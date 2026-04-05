@@ -21,6 +21,12 @@ type Instance struct {
 	HasStoredPath  bool
 }
 
+type Route struct {
+	ScopeKey     string
+	InstanceID   string
+	InstancePath string
+}
+
 func ScopeKey(source semanticview.Source, flowID string) string {
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
@@ -44,6 +50,19 @@ func InstancePath(source semanticview.Source, flowID, instanceID string) string 
 		return basePath
 	default:
 		return basePath + "/" + instanceID
+	}
+}
+
+func routePath(scopeKey, instanceID string) string {
+	scopeKey = normalizeRef(scopeKey)
+	instanceID = strings.Trim(strings.TrimSpace(instanceID), "/")
+	switch {
+	case scopeKey == "":
+		return instanceID
+	case instanceID == "":
+		return scopeKey
+	default:
+		return scopeKey + "/" + instanceID
 	}
 }
 
@@ -101,6 +120,40 @@ func Derive(source semanticview.Source, flowID, instanceID string) Instance {
 		EntityID:      entityID,
 		HasStoredPath: instancePath != "",
 	}
+}
+
+func DeriveRoute(scopeKey, instanceID string) Route {
+	return StoredRoute(scopeKey, instanceID, "")
+}
+
+func StoredRoute(scopeKey, instanceID, instancePath string) Route {
+	scopeKey = normalizeRef(scopeKey)
+	instancePath = normalizeRef(instancePath)
+	instanceID = strings.TrimSpace(instanceID)
+	if scopeKey == "" && instancePath != "" {
+		scopeKey = SemanticScope(instancePath)
+	}
+	if instanceID == "" && instancePath != "" {
+		instanceID = LogicalInstanceID(instancePath)
+	}
+	if instancePath == "" {
+		instancePath = routePath(scopeKey, instanceID)
+	}
+	return Route{
+		ScopeKey:     scopeKey,
+		InstanceID:   instanceID,
+		InstancePath: instancePath,
+	}
+}
+
+func (i Instance) Route() Route {
+	return StoredRoute(i.ScopeKey, i.InstanceID, i.InstancePath)
+}
+
+func (r Route) Valid() bool {
+	return strings.TrimSpace(r.ScopeKey) != "" &&
+		strings.TrimSpace(r.InstanceID) != "" &&
+		strings.TrimSpace(r.InstancePath) != ""
 }
 
 func SemanticScopeFromInstancePath(instancePath string) string {

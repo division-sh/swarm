@@ -6,6 +6,7 @@ import (
 
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/testutil"
 )
 
@@ -35,9 +36,7 @@ func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {
 	}
 
 	route := runtimebus.FlowInstanceRouteRecord{
-		TemplateID:     "review",
-		InstanceID:     "inst-1",
-		InstancePath:   "review/inst-1",
+		Identity:       runtimeflowidentity.DeriveRoute("review", "inst-1"),
 		EventPattern:   "review/inst-1/task.started",
 		SubscriberType: "node",
 		SubscriberID:   "reviewer-inst-1",
@@ -50,15 +49,11 @@ func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListFlowInstanceRoutes: %v", err)
 	}
-	want := runtimebus.FlowInstanceRouteRecord{
-		TemplateID:   route.TemplateID,
-		InstanceID:   route.InstanceID,
-		InstancePath: route.InstancePath,
-	}
+	want := route.Identity
 	if len(routes) != 1 || routes[0] != want {
 		t.Fatalf("listed routes = %#v, want %#v", routes, want)
 	}
-	if err := pg.DeleteFlowInstanceRoute(ctx, route.TemplateID, route.InstanceID); err != nil {
+	if err := pg.DeleteFlowInstanceRoute(ctx, route.Identity); err != nil {
 		t.Fatalf("DeleteFlowInstanceRoute: %v", err)
 	}
 	routes, err = pg.ListFlowInstanceRoutes(ctx)
@@ -96,9 +91,7 @@ func TestPostgresStoreFlowInstanceRoutes_NestedTemplateScope(t *testing.T) {
 	}
 
 	route := runtimebus.FlowInstanceRouteRecord{
-		TemplateID:     "child/grandchild",
-		InstanceID:     "inst-1",
-		InstancePath:   "child/grandchild/inst-1",
+		Identity:       runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1"),
 		EventPattern:   "child/grandchild/inst-1/micro.started",
 		SubscriberType: "node",
 		SubscriberID:   "worker-inst-1",
@@ -111,15 +104,11 @@ func TestPostgresStoreFlowInstanceRoutes_NestedTemplateScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListFlowInstanceRoutes: %v", err)
 	}
-	want := runtimebus.FlowInstanceRouteRecord{
-		TemplateID:   route.TemplateID,
-		InstanceID:   route.InstanceID,
-		InstancePath: route.InstancePath,
-	}
+	want := route.Identity
 	if len(routes) != 1 || routes[0] != want {
 		t.Fatalf("listed routes = %#v, want %#v", routes, want)
 	}
-	if err := pg.DeleteFlowInstanceRoute(ctx, route.TemplateID, route.InstanceID); err != nil {
+	if err := pg.DeleteFlowInstanceRoute(ctx, route.Identity); err != nil {
 		t.Fatalf("DeleteFlowInstanceRoute: %v", err)
 	}
 	routes, err = pg.ListFlowInstanceRoutes(ctx)

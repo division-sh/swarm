@@ -10,6 +10,7 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -138,7 +139,7 @@ func (eb *EventBus) RouteTable() *RouteTable {
 	return eb.routeTable
 }
 
-func (eb *EventBus) AddFlowInstance(template runtimecontracts.SystemNodeContract, instancePath string) error {
+func (eb *EventBus) AddFlowInstanceRoute(template runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
@@ -148,29 +149,28 @@ func (eb *EventBus) AddFlowInstance(template runtimecontracts.SystemNodeContract
 	if table == nil {
 		return errors.New("route table is not initialized")
 	}
-	if err := table.AddFlowInstance(template, instancePath); err != nil {
+	if err := table.AddFlowInstanceRoute(template, identity); err != nil {
 		return err
 	}
 	persister, ok := eb.store.(FlowInstanceRoutePersistence)
 	if !ok {
 		return nil
 	}
-	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
-	routes := table.MaterializedRoutes(instancePath)
+	routes := table.MaterializedRoutes(identity)
 	if len(routes) == 0 {
 		return nil
 	}
 	for _, route := range routes {
 		if err := persister.UpsertFlowInstanceRoute(context.Background(), route); err != nil {
-			_ = persister.DeleteFlowInstanceRoute(context.Background(), route.TemplateID, route.InstanceID)
-			table.RemoveFlowInstance(route.TemplateID, route.InstanceID)
+			_ = persister.DeleteFlowInstanceRoute(context.Background(), route.Identity)
+			table.RemoveFlowInstanceRoute(route.Identity)
 			return err
 		}
 	}
 	return nil
 }
 
-func (eb *EventBus) RemoveFlowInstance(templateID, instanceID string) error {
+func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
 	if eb == nil {
 		return errors.New("event bus is required")
 	}
@@ -181,11 +181,11 @@ func (eb *EventBus) RemoveFlowInstance(templateID, instanceID string) error {
 		return errors.New("route table is not initialized")
 	}
 	if persister, ok := eb.store.(FlowInstanceRoutePersistence); ok {
-		if err := persister.DeleteFlowInstanceRoute(context.Background(), templateID, instanceID); err != nil {
+		if err := persister.DeleteFlowInstanceRoute(context.Background(), identity); err != nil {
 			return err
 		}
 	}
-	table.RemoveFlowInstance(templateID, instanceID)
+	table.RemoveFlowInstanceRoute(identity)
 	return nil
 }
 

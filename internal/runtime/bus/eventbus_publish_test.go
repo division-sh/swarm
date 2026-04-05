@@ -11,6 +11,7 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/flowmodel"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -1049,7 +1050,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstance(runtimecontracts.SystemNodeContract{}, "child/grandchild/inst-1"); err != nil {
+	if err := eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	recorder := runtimebus.NewEmittedEventsRecorder()

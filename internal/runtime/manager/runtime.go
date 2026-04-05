@@ -444,8 +444,8 @@ func (am *AgentManager) restoreFlowInstanceRoutes(ctx context.Context) error {
 		return fmt.Errorf("list persisted flow instance routes: %w", err)
 	}
 	for _, route := range routes {
-		if err := installer.AddFlowInstance(runtimecontracts.SystemNodeContract{}, route.InstancePath); err != nil {
-			return fmt.Errorf("restore flow instance route %s/%s: %w", route.TemplateID, route.InstanceID, err)
+		if err := installer.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, route); err != nil {
+			return fmt.Errorf("restore flow instance route %s/%s: %w", route.ScopeKey, route.InstanceID, err)
 		}
 	}
 	return nil

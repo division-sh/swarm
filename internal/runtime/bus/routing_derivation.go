@@ -102,15 +102,16 @@ func (rt *RouteTable) Resolve(eventType string) []Subscriber {
 	return cloneSubscribers(rt.routes[eventType])
 }
 
-func (rt *RouteTable) AddFlowInstance(template runtimecontracts.SystemNodeContract, instancePath string) error {
+func (rt *RouteTable) AddFlowInstanceRoute(template runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
 	if rt == nil {
 		return fmt.Errorf("route table is required")
 	}
 
-	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
-	if instancePath == "" {
-		return fmt.Errorf("instance path is required")
+	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
+	if !identity.Valid() {
+		return fmt.Errorf("flow-instance route identity is required")
 	}
+	instancePath := identity.InstancePath
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
@@ -119,14 +120,13 @@ func (rt *RouteTable) AddFlowInstance(template runtimecontracts.SystemNodeContra
 		return nil
 	}
 
-	templateScope := strings.TrimSpace(runtimeflowidentity.SemanticScopeFromInstancePath(instancePath))
+	templateScope := strings.TrimSpace(identity.ScopeKey)
 	if templateDef, ok := rt.templates[templateScope]; ok {
 		rt.instances[instancePath] = struct{}{}
 		rt.instanceEventPath[instancePath] = rt.addEventPathsLocked(instancePath, templateDef.LocalEvents)
-		instanceID := routeLastPathSegment(instancePath)
 		vars := map[string]string{
 			"flow_instance_path": instancePath,
-			"instance_id":        instanceID,
+			"instance_id":        identity.InstanceID,
 			"template_id":        templateDef.FlowID,
 			"flow_scope_key":     templateScope,
 		}
@@ -163,7 +163,7 @@ func (rt *RouteTable) AddFlowInstance(template runtimecontracts.SystemNodeContra
 	rt.instances[instancePath] = struct{}{}
 	rt.instanceEventPath[instancePath] = rt.addEventPathsLocked(instancePath, localEvents)
 	subscriber := Subscriber{
-		ID:   routeRenderTemplate(template.ID, map[string]string{"instance_id": routeLastPathSegment(instancePath)}),
+		ID:   routeRenderTemplate(template.ID, map[string]string{"instance_id": identity.InstanceID}),
 		Type: "node",
 		Path: instancePath,
 	}
@@ -184,14 +184,15 @@ func (rt *RouteTable) AddFlowInstance(template runtimecontracts.SystemNodeContra
 	return nil
 }
 
-func (rt *RouteTable) RemoveFlowInstance(templateID, instanceID string) {
+func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) {
 	if rt == nil {
 		return
 	}
-	instancePath := routeFlowInstancePath(templateID, instanceID)
-	if instancePath == "" {
+	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
+	if !identity.Valid() {
 		return
 	}
+	instancePath := identity.InstancePath
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	if _, exists := rt.instances[instancePath]; !exists {
@@ -213,19 +214,18 @@ func (rt *RouteTable) RemoveFlowInstance(templateID, instanceID string) {
 	rt.rebuildLocked()
 }
 
-func (rt *RouteTable) MaterializedRoutes(instancePath string) []FlowInstanceRouteRecord {
+func (rt *RouteTable) MaterializedRoutes(identity runtimeflowidentity.Route) []FlowInstanceRouteRecord {
 	if rt == nil {
 		return nil
 	}
-	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
-	if instancePath == "" {
+	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
+	if !identity.Valid() {
 		return nil
 	}
+	instancePath := identity.InstancePath
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 
-	templateID := strings.TrimSpace(runtimeflowidentity.SemanticScopeFromInstancePath(instancePath))
-	instanceID := routeLastPathSegment(instancePath)
 	seen := make(map[string]struct{})
 	out := make([]FlowInstanceRouteRecord, 0, 8)
 	for _, pattern := range rt.patterns {
@@ -233,16 +233,14 @@ func (rt *RouteTable) MaterializedRoutes(instancePath string) []FlowInstanceRout
 			continue
 		}
 		record := FlowInstanceRouteRecord{
-			TemplateID:     templateID,
-			InstanceID:     instanceID,
-			InstancePath:   instancePath,
+			Identity:       identity,
 			EventPattern:   strings.TrimSpace(pattern.EventPattern),
 			SubscriberType: strings.TrimSpace(pattern.Subscriber.Type),
 			SubscriberID:   strings.TrimSpace(pattern.Subscriber.ID),
-			SourceFlow:     templateID,
+			SourceFlow:     identity.ScopeKey,
 		}
 		key := strings.Join([]string{
-			record.InstancePath,
+			record.Identity.InstancePath,
 			record.EventPattern,
 			record.SubscriberType,
 			record.SubscriberID,
@@ -597,18 +595,6 @@ func routeRenderTemplate(raw string, vars map[string]string) string {
 		replacements = append(replacements, "{"+key+"}", value, "{{"+key+"}}", value)
 	}
 	return strings.NewReplacer(replacements...).Replace(raw)
-}
-
-func routeLastPathSegment(raw string) string {
-	parts := eventidentity.SplitRouteSegments(raw)
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(parts[len(parts)-1])
-}
-
-func routeFlowInstancePath(templateID, instanceID string) string {
-	return runtimeflowidentity.InstancePath(nil, templateID, instanceID)
 }
 
 func appendUniqueSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {

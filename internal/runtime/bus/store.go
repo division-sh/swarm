@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"swarm/internal/events"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 )
 
 type EventStore interface {
@@ -14,9 +15,7 @@ type EventStore interface {
 }
 
 type FlowInstanceRouteRecord struct {
-	TemplateID     string
-	InstanceID     string
-	InstancePath   string
+	Identity       runtimeflowidentity.Route
 	EventPattern   string
 	SubscriberType string
 	SubscriberID   string
@@ -25,8 +24,8 @@ type FlowInstanceRouteRecord struct {
 
 type FlowInstanceRoutePersistence interface {
 	UpsertFlowInstanceRoute(ctx context.Context, route FlowInstanceRouteRecord) error
-	DeleteFlowInstanceRoute(ctx context.Context, templateID, instanceID string) error
-	ListFlowInstanceRoutes(ctx context.Context) ([]FlowInstanceRouteRecord, error)
+	DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error
+	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error)
 }
 
 // ActiveAgentLister is an optional capability for broadcast-style events.
