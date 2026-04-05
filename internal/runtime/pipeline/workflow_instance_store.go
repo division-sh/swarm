@@ -152,16 +152,8 @@ func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, f
 	return s.Upsert(ctx, instance)
 }
 
-func (s *WorkflowInstanceStore) Delete(ctx context.Context, instanceID string) error {
-	instanceID = strings.TrimSpace(instanceID)
-	if instanceID == "" || s == nil || s.db == nil {
-		return nil
-	}
-	keys := workflowInstanceLookupKeys(instanceID)
-	if len(keys) == 0 {
-		return nil
-	}
-	return s.deleteSpec(ctx, keys)
+func (s *WorkflowInstanceStore) Delete(context.Context, string) error {
+	return fmt.Errorf("workflow instance deletion is unsupported: entity_state writes must stay on the mutation-logged upsert path")
 }
 
 func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string) (WorkflowInstance, bool, error) {
@@ -347,13 +339,8 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 			}
 		}()
 	}
-
-	var previousState sql.NullString
-	if err := tx.QueryRowContext(ctx, `
-		SELECT current_state
-		FROM entity_state
-		WHERE entity_id = $1::uuid
-	`, rowID).Scan(&previousState); err != nil && err != sql.ErrNoRows {
+	previous, err := loadTrackedEntityStateProjection(ctx, tx, rowID)
+	if err != nil {
 		return err
 	}
 
@@ -424,18 +411,17 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	); err != nil {
 		return err
 	}
-	if strings.TrimSpace(previousState.String) != strings.TrimSpace(instance.CurrentState) {
-		if err := runtimemutationlog.Insert(ctx, tx, runtimemutationlog.Record{
-			EntityID:    rowID,
-			Field:       "current_state",
-			OldValue:    nullStringValue(previousState),
-			NewValue:    strings.TrimSpace(instance.CurrentState),
-			WriterType:  "platform",
-			WriterID:    "workflow_instance_store",
-			HandlerStep: "current_state",
-		}); err != nil {
-			return err
-		}
+	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, rowID, previous, runtimemutationlog.EntityStateProjection{
+		CurrentState: strings.TrimSpace(instance.CurrentState),
+		Fields:       fields,
+		Gates:        gates,
+		Accumulator:  cloneStringAnyMap(instance.StateBuckets),
+	}, runtimemutationlog.Writer{
+		Type:        "platform",
+		ID:          "workflow_instance_store",
+		HandlerStep: "upsert",
+	}); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM timers WHERE entity_id = $1::uuid AND flow_instance = $2`, rowID, storageRef); err != nil {
 		return err
@@ -477,66 +463,6 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	return nil
 }
 
-func nullStringValue(v sql.NullString) any {
-	if !v.Valid {
-		return nil
-	}
-	return strings.TrimSpace(v.String)
-}
-
-func (s *WorkflowInstanceStore) deleteSpec(ctx context.Context, keys []string) error {
-	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	committed := !ownedTx
-	if ownedTx {
-		defer func() {
-			if !committed {
-				_ = tx.Rollback()
-			}
-		}()
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(flow_instance, '') FROM entity_state WHERE entity_id = ANY($1::uuid[])`, pqStringArray(keys))
-	if err != nil {
-		return err
-	}
-	flowInstances := make([]string, 0, len(keys))
-	for rows.Next() {
-		var flowInstance string
-		if err := rows.Scan(&flowInstance); err != nil {
-			rows.Close()
-			return err
-		}
-		if flowInstance = strings.TrimSpace(flowInstance); flowInstance != "" {
-			flowInstances = append(flowInstances, flowInstance)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	rows.Close()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM timers WHERE entity_id = ANY($1::uuid[])`, pqStringArray(keys)); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_state WHERE entity_id = ANY($1::uuid[])`, pqStringArray(keys)); err != nil {
-		return err
-	}
-	if len(flowInstances) > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM flow_instances WHERE instance_id = ANY($1::text[])`, pq.Array(flowInstances)); err != nil {
-			return err
-		}
-	}
-	if ownedTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		committed = true
-	}
-	return nil
-}
-
 func workflowInstanceStoreTx(ctx context.Context, db *sql.DB) (*sql.Tx, bool, error) {
 	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
 		return tx, false, nil
@@ -546,6 +472,54 @@ func workflowInstanceStoreTx(ctx context.Context, db *sql.DB) (*sql.Tx, bool, er
 		return nil, false, err
 	}
 	return tx, true, nil
+}
+
+func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, entityID string) (runtimemutationlog.EntityStateProjection, error) {
+	if tx == nil || strings.TrimSpace(entityID) == "" {
+		return runtimemutationlog.EntityStateProjection{}, nil
+	}
+	var (
+		currentState sql.NullString
+		fieldsRaw    []byte
+		gatesRaw     []byte
+		accRaw       []byte
+	)
+	err := tx.QueryRowContext(ctx, `
+		SELECT
+			current_state,
+			COALESCE(fields, '{}'::jsonb),
+			COALESCE(gates, '{}'::jsonb),
+			COALESCE(accumulator, '{}'::jsonb)
+		FROM entity_state
+		WHERE entity_id = $1::uuid
+		FOR UPDATE
+	`, entityID).Scan(&currentState, &fieldsRaw, &gatesRaw, &accRaw)
+	if err == sql.ErrNoRows {
+		return runtimemutationlog.EntityStateProjection{}, nil
+	}
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	return runtimemutationlog.EntityStateProjection{
+		CurrentState: strings.TrimSpace(currentState.String),
+		Fields:       jsonObjectMap(fieldsRaw),
+		Gates:        jsonObjectMap(gatesRaw),
+		Accumulator:  jsonObjectMap(accRaw),
+	}, nil
+}
+
+func jsonObjectMap(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, entityID string) ([]WorkflowTimerState, error) {
