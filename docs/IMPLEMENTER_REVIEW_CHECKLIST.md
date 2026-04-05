@@ -67,6 +67,7 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 ## Final Merge Check
 
 - Before code review, did the reviewer read the implementer's PR summary, tests-run list, residual risk, and not-in-scope notes?
+- Before merge recommendation, did the reviewer read the existing PR conversation comments and review comments for substantive concerns, and explicitly check whether they are still unresolved or already obsolete on the current head?
 - Does the PR description include:
   - a short human summary in plain language
   - what changed

@@ -15,6 +15,18 @@ It should be used together with:
 - [IMPLEMENTER_REVIEW_CHECKLIST.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_REVIEW_CHECKLIST.md)
 - [RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md](/Users/youmew/dev/swarm/docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md)
 
+## Document Role
+
+This file is the workflow contract for:
+
+- issue shaping
+- branch/worktree conventions
+- PR structure
+- review sequencing
+- merge/post-merge behavior
+
+Use it as the operating model for day-to-day execution.
+
 ## Source Of Truth
 
 Use these layers of truth:
@@ -29,8 +41,11 @@ Use these layers of truth:
    - `docs/IMPLEMENTER_GUIDELINES.md`
    - `docs/IMPLEMENTER_REVIEW_CHECKLIST.md`
 
-The watchlist is the backlog and memory.
-GitHub issues are the active execution units.
+Default rule:
+
+- GitHub issues are the source of truth for work, prioritization, scope, and completion state
+- the watchlist is incident memory, root-cause guidance, and architectural pressure tracking
+- do not maintain duplicate backlog state in the watchlist once an issue exists on GitHub
 
 ## Spec Change Workflow
 
@@ -138,6 +153,7 @@ git worktree add worktrees/agent-a -b issue/1-schema-capability-boundary origin/
 
 Each GitHub issue should define:
 
+- human summary
 - problem statement
 - why it matters
 - source watchlist/backlog item
@@ -148,6 +164,82 @@ Each GitHub issue should define:
 - required tests
 - forbidden shortcuts
 - suggested ownership boundary
+
+Human summary rule:
+
+- start each issue with a short plain-language paragraph explaining:
+  - what the problem is
+  - why it matters
+  - what larger goal it supports
+- optimize for readability, not overloaded wording
+
+Default issue-title rule:
+
+- use plain human-readable titles for normal engineering work
+- do not use bracket prefixes for ordinary implementation issues now that labels carry the categorization
+
+Examples:
+
+- `Persist canonical run completion instead of inferring it from quiescence`
+- `Require authentication for dashboard and runtime-control surfaces`
+- `Split boot verification into boundary-owned modules`
+
+Reserved bracket prefixes:
+
+- `[audit]`
+- `[spec]`
+- `[meta]`
+- `[decision]`
+- `[incident]`
+
+Use bracket prefixes only for those special non-standard issue classes.
+
+## GitHub Triage Model
+
+GitHub labels are the active queue taxonomy.
+
+Use these label families:
+
+- priority:
+  - `priority:P0`
+  - `priority:P1`
+  - `priority:P2`
+  - `priority:P3`
+- status:
+  - `status:ready`
+  - `status:needs-scope`
+  - `status:blocked`
+  - `status:watchpoint`
+- domain:
+  - `domain:runtime`
+  - `domain:store`
+  - `domain:operator-surfaces`
+  - `domain:security`
+  - `domain:conformance`
+  - `domain:maintenance`
+  - `domain:architecture`
+  - `domain:cross-cutting`
+- scope:
+  - `scope:pack`
+  - `scope:fit`
+  - `scope:split`
+- complexity:
+  - `complexity:low`
+  - `complexity:medium`
+  - `complexity:high`
+
+Default label rules:
+
+- every open engineering issue should have one label from:
+  - priority
+  - status
+  - scope
+  - complexity
+- every issue should have at least one domain label
+- multi-domain issues are allowed when the seam is genuinely cross-boundary
+- use `scope:pack` for issues too narrow to assign alone
+- use `scope:split` for issues too broad to assign without decomposition
+- use `status:watchpoint` for visible-but-not-assignable issues
 
 Use:
 
@@ -189,6 +281,16 @@ Default rule:
 - high-risk PRs require a second reviewer before merge
 - the reviewer must state why the PR is high risk
 - no high-risk PR merges on one review alone
+
+One-account reality:
+
+- GitHub approval mechanics are not the primary quality gate in this repo
+- required approval counts do not substitute for real review discipline when one account is doing the work
+- the real gate is:
+  - explicit reviewer reasoning
+  - risk classification
+  - guideline-check comment
+  - and second-review process for high-risk PRs
 
 ## Migration Completeness Gate
 
@@ -278,8 +380,22 @@ Review rule:
 
 - reviewers must read the implementer summary and residual risk before deciding whether the code review is complete
 - no merge recommendation should be given without checking that PR description context first
+- reviewers must also read the existing PR comments and review comments before final merge recommendation
+- any substantive earlier concern must be explicitly classified as:
+  - still blocking
+  - resolved on the current head
+  - or obsolete after later changes
 - if the PR describes a narrow follow-up item in the same seam, reviewers should flag it and ask for it to be encompassed in the PR instead of creating another tiny issue
 - leave a follow-up separate only when it is meaningfully broader, riskier, or cross-boundary
+
+Follow-up rule:
+
+- narrow same-seam follow-up work should normally be absorbed into the current PR
+- do not create a new issue for a tiny same-seam item just because it was noticed late
+- only spin follow-up work out when it is:
+  - meaningfully broader
+  - materially riskier
+  - or clearly cross-boundary
 
 PR title rule:
 
