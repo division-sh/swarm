@@ -181,6 +181,81 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 	}
 }
 
+func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) {
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.SharedDataSource = dataDir
+	cfg.ContractsSource = contractsDir
+	cfg.WorkspaceNetwork = ""
+	cfg.WorkspaceImage = "test-image"
+	manager.SetConfig(cfg)
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"workspace_classes": {
+				Value: map[string]any{
+					"shared_flow": map[string]any{"workspace_scope": "per-flow-instance"},
+				},
+			},
+		}},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"worker": {Role: "worker", WorkspaceClass: "shared_flow"},
+		},
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{{
+				Paths: runtimecontracts.FlowContractPaths{ID: "ops", Flow: "ops"},
+				Path:  "ops",
+				Agents: map[string]runtimecontracts.AgentRegistryEntry{
+					"worker": {Role: "worker", WorkspaceClass: "shared_flow"},
+				},
+			}}},
+			ByID: map[string]*runtimecontracts.FlowContractView{},
+		},
+	})
+	if err := manager.ValidateSource(context.Background(), source); err != nil {
+		t.Fatalf("ValidateSource: %v", err)
+	}
+
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		switch args[0] {
+		case "inspect":
+			return "", fmt.Errorf("no such object")
+		case "create", "start":
+			return "", nil
+		default:
+			return "", nil
+		}
+	})
+
+	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+		ID:       "worker-1",
+		Role:     "worker",
+		FlowPath: "ops/instance-1",
+	})
+	if err != nil {
+		t.Fatalf("ResolveWorkspace: %v", err)
+	}
+	if target == nil || target.Container != "swarm-flow-ops-instance-1" {
+		t.Fatalf("target = %#v, want swarm-flow-ops-instance-1", target)
+	}
+}
+
+func TestResolveWorkspace_FailsClosedWithoutInjectedSourceForWorkspaceClassScope(t *testing.T) {
+	manager := NewDockerManager(nil)
+	_, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+		ID:             "worker-1",
+		WorkspaceClass: "dedicated",
+	})
+	if err == nil || !strings.Contains(err.Error(), `semantic source is required for workspace_class "dedicated"`) {
+		t.Fatalf("expected missing semantic source error, got %v", err)
+	}
+}
+
 func TestEnsurePrereqs_CreatesMissingNetworkAndBuildsMissingImage(t *testing.T) {
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()

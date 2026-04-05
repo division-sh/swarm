@@ -193,7 +193,7 @@ func (am *AgentManager) defaultManagerAgentID(cfg runtimeactors.AgentConfig) str
 	if managerID := normalizedManagerFallback(cfg, cfg.ManagerFallback); managerID != "" {
 		return managerID
 	}
-	if source := runtimepipeline.DefaultWorkflowSemanticSourceOrNil(); source != nil {
+	if source := am.semanticSource; source != nil {
 		if _, entry, ok := semanticview.ResolveAgentRegistryEntry(source, cfg); ok {
 			if managerID := normalizedManagerFallback(cfg, strings.TrimSpace(entry.ManagerFallback)); managerID != "" {
 				return managerID

@@ -78,31 +78,6 @@ var ()
 
 const runtimeQuiescenceStableChecks = 3
 
-func runtimeControlPlaneRecipient() string {
-	if recipient := controlPlaneRecipientFromSource(runtimepipeline.DefaultWorkflowSemanticSourceOrNil()); recipient != "" {
-		return recipient
-	}
-	return ""
-}
-
-func controlPlaneRecipientFromSource(source semanticview.Source) string {
-	if source == nil {
-		return ""
-	}
-	for _, key := range []string{"control_plane_agent_id", "manager_fallback_agent_id"} {
-		if value, ok := semanticview.PolicyValueForFlow(source, "", key); ok {
-			if agentID := strings.TrimSpace(asString(value.Value)); agentID != "" {
-				return agentID
-			}
-		}
-	}
-	return ""
-}
-
-func DefaultControlPlaneRecipient() string {
-	return strings.TrimSpace(runtimeControlPlaneRecipient())
-}
-
 func (rt *Runtime) WaitForQuiescence(ctx context.Context) error {
 	if rt == nil {
 		return nil
@@ -256,7 +231,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		rt.Logger = NewRuntimeLogger(stores.SQLDB)
 	}
 	payloadValidator := newRuntimePayloadValidator(runtimeEnvBool("SWARM_STRICT_PAYLOAD_VALIDATION", false), rt.Logger)
-	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
@@ -410,6 +385,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
 		Workspaces:               rt.Workspace,
 		Sessions:                 stores.SessionRegistry,
+		SemanticSource:           source,
 		RuntimeMode:              cfg.LLM.RuntimeMode,
 		Budget:                   rt.Budget,
 		ThrottleSuppressPrefixes: runtimeThrottleSuppressPrefixes(source),

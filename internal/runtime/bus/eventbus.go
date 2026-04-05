@@ -12,7 +12,6 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -74,9 +73,6 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		store = InMemoryEventStore{}
 	}
 	semanticSource := opts.ContractBundle
-	if semanticSource == nil {
-		semanticSource = runtimepipeline.DefaultWorkflowSemanticSourceOrNil()
-	}
 	filtered := make([]EventInterceptor, 0, len(opts.Interceptors))
 	for _, it := range opts.Interceptors {
 		if it != nil {

@@ -12,6 +12,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	llm "swarm/internal/runtime/llm"
+	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
 )
@@ -26,6 +27,7 @@ type AgentManager struct {
 	factory                  AgentFactory
 	store                    ManagerPersistence
 	sessions                 sessions.Registry
+	semanticSource           semanticview.Source
 	budget                   BudgetGuard
 	runtimeMode              string
 	throttleSuppressPrefixes []string
@@ -95,6 +97,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		store:                    store,
 		workspaces:               opts.Workspaces,
 		sessions:                 opts.Sessions,
+		semanticSource:           opts.SemanticSource,
 		runtimeMode:              strings.TrimSpace(opts.RuntimeMode),
 		budget:                   opts.Budget,
 		throttleSuppressPrefixes: throttleSuppressPrefixes,
