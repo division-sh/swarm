@@ -191,3 +191,58 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 		t.Fatalf("bad receipt reason = %q, want pipeline_error", badReason)
 	}
 }
+
+func TestRecoveryManager_QuarantinesMissingRunIDSchemaCapability(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	if _, err := db.ExecContext(ctx, `ALTER TABLE events DROP COLUMN run_id`); err != nil {
+		t.Fatalf("drop events.run_id: %v", err)
+	}
+
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	capture := &recoveryCapturePublisher{inner: bus}
+
+	eventID := uuid.NewString()
+	parentID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:            eventID,
+		Type:          events.EventType("system.recover.no-run-id"),
+		SourceAgent:   "runtime",
+		Payload:       []byte(`{"ok":true}`),
+		ParentEventID: parentID,
+		CreatedAt:     time.Now().Add(-time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(capture.published) != 0 {
+		t.Fatalf("published events = %#v, want none", capture.published)
+	}
+
+	var outcome, reason string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&outcome, &reason); err != nil {
+		t.Fatalf("load receipt: %v", err)
+	}
+	if outcome != "dead_letter" {
+		t.Fatalf("receipt outcome = %q, want dead_letter", outcome)
+	}
+	if reason != "pipeline_error" {
+		t.Fatalf("receipt reason = %q, want pipeline_error", reason)
+	}
+}

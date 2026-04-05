@@ -522,6 +522,50 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	}
 }
 
+func TestPostgresStore_PipelineReceipts_MissingEventsQuery_QuarantinesNoRunIDCapability(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `ALTER TABLE events DROP COLUMN run_id`); err != nil {
+		t.Fatalf("drop events.run_id: %v", err)
+	}
+
+	pg := &PostgresStore{DB: db}
+	eventID := uuid.NewString()
+	parentID := uuid.NewString()
+	evt := events.Event{
+		ID:            eventID,
+		Type:          events.EventType("system.directive"),
+		SourceAgent:   "runtime",
+		Payload:       []byte(`{"directive":"x"}`),
+		ParentEventID: parentID,
+		CreatedAt:     time.Now().Add(-time.Minute).UTC(),
+	}
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	missing, err := pg.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-time.Hour), 20)
+	if err != nil {
+		t.Fatalf("ListEventsMissingPipelineReceipt: %v", err)
+	}
+	if len(missing) != 1 {
+		t.Fatalf("missing events = %d, want 1", len(missing))
+	}
+	if missing[0].Event.ID != eventID {
+		t.Fatalf("missing event id = %q, want %q", missing[0].Event.ID, eventID)
+	}
+	if missing[0].Event.ParentEventID != parentID {
+		t.Fatalf("missing event parent_event_id = %q, want %q", missing[0].Event.ParentEventID, parentID)
+	}
+	if missing[0].Event.RunID != "" {
+		t.Fatalf("missing event run_id = %q, want empty", missing[0].Event.RunID)
+	}
+	if missing[0].ReplayError != "missing run_id schema capability" {
+		t.Fatalf("missing event replay_error = %q, want missing run_id schema capability", missing[0].ReplayError)
+	}
+}
+
 func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
