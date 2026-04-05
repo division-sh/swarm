@@ -117,18 +117,27 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 		t.Fatalf("ListInstanceDigestRows err=%v len=%d", err, len(rows))
 	}
 
-	// Active agent ids.
+	// Active agent descriptors.
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: "a", Role: "a", Mode: "global", Type: "stub", Config: []byte(`{}`)},
+		Config: runtimeactors.AgentConfig{ID: "a", Role: "a", Mode: "global", Type: "stub", FlowPath: "review/inst-1", EntityID: entityID, Config: []byte(`{}`)},
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	})
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ID: "t", Role: "t", Mode: "global", Type: "stub", Config: []byte(`{}`)},
 		Status: "terminated", HiredBy: "test", StartedAt: time.Now().UTC(),
 	})
-	ids, err := pg.ListActiveAgentIDs(ctx)
-	if err != nil || len(ids) == 0 {
-		t.Fatalf("ListActiveAgentIDs err=%v ids=%v", err, ids)
+	descriptors, err := pg.ListActiveAgentDescriptors(ctx)
+	if err != nil || len(descriptors) == 0 {
+		t.Fatalf("ListActiveAgentDescriptors err=%v descriptors=%v", err, descriptors)
+	}
+	if got := descriptors[0].AgentID; got != "a" {
+		t.Fatalf("descriptor agent_id = %q, want a", got)
+	}
+	if got := descriptors[0].EntityID; got != entityID {
+		t.Fatalf("descriptor entity_id = %q, want %q", got, entityID)
+	}
+	if got := descriptors[0].FlowInstance; got != "review/inst-1" {
+		t.Fatalf("descriptor flow_instance = %q, want review/inst-1", got)
 	}
 
 }

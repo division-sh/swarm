@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -166,6 +168,60 @@ func (h *recordingLoggerHook) Log(_ context.Context, _, _, _, action, _, _, _, _
 	h.entries = append(h.entries, recordedLogEntry{Action: action, Detail: detail})
 }
 
+type descriptorAwareEventStore struct {
+	mu          sync.Mutex
+	descriptors []runtimebus.ActiveAgentDescriptor
+	deliveries  []string
+	listErr     error
+}
+
+func (*descriptorAwareEventStore) AppendEvent(context.Context, events.Event) error { return nil }
+
+func (s *descriptorAwareEventStore) InsertEventDeliveries(_ context.Context, _ string, agentIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deliveries = append([]string(nil), agentIDs...)
+	return nil
+}
+
+func (s *descriptorAwareEventStore) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return append([]runtimebus.ActiveAgentDescriptor(nil), s.descriptors...), nil
+}
+
+func (s *descriptorAwareEventStore) persistedDeliveries() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.deliveries...)
+}
+
+func waitForNoEvent(t *testing.T, ch <-chan events.Event) {
+	t.Helper()
+	select {
+	case evt := <-ch:
+		t.Fatalf("unexpected event delivered: %#v", evt)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+func assertSortedStringsEqual(t *testing.T, got, want []string) {
+	t.Helper()
+	got = append([]string(nil), got...)
+	want = append([]string(nil), want...)
+	slices.Sort(got)
+	slices.Sort(want)
+	if len(got) != len(want) {
+		t.Fatalf("strings = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("strings = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {
 	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
 		PayloadValidator: func(eventType string, payload []byte) error {
@@ -222,6 +278,106 @@ func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T
 	}, []string{"agent-a"})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
+	}
+}
+
+func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *testing.T) {
+	store := &descriptorAwareEventStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "control-plane"},
+			{AgentID: "reviewer-ent-1", EntityID: "ent-1"},
+			{AgentID: "reviewer-ent-2", EntityID: "ent-2"},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	controlCh := eb.Subscribe("control-plane", events.EventType("custom.trigger"))
+	matchCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
+	otherCh := eb.Subscribe("reviewer-ent-2", events.EventType("custom.trigger"))
+
+	if err := eb.Publish(context.Background(), events.Event{
+		Type:      events.EventType("custom.trigger"),
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}.WithEntityID("ent-1")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case evt := <-controlCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("control event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("control-plane did not receive event")
+	}
+	select {
+	case evt := <-matchCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("matched event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("entity-scoped reviewer did not receive matching event")
+	}
+	waitForNoEvent(t, otherCh)
+
+	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"control-plane", "reviewer-ent-1"})
+}
+
+func TestEventBusPublish_DropsRecipientsMissingExplicitDescriptor(t *testing.T) {
+	store := &descriptorAwareEventStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "control-plane"},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	controlCh := eb.Subscribe("control-plane", events.EventType("custom.trigger"))
+	missingCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
+
+	if err := eb.Publish(context.Background(), events.Event{
+		Type:      events.EventType("custom.trigger"),
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}.WithEntityID("ent-1")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case <-controlCh:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("control-plane did not receive event")
+	}
+	waitForNoEvent(t, missingCh)
+
+	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"control-plane"})
+}
+
+func TestEventBusPublish_FailsClosedWhenDescriptorLookupFails(t *testing.T) {
+	store := &descriptorAwareEventStore{
+		listErr: errors.New("descriptor lookup failed"),
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
+
+	err = eb.Publish(context.Background(), events.Event{
+		Type:      events.EventType("custom.trigger"),
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}.WithEntityID("ent-1"))
+	if err == nil || !strings.Contains(err.Error(), "descriptor lookup failed") {
+		t.Fatalf("Publish error = %v, want descriptor lookup failure", err)
+	}
+	waitForNoEvent(t, ch)
+	if got := store.persistedDeliveries(); len(got) != 0 {
+		t.Fatalf("persisted deliveries = %v, want none", got)
 	}
 }
 

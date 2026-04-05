@@ -415,7 +415,16 @@ func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (ev
 	if direct := uniqueStrings(plan.SubscribedRecipients); len(direct) > 0 {
 		plan.ExtraDetail["subscription_recipients"] = direct
 	}
-	plan.PersistedRecipients = eb.persistableRecipients(ctx, plan.Recipients)
+	descriptors, ok, err := eb.activeAgentDescriptors(ctx)
+	if err != nil {
+		return eventDeliveryPlan{}, err
+	}
+	if ok {
+		plan.Recipients = filterRecipientsForExplicitAgentScope(evt, plan.Recipients, descriptors)
+		plan.PersistedRecipients = append([]string(nil), plan.Recipients...)
+	} else {
+		plan.PersistedRecipients = uniqueStrings(plan.Recipients)
+	}
 	eb.recordPublishDiagnostic(ctx, evt, plan)
 	return plan, nil
 }
