@@ -78,7 +78,9 @@ type Runtime struct {
 	PromptResolver runtimecontracts.PromptResolver
 }
 
-var ()
+type terminalInstanceStateSetter interface {
+	SetTerminalInstanceStates(states []string)
+}
 
 const runtimeQuiescenceStableChecks = 3
 
@@ -183,6 +185,41 @@ func bootWarningsFatal() bool {
 	return runtimeEnvBool("SWARM_BOOT_WARNINGS_FATAL", true)
 }
 
+func bindRuntimeTerminalInstanceStates(stores Stores, source semanticview.Source) {
+	if source == nil {
+		return
+	}
+	states := source.WorkflowTerminalStages()
+	candidates := []any{
+		stores.EventStore,
+		stores.ConversationStore,
+		stores.ManagerStore,
+		stores.ScheduleStore,
+		stores.MailboxStore,
+		stores.InboundStore,
+		stores.DigestStore,
+		stores.TurnStore,
+	}
+	for _, candidate := range candidates {
+		setter, ok := candidate.(terminalInstanceStateSetter)
+		if !ok || setter == nil {
+			continue
+		}
+		setter.SetTerminalInstanceStates(states)
+	}
+}
+
+func newRuntimePromptResolver(source semanticview.Source) (runtimecontracts.PromptResolver, error) {
+	if source == nil {
+		return nil, fmt.Errorf("semantic source is required")
+	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		return nil, fmt.Errorf("bundle-backed semantic source is required for contract prompt resolution")
+	}
+	return runtimecontracts.NewBundlePromptResolver(bundle), nil
+}
+
 func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts RuntimeOptions) (*Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
@@ -194,9 +231,10 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 	source := opts.WorkflowModule.SemanticSource()
-	promptResolver := runtimecontracts.PromptResolver(nil)
-	if bundle, ok := semanticview.Bundle(source); ok {
-		promptResolver = runtimecontracts.NewBundlePromptResolver(bundle)
+	bindRuntimeTerminalInstanceStates(stores, source)
+	promptResolver, err := newRuntimePromptResolver(source)
+	if err != nil {
+		return nil, fmt.Errorf("build prompt resolver: %w", err)
 	}
 	authorityProvider := runtimeauthority.NewSourceProvider(source)
 	emitRegistry := runtimetools.NewEmitRegistry(source, authorityProvider)

@@ -118,9 +118,6 @@ func main() {
 		slog.Error("validate prompt schema guards", "error", err)
 		os.Exit(1)
 	}
-	if stores.Postgres != nil {
-		stores.Postgres.TerminalInstanceStates = bundle.WorkflowTerminalStages()
-	}
 	source := semanticview.Wrap(bundle)
 	stateStoreSummary, err := initializeStateStores(ctx, stores, bundle)
 	if err != nil {

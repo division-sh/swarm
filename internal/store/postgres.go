@@ -23,6 +23,26 @@ type PostgresStore struct {
 	schemaCapsBound bool
 }
 
+func (s *PostgresStore) SetTerminalInstanceStates(states []string) {
+	if s == nil {
+		return
+	}
+	out := make([]string, 0, len(states))
+	seen := make(map[string]struct{}, len(states))
+	for _, state := range states {
+		state = strings.TrimSpace(state)
+		if state == "" {
+			continue
+		}
+		if _, ok := seen[state]; ok {
+			continue
+		}
+		seen[state] = struct{}{}
+		out = append(out, state)
+	}
+	s.TerminalInstanceStates = out
+}
+
 func (s *PostgresStore) EffectiveTerminalInstanceStates() []string {
 	if s == nil {
 		return nil

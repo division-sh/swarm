@@ -98,6 +98,7 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 	`, entityID); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
+	pg.SetTerminalInstanceStates([]string{"done"})
 	// Active count includes active workflow instances.
 	if n, err := pg.CountActiveInstances(ctx); err != nil || n < 1 {
 		t.Fatalf("CountActiveInstances n=%d err=%v", n, err)
@@ -140,4 +141,15 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 		t.Fatalf("descriptor flow_instance = %q, want review/inst-1", got)
 	}
 
+}
+
+func TestPostgresStore_DigestRequiresTerminalInstanceStates(t *testing.T) {
+	pg := &PostgresStore{}
+
+	if _, err := pg.CountActiveInstances(context.Background()); err == nil || !strings.Contains(err.Error(), "terminal instance states are required") {
+		t.Fatalf("CountActiveInstances err = %v, want terminal state requirement", err)
+	}
+	if _, err := pg.ListInstanceDigestRows(context.Background(), 10); err == nil || !strings.Contains(err.Error(), "terminal instance states are required") {
+		t.Fatalf("ListInstanceDigestRows err = %v, want terminal state requirement", err)
+	}
 }
