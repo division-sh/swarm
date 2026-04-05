@@ -51,8 +51,8 @@ Default rule:
 
 When a workstream requires a platform semantic change:
 
-1. Keep `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml` authoritative for `main`.
-2. Do not put future semantics onto `main` ahead of code.
+1. Keep `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml` authoritative for `master`.
+2. Do not put future semantics onto `master` ahead of code.
 3. Use a review-spec draft file while the semantic change is still in design or implementation.
 4. Land the authoritative YAML update in the same issue branch/PR as the matching implementation.
 
@@ -66,10 +66,10 @@ Default review-spec convention:
 Default rule:
 
 - review-spec draft: proposed future semantics
-- authoritative YAML: semantics that are already true on `main`
+- authoritative YAML: semantics that are already true on `master`
 - review-spec drafts stay gitignored until the matching implementation branch is ready to copy the finalized semantics into the authoritative YAML
 
-If code on `main` and a proposed spec update would disagree:
+If code on `master` and a proposed spec update would disagree:
 
 - the proposed spec change stays in a review-spec draft
 - the implementation branch becomes the convergence point for:
@@ -85,7 +85,7 @@ Use this sequence whenever an implementer believes they found a spec ambiguity o
 2. The lead reviewer evaluates it first.
 3. If it is not a real gap, the implementer proceeds with the clarified interpretation.
 4. If it is a real gap, escalate to the spec writer.
-5. The spec writer works in a review-spec draft, not in the authoritative YAML on `main`.
+5. The spec writer works in a review-spec draft, not in the authoritative YAML on `master`.
 6. The lead reviewer reviews the draft spec.
 7. If the draft is approved, copy the reviewed draft into the relevant implementer worktree.
 8. The implementer uses that reviewed draft as the target semantic contract.
@@ -100,7 +100,7 @@ Use this sequence whenever an implementer believes they found a spec ambiguity o
 Rules:
 
 - implementers do not invent missing platform semantics locally
-- spec writers do not put future semantics onto `main` ahead of implementation
+- spec writers do not put future semantics onto `master` ahead of implementation
 - reviewed drafts are the staging area for semantic changes
 - the implementation branch is the convergence point where reviewed draft semantics become authoritative
 
@@ -140,13 +140,13 @@ Default rule:
 
 - worktree paths are stable per implementer
 - branch names rotate per issue
-- the repo root remains the coordination/integration workspace and should stay on `main`
+- the repo root remains the coordination/integration workspace and should stay on `master`
 
 Suggested commands:
 
 ```sh
 git fetch origin
-git worktree add worktrees/agent-a -b issue/1-schema-capability-boundary origin/main
+git worktree add worktrees/agent-a -b issue/1-schema-capability-boundary origin/master
 ```
 
 ## Issue Standards
@@ -653,7 +653,7 @@ Use the repo root as the coordination workspace.
 
 Default expectations:
 
-- keep root on `main`
+- keep root on `master`
 - keep root relatively clean
 - use root for:
   - issue triage
