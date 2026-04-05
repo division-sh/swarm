@@ -316,7 +316,13 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, normalizeConversationTurn(item))
+		assistantText, outcome, reasoning, progress, toolResults := summarizeConversationTurnBlocks(item.TurnBlocks)
+		item.AssistantVisibleOutput = assistantText
+		item.Outcome = outcome
+		item.ReasoningBlocks = reasoning
+		item.ProgressUpdates = progress
+		item.ToolResults = toolResults
+		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -453,20 +459,6 @@ func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {
 	return item, nil
 }
 
-func normalizeConversationTurn(item ConversationTurn) ConversationTurn {
-	assistantText, outcome, reasoning, progress, toolResults := summarizeConversationTurn(item)
-	item.AssistantVisibleOutput = assistantText
-	item.Outcome = outcome
-	item.ReasoningBlocks = reasoning
-	item.ProgressUpdates = progress
-	item.ToolResults = toolResults
-	return item
-}
-
-func summarizeConversationTurn(item ConversationTurn) (string, string, []string, []string, []any) {
-	return summarizeConversationTurnBlocks(item.TurnBlocks)
-}
-
 func summarizeConversationTurnBlocks(blocks []any) (string, string, []string, []string, []any) {
 	summary, ok := readTurnSummaryBlock(blocks)
 	if !ok {
@@ -520,15 +512,6 @@ func readAnySlice(value any) []any {
 		return nil
 	}
 	return append([]any(nil), list...)
-}
-
-func firstReadableString(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func compactMap(in map[string]any, keys ...string) map[string]any {

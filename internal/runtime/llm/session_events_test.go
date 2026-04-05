@@ -373,17 +373,11 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	if len(rec.EmittedEvents) != 2 || rec.EmittedEvents[0] != "discovery/category.assessed" || rec.EmittedEvents[1] != "discovery/scan_complete" {
 		t.Fatalf("emitted_events = %#v", rec.EmittedEvents)
 	}
-	if len(rec.PublishDiagnostics) != 1 {
-		t.Fatalf("publish_diagnostics = %#v", rec.PublishDiagnostics)
-	}
-	if rec.PublishDiagnostics[0].EventType != "discovery/category.assessed" {
-		t.Fatalf("publish_diagnostics[0].event_type = %q", rec.PublishDiagnostics[0].EventType)
-	}
-	if len(rec.PublishDiagnostics[0].RoutedRecipients) != 1 || rec.PublishDiagnostics[0].RoutedRecipients[0].LocalizedEvent != "category.assessed" {
-		t.Fatalf("publish_diagnostics[0].routed_recipients = %#v", rec.PublishDiagnostics[0].RoutedRecipients)
-	}
 	if len(rec.FlightRecorder) != 2 {
 		t.Fatalf("flight_recorder = %#v", rec.FlightRecorder)
+	}
+	if rec.FlightRecorder[0].Kind != "publish" || rec.FlightRecorder[0].EventType != "discovery/category.assessed" {
+		t.Fatalf("flight_recorder[0] = %#v", rec.FlightRecorder[0])
 	}
 	if rec.FlightRecorder[1].Message != "Emit tool target was resolved" {
 		t.Fatalf("flight_recorder[1].message = %q", rec.FlightRecorder[1].Message)
