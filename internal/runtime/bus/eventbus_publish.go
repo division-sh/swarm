@@ -15,6 +15,10 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
+type pipelineTransitionSchemaCapabilityProvider interface {
+	CanonicalEventReceiptsCapability(context.Context) (bool, error)
+}
+
 func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
@@ -45,7 +49,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 	postCommitActions := make([]func(), 0, 8)
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-	ictx = runtimepipeline.WithPipelineTransitionCollector(ictx, &deferredTransitions)
+	ictx = runtimepipeline.WithPipelineTransitionCollector(ictx, &deferredTransitions, eb.pipelineTransitionCapability())
 	ictx = runtimepipeline.WithPipelinePostCommitActions(ictx, &postCommitActions)
 	ictx = runtimepipeline.WithPipelineReceiptOverride(ictx, receiptOverride)
 	if txStore, ok := eb.store.(TransactionalEventStore); ok {
@@ -98,6 +102,16 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		if err := eb.publishDeferred(ictx, d); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (eb *EventBus) pipelineTransitionCapability() func(context.Context) (bool, error) {
+	if eb == nil || eb.store == nil {
+		return nil
+	}
+	if provider, ok := eb.store.(pipelineTransitionSchemaCapabilityProvider); ok && provider != nil {
+		return provider.CanonicalEventReceiptsCapability
 	}
 	return nil
 }
