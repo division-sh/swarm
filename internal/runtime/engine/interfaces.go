@@ -18,6 +18,20 @@ type StateRepository interface {
 	SaveState(ctx context.Context, entityID identity.EntityID, mutation StateMutation) error
 }
 
+type EmitPersistenceFieldPrerequisite struct {
+	Field       string
+	Expected    any
+	HasExpected bool
+}
+
+type EmitPersistencePrerequisites struct {
+	Fields []EmitPersistenceFieldPrerequisite
+}
+
+type EmitPersistenceVerifier interface {
+	VerifyEmitPersistence(ctx context.Context, entityID identity.EntityID, prerequisites EmitPersistencePrerequisites) error
+}
+
 type Tx interface {
 	Context() context.Context
 }
@@ -73,6 +87,7 @@ type TransitionValidator interface {
 type RuntimeDependencies struct {
 	Source              semanticview.Source
 	StateRepo           StateRepository
+	EmitVerifier        EmitPersistenceVerifier
 	TxRunner            TransactionRunner
 	Locker              EntityLocker
 	Outbox              OutboxWriter

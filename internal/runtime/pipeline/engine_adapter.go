@@ -12,6 +12,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/identity"
+	"swarm/internal/runtime/core/paths"
 	runtimeregistry "swarm/internal/runtime/core/registry"
 	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/semanticview"
@@ -202,6 +203,58 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 	return nil
 }
 
+func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, entityID identity.EntityID, prerequisites runtimeengine.EmitPersistencePrerequisites) error {
+	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.Enabled() {
+		return nil
+	}
+	entityID = identity.NormalizeEntityID(entityID.String())
+	if entityID.IsZero() || len(prerequisites.Fields) == 0 {
+		return nil
+	}
+	persisted, ok, err := r.LoadState(ctx, entityID)
+	if err != nil {
+		return fmt.Errorf("%w: load persisted entity state: %v", runtimeengine.ErrEmitPersistencePrerequisite, err)
+	}
+	if !ok {
+		return fmt.Errorf("%w: entity_state row missing for %s", runtimeengine.ErrEmitPersistencePrerequisite, entityID.String())
+	}
+	missingExpected := make([]string, 0, len(prerequisites.Fields))
+	missingPersisted := make([]string, 0, len(prerequisites.Fields))
+	mismatched := make([]string, 0, len(prerequisites.Fields))
+	for _, prerequisite := range prerequisites.Fields {
+		field := strings.TrimSpace(prerequisite.Field)
+		if field == "" {
+			continue
+		}
+		if !prerequisite.HasExpected {
+			missingExpected = append(missingExpected, field)
+			continue
+		}
+		actual, ok := workflowMetadataValue(persisted.Metadata, field)
+		if !ok {
+			missingPersisted = append(missingPersisted, field)
+			continue
+		}
+		if !workflowJSONValuesEqual(prerequisite.Expected, actual) {
+			mismatched = append(mismatched, field)
+		}
+	}
+	if len(missingExpected) == 0 && len(missingPersisted) == 0 && len(mismatched) == 0 {
+		return nil
+	}
+	details := make([]string, 0, 3)
+	if len(missingExpected) > 0 {
+		details = append(details, "missing handler writes="+strings.Join(missingExpected, ","))
+	}
+	if len(missingPersisted) > 0 {
+		details = append(details, "missing persisted fields="+strings.Join(missingPersisted, ","))
+	}
+	if len(mismatched) > 0 {
+		details = append(details, "mismatched persisted fields="+strings.Join(mismatched, ","))
+	}
+	return fmt.Errorf("%w: %s", runtimeengine.ErrEmitPersistencePrerequisite, strings.Join(details, "; "))
+}
+
 func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, entityID string) error {
 	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.Enabled() {
 		return nil
@@ -333,6 +386,7 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	return runtimeengine.RuntimeDependencies{
 		Source:              source,
 		StateRepo:           pipelineEngineStateRepo{coordinator: pc},
+		EmitVerifier:        pipelineEngineStateRepo{coordinator: pc},
 		TxRunner:            pipelineEngineTxRunner{db: pc.db},
 		Locker:              pipelineEngineLocker{coordinator: pc},
 		Outbox:              outbox,
@@ -346,6 +400,39 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		TransitionValidator: pipelineEngineTransitionValidator{coordinator: pc},
 		MaxChainDepth:       workflowMaxChainDepthPolicy(source),
 	}
+}
+
+func workflowMetadataValue(metadata map[string]any, target string) (any, bool) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return nil, false
+	}
+	parsed := paths.Parse(target)
+	if parsed.HasExplicitRoot() {
+		parsed = paths.Path{Segments: parsed.Segments}
+	}
+	if len(parsed.Segments) == 0 {
+		return nil, false
+	}
+	current := any(metadata)
+	for _, segment := range parsed.Segments {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		value, ok := object[strings.TrimSpace(segment)]
+		if !ok {
+			return nil, false
+		}
+		current = value
+	}
+	return current, true
+}
+
+func workflowJSONValuesEqual(left, right any) bool {
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
 }
 
 func workflowMaxChainDepthPolicy(source semanticview.Source) int {

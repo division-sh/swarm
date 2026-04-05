@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -196,6 +197,137 @@ func TestExecuteNodeContractHandlerMintsEntityIDForEntityMaterializingHandler(t 
 	}
 }
 
+func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIsMissing(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, bus := newEmitPersistenceTestCoordinator(db)
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "validation",
+		WorkflowVersion: "v-test",
+		CurrentState:    "researching",
+		Metadata: map[string]any{
+			"subject_id": entityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "business_brief"},
+			},
+			SourceEvent: "research.completed",
+		},
+		Emits:      runtimecontracts.EventEmission{Single: "spec.requested"},
+		AdvancesTo: "mvp_speccing",
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("research.completed"),
+			Payload: mustJSON(map[string]any{}),
+		}.WithEntityID(entityID),
+		State: WorkflowState{
+			EntityID: entityID,
+			Stage:    WorkflowStateID("researching"),
+			Metadata: map[string]any{},
+		},
+	}, false)
+	if !errors.Is(err, runtimeengine.ErrEmitPersistencePrerequisite) {
+		t.Fatalf("executeNodeContractHandler error = %v, want %v", err, runtimeengine.ErrEmitPersistencePrerequisite)
+	}
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("published count = %d, want 0 when persistence prerequisite is missing", got)
+	}
+
+	instance, ok, loadErr := pc.workflowStore.Load(context.Background(), entityID)
+	if loadErr != nil {
+		t.Fatalf("load workflow instance: %v", loadErr)
+	}
+	if !ok {
+		t.Fatal("expected seeded workflow instance to remain available")
+	}
+	if got := strings.TrimSpace(instance.CurrentState); got != "researching" {
+		t.Fatalf("current_state = %q, want researching after rollback", got)
+	}
+	if _, exists := instance.Metadata["business_brief"]; exists {
+		t.Fatalf("business_brief unexpectedly persisted after rejected emit: %#v", instance.Metadata["business_brief"])
+	}
+}
+
+func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSucceeds(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, bus := newEmitPersistenceTestCoordinator(db)
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "validation",
+		WorkflowVersion: "v-test",
+		CurrentState:    "researching",
+		Metadata: map[string]any{
+			"subject_id": entityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "business_brief"},
+			},
+			SourceEvent: "research.completed",
+		},
+		Emits:      runtimecontracts.EventEmission{Single: "spec.requested"},
+		AdvancesTo: "mvp_speccing",
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type: events.EventType("research.completed"),
+			Payload: mustJSON(map[string]any{
+				"business_brief": map[string]any{"summary": "validated"},
+			}),
+		}.WithEntityID(entityID),
+		State: WorkflowState{
+			EntityID: entityID,
+			Stage:    WorkflowStateID("researching"),
+			Metadata: map[string]any{},
+		},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("published count = %d, want 1", got)
+	}
+	if got := string(bus.publishedEvent(0).Type); got != "spec.requested" {
+		t.Fatalf("published type = %q, want spec.requested", got)
+	}
+
+	instance, ok, loadErr := pc.workflowStore.Load(context.Background(), entityID)
+	if loadErr != nil {
+		t.Fatalf("load workflow instance: %v", loadErr)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance to persist")
+	}
+	if got := strings.TrimSpace(instance.CurrentState); got != "mvp_speccing" {
+		t.Fatalf("current_state = %q, want mvp_speccing", got)
+	}
+	brief, ok := instance.Metadata["business_brief"].(map[string]any)
+	if !ok || brief["summary"] != "validated" {
+		t.Fatalf("business_brief = %#v, want persisted payload", instance.Metadata["business_brief"])
+	}
+}
+
 func TestResolveHandlerEntityIDForFlowKeepsSameFlowEntity(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -234,6 +366,47 @@ func TestResolveHandlerEntityIDForFlowKeepsSameFlowEntity(t *testing.T) {
 	if state.EntityID != entityID {
 		t.Fatalf("state entity_id = %q, want %q", state.EntityID, entityID)
 	}
+}
+
+func newEmitPersistenceTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recordingPipelineBus) {
+	bus := &recordingPipelineBus{}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "validation",
+			Version: "v-test",
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{
+					{
+						Name: "validation_phase",
+						Fields: []runtimecontracts.EntitySchemaField{
+							{Name: "business_brief", Type: "jsonb"},
+						},
+					},
+				},
+			},
+		},
+	}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		db:             db,
+		workflowStore:  NewWorkflowInstanceStore(db),
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module: &previewWorkflowModule{
+			bundle: bundle,
+			workflow: NewWorkflowDefinition("validation", []WorkflowStage{
+				{Name: "researching"},
+				{Name: "mvp_speccing"},
+			}, []WorkflowTransition{
+				{
+					Name: "research_to_spec",
+					From: []WorkflowStateID{"researching"},
+					To:   "mvp_speccing",
+				},
+			}),
+		},
+	}
+	return pc, bus
 }
 
 func TestResolveHandlerEntityIDForFlowPreservesCrossFlowEntityWithoutCreateEntity(t *testing.T) {

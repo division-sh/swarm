@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -217,6 +218,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		})
 	})
 	if err != nil {
+		if errors.Is(err, ErrEmitPersistencePrerequisite) {
+			result.Status = OutcomeRejected
+		}
 		if result.Status == OutcomeUnknown {
 			result.Status = OutcomeRejected
 		}
@@ -948,7 +952,81 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
 	if len(frame.result.EmitIntents) == 0 {
 		return nil
 	}
+	if err := e.verifyEmitPersistencePrerequisites(ctx, frame); err != nil {
+		return err
+	}
 	return e.deps.Outbox.WriteOutbox(ctx, frame.result.EmitIntents)
+}
+
+func (e *Executor) verifyEmitPersistencePrerequisites(ctx context.Context, frame executionFrame) error {
+	if e == nil || e.deps.EmitVerifier == nil || len(frame.result.EmitIntents) == 0 {
+		return nil
+	}
+	prerequisites := e.emitPersistencePrerequisites(frame)
+	if len(prerequisites.Fields) == 0 {
+		return nil
+	}
+	return e.deps.EmitVerifier.VerifyEmitPersistence(ctx, frame.req.EntityID, prerequisites)
+}
+
+func (e *Executor) emitPersistencePrerequisites(frame executionFrame) EmitPersistencePrerequisites {
+	seen := map[string]int{}
+	fields := make([]EmitPersistenceFieldPrerequisite, 0, 4)
+	appendField := func(target string) {
+		field, path, ok := emitPersistenceFieldTarget(target)
+		if !ok {
+			return
+		}
+		prerequisite := EmitPersistenceFieldPrerequisite{Field: field}
+		if expected, ok := lookupParsedPath(frame.state.State.Metadata, path); ok {
+			prerequisite.Expected = expected
+			prerequisite.HasExpected = true
+		}
+		if idx, ok := seen[field]; ok {
+			fields[idx] = prerequisite
+			return
+		}
+		seen[field] = len(fields)
+		fields = append(fields, prerequisite)
+	}
+	if frame.topLevelDataWritesApplied {
+		for _, write := range frame.topLevelDataAccumulation.Writes {
+			appendField(write.Target())
+		}
+	}
+	if frame.rule != nil {
+		for _, write := range frame.rule.DataAccumulation.Writes {
+			appendField(write.Target())
+		}
+	}
+	if spec := e.selectedCompute(&frame); spec != nil {
+		appendField(spec.StoreAs)
+	}
+	return EmitPersistencePrerequisites{Fields: fields}
+}
+
+func emitPersistenceFieldTarget(target string) (string, paths.Path, bool) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", paths.Path{}, false
+	}
+	parsed := paths.Parse(target)
+	if parsed.HasExplicitRoot() {
+		switch parsed.Root {
+		case paths.RootEntity, paths.RootMetadata:
+			parsed = paths.Path{Segments: parsed.Segments}
+		default:
+			return "", paths.Path{}, false
+		}
+	}
+	if len(parsed.Segments) == 0 {
+		return "", paths.Path{}, false
+	}
+	field := strings.Join(parsed.Segments, ".")
+	if strings.TrimSpace(field) == "" {
+		return "", paths.Path{}, false
+	}
+	return field, parsed, true
 }
 
 func decodePayload(raw json.RawMessage) map[string]any {
