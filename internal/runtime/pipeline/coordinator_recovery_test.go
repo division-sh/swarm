@@ -2,7 +2,6 @@ package pipeline_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -114,7 +113,7 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	}
 }
 
-func TestRecoveryManager_FailsClosedOnMissingPersistedRunID(t *testing.T) {
+func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing.T) {
 	ctx := context.Background()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -165,14 +164,30 @@ func TestRecoveryManager_FailsClosedOnMissingPersistedRunID(t *testing.T) {
 	}
 
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
-	err = rm.Recover(ctx)
-	if err == nil || !strings.Contains(err.Error(), "missing canonical run_id") {
-		t.Fatalf("Recover error = %v, want missing canonical run_id", err)
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
 	}
 	if len(capture.published) != 1 {
 		t.Fatalf("published events = %#v, want one valid replay", capture.published)
 	}
 	if capture.published[0].ID != goodEventID {
 		t.Fatalf("published event id = %q, want %q", capture.published[0].ID, goodEventID)
+	}
+
+	var badOutcome, badReason string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, badEventID).Scan(&badOutcome, &badReason); err != nil {
+		t.Fatalf("load bad receipt: %v", err)
+	}
+	if badOutcome != "dead_letter" {
+		t.Fatalf("bad receipt outcome = %q, want dead_letter", badOutcome)
+	}
+	if badReason != "pipeline_error" {
+		t.Fatalf("bad receipt reason = %q, want pipeline_error", badReason)
 	}
 }
