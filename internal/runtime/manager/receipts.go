@@ -521,7 +521,7 @@ func (am *AgentManager) resolveManagerAgentID(agentID string) string {
 		if p := strings.TrimSpace(cfg.ParentAgent); p != "" {
 			return p
 		}
-		if managerID := normalizedManagerFallback(cfg, managerFallbackFromConfig(cfg)); managerID != "" {
+		if managerID := normalizedManagerFallback(cfg, cfg.ManagerFallback); managerID != "" {
 			return managerID
 		}
 	}

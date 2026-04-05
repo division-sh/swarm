@@ -55,13 +55,11 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 
 	maxTurns := 100
 	mode := llm.TaskScoped
-	if overrideMode, overrideMaxTurns := extractConversationConstraints(cfg.Config); overrideMode != nil {
-		mode = *overrideMode
-		if overrideMaxTurns > 0 {
-			maxTurns = overrideMaxTurns
-		}
-	} else if overrideMaxTurns > 0 {
-		maxTurns = overrideMaxTurns
+	if overrideMode, ok := parseConversationMode(cfg.ConversationMode); ok {
+		mode = overrideMode
+	}
+	if cfg.MaxTurnsPerTask > 0 {
+		maxTurns = cfg.MaxTurnsPerTask
 	}
 	c := llm.NewConversation(cfg.ID, "", systemPrompt, tools, mode, maxTurns, modelRuntime)
 	c.SetToolExecutor(toolExecutor)
@@ -87,42 +85,6 @@ func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, 
 	return tools
 }
 
-func extractConversationConstraints(raw json.RawMessage) (*llm.ConversationMode, int) {
-	if len(raw) == 0 || !json.Valid(raw) {
-		return nil, 0
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return nil, 0
-	}
-	var (
-		modePtr  *llm.ConversationMode
-		maxTurns int
-	)
-	if constraints, ok := obj["constraints"].(map[string]any); ok {
-		if mode, ok := parseConversationMode(sharedjson.AsString(constraints["conversation_mode"])); ok {
-			modeCopy := mode
-			modePtr = &modeCopy
-		}
-		if v := asIntFromAny(constraints["max_turns_per_task"]); v > 0 {
-			maxTurns = v
-		}
-	}
-	// Backward-compatible top-level overrides.
-	if modePtr == nil {
-		if mode, ok := parseConversationMode(sharedjson.AsString(obj["conversation_mode"])); ok {
-			modeCopy := mode
-			modePtr = &modeCopy
-		}
-	}
-	if maxTurns == 0 {
-		if v := asIntFromAny(obj["max_turns_per_task"]); v > 0 {
-			maxTurns = v
-		}
-	}
-	return modePtr, maxTurns
-}
-
 func parseConversationMode(raw string) (llm.ConversationMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "task", "task_scoped", "task-scoped", "stateless":
@@ -133,26 +95,6 @@ func parseConversationMode(raw string) (llm.ConversationMode, bool) {
 		return llm.SessionPerEntityScoped, true
 	default:
 		return llm.TaskScoped, false
-	}
-}
-
-func asIntFromAny(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int32:
-		return int(n)
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	case float32:
-		return int(n)
-	case json.Number:
-		i, _ := n.Int64()
-		return int(i)
-	default:
-		return 0
 	}
 }
 
@@ -606,25 +548,12 @@ func extractSystemPrompt(cfg models.AgentConfig) string {
 
 func extractAllowedToolSet(cfg models.AgentConfig) (map[string]struct{}, bool) {
 	allowed := make(map[string]struct{})
-	if len(cfg.Config) == 0 || !json.Valid(cfg.Config) {
-		return allowed, false
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(cfg.Config, &obj); err != nil {
+	if len(cfg.Tools) == 0 {
 		return allowed, false
 	}
 	found := false
-	raw, ok := obj["tools"]
-	if !ok {
-		return allowed, false
-	}
-	arr, ok := raw.([]any)
-	if !ok {
-		return allowed, false
-	}
-	for _, item := range arr {
-		name, _ := item.(string)
-		name = strings.TrimSpace(name)
+	for _, item := range cfg.Tools {
+		name := strings.TrimSpace(item)
 		if name == "" {
 			continue
 		}
@@ -635,34 +564,14 @@ func extractAllowedToolSet(cfg models.AgentConfig) (map[string]struct{}, bool) {
 }
 
 func extractNativeToolConfig(cfg models.AgentConfig) map[string]bool {
-	if len(cfg.Config) == 0 || !json.Valid(cfg.Config) {
+	if !cfg.NativeTools.Any() {
 		return nil
 	}
-	var obj map[string]any
-	if err := json.Unmarshal(cfg.Config, &obj); err != nil {
-		return nil
+	return map[string]bool{
+		"bash":       cfg.NativeTools.Bash,
+		"web_search": cfg.NativeTools.WebSearch,
+		"file_io":    cfg.NativeTools.FileIO,
 	}
-	raw, ok := obj["native_tools"]
-	if !ok {
-		return nil
-	}
-	items, ok := raw.(map[string]any)
-	if !ok {
-		return nil
-	}
-	out := make(map[string]bool, len(items))
-	for key, value := range items {
-		key = strings.TrimSpace(key)
-		flag, ok := value.(bool)
-		if key == "" || !ok || !flag {
-			continue
-		}
-		out[key] = true
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func supportedNativeToolCapabilities(runtime llm.Runtime) llm.NativeToolCapabilities {
@@ -722,30 +631,7 @@ func nativeFallbackToolDefinitions(cfg models.AgentConfig, modelRuntime llm.Runt
 }
 
 func extractEmitEvents(cfg models.AgentConfig) []string {
-	if len(cfg.Config) == 0 || !json.Valid(cfg.Config) {
-		return nil
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(cfg.Config, &obj); err != nil {
-		return nil
-	}
-	raw, ok := obj["emit_events"]
-	if !ok {
-		return nil
-	}
-	arr, ok := raw.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(arr))
-	for _, item := range arr {
-		eventType := strings.TrimSpace(sharedjson.AsString(item))
-		if eventType == "" {
-			continue
-		}
-		out = append(out, eventType)
-	}
-	return uniqueStrings(out)
+	return uniqueStrings(cfg.EmitEvents)
 }
 
 func emitToolDefinitions(cfg models.AgentConfig) []llm.ToolDefinition {

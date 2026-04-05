@@ -63,21 +63,15 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
-	actorConfig, err := json.Marshal(map[string]any{
-		"flow_path":   "discovery",
-		"emit_events": []string{"category.assessed"},
-	})
-	if err != nil {
-		t.Fatalf("json.Marshal actor config: %v", err)
-	}
 	actor := models.AgentConfig{
-		ID:     "market-research-agent",
-		Role:   "market_research",
-		Mode:   "discovery",
-		Config: actorConfig,
+		ID:         "market-research-agent",
+		Role:       "market_research",
+		Mode:       "discovery",
+		FlowPath:   "discovery",
+		EmitEvents: []string{"category.assessed"},
 	}
 
-	_, err = exec.handleEmitTool(context.Background(), actor, "emit_category_assessed", map[string]any{
+	_, err := exec.handleEmitTool(context.Background(), actor, "emit_category_assessed", map[string]any{
 		"category":  "AP automation",
 		"signal_id": "sig-1",
 	})
@@ -141,21 +135,15 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
-	actorConfig, err := json.Marshal(map[string]any{
-		"flow_path":   "discovery",
-		"emit_events": []string{"vertical.discovered"},
-	})
-	if err != nil {
-		t.Fatalf("json.Marshal actor config: %v", err)
-	}
 	actor := models.AgentConfig{
-		ID:     "discovery-coordinator",
-		Role:   "discovery_coordinator",
-		Mode:   "discovery",
-		Config: actorConfig,
+		ID:         "discovery-coordinator",
+		Role:       "discovery_coordinator",
+		Mode:       "discovery",
+		FlowPath:   "discovery",
+		EmitEvents: []string{"vertical.discovered"},
 	}
 
-	_, err = exec.handleEmitTool(context.Background(), actor, "emit_vertical_discovered", map[string]any{
+	_, err := exec.handleEmitTool(context.Background(), actor, "emit_vertical_discovered", map[string]any{
 		"name": "Law firm AP automation",
 	})
 	if err != nil {

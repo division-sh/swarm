@@ -60,14 +60,16 @@ func TestAuthorizeManage_AllowsAncestorManagerChain(t *testing.T) {
 		agents: map[string]models.AgentConfig{
 			"control": {ID: "control"},
 			"reviewer": {
-				ID:          "reviewer",
-				ParentAgent: "control",
-				Config:      []byte(`{"flow_path":"review/inst-1","manager_fallback":"control"}`),
+				ID:              "reviewer",
+				ParentAgent:     "control",
+				FlowPath:        "review/inst-1",
+				ManagerFallback: "control",
 			},
 			"worker": {
-				ID:          "worker",
-				ParentAgent: "reviewer",
-				Config:      []byte(`{"flow_path":"review/inst-1","manager_fallback":"reviewer"}`),
+				ID:              "worker",
+				ParentAgent:     "reviewer",
+				FlowPath:        "review/inst-1",
+				ManagerFallback: "reviewer",
 			},
 		},
 	}
@@ -75,7 +77,7 @@ func TestAuthorizeManage_AllowsAncestorManagerChain(t *testing.T) {
 		ID:          "control",
 		Role:        "control",
 		Permissions: []string{"agent_fire"},
-		Config:      []byte(`{"flow_path":"review/inst-1"}`),
+		FlowPath:    "review/inst-1",
 	}
 	target := manager.agents["worker"]
 
@@ -105,10 +107,11 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	manager := managerStub{
 		agents: map[string]models.AgentConfig{
 			"target-1": {
-				ID:       "target-1",
-				Role:     "reviewer",
-				EntityID: "entity-b",
-				Config:   []byte(`{"flow_path":"review/inst-1","manager_fallback":"control"}`),
+				ID:              "target-1",
+				Role:            "reviewer",
+				EntityID:        "entity-b",
+				FlowPath:        "review/inst-1",
+				ManagerFallback: "control",
 			},
 		},
 	}
@@ -118,7 +121,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 		Role:        "control",
 		Permissions: []string{"message_flow"},
 		EntityID:    "entity-a",
-		Config:      []byte(`{"flow_path":"review/inst-1"}`),
+		FlowPath:    "review/inst-1",
 	})
 
 	if _, err := exec.execAgentMessage(ctx, models.AgentConfig{
@@ -126,7 +129,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 		Role:        "control",
 		Permissions: []string{"message_flow"},
 		EntityID:    "entity-a",
-		Config:      []byte(`{"flow_path":"review/inst-1"}`),
+		FlowPath:    "review/inst-1",
 	}, map[string]any{
 		"target_agent_id": "target-1",
 		"message":         "hello",

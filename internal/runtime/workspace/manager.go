@@ -375,7 +375,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 }
 
 func WorkspaceClass(actor models.AgentConfig) string {
-	if cfgClass := configString(actor.Config, "workspace_class"); cfgClass != "" {
+	if cfgClass := strings.TrimSpace(actor.WorkspaceClass); cfgClass != "" {
 		return cfgClass
 	}
 	if source := runtimepipeline.DefaultWorkflowSemanticSourceOrNil(); source != nil {
@@ -447,7 +447,7 @@ func (m *DockerManager) workspaceScopeForActor(actor models.AgentConfig) (string
 		}
 		return scope, agentID, nil
 	case "per-flow-instance":
-		flowPath := strings.Trim(strings.TrimSpace(configString(actor.Config, "flow_path")), "/")
+		flowPath := actor.CanonicalFlowPath()
 		if flowPath == "" {
 			return "", "", fmt.Errorf("workspace resolution failed: per-flow-instance workspace for agent %s requires flow_path", strings.TrimSpace(actor.ID))
 		}
@@ -653,18 +653,6 @@ func validateReadableDir(path, prefix string) error {
 		return fmt.Errorf("%s %s is not a directory", prefix, path)
 	}
 	return nil
-}
-
-func configString(raw []byte, key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" || len(raw) == 0 || !json.Valid(raw) {
-		return ""
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(asString(parsed[key]))
 }
 
 func asString(v any) string {

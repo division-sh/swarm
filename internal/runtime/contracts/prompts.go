@@ -460,10 +460,8 @@ func promptRuntimeTokens(cfg models.AgentConfig) map[string]any {
 		"current_date": time.Now().In(time.Local).Format("2006-01-02"),
 		"agent_id":     strings.TrimSpace(cfg.ID),
 	}
-	if config := parsePromptConfig(cfg.Config); len(config) > 0 {
-		if flowPath := strings.TrimSpace(asPromptString(config["flow_path"])); flowPath != "" {
-			out["flow_instance_path"] = flowPath
-		}
+	if flowPath := cfg.CanonicalFlowPath(); flowPath != "" {
+		out["flow_instance_path"] = flowPath
 	}
 	return out
 }

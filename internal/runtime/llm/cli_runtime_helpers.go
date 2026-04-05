@@ -227,23 +227,16 @@ var claudeProviderBuiltinToolNames = []string{
 
 func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig) string {
 	allowed := map[string]struct{}{}
-	if len(actor.Config) != 0 && json.Valid(actor.Config) {
-		var parsed map[string]any
-		if err := json.Unmarshal(actor.Config, &parsed); err == nil {
-			if raw, ok := parsed["native_tools"].(map[string]any); ok {
-				if enabled, _ := raw["bash"].(bool); enabled {
-					allowed["Bash"] = struct{}{}
-				}
-				if enabled, _ := raw["web_search"].(bool); enabled {
-					allowed["WebSearch"] = struct{}{}
-				}
-				if enabled, _ := raw["file_io"].(bool); enabled {
-					allowed["Read"] = struct{}{}
-					allowed["Write"] = struct{}{}
-					allowed["Edit"] = struct{}{}
-				}
-			}
-		}
+	if actor.NativeTools.Bash {
+		allowed["Bash"] = struct{}{}
+	}
+	if actor.NativeTools.WebSearch {
+		allowed["WebSearch"] = struct{}{}
+	}
+	if actor.NativeTools.FileIO {
+		allowed["Read"] = struct{}{}
+		allowed["Write"] = struct{}{}
+		allowed["Edit"] = struct{}{}
 	}
 	names := make([]string, 0, len(claudeProviderBuiltinToolNames))
 	for _, name := range claudeProviderBuiltinToolNames {
@@ -274,23 +267,16 @@ func claudeAllowedToolsArgForActor(actor models.AgentConfig, tools []ToolDefinit
 		add(tool.Name)
 	}
 	add("ExitPlanMode")
-	if len(actor.Config) != 0 && json.Valid(actor.Config) {
-		var parsed map[string]any
-		if err := json.Unmarshal(actor.Config, &parsed); err == nil {
-			if raw, ok := parsed["native_tools"].(map[string]any); ok {
-				if enabled, _ := raw["bash"].(bool); enabled {
-					add("Bash")
-				}
-				if enabled, _ := raw["web_search"].(bool); enabled {
-					add("WebSearch")
-				}
-				if enabled, _ := raw["file_io"].(bool); enabled {
-					add("Read")
-					add("Write")
-					add("Edit")
-				}
-			}
-		}
+	if actor.NativeTools.Bash {
+		add("Bash")
+	}
+	if actor.NativeTools.WebSearch {
+		add("WebSearch")
+	}
+	if actor.NativeTools.FileIO {
+		add("Read")
+		add("Write")
+		add("Edit")
 	}
 	if len(allowed) == 0 {
 		return ""

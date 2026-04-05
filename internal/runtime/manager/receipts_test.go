@@ -51,9 +51,7 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	am.agentCfg["agent-a"] = runtimeactors.AgentConfig{
 		ID:       "agent-a",
 		EntityID: "ent-123",
-		Config: mustJSON(map[string]any{
-			"flow_path": "review/inst-1",
-		}),
+		FlowPath: "review/inst-1",
 	}
 
 	am.maybeTripAuthCircuitBreaker("agent-a", "evt-1", errors.New("claude auth required"))

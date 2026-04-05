@@ -108,10 +108,31 @@ func canonicalRuntimeToolInput(name string, input any) any {
 			if entityID := strings.TrimSpace(asString(payload["entity_id"])); entityID != "" {
 				config["entity_id"] = entityID
 			}
-			rawConfig := map[string]any{}
 			if modelTier := strings.TrimSpace(asString(payload["model_tier"])); modelTier != "" {
-				rawConfig["model_tier"] = modelTier
+				config["model_tier"] = modelTier
 			}
+			if conversationMode := strings.TrimSpace(asString(payload["conversation_mode"])); conversationMode != "" {
+				config["conversation_mode"] = conversationMode
+			}
+			if maxTurns := asInt(payload["max_turns_per_task"]); maxTurns > 0 {
+				config["max_turns_per_task"] = maxTurns
+			}
+			if tools, ok := payload["tools"]; ok && tools != nil {
+				config["tools"] = tools
+			}
+			if emitEvents, ok := payload["emit_events"]; ok && emitEvents != nil {
+				config["emit_events"] = emitEvents
+			}
+			if nativeTools, ok := payload["native_tools"]; ok && nativeTools != nil {
+				config["native_tools"] = nativeTools
+			}
+			if workspaceClass := strings.TrimSpace(asString(payload["workspace_class"])); workspaceClass != "" {
+				config["workspace_class"] = workspaceClass
+			}
+			if managerFallback := strings.TrimSpace(asString(payload["manager_fallback"])); managerFallback != "" {
+				config["manager_fallback"] = managerFallback
+			}
+			rawConfig := map[string]any{}
 			if systemPrompt := strings.TrimSpace(asString(payload["system_prompt"])); systemPrompt != "" {
 				rawConfig["system_prompt"] = systemPrompt
 			}
@@ -130,11 +151,33 @@ func canonicalRuntimeToolInput(name string, input any) any {
 			if modelTier := strings.TrimSpace(asString(payload["model_tier"])); modelTier != "" {
 				config["model_tier"] = modelTier
 			}
-			if systemPrompt := strings.TrimSpace(asString(payload["system_prompt"])); systemPrompt != "" {
-				config["system_prompt"] = systemPrompt
+			if conversationMode := strings.TrimSpace(asString(payload["conversation_mode"])); conversationMode != "" {
+				config["conversation_mode"] = conversationMode
 			}
 			if maxTurns := asInt(payload["max_turns_per_task"]); maxTurns > 0 {
 				config["max_turns_per_task"] = maxTurns
+			}
+			if tools, ok := payload["tools"]; ok && tools != nil {
+				config["tools"] = tools
+			}
+			if emitEvents, ok := payload["emit_events"]; ok && emitEvents != nil {
+				config["emit_events"] = emitEvents
+			}
+			if nativeTools, ok := payload["native_tools"]; ok && nativeTools != nil {
+				config["native_tools"] = nativeTools
+			}
+			if workspaceClass := strings.TrimSpace(asString(payload["workspace_class"])); workspaceClass != "" {
+				config["workspace_class"] = workspaceClass
+			}
+			if managerFallback := strings.TrimSpace(asString(payload["manager_fallback"])); managerFallback != "" {
+				config["manager_fallback"] = managerFallback
+			}
+			rawConfig := map[string]any{}
+			if systemPrompt := strings.TrimSpace(asString(payload["system_prompt"])); systemPrompt != "" {
+				rawConfig["system_prompt"] = systemPrompt
+			}
+			if len(rawConfig) > 0 {
+				config["config"] = rawConfig
 			}
 			payload["config"] = config
 		}

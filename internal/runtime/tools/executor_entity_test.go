@@ -531,11 +531,9 @@ func TestEntityTools_GetSubjectStatusAllTerminalTrueWhenAllFlowsTerminal(t *test
 		},
 	}
 	ctx, exec := newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
-		ID:   "tester",
-		Role: "operator",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"create_entity", "get_subject_status"},
-		}),
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "get_subject_status"},
 	}, bundle)
 	subjectID := uuid.NewString()
 	for _, row := range []struct {
@@ -605,11 +603,9 @@ func TestEntityTools_GetSubjectStatusSingleFlowSubject(t *testing.T) {
 func TestEntityTools_GetSubjectStatusPrefersDeeperFlowOnEqualEnteredStateAt(t *testing.T) {
 	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-nested-three-levels")
 	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:   "tester",
-		Role: "operator",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"create_entity", "get_subject_status"},
-		}),
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "get_subject_status"},
 	}, bundle)
 	subjectID := uuid.NewString()
 	childID := uuid.NewString()
@@ -701,11 +697,9 @@ func TestEntityTools_CreateEntityDuplicate(t *testing.T) {
 
 func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutorWithActor(t, models.AgentConfig{
-		ID:   "tester",
-		Role: "operator",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"emit_something"},
-		}),
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"emit_something"},
 	})
 	entityID := uuid.NewString()
 	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
@@ -726,11 +720,9 @@ func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(
 
 func TestEntityTools_NoSchemaAcceptsArbitraryFieldNames(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
-		ID:   "tester",
-		Role: "operator",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"create_entity", "save_entity_field", "get_entity"},
-		}),
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
 	}, &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			InitialStage: "queued",
@@ -758,11 +750,9 @@ func TestEntityTools_NoSchemaAcceptsArbitraryFieldNames(t *testing.T) {
 func TestEntityTools_SaveEntityFieldRejectsCrossFlowWrite(t *testing.T) {
 	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-required-agents-child")
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:   "analyzer",
-		Role: "analyzer",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"create_entity", "save_entity_field", "get_entity"},
-		}),
+		ID:    "analyzer",
+		Role:  "analyzer",
+		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
 	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
@@ -789,11 +779,9 @@ func TestEntityTools_SaveEntityFieldRejectsCrossFlowWrite(t *testing.T) {
 func TestEntityTools_SaveEntityFieldAllowsSameFlowWrite(t *testing.T) {
 	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-required-agents-child")
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:   "analyzer",
-		Role: "analyzer",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"create_entity", "save_entity_field", "get_entity"},
-		}),
+		ID:    "analyzer",
+		Role:  "analyzer",
+		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
 	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
@@ -818,11 +806,9 @@ func TestEntityTools_SaveEntityFieldAllowsSameFlowWrite(t *testing.T) {
 func TestEntityTools_SaveEntityFieldAllowsSameFlowWriteWithForeignSubject(t *testing.T) {
 	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-required-agents-child")
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:   "analyzer",
-		Role: "analyzer",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"create_entity", "save_entity_field", "get_entity"},
-		}),
+		ID:    "analyzer",
+		Role:  "analyzer",
+		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
 	subjectID := uuid.NewString()
@@ -849,11 +835,9 @@ func TestEntityTools_SaveEntityFieldAllowsSameFlowWriteWithForeignSubject(t *tes
 func TestEntityTools_GetEntityAllowsCrossFlowRead(t *testing.T) {
 	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-required-agents-child")
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:   "analyzer",
-		Role: "analyzer",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"create_entity", "get_entity"},
-		}),
+		ID:    "analyzer",
+		Role:  "analyzer",
+		Tools: []string{"create_entity", "get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
 	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
@@ -886,11 +870,9 @@ func TestEntityTools_GetEntityAllowsCrossFlowRead(t *testing.T) {
 func TestEntityTools_FlowOwnedActorCanReadForeignEntityAndWriteOwnEntity(t *testing.T) {
 	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-required-agents-child")
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:   "analyzer",
-		Role: "analyzer",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"create_entity", "get_entity", "save_entity_field"},
-		}),
+		ID:    "analyzer",
+		Role:  "analyzer",
+		Tools: []string{"create_entity", "get_entity", "save_entity_field"},
 	}, bundle)
 
 	scoringID := uuid.NewString()
@@ -945,11 +927,9 @@ func TestEntityTools_FlowOwnedActorCanReadForeignEntityAndWriteOwnEntity(t *test
 func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Executor) {
 	t.Helper()
 	ctx, exec, _ := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
-		ID:   "tester",
-		Role: "operator",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"create_entity", "get_entity", "get_subject_status", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
-		}),
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "get_entity", "get_subject_status", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	})
 	return ctx, exec
 }
@@ -986,11 +966,9 @@ func newEntityToolTestExecutorWithBundle(t *testing.T, actor models.AgentConfig,
 func newEntityToolTestHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
 	return newEntityToolTestHarnessWithActor(t, models.AgentConfig{
-		ID:   "tester",
-		Role: "operator",
-		Config: mustJSONRaw(t, map[string]any{
-			"tools": []string{"create_entity", "get_entity", "get_subject_status", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
-		}),
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "get_entity", "get_subject_status", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	})
 }
 

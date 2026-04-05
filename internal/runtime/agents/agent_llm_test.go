@@ -23,12 +23,10 @@ import (
 
 func TestFormatEventForAgent_UsesConfiguredToolSummary(t *testing.T) {
 	cfg := models.AgentConfig{
-		ID:   "agent-1",
-		Role: "operator",
-		Mode: "task",
-		Config: mustAgentConfigJSON(t, map[string]any{
-			"tools": []string{"schedule", "get_entity", "emit_example"},
-		}),
+		ID:    "agent-1",
+		Role:  "operator",
+		Mode:  "task",
+		Tools: []string{"schedule", "get_entity", "emit_example"},
 	}
 	evt := (events.Event{
 		ID:          "evt-1",
@@ -46,9 +44,7 @@ func TestFormatEventForAgent_UsesConfiguredToolSummary(t *testing.T) {
 
 func TestFilterTools_RetainsUniversalEntityToolsWhenConstrained(t *testing.T) {
 	allowed, constrained := extractAllowedToolSet(models.AgentConfig{
-		Config: mustAgentConfigJSON(t, map[string]any{
-			"tools": []string{"emit_example"},
-		}),
+		Tools: []string{"emit_example"},
 	})
 	if !constrained {
 		t.Fatal("expected constrained tool set")
@@ -230,12 +226,10 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 	}))
 	agent := NewLLMAgent(
 		models.AgentConfig{
-			ID:   "coordinator-1",
-			Role: "coordinator",
-			Config: mustAgentConfigJSON(t, map[string]any{
-				"tools":       []string{"schedule"},
-				"emit_events": []string{"coord.done"},
-			}),
+			ID:         "coordinator-1",
+			Role:       "coordinator",
+			Tools:      []string{"schedule"},
+			EmitEvents: []string{"coord.done"},
 		},
 		nil,
 		nil,
@@ -418,10 +412,10 @@ func TestNewLLMAgentFactory_PrefersActorScopedToolDefinitions(t *testing.T) {
 		{Name: "global_only"},
 	})
 	agent, err := factory(models.AgentConfig{
-		ID: "analysis-agent",
+		ID:    "analysis-agent",
+		Tools: []string{"query_entities"},
 		Config: mustAgentConfigJSON(t, map[string]any{
 			"system_prompt": "You are here.",
-			"tools":         []string{"query_entities"},
 		}),
 	})
 	if err != nil {
@@ -475,12 +469,10 @@ func TestLLMAgent_TaskScopedFatalCLIErrorResetsConversationAndRetries(t *testing
 	rt := &taskRetryRuntime{}
 	agent := NewLLMAgent(
 		models.AgentConfig{
-			ID:       "spec-reviewer",
-			Role:     "spec_reviewer",
-			EntityID: "ent-1",
-			Config: mustAgentConfigJSON(t, map[string]any{
-				"conversation_mode": "stateless",
-			}),
+			ID:               "spec-reviewer",
+			Role:             "spec_reviewer",
+			EntityID:         "ent-1",
+			ConversationMode: "stateless",
 		},
 		rt,
 		nil,
@@ -575,13 +567,11 @@ func TestNewLLMAgent_InjectsNativeFallbackToolsWhenProviderLacksSupport(t *testi
 		models.AgentConfig{
 			ID:   "researcher-1",
 			Role: "researcher",
-			Config: mustAgentConfigJSON(t, map[string]any{
-				"native_tools": map[string]any{
-					"bash":       true,
-					"web_search": true,
-					"file_io":    true,
-				},
-			}),
+			NativeTools: models.NativeToolConfig{
+				Bash:      true,
+				WebSearch: true,
+				FileIO:    true,
+			},
 		},
 		nativeCapabilityRuntimeStub{},
 		nil,
@@ -603,13 +593,11 @@ func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWhenProviderSupportsCapabil
 		models.AgentConfig{
 			ID:   "ops-1",
 			Role: "ops",
-			Config: mustAgentConfigJSON(t, map[string]any{
-				"native_tools": map[string]any{
-					"bash":       true,
-					"web_search": true,
-					"file_io":    true,
-				},
-			}),
+			NativeTools: models.NativeToolConfig{
+				Bash:      true,
+				WebSearch: true,
+				FileIO:    true,
+			},
 		},
 		nativeCapabilityRuntimeStub{caps: llm.NativeToolCapabilities{
 			Bash:      true,

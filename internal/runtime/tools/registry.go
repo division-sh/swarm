@@ -108,7 +108,7 @@ func registeredToolsForActor(source semanticview.Source, actor models.AgentConfi
 	for name := range entries {
 		candidates[strings.TrimSpace(name)] = struct{}{}
 	}
-	if allowed, _ := extractAllowedToolsFromConfig(actor); len(allowed) > 0 {
+	if allowed, _ := extractAllowedTools(actor); len(allowed) > 0 {
 		for name := range allowed {
 			candidates[strings.TrimSpace(name)] = struct{}{}
 		}

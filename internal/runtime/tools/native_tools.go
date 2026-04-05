@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"encoding/json"
 	"strings"
 
 	models "swarm/internal/runtime/core/actors"
@@ -72,19 +71,10 @@ func nativeFallbackRegisteredTool(actor models.AgentConfig, name string) (Regist
 
 func nativeToolCapabilityEnabledForActor(actor models.AgentConfig, capability string) bool {
 	capability = strings.TrimSpace(capability)
-	if capability == "" || len(actor.Config) == 0 || !json.Valid(actor.Config) {
+	if capability == "" {
 		return false
 	}
-	var parsed map[string]any
-	if err := json.Unmarshal(actor.Config, &parsed); err != nil {
-		return false
-	}
-	items, ok := parsed["native_tools"].(map[string]any)
-	if !ok {
-		return false
-	}
-	flag, ok := items[capability].(bool)
-	return ok && flag
+	return actor.NativeTools.Enabled(capability)
 }
 
 func normalizeNativeToolName(name string) string {

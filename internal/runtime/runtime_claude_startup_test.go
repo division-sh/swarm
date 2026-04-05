@@ -164,9 +164,9 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsWhenRequiredEmitToolsMissin
 	cfg.LLM.RuntimeMode = "cli_test"
 	manager := runtimemanager.NewAgentManager(nil, nil)
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
-		ID:     "market-research-agent",
-		Role:   "market_research",
-		Config: json.RawMessage(`{"emit_events":["discovery/category.assessed","discovery/market_research.scan_complete"]}`),
+		ID:         "market-research-agent",
+		Role:       "market_research",
+		EmitEvents: []string{"discovery/category.assessed", "discovery/market_research.scan_complete"},
 	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}

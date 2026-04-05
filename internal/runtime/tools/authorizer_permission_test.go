@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -71,15 +70,9 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("actor config still allows explicitly listed workflow tool", func(t *testing.T) {
-		raw, err := json.Marshal(map[string]any{
-			"tools": []string{"workflow_custom_tool"},
-		})
-		if err != nil {
-			t.Fatalf("json.Marshal: %v", err)
-		}
 		authErr := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
-			ID:     "ops-7",
-			Config: raw,
+			ID:    "ops-7",
+			Tools: []string{"workflow_custom_tool"},
 		}, "workflow_custom_tool")
 		if authErr != nil {
 			t.Fatalf("expected listed workflow tool to be allowed: %v", authErr)
@@ -87,17 +80,9 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("provider native read allowed when file_io enabled", func(t *testing.T) {
-		raw, err := json.Marshal(map[string]any{
-			"native_tools": map[string]any{
-				"file_io": true,
-			},
-		})
-		if err != nil {
-			t.Fatalf("json.Marshal: %v", err)
-		}
 		authErr := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
-			ID:     "ops-8",
-			Config: raw,
+			ID:          "ops-8",
+			NativeTools: models.NativeToolConfig{FileIO: true},
 		}, "Read")
 		if authErr != nil {
 			t.Fatalf("expected provider native Read to be allowed: %v", authErr)
@@ -105,15 +90,9 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("actor config tool aliases are canonicalized", func(t *testing.T) {
-		raw, err := json.Marshal(map[string]any{
-			"tools": []string{"Read"},
-		})
-		if err != nil {
-			t.Fatalf("json.Marshal: %v", err)
-		}
 		authErr := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
-			ID:     "ops-9",
-			Config: raw,
+			ID:    "ops-9",
+			Tools: []string{"Read"},
 		}, "read_file")
 		if authErr != nil {
 			t.Fatalf("expected aliased configured tool to be allowed: %v", authErr)
@@ -253,15 +232,9 @@ func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
 			},
 		},
 	}))
-	raw, err := json.Marshal(map[string]any{
-		"emit_events": []string{"coord.done"},
-	})
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	err = NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
-		ID:     "coordinator-1",
-		Config: raw,
+	err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		ID:         "coordinator-1",
+		EmitEvents: []string{"coord.done"},
 	}, "emit_coord_done")
 	if err != nil {
 		t.Fatalf("expected configured emit tool to be allowed: %v", err)
@@ -280,15 +253,9 @@ func TestToolAuthorizer_ScopedEmitEventsAllowLocalEmitTool(t *testing.T) {
 			},
 		},
 	}))
-	raw, err := json.Marshal(map[string]any{
-		"emit_events": []string{"discovery/category.assessed"},
-	})
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	err = NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
-		ID:     "market-research-agent",
-		Config: raw,
+	err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		ID:         "market-research-agent",
+		EmitEvents: []string{"discovery/category.assessed"},
 	}, "emit_category_assessed")
 	if err != nil {
 		t.Fatalf("expected scoped configured emit tool to be allowed: %v", err)
@@ -307,15 +274,9 @@ func TestToolAuthorizer_AllowsMCPPrefixedEmitToolAlias(t *testing.T) {
 			},
 		},
 	}))
-	raw, err := json.Marshal(map[string]any{
-		"emit_events": []string{"market_research.scan_complete"},
-	})
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	err = NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
-		ID:     "market-research-agent",
-		Config: raw,
+	err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		ID:         "market-research-agent",
+		EmitEvents: []string{"market_research.scan_complete"},
 	}, "mcp__runtime-tools__emit_market_research_scan_complete")
 	if err != nil {
 		t.Fatalf("expected MCP-prefixed emit tool alias to be allowed: %v", err)

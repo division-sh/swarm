@@ -61,7 +61,7 @@ func TestExecutorTelemetry_LogsSuccess(t *testing.T) {
 		ID:       "agent-1",
 		Role:     "analysis",
 		EntityID: "entity-1",
-		Config:   mustToolConfigJSON(t, map[string]any{"tools": []string{"check_domain"}}),
+		Tools:    []string{"check_domain"},
 	})
 
 	if _, err := exec.Execute(ctx, "check_domain", map[string]any{"domain": "example.com"}); err != nil {
@@ -155,7 +155,7 @@ func TestExecutorTelemetry_LogsExecutionFailure(t *testing.T) {
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
 		ID:       "agent-3",
 		EntityID: "entity-3",
-		Config:   mustToolConfigJSON(t, map[string]any{"tools": []string{"check_domain"}}),
+		Tools:    []string{"check_domain"},
 	})
 
 	if _, err := exec.Execute(ctx, "check_domain", map[string]any{"domain": "example.com"}); err == nil {
