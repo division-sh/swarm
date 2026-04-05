@@ -2086,6 +2086,179 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 	}
 }
 
+func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	entityID := uuid.NewString()
+	rec := runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "agent-canonical-1",
+			Type:             "review-worker",
+			Role:             "reviewer",
+			Mode:             "review",
+			ModelTier:        "sonnet",
+			LLMBackend:       "cli_test",
+			ConversationMode: "session_per_entity",
+			SessionScope:     "entity",
+			MaxTurnsPerTask:  7,
+			Subscriptions:    []string{"review.ready"},
+			EmitEvents:       []string{"review.completed"},
+			Tools:            []string{"agent_message"},
+			Permissions:      []string{"agent_message"},
+			NativeTools:      runtimeactors.NativeToolConfig{FileIO: true},
+			WorkspaceClass:   "shared_flow",
+			ManagerFallback:  "control-plane",
+			FlowPath:         "review/inst-1",
+			EntityID:         entityID,
+			ParentAgent:      "manager-1",
+			Config: json.RawMessage(`{
+				"system_prompt":"x",
+				"type":"wrong-type",
+				"conversation_mode":"task",
+				"subscriptions":["wrong.subscription"],
+				"manager_fallback":"wrong-manager",
+				"workspace_class":"wrong-workspace"
+			}`),
+		},
+		Status: "active",
+	}
+	if err := pg.UpsertAgent(ctx, rec); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+
+	agents, err := pg.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agent count = %d, want 1", len(agents))
+	}
+	got := agents[0].Config
+	if got.Type != "review-worker" {
+		t.Fatalf("type = %q, want review-worker", got.Type)
+	}
+	if got.ModelTier != "sonnet" {
+		t.Fatalf("model_tier = %q, want sonnet", got.ModelTier)
+	}
+	if got.LLMBackend != "cli_test" {
+		t.Fatalf("llm_backend = %q, want cli_test", got.LLMBackend)
+	}
+	if got.ConversationMode != "session_per_entity" {
+		t.Fatalf("conversation_mode = %q, want session_per_entity", got.ConversationMode)
+	}
+	if got.MaxTurnsPerTask != 7 {
+		t.Fatalf("max_turns_per_task = %d, want 7", got.MaxTurnsPerTask)
+	}
+	if len(got.Subscriptions) != 1 || got.Subscriptions[0] != "review.ready" {
+		t.Fatalf("subscriptions = %#v, want [review.ready]", got.Subscriptions)
+	}
+	if len(got.EmitEvents) != 1 || got.EmitEvents[0] != "review.completed" {
+		t.Fatalf("emit_events = %#v, want [review.completed]", got.EmitEvents)
+	}
+	if got.ManagerFallback != "control-plane" {
+		t.Fatalf("manager_fallback = %q, want control-plane", got.ManagerFallback)
+	}
+	if got.WorkspaceClass != "shared_flow" {
+		t.Fatalf("workspace_class = %q, want shared_flow", got.WorkspaceClass)
+	}
+	if got.CanonicalFlowPath() != "review/inst-1" {
+		t.Fatalf("flow_path = %q, want review/inst-1", got.FlowPath)
+	}
+	if got.ParentAgent != "manager-1" {
+		t.Fatalf("parent_agent = %q, want manager-1", got.ParentAgent)
+	}
+	var opaque map[string]any
+	if err := json.Unmarshal(got.Config, &opaque); err != nil {
+		t.Fatalf("unmarshal opaque config: %v", err)
+	}
+	if len(opaque) != 1 || opaque["system_prompt"] != "x" {
+		t.Fatalf("opaque config = %#v, want only system_prompt", opaque)
+	}
+
+	var (
+		configRaw            []byte
+		runtimeDescriptorRaw []byte
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT config, runtime_descriptor
+		FROM agents
+		WHERE agent_id = $1
+	`, rec.Config.ID).Scan(&configRaw, &runtimeDescriptorRaw); err != nil {
+		t.Fatalf("query persisted agent row: %v", err)
+	}
+	if err := validateOpaqueAgentConfig(configRaw); err != nil {
+		t.Fatalf("validateOpaqueAgentConfig: %v", err)
+	}
+	desc, err := decodePersistedAgentRuntimeDescriptor(runtimeDescriptorRaw)
+	if err != nil {
+		t.Fatalf("decodePersistedAgentRuntimeDescriptor: %v", err)
+	}
+	if desc.Type != "review-worker" {
+		t.Fatalf("runtime_descriptor.type = %q, want review-worker", desc.Type)
+	}
+	if desc.ManagerFallback != "control-plane" {
+		t.Fatalf("runtime_descriptor.manager_fallback = %q, want control-plane", desc.ManagerFallback)
+	}
+}
+
+func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeKeys(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if err := pg.ensureSchemaCompatibilityColumns(ctx); err != nil {
+		t.Fatalf("ensureSchemaCompatibilityColumns: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (
+			agent_id, flow_instance, role, model_tier, llm_backend, conversation_mode,
+			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
+			runtime_descriptor, status
+		) VALUES (
+			$1, '', 'reviewer', 'sonnet', 'api', 'task',
+			NULL, NULL, $2::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+			$3::jsonb, 'active'
+		)
+	`, "agent-invalid-config", `{"system_prompt":"x","subscriptions":["wrong"]}`, `{"type":"review-worker","mode":"review"}`); err != nil {
+		t.Fatalf("seed agent row: %v", err)
+	}
+
+	_, err := pg.loadAgentsSpec(ctx)
+	if err == nil || !strings.Contains(err.Error(), "config contains runtime-owned keys: subscriptions") {
+		t.Fatalf("loadAgentsSpec error = %v, want runtime-owned config key failure", err)
+	}
+}
+
+func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelTierMissing(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if err := pg.ensureSchemaCompatibilityColumns(ctx); err != nil {
+		t.Fatalf("ensureSchemaCompatibilityColumns: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (
+			agent_id, flow_instance, role, model_tier, llm_backend, conversation_mode,
+			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
+			runtime_descriptor, status
+		) VALUES (
+			$1, '', 'reviewer', '', 'api', 'task',
+			NULL, NULL, '{}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+			$2::jsonb, 'active'
+		)
+	`, "agent-missing-type", `{"mode":"review"}`); err != nil {
+		t.Fatalf("seed agent row: %v", err)
+	}
+
+	_, err := pg.LoadAgents(ctx)
+	if err == nil || !strings.Contains(err.Error(), "missing model_tier") {
+		t.Fatalf("LoadAgents error = %v, want missing model_tier failure", err)
+	}
+}
+
 func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

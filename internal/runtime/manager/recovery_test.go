@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,66 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	}
 	if len(bus.restored) != 1 || bus.restored[0] != "review/inst-1" {
 		t.Fatalf("restored routes = %#v, want [review/inst-1]", bus.restored)
+	}
+}
+
+func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
+	bus := &recoveryTestBus{}
+	store := &recoveryTestStore{
+		agents: []PersistedAgent{{
+			Config: models.AgentConfig{
+				ID:               "reviewer-inst-1",
+				Type:             "review-worker",
+				Role:             "reviewer",
+				Mode:             "review",
+				ModelTier:        "sonnet",
+				LLMBackend:       "api",
+				ConversationMode: "session_per_entity",
+				Subscriptions:    []string{"review.ready"},
+				EmitEvents:       []string{"review.completed"},
+				WorkspaceClass:   "shared_flow",
+				ManagerFallback:  "control-plane",
+				FlowPath:         "review/inst-1",
+				EntityID:         "ent-1",
+				ParentAgent:      "control-plane",
+				Config: mustRecoveryJSON(t, map[string]any{
+					"system_prompt":      "x",
+					"subscriptions":      []string{"wrong.subscription"},
+					"manager_fallback":   "wrong-manager",
+					"conversation_mode":  "task",
+					"workspace_class":    "wrong-workspace",
+					"max_turns_per_task": 99,
+				}),
+			},
+			StartedAt: time.Now().UTC(),
+		}},
+	}
+	var hydrated models.AgentConfig
+	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+		hydrated = cfg
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, store)
+
+	if err := am.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if hydrated.ID != "reviewer-inst-1" {
+		t.Fatalf("hydrated id = %q, want reviewer-inst-1", hydrated.ID)
+	}
+	if hydrated.ConversationMode != "session_per_entity" {
+		t.Fatalf("conversation_mode = %q, want session_per_entity", hydrated.ConversationMode)
+	}
+	if len(hydrated.Subscriptions) != 1 || hydrated.Subscriptions[0] != "review.ready" {
+		t.Fatalf("subscriptions = %#v, want [review.ready]", hydrated.Subscriptions)
+	}
+	if hydrated.ManagerFallback != "control-plane" {
+		t.Fatalf("manager_fallback = %q, want control-plane", hydrated.ManagerFallback)
+	}
+	if hydrated.WorkspaceClass != "shared_flow" {
+		t.Fatalf("workspace_class = %q, want shared_flow", hydrated.WorkspaceClass)
+	}
+	if strings.TrimSpace(hydrated.FlowPath) != "review/inst-1" {
+		t.Fatalf("flow_path = %q, want review/inst-1", hydrated.FlowPath)
 	}
 }
 

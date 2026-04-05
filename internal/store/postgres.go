@@ -166,7 +166,7 @@ func (s *PostgresStore) migrateLegacyAgentRuntimeDescriptors(ctx context.Context
 		return nil
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT agent_id, COALESCE(config, '{}'::jsonb), COALESCE(runtime_descriptor, '{}'::jsonb)
+		SELECT agent_id, COALESCE(model_tier, ''), COALESCE(config, '{}'::jsonb), COALESCE(runtime_descriptor, '{}'::jsonb)
 		FROM agents
 	`)
 	if err != nil {
@@ -183,16 +183,17 @@ func (s *PostgresStore) migrateLegacyAgentRuntimeDescriptors(ctx context.Context
 	for rows.Next() {
 		var (
 			agentID           string
+			modelTier         string
 			configRaw         []byte
 			runtimeDescriptor []byte
 		)
-		if err := rows.Scan(&agentID, &configRaw, &runtimeDescriptor); err != nil {
+		if err := rows.Scan(&agentID, &modelTier, &configRaw, &runtimeDescriptor); err != nil {
 			return fmt.Errorf("scan agent runtime descriptor migration row: %w", err)
 		}
-		desc := decodePersistedAgentRuntimeDescriptor(runtimeDescriptor)
+		desc := decodePersistedAgentRuntimeDescriptorLoose(runtimeDescriptor)
 		legacy := decodeLegacyAgentRuntimeConfig(configRaw)
 		if desc.Type == "" {
-			desc.Type = legacy.Type
+			desc.Type = coalesce(legacy.Type, strings.TrimSpace(modelTier))
 		}
 		if desc.Mode == "" {
 			desc.Mode = legacy.Mode
