@@ -9,6 +9,7 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/timeridentity"
 	"swarm/internal/testutil"
 )
 
@@ -102,6 +103,11 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 	}
 	if got.TaskID != "check_timer" {
 		t.Fatalf("scheduled task_id = %q, want check_timer", got.TaskID)
+	}
+	payload := parsePayloadMap(got.Payload)
+	handle, ok := timeridentity.ParseTimerHandle(payload)
+	if !ok || handle.Kind != timeridentity.TimerHandleWorkflowTimer || handle.TimerID != "check_timer" {
+		t.Fatalf("scheduled payload handle = %#v", payload)
 	}
 }
 
@@ -297,7 +303,8 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 	if got.AgentID != runtimeWorkflowID {
 		t.Fatalf("scheduled agent_id = %q, want %q", got.AgentID, runtimeWorkflowID)
 	}
-	if got.TaskID != accumulationTimeoutTaskID("test-node", "item.arrived") {
+	wantHandle := timeridentity.AccumulationTimeoutHandle(timeridentity.NewAccumulatorBucketRef("test-node", "item.arrived"))
+	if got.TaskID != wantHandle.TaskID() {
 		t.Fatalf("scheduled task_id = %q", got.TaskID)
 	}
 	if got.EntityID != "ent-001" {
@@ -307,7 +314,11 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 		t.Fatalf("scheduled at = %s, want about %s", got.At.Format(time.RFC3339Nano), start.Add(5*time.Second).Format(time.RFC3339Nano))
 	}
 	payload := parsePayloadMap(got.Payload)
-	if asString(payload["node_id"]) != "test-node" || asString(payload["bucket_event_type"]) != "item.arrived" {
+	handle, ok := timeridentity.ParseTimerHandle(payload)
+	if !ok || handle.Kind != timeridentity.TimerHandleAccumulationTimeout {
+		t.Fatalf("scheduled payload = %#v", payload)
+	}
+	if handle.Bucket.NodeID != "test-node" || handle.Bucket.EventType != "item.arrived" {
 		t.Fatalf("scheduled payload = %#v", payload)
 	}
 }
@@ -362,9 +373,14 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 		Type:        events.EventType("accumulate.timeout"),
 		SourceAgent: runtimeWorkflowID,
 		Payload: mustJSON(map[string]any{
-			"entity_id":         "ent-001",
-			"node_id":           "test-node",
-			"bucket_event_type": "item.arrived",
+			"entity_id": "ent-001",
+			"timer_handle": map[string]any{
+				"kind": "accumulation_timeout",
+				"bucket": map[string]any{
+					"node_id":    "test-node",
+					"event_type": "item.arrived",
+				},
+			},
 		}),
 		CreatedAt: time.Now().UTC(),
 	}.WithEntityID("ent-001")
@@ -374,7 +390,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 	if len(store.cancels) != 1 {
 		t.Fatalf("cancelled schedules = %d, want 1", len(store.cancels))
 	}
-	if got := store.cancels[0].TaskID; got != accumulationTimeoutTaskID("test-node", "item.arrived") {
+	if got := store.cancels[0].TaskID; got != timeridentity.AccumulationTimeoutHandle(timeridentity.NewAccumulatorBucketRef("test-node", "item.arrived")).TaskID() {
 		t.Fatalf("cancelled task_id = %q", got)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/eventidentity"
+	"swarm/internal/runtime/core/timeridentity"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -552,6 +553,25 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt
 						policy = candidate
 						ok = true
 						break
+					}
+				}
+			}
+		}
+		if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
+			if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == strings.TrimSpace(node.ID) {
+				if node.Policies != nil {
+					policy, ok = node.Policies[bucket.EventType]
+					if !ok {
+						for pattern, candidate := range node.Policies {
+							if strings.TrimSpace(pattern) == bucket.EventType {
+								continue
+							}
+							if runtimecontractsHandlerPatternMatches(pattern, bucket.EventType) {
+								policy = candidate
+								ok = true
+								break
+							}
+						}
 					}
 				}
 			}

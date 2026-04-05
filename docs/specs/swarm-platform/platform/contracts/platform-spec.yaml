@@ -1326,16 +1326,28 @@ engine:
         event: Event name to fire when timer expires (e.g., timer.scan_timeout)
         delay: Duration string (e.g., 72h, 30m, 7d) or policy reference (e.g., policy.sla_timeout)
         recurring: Boolean — if true, timer re-fires at the interval until cancelled
-        start_on: State or event that starts the timer (e.g., state:assigned or event:ticket.opened)
-        cancel_on: State or event that cancels the timer (e.g., state:resolved or event:ticket.closed)
+        start_on: Trigger that starts the timer. Canonical forms are state:<name>, event:<name>, or boot.
+        cancel_on: Trigger that cancels the timer. Canonical forms are state:<name> or event:<name>. boot is invalid.
+      trigger_forms:
+        state: "state:<name> starts or cancels when the entity enters the named state"
+        event: "event:<name> starts or cancels when the named event fires for the entity"
+        boot: "start_on: boot starts a timer at platform boot. This form is only valid on start_on."
+      invalid_forms:
+      - "Unprefixed trigger values are boot errors. The platform does not infer state-vs-event intent from bare strings."
+      - "Prefixes other than state: and event: are boot errors."
     lifecycle:
-    - 1. Timer starts when the entity enters the start_on state or the start_on event fires.
+    - 1. Timer starts when the entity enters the start_on state, the start_on event fires, or start_on is boot and platform startup schedules it.
     - 2. Platform persists the timer (entity_id, timer_id, fire_at timestamp).
     - 3. When fire_at is reached, platform emits the timer event into the event loop.
     - 4. Timer event is a regular event — routed to subscribers, processed by handlers.
     - 5. If cancel_on state is reached or cancel_on event fires before fire_at, timer is cancelled.
     - 6. Recurring timers restart after firing unless cancelled.
     crash_recovery: Timers are persisted. On restart, platform checks for expired timers and fires them.
+    boot_validation:
+      start_on: start_on must match state:<name>, event:<name>, or boot. Any other form is a boot error.
+      cancel_on: cancel_on must match state:<name> or event:<name>. boot is not valid.
+      state_reference: state:<name> must reference a declared flow state. Unknown state is a boot error.
+      event_reference: event:<name> should reference an event in the flow or platform catalog. Unknown event is a boot warning.
     example: "timers:\n  - id: sla_timeout\n    event: timer.sla_breach\n    delay: \"{{sla_timeout_hours}}h\"\
       \n    start_on: state:assigned\n    cancel_on: state:resolved\n    recurring: false\n  - id: daily_report\n\
       \    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\n    start_on: boot\n    recurring: true"

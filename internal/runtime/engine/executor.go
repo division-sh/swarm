@@ -13,6 +13,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/timeridentity"
 	"swarm/internal/runtime/core/values"
 )
 
@@ -465,11 +466,15 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if spec == nil {
 		return false, nil
 	}
-	bucketEventType := frame.req.Event.Type
-	acc, ok := loadAccumulator(frame.state.State, frame.req.NodeID, bucketEventType)
-	if !ok && isAccumulationTimeoutEvent(frame.req.Event.Type) {
-		acc, bucketEventType, ok = loadNodeAccumulatorForTimeout(frame.state.State, frame.req.NodeID)
+	bucketRef := timeridentity.NewAccumulatorBucketRef(frame.req.NodeID.String(), string(frame.req.Event.Type))
+	if isAccumulationTimeoutEvent(frame.req.Event.Type) {
+		parsed, ok := accumulationTimeoutBucketRefFromPayload(frame.payload)
+		if !ok || parsed.NodeID != frame.req.NodeID.String() {
+			return false, nil
+		}
+		bucketRef = parsed
 	}
+	acc, ok := loadAccumulatorForBucket(frame.state.State, bucketRef)
 	if !ok {
 		acc = &Accumulator{}
 	}
@@ -506,7 +511,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	acc.LastEventType = strings.TrimSpace(string(frame.req.Event.Type))
 	acc.LastSource = strings.TrimSpace(frame.req.Event.SourceAgent)
 	acc.LastReceivedAt = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
-	storeAccumulator(&frame.state.State, frame.req.NodeID, bucketEventType, acc)
+	storeAccumulatorForBucket(&frame.state.State, bucketRef, acc)
 	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateBuckets)
 	frame.state.Accumulated = accumulatorExpressionValue(acc)
 	if isAccumulationTimeoutEvent(frame.req.Event.Type) && spec.OnTimeout != nil {

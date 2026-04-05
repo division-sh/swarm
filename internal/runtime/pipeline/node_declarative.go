@@ -10,6 +10,7 @@ import (
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
+	"swarm/internal/runtime/core/timeridentity"
 	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/semanticview"
 )
@@ -76,6 +77,11 @@ func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.E
 		eventType = strings.TrimSpace(string(evt.Type))
 	}
 	policy, ok := workflowNodeEventPolicy(n.NodeID(), eventType)
+	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
+		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == n.NodeID() {
+			policy, ok = workflowNodeEventPolicy(n.NodeID(), bucket.EventType)
+		}
+	}
 	if !ok {
 		return false, false
 	}
@@ -126,6 +132,11 @@ func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (b
 		eventType = strings.TrimSpace(string(evt.Type))
 	}
 	policy, ok := workflowNodeEventPolicy(n.NodeID(), eventType)
+	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
+		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == n.NodeID() {
+			policy, ok = workflowNodeEventPolicy(n.NodeID(), bucket.EventType)
+		}
+	}
 	if !ok {
 		return false, false
 	}
@@ -159,16 +170,18 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 		}
 	}
 	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) && containsString(n.contract.SubscribesTo, eventType) {
-		for _, candidate := range n.contract.EventHandlers {
-			if candidate.Accumulate == nil {
-				continue
+		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == n.NodeID() {
+			for candidateEventType, candidate := range n.contract.EventHandlers {
+				if strings.TrimSpace(candidateEventType) != bucket.EventType {
+					continue
+				}
+				if !accumulationTimeoutHandler(candidate) {
+					continue
+				}
+				handler = candidate
+				ok = true
+				break
 			}
-			if candidate.Accumulate.Completion.Mode != runtimecontracts.AccumulateModeTimeout && candidate.Accumulate.OnTimeout == nil {
-				continue
-			}
-			handler = candidate
-			ok = true
-			break
 		}
 	}
 	if !ok {

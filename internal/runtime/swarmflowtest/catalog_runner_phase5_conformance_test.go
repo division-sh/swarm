@@ -68,7 +68,7 @@ func TestCatalogRunner_TimerEventRequiresActiveNodeTimer(t *testing.T) {
 		"task-node": {
 			Timers: []catalogNodeTimerContract{{
 				ID:      "task_timer",
-				StartOn: "task.started",
+				StartOn: "event:task.started",
 				Emits:   "timer.task_timeout",
 			}},
 		},

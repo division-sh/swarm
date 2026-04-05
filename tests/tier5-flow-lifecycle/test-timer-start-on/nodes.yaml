@@ -7,7 +7,7 @@ task-node:
     - id: task_timer
       event: timer.task_timeout
       delay: 1h
-      start_on: task.started
+      start_on: event:task.started
   event_handlers:
     task.started:
       advances_to: active

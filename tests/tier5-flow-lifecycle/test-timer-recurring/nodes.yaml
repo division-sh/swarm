@@ -7,7 +7,7 @@ test-node:
     - id: tick_timer
       event: timer.tick
       delay: 1s
-      start_on: monitor.started
+      start_on: event:monitor.started
       recurring: true
   event_handlers:
     monitor.started:

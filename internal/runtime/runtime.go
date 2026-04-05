@@ -21,6 +21,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/timeridentity"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	llm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
@@ -431,8 +432,9 @@ func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
 		return payload
 	}
 	delete(decoded, "__schedule_task_id")
-	delete(decoded, "timer_id")
-	delete(decoded, "trigger_reason")
+	if handle, ok := timeridentity.ParseTimerHandle(decoded); ok && handle.Kind == timeridentity.TimerHandleWorkflowTimer {
+		delete(decoded, "timer_handle")
+	}
 	entityID := strings.TrimSpace(sc.EffectiveEntityID())
 	if _, ok := decoded["entity_id"]; !ok {
 		if entityID != "" {
@@ -649,7 +651,12 @@ func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline
 		if !timer.Recurring {
 			continue
 		}
-		if strings.TrimSpace(timer.StartOn) != "" || strings.TrimSpace(timer.CancelOn) != "" {
+		startTrigger, err := timeridentity.ParseStartTrigger(timer.StartOn)
+		if err != nil || !startTrigger.IsBoot() {
+			continue
+		}
+		cancelTrigger, err := timeridentity.ParseCancelTrigger(timer.CancelOn)
+		if err != nil || cancelTrigger.Valid() {
 			continue
 		}
 		owner := strings.TrimSpace(timer.Owner)
@@ -719,8 +726,8 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 				Mode:      "once",
 				At:        timerState.FiresAt,
 				EntityID:  entityID,
-				TaskID:    timerID,
-				Payload:   mustJSON(map[string]any{"timer_id": timerID, "trigger_reason": timerID}),
+				TaskID:    timeridentity.WorkflowTimerHandle(timerID).TaskID(),
+				Payload:   recurringWorkflowTimerPayload(timer),
 			}
 			if err := store.UpsertSchedule(ctx, sc); err != nil {
 				return err
@@ -753,11 +760,11 @@ func recurringWorkflowTimerSpec(timer runtimecontracts.WorkflowTimerContract) (s
 }
 
 func recurringWorkflowTimerPayload(timer runtimecontracts.WorkflowTimerContract) []byte {
-	timerID := strings.TrimSpace(timer.ID)
-	if timerID == "" {
+	handle := timeridentity.WorkflowTimerHandle(timer.ID)
+	if !handle.Valid() {
 		return mustJSON(map[string]any{})
 	}
-	return mustJSON(map[string]any{"trigger_reason": timerID})
+	return mustJSON(handle.PayloadMetadata())
 }
 
 func runtimeEnvBool(key string, fallback bool) bool {
