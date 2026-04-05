@@ -1267,6 +1267,43 @@ func TestManagerStore_EventReceiptBranches(t *testing.T) {
 	}
 }
 
+func TestManagerStore_GetEventReceipt_FailsClosedOnMalformedSideEffects(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	entityID := uuid.NewString()
+	seedSpecAgent(t, ctx, pg, "a1", "", "*")
+	eventID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, (events.Event{
+		ID:          eventID,
+		Type:        "system.started",
+		SourceAgent: "runtime",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now(),
+	}).WithEntityID(entityID)); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, side_effects, processed_at
+		)
+		SELECT
+			e.event_id, 'agent', 'a1', e.entity_id, e.flow_instance,
+			'dead_letter', '{"retry_count":"bad"}'::jsonb, now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+	`, eventID); err != nil {
+		t.Fatalf("insert malformed receipt: %v", err)
+	}
+
+	if _, ok, err := pg.GetEventReceipt(ctx, eventID, "a1"); err == nil || ok {
+		t.Fatalf("expected malformed side effects error, got ok=%v err=%v", ok, err)
+	}
+}
+
 func TestManagerStore_MarkEventDeliveryInProgress_RequiresIDs(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
