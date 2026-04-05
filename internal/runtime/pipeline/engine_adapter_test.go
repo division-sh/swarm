@@ -228,7 +228,7 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 	}
 }
 
-func TestProjectWorkflowSubjectGatesFallsBackToFlowPathStorageRef(t *testing.T) {
+func TestProjectWorkflowSubjectGatesRequiresCanonicalEntityID(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := NewWorkflowInstanceStore(db)
 	subjectID := "11111111-1111-1111-1111-111111111111"
@@ -277,8 +277,7 @@ func TestProjectWorkflowSubjectGatesFallsBackToFlowPathStorageRef(t *testing.T) 
 			},
 		},
 	}
-	ctx := withPipelineFlowScope(context.Background(), "child")
-	if err := pc.projectWorkflowSubjectGates(ctx, logicalChildID); err != nil {
+	if err := pc.projectWorkflowSubjectGates(context.Background(), logicalChildID); err != nil {
 		t.Fatalf("projectWorkflowSubjectGates: %v", err)
 	}
 
@@ -290,8 +289,8 @@ func TestProjectWorkflowSubjectGatesFallsBackToFlowPathStorageRef(t *testing.T) 
 		t.Fatal("subject entity missing after projection")
 	}
 	gates := workflowStateGatesAsBools(subject.Metadata)
-	if !gates["child/g_validated"] {
-		t.Fatalf("subject gates missing projected child gate via flow-path fallback: %#v", gates)
+	if gates["child/g_validated"] {
+		t.Fatalf("subject gates unexpectedly projected from logical instance id lookup: %#v", gates)
 	}
 }
 

@@ -293,47 +293,47 @@ func resolveHandlerEntityIDForFlow(
 	if handler.CreateEntity {
 		sourceEntityID := strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
 		instanceID := uuid.NewString()
-		identity := deriveFlowInstanceIdentity(source, flowID, instanceID)
-		subjectID := ""
+		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
+		instance.ParentEntityID = sourceEntityID
 		if state != nil && state.Metadata != nil {
-			subjectID = strings.TrimSpace(asString(state.Metadata["subject_id"]))
+			instance.SubjectID = strings.TrimSpace(asString(state.Metadata["subject_id"]))
 		}
-		if subjectID == "" {
-			subjectID = sourceEntityID
+		if instance.SubjectID == "" {
+			instance.SubjectID = sourceEntityID
 		}
-		if subjectID == "" {
-			subjectID = identity.EntityID
+		if instance.SubjectID == "" {
+			instance.SubjectID = instance.EntityID
 		}
-		entityID = identity.EntityID
+		entityID = instance.EntityID
 		if state != nil {
 			state.EntityID = entityID
 			state.Stage = ""
 			state.Status = ""
-			state.Metadata = map[string]any{"subject_id": subjectID}
-			if identity.InstancePath != "" {
-				state.Metadata["flow_path"] = identity.InstancePath
-				state.Metadata["storage_ref"] = identity.InstancePath
+			state.Metadata = map[string]any{"subject_id": instance.SubjectID}
+			if instance.InstancePath != "" {
+				state.Metadata["flow_path"] = instance.InstancePath
+				state.Metadata["storage_ref"] = instance.InstancePath
 			}
-			state.Metadata["instance_id"] = identity.InstanceID
-			if sourceEntityID != "" {
-				state.Metadata["parent_entity_id"] = sourceEntityID
+			state.Metadata["instance_id"] = instance.InstanceID
+			if instance.ParentEntityID != "" {
+				state.Metadata["parent_entity_id"] = instance.ParentEntityID
 			}
 		}
 		return entityID, evt
 	}
 	entityID, evt = ensureHandlerEntityID(source, handler, entityID, evt)
 	if flowID != "" && state != nil {
+		inboundInstance := workflowStateIdentity(source, flowID, *state)
 		currentScopeKey := strings.TrimSpace(workflowScopeKey(source, flowID))
-		inboundInstancePath := strings.Trim(strings.TrimSpace(asString(state.Metadata["flow_path"])), "/")
-		if isDescendantFlowInstance(currentScopeKey, inboundInstancePath) {
-			if parentEntityID := strings.TrimSpace(asString(state.Metadata["parent_entity_id"])); parentEntityID != "" {
+		if isDescendantFlowInstance(currentScopeKey, inboundInstance.InstancePath) {
+			if parentEntityID := strings.TrimSpace(inboundInstance.ParentEntityID); parentEntityID != "" {
 				entityID = parentEntityID
 				state.EntityID = parentEntityID
 			}
 		}
 	}
 	if strings.TrimSpace(flowID) == "" && state != nil {
-		subjectID := strings.TrimSpace(asString(state.Metadata["subject_id"]))
+		subjectID := strings.TrimSpace(workflowStateIdentity(source, "", *state).SubjectID)
 		if subjectID != "" && subjectID != entityID {
 			entityID = subjectID
 			state.EntityID = subjectID

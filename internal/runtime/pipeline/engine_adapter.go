@@ -672,7 +672,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		instance.Metadata = cloneStringAnyMap(mutation.Metadata)
 	}
 	if instance.Metadata != nil && strings.TrimSpace(instance.SubjectID) == "" {
-		instance.SubjectID = strings.TrimSpace(asString(instance.Metadata["subject_id"]))
+		instance.SubjectID = workflowInstanceIdentity(source, *instance).SubjectID
 	}
 	if mutation.StateBuckets != nil {
 		instance.StateBuckets = cloneStringAnyMap(mutation.StateBuckets)
@@ -724,16 +724,13 @@ func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.C
 			return nil
 		}
 	}
-	flowPath, instanceID, ok := workflowInstanceMaterializedIdentity(instance)
-	if !ok {
+	instanceIdentity := workflowInstanceIdentity(source, instance)
+	if !instanceIdentity.HasStoredPath {
 		return nil
 	}
 	return pc.instanceDeactivator(ctx, FlowInstanceDeactivationRequest{
 		ContractBundle: source,
-		TemplateID:     templateID,
-		InstanceID:     instanceID,
-		EntityID:       entityID,
-		FlowPath:       flowPath,
+		Instance:       instanceIdentity,
 		FinalState:     nextState,
 	})
 }
