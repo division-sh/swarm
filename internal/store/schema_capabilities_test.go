@@ -36,8 +36,9 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 		"reason_code", "last_error", "active_session_id", "started_at", "delivered_at", "created_at",
 	)
 	addColumns("event_receipts",
-		"event_id", "subscriber_type", "subscriber_id", "entity_id", "flow_instance",
-		"outcome", "reason_code", "side_effects", "processed_at",
+		"receipt_id", "event_id", "subscriber_type", "subscriber_id", "entity_id", "flow_instance",
+		"outcome", "reason_code", "state_before", "state_after", "side_effects",
+		"duration_ms", "idempotency_key", "processed_at",
 	)
 	addColumns("agent_sessions",
 		"session_id", "run_id", "agent_id", "entity_id", "flow_instance", "scope_key", "scope",
@@ -215,6 +216,106 @@ func TestPostgresStore_BindSchemaCapabilities_FailsClosedOnPartialCanonicalShape
 	}
 	if caps.Conversations.TurnBlocks {
 		t.Fatalf("expected partial canonical turns table to report missing turn_blocks: %+v", caps.Conversations)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestPostgresStore_CanonicalCapabilityReaders(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"table_name", "column_name"}).
+		AddRow("events", "event_id").
+		AddRow("events", "run_id").
+		AddRow("events", "event_name").
+		AddRow("events", "entity_id").
+		AddRow("events", "flow_instance").
+		AddRow("events", "scope").
+		AddRow("events", "payload").
+		AddRow("events", "chain_depth").
+		AddRow("events", "produced_by").
+		AddRow("events", "produced_by_type").
+		AddRow("events", "source_event_id").
+		AddRow("events", "created_at").
+		AddRow("event_receipts", "receipt_id").
+		AddRow("event_receipts", "event_id").
+		AddRow("event_receipts", "subscriber_type").
+		AddRow("event_receipts", "subscriber_id").
+		AddRow("event_receipts", "entity_id").
+		AddRow("event_receipts", "flow_instance").
+		AddRow("event_receipts", "outcome").
+		AddRow("event_receipts", "reason_code").
+		AddRow("event_receipts", "state_before").
+		AddRow("event_receipts", "state_after").
+		AddRow("event_receipts", "side_effects").
+		AddRow("event_receipts", "duration_ms").
+		AddRow("event_receipts", "idempotency_key").
+		AddRow("event_receipts", "processed_at")
+	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(rows)
+
+	pg := &PostgresStore{DB: db}
+	logEnabled, logRunID, err := pg.CanonicalRuntimeLogCapability(context.Background())
+	if err != nil {
+		t.Fatalf("CanonicalRuntimeLogCapability: %v", err)
+	}
+	if !logEnabled || !logRunID {
+		t.Fatalf("runtime log capability = enabled:%v run_id:%v, want true/true", logEnabled, logRunID)
+	}
+	receiptsEnabled, err := pg.CanonicalEventReceiptsCapability(context.Background())
+	if err != nil {
+		t.Fatalf("CanonicalEventReceiptsCapability: %v", err)
+	}
+	if !receiptsEnabled {
+		t.Fatal("CanonicalEventReceiptsCapability = false, want true")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestPostgresStore_CanonicalEventReceiptsCapability_FailsClosedWithoutCanonicalEventsLog(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"table_name", "column_name"}).
+		AddRow("events", "id").
+		AddRow("events", "type").
+		AddRow("events", "source_agent").
+		AddRow("events", "task_id").
+		AddRow("events", "entity_id").
+		AddRow("events", "payload").
+		AddRow("events", "created_at").
+		AddRow("event_receipts", "receipt_id").
+		AddRow("event_receipts", "event_id").
+		AddRow("event_receipts", "subscriber_type").
+		AddRow("event_receipts", "subscriber_id").
+		AddRow("event_receipts", "entity_id").
+		AddRow("event_receipts", "flow_instance").
+		AddRow("event_receipts", "outcome").
+		AddRow("event_receipts", "reason_code").
+		AddRow("event_receipts", "state_before").
+		AddRow("event_receipts", "state_after").
+		AddRow("event_receipts", "side_effects").
+		AddRow("event_receipts", "duration_ms").
+		AddRow("event_receipts", "idempotency_key").
+		AddRow("event_receipts", "processed_at")
+	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(rows)
+
+	pg := &PostgresStore{DB: db}
+	receiptsEnabled, err := pg.CanonicalEventReceiptsCapability(context.Background())
+	if err != nil {
+		t.Fatalf("CanonicalEventReceiptsCapability: %v", err)
+	}
+	if receiptsEnabled {
+		t.Fatal("CanonicalEventReceiptsCapability = true, want false when events log is not canonical")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)

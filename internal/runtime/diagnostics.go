@@ -47,7 +47,12 @@ func (e *RuntimeLogEntry) NormalizeEntityID() {
 }
 
 type RuntimeLogger struct {
-	db *sql.DB
+	db           *sql.DB
+	capabilities runtimeLogCapabilityResolver
+}
+
+type runtimeLogCapabilityResolver interface {
+	CanonicalRuntimeLogCapability(context.Context) (bool, bool, error)
 }
 
 type InstanceDigestRow struct {
@@ -69,8 +74,8 @@ type deferredPipelineTransition struct {
 
 type pipelineTransitionCollectorKey struct{}
 
-func NewRuntimeLogger(db *sql.DB) *RuntimeLogger {
-	return &RuntimeLogger{db: db}
+func NewRuntimeLogger(db *sql.DB, capabilities runtimeLogCapabilityResolver) *RuntimeLogger {
+	return &RuntimeLogger{db: db, capabilities: capabilities}
 }
 
 func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
@@ -111,9 +116,16 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 	if l.db == nil {
 		return nil
 	}
+	if l.capabilities == nil {
+		return nil
+	}
+	enabled, hasRunID, err := l.capabilities.CanonicalRuntimeLogCapability(withoutSQLTxContext(ctx))
+	if err != nil || !enabled {
+		return nil
+	}
 
 	detail := marshalJSONOrEmpty(e.Detail)
-	if err := logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, level, component, action, e, detail); err != nil {
+	if err := logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, hasRunID, level, component, action, e, detail); err != nil {
 		return err
 	}
 	return nil
@@ -367,11 +379,10 @@ func isMissingDiagnosticsTable(err error) bool {
 		strings.Contains(msg, "duration_ms")
 }
 
-func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, action string, e RuntimeLogEntry, detail []byte) error {
+func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, component, action string, e RuntimeLogEntry, detail []byte) error {
 	if db == nil {
 		return nil
 	}
-	hasRunID := runtimeColumnExists(ctx, db, "events", "run_id")
 	detailMap := map[string]any{}
 	_ = json.Unmarshal(detail, &detailMap)
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
@@ -475,23 +486,6 @@ func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detai
 		payload["stack_trace"] = v
 	}
 	return payload
-}
-
-func runtimeColumnExists(ctx context.Context, db *sql.DB, tableName, columnName string) bool {
-	if db == nil {
-		return false
-	}
-	var exists bool
-	if err := db.QueryRowContext(ctx, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM information_schema.columns
-			WHERE table_name = $1 AND column_name = $2
-		)
-	`, strings.TrimSpace(tableName), strings.TrimSpace(columnName)).Scan(&exists); err != nil {
-		return false
-	}
-	return exists
 }
 
 func recordPipelineTransitionSpec(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason, errText string) error {

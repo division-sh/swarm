@@ -12,8 +12,18 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 )
 
+type runtimeLogCapabilityStub struct {
+	enabled  bool
+	hasRunID bool
+	err      error
+}
+
+func (s runtimeLogCapabilityStub) CanonicalRuntimeLogCapability(context.Context) (bool, bool, error) {
+	return s.enabled, s.hasRunID, s.err
+}
+
 func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
-	logger := NewRuntimeLogger(nil)
+	logger := NewRuntimeLogger(nil, nil)
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
 
@@ -73,16 +83,13 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	}
 }
 
-func TestRuntimeLogger_Log_PersistsRuntimeLogPayload(t *testing.T) {
+func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
 
-	mock.ExpectQuery(`SELECT EXISTS\(`).
-		WithArgs("events", "run_id").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectExec(`INSERT INTO events`).
 		WithArgs("", runtimeLogPayloadArg{
 			level:      "warn",
@@ -104,7 +111,7 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayload(t *testing.T) {
 		}, "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	logger := NewRuntimeLogger(db)
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
 	if err := logger.Log(context.Background(), RuntimeLogEntry{
 		Level:      "warn",
 		Message:    "Tool execution was denied for save_entity_field",
@@ -138,14 +145,11 @@ func TestRuntimeLogger_Log_ReturnsPersistenceFailure(t *testing.T) {
 	defer db.Close()
 
 	writeErr := errors.New("insert failed")
-	mock.ExpectQuery(`SELECT EXISTS\(`).
-		WithArgs("events", "run_id").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectExec(`INSERT INTO events`).
 		WithArgs("", sqlmock.AnyArg(), "").
 		WillReturnError(writeErr)
 
-	logger := NewRuntimeLogger(db)
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
 	err = logger.Log(context.Background(), RuntimeLogEntry{
 		Level:     "error",
 		Message:   "Persisting the pipeline receipt failed",
@@ -157,6 +161,26 @@ func TestRuntimeLogger_Log_ReturnsPersistenceFailure(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet() error = %v", err)
+	}
+}
+
+func TestRuntimeLogger_Log_FailsClosedWithoutCanonicalCapability(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{})
+	if err := logger.Log(context.Background(), RuntimeLogEntry{
+		Level:   "info",
+		Message: "runtime log",
+	}); err != nil {
+		t.Fatalf("logger.Log() error = %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
 	}
 }
 

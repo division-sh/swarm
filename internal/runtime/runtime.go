@@ -45,6 +45,14 @@ type Stores struct {
 	TurnStore         llm.TurnPersistence
 }
 
+type runtimeLogSchemaCapabilityProvider interface {
+	CanonicalRuntimeLogCapability(context.Context) (bool, bool, error)
+}
+
+type eventReceiptSchemaCapabilityProvider interface {
+	CanonicalEventReceiptsCapability(context.Context) (bool, error)
+}
+
 type RuntimeOptions struct {
 	SelfCheck          bool
 	WorkspaceLifecycle workspace.Lifecycle
@@ -236,6 +244,8 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		EmitRegistry:   emitRegistry,
 		PromptResolver: promptResolver,
 	}
+	logCaps := runtimeLogSchemaCapabilities(stores)
+	receiptCaps := canonicalEventReceiptCapabilities(stores)
 	if opts.Credentials != nil {
 		rt.Credentials = opts.Credentials
 	} else {
@@ -243,7 +253,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	}
 
 	if stores.SQLDB != nil {
-		rt.Logger = NewRuntimeLogger(stores.SQLDB)
+		rt.Logger = NewRuntimeLogger(stores.SQLDB, logCaps)
 	}
 	payloadValidator := newRuntimePayloadValidator(runtimeEnvBool("SWARM_STRICT_PAYLOAD_VALIDATION", false), rt.Logger, emitRegistry.EventSchemaSnapshot())
 	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, func() []runtimebus.EventInterceptor {
@@ -307,8 +317,9 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 				}
 				return managerRef.DeactivateFlowInstanceModel(ctx, req)
 			},
-			TimerScheduler:     rt.Scheduler,
-			TimerScheduleStore: stores.ScheduleStore,
+			TimerScheduler:          rt.Scheduler,
+			TimerScheduleStore:      stores.ScheduleStore,
+			EventReceiptsCapability: receiptCaps,
 		})
 		if rt.Pipeline != nil {
 			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
@@ -443,6 +454,38 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	}
 
 	return rt, nil
+}
+
+func runtimeLogSchemaCapabilities(stores Stores) runtimeLogCapabilityResolver {
+	candidates := []any{
+		stores.EventStore,
+		stores.ManagerStore,
+		stores.ScheduleStore,
+		stores.MailboxStore,
+		stores.InboundStore,
+	}
+	for _, candidate := range candidates {
+		if provider, ok := candidate.(runtimeLogSchemaCapabilityProvider); ok && provider != nil {
+			return provider
+		}
+	}
+	return nil
+}
+
+func canonicalEventReceiptCapabilities(stores Stores) func(context.Context) (bool, error) {
+	candidates := []any{
+		stores.EventStore,
+		stores.ManagerStore,
+		stores.ScheduleStore,
+		stores.MailboxStore,
+		stores.InboundStore,
+	}
+	for _, candidate := range candidates {
+		if provider, ok := candidate.(eventReceiptSchemaCapabilityProvider); ok && provider != nil {
+			return provider.CanonicalEventReceiptsCapability
+		}
+	}
+	return nil
 }
 
 func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
