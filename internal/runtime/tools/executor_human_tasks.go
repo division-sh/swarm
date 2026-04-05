@@ -104,7 +104,7 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 	if db == nil {
 		return nil, errors.New("sql db is not configured")
 	}
-	if !runtimeauthority.Active().CanDecideHumanTasks(actor.Role) {
+	if !runtimeauthority.ProviderOrNoop(e.authority).CanDecideHumanTasks(actor.Role) {
 		return nil, fmt.Errorf("role %s is not authorized to decide human tasks", actor.Role)
 	}
 

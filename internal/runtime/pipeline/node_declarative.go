@@ -37,6 +37,7 @@ type declarativeWorkflowNode struct {
 type DeclarativeNode struct {
 	nodeID   string
 	contract SystemNodeContract
+	policies map[string]WorkflowEventPolicy
 	engine   HandlerExecutionEngine
 	hooks    *ProductHookRegistry
 }
@@ -48,10 +49,20 @@ type ProductHookRegistry struct {
 	actions map[string]ActionHandler
 }
 
-func NewNode(contract SystemNodeContract, engine HandlerExecutionEngine, hooks *ProductHookRegistry) NodeExecutor {
+func NewNode(contract SystemNodeContract, source semanticview.Source, engine HandlerExecutionEngine, hooks *ProductHookRegistry) NodeExecutor {
+	nodeID := strings.TrimSpace(contract.ID)
+	subscriptions := make([]events.EventType, 0, len(contract.SubscribesTo))
+	for _, evt := range contract.SubscribesTo {
+		evt = strings.TrimSpace(evt)
+		if evt == "" {
+			continue
+		}
+		subscriptions = append(subscriptions, events.EventType(evt))
+	}
 	return &DeclarativeNode{
-		nodeID:   strings.TrimSpace(contract.ID),
+		nodeID:   nodeID,
 		contract: contract,
+		policies: buildWorkflowNodePolicies(source, nodeID, subscriptions),
 		engine:   engine,
 		hooks:    hooks,
 	}
@@ -65,7 +76,10 @@ func (n *declarativeWorkflowNode) NodeID() string {
 }
 
 func (n *declarativeWorkflowNode) Subscriptions() []events.EventType {
-	return workflowNodeSubscriptions(n.NodeID())
+	if n == nil || n.coordinator == nil {
+		return nil
+	}
+	return workflowNodeSubscriptions(n.coordinator.WorkflowNodes(), n.NodeID())
 }
 
 func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.Event) (bool, bool) {
@@ -76,10 +90,10 @@ func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.E
 	if eventType == "" {
 		eventType = strings.TrimSpace(string(evt.Type))
 	}
-	policy, ok := workflowNodeEventPolicy(n.NodeID(), eventType)
+	policy, ok := workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), eventType)
 	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
 		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == n.NodeID() {
-			policy, ok = workflowNodeEventPolicy(n.NodeID(), bucket.EventType)
+			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), bucket.EventType)
 		}
 	}
 	if !ok {
@@ -131,10 +145,10 @@ func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (b
 	if eventType == "" {
 		eventType = strings.TrimSpace(string(evt.Type))
 	}
-	policy, ok := workflowNodeEventPolicy(n.NodeID(), eventType)
+	policy, ok := n.policies[eventType]
 	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
 		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); bucketOK && bucket.NodeID == n.NodeID() {
-			policy, ok = workflowNodeEventPolicy(n.NodeID(), bucket.EventType)
+			policy, ok = n.policies[bucket.EventType]
 		}
 	}
 	if !ok {

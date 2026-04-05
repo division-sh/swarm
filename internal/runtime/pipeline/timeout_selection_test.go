@@ -56,7 +56,7 @@ func TestDeclarativeNodeHandleEvent_SelectsOnTimeoutAccumulatorHandler(t *testin
 	}
 	entry := bundle.NodeEntries()["test-node"]
 	engine := &recordingExecutionEngine{}
-	node := NewNode(entry, engine, nil)
+	node := NewNode(entry, semanticview.Wrap(bundle), engine, nil)
 	handled := node.Handle(context.Background(), events.Event{
 		Type: "accumulate.timeout",
 		Payload: mustJSON(map[string]any{
@@ -87,7 +87,7 @@ func TestDeclarativeNodeHandleEvent_MatchesWildcardHandler(t *testing.T) {
 	}
 	entry := bundle.NodeEntries()["test-node"]
 	engine := &recordingExecutionEngine{}
-	node := NewNode(entry, engine, nil)
+	node := NewNode(entry, semanticview.Wrap(bundle), engine, nil)
 	handled := node.Handle(context.Background(), events.Event{Type: "task.completed"}.WithEntityID("ent-1"))
 	if !handled {
 		t.Fatal("expected wildcard event to be handled")
@@ -109,11 +109,7 @@ func TestWorkflowNodeEventPolicy_MatchesWildcardSubscription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	previous := defaultWorkflowModuleFactory
-	SetDefaultWorkflowModuleFactory(func() WorkflowModule { return module })
-	defer SetDefaultWorkflowModuleFactory(previous)
-
-	policy, ok := workflowNodeEventPolicy("test-node", "task.completed")
+	policy, ok := workflowNodeEventPolicy(module.WorkflowNodes(), "test-node", "task.completed")
 	if !ok {
 		t.Fatal("expected wildcard subscription policy to match")
 	}
@@ -132,7 +128,7 @@ func TestDeclarativeNodeHandleEvent_MatchesDeepWildcardChildFlowHandler(t *testi
 	}
 	entry := bundle.NodeEntries()["collector"]
 	engine := &recordingExecutionEngine{}
-	node := NewNode(entry, engine, nil)
+	node := NewNode(entry, semanticview.Wrap(bundle), engine, nil)
 	handled := node.Handle(context.Background(), events.Event{Type: "child/grandchild/task.done"}.WithEntityID("ent-1"))
 	if !handled {
 		t.Fatal("expected deep wildcard event to be handled")

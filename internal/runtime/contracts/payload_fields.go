@@ -8,8 +8,8 @@ import (
 // EventPayloadFields is derived from the generated schema registry rather than
 // maintained as a second parallel artifact. It preserves a stable copy of the
 // generated top-level payload property names for parity checks and emit schemas.
-func EventPayloadFields() map[string][]string {
-	return cloneEventPayloadFields(deriveEventPayloadFields(EventSchemaRegistry()))
+func EventPayloadFields(registry map[string]EventSchema) map[string][]string {
+	return cloneEventPayloadFields(deriveEventPayloadFields(registry))
 }
 
 func deriveEventPayloadFields(registry map[string]EventSchema) map[string][]string {

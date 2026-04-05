@@ -14,7 +14,7 @@ func (s *PostgresStore) CountActiveInstances(ctx context.Context) (int, error) {
 		SELECT COUNT(*)
 		FROM entity_state
 		WHERE NOT (current_state = ANY($1::text[]))
-	`, pq.Array(runtime.TerminalInstanceStates())).Scan(&n)
+	`, pq.Array(s.EffectiveTerminalInstanceStates())).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count active instances: %w", err)
 	}
@@ -37,7 +37,7 @@ func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) (
 		LIMIT $1
 	`
 
-	rows, err := s.DB.QueryContext(ctx, q, limit, pq.Array(runtime.TerminalInstanceStates()))
+	rows, err := s.DB.QueryContext(ctx, q, limit, pq.Array(s.EffectiveTerminalInstanceStates()))
 	if err != nil {
 		return nil, fmt.Errorf("list digest rows: %w", err)
 	}

@@ -14,7 +14,7 @@ import (
 
 func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	t.Run("agent fire allowed with permission", func(t *testing.T) {
-		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		err := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID:          "ops-1",
 			Permissions: []string{"agent_fire"},
 		}, "agent_fire")
@@ -24,7 +24,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("agent fire denied without permission", func(t *testing.T) {
-		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		err := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-2",
 		}, "agent_fire")
 		if err == nil || !errors.Is(err, ErrToolNotAllowed) {
@@ -33,7 +33,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("schedule allowed with permission", func(t *testing.T) {
-		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		err := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID:          "ops-3",
 			Permissions: []string{"schedule"},
 		}, "schedule")
@@ -43,7 +43,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("schedule denied without permission", func(t *testing.T) {
-		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		err := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-4",
 		}, "schedule")
 		if err == nil || !errors.Is(err, ErrToolNotAllowed) {
@@ -52,7 +52,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("universal tool bypasses permission tier", func(t *testing.T) {
-		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		err := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-5",
 		}, "agent_message")
 		if err != nil {
@@ -61,7 +61,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("actor config tier still applies to non-gated tools", func(t *testing.T) {
-		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		err := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-6",
 		}, "workflow_custom_tool")
 		if err == nil || !errors.Is(err, ErrToolNotAllowed) {
@@ -70,7 +70,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("actor config still allows explicitly listed workflow tool", func(t *testing.T) {
-		authErr := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		authErr := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID:    "ops-7",
 			Tools: []string{"workflow_custom_tool"},
 		}, "workflow_custom_tool")
@@ -80,7 +80,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("provider native read allowed when file_io enabled", func(t *testing.T) {
-		authErr := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		authErr := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID:          "ops-8",
 			NativeTools: models.NativeToolConfig{FileIO: true},
 		}, "Read")
@@ -90,7 +90,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 	})
 
 	t.Run("actor config tool aliases are canonicalized", func(t *testing.T) {
-		authErr := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		authErr := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID:    "ops-9",
 			Tools: []string{"Read"},
 		}, "read_file")
@@ -221,7 +221,7 @@ func TestValidateAgentPermissions_DefaultWorkflowBundleDoesNotReportUnknownBundl
 }
 
 func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
-	InitEventSchemaRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	registry := NewEmitRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"coord.done": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -231,8 +231,11 @@ func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
 				},
 			},
 		},
-	}))
-	err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+	}), nil)
+	auth := NewToolAuthorizer(nil, func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
+		return classifyToolAuthorization(actor, toolName, nil, registry)
+	})
+	err := auth.Authorize(context.Background(), models.AgentConfig{
 		ID:         "coordinator-1",
 		EmitEvents: []string{"coord.done"},
 	}, "emit_coord_done")
@@ -242,7 +245,7 @@ func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
 }
 
 func TestToolAuthorizer_ScopedEmitEventsAllowLocalEmitTool(t *testing.T) {
-	InitEventSchemaRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	registry := NewEmitRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"discovery/category.assessed": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -252,8 +255,11 @@ func TestToolAuthorizer_ScopedEmitEventsAllowLocalEmitTool(t *testing.T) {
 				},
 			},
 		},
-	}))
-	err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+	}), nil)
+	auth := NewToolAuthorizer(nil, func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
+		return classifyToolAuthorization(actor, toolName, nil, registry)
+	})
+	err := auth.Authorize(context.Background(), models.AgentConfig{
 		ID:         "market-research-agent",
 		EmitEvents: []string{"discovery/category.assessed"},
 	}, "emit_category_assessed")
@@ -263,7 +269,7 @@ func TestToolAuthorizer_ScopedEmitEventsAllowLocalEmitTool(t *testing.T) {
 }
 
 func TestToolAuthorizer_AllowsMCPPrefixedEmitToolAlias(t *testing.T) {
-	InitEventSchemaRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	registry := NewEmitRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"market_research.scan_complete": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -273,8 +279,11 @@ func TestToolAuthorizer_AllowsMCPPrefixedEmitToolAlias(t *testing.T) {
 				},
 			},
 		},
-	}))
-	err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+	}), nil)
+	auth := NewToolAuthorizer(nil, func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
+		return classifyToolAuthorization(actor, toolName, nil, registry)
+	})
+	err := auth.Authorize(context.Background(), models.AgentConfig{
 		ID:         "market-research-agent",
 		EmitEvents: []string{"market_research.scan_complete"},
 	}, "mcp__runtime-tools__emit_market_research_scan_complete")

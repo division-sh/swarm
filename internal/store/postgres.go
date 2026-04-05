@@ -15,11 +15,26 @@ import (
 )
 
 type PostgresStore struct {
-	DB *sql.DB
+	DB                     *sql.DB
+	TerminalInstanceStates []string
 
 	schemaCapsMu    sync.RWMutex
 	schemaCaps      StoreSchemaCapabilities
 	schemaCapsBound bool
+}
+
+func (s *PostgresStore) EffectiveTerminalInstanceStates() []string {
+	if s == nil {
+		return nil
+	}
+	out := make([]string, 0, len(s.TerminalInstanceStates))
+	for _, state := range s.TerminalInstanceStates {
+		state = strings.TrimSpace(state)
+		if state != "" {
+			out = append(out, state)
+		}
+	}
+	return out
 }
 
 func DSNFromConfig(cfg config.DatabaseConfig) string {

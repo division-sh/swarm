@@ -9,28 +9,3 @@ type WorkflowModule interface {
 	GuardRegistry() GuardRegistry
 	ActionRegistry() ActionRegistry
 }
-
-var defaultWorkflowModuleFactory func() WorkflowModule
-
-func SetDefaultWorkflowModuleFactory(factory func() WorkflowModule) {
-	defaultWorkflowModuleFactory = factory
-}
-
-func defaultWorkflowModule() WorkflowModule {
-	module := defaultWorkflowModuleOrNil()
-	if module == nil {
-		panic("pipeline: workflow module is required; configure SetDefaultWorkflowModuleFactory")
-	}
-	return module
-}
-
-func defaultWorkflowModuleOrNil() WorkflowModule {
-	if defaultWorkflowModuleFactory == nil {
-		return nil
-	}
-	return defaultWorkflowModuleFactory()
-}
-
-func DefaultWorkflowModuleOrNil() WorkflowModule {
-	return defaultWorkflowModuleOrNil()
-}

@@ -40,6 +40,8 @@ type Executor struct {
 	workflowSource  semanticview.Source
 	flowActivator   runtimepipeline.FlowInstanceActivator
 	workspaces      workspace.Resolver
+	authority       runtimeauthority.Provider
+	emitRegistry    *EmitRegistry
 	authorizer      *ToolAuthorizer
 	validator       *ToolInputValidator
 	dispatcher      *ToolDispatcher
@@ -75,7 +77,13 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		workflowSource:  opts.WorkflowSource,
 		flowActivator:   opts.FlowActivator,
 		workspaces:      opts.WorkspaceResolver,
+		authority:       runtimeauthority.ProviderOrNoop(opts.AuthorityProvider),
 		oneShotEmits:    make(map[string]struct{}),
+	}
+	if opts.EmitRegistry != nil {
+		exec.emitRegistry = opts.EmitRegistry
+	} else {
+		exec.emitRegistry = NewEmitRegistry(exec.workflowSource, exec.authority)
 	}
 	if exec.credentials == nil {
 		exec.credentials = runtimecredentials.NewEnvStore()
@@ -88,7 +96,9 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 			processWarn("tool-executor", "mcp discovery warning: %v", err)
 		}
 	}
-	exec.authorizer = NewToolAuthorizer(bus)
+	exec.authorizer = NewToolAuthorizer(bus, func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
+		return classifyToolAuthorization(actor, toolName, exec.authority, exec.emitRegistry)
+	})
 	exec.validator = NewToolInputValidator(exec.contractDefinitions)
 	exec.dispatcher = NewToolDispatcher(
 		func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
@@ -124,6 +134,7 @@ func (e *Executor) SetWorkflowSource(source semanticview.Source) {
 	e.mu.Lock()
 	e.workflowSource = source
 	client := e.mcpClient
+	e.emitRegistry = NewEmitRegistry(source, e.authority)
 	e.mu.Unlock()
 	if client != nil {
 		for _, err := range client.Refresh(context.Background(), source) {
@@ -153,6 +164,13 @@ func (e *Executor) SetConfig(cfg *config.Config) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.cfg = cfg
+}
+
+func (e *Executor) SetAuthorityProvider(provider runtimeauthority.Provider) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.authority = runtimeauthority.ProviderOrNoop(provider)
+	e.emitRegistry = NewEmitRegistry(e.workflowSource, e.authority)
 }
 
 func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool, error) {
@@ -199,7 +217,7 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 	filtered := make([]llm.ToolDefinition, 0, len(names))
 	for _, name := range names {
 		entry := entries[name]
-		if !classifyToolAuthorization(actor, name).allowed {
+		if !classifyToolAuthorization(actor, name, e.authority, e.emitRegistry).allowed {
 			continue
 		}
 		filtered = append(filtered, llm.ToolDefinition{
@@ -208,14 +226,16 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 			Schema:      deepCloneJSONValue(entry.InputSchema),
 		})
 	}
-	filtered = append(filtered, GenerateEmitToolsForActor(actor, func(_ string, component string, format string, args ...any) {
-		processWarn(component, format, args...)
-	})...)
+	if e.emitRegistry != nil {
+		filtered = append(filtered, e.emitRegistry.GenerateEmitToolsForActor(actor, func(_ string, component string, format string, args ...any) {
+			processWarn(component, format, args...)
+		})...)
+	}
 	return filtered
 }
 
 func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
-	return capabilitySetForActor(actor, names, requestAllowed)
+	return capabilitySetForActorWithDeps(actor, names, requestAllowed, e.authority, e.emitRegistry)
 }
 
 func (e *Executor) Execute(ctx context.Context, name string, input any) (any, error) {
@@ -356,7 +376,7 @@ func (e *Executor) emitToolExecutionEvent(
 			action = "tool_execution_failed"
 		}
 	}
-	detail := toolExecutionDiagnosticDetail(ctx, actor, toolName, input, result, execErr, phase)
+	detail := toolExecutionDiagnosticDetail(ctx, actor, toolName, input, result, execErr, phase, e.authority, e.emitRegistry)
 	if strings.TrimSpace(actor.Role) != "" {
 		detail["actor_role"] = strings.TrimSpace(actor.Role)
 	}
@@ -394,7 +414,7 @@ func toolExecutionMessage(toolName string, execErr error) string {
 	}
 }
 
-func toolExecutionDiagnosticDetail(ctx context.Context, actor models.AgentConfig, toolName string, input any, result any, execErr error, phase string) map[string]any {
+func toolExecutionDiagnosticDetail(ctx context.Context, actor models.AgentConfig, toolName string, input any, result any, execErr error, phase string, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) map[string]any {
 	detail := map[string]any{
 		"tool_name":     toolName,
 		"phase":         strings.TrimSpace(phase),
@@ -424,7 +444,7 @@ func toolExecutionDiagnosticDetail(ctx context.Context, actor models.AgentConfig
 				detail["denial_layer"] = "executor"
 			}
 		} else {
-			decision := classifyToolAuthorization(actor, toolName)
+			decision := classifyToolAuthorization(actor, toolName, provider, emitRegistry)
 			detail["tool_kind"] = string(toolKindPolicy(toolName))
 			detail["context_requirement"] = string(toolContextRequirementPolicy(toolName))
 			if v := strings.TrimSpace(string(decision.class)); v != "" {
@@ -436,7 +456,7 @@ func toolExecutionDiagnosticDetail(ctx context.Context, actor models.AgentConfig
 			}
 		}
 	} else {
-		decision := classifyToolAuthorization(actor, toolName)
+		decision := classifyToolAuthorization(actor, toolName, provider, emitRegistry)
 		detail["tool_kind"] = string(toolKindPolicy(toolName))
 		detail["context_requirement"] = string(toolContextRequirementPolicy(toolName))
 		if v := strings.TrimSpace(string(decision.class)); v != "" {
@@ -580,11 +600,11 @@ func (e *Executor) ExecHumanTaskDecideDirect(ctx context.Context, actor models.A
 	return e.execHumanTaskDecide(ctx, actor, input)
 }
 
-func authorizeRouting(actor, target models.AgentConfig, status string) error {
-	return runtimeauthority.Active().AuthorizeRouting(actor, target, status)
+func authorizeRouting(provider runtimeauthority.Provider, actor, target models.AgentConfig, status string) error {
+	return runtimeauthority.ProviderOrNoop(provider).AuthorizeRouting(actor, target, status)
 }
 
-func authorizeManage(actor, target models.AgentConfig, manager Manager) error {
+func authorizeManage(provider runtimeauthority.Provider, actor, target models.AgentConfig, manager Manager) error {
 	_ = manager
 	if !runtimeauthority.SameFlowInstance(actor, target) {
 		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
@@ -592,11 +612,11 @@ func authorizeManage(actor, target models.AgentConfig, manager Manager) error {
 	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
 		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
 	}
-	return runtimeauthority.Active().AuthorizeManagement(actor, target)
+	return runtimeauthority.ProviderOrNoop(provider).AuthorizeManagement(actor, target)
 }
 
-func authorizeMailboxSend(actor models.AgentConfig) error {
-	return runtimeauthority.Active().AuthorizeMailboxSend(actor)
+func authorizeMailboxSend(provider runtimeauthority.Provider, actor models.AgentConfig) error {
+	return runtimeauthority.ProviderOrNoop(provider).AuthorizeMailboxSend(actor)
 }
 
 func coalesce(values ...string) string {

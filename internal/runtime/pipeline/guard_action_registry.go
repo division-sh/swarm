@@ -117,14 +117,6 @@ func (r contractActionRegistry) Action(id identity.ActionKey) (runtimeregistry.A
 	return instruction, ok
 }
 
-func defaultGuardRegistry() GuardRegistry {
-	return defaultWorkflowModule().GuardRegistry()
-}
-
-func defaultActionRegistry() ActionRegistry {
-	return defaultWorkflowModule().ActionRegistry()
-}
-
 func NewContractGuardRegistry(source semanticview.Source) GuardRegistry {
 	if source == nil {
 		return contractGuardRegistry{}

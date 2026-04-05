@@ -73,6 +73,9 @@ type Runtime struct {
 	Manager        *runtimemanager.AgentManager
 	InboundGateway *InboundGateway
 	ToolGateway    *runtimemcp.Gateway
+	Authority      runtimeauthority.Provider
+	EmitRegistry   *runtimetools.EmitRegistry
+	PromptResolver runtimecontracts.PromptResolver
 }
 
 var ()
@@ -151,9 +154,6 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	if opts.WorkflowModule == nil {
 		return fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
-	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule {
-		return opts.WorkflowModule
-	})
 	source := opts.WorkflowModule.SemanticSource()
 	if opts.WorkspaceLifecycle != nil {
 		if err := opts.WorkspaceLifecycle.ValidateSource(context.Background(), source); err != nil {
@@ -194,12 +194,12 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 	source := opts.WorkflowModule.SemanticSource()
+	promptResolver := runtimecontracts.PromptResolver(nil)
 	if bundle, ok := semanticview.Bundle(source); ok {
-		runtimecontracts.SetActivePromptBundle(bundle)
-	} else {
-		runtimecontracts.SetActivePromptBundle(nil)
+		promptResolver = runtimecontracts.NewBundlePromptResolver(bundle)
 	}
-	runtimeauthority.SetProvider(runtimeauthority.NewSourceProvider(source))
+	authorityProvider := runtimeauthority.NewSourceProvider(source)
+	emitRegistry := runtimetools.NewEmitRegistry(source, authorityProvider)
 	if warnings, err := runtimetools.ValidateToolImplementations(source); err != nil {
 		return nil, fmt.Errorf("tool implementation validation failed: %w", err)
 	} else {
@@ -217,10 +217,13 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	}
 
 	rt := &Runtime{
-		Config:    cfg,
-		Stores:    stores,
-		Options:   opts,
-		Workspace: opts.WorkspaceLifecycle,
+		Config:         cfg,
+		Stores:         stores,
+		Options:        opts,
+		Workspace:      opts.WorkspaceLifecycle,
+		Authority:      authorityProvider,
+		EmitRegistry:   emitRegistry,
+		PromptResolver: promptResolver,
 	}
 	if opts.Credentials != nil {
 		rt.Credentials = opts.Credentials
@@ -231,7 +234,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if stores.SQLDB != nil {
 		rt.Logger = NewRuntimeLogger(stores.SQLDB)
 	}
-	payloadValidator := newRuntimePayloadValidator(runtimeEnvBool("SWARM_STRICT_PAYLOAD_VALIDATION", false), rt.Logger)
+	payloadValidator := newRuntimePayloadValidator(runtimeEnvBool("SWARM_STRICT_PAYLOAD_VALIDATION", false), rt.Logger, emitRegistry.EventSchemaSnapshot())
 	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
@@ -339,6 +342,8 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		WorkflowSource:    source,
 		FlowActivator:     nil,
 		WorkspaceResolver: rt.Workspace,
+		AuthorityProvider: rt.Authority,
+		EmitRegistry:      rt.EmitRegistry,
 		ManagerProvider: func() runtimetools.Manager {
 			return managerRef
 		},
@@ -367,8 +372,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			slog.Warn("credential requirement warning", "key", item.Key, "required_by", strings.Join(requiredBy, ", "))
 		}
 	}
-	runtimetools.InitEventSchemaRegistry(source)
-	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
+	if generated := rt.EmitRegistry.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
 		if runtimeEnvBool("SWARM_EMIT_SCHEMA_STRICT", true) {
 			return nil, fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries", len(generated))
 		}
@@ -382,11 +386,16 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		)
 	}
 
-	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, rt.ToolExecutor.ToolDefinitions())
+	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, rt.ToolExecutor.ToolDefinitions(), runtimeagents.LLMAgentOptions{
+		PromptResolver:    rt.PromptResolver,
+		AuthorityProvider: rt.Authority,
+		EmitRegistry:      rt.EmitRegistry,
+	})
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
 		Workspaces:               rt.Workspace,
 		Sessions:                 stores.SessionRegistry,
 		SemanticSource:           source,
+		PromptResolver:           rt.PromptResolver,
 		RuntimeMode:              cfg.LLM.RuntimeMode,
 		Budget:                   rt.Budget,
 		ThrottleSuppressPrefixes: runtimeThrottleSuppressPrefixes(source),
@@ -416,7 +425,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 				return runtimeactors.AgentConfig{}, false
 			}
 			return rt.Manager.GetAgentConfig(strings.TrimSpace(agentID))
-		}))
+		}, rt.EmitRegistry))
 	}
 
 	return rt, nil

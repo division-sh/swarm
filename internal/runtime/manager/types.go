@@ -8,6 +8,7 @@ import (
 
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -126,6 +127,7 @@ type AgentManagerOptions struct {
 	Workspaces                workspace.Lifecycle
 	Sessions                  sessions.Registry
 	SemanticSource            semanticview.Source
+	PromptResolver            runtimecontracts.PromptResolver
 	RuntimeMode               string
 	Budget                    BudgetGuard
 	ThrottleSuppressPrefixes  []string

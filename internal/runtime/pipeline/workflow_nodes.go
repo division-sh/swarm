@@ -43,18 +43,13 @@ type WorkflowNode struct {
 	Policies         map[string]WorkflowEventPolicy
 }
 
-func DefaultPipelineWorkflowNodes() []WorkflowNode {
-	nodes := defaultWorkflowModule().WorkflowNodes()
+func workflowNodesSnapshot(nodes []WorkflowNode) []WorkflowNode {
 	out := make([]WorkflowNode, 0, len(nodes))
 	for _, node := range nodes {
 		nodeCopy := node
 		out = append(out, nodeCopy)
 	}
 	return out
-}
-
-func defaultPipelineSubscriptions() []events.EventType {
-	return workflowSubscriptions(DefaultPipelineWorkflowNodes())
 }
 
 func workflowSubscriptions(nodes []WorkflowNode) []events.EventType {
@@ -73,14 +68,9 @@ func workflowSubscriptions(nodes []WorkflowNode) []events.EventType {
 	return out
 }
 
-func defaultPipelineEventPolicy(eventType string) (WorkflowEventPolicy, bool) {
-	eventType = strings.TrimSpace(eventType)
-	return workflowNodeEventPolicy("", eventType)
-}
-
-func workflowNodeSubscriptions(nodeID string) []events.EventType {
+func workflowNodeSubscriptions(nodes []WorkflowNode, nodeID string) []events.EventType {
 	nodeID = strings.TrimSpace(nodeID)
-	for _, node := range DefaultPipelineWorkflowNodes() {
+	for _, node := range nodes {
 		if strings.TrimSpace(node.ID) != nodeID {
 			continue
 		}
@@ -89,10 +79,10 @@ func workflowNodeSubscriptions(nodeID string) []events.EventType {
 	return nil
 }
 
-func workflowNodeEventPolicy(nodeID, eventType string) (WorkflowEventPolicy, bool) {
+func workflowNodeEventPolicy(nodes []WorkflowNode, nodeID, eventType string) (WorkflowEventPolicy, bool) {
 	eventType = strings.TrimSpace(eventType)
 	nodeID = strings.TrimSpace(nodeID)
-	for _, node := range DefaultPipelineWorkflowNodes() {
+	for _, node := range nodes {
 		if nodeID != "" && strings.TrimSpace(node.ID) != nodeID {
 			continue
 		}
@@ -526,7 +516,7 @@ func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 		if !ok {
 			continue
 		}
-		executor := NewNode(contract, newCoordinatorHandlerExecutionEngine(pc, nodeID), nil)
+		executor := NewNode(contract, pc.SemanticSource(), newCoordinatorHandlerExecutionEngine(pc, nodeID), nil)
 		if executor == nil {
 			continue
 		}

@@ -152,7 +152,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsVisibleTools(t *testing.T
 	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	gateway := runtimemcp.NewGateway(startupProbeToolExecutor{}, "gateway-token", RuntimeMCPGatewayHooks(nil, manager.GetAgentConfig))
+	gateway := runtimemcp.NewGateway(startupProbeToolExecutor{}, "gateway-token", RuntimeMCPGatewayHooks(nil, manager.GetAgentConfig, nil))
 
 	if err := validateClaudeMCPToolsForManagedAgents(cfg, gateway, "gateway-token", manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
@@ -170,7 +170,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsWhenRequiredEmitToolsMissin
 	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	gateway := runtimemcp.NewGateway(startupProbeToolExecutor{}, "gateway-token", RuntimeMCPGatewayHooks(nil, manager.GetAgentConfig))
+	gateway := runtimemcp.NewGateway(startupProbeToolExecutor{}, "gateway-token", RuntimeMCPGatewayHooks(nil, manager.GetAgentConfig, nil))
 
 	err := validateClaudeMCPToolsForManagedAgents(cfg, gateway, "gateway-token", manager)
 	if err == nil || !strings.Contains(err.Error(), "missing required emit tools") {

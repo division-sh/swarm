@@ -71,7 +71,7 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 		if targetEntity == "" {
 			targetEntity = targetCfgEntityID
 		}
-		if err := authorizeAgentMessage(actor, targetCfg, manager); err != nil {
+		if err := authorizeAgentMessage(e.authority, actor, targetCfg, manager); err != nil {
 			return nil, fmt.Errorf("agent_message target %s: %w", targetID, err)
 		}
 	}
@@ -103,21 +103,21 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	return map[string]any{"event_id": evt.ID, "status": "sent", "targets": targets}, nil
 }
 
-func authorizeAgentMessage(actor, target models.AgentConfig, manager Manager) error {
+func authorizeAgentMessage(provider runtimeauthority.Provider, actor, target models.AgentConfig, manager Manager) error {
 	if strings.TrimSpace(actor.ID) == "" || strings.TrimSpace(target.ID) == "" {
 		return errors.New("agent ids are required for message authorization")
 	}
 	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
 		return nil
 	}
-	if hasRoleMessageAuthority(actor, target) {
+	if hasRoleMessageAuthority(provider, actor, target) {
 		return nil
 	}
 	return fmt.Errorf("role %s cannot message role %s", actor.Role, target.Role)
 }
 
-func hasRoleMessageAuthority(actor, target models.AgentConfig) bool {
-	return runtimeauthority.Active().HasMessageAuthority(actor, target)
+func hasRoleMessageAuthority(provider runtimeauthority.Provider, actor, target models.AgentConfig) bool {
+	return runtimeauthority.ProviderOrNoop(provider).HasMessageAuthority(actor, target)
 }
 
 func uniqueNonEmptyStrings(in []string) []string {
@@ -243,16 +243,16 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 	if in.Config.Mode == "" {
 		in.Config.Mode = coalesce(actor.Mode, "entity")
 	}
-	if err := authorizeManage(actor, in.Config, manager); err != nil {
+	if err := authorizeManage(e.authority, actor, in.Config, manager); err != nil {
 		return nil, err
 	}
 	if err := manager.SpawnAgentForEntity(in.Config.EffectiveEntityID(), in.Config); err != nil {
 		return nil, err
 	}
 	if cfg, ok := manager.GetAgentConfig(in.Config.ID); ok {
-		runtimeauthority.UpsertManagedAgent(cfg)
+		runtimeauthority.UpsertManagedAgent(e.authority, cfg)
 	} else {
-		runtimeauthority.UpsertManagedAgent(in.Config)
+		runtimeauthority.UpsertManagedAgent(e.authority, in.Config)
 	}
 	return map[string]any{"status": "hired", "agent_id": in.Config.ID}, nil
 }
@@ -275,13 +275,13 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 	if !ok {
 		return nil, fmt.Errorf("target agent not found: %s", in.AgentID)
 	}
-	if err := authorizeManage(actor, targetCfg, manager); err != nil {
+	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
 	if err := manager.TeardownAgent(in.AgentID); err != nil {
 		return nil, err
 	}
-	runtimeauthority.RemoveManagedAgent(in.AgentID)
+	runtimeauthority.RemoveManagedAgent(e.authority, in.AgentID)
 	return map[string]any{"status": "fired", "agent_id": in.AgentID}, nil
 }
 
@@ -304,17 +304,17 @@ func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (an
 	if !ok {
 		return nil, fmt.Errorf("target agent not found: %s", in.AgentID)
 	}
-	if err := authorizeManage(actor, targetCfg, manager); err != nil {
+	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
 	if err := manager.ReconfigureAgent(in.AgentID, in.Config); err != nil {
 		return nil, err
 	}
 	if cfg, ok := manager.GetAgentConfig(in.AgentID); ok {
-		runtimeauthority.UpsertManagedAgent(cfg)
+		runtimeauthority.UpsertManagedAgent(e.authority, cfg)
 	} else {
 		in.Config.ID = in.AgentID
-		runtimeauthority.UpsertManagedAgent(in.Config)
+		runtimeauthority.UpsertManagedAgent(e.authority, in.Config)
 	}
 	return map[string]any{"status": "reconfigured", "agent_id": in.AgentID}, nil
 }

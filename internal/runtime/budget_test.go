@@ -1,37 +1,29 @@
 package runtime
 
 import (
+	"reflect"
 	"testing"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
 )
 
-func TestBudgetThresholdsFromSource_DisabledWhenThresholdsMissing(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{}},
-	})
+func TestBudgetTracker_KeepsTerminalStatesInstanceOwned(t *testing.T) {
+	trackerA := NewBudgetTracker(nil, nil, nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			TerminalStages: []string{"done"},
+		},
+	}))
+	trackerB := NewBudgetTracker(nil, nil, nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			TerminalStages: []string{"closed"},
+		},
+	}))
 
-	thresholds := budgetThresholdsFromSource(source)
-	if thresholds.Enabled {
-		t.Fatal("expected budget thresholds to be disabled when policy keys are absent")
+	if got, want := trackerA.TerminalInstanceStates(), []string{"done"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("trackerA.TerminalInstanceStates() = %#v, want %#v", got, want)
 	}
-}
-
-func TestBudgetThresholdsFromSource_UsesConfiguredPercents(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
-			"budget_warning_percent":   {Value: 80},
-			"budget_throttle_percent":  {Value: 90},
-			"budget_emergency_percent": {Value: 100},
-		}},
-	})
-
-	thresholds := budgetThresholdsFromSource(source)
-	if !thresholds.Enabled {
-		t.Fatal("expected budget thresholds to be enabled")
-	}
-	if thresholds.Warning != 0.80 || thresholds.Throttle != 0.90 || thresholds.Emergency != 1.00 {
-		t.Fatalf("thresholds = %#v, want 0.80/0.90/1.00", thresholds)
+	if got, want := trackerB.TerminalInstanceStates(), []string{"closed"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("trackerB.TerminalInstanceStates() = %#v, want %#v", got, want)
 	}
 }

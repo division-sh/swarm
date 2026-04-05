@@ -3,12 +3,13 @@ package tools
 import (
 	"strings"
 
+	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
 )
 
-func capabilityForTool(actor models.AgentConfig, toolName string, requestAllowed map[string]struct{}) toolcapabilities.Capability {
-	decision := classifyToolAuthorization(actor, toolName)
+func capabilityForTool(actor models.AgentConfig, toolName string, requestAllowed map[string]struct{}, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) toolcapabilities.Capability {
+	decision := classifyToolAuthorization(actor, toolName, provider, emitRegistry)
 	name := normalizeNativeToolName(toolName)
 	cap := toolcapabilities.Capability{
 		Name:               name,
@@ -33,6 +34,10 @@ func capabilityForTool(actor models.AgentConfig, toolName string, requestAllowed
 }
 
 func capabilitySetForActor(actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	return capabilitySetForActorWithDeps(actor, names, requestAllowed, runtimeauthority.NoopProvider(), nil)
+}
+
+func capabilitySetForActorWithDeps(actor models.AgentConfig, names []string, requestAllowed map[string]struct{}, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	seen := map[string]struct{}{}
 	for _, raw := range names {
@@ -44,7 +49,7 @@ func capabilitySetForActor(actor models.AgentConfig, names []string, requestAllo
 			continue
 		}
 		seen[name] = struct{}{}
-		caps = append(caps, capabilityForTool(actor, name, requestAllowed))
+		caps = append(caps, capabilityForTool(actor, name, requestAllowed, provider, emitRegistry))
 	}
 	return toolcapabilities.NewSet(caps)
 }

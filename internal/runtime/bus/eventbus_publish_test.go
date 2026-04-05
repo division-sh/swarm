@@ -771,15 +771,6 @@ func TestEventBusPublish_NestedDescendantCompletionFlushesDeferredParentEvents(t
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	module := newFixtureWorkflowModule(t, bundle)
-	previous := runtimepipeline.DefaultWorkflowModuleOrNil()
-	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return module })
-	t.Cleanup(func() {
-		if previous == nil {
-			runtimepipeline.SetDefaultWorkflowModuleFactory(nil)
-			return
-		}
-		runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return previous })
-	})
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -932,15 +923,6 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesPipeline(t 
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	module := newFixtureWorkflowModule(t, bundle)
-	previous := runtimepipeline.DefaultWorkflowModuleOrNil()
-	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return module })
-	t.Cleanup(func() {
-		if previous == nil {
-			runtimepipeline.SetDefaultWorkflowModuleFactory(nil)
-			return
-		}
-		runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return previous })
-	})
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -1021,15 +1003,6 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	module := newFixtureWorkflowModule(t, bundle)
-	previous := runtimepipeline.DefaultWorkflowModuleOrNil()
-	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return module })
-	t.Cleanup(func() {
-		if previous == nil {
-			runtimepipeline.SetDefaultWorkflowModuleFactory(nil)
-			return
-		}
-		runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return previous })
-	})
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 

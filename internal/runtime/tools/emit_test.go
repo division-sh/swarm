@@ -37,11 +37,9 @@ func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.
 			},
 		},
 	})
-	runtimeauthority.SetProvider(runtimeauthority.NewSourceProvider(source))
-	defer runtimeauthority.SetProvider(nil)
-	InitEventSchemaRegistry(source)
+	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 
-	tools := GenerateEmitToolsForActor(models.AgentConfig{
+	tools := registry.GenerateEmitToolsForActor(models.AgentConfig{
 		ID:   "campaign-coordinator",
 		Role: "campaign_coordinator",
 	}, nil)
@@ -51,4 +49,56 @@ func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.
 		}
 	}
 	t.Fatalf("expected role-scoped emit tool in %#v", tools)
+}
+
+func TestEmitRegistry_KeepsRuntimeSourcesIsolated(t *testing.T) {
+	sourceA := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"coordinator": {
+				ID:         "coordinator",
+				Role:       "coordinator",
+				EmitEvents: []string{"scan.requested"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+				},
+			},
+		},
+	})
+	sourceB := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"coordinator": {
+				ID:         "coordinator",
+				Role:       "coordinator",
+				EmitEvents: []string{"review.requested"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"review.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+				},
+			},
+		},
+	})
+
+	registryA := NewEmitRegistry(sourceA, runtimeauthority.NewSourceProvider(sourceA))
+	registryB := NewEmitRegistry(sourceB, runtimeauthority.NewSourceProvider(sourceB))
+	actor := models.AgentConfig{ID: "coordinator", Role: "coordinator"}
+
+	toolsA := registryA.GenerateEmitToolsForActor(actor, nil)
+	toolsB := registryB.GenerateEmitToolsForActor(actor, nil)
+	if len(toolsA) != 1 || toolsA[0].Name != "emit_scan_requested" {
+		t.Fatalf("toolsA = %#v, want emit_scan_requested only", toolsA)
+	}
+	if len(toolsB) != 1 || toolsB[0].Name != "emit_review_requested" {
+		t.Fatalf("toolsB = %#v, want emit_review_requested only", toolsB)
+	}
 }

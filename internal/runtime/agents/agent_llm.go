@@ -23,12 +23,21 @@ import (
 )
 
 type LLMAgent struct {
-	cfg           models.AgentConfig
-	subscriptions []events.EventType
-	conversation  *llm.Conversation
-	scopeKey      string
-	promptCache   map[string]string
-	mu            sync.Mutex
+	cfg            models.AgentConfig
+	subscriptions  []events.EventType
+	conversation   *llm.Conversation
+	scopeKey       string
+	promptCache    map[string]string
+	promptResolver runtimecontracts.PromptResolver
+	authority      runtimeauthority.Provider
+	emitRegistry   *runtimetools.EmitRegistry
+	mu             sync.Mutex
+}
+
+type LLMAgentOptions struct {
+	PromptResolver    runtimecontracts.PromptResolver
+	AuthorityProvider runtimeauthority.Provider
+	EmitRegistry      *runtimetools.EmitRegistry
 }
 
 type actorScopedToolExecutor interface {
@@ -36,11 +45,15 @@ type actorScopedToolExecutor interface {
 	ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition
 }
 
-func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) (*LLMAgent, error) {
-	return newLLMAgent(cfg, modelRuntime, toolExecutor, tools, false)
+func NewLLMAgentWithOptions(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, opts LLMAgentOptions) (*LLMAgent, error) {
+	return newLLMAgent(cfg, modelRuntime, toolExecutor, tools, false, opts)
 }
 
-func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, precomposed bool) (*LLMAgent, error) {
+func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) (*LLMAgent, error) {
+	return newLLMAgent(cfg, modelRuntime, toolExecutor, tools, false, LLMAgentOptions{})
+}
+
+func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, precomposed bool, opts LLMAgentOptions) (*LLMAgent, error) {
 	subs := make([]events.EventType, 0, len(cfg.Subscriptions))
 	for _, s := range cfg.Subscriptions {
 		if strings.TrimSpace(s) == "" {
@@ -51,7 +64,12 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 
 	systemPrompt := strings.TrimSpace(extractSystemPrompt(cfg))
 	systemPrompt = appendPromptPostamble(systemPrompt)
-	tools = composeConversationTools(cfg, modelRuntime, tools, precomposed)
+	authority := runtimeauthority.ProviderOrNoop(opts.AuthorityProvider)
+	emitRegistry := opts.EmitRegistry
+	if emitRegistry == nil {
+		emitRegistry = runtimetools.NewEmitRegistry(nil, authority)
+	}
+	tools = composeConversationTools(cfg, modelRuntime, tools, precomposed, authority, emitRegistry)
 
 	maxTurns := 100
 	mode := llm.TaskScoped
@@ -79,19 +97,22 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		promptCache[""] = systemPrompt
 	}
 	return &LLMAgent{
-		cfg:           cfg,
-		subscriptions: subs,
-		conversation:  c,
-		promptCache:   promptCache,
+		cfg:            cfg,
+		subscriptions:  subs,
+		conversation:   c,
+		promptCache:    promptCache,
+		promptResolver: opts.PromptResolver,
+		authority:      authority,
+		emitRegistry:   emitRegistry,
 	}, nil
 }
 
-func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, tools []llm.ToolDefinition, precomposed bool) []llm.ToolDefinition {
+func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, tools []llm.ToolDefinition, precomposed bool, authority runtimeauthority.Provider, emitRegistry *runtimetools.EmitRegistry) []llm.ToolDefinition {
 	if precomposed {
 		return tools
 	}
 	allowedToolSet, constrained := extractAllowedToolSet(cfg)
-	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), emitToolDefinitions(cfg))
+	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), emitToolDefinitions(cfg, authority, emitRegistry))
 	tools = mergeTools(tools, nativeFallbackToolDefinitions(cfg, modelRuntime))
 	return tools
 }
@@ -109,7 +130,7 @@ func parseConversationMode(raw string) (llm.ConversationMode, bool) {
 	}
 }
 
-func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) runtimemanager.AgentFactory {
+func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, opts LLMAgentOptions) runtimemanager.AgentFactory {
 	return func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
 			agentID := strings.TrimSpace(cfg.ID)
@@ -123,7 +144,7 @@ func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolEx
 		}
 		agentTools := tools
 		agentTools = toolExecutor.ToolDefinitionsForActor(cfg)
-		return newLLMAgent(cfg, modelRuntime, toolExecutor, agentTools, true)
+		return newLLMAgent(cfg, modelRuntime, toolExecutor, agentTools, true, opts)
 	}
 }
 
@@ -154,7 +175,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 		}
 	}
 
-	input := formatEventForAgent(a.cfg, evt)
+	input := formatEventForAgent(a.cfg, evt, a.authority)
 	resp, err := a.conversation.Step(ctx, input)
 	if err != nil && a.shouldRetryAfterTaskScopeReset(err) {
 		a.conversation.Reset()
@@ -216,7 +237,10 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 		return strings.TrimSpace(cached)
 	}
 
-	prompt, found, err := runtimecontracts.LoadPromptForAgent(a.cfg, mode)
+	if a.promptResolver == nil {
+		return strings.TrimSpace(a.promptCache[""])
+	}
+	prompt, found, err := a.promptResolver.LoadPromptForAgent(a.cfg, mode)
 	if err != nil {
 		processWarn(
 			"agent-llm",
@@ -464,7 +488,7 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive string) (string, err
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 	beforeMessages := len(a.conversation.Messages)
-	resp, err := a.conversation.Step(ctx, formatEventForAgent(a.cfg, evt))
+	resp, err := a.conversation.Step(ctx, formatEventForAgent(a.cfg, evt, a.authority))
 	if err != nil {
 		return "", err
 	}
@@ -645,11 +669,14 @@ func extractEmitEvents(cfg models.AgentConfig) []string {
 	return uniqueStrings(cfg.EmitEvents)
 }
 
-func emitToolDefinitions(cfg models.AgentConfig) []llm.ToolDefinition {
-	if emitEvents := extractEmitEvents(cfg); len(emitEvents) > 0 {
-		return runtimetools.GenerateEmitToolsForEvents(emitEvents, processWarnOnce)
+func emitToolDefinitions(cfg models.AgentConfig, authority runtimeauthority.Provider, emitRegistry *runtimetools.EmitRegistry) []llm.ToolDefinition {
+	if emitRegistry == nil {
+		emitRegistry = runtimetools.NewEmitRegistry(nil, authority)
 	}
-	return runtimetools.GenerateEmitToolsForRole(cfg.Role, processWarnOnce)
+	if emitEvents := extractEmitEvents(cfg); len(emitEvents) > 0 {
+		return emitRegistry.GenerateEmitToolsForEvents(emitEvents, processWarnOnce)
+	}
+	return emitRegistry.GenerateEmitToolsForRole(cfg.Role, processWarnOnce)
 }
 
 func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrained bool) []llm.ToolDefinition {
@@ -702,14 +729,14 @@ func mergeTools(in []llm.ToolDefinition, extra []llm.ToolDefinition) []llm.ToolD
 	return out
 }
 
-func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
+func formatEventForAgent(cfg models.AgentConfig, evt events.Event, authority runtimeauthority.Provider) string {
 	payload := strings.TrimSpace(string(evt.Payload))
 	if payload == "" {
 		payload = "{}"
 	}
 	allowed := extractEmitEvents(cfg)
 	if len(allowed) == 0 {
-		allowed = runtimeauthority.Active().ProducerEventsForRole(cfg.Role)
+		allowed = runtimeauthority.ProviderOrNoop(authority).ProducerEventsForRole(cfg.Role)
 	}
 	emitTools := make([]string, 0, len(allowed))
 	for _, evtType := range allowed {
@@ -761,8 +788,8 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 	)
 }
 
-func canonicalRuntimeRole(role string) string {
-	return runtimeauthority.Active().CanonicalRole(role)
+func canonicalRuntimeRole(authority runtimeauthority.Provider, role string) string {
+	return runtimeauthority.ProviderOrNoop(authority).CanonicalRole(role)
 }
 
 func uniqueStrings(in []string) []string {

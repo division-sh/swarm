@@ -15,26 +15,29 @@ func (e *Executor) enrichEmitPayloadContext(actor models.AgentConfig, inbound ev
 	for k, v := range payload {
 		out[k] = v
 	}
-	if emitSchemaAllowsProperty(eventType, "task_id") && strings.TrimSpace(asString(out["task_id"])) == "" {
+	if e.emitSchemaAllowsProperty(eventType, "task_id") && strings.TrimSpace(asString(out["task_id"])) == "" {
 		out["task_id"] = strings.TrimSpace(inbound.TaskID)
 	}
 	entityID := actor.EffectiveEntityID()
 	if entityID == "" {
 		entityID = strings.TrimSpace(inbound.EntityID())
 	}
-	if emitSchemaAllowsProperty(eventType, "entity_id") && strings.TrimSpace(asString(out["entity_id"])) == "" {
+	if e.emitSchemaAllowsProperty(eventType, "entity_id") && strings.TrimSpace(asString(out["entity_id"])) == "" {
 		out["entity_id"] = entityID
 	}
 	return out
 }
 
-func emitSchemaAllowsProperty(eventType, property string) bool {
+func (e *Executor) emitSchemaAllowsProperty(eventType, property string) bool {
 	eventType = strings.TrimSpace(eventType)
 	property = strings.TrimSpace(property)
 	if eventType == "" || property == "" {
 		return false
 	}
-	schema := schemaForEventType(eventType).Schema
+	if e == nil || e.emitRegistry == nil {
+		return false
+	}
+	schema := e.emitRegistry.SchemaForEventType(eventType).Schema
 	props, ok := schema["properties"].(map[string]any)
 	if !ok || len(props) == 0 {
 		return false
@@ -43,7 +46,7 @@ func emitSchemaAllowsProperty(eventType, property string) bool {
 	return ok
 }
 
-func trimEmitPayloadToSchema(eventType string, payload map[string]any) map[string]any {
+func (e *Executor) trimEmitPayloadToSchema(eventType string, payload map[string]any) map[string]any {
 	if payload == nil {
 		return map[string]any{}
 	}
@@ -51,7 +54,10 @@ func trimEmitPayloadToSchema(eventType string, payload map[string]any) map[strin
 	if eventType == "" {
 		return payload
 	}
-	schema := schemaForEventType(eventType).Schema
+	if e == nil || e.emitRegistry == nil {
+		return payload
+	}
+	schema := e.emitRegistry.SchemaForEventType(eventType).Schema
 	if schemaAdditionalProps(schema["additionalProperties"]) {
 		return payload
 	}

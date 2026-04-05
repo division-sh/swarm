@@ -6,6 +6,7 @@ import (
 
 	"swarm/internal/config"
 	"swarm/internal/events"
+	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimemcp "swarm/internal/runtime/mcp"
@@ -48,4 +49,6 @@ type ExecutorOptions struct {
 	WorkflowSource    semanticview.Source
 	FlowActivator     runtimepipeline.FlowInstanceActivator
 	WorkspaceResolver workspace.Resolver
+	AuthorityProvider runtimeauthority.Provider
+	EmitRegistry      *EmitRegistry
 }

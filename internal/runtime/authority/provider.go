@@ -3,7 +3,6 @@ package authority
 import (
 	"errors"
 	"strings"
-	"sync"
 
 	models "swarm/internal/runtime/core/actors"
 )
@@ -58,44 +57,25 @@ func (noopProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
 
 func (noopProvider) CanDecideHumanTasks(role string) bool { return false }
 
-var (
-	providerMu     sync.RWMutex
-	activeProvider Provider = noopProvider{}
-)
-
-func SetProvider(provider Provider) {
-	providerMu.Lock()
-	defer providerMu.Unlock()
-	if provider == nil {
-		activeProvider = noopProvider{}
-		return
-	}
-	activeProvider = provider
+func NoopProvider() Provider {
+	return noopProvider{}
 }
 
-func Active() Provider {
-	providerMu.RLock()
-	defer providerMu.RUnlock()
-	if activeProvider == nil {
+func ProviderOrNoop(provider Provider) Provider {
+	if provider == nil {
 		return noopProvider{}
 	}
-	return activeProvider
+	return provider
 }
 
-func UpsertManagedAgent(cfg models.AgentConfig) {
-	providerMu.RLock()
-	provider := activeProvider
-	providerMu.RUnlock()
-	if mutable, ok := provider.(graphMutableProvider); ok && mutable != nil {
+func UpsertManagedAgent(provider Provider, cfg models.AgentConfig) {
+	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
 		mutable.UpsertManagedAgent(cfg)
 	}
 }
 
-func RemoveManagedAgent(agentID string) {
-	providerMu.RLock()
-	provider := activeProvider
-	providerMu.RUnlock()
-	if mutable, ok := provider.(graphMutableProvider); ok && mutable != nil {
+func RemoveManagedAgent(provider Provider, agentID string) {
+	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
 		mutable.RemoveManagedAgent(agentID)
 	}
 }
