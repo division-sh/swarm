@@ -89,6 +89,17 @@ func sanitizeOptionalUUID(raw string) string {
 	return raw
 }
 
+func validateOptionalEntityUUID(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if _, err := uuid.Parse(raw); err != nil {
+		return "", fmt.Errorf("invalid entity_id %q: must be a UUID", raw)
+	}
+	return raw, nil
+}
+
 func (s *PostgresStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
 	return s.InsertEventDeliveriesTx(ctx, nil, eventID, agentIDs)
 }
@@ -228,7 +239,10 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 }
 
 func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, evt events.Event) error {
-	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, sourceEventID, createdAt := eventStorageEnvelope(evt)
+	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, sourceEventID, createdAt, err := eventStorageEnvelope(evt)
+	if err != nil {
+		return err
+	}
 	execFn := s.DB.ExecContext
 	if tx != nil {
 		execFn = tx.ExecContext
@@ -576,7 +590,7 @@ func runIDOrEventID(runID, eventID string) string {
 	return nullUUIDString(eventID)
 }
 
-func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, producedBy string, producedByType string, sourceEventID string, createdAt time.Time) {
+func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, producedBy string, producedByType string, sourceEventID string, createdAt time.Time, err error) {
 	id = strings.TrimSpace(evt.ID)
 	if id == "" {
 		id = uuid.NewString()
@@ -585,7 +599,10 @@ func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName 
 	eventName = strings.TrimSpace(string(evt.Type))
 	payload = eventPayloadForStorage(evt)
 	envelope := evt.NormalizedEnvelope()
-	entityID = sanitizeOptionalUUID(envelope.EntityID)
+	entityID, err = validateOptionalEntityUUID(envelope.EntityID)
+	if err != nil {
+		return "", "", "", "", "", "", nil, 0, "", "", "", time.Time{}, err
+	}
 	flowInstance = envelope.FlowInstance
 	scope = string(envelope.Scope)
 	if scope == "" {

@@ -125,6 +125,8 @@ type runtimeHarness struct {
 	mu             sync.Mutex
 }
 
+var catalogEntityIDNamespace = uuid.MustParse("9fe445fe-6e58-43bb-9bdb-ec0d4d5a1b2c")
+
 type agentFixtureDoc struct {
 	AgentFixtures map[string][]agentFixtureStep `yaml:"agent_fixtures"`
 }
@@ -563,7 +565,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	if h == nil || h.workflow == nil || h.bundle == nil {
 		return
 	}
-	entityID = strings.TrimSpace(entityID)
+	entityID = catalogEntityID(entityID)
 	if entityID == "" {
 		return
 	}
@@ -670,7 +672,18 @@ func triggerPayloadEntityID(payload map[string]any) string {
 	if payload == nil {
 		return ""
 	}
-	return strings.TrimSpace(asString(payload["entity_id"]))
+	return catalogEntityID(asString(payload["entity_id"]))
+}
+
+func catalogEntityID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if _, err := uuid.Parse(raw); err == nil {
+		return raw
+	}
+	return uuid.NewSHA1(catalogEntityIDNamespace, []byte(raw)).String()
 }
 
 func cloneStringAnyMap(in map[string]any) map[string]any {

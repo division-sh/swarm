@@ -141,37 +141,123 @@ func installFailAgentTurnInsertTrigger(t *testing.T, ctx context.Context, db *sq
 	})
 }
 
-func TestPostgresStore_AppendEvent_NormalizesInvalidOptionalUUIDs(t *testing.T) {
+func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	eventID := uuid.NewString()
-	err := pg.AppendEvent(ctx, (events.Event{
-		ID:          eventID,
+	validEntityID := uuid.NewString()
+	validEventID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, (events.Event{
+		ID:          validEventID,
 		Type:        events.EventType("review.requested"),
 		SourceAgent: "control-plane",
 		TaskID:      "legacy-task-key",
 		Payload:     []byte(`{"name":"Telemedicine Platform"}`),
 		CreatedAt:   time.Now(),
-	}).WithEntityID("pry_hc_telemedicine_001"))
-	if err != nil {
-		t.Fatalf("AppendEvent should not fail on non-UUID optional refs: %v", err)
+	}).WithEntityID(validEntityID)); err != nil {
+		t.Fatalf("AppendEvent(valid entity_id): %v", err)
 	}
 
-	var gotTaskID, gotEntityID string
+	var gotTaskID, gotEntityID, gotScope string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(payload->>'task_id', ''), COALESCE(entity_id::text, '')
+		SELECT COALESCE(payload->>'task_id', ''), COALESCE(entity_id::text, ''), COALESCE(scope, '')
 		FROM events
 		WHERE event_id = $1::uuid
-	`, eventID).Scan(&gotTaskID, &gotEntityID); err != nil {
-		t.Fatalf("query event row: %v", err)
+	`, validEventID).Scan(&gotTaskID, &gotEntityID, &gotScope); err != nil {
+		t.Fatalf("query valid event row: %v", err)
 	}
 	if gotTaskID != "" {
 		t.Fatalf("expected normalized empty task_id, got %q", gotTaskID)
 	}
+	if gotEntityID != validEntityID {
+		t.Fatalf("valid event entity_id = %q, want %q", gotEntityID, validEntityID)
+	}
+	if gotScope != string(events.EventScopeEntity) {
+		t.Fatalf("valid event scope = %q, want %q", gotScope, events.EventScopeEntity)
+	}
+
+	emptyEventID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          emptyEventID,
+		Type:        events.EventType("review.requested"),
+		SourceAgent: "control-plane",
+		Payload:     []byte(`{"name":"Telemedicine Platform"}`),
+		CreatedAt:   time.Now(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(empty entity_id): %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(entity_id::text, ''), COALESCE(scope, '')
+		FROM events
+		WHERE event_id = $1::uuid
+	`, emptyEventID).Scan(&gotEntityID, &gotScope); err != nil {
+		t.Fatalf("query empty event row: %v", err)
+	}
 	if gotEntityID != "" {
-		t.Fatalf("expected normalized empty entity_id, got %q", gotEntityID)
+		t.Fatalf("empty entity event entity_id = %q, want empty", gotEntityID)
+	}
+	if gotScope != string(events.EventScopeGlobal) {
+		t.Fatalf("empty entity event scope = %q, want %q", gotScope, events.EventScopeGlobal)
+	}
+
+	invalidEventID := uuid.NewString()
+	err := pg.AppendEvent(ctx, (events.Event{
+		ID:          invalidEventID,
+		Type:        events.EventType("review.requested"),
+		SourceAgent: "control-plane",
+		Payload:     []byte(`{"name":"Telemedicine Platform"}`),
+		CreatedAt:   time.Now(),
+	}).WithEntityID("pry_hc_telemedicine_001"))
+	if err == nil {
+		t.Fatal("expected AppendEvent to fail on non-UUID entity_id")
+	}
+	if !strings.Contains(err.Error(), "invalid entity_id") {
+		t.Fatalf("AppendEvent invalid entity_id error = %v", err)
+	}
+
+	var invalidCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE event_id = $1::uuid
+	`, invalidEventID).Scan(&invalidCount); err != nil {
+		t.Fatalf("count invalid event rows: %v", err)
+	}
+	if invalidCount != 0 {
+		t.Fatalf("expected invalid entity_id event not to persist, count=%d", invalidCount)
+	}
+}
+
+func TestPostgresStore_PersistEventWithDeliveries_RejectsInvalidEntityID(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	eventID := uuid.NewString()
+	err := pg.PersistEventWithDeliveries(ctx, (events.Event{
+		ID:          eventID,
+		Type:        events.EventType("review.requested"),
+		SourceAgent: "human",
+		Payload:     []byte(`{"directive":"Telemedicine Platform"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID("pry_hc_telemedicine_001"), []string{"control-plane"})
+	if err == nil {
+		t.Fatal("expected PersistEventWithDeliveries to fail on non-UUID entity_id")
+	}
+	if !strings.Contains(err.Error(), "invalid entity_id") {
+		t.Fatalf("PersistEventWithDeliveries invalid entity_id error = %v", err)
+	}
+
+	var nEvents, nDeliveries int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&nEvents); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, eventID).Scan(&nDeliveries); err != nil {
+		t.Fatalf("count event_deliveries: %v", err)
+	}
+	if nEvents != 0 || nDeliveries != 0 {
+		t.Fatalf("expected invalid entity_id event tx rollback, got events=%d deliveries=%d", nEvents, nDeliveries)
 	}
 }
 
