@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,8 +13,14 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
+	builderpkg "swarm/internal/builder"
+	runtimepkg "swarm/internal/runtime"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/store"
+	"swarm/internal/testutil"
 )
 
 func TestPrintRunStatusReport(t *testing.T) {
@@ -124,6 +133,79 @@ func TestLoadRunStatusRuntimeLogs_UsesSpecShapedPayload(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	eb, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: eb}
+	handler := builderpkg.NewHandler(builderpkg.Options{
+		CurrentRuntime: func() *runtimepkg.Runtime { return rt },
+	})
+
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	reqBody, err := json.Marshal(builderpkg.Request{
+		JSONRPC: "2.0",
+		ID:      "run-start-1",
+		Method:  "run.start",
+		Params: map[string]any{
+			"run_id": runID,
+			"inputs": map[string]any{
+				"scan.requested": map[string]any{
+					"entity_id": entityID,
+					"topic":     "sample",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal run.start request: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(reqBody))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var status string
+		err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(status, '')
+			FROM runs
+			WHERE run_id = $1::uuid
+		`, runID).Scan(&status)
+		if err == nil && status == "completed" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %s did not reach durable completed state: last err=%v", runID, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	report, err := loadRunStatusReport(ctx, db, runID, runStatusOptions{})
+	if err != nil {
+		t.Fatalf("loadRunStatusReport: %v", err)
+	}
+	if report.RunTableStatus != "completed" {
+		t.Fatalf("RunTableStatus = %q, want completed", report.RunTableStatus)
+	}
+	if report.EndedAt == nil || report.EndedAt.IsZero() {
+		t.Fatal("expected durable ended_at in run status report")
+	}
+	for _, heuristic := range report.Heuristics {
+		if strings.Contains(heuristic, "runs table still says running") {
+			t.Fatalf("unexpected running heuristic after durable completion: %#v", report.Heuristics)
+		}
 	}
 }
 

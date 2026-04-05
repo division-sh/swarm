@@ -13,6 +13,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/websocket"
 	builderpkg "swarm/internal/builder"
+	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
@@ -80,6 +81,16 @@ type stubObservability struct {
 	eventDetail map[string]eventRecord
 	runtimeLogs []runtimeLogRecord
 	incidents   []incidentRecord
+}
+
+type stubBuilderRunStore struct{}
+
+func (stubBuilderRunStore) AppendEvent(context.Context, events.Event) error { return nil }
+func (stubBuilderRunStore) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+func (stubBuilderRunStore) MarkRunTerminal(context.Context, string, string, string, time.Time) error {
+	return nil
 }
 
 type stubConversationCaps struct {
@@ -1301,7 +1312,7 @@ func TestHandler_HealthzAliases(t *testing.T) {
 }
 
 func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -1395,7 +1406,7 @@ func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
 }
 
 func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -1478,7 +1489,7 @@ func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
 }
 
 func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -1578,7 +1589,7 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 }
 
 func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -1699,7 +1710,7 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 }
 
 func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -1800,7 +1811,7 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 }
 
 func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -1944,7 +1955,7 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 }
 
 func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2062,7 +2073,7 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 }
 
 func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(nil)
+	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}

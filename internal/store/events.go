@@ -485,6 +485,78 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabi
 	return nil
 }
 
+func canonicalRunTerminalStatus(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "completed":
+		return "completed", nil
+	case "failed":
+		return "failed", nil
+	case "cancelled":
+		return "cancelled", nil
+	case "forked":
+		return "forked", nil
+	default:
+		return "", fmt.Errorf("unsupported terminal run status %q", raw)
+	}
+}
+
+func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status, errorSummary string, endedAt time.Time) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	runID = nullUUIDString(runID)
+	if runID == "" {
+		return fmt.Errorf("run_id is required")
+	}
+	if !caps.Events.HasRuns {
+		return fmt.Errorf("runs table is required")
+	}
+	status, err = canonicalRunTerminalStatus(status)
+	if err != nil {
+		return err
+	}
+	errorSummary = strings.TrimSpace(errorSummary)
+	if status != "failed" {
+		errorSummary = ""
+	}
+	if endedAt.IsZero() {
+		endedAt = time.Now().UTC()
+	}
+	result, err := s.DB.ExecContext(ctx, `
+		UPDATE runs
+		SET status = $2,
+		    error_summary = NULLIF($3, ''),
+		    ended_at = COALESCE(ended_at, $4)
+		WHERE run_id = $1::uuid
+		  AND (status IN ('running', 'paused') OR status = $2)
+	`, runID, status, errorSummary, endedAt.UTC())
+	if err != nil {
+		return fmt.Errorf("mark run terminal: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err == nil && rows > 0 {
+		return nil
+	}
+
+	var currentStatus string
+	err = s.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(status, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&currentStatus)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("run %s not found", runID)
+		}
+		return fmt.Errorf("load run terminal state: %w", err)
+	}
+	currentStatus = strings.TrimSpace(currentStatus)
+	if currentStatus == status {
+		return nil
+	}
+	return fmt.Errorf("run %s already terminal with status %s", runID, currentStatus)
+}
+
 func runIDOrEventID(runID, eventID string) string {
 	if runID = nullUUIDString(runID); runID != "" {
 		return runID

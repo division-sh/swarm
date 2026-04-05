@@ -36,3 +36,42 @@ func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 		t.Fatal("expected run input event to be published")
 	}
 }
+
+func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCompletionPersistenceFails(t *testing.T) {
+	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: eb}
+	hub := &runHub{
+		sessions: map[string]*runSession{
+			"run-123": {
+				runID:   "run-123",
+				runtime: rt,
+				subs:    map[string]func(RunEventEnvelope){},
+				events:  []RunEventEnvelope{},
+			},
+		},
+	}
+
+	hub.awaitCompletion("run-123")
+
+	if !hub.isTerminal("run-123") {
+		t.Fatal("expected run session to be marked terminal when completion persistence fails")
+	}
+	session := hub.session("run-123")
+	if session == nil {
+		t.Fatal("expected run session to remain addressable")
+	}
+	if len(session.events) == 0 {
+		t.Fatal("expected terminal failure event to be emitted")
+	}
+	last := session.events[len(session.events)-1]
+	if got, _ := last["type"].(string); got != "run.failed" {
+		t.Fatalf("last event type = %q, want run.failed", got)
+	}
+	payload, _ := last["payload"].(map[string]any)
+	if _, ok := payload["persistence_error"]; !ok {
+		t.Fatalf("last payload = %#v, want persistence_error", payload)
+	}
+}
