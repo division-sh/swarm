@@ -39,12 +39,12 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 	if entityID == "" || nextState == "" {
 		return nil
 	}
-	current := pc.currentWorkflowState(ctx, entityID)
-	currentState := strings.TrimSpace(string(current.Stage))
 	source := pc.SemanticSource()
+	currentState := ""
 	if err := pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+		currentState = strings.TrimSpace(instance.CurrentState)
 		enteredStateAt := time.Now().UTC()
-		if strings.TrimSpace(instance.CurrentState) == nextState && !instance.EnteredStageAt.IsZero() {
+		if currentState == nextState && !instance.EnteredStageAt.IsZero() {
 			enteredStateAt = instance.EnteredStageAt
 		}
 		if strings.TrimSpace(instance.WorkflowName) == "" {
@@ -53,10 +53,7 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 		if strings.TrimSpace(instance.WorkflowVersion) == "" {
 			instance.WorkflowVersion = source.WorkflowVersion()
 		}
-		metadata := cloneStringAnyMap(current.Metadata)
-		if strings.TrimSpace(current.Status) != "" {
-			metadata["status"] = strings.TrimSpace(current.Status)
-		}
+		metadata := cloneStringAnyMap(instance.Metadata)
 		if sourceEvent != "" {
 			metadata["last_source_event"] = sourceEvent
 		}
