@@ -78,7 +78,7 @@ type TransactionalEventStore interface {
 }
 
 type PipelineReceiptSweeperStore interface {
-	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.Event, error)
+	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error)
 }
 
 type EventDeliveryReader interface {

@@ -141,7 +141,7 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 	return s.upsertPipelineReceiptSpec(ctx, tx, eventID, status, errText)
 }
 
-func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.Event, error) {
+func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return nil, err
@@ -392,7 +392,7 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 	return nil
 }
 
-func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context, since time.Time, limit int) ([]events.Event, error) {
+func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
@@ -413,7 +413,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 	}
 	defer rows.Close()
 
-	out := make([]events.Event, 0, limit)
+	out := make([]events.PersistedReplayEvent, 0, limit)
 	for rows.Next() {
 		var evt events.Event
 		var entityID, flowInstance, scope string
@@ -431,15 +431,16 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 		); err != nil {
 			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
 		}
-		if strings.TrimSpace(evt.RunID) == "" {
-			return nil, fmt.Errorf("scan missing pipeline receipt event %s: missing canonical run_id", strings.TrimSpace(evt.ID))
-		}
 		evt = evt.WithEnvelope(events.EventEnvelope{
 			EntityID:     entityID,
 			FlowInstance: flowInstance,
 			Scope:        events.EventScope(scope),
 		})
-		out = append(out, evt)
+		record := events.PersistedReplayEvent{Event: evt}
+		if strings.TrimSpace(evt.RunID) == "" {
+			record.ReplayError = "missing canonical run_id"
+		}
+		out = append(out, record)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read missing pipeline receipt events: %w", err)

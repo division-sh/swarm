@@ -90,7 +90,12 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	}
 	dispatcher := engineDispatcher{bus: eb}
 	redelivered := 0
-	for _, evt := range events {
+	for _, record := range events {
+		evt := record.Event
+		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
+			eb.markPipelineReceipt(ctx, evt.ID, "error", replayErr)
+			continue
+		}
 		recipients, err := eb.sweeperRecipients(ctx, evt.ID)
 		if err != nil {
 			eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())

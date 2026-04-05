@@ -10,7 +10,7 @@ import (
 )
 
 type missingPipelineReceiptReader interface {
-	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.Event, error)
+	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error)
 }
 
 type EventStore interface {
@@ -64,11 +64,18 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		return err
 	}
 	var firstErr error
-	for _, evt := range eventsToReplay {
+	for _, record := range eventsToReplay {
+		evt := record.Event
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if strings.TrimSpace(evt.ID) == "" {
+			continue
+		}
+		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("replay event %s: %s", evt.ID, replayErr)
+			}
 			continue
 		}
 		if err := r.bus.Publish(ctx, evt); err != nil {

@@ -10,7 +10,7 @@ import (
 )
 
 type sweeperTestStore struct {
-	events      []events.Event
+	events      []events.PersistedReplayEvent
 	deliveries  map[string][]string
 	receipts    map[string]string
 	receiptErrs map[string]string
@@ -31,8 +31,8 @@ func (s *sweeperTestStore) UpsertPipelineReceipt(_ context.Context, eventID, sta
 	s.receiptErrs[eventID] = errText
 	return nil
 }
-func (s *sweeperTestStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.Event, error) {
-	return append([]events.Event(nil), s.events...), nil
+func (s *sweeperTestStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
+	return append([]events.PersistedReplayEvent(nil), s.events...), nil
 }
 func (s *sweeperTestStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	return append([]string(nil), s.deliveries[eventID]...), nil
@@ -40,13 +40,13 @@ func (s *sweeperTestStore) ListEventDeliveryRecipients(_ context.Context, eventI
 
 func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 	store := &sweeperTestStore{
-		events: []events.Event{
-			(events.Event{
+		events: []events.PersistedReplayEvent{
+			{Event: (events.Event{
 				ID:        "evt-1",
 				Type:      events.EventType("custom.emitted"),
 				Payload:   []byte(`{"entity_id":"ent-1"}`),
 				CreatedAt: time.Now().UTC(),
-			}).WithEntityID("ent-1"),
+			}).WithEntityID("ent-1")},
 		},
 		deliveries: map[string][]string{"evt-1": {"agent-a"}},
 	}
@@ -78,13 +78,13 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 
 func TestSweepUndispatchedFallsBackToSubscribedRouting(t *testing.T) {
 	store := &sweeperTestStore{
-		events: []events.Event{
-			(events.Event{
+		events: []events.PersistedReplayEvent{
+			{Event: (events.Event{
 				ID:        "evt-2",
 				Type:      events.EventType("custom.routed"),
 				Payload:   []byte(`{"entity_id":"ent-2"}`),
 				CreatedAt: time.Now().UTC(),
-			}).WithEntityID("ent-2"),
+			}).WithEntityID("ent-2")},
 		},
 		deliveries: map[string][]string{},
 	}
@@ -111,5 +111,59 @@ func TestSweepUndispatchedFallsBackToSubscribedRouting(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected subscribed swept delivery")
+	}
+}
+
+func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
+	store := &sweeperTestStore{
+		events: []events.PersistedReplayEvent{
+			{
+				Event: events.Event{
+					ID:        "evt-bad",
+					Type:      events.EventType("custom.bad"),
+					CreatedAt: time.Now().UTC(),
+				},
+				ReplayError: "missing canonical run_id",
+			},
+			{
+				Event: (events.Event{
+					ID:        "evt-good",
+					Type:      events.EventType("custom.good"),
+					Payload:   []byte(`{"entity_id":"ent-good"}`),
+					CreatedAt: time.Now().UTC(),
+				}).WithEntityID("ent-good"),
+			},
+		},
+		deliveries: map[string][]string{"evt-good": {"agent-good"}},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := eb.Subscribe("agent-good")
+
+	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("swept count = %d, want 1", count)
+	}
+	if got := store.receipts["evt-bad"]; got != "error" {
+		t.Fatalf("bad receipt status = %q, want error", got)
+	}
+	if got := store.receiptErrs["evt-bad"]; got != "missing canonical run_id" {
+		t.Fatalf("bad receipt error = %q, want missing canonical run_id", got)
+	}
+	if got := store.receipts["evt-good"]; got != "processed" {
+		t.Fatalf("good receipt status = %q, want processed", got)
+	}
+	select {
+	case evt := <-ch:
+		if evt.ID != "evt-good" {
+			t.Fatalf("delivered event id = %q, want evt-good", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected good swept delivery")
 	}
 }
