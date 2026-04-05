@@ -824,6 +824,7 @@ type AgentRegistryEntry struct {
 	NodeType               string         `yaml:"node_type"`
 	ModelTier              string         `yaml:"model_tier"`
 	ConversationMode       string         `yaml:"conversation_mode"`
+	SessionScope           string         `yaml:"session_scope"`
 	MaxTurnsPerTask        int            `yaml:"max_turns_per_task"`
 	Subscriptions          []string       `yaml:"subscriptions"`
 	SubscriptionsBootstrap []string       `yaml:"subscriptions_bootstrap"`

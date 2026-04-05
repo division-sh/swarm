@@ -24,6 +24,7 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 	agentID := strings.TrimSpace(lease.AgentID)
 	lockOwner := strings.TrimSpace(lease.LockOwner)
 	scopeKey := strings.TrimSpace(lease.ScopeKey)
+	sessionScope := strings.TrimSpace(lease.SessionScope)
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	if agentID == "" || lockOwner == "" || runtimeMode == "" {
 		return func() {}
@@ -45,7 +46,7 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 			case <-stopCh:
 				return
 			case <-ticker.C:
-				refreshed, err := sessions.Acquire(ctx, agentID, runtimeMode, lockOwner, scopeKey)
+				refreshed, err := sessions.Acquire(ctx, agentID, runtimeMode, sessionScope, lockOwner, scopeKey)
 				if err != nil {
 					if onError != nil {
 						onError(err)

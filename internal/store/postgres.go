@@ -232,6 +232,9 @@ func (s *PostgresStore) migrateLegacyAgentRuntimeDescriptors(ctx context.Context
 		if desc.Mode == "" {
 			desc.Mode = legacy.Mode
 		}
+		if desc.SessionScope == "" {
+			desc.SessionScope = legacy.SessionScope
+		}
 		if desc.MaxTurnsPerTask == 0 {
 			desc.MaxTurnsPerTask = legacy.MaxTurnsPerTask
 		}
@@ -302,6 +305,7 @@ func decodeLegacyAgentRuntimeConfig(raw []byte) persistedAgentRuntimeDescriptor 
 	desc := persistedAgentRuntimeDescriptor{
 		Type:            strings.TrimSpace(stringValue(payload["type"])),
 		Mode:            strings.TrimSpace(stringValue(payload["mode"])),
+		SessionScope:    strings.TrimSpace(stringValue(payload["session_scope"])),
 		MaxTurnsPerTask: intValue(payload["max_turns_per_task"]),
 		NativeTools:     nativeToolConfigValue(payload["native_tools"]),
 		WorkspaceClass:  strings.TrimSpace(stringValue(payload["workspace_class"])),

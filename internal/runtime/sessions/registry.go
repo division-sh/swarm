@@ -12,10 +12,10 @@ import (
 )
 
 type Registry interface {
-	Acquire(ctx context.Context, agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error)
+	Acquire(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, scopeKey string) (*Lease, error)
 	Release(ctx context.Context, lease *Lease) error
-	Rotate(ctx context.Context, agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error)
-	IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionID, scopeKey string) error
+	Rotate(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, summary, scopeKey string) (*Lease, error)
+	IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionScope, sessionID, scopeKey string) error
 }
 
 type Resetter interface {
@@ -27,6 +27,7 @@ type Lease struct {
 	ProviderSessionID string
 	AgentID           string
 	RuntimeMode       string
+	SessionScope      string
 	LockOwner         string
 	ScopeKey          string
 	ExpiresAt         time.Time
@@ -72,11 +73,11 @@ func registryKey(agentID, runtimeMode, scopeKey string) string {
 	return strings.TrimSpace(agentID) + "|" + strings.TrimSpace(runtimeMode) + "|" + strings.TrimSpace(scopeKey)
 }
 
-func (sr *InMemoryRegistry) Acquire(ctx context.Context, agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error) {
+func (sr *InMemoryRegistry) Acquire(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
-	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +115,7 @@ func (sr *InMemoryRegistry) Acquire(ctx context.Context, agentID, runtimeMode, l
 		ProviderSessionID: rec.ProviderSessionID,
 		AgentID:           rec.AgentID,
 		RuntimeMode:       rec.RuntimeMode,
+		SessionScope:      resolved.Scope,
 		LockOwner:         rec.LockOwner,
 		ScopeKey:          rec.ScopeKey,
 		ExpiresAt:         rec.LockExpiresAt,
@@ -143,8 +145,8 @@ func (sr *InMemoryRegistry) Release(_ context.Context, lease *Lease) error {
 	return nil
 }
 
-func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error) {
-	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, summary, scopeKey string) (*Lease, error) {
+	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -181,14 +183,15 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID, runtimeMode, lo
 		ProviderSessionID: rec.ProviderSessionID,
 		AgentID:           rec.AgentID,
 		RuntimeMode:       rec.RuntimeMode,
+		SessionScope:      resolved.Scope,
 		LockOwner:         rec.LockOwner,
 		ScopeKey:          rec.ScopeKey,
 		ExpiresAt:         rec.LockExpiresAt,
 	}, nil
 }
 
-func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionID, scopeKey string) error {
-	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionScope, sessionID, scopeKey string) error {
+	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return err
 	}
@@ -210,7 +213,7 @@ func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, agentID, runtimeM
 	return fmt.Errorf("session for agent %s not found", agentID)
 }
 
-func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey string) error {
 	agentID = strings.TrimSpace(agentID)
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	lockOwner = strings.TrimSpace(lockOwner)
@@ -218,7 +221,7 @@ func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, agentID, runtime
 	if agentID == "" || runtimeMode == "" || lockOwner == "" || newSessionID == "" {
 		return errors.New("agentID, runtimeMode, lockOwner, and newSessionID are required")
 	}
-	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return err
 	}

@@ -54,7 +54,20 @@ func (s *failingConversationStore) UpsertConversation(context.Context, Conversat
 	return s.err
 }
 
-func (s *failingConversationStore) LoadActiveConversation(context.Context, string, string, string) (ConversationRecord, bool, error) {
+func (s *failingConversationStore) LoadActiveConversation(context.Context, string, string, string, string) (ConversationRecord, bool, error) {
+	return ConversationRecord{}, false, nil
+}
+
+type captureConversationStore struct {
+	record ConversationRecord
+}
+
+func (s *captureConversationStore) UpsertConversation(_ context.Context, rec ConversationRecord) error {
+	s.record = rec
+	return nil
+}
+
+func (s *captureConversationStore) LoadActiveConversation(context.Context, string, string, string, string) (ConversationRecord, bool, error) {
 	return ConversationRecord{}, false, nil
 }
 
@@ -69,7 +82,7 @@ func (s *failingTurnStore) AppendAgentTurn(context.Context, AgentTurnRecord) err
 func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
-	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "task-1"), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "", "task-1"), runtimeactors.AgentConfig{
 		ID:       "agent-1",
 		Type:     "sonnet",
 		EntityID: "entity-1",
@@ -113,7 +126,7 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
-	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "task-1"), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "", "task-1"), runtimeactors.AgentConfig{
 		ID:   "agent-2",
 		Type: "haiku",
 	})
@@ -149,7 +162,7 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 
 func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
-	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "task-1")
+	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "", "task-1")
 
 	s, err := runtime.StartSession(ctx, "agent-2", "base prompt", []ToolDefinition{
 		{Name: "emit_market_research_scan_complete"},
@@ -274,6 +287,40 @@ func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T)
 	}
 	if publisher.runtimeLogs[0].Action != "persist_api_conversation_failed" {
 		t.Fatalf("action = %q", publisher.runtimeLogs[0].Action)
+	}
+}
+
+func TestAnthropicAPIRuntime_PersistConversationIncludesSessionScope(t *testing.T) {
+	store := &captureConversationStore{}
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, store, nil, nil)
+
+	runtime.persistConversation(context.Background(), &Session{
+		ID:               "session-3",
+		AgentID:          "agent-3",
+		ConversationMode: sessions.RuntimeModeSession,
+		SessionScope:     sessions.SessionScopeFlow,
+		ScopeKey:         "review/inst-1",
+	})
+
+	if store.record.SessionScope != sessions.SessionScopeFlow {
+		t.Fatalf("SessionScope = %q, want %q", store.record.SessionScope, sessions.SessionScopeFlow)
+	}
+}
+
+func TestClaudeCLIRuntime_PersistConversationIncludesSessionScope(t *testing.T) {
+	store := &captureConversationStore{}
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, store, nil)
+
+	runtime.persistConversation(context.Background(), &Session{
+		ID:               "session-4",
+		AgentID:          "agent-4",
+		ConversationMode: sessions.RuntimeModeSessionPerEntity,
+		SessionScope:     sessions.SessionScopeEntity,
+		ScopeKey:         "entity-1",
+	})
+
+	if store.record.SessionScope != sessions.SessionScopeEntity {
+		t.Fatalf("SessionScope = %q, want %q", store.record.SessionScope, sessions.SessionScopeEntity)
 	}
 }
 

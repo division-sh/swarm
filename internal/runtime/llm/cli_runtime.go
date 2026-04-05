@@ -103,28 +103,29 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 		return nil
 	}
 	return r.conversations.UpsertConversation(ctx, ConversationRecord{
-		SessionID: s.ID,
-		AgentID:   s.AgentID,
-		ScopeKey:  strings.TrimSpace(s.ScopeKey),
-		RunID:     strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
-		Mode:      mode,
-		Messages:  s.Messages,
-		Summary:   BuildSessionSummary(s),
-		TurnCount: s.TurnCount,
-		Status:    "active",
+		SessionID:    s.ID,
+		AgentID:      s.AgentID,
+		SessionScope: strings.TrimSpace(s.SessionScope),
+		ScopeKey:     strings.TrimSpace(s.ScopeKey),
+		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
+		Mode:         mode,
+		Messages:     s.Messages,
+		Summary:      BuildSessionSummary(s),
+		TurnCount:    s.TurnCount,
+		Status:       "active",
 	})
 }
 
 func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
 	scope := sessions.ScopeFromContext(ctx)
-	resolved, err := resolvedSessionScope(ctx, scope.ConversationMode, scope.ScopeKey)
+	resolved, err := resolvedSessionScope(ctx, scope.ConversationMode, scope.SessionScope, scope.ScopeKey)
 	if err != nil {
 		return nil, err
 	}
 
 	var lease *sessions.Lease
 	if !resolved.Stateless {
-		lease, err = r.sessions.Acquire(ctx, agentID, resolved.RuntimeMode, r.lockOwner, resolved.ScopeKey)
+		lease, err = r.sessions.Acquire(ctx, agentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, resolved.ScopeKey)
 		if err != nil {
 			return nil, err
 		}
@@ -149,13 +150,14 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 		AgentID:          agentID,
 		RuntimeMode:      resolved.RuntimeMode,
 		ConversationMode: resolved.RuntimeMode,
+		SessionScope:     resolved.Scope,
 		ScopeKey:         resolved.ScopeKey,
 		SystemPrompt:     augmentCLISystemPrompt(systemPrompt, tools),
 		Tools:            tools,
 		Messages:         nil,
 	}
 	if r.conversations != nil && !resolved.Stateless {
-		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, resolved.RuntimeMode, resolved.ScopeKey); err == nil && ok {
+		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, resolved.RuntimeMode, resolved.Scope, resolved.ScopeKey); err == nil && ok {
 			s.Messages = rec.Messages
 			s.TurnCount = rec.TurnCount
 		}
@@ -185,13 +187,13 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	}
 
-	resolved, err := resolvedSessionScope(ctx, coalesce(s.ConversationMode, s.RuntimeMode), s.ScopeKey)
+	resolved, err := resolvedSessionScope(ctx, coalesce(s.ConversationMode, s.RuntimeMode), coalesce(s.SessionScope, ""), s.ScopeKey)
 	if err != nil {
 		return nil, err
 	}
 	var lease *sessions.Lease
 	if !resolved.Stateless {
-		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, r.lockOwner, resolved.ScopeKey)
+		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, resolved.ScopeKey)
 		if err != nil {
 			return nil, err
 		}
@@ -324,7 +326,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		oldParseFailures := s.ParseFailures
 		checkpoint := BuildRotationCheckpoint(rotateReason, s)
 		if !resolved.Stateless {
-			rotated, rotateErr := r.sessions.Rotate(ctx, s.AgentID, resolved.RuntimeMode, r.lockOwner, checkpoint, resolved.ScopeKey)
+			rotated, rotateErr := r.sessions.Rotate(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, checkpoint, resolved.ScopeKey)
 			if rotateErr == nil && rotated != nil {
 				s.ID = rotated.SessionID
 				s.ProviderSessionID = rotated.ProviderSessionID
@@ -410,7 +412,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	if sid := strings.TrimSpace(resp.SessionID); sid != "" && sid != s.ProviderSessionID {
 		oldSessionID := strings.TrimSpace(s.ProviderSessionID)
 		if !resolved.Stateless {
-			if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, resolved.RuntimeMode, lease.LockOwner, sid, resolved.ScopeKey); err != nil {
+			if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, resolved.RuntimeMode, resolved.Scope, lease.LockOwner, sid, resolved.ScopeKey); err != nil {
 				logPublisherRuntime(ctx, r.events, "warn", "adopt_cli_provider_session_failed", "Adopting the CLI provider session failed", s.AgentID, s.ID, entityID, map[string]any{
 					"old_provider_session_id": oldSessionID,
 					"new_provider_session_id": sid,
@@ -427,7 +429,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	s.ParseFailures = 0
 
 	if !resolved.Stateless {
-		if err := r.sessions.IncrementTurn(ctx, s.AgentID, resolved.RuntimeMode, s.ID, resolved.ScopeKey); err != nil {
+		if err := r.sessions.IncrementTurn(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, s.ID, resolved.ScopeKey); err != nil {
 			return nil, err
 		}
 	}

@@ -1393,9 +1393,10 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		AgentID:  "a1",
-		Mode:     "session",
-		ScopeKey: "global",
+		AgentID:      "a1",
+		Mode:         "session",
+		SessionScope: "global",
+		ScopeKey:     "global",
 		Messages: []llm.Message{
 			{Role: "user", Content: "reach me at a@example.com"},
 		},
@@ -1403,7 +1404,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertConversation: %v", err)
 	}
-	rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "global")
+	rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "global", "global")
 	if err != nil || !ok {
 		t.Fatalf("LoadActiveConversation ok=%v err=%v", ok, err)
 	}
@@ -1458,6 +1459,53 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	}
 	if availableToolsJSON != "[]" || toolCallsJSON != "[]" || emittedEventsJSON != "[]" || mcpServersJSON != "{}" || mcpToolsListedJSON != "[]" || mcpToolsVisibleJSON != "[]" {
 		t.Fatalf("expected empty structured telemetry defaults, got tools=%s calls=%s emitted=%s mcp_servers=%s mcp_listed=%s mcp_visible=%s", availableToolsJSON, toolCallsJSON, emittedEventsJSON, mcpServersJSON, mcpToolsListedJSON, mcpToolsVisibleJSON)
+	}
+}
+
+func TestManagerStore_ConversationPersistence_SessionPerEntityUsesActorContext(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	baseCtx := context.Background()
+	resetAgentSessionsSpecTable(t, baseCtx, pg)
+	entityID := uuid.NewString()
+	seedSpecAgent(t, baseCtx, pg, "entity-agent", entityID, "")
+
+	ctx := runtimeactors.WithActor(baseCtx, runtimeactors.AgentConfig{
+		ID:       "entity-agent",
+		FlowPath: "review/inst-1",
+		EntityID: entityID,
+	})
+
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		AgentID:      "entity-agent",
+		Mode:         "session_per_entity",
+		SessionScope: "entity",
+		ScopeKey:     entityID,
+		Messages:     []llm.Message{{Role: "assistant", Content: "done"}},
+		TurnCount:    1,
+		Status:       "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(session_per_entity): %v", err)
+	}
+
+	rec, ok, err := pg.LoadActiveConversation(ctx, "entity-agent", "session_per_entity", "entity", entityID)
+	if err != nil || !ok {
+		t.Fatalf("LoadActiveConversation ok=%v err=%v", ok, err)
+	}
+	if rec.SessionScope != "entity" || rec.ScopeKey != entityID {
+		t.Fatalf("unexpected conversation record: %+v", rec)
+	}
+
+	var flowInstance string
+	if err := db.QueryRowContext(baseCtx, `
+		SELECT COALESCE(flow_instance, '')
+		FROM agent_sessions
+		WHERE agent_id = 'entity-agent' AND scope_key = $1
+	`, entityID).Scan(&flowInstance); err != nil {
+		t.Fatalf("load entity-scoped session row: %v", err)
+	}
+	if flowInstance != "review/inst-1" {
+		t.Fatalf("flow_instance = %q, want review/inst-1", flowInstance)
 	}
 }
 
@@ -1597,12 +1645,13 @@ func TestManagerStore_AppendAgentTurn_AtomicallyPersistsSessionLastTurnAndTurnRo
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		AgentID:   "a1",
-		Mode:      "session",
-		ScopeKey:  "global",
-		Messages:  []llm.Message{{Role: "assistant", Content: "done"}},
-		TurnCount: 1,
-		Status:    "active",
+		AgentID:      "a1",
+		Mode:         "session",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Messages:     []llm.Message{{Role: "assistant", Content: "done"}},
+		TurnCount:    1,
+		Status:       "active",
 	}); err != nil {
 		t.Fatalf("UpsertConversation(session): %v", err)
 	}
@@ -1715,7 +1764,7 @@ func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *test
 		t.Fatalf("UpsertConversation(task): %v", err)
 	}
 
-	if rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "task", ""); err != nil || ok || rec.AgentID != "" {
+	if rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "task", "", ""); err != nil || ok || rec.AgentID != "" {
 		t.Fatalf("LoadActiveConversation(task) ok=%v err=%v rec=%+v", ok, err, rec)
 	}
 
@@ -1775,9 +1824,10 @@ func TestManagerStore_SessionConversationDoesNotPersistAuditRow(t *testing.T) {
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		AgentID:  "a1",
-		Mode:     "session",
-		ScopeKey: "global",
+		AgentID:      "a1",
+		Mode:         "session",
+		SessionScope: "global",
+		ScopeKey:     "global",
 		Messages: []llm.Message{
 			{Role: "user", Content: "hello"},
 		},
@@ -2179,18 +2229,19 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		AgentID:   ceoID,
-		TaskID:    "",
-		Mode:      "session",
-		ScopeKey:  "global",
-		Messages:  []llm.Message{{Role: "user", Content: "hi"}},
-		Summary:   "sum",
-		TurnCount: 1,
-		Status:    "active",
+		AgentID:      ceoID,
+		TaskID:       "",
+		Mode:         "session",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Messages:     []llm.Message{{Role: "user", Content: "hi"}},
+		Summary:      "sum",
+		TurnCount:    1,
+		Status:       "active",
 	}); err != nil {
 		t.Fatalf("UpsertConversation: %v", err)
 	}
-	if rec, ok, err := pg.LoadActiveConversation(ctx, ceoID, "session", "global"); err != nil || !ok || rec.AgentID != ceoID {
+	if rec, ok, err := pg.LoadActiveConversation(ctx, ceoID, "session", "global", "global"); err != nil || !ok || rec.AgentID != ceoID {
 		t.Fatalf("LoadActiveConversation ok=%v err=%v rec=%+v", ok, err, rec)
 	}
 
@@ -2212,6 +2263,66 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 	if err := pg.CancelSchedule(ctx, ceoID, "timer.test"); err != nil {
 		t.Fatalf("CancelSchedule: %v", err)
+	}
+}
+
+func TestPostgresStore_LoadAgents_MigratesLegacySessionScopeIntoRuntimeDescriptor(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if err := pg.ensureSchemaCompatibilityColumns(ctx); err != nil {
+		t.Fatalf("ensureSchemaCompatibilityColumns: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (
+			agent_id, role, model_tier, llm_backend, conversation_mode,
+			config, runtime_descriptor, status, created_at
+		) VALUES (
+			'legacy-session-agent', 'worker', 'sonnet', 'api', 'session',
+			'{"type":"sonnet","mode":"worker","session_scope":"global","system_prompt":"x"}'::jsonb,
+			'{}'::jsonb,
+			'active',
+			now()
+		)
+	`); err != nil {
+		t.Fatalf("seed legacy agent row: %v", err)
+	}
+
+	agents, err := pg.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents: %v", err)
+	}
+	found := false
+	for _, agent := range agents {
+		if agent.Config.ID != "legacy-session-agent" {
+			continue
+		}
+		found = true
+		if agent.Config.SessionScope != "global" {
+			t.Fatalf("SessionScope = %q, want global", agent.Config.SessionScope)
+		}
+	}
+	if !found {
+		t.Fatal("expected migrated legacy agent")
+	}
+
+	var (
+		configJSON            string
+		runtimeDescriptorJSON string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(config::text, '{}'), COALESCE(runtime_descriptor::text, '{}')
+		FROM agents
+		WHERE agent_id = 'legacy-session-agent'
+	`).Scan(&configJSON, &runtimeDescriptorJSON); err != nil {
+		t.Fatalf("load migrated agent row: %v", err)
+	}
+	if strings.Contains(configJSON, "session_scope") {
+		t.Fatalf("expected session_scope removed from opaque config, got %s", configJSON)
+	}
+	if !strings.Contains(runtimeDescriptorJSON, `"session_scope": "global"`) && !strings.Contains(runtimeDescriptorJSON, `"session_scope":"global"`) {
+		t.Fatalf("expected session_scope in runtime_descriptor, got %s", runtimeDescriptorJSON)
 	}
 }
 
@@ -2240,13 +2351,14 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	}
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		AgentID:   "agent-cleanup-1",
-		Mode:      "session",
-		ScopeKey:  "global",
-		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
-		Summary:   "x",
-		TurnCount: 1,
-		Status:    "active",
+		AgentID:      "agent-cleanup-1",
+		Mode:         "session",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Messages:     []llm.Message{{Role: "user", Content: "hello"}},
+		Summary:      "x",
+		TurnCount:    1,
+		Status:       "active",
 	}); err != nil {
 		t.Fatalf("seed conversation: %v", err)
 	}

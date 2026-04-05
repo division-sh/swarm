@@ -332,15 +332,20 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	// Spec v2.0: reconfigure triggers session rotation so the agent restarts on a
 	// clean session with the new prompt/tool set. Fail fast if rotation fails.
 	am.mu.RLock()
-	sessions := am.sessions
-	runtimeMode := strings.TrimSpace(am.runtimeMode)
+	sessionRegistry := am.sessions
 	am.mu.RUnlock()
-	if sessions != nil && runtimeMode != "" {
-		rotated, err := sessions.Rotate(am.runtimeContext(), agentID, runtimeMode, "reconfigure", "agent reconfigured", "")
+	conversationMode := strings.TrimSpace(updated.ConversationMode)
+	if sessionRegistry != nil && conversationMode != "" && sessions.IsLiveSessionRuntimeMode(conversationMode) {
+		scopeKey, err := sessions.DeclaredScopeKey(updated)
 		if err != nil {
-			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, runtimeMode, err)
+			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, conversationMode, err)
+		}
+		rotationCtx := models.WithActor(am.runtimeContext(), updated)
+		rotated, err := sessionRegistry.Rotate(rotationCtx, agentID, conversationMode, strings.TrimSpace(updated.SessionScope), "reconfigure", "agent reconfigured", scopeKey)
+		if err != nil {
+			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, conversationMode, err)
 		} else if rotated != nil {
-			llm.LogSessionRotatedForRun(am.runtimeContext(), am.bus, agentID, runtimeMode, "", rotated.SessionID, "", "agent_reconfigured", 0, 0)
+			llm.LogSessionRotatedForRun(am.runtimeContext(), am.bus, agentID, conversationMode, "", rotated.SessionID, "", "agent_reconfigured", 0, 0)
 		}
 	}
 	if am.store != nil {

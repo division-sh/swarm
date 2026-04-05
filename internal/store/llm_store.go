@@ -569,7 +569,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if err != nil {
 		return err
 	}
-	resolved, err := runtimesessions.ResolveScope(context.Background(), mode, rec.ScopeKey)
+	resolved, err := runtimesessions.ResolveScope(ctx, mode, rec.SessionScope, rec.ScopeKey)
 	if err != nil {
 		return err
 	}
@@ -835,7 +835,7 @@ func nullUUIDString(raw string) string {
 	return raw
 }
 
-func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mode, scopeKey string) (runtimellm.ConversationRecord, bool, error) {
+func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mode, sessionScope, scopeKey string) (runtimellm.ConversationRecord, bool, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return runtimellm.ConversationRecord{}, false, fmt.Errorf("agent_id is required")
@@ -845,7 +845,7 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 	if err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
-	resolved, err := runtimesessions.ResolveScope(context.Background(), mode, scopeKey)
+	resolved, err := runtimesessions.ResolveScope(ctx, mode, sessionScope, scopeKey)
 	if err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
@@ -879,6 +879,7 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 	var rec runtimellm.ConversationRecord
 	rec.AgentID = agentID
 	rec.Mode = mode
+	rec.SessionScope = resolved.Scope
 
 	var rawMessages []byte
 	err = s.DB.QueryRowContext(ctx, q, agentID, mode, resolved.ScopeKey).Scan(

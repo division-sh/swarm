@@ -148,13 +148,18 @@ func (c *Conversation) ensureSession(ctx context.Context) error {
 	if strings.TrimSpace(scope.ConversationMode) == "" {
 		scope.ConversationMode = ConversationModeString(c.Mode)
 	}
+	if strings.TrimSpace(scope.SessionScope) == "" {
+		if actor, ok := models.ActorFromContext(ctx); ok {
+			scope.SessionScope = strings.TrimSpace(actor.SessionScope)
+		}
+	}
 	if strings.TrimSpace(scope.ScopeKey) == "" {
 		switch c.Mode {
 		case TaskScoped, SessionPerEntityScoped:
 			scope.ScopeKey = strings.TrimSpace(c.TaskID)
 		}
 	}
-	ctx = sessions.WithScope(ctx, scope.ConversationMode, scope.ScopeKey)
+	ctx = sessions.WithScope(ctx, scope.ConversationMode, scope.SessionScope, scope.ScopeKey)
 	s, err := c.runtime.StartSession(ctx, c.AgentID, c.SystemPrompt, c.Tools)
 	if err != nil {
 		return err

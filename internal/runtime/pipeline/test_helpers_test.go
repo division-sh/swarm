@@ -58,6 +58,7 @@ control-plane:
   role: control-plane
   model_tier: sonnet
   conversation_mode: session
+  session_scope: global
   subscriptions:
     - item.reviewed
 `)

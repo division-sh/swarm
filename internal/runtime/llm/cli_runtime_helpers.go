@@ -42,15 +42,16 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 		return
 	}
 	if err := r.conversations.UpsertConversation(ctx, ConversationRecord{
-		SessionID: s.ID,
-		AgentID:   s.AgentID,
-		ScopeKey:  strings.TrimSpace(s.ScopeKey),
-		RunID:     strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
-		Mode:      mode,
-		Messages:  s.Messages,
-		Summary:   BuildSessionSummary(s),
-		TurnCount: s.TurnCount,
-		Status:    "active",
+		SessionID:    s.ID,
+		AgentID:      s.AgentID,
+		SessionScope: strings.TrimSpace(s.SessionScope),
+		ScopeKey:     strings.TrimSpace(s.ScopeKey),
+		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
+		Mode:         mode,
+		Messages:     s.Messages,
+		Summary:      BuildSessionSummary(s),
+		TurnCount:    s.TurnCount,
+		Status:       "active",
 	}); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_failed", "Persisting the CLI conversation failed", s.AgentID, s.ID, "", map[string]any{
 			"conversation_mode": mode,
@@ -173,10 +174,10 @@ func dedupeToolCalls(calls []ToolCall) []ToolCall {
 }
 
 type sessionIDAdopter interface {
-	AdoptSessionID(ctx context.Context, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error
+	AdoptSessionID(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey string) error
 }
 
-func adoptRegistrySessionID(ctx context.Context, reg sessions.Registry, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+func adoptRegistrySessionID(ctx context.Context, reg sessions.Registry, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey string) error {
 	if reg == nil {
 		return nil
 	}
@@ -184,7 +185,7 @@ func adoptRegistrySessionID(ctx context.Context, reg sessions.Registry, agentID,
 	if !ok {
 		return nil
 	}
-	return adopter.AdoptSessionID(ctx, agentID, runtimeMode, lockOwner, newSessionID, scopeKey)
+	return adopter.AdoptSessionID(ctx, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey)
 }
 
 func claudeToolsArg(tools []ToolDefinition) string {

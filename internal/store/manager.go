@@ -11,6 +11,7 @@ import (
 type persistedAgentRuntimeDescriptor struct {
 	Type            string                         `json:"type,omitempty"`
 	Mode            string                         `json:"mode,omitempty"`
+	SessionScope    string                         `json:"session_scope,omitempty"`
 	MaxTurnsPerTask int                            `json:"max_turns_per_task,omitempty"`
 	NativeTools     runtimeactors.NativeToolConfig `json:"native_tools,omitempty"`
 	WorkspaceClass  string                         `json:"workspace_class,omitempty"`
@@ -23,6 +24,7 @@ var runtimeConfigKeys = map[string]struct{}{
 	"model_tier":         {},
 	"llm_backend":        {},
 	"conversation_mode":  {},
+	"session_scope":      {},
 	"max_turns_per_task": {},
 	"subscriptions":      {},
 	"emit_events":        {},
@@ -66,6 +68,7 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig) ([]by
 	desc := persistedAgentRuntimeDescriptor{
 		Type:            strings.TrimSpace(cfg.Type),
 		Mode:            strings.TrimSpace(cfg.Mode),
+		SessionScope:    strings.TrimSpace(cfg.SessionScope),
 		MaxTurnsPerTask: cfg.MaxTurnsPerTask,
 		NativeTools:     cfg.NativeTools,
 		WorkspaceClass:  strings.TrimSpace(cfg.WorkspaceClass),
@@ -87,6 +90,7 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) persistedAgentRuntimeDesc
 	}
 	desc.Type = strings.TrimSpace(desc.Type)
 	desc.Mode = strings.TrimSpace(desc.Mode)
+	desc.SessionScope = strings.TrimSpace(desc.SessionScope)
 	desc.WorkspaceClass = strings.TrimSpace(desc.WorkspaceClass)
 	desc.ManagerFallback = strings.TrimSpace(desc.ManagerFallback)
 	return desc

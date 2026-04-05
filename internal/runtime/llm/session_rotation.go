@@ -20,7 +20,7 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, runtimeMode string, r
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
 	summary := BuildRotationCheckpoint(fmt.Sprintf("turn_limit_reached:%d", rotateAfter), s)
-	lease, err := registry.Rotate(ctx, s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
+	lease, err := registry.Rotate(ctx, s.AgentID, runtimeMode, strings.TrimSpace(s.SessionScope), lockOwner, summary, strings.TrimSpace(s.ScopeKey))
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, runtimeMode 
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
 	summary := BuildRotationCheckpoint(fmt.Sprintf("parse_failures_threshold:%d", threshold), s)
-	lease, err := registry.Rotate(ctx, s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
+	lease, err := registry.Rotate(ctx, s.AgentID, runtimeMode, strings.TrimSpace(s.SessionScope), lockOwner, summary, strings.TrimSpace(s.ScopeKey))
 	if err != nil {
 		return nil, err
 	}

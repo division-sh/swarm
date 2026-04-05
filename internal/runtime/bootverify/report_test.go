@@ -393,6 +393,85 @@ func TestRun_MapsInvalidFieldDetectionToNamedError(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsRootAgentFlowSessionScope(t *testing.T) {
+	root := writeSessionScopeValidationFixture(t, `
+root-flow:
+  id: root-flow
+  model_tier: sonnet
+  conversation_mode: session
+  session_scope: flow
+  subscriptions:
+    - item.created
+`, "", "")
+
+	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+
+	if !reportContains(report.Errors(), "invalid_field_detection", "session_scope flow requires flow-scoped declaration") {
+		t.Fatalf("expected session_scope flow declaration error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsEntitySessionScopeInStatelessFlow(t *testing.T) {
+	root := writeSessionScopeValidationFixture(t, "{}\n", `
+name: support
+`, `
+entity-agent:
+  id: entity-agent
+  model_tier: sonnet
+  conversation_mode: session_per_entity
+  session_scope: entity
+  subscriptions:
+    - item.created
+`)
+
+	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+
+	if !reportContains(report.Errors(), "invalid_field_detection", "session_scope entity requires stateful flow support") {
+		t.Fatalf("expected stateful flow session_scope error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AcceptsExplicitSessionScopeDeclarations(t *testing.T) {
+	root := writeSessionScopeValidationFixture(t, `
+root-global:
+  id: root-global
+  model_tier: sonnet
+  conversation_mode: session
+  session_scope: global
+  subscriptions:
+    - item.created
+`, `
+name: support
+initial_state: waiting
+states:
+  - waiting
+  - done
+`, `
+flow-agent:
+  id: flow-agent
+  model_tier: sonnet
+  conversation_mode: session
+  session_scope: flow
+  subscriptions:
+    - support/item.created
+entity-agent:
+  id: entity-agent
+  model_tier: sonnet
+  conversation_mode: session_per_entity
+  session_scope: entity
+  subscriptions:
+    - support/item.created
+`)
+
+	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+
+	for _, finding := range report.Errors() {
+		if finding.CheckID == "invalid_field_detection" && strings.Contains(finding.Message, "session_scope") {
+			t.Fatalf("unexpected session_scope error: %#v", report.Errors())
+		}
+	}
+}
+
 func TestRun_MapsHandlerFieldComplianceToNamedError(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-success")
 	nodeID, eventType, handler, ok := firstBundleHandler(bundle)
@@ -848,6 +927,68 @@ func writeBootverifyFixtureFile(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func loadSessionScopeValidationFixture(t *testing.T, fixtureRoot string) semanticview.Source {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	return semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec))
+}
+
+func writeSessionScopeValidationFixture(t *testing.T, rootAgents, flowSchema, flowAgents string) string {
+	t.Helper()
+	root := t.TempDir()
+	flows := " []"
+	if strings.TrimSpace(flowSchema) != "" || strings.TrimSpace(flowAgents) != "" {
+		flows = "\n  - id: support\n    flow: support\n    mode: static"
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: session-scope-validation
+version: "1.0.0"
+platform_version: ">=1.0.0"
+entity_schema:
+  groups:
+    - name: item
+      fields:
+        - name: item_id
+          type: string
+          primary: true
+flows:`+flows+`
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
+item.created:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	if strings.TrimSpace(rootAgents) == "" {
+		rootAgents = "{}\n"
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), rootAgents)
+	if strings.TrimSpace(flowSchema) != "" || strings.TrimSpace(flowAgents) != "" {
+		if strings.TrimSpace(flowSchema) == "" {
+			flowSchema = "name: support\n"
+		}
+		if strings.TrimSpace(flowAgents) == "" {
+			flowAgents = "{}\n"
+		}
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), flowSchema)
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+support/item.created:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), flowAgents)
+	}
+	return root
 }
 
 func writeTimerValidationFixture(t *testing.T, startOn, cancelOn string) string {

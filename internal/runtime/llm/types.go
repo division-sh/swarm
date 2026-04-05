@@ -33,6 +33,7 @@ type Session struct {
 	AgentID           string
 	RuntimeMode       string
 	ConversationMode  string
+	SessionScope      string
 	ScopeKey          string
 	TurnCount         int
 	ParseFailures     int

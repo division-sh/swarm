@@ -12,10 +12,14 @@ const (
 	RuntimeModeTask             = "task"
 	RuntimeModeSession          = "session"
 	RuntimeModeSessionPerEntity = "session_per_entity"
+	SessionScopeGlobal          = "global"
+	SessionScopeFlow            = "flow"
+	SessionScopeEntity          = "entity"
 )
 
 type ScopeContext struct {
 	ConversationMode string
+	SessionScope     string
 	ScopeKey         string
 }
 
@@ -30,9 +34,10 @@ type ResolvedScope struct {
 
 type scopeContextKey struct{}
 
-func WithScope(ctx context.Context, mode, scopeKey string) context.Context {
+func WithScope(ctx context.Context, mode, sessionScope, scopeKey string) context.Context {
 	payload := ScopeContext{
 		ConversationMode: strings.TrimSpace(mode),
+		SessionScope:     strings.TrimSpace(sessionScope),
 		ScopeKey:         strings.TrimSpace(scopeKey),
 	}
 	return context.WithValue(ctx, scopeContextKey{}, payload)
@@ -48,6 +53,7 @@ func ScopeFromContext(ctx context.Context) ScopeContext {
 		return ScopeContext{}
 	}
 	payload.ConversationMode = strings.TrimSpace(payload.ConversationMode)
+	payload.SessionScope = strings.TrimSpace(payload.SessionScope)
 	payload.ScopeKey = strings.TrimSpace(payload.ScopeKey)
 	return payload
 }
@@ -92,8 +98,117 @@ func IsLiveSessionRuntimeMode(raw string) bool {
 	return ok && mode != RuntimeModeTask
 }
 
-func ResolveScope(ctx context.Context, runtimeMode, scopeKey string) (ResolvedScope, error) {
+func canonicalSessionScope(raw string) (string, bool) {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case SessionScopeGlobal:
+		return SessionScopeGlobal, true
+	case SessionScopeFlow:
+		return SessionScopeFlow, true
+	case SessionScopeEntity:
+		return SessionScopeEntity, true
+	default:
+		return "", false
+	}
+}
+
+func NormalizeSessionScope(raw string) string {
+	scope, _ := canonicalSessionScope(raw)
+	return scope
+}
+
+func ParseSessionScope(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("session scope is required")
+	}
+	scope, ok := canonicalSessionScope(raw)
+	if !ok {
+		return "", fmt.Errorf("invalid session scope %q", raw)
+	}
+	return scope, nil
+}
+
+func ValidateSessionScopeIntent(runtimeMode, sessionScope string) (string, error) {
 	mode, err := ParseConversationRuntimeMode(runtimeMode)
+	if err != nil {
+		return "", err
+	}
+	sessionScope = strings.TrimSpace(sessionScope)
+	switch mode {
+	case RuntimeModeTask:
+		if sessionScope != "" {
+			return "", fmt.Errorf("task mode does not use sessions; session_scope must be absent")
+		}
+		return "", nil
+	case RuntimeModeSession:
+		scope, err := ParseSessionScope(sessionScope)
+		if err != nil {
+			return "", fmt.Errorf("session mode requires explicit session_scope (global or flow)")
+		}
+		switch scope {
+		case SessionScopeGlobal, SessionScopeFlow:
+			return scope, nil
+		default:
+			return "", fmt.Errorf("session mode does not support entity scope; use session_per_entity")
+		}
+	case RuntimeModeSessionPerEntity:
+		scope, err := ParseSessionScope(sessionScope)
+		if err != nil {
+			return "", fmt.Errorf("session_per_entity requires explicit session_scope: entity")
+		}
+		if scope != SessionScopeEntity {
+			switch scope {
+			case SessionScopeGlobal:
+				return "", fmt.Errorf("session_per_entity does not support global scope; use session with session_scope: global")
+			case SessionScopeFlow:
+				return "", fmt.Errorf("session_per_entity does not support flow scope; use session with session_scope: flow")
+			default:
+				return "", fmt.Errorf("session_per_entity requires explicit session_scope: entity")
+			}
+		}
+		return scope, nil
+	default:
+		return "", fmt.Errorf("unsupported conversation mode %q", runtimeMode)
+	}
+}
+
+func DeclaredScopeKey(actor runtimeactors.AgentConfig) (string, error) {
+	runtimeMode := strings.TrimSpace(actor.ConversationMode)
+	if runtimeMode == "" {
+		runtimeMode = RuntimeModeTask
+	}
+	sessionScope, err := ValidateSessionScopeIntent(runtimeMode, actor.SessionScope)
+	if err != nil {
+		return "", err
+	}
+	switch sessionScope {
+	case "":
+		return "", nil
+	case SessionScopeGlobal:
+		return SessionScopeGlobal, nil
+	case SessionScopeFlow:
+		flowPath := actor.CanonicalFlowPath()
+		if flowPath == "" {
+			return "", fmt.Errorf("session_scope flow requires flow path metadata")
+		}
+		return flowPath, nil
+	case SessionScopeEntity:
+		entityID := actor.EffectiveEntityID()
+		if entityID == "" {
+			return "", fmt.Errorf("session_scope entity requires entity_id metadata")
+		}
+		return entityID, nil
+	default:
+		return "", fmt.Errorf("unsupported session scope %q", actor.SessionScope)
+	}
+}
+
+func ResolveScope(ctx context.Context, runtimeMode, sessionScope, scopeKey string) (ResolvedScope, error) {
+	mode, err := ParseConversationRuntimeMode(runtimeMode)
+	if err != nil {
+		return ResolvedScope{}, err
+	}
+	sessionScope, err = ValidateSessionScopeIntent(mode, sessionScope)
 	if err != nil {
 		return ResolvedScope{}, err
 	}
@@ -111,6 +226,9 @@ func ResolveScope(ctx context.Context, runtimeMode, scopeKey string) (ResolvedSc
 		out.Stateless = true
 		return out, nil
 	case RuntimeModeSessionPerEntity:
+		if sessionScope != SessionScopeEntity {
+			return ResolvedScope{}, fmt.Errorf("session_per_entity requires explicit session_scope: entity")
+		}
 		if scopeKey == "" {
 			return ResolvedScope{}, fmt.Errorf("session_per_entity requires entity scope key")
 		}
@@ -122,26 +240,37 @@ func ResolveScope(ctx context.Context, runtimeMode, scopeKey string) (ResolvedSc
 		out.FlowInstance = flowPath
 		return out, nil
 	case RuntimeModeSession:
-		switch {
-		case scopeKey == "global":
-			out.Scope = "global"
-			out.ScopeKey = "global"
-			return out, nil
-		case scopeKey != "":
-			out.Scope = "flow"
-			out.FlowInstance = scopeKey
-			return out, nil
-		case flowPath != "":
-			out.Scope = "flow"
-			out.ScopeKey = flowPath
-			out.FlowInstance = flowPath
-			return out, nil
-		case strings.TrimSpace(actor.ID) != "":
-			out.Scope = "global"
-			out.ScopeKey = "global"
-			return out, nil
+		switch sessionScope {
+		case SessionScopeGlobal:
+			switch scopeKey {
+			case "", SessionScopeGlobal:
+				out.Scope = SessionScopeGlobal
+				out.ScopeKey = SessionScopeGlobal
+				return out, nil
+			default:
+				return ResolvedScope{}, fmt.Errorf("session_scope global requires scope_key global or empty")
+			}
+		case SessionScopeFlow:
+			switch {
+			case scopeKey == SessionScopeGlobal:
+				return ResolvedScope{}, fmt.Errorf("session_scope flow does not allow global scope key")
+			case scopeKey != "" && flowPath != "" && scopeKey != flowPath:
+				return ResolvedScope{}, fmt.Errorf("session_scope flow scope key %q does not match actor flow path %q", scopeKey, flowPath)
+			case scopeKey != "":
+				out.Scope = SessionScopeFlow
+				out.ScopeKey = scopeKey
+				out.FlowInstance = scopeKey
+				return out, nil
+			case flowPath != "":
+				out.Scope = SessionScopeFlow
+				out.ScopeKey = flowPath
+				out.FlowInstance = flowPath
+				return out, nil
+			default:
+				return ResolvedScope{}, fmt.Errorf("session_scope flow requires actor flow path")
+			}
 		default:
-			return ResolvedScope{}, fmt.Errorf("session requires explicit scope key or actor declaration")
+			return ResolvedScope{}, fmt.Errorf("session mode requires explicit session_scope (global or flow)")
 		}
 	}
 

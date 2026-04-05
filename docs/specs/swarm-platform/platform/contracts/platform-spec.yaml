@@ -1100,10 +1100,10 @@ engine:
       description: How the platform manages agent session context across invocations.
       modes:
         task: New session per event. No memory between invocations. Stateless.
-        session: Session persists across events for the agent. Context accumulates.
-        session_per_entity: One session per entity the agent works on. Agent retains context across multiple events for the
-          same entity but has separate sessions for different entities. Useful for agents that need continuity (e.g., research
-          agent building a brief over multiple turns).
+        session: Session persists across events for the agent. Requires explicit session_scope global or flow.
+        session_per_entity: One session per entity the agent works on. Requires explicit session_scope entity. Agent retains
+          context across multiple events for the same entity but has separate sessions for different entities. Useful for
+          agents that need continuity (e.g., research agent building a brief over multiple turns).
       default: task
     subscription_types:
       subscriptions: Static subscription list. Always active from boot (or from instance creation for dynamic flows). Cannot
@@ -1133,11 +1133,52 @@ engine:
       task: 'Stateless between invocations. No agent_sessions row. Audit snapshot persisted to
         agent_conversation_audits (write-only). Per-turn history in agent_turns. Never reloaded.
         Each invocation starts fresh.'
-      session: 'Persistent session across events. Live session row in agent_sessions. Conversation
-        history maintained and reused. Agent accumulates context.'
+      session: 'Persistent session across events. Live session row in agent_sessions. Requires explicit
+        session_scope global or flow. Conversation history maintained and reused. Agent accumulates context.'
       session_per_entity: 'One session per agent × entity. Live session row in agent_sessions per entity.
-        Context preserved and reused per entity.'
+        Requires explicit session_scope entity. Context preserved and reused per entity.'
       stateless: Alias for task. Accepted by the loader, normalized to task internally.
+    session_scope_intent:
+      description: 'Explicit session scope declaration for agent contracts. Removes scope inference from
+        agent placement or actor form.'
+      contract_field:
+        field: session_scope
+        location: Agent declaration in agents.yaml, alongside conversation_mode.
+        type: string
+        values:
+        - global
+        - flow
+        - entity
+      canonical_rules:
+        task: 'conversation_mode task: session_scope must be absent.'
+        session_global: 'conversation_mode session + session_scope global: one session per agent across
+          the system. scope_key = "global".'
+        session_flow: 'conversation_mode session + session_scope flow: one session per agent per flow
+          instance. scope_key = flow_instance path.'
+        session_per_entity: 'conversation_mode session_per_entity + session_scope entity: one reusable
+          session per agent per entity within the same flow instance. scope_key = entity_id.'
+      invalid_combinations:
+        task_present: 'task + session_scope present is a boot error.'
+        session_missing: 'session + session_scope absent is a boot error.'
+        session_entity: 'session + session_scope entity is a boot error. Use session_per_entity.'
+        entity_missing: 'session_per_entity + session_scope absent is a boot error.'
+        entity_global: 'session_per_entity + session_scope global is a boot error. Use session with
+          session_scope global.'
+        entity_flow: 'session_per_entity + session_scope flow is a boot error. Use session with
+          session_scope flow.'
+      boot_validation:
+        description: Enforced at boot, not at first runtime session acquisition.
+        rules:
+        - Validate conversation_mode + session_scope against the canonical combinations.
+        - No inference. No fallback. Missing required session_scope is a boot error.
+        - session_scope flow requires a flow-scoped declaration with resolvable flow-instance context.
+          Root-level agents cannot declare session_scope flow.
+        - session_scope entity requires a flow that manages entities (has initial_state). Stateless
+          flows cannot declare session_scope entity.
+      lookup_rules:
+        global: scope_key = "global"
+        flow: scope_key = flow_instance path of the agent
+        entity: scope_key = entity_id from the triggering event within the agent's flow instance
     native_tools:
       description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
         (omitted = no native capabilities). The native_tools field is the sole authorization gate — no separate permission
@@ -2400,8 +2441,8 @@ platform_tables:
       description: 'Runtime agent registry. One row per agent instance. Carries the full persisted runtime descriptor:
         role/model_tier/llm_backend/conversation_mode/parent_agent_id as typed columns, subscriptions/emit_events/tools/permissions
         as JSONB arrays, and runtime_descriptor JSONB for the remaining control-plane fields that do not already have a
-        first-class persisted column (for example type, mode, workspace_class, manager_fallback, max_turns_per_task, native_tools).
-        config is opaque agent-specific payload only; the platform stores and passes it through but does not read config
+        first-class persisted column (for example type, mode, session_scope, workspace_class, manager_fallback, max_turns_per_task,
+        native_tools). config is opaque agent-specific payload only; the platform stores and passes it through but does not read config
         for runtime control semantics. flow_instance nullable for root-level agents not scoped to any flow. entity_id nullable
         — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth and
         permissions_bundle is resolved at boot into the persisted permissions array rather than being stored directly.
@@ -2423,7 +2464,8 @@ platform_tables:
         conversation modes. Task mode does NOT create rows here — task-mode audit goes to
         agent_conversation_audits instead. Supports three scopes: entity (one session per agent × entity),
         flow (one session per agent × flow instance), global (one session per agent, shared across all
-        entities). scope_key is the lookup key. lease_holder/lease_expires_at for distributed session locking.'
+        entities). scope directly reflects the declared session_scope. scope_key is the lookup key.
+        lease_holder/lease_expires_at for distributed session locking.'
       ddl: "CREATE TABLE agent_sessions (\n    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
         \            UUID REFERENCES runs(run_id),\n    agent_id          TEXT NOT NULL REFERENCES agents(agent_id),\n\
         \    entity_id         UUID,\n    flow_instance     TEXT,\n    scope_key         TEXT NOT NULL,\n    scope         \
@@ -2442,8 +2484,9 @@ platform_tables:
         global: entity_id NULL, flow_instance NULL, scope_key = "global". One session per agent across the entire system.
       lookup_pattern: 'Runtime acquires sessions via (agent_id, scope_key). The scope_key is derived from
         conversation_mode: task → no session lookup, no agent_sessions row (audit goes to
-        agent_conversation_audits). session_per_entity → scope_key = entity_id. session → scope_key =
-        flow_instance or "global" depending on agent declaration.'
+        agent_conversation_audits). session_per_entity + session_scope entity → scope_key = entity_id.
+        session + session_scope flow → scope_key = flow_instance. session + session_scope global →
+        scope_key = "global". No actor-shape inference.'
     agent_turns:
       description: 'Append-only per-turn agent execution audit log. Records the triggering event context, visible tools,
         attempted tool calls, emitted event names, canonical per-turn turn_blocks, and sanitized request/response payloads.
@@ -2997,6 +3040,7 @@ platform_events:
         agent_id: string
         flow_instance: string (nullable)
         conversation_mode: string
+        session_scope: string (nullable)
         model_tier: string
         timestamp: string (ISO 8601)
       produced_by_type: platform
