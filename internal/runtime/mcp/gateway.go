@@ -32,6 +32,7 @@ type GatewayHooks struct {
 	WithInboundEvent          func(context.Context, events.Event) context.Context
 	WithEmittedEventsRecorder func(context.Context, *runtimebus.EmittedEventsRecorder) context.Context
 	ResolveTurnContext        func(string) (TurnContext, bool)
+	MarkEmitKeyUsed           func(string, string) bool
 	EmitToolsForActor         func(models.AgentConfig) []llm.ToolDefinition
 	EmitTools                 func(string) []llm.ToolDefinition
 	EmitSchemaForTool         func(string) (description string, schema any, ok bool)
@@ -268,7 +269,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if toolIsKindInContext(ctx, toolName, toolcapabilities.KindEmit) {
-			if token := ContextTokenFromRequest(r); token != "" && MarkEmitKeyUsed(token, emitTurnDedupeKey(toolName, req.Params["arguments"])) {
+			if token := ContextTokenFromRequest(r); token != "" && g.hooks.MarkEmitKeyUsed != nil && g.hooks.MarkEmitKeyUsed(token, emitTurnDedupeKey(toolName, req.Params["arguments"])) {
 				WriteRPCResult(w, req.ID, map[string]any{
 					"content": []map[string]any{{
 						"type": "text",

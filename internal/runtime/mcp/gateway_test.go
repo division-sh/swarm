@@ -150,6 +150,18 @@ func (s *capabilityAwareExecutorStub) ToolCapabilitiesForActor(_ models.AgentCon
 	return toolcapabilities.NewSet(caps)
 }
 
+func newTestTurnContextRegistry() *TurnContextRegistry {
+	return NewTurnContextRegistry(nil)
+}
+
+func putTestTurnContext(t testing.TB, registry *TurnContextRegistry, token string, turn TurnContext) {
+	t.Helper()
+	registry.PutTurnContextForTest(token, turn)
+	t.Cleanup(func() {
+		registry.UnregisterTurnContext(token)
+	})
+}
+
 func TestGatewayHydrateActorMergesResolvedConfig(t *testing.T) {
 	g := NewGateway(nil, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
@@ -252,6 +264,7 @@ func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.
 }
 
 func TestGatewayMCPToolsForRequest_KeepsEmitToolsForDirectMCPContext(t *testing.T) {
+	registry := newTestTurnContextRegistry()
 	g := NewGateway(nil, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
 			if agentID != "campaign-coordinator" {
@@ -272,14 +285,14 @@ func TestGatewayMCPToolsForRequest_KeepsEmitToolsForDirectMCPContext(t *testing.
 				Schema:      map[string]any{"type": "object"},
 			}}
 		},
+		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
-	PutTurnContextForTest("ctx-1", TurnContext{
+	putTestTurnContext(t, registry, "ctx-1", TurnContext{
 		Actor:     models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
-	t.Cleanup(func() { UnregisterTurnContext("ctx-1") })
 
 	req := httptest.NewRequest("POST", "/mcp?agent_id=campaign-coordinator&ctx_token=ctx-1", nil)
 	tools := g.mcpToolsForRequest(req)
@@ -359,53 +372,56 @@ func TestGatewayMCPToolsForRequest_DoesNotInventUnknownAllowedToolEntries(t *tes
 }
 
 func TestMarkEmitUsed(t *testing.T) {
-	PutTurnContextForTest("ctx-emit", TurnContext{
+	registry := newTestTurnContextRegistry()
+	putTestTurnContext(t, registry, "ctx-emit", TurnContext{
 		Actor:     models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
-	t.Cleanup(func() { UnregisterTurnContext("ctx-emit") })
 
-	if already := MarkEmitUsed("ctx-emit"); already {
+	if already := registry.MarkEmitUsed("ctx-emit"); already {
 		t.Fatal("first emit use should not report already used")
 	}
-	if already := MarkEmitUsed("ctx-emit"); !already {
+	if already := registry.MarkEmitUsed("ctx-emit"); !already {
 		t.Fatal("second emit use should report already used")
 	}
 }
 
 func TestMarkEmitKeyUsed_AllowsDistinctKeysPerTurn(t *testing.T) {
-	PutTurnContextForTest("ctx-emit-keys", TurnContext{
+	registry := newTestTurnContextRegistry()
+	putTestTurnContext(t, registry, "ctx-emit-keys", TurnContext{
 		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
-	t.Cleanup(func() { UnregisterTurnContext("ctx-emit-keys") })
 
-	if already := MarkEmitKeyUsed("ctx-emit-keys", "emit_a\n{\"dimension\":\"one\"}"); already {
+	if already := registry.MarkEmitKeyUsed("ctx-emit-keys", "emit_a\n{\"dimension\":\"one\"}"); already {
 		t.Fatal("first unique emit key should not report already used")
 	}
-	if already := MarkEmitKeyUsed("ctx-emit-keys", "emit_a\n{\"dimension\":\"two\"}"); already {
+	if already := registry.MarkEmitKeyUsed("ctx-emit-keys", "emit_a\n{\"dimension\":\"two\"}"); already {
 		t.Fatal("second distinct emit key should be allowed")
 	}
-	if already := MarkEmitKeyUsed("ctx-emit-keys", "emit_a\n{\"dimension\":\"one\"}"); !already {
+	if already := registry.MarkEmitKeyUsed("ctx-emit-keys", "emit_a\n{\"dimension\":\"one\"}"); !already {
 		t.Fatal("duplicate emit key should report already used")
 	}
 }
 
 func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
+	registry := newTestTurnContextRegistry()
 	callCount := 0
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+	}), "", GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+		MarkEmitKeyUsed:    registry.MarkEmitKeyUsed,
+	})
 
-	PutTurnContextForTest("ctx-emit-gateway", TurnContext{
+	putTestTurnContext(t, registry, "ctx-emit-gateway", TurnContext{
 		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
-	t.Cleanup(func() { UnregisterTurnContext("ctx-emit-gateway") })
 
 	handler := g.Handler()
 	makeReq := func(arguments any) *httptest.ResponseRecorder {
@@ -447,15 +463,18 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 }
 
 func TestGatewayHandleMCP_AllowsPrefixedToolNameWhenAllowedListUsesLocalName(t *testing.T) {
+	registry := newTestTurnContextRegistry()
 	exec := &capabilityAwareExecutorStub{}
-	g := NewGateway(exec, "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+	g := NewGateway(exec, "", GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+		MarkEmitKeyUsed:    registry.MarkEmitKeyUsed,
+	})
 
-	PutTurnContextForTest("ctx-prefixed-emit", TurnContext{
+	putTestTurnContext(t, registry, "ctx-prefixed-emit", TurnContext{
 		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
-	t.Cleanup(func() { UnregisterTurnContext("ctx-prefixed-emit") })
 
 	body, err := json.Marshal(map[string]any{
 		"id":     "req-1",
@@ -484,23 +503,24 @@ func TestGatewayHandleMCP_AllowsPrefixedToolNameWhenAllowedListUsesLocalName(t *
 }
 
 func TestGatewayHandleMCP_RejectsToolWhenRequestAllowlistDoesNotIncludeIt(t *testing.T) {
+	registry := newTestTurnContextRegistry()
 	exec := &capabilityAwareExecutorStub{}
 	var loggedAction string
 	var denialLayer string
 	g := NewGateway(exec, "", GatewayHooks{
-		ResolveTurnContext: ResolveTurnContext,
+		ResolveTurnContext: registry.ResolveTurnContext,
+		MarkEmitKeyUsed:    registry.MarkEmitKeyUsed,
 		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
 			loggedAction = action
 			denialLayer = strings.TrimSpace(asString(detail["denial_layer"]))
 		},
 	})
 
-	PutTurnContextForTest("ctx-denied-allowlist", TurnContext{
+	putTestTurnContext(t, registry, "ctx-denied-allowlist", TurnContext{
 		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
-	t.Cleanup(func() { UnregisterTurnContext("ctx-denied-allowlist") })
 
 	body, err := json.Marshal(map[string]any{
 		"id":     "req-1",
@@ -539,7 +559,7 @@ func TestGatewayHandleMCP_RejectsMutatingToolWhenContextTokenMisses(t *testing.T
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+	}), "", GatewayHooks{})
 
 	body, err := json.Marshal(map[string]any{
 		"id":     "req-1",
@@ -568,7 +588,7 @@ func TestGatewayHandleMCP_RejectsMutatingToolWhenContextTokenMisses(t *testing.T
 }
 
 func TestGatewayMCPExecutionContext_RejectsPrefixedMutatingToolOnContextMiss(t *testing.T) {
-	g := NewGateway(nil, "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+	g := NewGateway(nil, "", GatewayHooks{})
 	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", nil)
 	if _, err := g.mcpExecutionContext(req, "mcp__runtime-tools__emit_score_dimension_complete"); err == nil {
 		t.Fatal("expected context miss error for prefixed mutating tool")
@@ -576,8 +596,9 @@ func TestGatewayMCPExecutionContext_RejectsPrefixedMutatingToolOnContextMiss(t *
 }
 
 func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t *testing.T) {
+	registry := newTestTurnContextRegistry()
 	g := NewGateway(nil, "", GatewayHooks{
-		ResolveTurnContext: ResolveTurnContext,
+		ResolveTurnContext: registry.ResolveTurnContext,
 		WithActor: func(ctx context.Context, actor models.AgentConfig) context.Context {
 			return models.WithActor(ctx, actor)
 		},
@@ -588,14 +609,13 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 			return runtimebus.WithInboundEvent(ctx, evt)
 		},
 	})
-	PutTurnContextForTest("ctx-trace", TurnContext{
+	putTestTurnContext(t, registry, "ctx-trace", TurnContext{
 		Actor:      models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		Inbound:    events.Event{ID: "evt-1", RunID: "run-1"},
 		HasInbound: true,
 		CreatedAt:  time.Now().UTC(),
 		ExpiresAt:  time.Now().UTC().Add(time.Hour),
 	})
-	t.Cleanup(func() { UnregisterTurnContext("ctx-trace") })
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-trace", nil)
 	ctx, err := g.mcpExecutionContext(req, "get_entity")
@@ -610,7 +630,7 @@ func TestGatewayHandleMCP_AllowsReadOnlyToolWhenContextTokenMisses(t *testing.T)
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+	}), "", GatewayHooks{})
 
 	body, err := json.Marshal(map[string]any{
 		"id":     "req-1",
@@ -643,7 +663,7 @@ func TestGatewayHandleTool_RejectsMutatingToolWithoutContextToken(t *testing.T) 
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+	}), "", GatewayHooks{})
 
 	body, err := json.Marshal(ToolGatewayRequest{
 		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
@@ -672,7 +692,7 @@ func TestGatewayHandleTool_AllowsReadOnlyToolWithoutContextToken(t *testing.T) {
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+	}), "", GatewayHooks{})
 
 	body, err := json.Marshal(ToolGatewayRequest{
 		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
@@ -699,7 +719,6 @@ func TestGatewayHandleMCP_LogsFallbackUsedReason(t *testing.T) {
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
 	}), "", GatewayHooks{
-		ResolveTurnContext: ResolveTurnContext,
 		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
 			actions = append(actions, action)
 			if reason, _ := detail["reason"].(string); strings.TrimSpace(reason) != "" {
@@ -740,7 +759,6 @@ func TestGatewayHandleTool_LogsFallbackBlockedReason(t *testing.T) {
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
 	}), "", GatewayHooks{
-		ResolveTurnContext: ResolveTurnContext,
 		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
 			actions = append(actions, action)
 			if reason, _ := detail["reason"].(string); strings.TrimSpace(reason) != "" {

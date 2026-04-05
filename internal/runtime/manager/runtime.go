@@ -16,7 +16,6 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
@@ -594,7 +593,9 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 			return fmt.Errorf("kill workspace orphan processes: %w", err)
 		}
 	}
-	runtimemcp.ResetTurnContexts()
+	if am.resetRuntimeOwnedState != nil {
+		am.resetRuntimeOwnedState()
+	}
 	if resetter, ok := am.sessions.(sessions.Resetter); ok && resetter != nil {
 		if err := resetter.ResetAll(am.runtimeMode); err != nil {
 			if am.bus != nil {

@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"sync"
-	"time"
 
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
@@ -13,15 +11,6 @@ import (
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimetools "swarm/internal/runtime/tools"
 )
-
-type mcpTurnContext = runtimemcp.TurnContext
-
-type mcpTurnRegistry struct {
-	mu sync.Mutex
-}
-
-var globalMCPTurnRegistry = newMCPTurnRegistry()
-var defaultMCPTurnContextTTL = 2 * time.Hour
 
 const (
 	ErrCodeMCPAuthMissingBearer = runtimemcp.ErrCodeAuthMissingBearer
@@ -35,55 +24,6 @@ const (
 	ErrCodeMCPInvalidRequest    = runtimemcp.ErrCodeInvalidRequest
 )
 
-func init() {
-	runtimemcp.SetActorResolver(runtimeactors.ActorFromContext)
-	llm.SetMCPTurnContextHooks(runtimemcp.RegisterTurnContextWithTTL, runtimemcp.UnregisterTurnContext)
-}
-
-func newMCPTurnRegistry() *mcpTurnRegistry {
-	return &mcpTurnRegistry{}
-}
-
-func registerMCPTurnContext(ctx context.Context) string {
-	return runtimemcp.RegisterTurnContext(ctx)
-}
-
-func registerMCPTurnContextWithTTL(ctx context.Context, ttl time.Duration) string {
-	return runtimemcp.RegisterTurnContextWithTTL(ctx, ttl)
-}
-
-func resolveMCPTurnContext(token string) (mcpTurnContext, bool) {
-	return runtimemcp.ResolveTurnContext(token)
-}
-
-func unregisterMCPTurnContext(token string) {
-	runtimemcp.UnregisterTurnContext(token)
-}
-
-func resetMCPTurnContexts() {
-	runtimemcp.ResetTurnContexts()
-}
-
-func (r *mcpTurnRegistry) put(token string, data mcpTurnContext) {
-	runtimemcp.PutTurnContextForTest(token, data)
-}
-
-func (r *mcpTurnRegistry) get(token string) (mcpTurnContext, bool) {
-	return runtimemcp.ResolveTurnContext(token)
-}
-
-func (r *mcpTurnRegistry) delete(token string) {
-	runtimemcp.UnregisterTurnContext(token)
-}
-
-func (r *mcpTurnRegistry) reset() {
-	runtimemcp.ResetTurnContexts()
-}
-
-func (r *mcpTurnRegistry) pruneLocked(now time.Time) {
-	runtimemcp.PruneTurnContextsBefore(now)
-}
-
 func newMCPRuntimeError(code, operation string, retryable bool, cause error, format string, args ...any) error {
 	return WrapRuntimeError(code, "mcp-gateway", operation, retryable, cause, format, args...)
 }
@@ -96,7 +36,7 @@ func runtimeErrorEnvelope(raw string) string {
 	return runtimemcp.RuntimeErrorEnvelope(raw)
 }
 
-func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool), emitRegistry *runtimetools.EmitRegistry) runtimemcp.GatewayHooks {
+func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool), emitRegistry *runtimetools.EmitRegistry, turnContexts *runtimemcp.TurnContextRegistry) runtimemcp.GatewayHooks {
 	if emitRegistry == nil {
 		emitRegistry = runtimetools.NewEmitRegistry(nil, nil)
 	}
@@ -113,7 +53,18 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(strin
 		IsCurrentRuntimeEpoch:     runtimebus.IsCurrentRuntimeEpoch,
 		WithInboundEvent:          runtimebus.WithInboundEvent,
 		WithEmittedEventsRecorder: runtimebus.WithEmittedEventsRecorder,
-		ResolveTurnContext:        resolveMCPTurnContext,
+		ResolveTurnContext: func(token string) (runtimemcp.TurnContext, bool) {
+			if turnContexts == nil {
+				return runtimemcp.TurnContext{}, false
+			}
+			return turnContexts.ResolveTurnContext(token)
+		},
+		MarkEmitKeyUsed: func(token, key string) bool {
+			if turnContexts == nil {
+				return false
+			}
+			return turnContexts.MarkEmitKeyUsed(token, key)
+		},
 		EmitToolsForActor: func(actor runtimeactors.AgentConfig) []llm.ToolDefinition {
 			return emitRegistry.GenerateEmitToolsForActor(actor, processWarnOnce)
 		},

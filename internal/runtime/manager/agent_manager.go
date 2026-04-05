@@ -30,6 +30,7 @@ type AgentManager struct {
 	semanticSource           semanticview.Source
 	promptResolver           runtimecontracts.PromptResolver
 	budget                   BudgetGuard
+	resetRuntimeOwnedState   func()
 	runtimeMode              string
 	throttleSuppressPrefixes []string
 	inFlightMu               sync.Mutex
@@ -102,6 +103,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		promptResolver:           opts.PromptResolver,
 		runtimeMode:              strings.TrimSpace(opts.RuntimeMode),
 		budget:                   opts.Budget,
+		resetRuntimeOwnedState:   opts.ResetRuntimeOwnedState,
 		throttleSuppressPrefixes: throttleSuppressPrefixes,
 		inFlight:                 make(map[string]struct{}),
 		loopCancel:               make(map[string]context.CancelFunc),

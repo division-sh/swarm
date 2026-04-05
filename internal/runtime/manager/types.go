@@ -130,6 +130,7 @@ type AgentManagerOptions struct {
 	PromptResolver            runtimecontracts.PromptResolver
 	RuntimeMode               string
 	Budget                    BudgetGuard
+	ResetRuntimeOwnedState    func()
 	ThrottleSuppressPrefixes  []string
 	DisableSpinupControl      bool
 	EnableLegacySpinupControl bool

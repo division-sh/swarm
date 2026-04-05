@@ -14,8 +14,6 @@ import (
 
 type actorResolverFn func(context.Context) (models.AgentConfig, bool)
 
-var actorResolver actorResolverFn
-
 type TurnContext struct {
 	Actor      models.AgentConfig
 	Inbound    events.Event
@@ -27,42 +25,39 @@ type TurnContext struct {
 	ExpiresAt  time.Time
 }
 
-type mcpTurnRegistry struct {
+type TurnContextRegistry struct {
 	mu   sync.RWMutex
 	data map[string]TurnContext
+
+	actorResolver actorResolverFn
+	defaultTTL    time.Duration
 }
 
-func newMCPTurnRegistry() *mcpTurnRegistry {
-	return &mcpTurnRegistry{
-		data: make(map[string]TurnContext),
+func NewTurnContextRegistry(resolve actorResolverFn) *TurnContextRegistry {
+	return &TurnContextRegistry{
+		data:          make(map[string]TurnContext),
+		actorResolver: resolve,
+		defaultTTL:    2 * time.Hour,
 	}
 }
 
-var globalMCPTurnRegistry = newMCPTurnRegistry()
-var defaultMCPTurnContextTTL = 2 * time.Hour
-
-func init() {
-	runtimebus.SetRuntimeResetHook(ResetTurnContexts)
-}
-
-func SetActorResolver(resolve actorResolverFn) {
-	actorResolver = resolve
-}
-
-func RegisterTurnContext(ctx context.Context) string {
-	return RegisterTurnContextWithTTL(ctx, defaultMCPTurnContextTTL)
-}
-
-func RegisterTurnContextWithTTL(ctx context.Context, ttl time.Duration) string {
-	if actorResolver == nil {
+func (r *TurnContextRegistry) RegisterTurnContext(ctx context.Context) string {
+	if r == nil {
 		return ""
 	}
-	actor, ok := actorResolver(ctx)
+	return r.RegisterTurnContextWithTTL(ctx, r.defaultTTL)
+}
+
+func (r *TurnContextRegistry) RegisterTurnContextWithTTL(ctx context.Context, ttl time.Duration) string {
+	if r == nil || r.actorResolver == nil {
+		return ""
+	}
+	actor, ok := r.actorResolver(ctx)
 	if !ok || strings.TrimSpace(actor.ID) == "" {
 		return ""
 	}
 	if ttl <= 0 {
-		ttl = defaultMCPTurnContextTTL
+		ttl = r.defaultTTL
 	}
 	now := time.Now().UTC()
 	token := uuid.NewString()
@@ -72,7 +67,7 @@ func RegisterTurnContextWithTTL(ctx context.Context, ttl time.Duration) string {
 	if scoped, ok := runtimebus.RuntimeEpochFromContext(ctx); ok && scoped > 0 {
 		epoch = scoped
 	}
-	globalMCPTurnRegistry.put(token, TurnContext{
+	r.put(token, TurnContext{
 		Actor:      actor,
 		Inbound:    inbound,
 		HasInbound: hasInbound,
@@ -84,37 +79,58 @@ func RegisterTurnContextWithTTL(ctx context.Context, ttl time.Duration) string {
 	return token
 }
 
-func ResolveTurnContext(token string) (TurnContext, bool) {
-	return globalMCPTurnRegistry.get(strings.TrimSpace(token))
+func (r *TurnContextRegistry) ResolveTurnContext(token string) (TurnContext, bool) {
+	if r == nil {
+		return TurnContext{}, false
+	}
+	return r.get(strings.TrimSpace(token))
 }
 
-func MarkEmitUsed(token string) bool {
-	return globalMCPTurnRegistry.markEmitKeyUsed(strings.TrimSpace(token), "__default__")
+func (r *TurnContextRegistry) MarkEmitUsed(token string) bool {
+	if r == nil {
+		return false
+	}
+	return r.markEmitKeyUsed(strings.TrimSpace(token), "__default__")
 }
 
-func MarkEmitKeyUsed(token, key string) bool {
-	return globalMCPTurnRegistry.markEmitKeyUsed(strings.TrimSpace(token), strings.TrimSpace(key))
+func (r *TurnContextRegistry) MarkEmitKeyUsed(token, key string) bool {
+	if r == nil {
+		return false
+	}
+	return r.markEmitKeyUsed(strings.TrimSpace(token), strings.TrimSpace(key))
 }
 
-func UnregisterTurnContext(token string) {
-	globalMCPTurnRegistry.delete(strings.TrimSpace(token))
+func (r *TurnContextRegistry) UnregisterTurnContext(token string) {
+	if r == nil {
+		return
+	}
+	r.delete(strings.TrimSpace(token))
 }
 
-func ResetTurnContexts() {
-	globalMCPTurnRegistry.reset()
+func (r *TurnContextRegistry) Reset() {
+	if r == nil {
+		return
+	}
+	r.reset()
 }
 
-func PutTurnContextForTest(token string, data TurnContext) {
-	globalMCPTurnRegistry.put(strings.TrimSpace(token), data)
+func (r *TurnContextRegistry) PutTurnContextForTest(token string, data TurnContext) {
+	if r == nil {
+		return
+	}
+	r.put(strings.TrimSpace(token), data)
 }
 
-func PruneTurnContextsBefore(now time.Time) {
-	globalMCPTurnRegistry.mu.Lock()
-	defer globalMCPTurnRegistry.mu.Unlock()
-	globalMCPTurnRegistry.pruneLocked(now)
+func (r *TurnContextRegistry) PruneTurnContextsBefore(now time.Time) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(now)
 }
 
-func (r *mcpTurnRegistry) put(token string, data TurnContext) {
+func (r *TurnContextRegistry) put(token string, data TurnContext) {
 	if strings.TrimSpace(token) == "" {
 		return
 	}
@@ -123,7 +139,7 @@ func (r *mcpTurnRegistry) put(token string, data TurnContext) {
 		data.CreatedAt = now
 	}
 	if data.ExpiresAt.IsZero() {
-		data.ExpiresAt = data.CreatedAt.Add(defaultMCPTurnContextTTL)
+		data.ExpiresAt = data.CreatedAt.Add(r.defaultTTL)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -131,7 +147,7 @@ func (r *mcpTurnRegistry) put(token string, data TurnContext) {
 	r.data[token] = data
 }
 
-func (r *mcpTurnRegistry) get(token string) (TurnContext, bool) {
+func (r *TurnContextRegistry) get(token string) (TurnContext, bool) {
 	if strings.TrimSpace(token) == "" {
 		return TurnContext{}, false
 	}
@@ -143,7 +159,7 @@ func (r *mcpTurnRegistry) get(token string) (TurnContext, bool) {
 	return v, ok
 }
 
-func (r *mcpTurnRegistry) markEmitKeyUsed(token, key string) bool {
+func (r *TurnContextRegistry) markEmitKeyUsed(token, key string) bool {
 	if strings.TrimSpace(token) == "" {
 		return false
 	}
@@ -169,7 +185,7 @@ func (r *mcpTurnRegistry) markEmitKeyUsed(token, key string) bool {
 	return false
 }
 
-func (r *mcpTurnRegistry) delete(token string) {
+func (r *TurnContextRegistry) delete(token string) {
 	if strings.TrimSpace(token) == "" {
 		return
 	}
@@ -178,13 +194,13 @@ func (r *mcpTurnRegistry) delete(token string) {
 	delete(r.data, token)
 }
 
-func (r *mcpTurnRegistry) reset() {
+func (r *TurnContextRegistry) reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.data = make(map[string]TurnContext)
 }
 
-func (r *mcpTurnRegistry) pruneLocked(now time.Time) {
+func (r *TurnContextRegistry) pruneLocked(now time.Time) {
 	for k, v := range r.data {
 		if !v.ExpiresAt.IsZero() {
 			if !v.ExpiresAt.After(now) {
@@ -192,7 +208,7 @@ func (r *mcpTurnRegistry) pruneLocked(now time.Time) {
 			}
 			continue
 		}
-		if v.CreatedAt.Before(now.Add(-defaultMCPTurnContextTTL)) {
+		if v.CreatedAt.Before(now.Add(-r.defaultTTL)) {
 			delete(r.data, k)
 		}
 	}

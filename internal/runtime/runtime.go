@@ -73,6 +73,7 @@ type Runtime struct {
 	Manager        *runtimemanager.AgentManager
 	InboundGateway *InboundGateway
 	ToolGateway    *runtimemcp.Gateway
+	MCPTurns       *runtimemcp.TurnContextRegistry
 	Authority      runtimeauthority.Provider
 	EmitRegistry   *runtimetools.EmitRegistry
 	PromptResolver runtimecontracts.PromptResolver
@@ -236,6 +237,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if err != nil {
 		return nil, fmt.Errorf("build prompt resolver: %w", err)
 	}
+	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	authorityProvider := runtimeauthority.NewSourceProvider(source)
 	emitRegistry := runtimetools.NewEmitRegistry(source, authorityProvider)
 	if warnings, err := runtimetools.ValidateToolImplementations(source); err != nil {
@@ -259,6 +261,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		Stores:         stores,
 		Options:        opts,
 		Workspace:      opts.WorkspaceLifecycle,
+		MCPTurns:       mcpTurns,
 		Authority:      authorityProvider,
 		EmitRegistry:   emitRegistry,
 		PromptResolver: promptResolver,
@@ -349,6 +352,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			Budget:        rt.Budget,
 			Workspaces:    rt.Workspace,
 			Events:        rt.Bus,
+			MCPTurns:      rt.MCPTurns,
 		}.Build()
 		if err != nil {
 			return nil, fmt.Errorf("build runtime: %w", err)
@@ -430,12 +434,17 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		EmitRegistry:      rt.EmitRegistry,
 	})
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
-		Workspaces:               rt.Workspace,
-		Sessions:                 stores.SessionRegistry,
-		SemanticSource:           source,
-		PromptResolver:           rt.PromptResolver,
-		RuntimeMode:              cfg.LLM.RuntimeMode,
-		Budget:                   rt.Budget,
+		Workspaces:     rt.Workspace,
+		Sessions:       stores.SessionRegistry,
+		SemanticSource: source,
+		PromptResolver: rt.PromptResolver,
+		RuntimeMode:    cfg.LLM.RuntimeMode,
+		Budget:         rt.Budget,
+		ResetRuntimeOwnedState: func() {
+			if rt.MCPTurns != nil {
+				rt.MCPTurns.Reset()
+			}
+		},
 		ThrottleSuppressPrefixes: runtimeThrottleSuppressPrefixes(source),
 		DisableSpinupControl:     true,
 	}, stores.ManagerStore)
@@ -463,7 +472,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 				return runtimeactors.AgentConfig{}, false
 			}
 			return rt.Manager.GetAgentConfig(strings.TrimSpace(agentID))
-		}, rt.EmitRegistry))
+		}, rt.EmitRegistry, rt.MCPTurns))
 	}
 
 	return rt, nil

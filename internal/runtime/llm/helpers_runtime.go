@@ -37,16 +37,7 @@ func asString(v any) string {
 	return runtimesharedjson.AsString(v)
 }
 
-var mcpTurnContextRegister = func(context.Context, time.Duration) string { return "" }
-var mcpTurnContextUnregister = func(string) {}
-
-func SetMCPTurnContextHooks(register func(context.Context, time.Duration) string, unregister func(string)) {
-	if register == nil {
-		register = func(context.Context, time.Duration) string { return "" }
-	}
-	if unregister == nil {
-		unregister = func(string) {}
-	}
-	mcpTurnContextRegister = register
-	mcpTurnContextUnregister = unregister
+type MCPTurnContextStore interface {
+	RegisterTurnContextWithTTL(context.Context, time.Duration) string
+	UnregisterTurnContext(string)
 }
