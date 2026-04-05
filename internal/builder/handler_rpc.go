@@ -1,0 +1,263 @@
+package builder
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	runtimecredentials "swarm/internal/runtime/credentials"
+)
+
+func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if h.mux == nil {
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /rpc", h.handleRPC)
+		mux.HandleFunc("POST /api/rpc", h.handleRPC)
+		mux.HandleFunc("GET /ws", h.handleWS)
+		mux.HandleFunc("GET /api/ws", h.handleWS)
+		h.mux = mux
+	}
+	h.mux.ServeHTTP(w, r)
+}
+
+func (h *handler) handleRPC(w http.ResponseWriter, r *http.Request) {
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, RPCResponse{
+			JSONRPC: "2.0",
+			Error: &RPCError{
+				Code:    -32700,
+				Message: err.Error(),
+			},
+		})
+		return
+	}
+	resp := RPCResponse{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+	}
+	result, rpcErr := h.dispatchRPC(r.Context(), strings.TrimSpace(req.Method), req.Params)
+	if rpcErr != nil {
+		resp.Error = rpcErr
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	resp.Result = result
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *handler) dispatchRPC(ctx context.Context, method string, params map[string]any) (any, *RPCError) {
+	switch strings.TrimSpace(method) {
+	case "engine.ping":
+		return map[string]any{
+			"status":  "ok",
+			"version": h.builderVersion(),
+		}, nil
+	case "project.open":
+		if h.projectControl == nil {
+			return nil, methodUnavailable("project controller is not configured")
+		}
+		projectDir := strings.TrimSpace(asString(params["project_dir"]))
+		if projectDir == "" {
+			return nil, &RPCError{Code: -32602, Message: "project_dir is required"}
+		}
+		status, err := h.projectControl.OpenProject(ctx, projectDir)
+		if err != nil {
+			return nil, internalError(err)
+		}
+		return status, nil
+	case "project.reload":
+		if h.projectControl == nil {
+			return nil, methodUnavailable("project controller is not configured")
+		}
+		status, err := h.projectControl.ReloadProject(ctx, strings.TrimSpace(asString(params["project_dir"])))
+		if err != nil {
+			return nil, internalError(err)
+		}
+		return status, nil
+	case "project.close":
+		if h.projectControl == nil {
+			return nil, methodUnavailable("project controller is not configured")
+		}
+		status, err := h.projectControl.CloseProject(ctx)
+		if err != nil {
+			return nil, internalError(err)
+		}
+		return status, nil
+	case "run.start":
+		if h.runHub == nil {
+			return nil, methodUnavailable("run hub is not configured")
+		}
+		runID := strings.TrimSpace(asString(params["run_id"]))
+		if runID == "" {
+			return nil, &RPCError{Code: -32602, Message: "run_id is required"}
+		}
+		inputs, _ := params["inputs"].(map[string]any)
+		breakpoints := asStringSlice(params["breakpoints"])
+		if err := h.runHub.startRun(ctx, runID, inputs, breakpoints); err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"run_id": runID, "status": "started"}, nil
+	case "run.stop":
+		if h.runHub == nil {
+			return nil, methodUnavailable("run hub is not configured")
+		}
+		runID := strings.TrimSpace(asString(params["run_id"]))
+		if runID == "" {
+			return nil, &RPCError{Code: -32602, Message: "run_id is required"}
+		}
+		if err := h.runHub.stopRun(runID); err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"run_id": runID, "status": "stopped"}, nil
+	case "run.pause":
+		if h.runHub == nil {
+			return nil, methodUnavailable("run hub is not configured")
+		}
+		runID := strings.TrimSpace(asString(params["run_id"]))
+		if runID == "" {
+			return nil, &RPCError{Code: -32602, Message: "run_id is required"}
+		}
+		if err := h.runHub.pauseRun(runID); err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"run_id": runID, "status": "paused"}, nil
+	case "run.continue":
+		if h.runHub == nil {
+			return nil, methodUnavailable("run hub is not configured")
+		}
+		runID := strings.TrimSpace(asString(params["run_id"]))
+		if runID == "" {
+			return nil, &RPCError{Code: -32602, Message: "run_id is required"}
+		}
+		instanceIDs := asStringSlice(params["instance_ids"])
+		decision := strings.TrimSpace(asString(params["decision"]))
+		if err := h.runHub.continueRun(runID, instanceIDs, decision); err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"run_id": runID, "status": "running"}, nil
+	case "run.step":
+		if h.runHub == nil {
+			return nil, methodUnavailable("run hub is not configured")
+		}
+		runID := strings.TrimSpace(asString(params["run_id"]))
+		if runID == "" {
+			return nil, &RPCError{Code: -32602, Message: "run_id is required"}
+		}
+		if err := h.runHub.stepRun(runID, strings.TrimSpace(asString(params["node_id"])), strings.TrimSpace(asString(params["instance_id"]))); err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"run_id": runID, "status": "running"}, nil
+	case "run.retry":
+		if h.runHub == nil {
+			return nil, methodUnavailable("run hub is not configured")
+		}
+		runID := strings.TrimSpace(asString(params["run_id"]))
+		if runID == "" {
+			return nil, &RPCError{Code: -32602, Message: "run_id is required"}
+		}
+		if err := h.runHub.retryRun(runID, strings.TrimSpace(asString(params["node_id"])), strings.TrimSpace(asString(params["instance_id"]))); err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"run_id": runID, "status": "running"}, nil
+	case "run.skip":
+		if h.runHub == nil {
+			return nil, methodUnavailable("run hub is not configured")
+		}
+		runID := strings.TrimSpace(asString(params["run_id"]))
+		if runID == "" {
+			return nil, &RPCError{Code: -32602, Message: "run_id is required"}
+		}
+		if err := h.runHub.skipRun(runID, strings.TrimSpace(asString(params["node_id"])), strings.TrimSpace(asString(params["instance_id"]))); err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"run_id": runID, "status": "running"}, nil
+	case "state.list_instances", "state.get_instances":
+		if h.instances == nil {
+			return nil, methodUnavailable("instance reader is not configured")
+		}
+		rows, err := h.instances.List(ctx)
+		if err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"instances": rows}, nil
+	case "state.get_entity":
+		if h.instances == nil {
+			return nil, methodUnavailable("instance reader is not configured")
+		}
+		instanceID := strings.TrimSpace(asString(params["instance_id"]))
+		if instanceID == "" {
+			return nil, &RPCError{Code: -32602, Message: "instance_id is required"}
+		}
+		instance, ok, err := h.instances.Load(ctx, instanceID)
+		if err != nil {
+			return nil, internalError(err)
+		}
+		if !ok {
+			return nil, &RPCError{Code: -32004, Message: "instance not found", Data: map[string]any{"instance_id": instanceID}}
+		}
+		return map[string]any{
+			"entity":      entityPayload(instance),
+			"gates":       entityGates(instance),
+			"accumulated": entityAccumulated(instance),
+		}, nil
+	case "credentials.list":
+		if h.credentials == nil {
+			return nil, methodUnavailable("credential store is not configured")
+		}
+		items, err := runtimecredentials.ListDescriptors(ctx, h.credentials, h.currentSemanticSource())
+		if err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"credentials": credentialRecords(items)}, nil
+	case "credentials.set":
+		if h.credentials == nil {
+			return nil, methodUnavailable("credential store is not configured")
+		}
+		key := strings.TrimSpace(asString(params["key"]))
+		if key == "" {
+			return nil, &RPCError{Code: -32602, Message: "key is required"}
+		}
+		rawValue, ok := params["value"]
+		if !ok {
+			return nil, &RPCError{Code: -32602, Message: "value is required"}
+		}
+		if err := h.credentials.Set(ctx, key, asString(rawValue)); err != nil {
+			return nil, internalError(err)
+		}
+		record, err := runtimecredentials.Describe(ctx, h.credentials, h.currentSemanticSource(), key)
+		if err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"credential": credentialRecord(record)}, nil
+	case "credentials.delete":
+		if h.credentials == nil {
+			return nil, methodUnavailable("credential store is not configured")
+		}
+		key := strings.TrimSpace(asString(params["key"]))
+		if key == "" {
+			return nil, &RPCError{Code: -32602, Message: "key is required"}
+		}
+		if err := h.credentials.Delete(ctx, key); err != nil {
+			return nil, internalError(err)
+		}
+		record, err := runtimecredentials.Describe(ctx, h.credentials, h.currentSemanticSource(), key)
+		if err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"credential": credentialRecord(record)}, nil
+	case "validate.full":
+		return h.runFullValidation(ctx), nil
+	default:
+		return nil, &RPCError{
+			Code:    -32601,
+			Message: "method not found",
+			Data:    map[string]any{"method": method},
+		}
+	}
+}
