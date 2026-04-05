@@ -55,6 +55,12 @@ type PipelineReceiptPersistence interface {
 	UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error
 }
 
+// RunLifecyclePersistence is an optional capability for persisting canonical
+// terminal run lifecycle state once execution proves the run is done.
+type RunLifecyclePersistence interface {
+	MarkRunTerminal(ctx context.Context, runID, status, errorSummary string, endedAt time.Time) error
+}
+
 // AtomicEventPersistence is an optional capability for transactionally
 // persisting an event row and its delivery manifest together.
 type AtomicEventPersistence interface {

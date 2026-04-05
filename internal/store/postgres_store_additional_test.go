@@ -318,6 +318,74 @@ func TestPostgresStore_AppendEvent_InheritsParentRunID(t *testing.T) {
 	}
 }
 
+func TestPostgresStore_MarkRunTerminal_PersistsCanonicalLifecycle(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	completedRunID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, completedRunID); err != nil {
+		t.Fatalf("seed completed run: %v", err)
+	}
+	completedAt := time.Now().UTC().Round(time.Second)
+	if err := pg.MarkRunTerminal(ctx, completedRunID, "completed", "", completedAt); err != nil {
+		t.Fatalf("MarkRunTerminal(completed): %v", err)
+	}
+
+	var (
+		completedStatus string
+		completedErr    string
+		completedEnded  time.Time
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(error_summary, ''), ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, completedRunID).Scan(&completedStatus, &completedErr, &completedEnded); err != nil {
+		t.Fatalf("load completed run: %v", err)
+	}
+	if completedStatus != "completed" {
+		t.Fatalf("completed run status = %q, want completed", completedStatus)
+	}
+	if completedErr != "" {
+		t.Fatalf("completed run error_summary = %q, want empty", completedErr)
+	}
+	if completedEnded.IsZero() {
+		t.Fatal("completed run ended_at not persisted")
+	}
+
+	failedRunID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, failedRunID); err != nil {
+		t.Fatalf("seed failed run: %v", err)
+	}
+	failedAt := time.Now().UTC().Round(time.Second)
+	if err := pg.MarkRunTerminal(ctx, failedRunID, "failed", "quiescence timeout", failedAt); err != nil {
+		t.Fatalf("MarkRunTerminal(failed): %v", err)
+	}
+
+	var (
+		failedStatus string
+		failedErr    string
+		failedEnded  time.Time
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(error_summary, ''), ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, failedRunID).Scan(&failedStatus, &failedErr, &failedEnded); err != nil {
+		t.Fatalf("load failed run: %v", err)
+	}
+	if failedStatus != "failed" {
+		t.Fatalf("failed run status = %q, want failed", failedStatus)
+	}
+	if failedErr != "quiescence timeout" {
+		t.Fatalf("failed run error_summary = %q, want quiescence timeout", failedErr)
+	}
+	if failedEnded.IsZero() {
+		t.Fatal("failed run ended_at not persisted")
+	}
+}
+
 func TestPostgresStore_ListPendingEventsForAgentSpec_PreservesRunID(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

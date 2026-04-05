@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
+	runtimebus "swarm/internal/runtime/bus"
 )
 
 const runCompletionTimeout = 30 * time.Second
@@ -370,6 +371,20 @@ func (h *runHub) awaitCompletion(runID string) {
 		if h.isTerminal(runID) {
 			return
 		}
+		if persistErr := h.persistTerminalState(runID, "failed", err.Error(), time.Now().UTC()); persistErr != nil {
+			h.markTerminal(runID)
+			h.emit(runID, map[string]any{
+				"id":        uuid.NewString(),
+				"type":      "run.failed",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+				"payload": map[string]any{
+					"run_id":            runID,
+					"error":             err.Error(),
+					"persistence_error": persistErr.Error(),
+				},
+			})
+			return
+		}
 		h.markTerminal(runID)
 		h.emit(runID, map[string]any{
 			"id":        uuid.NewString(),
@@ -380,6 +395,20 @@ func (h *runHub) awaitCompletion(runID string) {
 		return
 	}
 	if h.isTerminal(runID) {
+		return
+	}
+	if err := h.persistTerminalState(runID, "completed", "", time.Now().UTC()); err != nil {
+		h.markTerminal(runID)
+		h.emit(runID, map[string]any{
+			"id":        uuid.NewString(),
+			"type":      "run.failed",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"payload": map[string]any{
+				"run_id":            runID,
+				"error":             "persisting canonical run completion failed",
+				"persistence_error": err.Error(),
+			},
+		})
 		return
 	}
 	h.markTerminal(runID)
@@ -406,6 +435,18 @@ func (h *runHub) markTerminal(runID string) {
 	if session := h.sessions[strings.TrimSpace(runID)]; session != nil {
 		session.terminal = true
 	}
+}
+
+func (h *runHub) persistTerminalState(runID, status, errorSummary string, endedAt time.Time) error {
+	session := h.session(runID)
+	if session == nil || session.runtime == nil || session.runtime.Bus == nil {
+		return fmt.Errorf("run terminal persistence is not configured")
+	}
+	writer, ok := session.runtime.Bus.Store().(runtimebus.RunLifecyclePersistence)
+	if !ok || writer == nil {
+		return fmt.Errorf("run terminal persistence is not supported")
+	}
+	return writer.MarkRunTerminal(context.Background(), runID, status, errorSummary, endedAt)
 }
 
 func (h *runHub) isTerminal(runID string) bool {
