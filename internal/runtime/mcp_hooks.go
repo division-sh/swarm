@@ -48,9 +48,7 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(strin
 		WithActor:                 runtimeactors.WithActor,
 		ActorFromContext:          runtimeactors.ActorFromContext,
 		ResolveActorConfig:        resolveActorConfig,
-		WithRuntimeEpoch:          runtimebus.WithRuntimeEpoch,
 		WithCurrentRuntimeEpoch:   runtimebus.WithCurrentRuntimeEpoch,
-		IsCurrentRuntimeEpoch:     runtimebus.IsCurrentRuntimeEpoch,
 		WithInboundEvent:          runtimebus.WithInboundEvent,
 		WithEmittedEventsRecorder: runtimebus.WithEmittedEventsRecorder,
 		ResolveTurnContext: func(token string) (runtimemcp.TurnContext, bool) {

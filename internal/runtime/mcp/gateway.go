@@ -26,9 +26,7 @@ type GatewayHooks struct {
 	WithActor                 func(context.Context, models.AgentConfig) context.Context
 	ActorFromContext          func(context.Context) (models.AgentConfig, bool)
 	ResolveActorConfig        func(string) (models.AgentConfig, bool)
-	WithRuntimeEpoch          func(context.Context, int64) context.Context
 	WithCurrentRuntimeEpoch   func(context.Context) context.Context
-	IsCurrentRuntimeEpoch     func(int64) bool
 	WithInboundEvent          func(context.Context, events.Event) context.Context
 	WithEmittedEventsRecorder func(context.Context, *runtimebus.EmittedEventsRecorder) context.Context
 	ResolveTurnContext        func(string) (TurnContext, bool)
@@ -329,15 +327,12 @@ func (g *Gateway) mcpExecutionContext(r *http.Request, toolName string) (context
 	if token := ContextTokenFromRequest(r); token != "" {
 		if g.hooks.ResolveTurnContext != nil {
 			if turn, ok := g.hooks.ResolveTurnContext(token); ok {
-				if g.hooks.IsCurrentRuntimeEpoch != nil && !g.hooks.IsCurrentRuntimeEpoch(turn.Epoch) {
-					return nil, g.newRuntimeError(ErrCodeContextStale, "mcp.context.resolve", false, nil, "stale mcp context token")
-				}
 				ctx := context.Background()
 				if g.hooks.WithActor != nil {
 					ctx = g.hooks.WithActor(ctx, g.hydrateActor(turn.Actor))
 				}
-				if g.hooks.WithRuntimeEpoch != nil {
-					ctx = g.hooks.WithRuntimeEpoch(ctx, turn.Epoch)
+				if g.hooks.WithCurrentRuntimeEpoch != nil {
+					ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 				}
 				ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
 				if turn.HasInbound && g.hooks.WithInboundEvent != nil {
@@ -404,15 +399,12 @@ func (g *Gateway) toolExecutionContext(r *http.Request, actor models.AgentConfig
 	if token := ContextTokenFromRequest(r); token != "" {
 		if g.hooks.ResolveTurnContext != nil {
 			if turn, ok := g.hooks.ResolveTurnContext(token); ok {
-				if g.hooks.IsCurrentRuntimeEpoch != nil && !g.hooks.IsCurrentRuntimeEpoch(turn.Epoch) {
-					return nil, g.newRuntimeError(ErrCodeContextStale, "tool.context.resolve", false, nil, "stale mcp context token")
-				}
 				ctx := r.Context()
 				if g.hooks.WithActor != nil {
 					ctx = g.hooks.WithActor(ctx, g.hydrateActor(turn.Actor))
 				}
-				if g.hooks.WithRuntimeEpoch != nil {
-					ctx = g.hooks.WithRuntimeEpoch(ctx, turn.Epoch)
+				if g.hooks.WithCurrentRuntimeEpoch != nil {
+					ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 				}
 				ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
 				if turn.HasInbound && g.hooks.WithInboundEvent != nil {

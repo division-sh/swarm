@@ -20,7 +20,6 @@ type TurnContext struct {
 	HasInbound bool
 	Recorder   *runtimebus.EmittedEventsRecorder
 	Emitted    map[string]struct{}
-	Epoch      int64
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
 }
@@ -63,16 +62,11 @@ func (r *TurnContextRegistry) RegisterTurnContextWithTTL(ctx context.Context, tt
 	token := uuid.NewString()
 	recorder, _ := runtimebus.EmittedEventsRecorderFromContext(ctx)
 	inbound, hasInbound := runtimebus.InboundEventFromContext(ctx)
-	epoch := runtimebus.CurrentRuntimeEpoch()
-	if scoped, ok := runtimebus.RuntimeEpochFromContext(ctx); ok && scoped > 0 {
-		epoch = scoped
-	}
 	r.put(token, TurnContext{
 		Actor:      actor,
 		Inbound:    inbound,
 		HasInbound: hasInbound,
 		Recorder:   recorder,
-		Epoch:      epoch,
 		CreatedAt:  now,
 		ExpiresAt:  now.Add(ttl),
 	})

@@ -602,8 +602,8 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 		WithActor: func(ctx context.Context, actor models.AgentConfig) context.Context {
 			return models.WithActor(ctx, actor)
 		},
-		WithRuntimeEpoch: func(ctx context.Context, epoch int64) context.Context {
-			return ctx
+		WithCurrentRuntimeEpoch: func(ctx context.Context) context.Context {
+			return runtimebus.WithCurrentRuntimeEpoch(ctx)
 		},
 		WithInboundEvent: func(ctx context.Context, evt events.Event) context.Context {
 			return runtimebus.WithInboundEvent(ctx, evt)
@@ -623,6 +623,36 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 		t.Fatalf("mcpExecutionContext: %v", err)
 	}
 	_ = ctx
+}
+
+func TestGatewayMCPExecutionContext_KeepsOtherRegistryTokensValidAfterGlobalEpochBump(t *testing.T) {
+	registryA := newTestTurnContextRegistry()
+	registryB := newTestTurnContextRegistry()
+	registryB.PutTurnContextForTest("ctx-b", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	t.Cleanup(func() { registryB.UnregisterTurnContext("ctx-b") })
+
+	gatewayB := NewGateway(nil, "", GatewayHooks{
+		ResolveTurnContext:      registryB.ResolveTurnContext,
+		WithActor:               models.WithActor,
+		WithCurrentRuntimeEpoch: runtimebus.WithCurrentRuntimeEpoch,
+	})
+
+	registryA.Reset()
+	runtimebus.EnterRuntimeResetMode()
+	runtimebus.ExitRuntimeResetMode()
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-b", nil)
+	ctx, err := gatewayB.mcpExecutionContext(req, "query_entities")
+	if err != nil {
+		t.Fatalf("mcpExecutionContext after unrelated reset: %v", err)
+	}
+	if epoch, ok := runtimebus.RuntimeEpochFromContext(ctx); !ok || epoch != runtimebus.CurrentRuntimeEpoch() {
+		t.Fatalf("context epoch = %d ok=%v, want current epoch %d", epoch, ok, runtimebus.CurrentRuntimeEpoch())
+	}
 }
 
 func TestGatewayHandleMCP_AllowsReadOnlyToolWhenContextTokenMisses(t *testing.T) {
