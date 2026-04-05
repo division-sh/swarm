@@ -70,13 +70,13 @@ func (*flowActivationTestBus) Store() runtimebus.EventStore                     
 func (*flowActivationTestBus) ResetInMemoryState() error                                   { return nil }
 func (*flowActivationTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) {}
 
-func (b *flowActivationTestBus) AddFlowInstance(_ runtimecontracts.SystemNodeContract, instancePath string) error {
-	b.addedPaths = append(b.addedPaths, instancePath)
+func (b *flowActivationTestBus) AddFlowInstanceRoute(_ runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
+	b.addedPaths = append(b.addedPaths, identity.InstancePath)
 	return nil
 }
 
-func (b *flowActivationTestBus) RemoveFlowInstance(templateID, instanceID string) error {
-	b.removedPairs = append(b.removedPairs, templateID+"/"+instanceID)
+func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+	b.removedPairs = append(b.removedPairs, identity.ScopeKey+"/"+identity.InstanceID)
 	return nil
 }
 

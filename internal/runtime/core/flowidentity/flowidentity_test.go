@@ -118,6 +118,32 @@ func TestStoredCoordinates_SeparateScopeFromConcretePath(t *testing.T) {
 	}
 }
 
+func TestStoredRoute_CanonicalizesScopeInstanceAndPath(t *testing.T) {
+	route := StoredRoute("", "", "child/grandchild/inst-1")
+	if !route.Valid() {
+		t.Fatal("expected stored route from instance path to be valid")
+	}
+	if route.ScopeKey != "child/grandchild" {
+		t.Fatalf("StoredRoute scope = %q, want child/grandchild", route.ScopeKey)
+	}
+	if route.InstanceID != "inst-1" {
+		t.Fatalf("StoredRoute instance id = %q, want inst-1", route.InstanceID)
+	}
+	if route.InstancePath != "child/grandchild/inst-1" {
+		t.Fatalf("StoredRoute instance path = %q, want child/grandchild/inst-1", route.InstancePath)
+	}
+
+	derived := DeriveRoute("child/grandchild", "inst-1")
+	if derived != route {
+		t.Fatalf("DeriveRoute = %#v, want %#v", derived, route)
+	}
+
+	instance := Stored(nil, "grandchild", "child/grandchild/inst-1", "inst-1", "", "", "")
+	if got := instance.Route(); got != route {
+		t.Fatalf("Instance.Route() = %#v, want %#v", got, route)
+	}
+}
+
 func TestSemanticScopeFromInstancePath(t *testing.T) {
 	cases := []struct {
 		path string

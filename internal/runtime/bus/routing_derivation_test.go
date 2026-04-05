@@ -7,6 +7,7 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/flowmodel"
 	"swarm/internal/runtime/semanticview"
 )
@@ -16,17 +17,17 @@ func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.AddFlowInstance(runtimecontracts.SystemNodeContract{
+	if err := eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{
 		ID:           "reviewer-{instance_id}",
 		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
-	}, "review/inst-1"); err != nil {
+	}, runtimeflowidentity.DeriveRoute("review", "inst-1")); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].ID != "reviewer-inst-1" {
 		t.Fatalf("resolved subscribers after add = %#v", got)
 	}
-	if err := eb.RemoveFlowInstance("review", "inst-1"); err != nil {
+	if err := eb.RemoveFlowInstanceRoute(runtimeflowidentity.DeriveRoute("review", "inst-1")); err != nil {
 		t.Fatalf("RemoveFlowInstance: %v", err)
 	}
 	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 0 {
@@ -47,19 +48,19 @@ func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, r
 	if s.routes == nil {
 		s.routes = map[string]runtimebus.FlowInstanceRouteRecord{}
 	}
-	s.routes[route.TemplateID+"/"+route.InstanceID] = route
+	s.routes[route.Identity.ScopeKey+"/"+route.Identity.InstanceID] = route
 	return nil
 }
 
-func (s *routePersistenceTestStore) DeleteFlowInstanceRoute(_ context.Context, templateID, instanceID string) error {
-	delete(s.routes, templateID+"/"+instanceID)
+func (s *routePersistenceTestStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+	delete(s.routes, identity.ScopeKey+"/"+identity.InstanceID)
 	return nil
 }
 
-func (s *routePersistenceTestStore) ListFlowInstanceRoutes(context.Context) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	out := make([]runtimebus.FlowInstanceRouteRecord, 0, len(s.routes))
+func (s *routePersistenceTestStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+	out := make([]runtimeflowidentity.Route, 0, len(s.routes))
 	for _, route := range s.routes {
-		out = append(out, route)
+		out = append(out, route.Identity)
 	}
 	return out, nil
 }
@@ -70,17 +71,17 @@ func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.AddFlowInstance(runtimecontracts.SystemNodeContract{
+	if err := eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{
 		ID:           "reviewer-{instance_id}",
 		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
-	}, "review/inst-1"); err != nil {
+	}, runtimeflowidentity.DeriveRoute("review", "inst-1")); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	if _, ok := store.routes["review/inst-1"]; !ok {
 		t.Fatalf("persisted routes = %#v, want review/inst-1", store.routes)
 	}
-	if err := eb.RemoveFlowInstance("review", "inst-1"); err != nil {
+	if err := eb.RemoveFlowInstanceRoute(runtimeflowidentity.DeriveRoute("review", "inst-1")); err != nil {
 		t.Fatalf("RemoveFlowInstance: %v", err)
 	}
 	if len(store.routes) != 0 {
@@ -93,17 +94,17 @@ func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := eb.AddFlowInstance(runtimecontracts.SystemNodeContract{
+	if err := eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{
 		ID:           "worker-{instance_id}",
 		Produces:     []string{"micro.started"},
 		SubscribesTo: []string{"micro.started"},
-	}, "child/grandchild/inst-1"); err != nil {
+	}, runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	if got := eb.RouteTable().Resolve("child/grandchild/inst-1/micro.started"); len(got) != 1 || got[0].ID != "worker-inst-1" {
 		t.Fatalf("resolved subscribers after add = %#v", got)
 	}
-	if err := eb.RemoveFlowInstance("child/grandchild", "inst-1"); err != nil {
+	if err := eb.RemoveFlowInstanceRoute(runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")); err != nil {
 		t.Fatalf("RemoveFlowInstance: %v", err)
 	}
 	if got := eb.RouteTable().Resolve("child/grandchild/inst-1/micro.started"); len(got) != 0 {
@@ -293,18 +294,19 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if err := rt.AddFlowInstance(runtimecontracts.SystemNodeContract{}, "child/grandchild/inst-1"); err != nil {
+	identity := runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")
+	if err := rt.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, identity); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
-	routes := rt.MaterializedRoutes("child/grandchild/inst-1")
+	routes := rt.MaterializedRoutes(identity)
 	if len(routes) != 1 {
 		t.Fatalf("MaterializedRoutes = %#v, want 1 route", routes)
 	}
-	if routes[0].TemplateID != "child/grandchild" {
-		t.Fatalf("TemplateID = %q, want child/grandchild", routes[0].TemplateID)
+	if routes[0].Identity.ScopeKey != "child/grandchild" {
+		t.Fatalf("ScopeKey = %q, want child/grandchild", routes[0].Identity.ScopeKey)
 	}
-	if routes[0].InstanceID != "inst-1" {
-		t.Fatalf("InstanceID = %q, want inst-1", routes[0].InstanceID)
+	if routes[0].Identity.InstanceID != "inst-1" {
+		t.Fatalf("InstanceID = %q, want inst-1", routes[0].Identity.InstanceID)
 	}
 	if routes[0].SourceFlow != "child/grandchild" {
 		t.Fatalf("SourceFlow = %q, want child/grandchild", routes[0].SourceFlow)

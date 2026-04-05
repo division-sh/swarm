@@ -24,11 +24,11 @@ type flowInstancePersistence interface {
 }
 
 type flowInstanceRouteInstaller interface {
-	AddFlowInstance(template runtimecontracts.SystemNodeContract, instancePath string) error
+	AddFlowInstanceRoute(template runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error
 }
 
 type flowInstanceRouteRemover interface {
-	RemoveFlowInstance(templateID, instanceID string) error
+	RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error
 }
 
 func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -114,7 +114,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		}
 	}
 	if installer, ok := am.bus.(flowInstanceRouteInstaller); ok && installer != nil {
-		if err := installer.AddFlowInstance(runtimecontracts.SystemNodeContract{}, flowPath); err != nil {
+		if err := installer.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, instance.Route()); err != nil {
 			return err
 		}
 	} else {
@@ -253,9 +253,9 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 		return fmt.Errorf("template_id, instance_id, flow_path, and entity_id are required")
 	}
 	flowEntityID := entityID
-	scopeKey := strings.TrimSpace(instance.ScopeKey)
-	if scopeKey == "" {
-		return fmt.Errorf("derive scope key for flow path %s", flowPath)
+	routeIdentity := instance.Route()
+	if !routeIdentity.Valid() {
+		return fmt.Errorf("derive route identity for flow path %s", flowPath)
 	}
 	am.mu.RLock()
 	agentIDs := make([]string, 0, len(am.agentCfg))
@@ -273,7 +273,7 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 		}
 	}
 	if remover, ok := am.bus.(flowInstanceRouteRemover); ok && remover != nil {
-		return remover.RemoveFlowInstance(scopeKey, instanceID)
+		return remover.RemoveFlowInstanceRoute(routeIdentity)
 	}
 	return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", flowPath)
 }

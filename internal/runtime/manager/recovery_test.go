@@ -10,6 +10,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
@@ -35,12 +36,18 @@ func (b *recoveryTestBus) ListEventsMissingPipelineReceipt(context.Context, time
 func (b *recoveryTestBus) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
 	return nil
 }
-func (b *recoveryTestBus) DeleteFlowInstanceRoute(context.Context, string, string) error { return nil }
-func (b *recoveryTestBus) ListFlowInstanceRoutes(context.Context) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	return append([]runtimebus.FlowInstanceRouteRecord(nil), b.storedRoutes...), nil
+func (b *recoveryTestBus) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+	return nil
 }
-func (b *recoveryTestBus) AddFlowInstance(_ runtimecontracts.SystemNodeContract, instancePath string) error {
-	b.restored = append(b.restored, instancePath)
+func (b *recoveryTestBus) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+	out := make([]runtimeflowidentity.Route, 0, len(b.storedRoutes))
+	for _, route := range b.storedRoutes {
+		out = append(out, route.Identity)
+	}
+	return out, nil
+}
+func (b *recoveryTestBus) AddFlowInstanceRoute(_ runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
+	b.restored = append(b.restored, identity.InstancePath)
 	return nil
 }
 
@@ -67,9 +74,7 @@ func (s *recoveryTestStore) ListPendingSubscribedEvents(context.Context, string,
 func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	bus := &recoveryTestBus{
 		storedRoutes: []runtimebus.FlowInstanceRouteRecord{{
-			TemplateID:   "review",
-			InstanceID:   "inst-1",
-			InstancePath: "review/inst-1",
+			Identity: runtimeflowidentity.DeriveRoute("review", "inst-1"),
 		}},
 	}
 	store := &recoveryTestStore{
