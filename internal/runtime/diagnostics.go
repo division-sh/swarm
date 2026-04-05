@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/diaglog"
@@ -234,6 +235,9 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 		return err
 	}
 	if hasRunID {
+		if err := ensureRuntimeLogRunRow(ctx, db, runID); err != nil {
+			return err
+		}
 		_, err = db.ExecContext(ctx, `
 			INSERT INTO events (
 				run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
@@ -260,6 +264,25 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 		return err
 	}
 	return nil
+}
+
+func ensureRuntimeLogRunRow(ctx context.Context, db *sql.DB, runID string) error {
+	if db == nil {
+		return nil
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil
+	}
+	if _, err := uuid.Parse(runID); err != nil {
+		return err
+	}
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', now())
+		ON CONFLICT (run_id) DO NOTHING
+	`, runID)
+	return err
 }
 
 func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detailMap map[string]any, runID, parentEventID, handlerID string) map[string]any {
