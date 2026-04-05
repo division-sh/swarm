@@ -569,7 +569,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if err != nil {
 		return err
 	}
-	resolved, err := runtimesessions.ResolveScope(context.Background(), mode, rec.SessionScope, rec.ScopeKey)
+	resolved, err := runtimesessions.ResolveScope(ctx, mode, rec.SessionScope, rec.ScopeKey)
 	if err != nil {
 		return err
 	}
@@ -845,7 +845,7 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 	if err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
-	resolved, err := runtimesessions.ResolveScope(context.Background(), mode, sessionScope, scopeKey)
+	resolved, err := runtimesessions.ResolveScope(ctx, mode, sessionScope, scopeKey)
 	if err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}

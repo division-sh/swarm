@@ -66,16 +66,16 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 		return nil
 	}
 	return r.conversations.UpsertConversation(ctx, ConversationRecord{
-		SessionID: s.ID,
-		AgentID:   s.AgentID,
+		SessionID:    s.ID,
+		AgentID:      s.AgentID,
 		SessionScope: strings.TrimSpace(s.SessionScope),
-		ScopeKey:  strings.TrimSpace(s.ScopeKey),
-		RunID:     strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
-		Mode:      mode,
-		Messages:  s.Messages,
-		Summary:   BuildSessionSummary(s),
-		TurnCount: s.TurnCount,
-		Status:    "active",
+		ScopeKey:     strings.TrimSpace(s.ScopeKey),
+		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
+		Mode:         mode,
+		Messages:     s.Messages,
+		Summary:      BuildSessionSummary(s),
+		TurnCount:    s.TurnCount,
+		Status:       "active",
 	})
 }
 
@@ -304,14 +304,15 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 		return
 	}
 	if err := r.conversations.UpsertConversation(ctx, ConversationRecord{
-		SessionID: s.ID,
-		AgentID:   s.AgentID,
-		ScopeKey:  strings.TrimSpace(s.ScopeKey),
-		Mode:      mode,
-		Messages:  s.Messages,
-		Summary:   BuildSessionSummary(s),
-		TurnCount: s.TurnCount,
-		Status:    "active",
+		SessionID:    s.ID,
+		AgentID:      s.AgentID,
+		SessionScope: strings.TrimSpace(s.SessionScope),
+		ScopeKey:     strings.TrimSpace(s.ScopeKey),
+		Mode:         mode,
+		Messages:     s.Messages,
+		Summary:      BuildSessionSummary(s),
+		TurnCount:    s.TurnCount,
+		Status:       "active",
 	}); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_api_conversation_failed", "Persisting the API conversation failed", s.AgentID, s.ID, "", map[string]any{
 			"conversation_mode": mode,

@@ -232,6 +232,9 @@ func (s *PostgresStore) migrateLegacyAgentRuntimeDescriptors(ctx context.Context
 		if desc.Mode == "" {
 			desc.Mode = legacy.Mode
 		}
+		if desc.SessionScope == "" {
+			desc.SessionScope = legacy.SessionScope
+		}
 		if desc.MaxTurnsPerTask == 0 {
 			desc.MaxTurnsPerTask = legacy.MaxTurnsPerTask
 		}

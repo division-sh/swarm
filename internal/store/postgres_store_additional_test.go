@@ -1462,6 +1462,53 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	}
 }
 
+func TestManagerStore_ConversationPersistence_SessionPerEntityUsesActorContext(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	baseCtx := context.Background()
+	resetAgentSessionsSpecTable(t, baseCtx, pg)
+	entityID := uuid.NewString()
+	seedSpecAgent(t, baseCtx, pg, "entity-agent", entityID, "")
+
+	ctx := runtimeactors.WithActor(baseCtx, runtimeactors.AgentConfig{
+		ID:       "entity-agent",
+		FlowPath: "review/inst-1",
+		EntityID: entityID,
+	})
+
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		AgentID:      "entity-agent",
+		Mode:         "session_per_entity",
+		SessionScope: "entity",
+		ScopeKey:     entityID,
+		Messages:     []llm.Message{{Role: "assistant", Content: "done"}},
+		TurnCount:    1,
+		Status:       "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(session_per_entity): %v", err)
+	}
+
+	rec, ok, err := pg.LoadActiveConversation(ctx, "entity-agent", "session_per_entity", "entity", entityID)
+	if err != nil || !ok {
+		t.Fatalf("LoadActiveConversation ok=%v err=%v", ok, err)
+	}
+	if rec.SessionScope != "entity" || rec.ScopeKey != entityID {
+		t.Fatalf("unexpected conversation record: %+v", rec)
+	}
+
+	var flowInstance string
+	if err := db.QueryRowContext(baseCtx, `
+		SELECT COALESCE(flow_instance, '')
+		FROM agent_sessions
+		WHERE agent_id = 'entity-agent' AND scope_key = $1
+	`, entityID).Scan(&flowInstance); err != nil {
+		t.Fatalf("load entity-scoped session row: %v", err)
+	}
+	if flowInstance != "review/inst-1" {
+		t.Fatalf("flow_instance = %q, want review/inst-1", flowInstance)
+	}
+}
+
 func TestManagerStore_Conversations_AndAgentTurns_PersistRunIDWhenColumnsExist(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -2216,6 +2263,66 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 	if err := pg.CancelSchedule(ctx, ceoID, "timer.test"); err != nil {
 		t.Fatalf("CancelSchedule: %v", err)
+	}
+}
+
+func TestPostgresStore_LoadAgents_MigratesLegacySessionScopeIntoRuntimeDescriptor(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if err := pg.ensureSchemaCompatibilityColumns(ctx); err != nil {
+		t.Fatalf("ensureSchemaCompatibilityColumns: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (
+			agent_id, role, model_tier, llm_backend, conversation_mode,
+			config, runtime_descriptor, status, created_at
+		) VALUES (
+			'legacy-session-agent', 'worker', 'sonnet', 'api', 'session',
+			'{"type":"sonnet","mode":"worker","session_scope":"global","system_prompt":"x"}'::jsonb,
+			'{}'::jsonb,
+			'active',
+			now()
+		)
+	`); err != nil {
+		t.Fatalf("seed legacy agent row: %v", err)
+	}
+
+	agents, err := pg.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents: %v", err)
+	}
+	found := false
+	for _, agent := range agents {
+		if agent.Config.ID != "legacy-session-agent" {
+			continue
+		}
+		found = true
+		if agent.Config.SessionScope != "global" {
+			t.Fatalf("SessionScope = %q, want global", agent.Config.SessionScope)
+		}
+	}
+	if !found {
+		t.Fatal("expected migrated legacy agent")
+	}
+
+	var (
+		configJSON            string
+		runtimeDescriptorJSON string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(config::text, '{}'), COALESCE(runtime_descriptor::text, '{}')
+		FROM agents
+		WHERE agent_id = 'legacy-session-agent'
+	`).Scan(&configJSON, &runtimeDescriptorJSON); err != nil {
+		t.Fatalf("load migrated agent row: %v", err)
+	}
+	if strings.Contains(configJSON, "session_scope") {
+		t.Fatalf("expected session_scope removed from opaque config, got %s", configJSON)
+	}
+	if !strings.Contains(runtimeDescriptorJSON, `"session_scope": "global"`) && !strings.Contains(runtimeDescriptorJSON, `"session_scope":"global"`) {
+		t.Fatalf("expected session_scope in runtime_descriptor, got %s", runtimeDescriptorJSON)
 	}
 }
 
