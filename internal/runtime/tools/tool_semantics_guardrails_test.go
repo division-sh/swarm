@@ -141,8 +141,8 @@ func TestToolDefinitionsForActor_IncludesEnabledNativeTools(t *testing.T) {
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
 	defs := exec.ToolDefinitionsForActor(models.AgentConfig{
-		ID:     "analysis-agent",
-		Config: []byte(`{"native_tools":{"file_io":true}}`),
+		ID:          "analysis-agent",
+		NativeTools: models.NativeToolConfig{FileIO: true},
 	})
 
 	names := make([]string, 0, len(defs))

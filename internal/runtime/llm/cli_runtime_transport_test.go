@@ -42,17 +42,13 @@ func TestClaudeDisallowedBuiltinToolsArgForActor_DefaultsToAllKnownBuiltins(t *t
 }
 
 func TestClaudeDisallowedBuiltinToolsArgForActor_MapsNativeCapabilities(t *testing.T) {
-	raw, err := json.Marshal(map[string]any{
-		"native_tools": map[string]any{
-			"bash":       true,
-			"web_search": true,
-			"file_io":    true,
+	got := claudeDisallowedBuiltinToolsArgForActor(models.AgentConfig{
+		NativeTools: models.NativeToolConfig{
+			Bash:      true,
+			WebSearch: true,
+			FileIO:    true,
 		},
 	})
-	if err != nil {
-		t.Fatalf("marshal config: %v", err)
-	}
-	got := claudeDisallowedBuiltinToolsArgForActor(models.AgentConfig{Config: raw})
 	gotNames := strings.Split(got, ",")
 	for _, name := range []string{"Bash", "Read", "Write", "Edit", "WebSearch"} {
 		if slices.Contains(gotNames, name) {
@@ -67,15 +63,9 @@ func TestClaudeDisallowedBuiltinToolsArgForActor_MapsNativeCapabilities(t *testi
 }
 
 func TestClaudeAllowedToolsArgForActor_IncludesContractAndNativeTools(t *testing.T) {
-	raw, err := json.Marshal(map[string]any{
-		"native_tools": map[string]any{
-			"file_io": true,
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal config: %v", err)
-	}
-	got := claudeAllowedToolsArgForActor(models.AgentConfig{Config: raw}, []ToolDefinition{
+	got := claudeAllowedToolsArgForActor(models.AgentConfig{
+		NativeTools: models.NativeToolConfig{FileIO: true},
+	}, []ToolDefinition{
 		{Name: "emit_category_assessed"},
 		{Name: "emit_market_research_scan_complete"},
 		{Name: "query_entities"},

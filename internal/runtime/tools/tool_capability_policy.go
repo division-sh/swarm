@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"encoding/json"
 	"strings"
 
 	models "swarm/internal/runtime/core/actors"
@@ -44,7 +43,7 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAu
 		decision.allowed = true
 		return decision
 	}
-	allowed, constrained := extractAllowedToolsFromConfig(actor)
+	allowed, constrained := extractAllowedTools(actor)
 	decision.constrained = constrained
 	if _, ok := allowed[toolName]; ok {
 		decision.class = toolAuthorizationActorConfig
@@ -55,7 +54,7 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAu
 }
 
 func toolEmitAllowed(actor models.AgentConfig, toolName string) bool {
-	return IsEmitToolAllowedForRole(actor.Role, toolName) || IsEmitToolAllowedForConfig(actor.Config, toolName)
+	return IsEmitToolAllowedForRole(actor.Role, toolName) || IsEmitToolAllowedForActor(actor, toolName)
 }
 
 func toolKindPolicy(toolName string) toolcapabilities.ToolKind {
@@ -74,26 +73,14 @@ func toolContextRequirementPolicy(toolName string) toolcapabilities.ContextRequi
 	}
 }
 
-func extractAllowedToolsFromConfig(actor models.AgentConfig) (map[string]struct{}, bool) {
+func extractAllowedTools(actor models.AgentConfig) (map[string]struct{}, bool) {
 	allowed := make(map[string]struct{})
-	if len(actor.Config) == 0 || !json.Valid(actor.Config) {
-		return allowed, false
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal(actor.Config, &parsed); err != nil {
+	if len(actor.Tools) == 0 {
 		return allowed, false
 	}
 	found := false
-	raw, ok := parsed["tools"]
-	if !ok {
-		return allowed, false
-	}
-	arr, ok := raw.([]any)
-	if !ok {
-		return allowed, false
-	}
-	for _, item := range arr {
-		name := normalizeNativeToolName(asString(item))
+	for _, item := range actor.Tools {
+		name := normalizeNativeToolName(item)
 		if name == "" {
 			continue
 		}

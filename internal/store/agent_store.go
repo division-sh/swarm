@@ -13,6 +13,9 @@ import (
 )
 
 func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {
+	if err := s.ensureSchemaCompatibilityColumns(ctx); err != nil {
+		return err
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -21,9 +24,14 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 		return fmt.Errorf("agent id is required")
 	}
 	rec.Config.NormalizeEntityID()
+	rec.Config.NormalizeRuntimeDescriptor()
 	cfgJSON, err := mergeAgentConfigJSON(rec.Config)
 	if err != nil {
 		return fmt.Errorf("marshal agent config: %w", err)
+	}
+	runtimeDescriptorJSON, err := marshalPersistedAgentRuntimeDescriptor(rec.Config)
+	if err != nil {
+		return fmt.Errorf("marshal agent runtime descriptor: %w", err)
 	}
 
 	var startedAt any
@@ -32,13 +40,16 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	}
 	switch caps.Agents {
 	case SchemaFlavorCanonical:
-		return s.upsertAgentSpec(ctx, rec, cfgJSON, startedAt)
+		return s.upsertAgentSpec(ctx, rec, cfgJSON, runtimeDescriptorJSON, startedAt)
 	default:
 		return unsupportedSchemaCapability("agents", caps.Agents)
 	}
 }
 
 func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
+	if err := s.ensureSchemaCompatibilityColumns(ctx); err != nil {
+		return nil, err
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return nil, err
@@ -118,11 +129,11 @@ func (s *PostgresStore) MarkAgentTerminated(ctx context.Context, agentID string)
 	return nil
 }
 
-func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.PersistedAgent, cfgJSON []byte, startedAt any) error {
+func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.PersistedAgent, cfgJSON, runtimeDescriptorJSON []byte, startedAt any) error {
 	modelTier := agentModelTier(rec.Config)
 	conversationMode := agentConversationMode(rec.Config)
-	emitEvents := extractStringListField(cfgJSON, "emit_events")
-	tools := extractStringListField(cfgJSON, "tools")
+	emitEvents := rec.Config.EmitEvents
+	tools := rec.Config.Tools
 	permissions := rec.Config.Permissions
 	subscriptions := rec.Config.Subscriptions
 	flowInstance := agentFlowInstance(rec.Config)
@@ -132,12 +143,12 @@ func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.
 		INSERT INTO agents (
 			agent_id, flow_instance, role, model_tier, llm_backend, conversation_mode,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
-			status, turn_count, last_active_at, created_at
+			runtime_descriptor, status, turn_count, last_active_at, created_at
 		)
 		VALUES (
 			$1, NULLIF($2,''), $3, $4, $5, $6,
 			NULLIF($7,''), NULLIF($8,'')::uuid, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb,
-			$14, 0, now(), COALESCE($15, now())
+			$14::jsonb, $15, 0, now(), COALESCE($16, now())
 		)
 		ON CONFLICT (agent_id) DO UPDATE SET
 			flow_instance = EXCLUDED.flow_instance,
@@ -152,6 +163,7 @@ func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.
 			emit_events = EXCLUDED.emit_events,
 			tools = EXCLUDED.tools,
 			permissions = EXCLUDED.permissions,
+			runtime_descriptor = EXCLUDED.runtime_descriptor,
 			status = EXCLUDED.status,
 			last_active_at = now()
 	`
@@ -169,6 +181,7 @@ func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.
 		mustJSONString(emitEvents),
 		mustJSONString(tools),
 		mustJSONString(permissions),
+		string(runtimeDescriptorJSON),
 		agentPersistedStatus(rec.Status),
 		startedAt,
 	)
@@ -187,7 +200,10 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 			COALESCE(parent_agent_id, ''),
 			COALESCE(entity_id::text, ''),
 			config,
+			COALESCE(runtime_descriptor, '{}'::jsonb),
 			COALESCE(subscriptions, '[]'::jsonb),
+			COALESCE(emit_events, '[]'::jsonb),
+			COALESCE(tools, '[]'::jsonb),
 			COALESCE(permissions, '[]'::jsonb),
 			COALESCE(status, 'active'),
 			COALESCE(created_at, now())
@@ -210,7 +226,10 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 			llmBackend        string
 			conversationMode  string
 			cfgRaw            []byte
+			runtimeDescriptor []byte
 			subscriptionsJSON []byte
+			emitEventsJSON    []byte
+			toolsJSON         []byte
 			permissionsJSON   []byte
 		)
 		if err := rows.Scan(
@@ -223,30 +242,35 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 			&rec.ParentAgentID,
 			&rec.Config.EntityID,
 			&cfgRaw,
+			&runtimeDescriptor,
 			&subscriptionsJSON,
+			&emitEventsJSON,
+			&toolsJSON,
 			&permissionsJSON,
 			&rec.Status,
 			&rec.StartedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent row: %w", err)
 		}
+		desc := decodePersistedAgentRuntimeDescriptor(runtimeDescriptor)
 		rec.Config.ParentAgent = rec.ParentAgentID
 		rec.Config.NormalizeEntityID()
 		rec.Config.Config = cfgRaw
-		rec.Config.Type = coalesce(extractStringField(cfgRaw, "type"), modelTier)
-		rec.Config.Mode = extractStringField(cfgRaw, "mode")
+		rec.Config.Type = coalesce(desc.Type, modelTier)
+		rec.Config.Mode = desc.Mode
+		rec.Config.ModelTier = strings.TrimSpace(modelTier)
 		rec.Config.LLMBackend = llmBackend
-		rec.Config.Subscriptions = coalesceStringList(decodeJSONStringList(subscriptionsJSON), extractSubscriptions(cfgRaw))
-		rec.Config.Permissions = coalesceStringList(decodeJSONStringList(permissionsJSON), extractPermissions(cfgRaw))
-		if rec.Config.Mode == "" && flowInstance != "" {
-			rec.Config.Mode = flowInstance
-		}
-		if extractStringField(cfgRaw, "conversation_mode") == "" && conversationMode != "" {
-			rec.Config.Config = withConfigString(cfgRaw, "conversation_mode", conversationMode)
-		}
-		if extractStringField(cfgRaw, "model_tier") == "" && modelTier != "" {
-			rec.Config.Config = withConfigString(rec.Config.Config, "model_tier", modelTier)
-		}
+		rec.Config.ConversationMode = strings.TrimSpace(conversationMode)
+		rec.Config.MaxTurnsPerTask = desc.MaxTurnsPerTask
+		rec.Config.Subscriptions = decodeJSONStringList(subscriptionsJSON)
+		rec.Config.EmitEvents = decodeJSONStringList(emitEventsJSON)
+		rec.Config.Tools = decodeJSONStringList(toolsJSON)
+		rec.Config.Permissions = decodeJSONStringList(permissionsJSON)
+		rec.Config.NativeTools = desc.NativeTools
+		rec.Config.WorkspaceClass = desc.WorkspaceClass
+		rec.Config.ManagerFallback = desc.ManagerFallback
+		rec.Config.FlowPath = strings.Trim(strings.TrimSpace(flowInstance), "/")
+		rec.Config.NormalizeRuntimeDescriptor()
 		out = append(out, rec)
 	}
 	if err := rows.Err(); err != nil {
@@ -256,7 +280,7 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 }
 
 func agentModelTier(cfg runtimeactors.AgentConfig) string {
-	if v := extractStringField(cfg.Config, "model_tier"); v != "" {
+	if v := strings.TrimSpace(cfg.ModelTier); v != "" {
 		return v
 	}
 	if v := strings.TrimSpace(cfg.Type); v != "" {
@@ -266,18 +290,8 @@ func agentModelTier(cfg runtimeactors.AgentConfig) string {
 }
 
 func agentConversationMode(cfg runtimeactors.AgentConfig) string {
-	if v := extractStringField(cfg.Config, "conversation_mode"); v != "" {
+	if v := strings.TrimSpace(cfg.ConversationMode); v != "" {
 		return runtimesessions.NormalizeConversationRuntimeMode(v)
-	}
-	if len(cfg.Config) > 0 && json.Valid(cfg.Config) {
-		var obj map[string]any
-		if json.Unmarshal(cfg.Config, &obj) == nil {
-			if constraints, ok := obj["constraints"].(map[string]any); ok {
-				if raw, _ := constraints["conversation_mode"].(string); strings.TrimSpace(raw) != "" {
-					return runtimesessions.NormalizeConversationRuntimeMode(raw)
-				}
-			}
-		}
 	}
 	if cfg.EffectiveEntityID() == "" {
 		return runtimesessions.RuntimeModeTask
@@ -286,10 +300,7 @@ func agentConversationMode(cfg runtimeactors.AgentConfig) string {
 }
 
 func agentFlowInstance(cfg runtimeactors.AgentConfig) string {
-	if v := extractStringField(cfg.Config, "flow_instance"); v != "" {
-		return v
-	}
-	if v := extractStringField(cfg.Config, "flow_path"); v != "" {
+	if v := strings.TrimSpace(cfg.FlowPath); v != "" {
 		return v
 	}
 	return ""
@@ -297,9 +308,6 @@ func agentFlowInstance(cfg runtimeactors.AgentConfig) string {
 
 func agentLLMBackend(cfg runtimeactors.AgentConfig) string {
 	if v := strings.TrimSpace(cfg.LLMBackend); v != "" {
-		return v
-	}
-	if v := extractStringField(cfg.Config, "llm_backend"); v != "" {
 		return v
 	}
 	return "api"
@@ -340,24 +348,6 @@ func coalesceStringList(primary, fallback []string) []string {
 		return primary
 	}
 	return fallback
-}
-
-func withConfigString(raw []byte, key, value string) []byte {
-	key = strings.TrimSpace(key)
-	value = strings.TrimSpace(value)
-	if key == "" || value == "" {
-		return raw
-	}
-	obj := map[string]any{}
-	if len(raw) > 0 && json.Valid(raw) {
-		_ = json.Unmarshal(raw, &obj)
-	}
-	obj[key] = value
-	b, err := json.Marshal(obj)
-	if err != nil {
-		return raw
-	}
-	return b
 }
 
 func coalesce(vals ...string) string {

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"sort"
 	"strings"
 	"sync"
@@ -154,12 +153,8 @@ func GenerateEmitToolsForEvents(eventTypes []string, warn func(string, string, s
 	return tools
 }
 
-func GenerateEmitToolsForConfig(raw json.RawMessage, warn func(string, string, string, ...any)) []llm.ToolDefinition {
-	return GenerateEmitToolsForEvents(configuredEmitEvents(raw), warn)
-}
-
 func GenerateEmitToolsForActor(actor models.AgentConfig, warn func(string, string, string, ...any)) []llm.ToolDefinition {
-	if configured := configuredEmitEvents(actor.Config); len(configured) > 0 {
+	if configured := UniqueNonEmpty(actor.EmitEvents); len(configured) > 0 {
 		return GenerateEmitToolsForEvents(configured, warn)
 	}
 	return GenerateEmitToolsForRole(actor.Role, warn)
@@ -202,12 +197,12 @@ func IsEmitToolAllowedForRole(role, toolName string) bool {
 	return false
 }
 
-func IsEmitToolAllowedForConfig(raw json.RawMessage, toolName string) bool {
+func IsEmitToolAllowedForActor(actor models.AgentConfig, toolName string) bool {
 	eventType, ok := eventTypeFromEmitToolName(toolName)
 	if !ok {
 		return false
 	}
-	for _, configured := range configuredEmitEvents(raw) {
+	for _, configured := range actor.EmitEvents {
 		if emitEventTypesEquivalent(configured, eventType) {
 			return true
 		}
@@ -262,33 +257,6 @@ func emitSchemaForEventTypeLocal(eventType string) (EmitSchema, bool) {
 	}
 	schema, ok := activeSchemas[local]
 	return schema, ok
-}
-
-func configuredEmitEvents(raw json.RawMessage) []string {
-	if len(raw) == 0 || !json.Valid(raw) {
-		return nil
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil
-	}
-	eventsRaw, ok := payload["emit_events"]
-	if !ok {
-		return nil
-	}
-	items, ok := eventsRaw.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		eventType := strings.TrimSpace(asString(item))
-		if eventType == "" {
-			continue
-		}
-		out = append(out, eventType)
-	}
-	return UniqueNonEmpty(out)
 }
 
 func InboundEventFromContext(ctx context.Context) (events.Event, bool) {

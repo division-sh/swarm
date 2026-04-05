@@ -162,7 +162,7 @@ func TestGatewayHydrateActorMergesResolvedConfig(t *testing.T) {
 				Mode:        "discovery",
 				EntityID:    "entity-1",
 				Permissions: []string{"schedule"},
-				Config:      []byte(`{"emit_events":["category.assessed","market_research.scan_complete"]}`),
+				EmitEvents:  []string{"category.assessed", "market_research.scan_complete"},
 			}, true
 		},
 	})
@@ -172,8 +172,8 @@ func TestGatewayHydrateActorMergesResolvedConfig(t *testing.T) {
 		Role: "market_research",
 	})
 
-	if string(hydrated.Config) == "" {
-		t.Fatal("expected hydrated actor config")
+	if len(hydrated.EmitEvents) != 2 {
+		t.Fatalf("emit_events = %#v, want two resolved events", hydrated.EmitEvents)
 	}
 	if hydrated.Mode != "discovery" {
 		t.Fatalf("mode = %q, want discovery", hydrated.Mode)

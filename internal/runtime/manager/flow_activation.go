@@ -318,33 +318,6 @@ func buildFlowAgentConfig(
 			cfgPayload[k] = v
 		}
 	}
-	if workspaceClass := strings.TrimSpace(entry.WorkspaceClass); workspaceClass != "" {
-		cfgPayload["workspace_class"] = workspaceClass
-	}
-	if flowPath != "" {
-		cfgPayload["flow_path"] = strings.Trim(flowPath, "/")
-	}
-	if managerFallback := strings.TrimSpace(entry.ManagerFallback); managerFallback != "" {
-		cfgPayload["manager_fallback"] = managerFallback
-	}
-	if modelTier := strings.TrimSpace(entry.ModelTier); modelTier != "" {
-		cfgPayload["model_tier"] = modelTier
-	}
-	if conversationMode := strings.TrimSpace(entry.ConversationMode); conversationMode != "" {
-		cfgPayload["conversation_mode"] = conversationMode
-	}
-	if maxTurns := entry.MaxTurnsPerTask; maxTurns > 0 {
-		cfgPayload["max_turns_per_task"] = maxTurns
-	}
-	if tools := normalizedConfiguredToolList(entry.ConfiguredTools()); len(tools) > 0 {
-		cfgPayload["tools"] = append([]string{}, tools...)
-	}
-	if nativeTools := normalizedConfiguredNativeTools(entry.NativeTools); len(nativeTools) > 0 {
-		cfgPayload["native_tools"] = nativeTools
-	}
-	if emitEvents := normalizedFlowAgentEmitEvents(entry.EmitEvents, vars, localEvents, strings.Trim(flowPath, "/"), templateID, instanceID); len(emitEvents) > 0 {
-		cfgPayload["emit_events"] = append([]string{}, emitEvents...)
-	}
 	rawConfig, err := json.Marshal(cfgPayload)
 	if err != nil {
 		return models.AgentConfig{}, err
@@ -354,17 +327,29 @@ func buildFlowAgentConfig(
 		return models.AgentConfig{}, fmt.Errorf("flow agent %s permissions: %w", key, err)
 	}
 
-	return models.AgentConfig{
-		ID:            agentID,
-		Type:          strings.TrimSpace(entry.Type),
-		Role:          strings.TrimSpace(entry.Role),
-		Mode:          templateID,
-		LLMBackend:    "",
-		Permissions:   permissions,
-		EntityID:      entityID,
-		Subscriptions: rendered,
-		Config:        rawConfig,
-	}, nil
+	cfg := models.AgentConfig{
+		ID:               agentID,
+		Type:             strings.TrimSpace(entry.Type),
+		Role:             strings.TrimSpace(entry.Role),
+		Mode:             templateID,
+		ModelTier:        strings.TrimSpace(entry.ModelTier),
+		LLMBackend:       "",
+		ConversationMode: strings.TrimSpace(entry.ConversationMode),
+		MaxTurnsPerTask:  entry.MaxTurnsPerTask,
+		Subscriptions:    rendered,
+		EmitEvents:       normalizedFlowAgentEmitEvents(entry.EmitEvents, vars, localEvents, strings.Trim(flowPath, "/"), templateID, instanceID),
+		Tools:            normalizedConfiguredToolList(entry.ConfiguredTools()),
+		Permissions:      permissions,
+		NativeTools:      nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
+		WorkspaceClass:   strings.TrimSpace(entry.WorkspaceClass),
+		ManagerFallback:  strings.TrimSpace(entry.ManagerFallback),
+		FlowPath:         strings.Trim(flowPath, "/"),
+		EntityID:         entityID,
+		ParentAgent:      strings.TrimSpace(entry.ManagerFallback),
+		Config:           rawConfig,
+	}
+	cfg.NormalizeRuntimeDescriptor()
+	return cfg, nil
 }
 
 func (am *AgentManager) ensureStaticRequiredAgentsForScope(
@@ -478,33 +463,6 @@ func buildStaticFlowAgentConfig(
 	rendered = dedupeStrings(rendered)
 
 	cfgPayload := map[string]any{}
-	if flowPath != "" {
-		cfgPayload["flow_path"] = flowPath
-	}
-	if workspaceClass := strings.TrimSpace(entry.WorkspaceClass); workspaceClass != "" {
-		cfgPayload["workspace_class"] = workspaceClass
-	}
-	if managerFallback := strings.TrimSpace(entry.ManagerFallback); managerFallback != "" {
-		cfgPayload["manager_fallback"] = managerFallback
-	}
-	if modelTier := strings.TrimSpace(entry.ModelTier); modelTier != "" {
-		cfgPayload["model_tier"] = modelTier
-	}
-	if conversationMode := strings.TrimSpace(entry.ConversationMode); conversationMode != "" {
-		cfgPayload["conversation_mode"] = conversationMode
-	}
-	if maxTurns := entry.MaxTurnsPerTask; maxTurns > 0 {
-		cfgPayload["max_turns_per_task"] = maxTurns
-	}
-	if tools := normalizedConfiguredToolList(entry.ConfiguredTools()); len(tools) > 0 {
-		cfgPayload["tools"] = append([]string{}, tools...)
-	}
-	if nativeTools := normalizedConfiguredNativeTools(entry.NativeTools); len(nativeTools) > 0 {
-		cfgPayload["native_tools"] = nativeTools
-	}
-	if emitEvents := normalizedStaticFlowEmitEvents(entry.EmitEvents, vars, localEvents, flowPath); len(emitEvents) > 0 {
-		cfgPayload["emit_events"] = append([]string{}, emitEvents...)
-	}
 	if _, ok := cfgPayload["system_prompt"]; !ok {
 		role := strings.TrimSpace(entry.Role)
 		if role == "" {
@@ -531,17 +489,29 @@ func buildStaticFlowAgentConfig(
 	if role == "" {
 		role = strings.TrimSpace(logicalID)
 	}
-	return models.AgentConfig{
-		ID:            agentID,
-		Type:          strings.TrimSpace(entry.Type),
-		Role:          role,
-		Mode:          flowID,
-		LLMBackend:    "",
-		Permissions:   permissions,
-		EntityID:      "",
-		Subscriptions: rendered,
-		Config:        rawConfig,
-	}, nil
+	cfg := models.AgentConfig{
+		ID:               agentID,
+		Type:             strings.TrimSpace(entry.Type),
+		Role:             role,
+		Mode:             flowID,
+		ModelTier:        strings.TrimSpace(entry.ModelTier),
+		LLMBackend:       "",
+		ConversationMode: strings.TrimSpace(entry.ConversationMode),
+		MaxTurnsPerTask:  entry.MaxTurnsPerTask,
+		Subscriptions:    rendered,
+		EmitEvents:       normalizedStaticFlowEmitEvents(entry.EmitEvents, vars, localEvents, flowPath),
+		Tools:            normalizedConfiguredToolList(entry.ConfiguredTools()),
+		Permissions:      permissions,
+		NativeTools:      nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
+		WorkspaceClass:   strings.TrimSpace(entry.WorkspaceClass),
+		ManagerFallback:  strings.TrimSpace(entry.ManagerFallback),
+		FlowPath:         flowPath,
+		EntityID:         "",
+		ParentAgent:      strings.TrimSpace(entry.ManagerFallback),
+		Config:           rawConfig,
+	}
+	cfg.NormalizeRuntimeDescriptor()
+	return cfg, nil
 }
 
 func resolveRequiredAgentEntry(agents map[string]runtimecontracts.AgentRegistryEntry, required runtimecontracts.FlowRequiredAgent) (string, runtimecontracts.AgentRegistryEntry, bool) {

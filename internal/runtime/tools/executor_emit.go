@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"time"
 
@@ -169,7 +168,7 @@ func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eve
 	if eventType == "" || strings.Contains(eventType, "/") {
 		return eventType
 	}
-	configured := configuredEmitEvents(actor.Config)
+	configured := UniqueNonEmpty(actor.EmitEvents)
 	for _, candidate := range configured {
 		if strings.Contains(candidate, "/") && eventidentity.LeafName(candidate) == eventType {
 			return strings.TrimSpace(candidate)
@@ -179,8 +178,7 @@ func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eve
 	if flowID == "" {
 		return eventType
 	}
-	flowPath := strings.TrimSpace(configString(actor.Config, "flow_path"))
-	flowPath = strings.Trim(flowPath, "/")
+	flowPath := actor.CanonicalFlowPath()
 	if flowPath == "" {
 		return eventType
 	}
@@ -200,16 +198,4 @@ func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eve
 		localEvents = append(localEvents, candidate)
 	}
 	return eventidentity.ExternalizeForFlow(flowPath, localEvents, eventType)
-}
-
-func configString(raw json.RawMessage, key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" || len(raw) == 0 || !json.Valid(raw) {
-		return ""
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(asString(payload[key]))
 }

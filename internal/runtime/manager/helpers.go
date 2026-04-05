@@ -141,17 +141,44 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if patch.LLMBackend != "" {
 		out.LLMBackend = patch.LLMBackend
 	}
+	if patch.ModelTier != "" {
+		out.ModelTier = patch.ModelTier
+	}
+	if patch.ConversationMode != "" {
+		out.ConversationMode = patch.ConversationMode
+	}
+	if patch.MaxTurnsPerTask > 0 {
+		out.MaxTurnsPerTask = patch.MaxTurnsPerTask
+	}
 	if patch.EntityID != "" {
 		out.EntityID = patch.EntityID
 	}
 	if patch.ParentAgent != "" {
 		out.ParentAgent = patch.ParentAgent
 	}
+	if patch.WorkspaceClass != "" {
+		out.WorkspaceClass = patch.WorkspaceClass
+	}
+	if patch.ManagerFallback != "" {
+		out.ManagerFallback = patch.ManagerFallback
+	}
+	if patch.FlowPath != "" {
+		out.FlowPath = patch.FlowPath
+	}
 	if len(patch.Subscriptions) > 0 {
 		out.Subscriptions = patch.Subscriptions
 	}
+	if len(patch.EmitEvents) > 0 {
+		out.EmitEvents = patch.EmitEvents
+	}
+	if len(patch.Tools) > 0 {
+		out.Tools = patch.Tools
+	}
 	if len(patch.Permissions) > 0 {
 		out.Permissions = patch.Permissions
+	}
+	if patch.NativeTools.Any() {
+		out.NativeTools = patch.NativeTools
 	}
 	if len(patch.Config) > 0 {
 		out.Config = patch.Config
@@ -160,6 +187,7 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 		out.BudgetEnvelope = patch.BudgetEnvelope
 	}
 	out.NormalizeEntityID()
+	out.NormalizeRuntimeDescriptor()
 	return out
 }
 
@@ -249,6 +277,14 @@ func DeterministicOutputEventID(inbound events.Event, agentID string, index int,
 		strings.TrimSpace(out.EntityID()),
 	}, "|")
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String()
+}
+
+func nativeToolConfigFromMap(values map[string]bool) runtimeactors.NativeToolConfig {
+	return runtimeactors.NativeToolConfig{
+		Bash:      values["bash"],
+		WebSearch: values["web_search"],
+		FileIO:    values["file_io"],
+	}
 }
 
 func ExtractDirectiveText(payload []byte) string {

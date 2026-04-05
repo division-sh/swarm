@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -480,11 +479,7 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "analyzer-flow/analysis.requested" {
 		t.Fatalf("subscriptions = %#v, want [analyzer-flow/analysis.requested]", cfg.Subscriptions)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(cfg.Config, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(config): %v", err)
-	}
-	if got := anySliceToStrings(payload["emit_events"]); len(got) != 1 || got[0] != "analyzer-flow/analysis.done" {
+	if got := cfg.EmitEvents; len(got) != 1 || got[0] != "analyzer-flow/analysis.done" {
 		t.Fatalf("emit_events = %#v, want [analyzer-flow/analysis.done]", got)
 	}
 	if len(store.upserts) != 1 || store.upserts[0].Config.ID != "analyzer" {
@@ -570,35 +565,16 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(cfg.Config, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(config): %v", err)
+	if got := cfg.MaxTurnsPerTask; got != 7 {
+		t.Fatalf("max_turns_per_task = %d, want 7", got)
 	}
-	if got := payload["max_turns_per_task"]; got != float64(7) {
-		t.Fatalf("max_turns_per_task = %#v, want 7", got)
+	if got := cfg.Tools; len(got) != 2 || got[0] != "check_status" || got[1] != "schedule" {
+		t.Fatalf("tools = %#v, want [check_status schedule]", got)
 	}
-	if got := anySliceToStrings(payload["tools"]); len(got) != 2 || got[0] != "schedule" || got[1] != "check_status" {
-		t.Fatalf("tools = %#v, want [schedule check_status]", got)
+	if got := cfg.EmitEvents; len(got) != 2 || got[0] != "review/inst-1/review.failed" || got[1] != "review/inst-1/task.completed" {
+		t.Fatalf("emit_events = %#v, want [review/inst-1/review.failed review/inst-1/task.completed]", got)
 	}
-	if got := anySliceToStrings(payload["emit_events"]); len(got) != 2 || got[0] != "review/inst-1/task.completed" || got[1] != "review/inst-1/review.failed" {
-		t.Fatalf("emit_events = %#v, want [review/inst-1/task.completed review/inst-1/review.failed]", got)
+	if !cfg.NativeTools.Bash || !cfg.NativeTools.FileIO {
+		t.Fatalf("native_tools = %#v, want bash/file_io true", cfg.NativeTools)
 	}
-	nativeTools, ok := payload["native_tools"].(map[string]any)
-	if !ok || nativeTools["bash"] != true || nativeTools["file_io"] != true {
-		t.Fatalf("native_tools = %#v, want bash/file_io true", payload["native_tools"])
-	}
-}
-
-func anySliceToStrings(raw any) []string {
-	items, ok := raw.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		if s, ok := item.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
 }

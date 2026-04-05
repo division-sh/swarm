@@ -190,7 +190,7 @@ func deterministicOutputEventID(inbound events.Event, agentID string, index int,
 }
 
 func (am *AgentManager) defaultManagerAgentID(cfg runtimeactors.AgentConfig) string {
-	if managerID := normalizedManagerFallback(cfg, managerFallbackFromConfig(cfg)); managerID != "" {
+	if managerID := normalizedManagerFallback(cfg, cfg.ManagerFallback); managerID != "" {
 		return managerID
 	}
 	if source := runtimepipeline.DefaultWorkflowSemanticSourceOrNil(); source != nil {
@@ -199,20 +199,6 @@ func (am *AgentManager) defaultManagerAgentID(cfg runtimeactors.AgentConfig) str
 				return managerID
 			}
 		}
-	}
-	return ""
-}
-
-func managerFallbackFromConfig(cfg runtimeactors.AgentConfig) string {
-	if len(cfg.Config) == 0 {
-		return ""
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(cfg.Config, &payload); err != nil {
-		return ""
-	}
-	if value, ok := payload["manager_fallback"].(string); ok {
-		return strings.TrimSpace(value)
 	}
 	return ""
 }
@@ -226,17 +212,7 @@ func normalizedManagerFallback(cfg runtimeactors.AgentConfig, managerID string) 
 }
 
 func flowPathFromAgentConfig(cfg runtimeactors.AgentConfig) string {
-	if len(cfg.Config) == 0 {
-		return ""
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(cfg.Config, &payload); err != nil {
-		return ""
-	}
-	if value, ok := payload["flow_path"].(string); ok {
-		return strings.Trim(strings.TrimSpace(value), "/")
-	}
-	return ""
+	return cfg.CanonicalFlowPath()
 }
 
 type eventExistenceReader interface {

@@ -19,16 +19,7 @@ func newGenericAgent(cfg runtimeactors.AgentConfig) Agent {
 	if cfg.Type == "" {
 		cfg.Type = "generic"
 	}
-	merged := make([]string, 0, len(cfg.Subscriptions))
-	merged = append(merged, cfg.Subscriptions...)
-	if len(cfg.Config) > 0 {
-		var aux struct {
-			Subscriptions []string `json:"subscriptions"`
-		}
-		if err := json.Unmarshal(cfg.Config, &aux); err == nil {
-			merged = append(merged, aux.Subscriptions...)
-		}
-	}
+	merged := append([]string(nil), cfg.Subscriptions...)
 
 	uniq := make(map[string]struct{})
 	subs := make([]events.EventType, 0, len(merged))

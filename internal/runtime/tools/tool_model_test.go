@@ -59,10 +59,8 @@ func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
-		ID: "agent-1",
-		Config: mustToolConfigJSON(t, map[string]any{
-			"tools": []string{"check_domain"},
-		}),
+		ID:    "agent-1",
+		Tools: []string{"check_domain"},
 	})
 	out, err := exec.Execute(ctx, "check_domain", map[string]any{"domain": "example.com"})
 	if err != nil {
@@ -135,10 +133,8 @@ func TestExecutor_MCPToolExecutesDiscoveredServerTool(t *testing.T) {
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
-		ID: "agent-1",
-		Config: mustToolConfigJSON(t, map[string]any{
-			"tools": []string{"infra.ping"},
-		}),
+		ID:    "agent-1",
+		Tools: []string{"infra.ping"},
 	})
 	out, err := exec.Execute(ctx, "infra.ping", map[string]any{"target": "svc"})
 	if err != nil {
@@ -172,13 +168,9 @@ func TestExecutor_ToolDefinitionsForActor_UsesSharedActorRegistry(t *testing.T) 
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 	defs := exec.ToolDefinitionsForActor(models.AgentConfig{
-		ID: "agent-1",
-		Config: mustToolConfigJSON(t, map[string]any{
-			"tools": []string{"check_domain"},
-			"native_tools": map[string]any{
-				"file_io": true,
-			},
-		}),
+		ID:          "agent-1",
+		Tools:       []string{"check_domain"},
+		NativeTools: models.NativeToolConfig{FileIO: true},
 	})
 
 	names := make([]string, 0, len(defs))

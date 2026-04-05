@@ -99,10 +99,10 @@ func TestPromptVariableValues_UsesSpecResolutionOrder(t *testing.T) {
 		}},
 	}
 	cfg := models.AgentConfig{
-		ID: "agent-42",
+		ID:       "agent-42",
+		FlowPath: "flows/demo/inst-1",
 		Config: mustPromptJSON(t, map[string]any{
 			"team_name": "instance",
-			"flow_path": "flows/demo/inst-1",
 			"fields": map[string]any{
 				"team_name": "entity",
 				"score":     7,

@@ -126,7 +126,7 @@ func validateClaudeMCPToolsForManagedAgents(cfg *config.Config, gateway *runtime
 			toolNames[name] = struct{}{}
 		}
 		missingEmitTools := make([]string, 0)
-		for _, eventType := range configuredEmitEventsForStartup(agentCfg.Config) {
+		for _, eventType := range agentCfg.EmitEvents {
 			name := runtimetools.EmitToolName(eventType)
 			if _, ok := toolNames[name]; ok {
 				continue
@@ -139,37 +139,4 @@ func validateClaudeMCPToolsForManagedAgents(cfg *config.Config, gateway *runtime
 		}
 	}
 	return nil
-}
-
-func configuredEmitEventsForStartup(raw json.RawMessage) []string {
-	if len(raw) == 0 || !json.Valid(raw) {
-		return nil
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil
-	}
-	eventsRaw, ok := payload["emit_events"]
-	if !ok {
-		return nil
-	}
-	items, ok := eventsRaw.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(items))
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		eventType := strings.TrimSpace(asString(item))
-		if eventType == "" {
-			continue
-		}
-		if _, exists := seen[eventType]; exists {
-			continue
-		}
-		seen[eventType] = struct{}{}
-		out = append(out, eventType)
-	}
-	sort.Strings(out)
-	return out
 }

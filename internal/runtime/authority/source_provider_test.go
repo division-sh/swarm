@@ -1,7 +1,6 @@
 package authority
 
 import (
-	"encoding/json"
 	"testing"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -144,19 +143,14 @@ func TestSourceProvider_ManagedAgentGraphUpdates(t *testing.T) {
 }
 
 func testAgentConfig(id, role string, permissions []string, entityID, flowPath, managerFallback string) models.AgentConfig {
-	payload := map[string]any{
-		"flow_path": flowPath,
-	}
-	if managerFallback != "" {
-		payload["manager_fallback"] = managerFallback
-	}
-	raw, _ := json.Marshal(payload)
 	return models.AgentConfig{
-		ID:          id,
-		Role:        role,
-		Permissions: permissions,
-		EntityID:    entityID,
-		ParentAgent: managerFallback,
-		Config:      raw,
+		ID:              id,
+		Role:            role,
+		Permissions:     permissions,
+		Tools:           permissions,
+		EntityID:        entityID,
+		ParentAgent:     managerFallback,
+		ManagerFallback: managerFallback,
+		FlowPath:        flowPath,
 	}
 }

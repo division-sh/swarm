@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,10 +105,9 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 			return "", nil
 		}
 	})
-	raw, _ := json.Marshal(map[string]any{"workspace_class": "dedicated"})
 	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
-		ID:     "dedicated-agent",
-		Config: raw,
+		ID:             "dedicated-agent",
+		WorkspaceClass: "dedicated",
 	})
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
@@ -166,13 +164,10 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 			return "", nil
 		}
 	})
-	raw, _ := json.Marshal(map[string]any{
-		"workspace_class": "shared_flow",
-		"flow_path":       "shared/work-001",
-	})
 	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
-		ID:     "shared-work-lead",
-		Config: raw,
+		ID:             "shared-work-lead",
+		WorkspaceClass: "shared_flow",
+		FlowPath:       "shared/work-001",
 	})
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)

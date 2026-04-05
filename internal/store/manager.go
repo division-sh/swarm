@@ -9,33 +9,88 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 )
 
+type persistedAgentRuntimeDescriptor struct {
+	Type            string                         `json:"type,omitempty"`
+	Mode            string                         `json:"mode,omitempty"`
+	MaxTurnsPerTask int                            `json:"max_turns_per_task,omitempty"`
+	NativeTools     runtimeactors.NativeToolConfig `json:"native_tools,omitempty"`
+	WorkspaceClass  string                         `json:"workspace_class,omitempty"`
+	ManagerFallback string                         `json:"manager_fallback,omitempty"`
+}
+
+var runtimeConfigKeys = map[string]struct{}{
+	"type":               {},
+	"mode":               {},
+	"model_tier":         {},
+	"llm_backend":        {},
+	"conversation_mode":  {},
+	"max_turns_per_task": {},
+	"subscriptions":      {},
+	"emit_events":        {},
+	"tools":              {},
+	"permissions":        {},
+	"native_tools":       {},
+	"workspace_class":    {},
+	"manager_fallback":   {},
+	"flow_path":          {},
+	"flow_instance":      {},
+}
+
 func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
+	return sanitizeOpaqueAgentConfig(cfg.Config)
+}
+
+func sanitizeOpaqueAgentConfig(raw json.RawMessage) ([]byte, error) {
 	obj := map[string]any{}
-	if len(cfg.Config) > 0 && json.Valid(cfg.Config) {
-		_ = json.Unmarshal(cfg.Config, &obj)
+	if len(raw) > 0 && json.Valid(raw) {
+		_ = json.Unmarshal(raw, &obj)
 	}
-	if len(cfg.Subscriptions) > 0 {
-		obj["subscriptions"] = cfg.Subscriptions
+	for key := range runtimeConfigKeys {
+		delete(obj, key)
 	}
-	if len(cfg.Permissions) > 0 {
-		obj["permissions"] = cfg.Permissions
-	}
-	if _, ok := obj["role"]; !ok && cfg.Role != "" {
-		obj["role"] = cfg.Role
-	}
-	if _, ok := obj["mode"]; !ok && cfg.Mode != "" {
-		obj["mode"] = cfg.Mode
-	}
-	if _, ok := obj["type"]; !ok && cfg.Type != "" {
-		obj["type"] = cfg.Type
-	}
-	if _, ok := obj["llm_backend"]; !ok && cfg.LLMBackend != "" {
-		obj["llm_backend"] = cfg.LLMBackend
+	if constraints, ok := obj["constraints"].(map[string]any); ok {
+		delete(constraints, "conversation_mode")
+		delete(constraints, "max_turns_per_task")
+		if len(constraints) == 0 {
+			delete(obj, "constraints")
+		} else {
+			obj["constraints"] = constraints
+		}
 	}
 	if len(obj) == 0 {
 		obj = map[string]any{}
 	}
 	return json.Marshal(obj)
+}
+
+func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig) ([]byte, error) {
+	desc := persistedAgentRuntimeDescriptor{
+		Type:            strings.TrimSpace(cfg.Type),
+		Mode:            strings.TrimSpace(cfg.Mode),
+		MaxTurnsPerTask: cfg.MaxTurnsPerTask,
+		NativeTools:     cfg.NativeTools,
+		WorkspaceClass:  strings.TrimSpace(cfg.WorkspaceClass),
+		ManagerFallback: strings.TrimSpace(cfg.ManagerFallback),
+	}
+	if !desc.NativeTools.Any() {
+		desc.NativeTools = runtimeactors.NativeToolConfig{}
+	}
+	return json.Marshal(desc)
+}
+
+func decodePersistedAgentRuntimeDescriptor(raw []byte) persistedAgentRuntimeDescriptor {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return persistedAgentRuntimeDescriptor{}
+	}
+	var desc persistedAgentRuntimeDescriptor
+	if err := json.Unmarshal(raw, &desc); err != nil {
+		return persistedAgentRuntimeDescriptor{}
+	}
+	desc.Type = strings.TrimSpace(desc.Type)
+	desc.Mode = strings.TrimSpace(desc.Mode)
+	desc.WorkspaceClass = strings.TrimSpace(desc.WorkspaceClass)
+	desc.ManagerFallback = strings.TrimSpace(desc.ManagerFallback)
+	return desc
 }
 
 func extractSubscriptions(raw []byte) []string {

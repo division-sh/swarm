@@ -1,7 +1,6 @@
 package authority
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -152,7 +151,7 @@ func (p *sourceProvider) UpsertManagedAgent(cfg models.AgentConfig) {
 	}
 	parent := strings.TrimSpace(cfg.ParentAgent)
 	if parent == "" {
-		parent = ManagerFallbackFromConfig(cfg.Config)
+		parent = strings.TrimSpace(cfg.ManagerFallback)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -427,56 +426,15 @@ func appendUniqueSortedEvent(events []string, eventType string) []string {
 }
 
 func SameFlowInstance(actor, target models.AgentConfig) bool {
-	actorFlow := flowPathFromConfig(actor.Config)
-	targetFlow := flowPathFromConfig(target.Config)
+	actorFlow := actor.CanonicalFlowPath()
+	targetFlow := target.CanonicalFlowPath()
 	return actorFlow != "" && actorFlow == targetFlow
 }
 
 func PeerManagerFallback(actor, target models.AgentConfig) bool {
-	actorFallback := managerFallbackFromConfig(actor.Config)
-	targetFallback := managerFallbackFromConfig(target.Config)
+	actorFallback := strings.TrimSpace(actor.ManagerFallback)
+	targetFallback := strings.TrimSpace(target.ManagerFallback)
 	return actorFallback != "" && actorFallback == targetFallback
-}
-
-func FlowPathFromConfig(raw []byte) string {
-	return flowPathFromConfig(raw)
-}
-
-func flowPathFromConfig(raw []byte) string {
-	payload := decodeConfigMap(raw)
-	if payload == nil {
-		return ""
-	}
-	if value, ok := payload["flow_path"].(string); ok {
-		return strings.Trim(strings.TrimSpace(value), "/")
-	}
-	return ""
-}
-
-func ManagerFallbackFromConfig(raw []byte) string {
-	return managerFallbackFromConfig(raw)
-}
-
-func managerFallbackFromConfig(raw []byte) string {
-	payload := decodeConfigMap(raw)
-	if payload == nil {
-		return ""
-	}
-	if value, ok := payload["manager_fallback"].(string); ok {
-		return strings.TrimSpace(value)
-	}
-	return ""
-}
-
-func decodeConfigMap(raw []byte) map[string]any {
-	if len(raw) == 0 {
-		return nil
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil
-	}
-	return payload
 }
 
 func firstNonEmpty(values ...string) string {

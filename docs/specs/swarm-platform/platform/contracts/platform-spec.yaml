@@ -2385,20 +2385,23 @@ platform_tables:
         \    INDEX idx_entity_state (current_state),\n    INDEX idx_entity_type (entity_type),\n    INDEX idx_entity_slug\
         \ (slug) WHERE slug IS NOT NULL\n);"
     agents:
-      description: 'Runtime agent registry. One row per agent instance. Carries the full runtime descriptor: role (from agents.yaml),
-        parent_agent_id (managerial hierarchy), config (agent-specific configuration from contracts), subscriptions/emit_events/tools/permissions
-        (materialized from contracts at boot for fast runtime lookup). flow_instance nullable for root-level agents not scoped
-        to any flow. entity_id nullable — set only for agents scoped to a specific entity (rare). The contract in agents.yaml
-        is the source of truth. This table is the runtime materialization. llm_backend specifies the LLM invocation backend
-        — api (production), cli_test (test harness), mock (fixture replay). This is a deployment/agent
-        property, not a session property. agent_sessions.runtime_mode tracks conversation scope only.'
+      description: 'Runtime agent registry. One row per agent instance. Carries the full persisted runtime descriptor:
+        role/model_tier/llm_backend/conversation_mode/parent_agent_id as typed columns, subscriptions/emit_events/tools/permissions
+        as JSONB arrays, and runtime_descriptor JSONB for the remaining control-plane fields that do not already have a
+        first-class persisted column (for example type, mode, workspace_class, manager_fallback, max_turns_per_task, native_tools).
+        config is opaque agent-specific payload only; the platform stores and passes it through but does not read config
+        for runtime control semantics. flow_instance nullable for root-level agents not scoped to any flow. entity_id nullable
+        — set only for agents scoped to a specific entity (rare). The contract in agents.yaml is the source of truth and
+        permissions_bundle is resolved at boot into the persisted permissions array rather than being stored directly.
+        llm_backend specifies the LLM invocation backend — api (production), cli_test (test harness), mock (fixture replay).
+        This is a deployment/agent property, not a session property. agent_sessions.runtime_mode tracks conversation scope only.'
       ddl: "CREATE TABLE agents (\n    agent_id          TEXT PRIMARY KEY,\n    flow_instance     TEXT,\n    role        \
         \      TEXT NOT NULL,\n    model_tier        TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'api' CHECK\
         \ (llm_backend IN ('api', 'cli_test', 'mock', 'local')),\n    conversation_mode TEXT NOT NULL CHECK (conversation_mode\
         \ IN ('task', 'session', 'session_per_entity')),\n    parent_agent_id   TEXT,\n    entity_id         UUID,\n    config\
         \            JSONB NOT NULL DEFAULT '{}',\n    subscriptions     JSONB NOT NULL DEFAULT '[]',\n    emit_events   \
         \    JSONB NOT NULL DEFAULT '[]',\n    tools             JSONB NOT NULL DEFAULT '[]',\n    permissions       JSONB\
-        \ NOT NULL DEFAULT '[]',\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused',\
+        \ NOT NULL DEFAULT '[]',\n    runtime_descriptor JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused',\
         \ 'terminated')),\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    last_active_at    TIMESTAMPTZ,\n    created_at\
         \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_agents_flow (flow_instance) WHERE flow_instance IS NOT\
         \ NULL,\n    INDEX idx_agents_role (role),\n    INDEX idx_agents_status (status),\n    INDEX idx_agents_parent (parent_agent_id)\

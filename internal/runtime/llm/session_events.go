@@ -54,16 +54,11 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 }
 
 func sessionModelTier(actor runtimeactors.AgentConfig) string {
-	if modelTier := strings.TrimSpace(actor.Type); modelTier != "" {
+	if modelTier := strings.TrimSpace(actor.ModelTier); modelTier != "" {
 		return modelTier
 	}
-	if len(actor.Config) > 0 {
-		var parsed map[string]any
-		if json.Unmarshal(actor.Config, &parsed) == nil {
-			if modelTier, _ := parsed["model_tier"].(string); strings.TrimSpace(modelTier) != "" {
-				return strings.TrimSpace(modelTier)
-			}
-		}
+	if modelTier := strings.TrimSpace(actor.Type); modelTier != "" {
+		return modelTier
 	}
 	return ""
 }
