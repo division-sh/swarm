@@ -29,6 +29,7 @@ type EventBus struct {
 	agentChans          map[string]chan events.Event
 	subscriptions       map[string][]events.EventType
 	routeTable          *RouteTable
+	deliveryPlanner     deliveryPlanner
 	interceptors        []EventInterceptor
 	interceptorProvider func() []EventInterceptor
 	store               EventStore
@@ -87,7 +88,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		}
 		routeTable = derived
 	}
-	return &EventBus{
+	eb := &EventBus{
 		channels:            make(map[events.EventType]map[string]chan events.Event),
 		agentChans:          make(map[string]chan events.Event),
 		subscriptions:       make(map[string][]events.EventType),
@@ -98,7 +99,9 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		interceptorProvider: opts.InterceptorProvider,
 		semanticSource:      semanticSource,
 		payloadValidator:    opts.PayloadValidator,
-	}, nil
+	}
+	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
+	return eb, nil
 }
 
 func (eb *EventBus) Store() EventStore {

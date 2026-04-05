@@ -70,10 +70,11 @@ func (o engineOutbox) persistedRecipientsForIntent(ctx context.Context, intent r
 	if len(intent.Recipients) > 0 {
 		return uniqueStrings(intent.Recipients), nil
 	}
-	plan, err := o.bus.buildDeliveryPlan(ctx, intent.Event)
+	plan, err := o.bus.deliveryPlanner.Plan(ctx, intent.Event)
 	if err != nil {
 		return nil, err
 	}
+	o.bus.recordPublishDiagnostic(ctx, intent.Event, plan)
 	return plan.PersistedRecipients, nil
 }
 
@@ -121,10 +122,11 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	if !passthrough {
 		return nil
 	}
-	plan, err := d.bus.buildDeliveryPlan(ctx, intent.Event)
+	plan, err := d.bus.deliveryPlanner.Plan(ctx, intent.Event)
 	if err != nil {
 		return err
 	}
+	d.bus.recordPublishDiagnostic(ctx, intent.Event, plan)
 	if len(plan.Recipients) > 0 {
 		d.bus.deliverToAgents(ctx, intent.Event, plan.Recipients)
 		d.bus.logDelivery(ctx, intent.Event, plan.Recipients, plan.ExtraDetail)
