@@ -1051,7 +1051,7 @@ func TestSchedules_LoadActiveSchedulesPreservesFlowInstance(t *testing.T) {
 	}
 }
 
-func TestSchedules_LoadActiveSchedulesFallsBackToTimerNameTaskIDForExactRows(t *testing.T) {
+func TestSchedules_LoadActiveSchedulesDoesNotReconstructTaskIDFromTimerName(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1079,31 +1079,11 @@ func TestSchedules_LoadActiveSchedulesFallsBackToTimerNameTaskIDForExactRows(t *
 	if len(active) != 1 {
 		t.Fatalf("active schedules = %d, want 1", len(active))
 	}
-	if got := active[0].TaskID; got != "timer-a" {
-		t.Fatalf("loaded task_id = %q, want timer-a", got)
+	if got := active[0].TaskID; got != "" {
+		t.Fatalf("loaded task_id = %q, want empty without canonical payload task id", got)
 	}
 	if string(active[0].Payload) != `{"timer_id":"timer-a"}` {
 		t.Fatalf("loaded payload = %s, want task metadata without synthetic task id", string(active[0].Payload))
-	}
-
-	if err := pg.MarkScheduleFiredExact(ctx, active[0]); err != nil {
-		t.Fatalf("MarkScheduleFiredExact(loaded fallback task): %v", err)
-	}
-
-	var status string
-	statusQuery := `
-		SELECT status
-		FROM timers
-		WHERE owner_agent = $1
-		  AND fire_event = $2
-		  AND flow_instance = $3
-		  AND ` + exactScheduleTaskIDSQL() + ` = $4
-	`
-	if err := db.QueryRowContext(ctx, statusQuery, active[0].AgentID, active[0].EventType, active[0].FlowInstance, active[0].TaskID).Scan(&status); err != nil {
-		t.Fatalf("query exact timer status: %v", err)
-	}
-	if status != "fired" {
-		t.Fatalf("exact timer status = %q, want fired", status)
 	}
 }
 

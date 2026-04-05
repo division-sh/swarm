@@ -140,20 +140,8 @@ func persistedSchedulePayload(sc runtimepipeline.Schedule) []byte {
 	return encoded
 }
 
-func exactScheduleTaskID(taskID, timerName, eventType string) string {
-	taskID = strings.TrimSpace(taskID)
-	if taskID != "" {
-		return taskID
-	}
-	timerName = strings.TrimSpace(timerName)
-	if timerName != "" && timerName != strings.TrimSpace(eventType) {
-		return timerName
-	}
-	return ""
-}
-
 func exactScheduleTaskIDSQL() string {
-	return `COALESCE(NULLIF(fire_payload->>'__schedule_task_id', ''), CASE WHEN NULLIF(timer_name, '') IS NOT NULL AND timer_name IS DISTINCT FROM fire_event THEN timer_name ELSE '' END, '')`
+	return `COALESCE(fire_payload->>'__schedule_task_id', '')`
 }
 
 func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
@@ -255,7 +243,6 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			fire_at,
 			COALESCE(entity_id::text, ''),
 			COALESCE(flow_instance, ''),
-			COALESCE(timer_name, ''),
 			fire_payload
 		FROM timers
 		WHERE status = 'active'
@@ -269,10 +256,9 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 	out := make([]runtimepipeline.Schedule, 0)
 	for rows.Next() {
 		var (
-			sc        runtimepipeline.Schedule
-			fireAt    time.Time
-			timerName string
-			payload   []byte
+			sc      runtimepipeline.Schedule
+			fireAt  time.Time
+			payload []byte
 		)
 		if err := rows.Scan(
 			&sc.AgentID,
@@ -282,13 +268,12 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			&fireAt,
 			&sc.EntityID,
 			&sc.FlowInstance,
-			&timerName,
 			&payload,
 		); err != nil {
 			return nil, fmt.Errorf("scan active timer: %w", err)
 		}
 		sc.At = fireAt
-		sc.TaskID, sc.Payload = extractPersistedScheduleTaskID(payload, timerName, sc.EventType)
+		sc.TaskID, sc.Payload = extractPersistedScheduleTaskID(payload)
 		out = append(out, sc)
 	}
 	if err := rows.Err(); err != nil {
@@ -338,22 +323,19 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 	return nil
 }
 
-func extractPersistedScheduleTaskID(payload []byte, timerName, eventType string) (string, []byte) {
-	taskID := exactScheduleTaskID("", timerName, eventType)
+func extractPersistedScheduleTaskID(payload []byte) (string, []byte) {
 	if len(payload) == 0 {
-		return taskID, payload
+		return "", payload
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(payload, &decoded); err != nil || decoded == nil {
-		return taskID, payload
+		return "", payload
 	}
-	if decodedTaskID, _ := decoded["__schedule_task_id"].(string); strings.TrimSpace(decodedTaskID) != "" {
-		taskID = exactScheduleTaskID(decodedTaskID, timerName, eventType)
-	}
+	taskID, _ := decoded["__schedule_task_id"].(string)
 	delete(decoded, "__schedule_task_id")
 	encoded, err := json.Marshal(decoded)
 	if err != nil {
-		return taskID, payload
+		return strings.TrimSpace(taskID), payload
 	}
-	return taskID, encoded
+	return strings.TrimSpace(taskID), encoded
 }
