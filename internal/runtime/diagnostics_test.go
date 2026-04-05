@@ -10,6 +10,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 type runtimeLogCapabilityStub struct {
@@ -129,6 +130,37 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testin
 			"denial_layer":  "executor",
 			"denial_reason": "cross_flow_write_forbidden",
 		},
+	}); err != nil {
+		t.Fatalf("logger.Log() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet() error = %v", err)
+	}
+}
+
+func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	const runID = "8d4891f8-0f8e-4c85-b34b-9e0e7f4327dd"
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+
+	mock.ExpectExec(`INSERT INTO runs`).
+		WithArgs(runID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO events`).
+		WithArgs(runID, sqlmock.AnyArg(), "").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	if err := logger.Log(ctx, RuntimeLogEntry{
+		Level:     "error",
+		Message:   "runtime log",
+		Component: "workflow-runtime",
+		Action:    "handler_error",
 	}); err != nil {
 		t.Fatalf("logger.Log() error = %v", err)
 	}
