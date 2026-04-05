@@ -159,6 +159,15 @@ func (s bundleSource) FlowOutputEvents(flowID string) []string {
 }
 func (s bundleSource) FlowWritePins(flowID string) []string { return s.bundle.FlowWritePins(flowID) }
 func (s bundleSource) WritePinOwners(pin string) []string   { return s.bundle.WritePinOwners(pin) }
+func (s bundleSource) FlowHasInputEvent(flowID, eventType string) bool {
+	return s.bundle.FlowHasInputEvent(flowID, eventType)
+}
+func (s bundleSource) FlowHasOutputEvent(flowID, eventType string) bool {
+	return s.bundle.FlowHasOutputEvent(flowID, eventType)
+}
+func (s bundleSource) FlowInputProducerPatterns(flowID, eventType string) []string {
+	return s.bundle.FlowInputProducerPatterns(flowID, eventType)
+}
 func (s bundleSource) ResolveFlowEventReference(flowID, eventType string) string {
 	return s.bundle.ResolveFlowEventReference(flowID, eventType)
 }
@@ -197,6 +206,9 @@ func (s bundleSource) NodeContractSource(nodeID string) (runtimecontracts.Contra
 }
 func (s bundleSource) AgentContractSource(agentID string) (runtimecontracts.ContractItemSource, bool) {
 	return s.bundle.AgentContractSource(agentID)
+}
+func (s bundleSource) ResolveNodeEventReference(nodeID, eventType string) string {
+	return s.bundle.ResolveNodeEventReference(nodeID, eventType)
 }
 func (s bundleSource) NodeHandlerSubscriptions(nodeID string) []string {
 	return s.bundle.NodeHandlerSubscriptions(nodeID)

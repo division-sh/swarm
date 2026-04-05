@@ -67,3 +67,49 @@ func TestSplitRouteSegments_NormalizesInput(t *testing.T) {
 		t.Fatalf("SplitRouteSegments = %#v", got)
 	}
 }
+
+func TestScopeResolveEvent_ExternalizesLocalAndDescendantEvents(t *testing.T) {
+	scope := Scope{
+		Path:        "child",
+		LocalEvents: []string{"step.result"},
+	}
+	descendants := []DescendantScope{{
+		Path:        "child/grandchild",
+		LocalEvents: []string{"micro.done"},
+	}}
+
+	if got := scope.ResolveEvent("step.result", descendants); got != "child/step.result" {
+		t.Fatalf("ResolveEvent(local) = %q, want child/step.result", got)
+	}
+	if got := scope.ResolveEvent("grandchild/micro.done", descendants); got != "child/grandchild/micro.done" {
+		t.Fatalf("ResolveEvent(descendant) = %q, want child/grandchild/micro.done", got)
+	}
+}
+
+func TestScopeMatches_TreatsLocalAndScopedInputEventsAsEquivalent(t *testing.T) {
+	scope := Scope{
+		Path:        "discovery",
+		InputEvents: []string{"scan.requested"},
+	}
+
+	if !scope.Matches("scan.requested", "producer/scan.requested", nil) {
+		t.Fatal("expected local subscription to match scoped event")
+	}
+	if !scope.Matches("scan.requested", "scan.requested", nil) {
+		t.Fatal("expected local subscription to match local event")
+	}
+}
+
+func TestScopeLocalizeOutput_MapsScopedOutputBackToLocalName(t *testing.T) {
+	scope := Scope{
+		Path:         "child",
+		OutputEvents: []string{"child.done"},
+	}
+
+	if got := scope.LocalizeOutput("child/child.done"); got != "child.done" {
+		t.Fatalf("LocalizeOutput = %q, want child.done", got)
+	}
+	if !scope.HasOutput("child/child.done") {
+		t.Fatal("expected scoped output event to be recognized as flow output")
+	}
+}

@@ -534,10 +534,12 @@ func (eb *EventBus) localizedSubscriberEvent(eventType string, subscriber Subscr
 	if eb != nil && eb.semanticSource != nil {
 		flowID := strings.TrimSpace(routeFlowIDForPath(eb.semanticSource, subscriber.Path))
 		if flowID != "" {
-			flowPath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-			inputs := eventidentity.NormalizeList(eb.semanticSource.FlowInputEvents(flowID))
+			scope := eventidentity.Scope{
+				Path:        strings.Trim(strings.TrimSpace(subscriber.Path), "/"),
+				InputEvents: append([]string{}, eb.semanticSource.FlowInputEvents(flowID)...),
+			}
 			for _, candidate := range candidates {
-				if localized := eventidentity.LocalizeForFlow(flowPath, inputs, candidate); localized != "" && localized != eventidentity.Normalize(candidate) {
+				if localized := scope.LocalizeInput(candidate); localized != "" && localized != eventidentity.Normalize(candidate) {
 					return localized
 				}
 			}
