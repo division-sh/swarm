@@ -38,10 +38,12 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if req.ContractBundle == nil {
 		return fmt.Errorf("contract bundle is required")
 	}
-	templateID := strings.TrimSpace(req.TemplateID)
-	instanceID := strings.TrimSpace(req.InstanceID)
-	entityID := strings.TrimSpace(req.EntityID)
-	if templateID == "" || instanceID == "" || entityID == "" {
+	instance := req.Instance
+	templateID := strings.TrimSpace(instance.TemplateID)
+	instanceID := strings.TrimSpace(instance.InstanceID)
+	flowEntityID := strings.TrimSpace(instance.EntityID)
+	flowPath := strings.TrimSpace(instance.InstancePath)
+	if templateID == "" || instanceID == "" || flowEntityID == "" || flowPath == "" {
 		return fmt.Errorf("template_id, instance_id, and entity_id are required")
 	}
 	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
@@ -52,19 +54,10 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if !ok {
 		return fmt.Errorf("flow schema not found: %s", templateID)
 	}
-	flowPath := strings.Trim(strings.TrimSpace(req.FlowPath), "/")
-	identity := runtimepipeline.DeriveFlowInstanceIdentity(req.ContractBundle, templateID, instanceID)
-	if flowPath == "" {
-		flowPath = identity.InstancePath
-	}
-	sourceEntityID := entityID
-	flowEntityID := strings.TrimSpace(identity.EntityID)
-	if strings.TrimSpace(flowPath) != strings.TrimSpace(identity.InstancePath) {
-		flowEntityID = strings.TrimSpace(runtimepipeline.FlowInstanceEntityID(flowPath))
-	}
 	if flowEntityID == "" {
 		return fmt.Errorf("derive flow entity id for %s", flowPath)
 	}
+	sourceEntityID := strings.TrimSpace(instance.SubjectID)
 	if am.workflowInstances != nil {
 		initialState := strings.TrimSpace(schema.InitialState)
 		if initialState == "" {
@@ -83,10 +76,10 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			Config:          cloneFlowConfig(req.Config),
 			Metadata: map[string]any{
 				"entity_id":        flowEntityID,
-				"instance_id":      identity.InstanceID,
+				"instance_id":      instanceID,
 				"flow_path":        flowPath,
 				"subject_id":       strings.TrimSpace(sourceEntityID),
-				"parent_entity_id": strings.TrimSpace(sourceEntityID),
+				"parent_entity_id": strings.TrimSpace(instance.ParentEntityID),
 			},
 		}); err != nil {
 			return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
@@ -131,11 +124,11 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		eventType := eventidentity.ExternalizeForFlow(flowPath, []string{autoEmit}, autoEmit)
 		payload := map[string]any{
 			"entity_id":        flowEntityID,
-			"instance_id":      identity.InstanceID,
+			"instance_id":      instanceID,
 			"template_id":      templateID,
 			"flow_path":        flowPath,
 			"subject_id":       strings.TrimSpace(sourceEntityID),
-			"parent_entity_id": strings.TrimSpace(sourceEntityID),
+			"parent_entity_id": strings.TrimSpace(instance.ParentEntityID),
 		}
 		for key, value := range req.Config {
 			key = strings.TrimSpace(key)
@@ -239,15 +232,28 @@ func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, 
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
 	}
-	templateID = strings.TrimSpace(templateID)
-	instanceID = strings.TrimSpace(instanceID)
-	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
-	entityID = strings.TrimSpace(entityID)
+	if canonicalEntityID := runtimeflowidentity.EntityID(flowPath); canonicalEntityID != "" {
+		entityID = canonicalEntityID
+	}
+	return am.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
+		Instance: runtimeflowidentity.Stored(nil, templateID, flowPath, instanceID, entityID, "", ""),
+	})
+}
+
+func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
+	if am == nil {
+		return fmt.Errorf("agent manager is required")
+	}
+	instance := req.Instance
+	templateID := strings.TrimSpace(instance.TemplateID)
+	instanceID := strings.TrimSpace(instance.InstanceID)
+	flowPath := strings.TrimSpace(instance.InstancePath)
+	entityID := strings.TrimSpace(instance.EntityID)
 	if templateID == "" || instanceID == "" || flowPath == "" || entityID == "" {
 		return fmt.Errorf("template_id, instance_id, flow_path, and entity_id are required")
 	}
-	flowEntityID := strings.TrimSpace(runtimepipeline.FlowInstanceEntityID(flowPath))
-	scopeKey := strings.TrimSpace(runtimeflowidentity.SemanticScopeFromInstancePath(flowPath))
+	flowEntityID := entityID
+	scopeKey := strings.TrimSpace(instance.ScopeKey)
 	if scopeKey == "" {
 		return fmt.Errorf("derive scope key for flow path %s", flowPath)
 	}
@@ -609,8 +615,8 @@ func staticFlowLocalEventSet(agents map[string]runtimecontracts.AgentRegistryEnt
 
 func flowActivationVars(req runtimepipeline.FlowInstanceActivationRequest) map[string]string {
 	vars := map[string]string{
-		"entity_id":   strings.TrimSpace(req.EntityID),
-		"instance_id": strings.TrimSpace(req.InstanceID),
+		"entity_id":   strings.TrimSpace(req.Instance.EntityID),
+		"instance_id": strings.TrimSpace(req.Instance.InstanceID),
 	}
 	for key, value := range req.Config {
 		key = strings.TrimSpace(key)

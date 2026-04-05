@@ -9,68 +9,56 @@ import (
 )
 
 type FlowInstanceIdentity struct {
-	TemplateID   string
-	ScopeKey     string
-	InstanceID   string
-	InstancePath string
-	EntityID     string
+	runtimeflowidentity.Instance
 }
 
 func DeriveFlowInstanceIdentity(source semanticview.Source, flowID, instanceID string) FlowInstanceIdentity {
-	identity := runtimeflowidentity.Derive(source, flowID, instanceID)
-	return FlowInstanceIdentity{
-		TemplateID:   identity.TemplateID,
-		ScopeKey:     identity.ScopeKey,
-		InstanceID:   identity.InstanceID,
-		InstancePath: identity.InstancePath,
-		EntityID:     identity.EntityID,
-	}
+	return FlowInstanceIdentity{Instance: runtimeflowidentity.Derive(source, flowID, instanceID)}
 }
 
 func deriveFlowInstanceIdentity(source semanticview.Source, flowID, instanceID string) FlowInstanceIdentity {
 	return DeriveFlowInstanceIdentity(source, flowID, instanceID)
 }
 
-func workflowInstanceCoordinates(source semanticview.Source, instance WorkflowInstance) runtimeflowidentity.Coordinates {
-	return runtimeflowidentity.StoredCoordinates(
+func StoredFlowInstance(source semanticview.Source, instance WorkflowInstance) runtimeflowidentity.Instance {
+	materializedPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
+	entityID := strings.TrimSpace(asString(instance.Metadata["entity_id"]))
+	if entityID == "" && materializedPath == "" {
+		entityID = strings.TrimSpace(instance.InstanceID)
+	}
+	return runtimeflowidentity.Stored(
 		source,
 		strings.TrimSpace(instance.WorkflowName),
-		workflowInstanceMaterializedPath(instance),
+		materializedPath,
+		strings.TrimSpace(firstNonEmptyString(asString(instance.Metadata["instance_id"]), instance.InstanceID)),
+		entityID,
+		strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"]))),
+		strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
 	)
 }
 
+func workflowInstanceIdentity(source semanticview.Source, instance WorkflowInstance) runtimeflowidentity.Instance {
+	return StoredFlowInstance(source, instance)
+}
+
 func workflowInstanceScopeKey(source semanticview.Source, instance WorkflowInstance) string {
-	return workflowInstanceCoordinates(source, instance).ScopeKey
+	return workflowInstanceIdentity(source, instance).ScopeKey
 }
 
 func workflowInstancePath(source semanticview.Source, instance WorkflowInstance) string {
-	return workflowInstanceCoordinates(source, instance).InstancePath
+	return workflowInstanceIdentity(source, instance).InstancePath
 }
 
-func workflowInstanceMaterializedPath(instance WorkflowInstance) string {
-	return strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
-}
-
-func workflowInstanceLogicalIDFromInstance(instance WorkflowInstance) string {
-	if instanceID := strings.TrimSpace(asString(instance.Metadata["instance_id"])); instanceID != "" {
-		return instanceID
-	}
-	return runtimeflowidentity.LogicalInstanceID(workflowInstanceMaterializedPath(instance))
-}
-
-func workflowInstanceMaterializedIdentity(instance WorkflowInstance) (flowPath string, instanceID string, ok bool) {
-	flowPath = workflowInstanceMaterializedPath(instance)
-	if flowPath == "" {
-		return "", "", false
-	}
-	instanceID = strings.TrimSpace(asString(instance.Metadata["instance_id"]))
-	if instanceID == "" {
-		instanceID = runtimeflowidentity.LogicalInstanceID(flowPath)
-	}
-	if instanceID == "" {
-		return "", "", false
-	}
-	return flowPath, instanceID, true
+func workflowStateIdentity(source semanticview.Source, flowID string, state WorkflowState) runtimeflowidentity.Instance {
+	return runtimeflowidentity.Stored(
+		source,
+		strings.TrimSpace(flowID),
+		asString(state.Metadata["flow_path"]),
+		asString(state.Metadata["instance_id"]),
+		strings.TrimSpace(state.EntityID),
+		asString(state.Metadata["subject_id"]),
+		asString(state.Metadata["parent_entity_id"]),
+	)
 }
 
 func isDescendantFlowInstance(scopeKey, instancePath string) bool {
@@ -85,9 +73,10 @@ func resolveEmittedEntityID(
 	currentEntityID string,
 	inboundEntityID string,
 ) string {
+	instance := workflowStateIdentity(source, flowID, state)
 	entityID := strings.TrimSpace(firstNonEmptyString(
 		currentEntityID,
-		state.EntityID,
+		instance.EntityID,
 		inboundEntityID,
 		workflowEventEntityID(trigger),
 		trigger.EntityID(),
@@ -95,11 +84,11 @@ func resolveEmittedEntityID(
 	if !workflowEmitTargetsParentEntity(source, flowID, eventType) {
 		return entityID
 	}
-	if strings.TrimSpace(asString(state.Metadata["flow_path"])) == "" {
+	if !instance.HasStoredPath {
 		return entityID
 	}
 	return strings.TrimSpace(firstNonEmptyString(
-		asString(state.Metadata["parent_entity_id"]),
+		instance.ParentEntityID,
 		trigger.EntityID(),
 		entityID,
 	))

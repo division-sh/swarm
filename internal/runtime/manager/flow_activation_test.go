@@ -10,6 +10,7 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -210,19 +211,30 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 	}
 }
 
+func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, templateID, instanceID, sourceEntityID, flowPath string) runtimepipeline.FlowInstanceActivationRequest {
+	instance := runtimeflowidentity.Stored(
+		semanticview.Wrap(bundle),
+		templateID,
+		flowPath,
+		instanceID,
+		runtimepipeline.FlowInstanceEntityID(flowPath),
+		sourceEntityID,
+		sourceEntityID,
+	)
+	return runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(bundle),
+		Instance:       instance,
+	}
+}
+
 func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := NewAgentManager(bus, nil)
 	bundle := testFlowBundle("")
 
-	err := am.ActivateFlowInstance(context.Background(), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(bundle),
-		TemplateID:     "review",
-		InstanceID:     "inst-1",
-		EntityID:       "ent-1",
-		FlowPath:       "review/inst-1",
-		InitialState:   "queued",
-	})
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.InitialState = "queued"
+	err := am.ActivateFlowInstance(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -243,13 +255,7 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	am := NewAgentManager(bus, nil)
 	bundle := testFlowBundle("task.started")
 
-	err := am.ActivateFlowInstance(context.Background(), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(bundle),
-		TemplateID:     "review",
-		InstanceID:     "inst-1",
-		EntityID:       "ent-1",
-		FlowPath:       "review/inst-1",
-	})
+	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -275,13 +281,7 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	postCommit := make([]func(), 0, 1)
 	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
 
-	err := am.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(bundle),
-		TemplateID:     "review",
-		InstanceID:     "inst-1",
-		EntityID:       "ent-1",
-		FlowPath:       "review/inst-1",
-	})
+	err := am.ActivateFlowInstance(ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -334,17 +334,12 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	am.SetWorkflowInstanceStore(instances)
 	bundle := testFlowBundle("task.started")
 
-	err := am.ActivateFlowInstance(context.Background(), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(bundle),
-		TemplateID:     "review",
-		InstanceID:     "inst-1",
-		EntityID:       "ent-1",
-		FlowPath:       "review/inst-1",
-		Config: map[string]any{
-			"name":     "alpha",
-			"priority": 1,
-		},
-	})
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.Config = map[string]any{
+		"name":     "alpha",
+		"priority": 1,
+	}
+	err := am.ActivateFlowInstance(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -390,13 +385,7 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 	reviewFlow.Agents["reviewer"] = entry
 	bundle.FlowTree.Root.Children[0].Agents["reviewer"] = entry
 
-	err := am.ActivateFlowInstance(context.Background(), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(bundle),
-		TemplateID:     "review",
-		InstanceID:     "inst-1",
-		EntityID:       "ent-1",
-		FlowPath:       "review/inst-1",
-	})
+	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -414,13 +403,7 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	am := NewAgentManager(bus, nil)
 	bundle := testFlowBundle("")
 
-	err := am.ActivateFlowInstance(context.Background(), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(bundle),
-		TemplateID:     "review",
-		InstanceID:     "inst-1",
-		EntityID:       "ent-1",
-		FlowPath:       "review/inst-1",
-	})
+	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -440,13 +423,7 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 	am := NewAgentManager(bus, nil)
 	bundle := testNestedFlowBundle()
 
-	err := am.ActivateFlowInstance(context.Background(), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(bundle),
-		TemplateID:     "grandchild",
-		InstanceID:     "inst-1",
-		EntityID:       "ent-1",
-		FlowPath:       "child/grandchild/inst-1",
-	})
+	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "grandchild", "inst-1", "ent-1", "child/grandchild/inst-1"))
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}

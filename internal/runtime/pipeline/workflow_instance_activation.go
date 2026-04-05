@@ -16,10 +16,7 @@ import (
 
 type FlowInstanceActivationRequest struct {
 	ContractBundle semanticview.Source
-	TemplateID     string
-	InstanceID     string
-	EntityID       string
-	FlowPath       string
+	Instance       runtimeflowidentity.Instance
 	InitialState   string
 	Config         map[string]any
 	TriggerEvent   events.Event
@@ -29,10 +26,7 @@ type FlowInstanceActivator func(context.Context, FlowInstanceActivationRequest) 
 
 type FlowInstanceDeactivationRequest struct {
 	ContractBundle semanticview.Source
-	TemplateID     string
-	InstanceID     string
-	EntityID       string
-	FlowPath       string
+	Instance       runtimeflowidentity.Instance
 	FinalState     string
 }
 
@@ -64,12 +58,19 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 	if instanceID == "" {
 		instanceID = uuid.NewString()
 	}
+	sourceEntityID := strings.TrimSpace(entityID)
+	instance := runtimeflowidentity.Derive(pc.SemanticSource(), templateID, instanceID)
+	instance.ParentEntityID = sourceEntityID
+	instance.SubjectID = strings.TrimSpace(asString(triggerCtx.State.Metadata["subject_id"]))
+	if instance.SubjectID == "" {
+		instance.SubjectID = sourceEntityID
+	}
+	if instance.SubjectID == "" {
+		instance.SubjectID = instance.EntityID
+	}
 	req := FlowInstanceActivationRequest{
 		ContractBundle: pc.SemanticSource(),
-		TemplateID:     templateID,
-		InstanceID:     instanceID,
-		EntityID:       entityID,
-		FlowPath:       DeriveFlowInstancePath(pc.SemanticSource(), templateID, instanceID),
+		Instance:       instance,
 		InitialState:   strings.TrimSpace(plan.AdvancesTo),
 		Config:         map[string]any{},
 		TriggerEvent:   triggerCtx.Event,

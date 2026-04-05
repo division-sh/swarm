@@ -10,17 +10,15 @@ import (
 
 var flowInstanceEntityNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("flow-instance-entity"))
 
-type Identity struct {
-	TemplateID   string
-	ScopeKey     string
-	InstanceID   string
-	InstancePath string
-	EntityID     string
-}
-
-type Coordinates struct {
-	ScopeKey     string
-	InstancePath string
+type Instance struct {
+	TemplateID     string
+	ScopeKey       string
+	InstanceID     string
+	InstancePath   string
+	EntityID       string
+	SubjectID      string
+	ParentEntityID string
+	HasStoredPath  bool
 }
 
 func ScopeKey(source semanticview.Source, flowID string) string {
@@ -87,30 +85,21 @@ func LogicalInstanceID(instancePath string) string {
 	return strings.TrimSpace(path.Base(instancePath))
 }
 
-func Derive(source semanticview.Source, flowID, instanceID string) Identity {
-	flowID = strings.TrimSpace(flowID)
+func Derive(source semanticview.Source, flowID, instanceID string) Instance {
+	scopeKey := normalizeRef(ScopeKey(source, flowID))
+	instancePath := normalizeRef(InstancePath(source, flowID, instanceID))
 	instanceID = strings.TrimSpace(instanceID)
-	coordinates := DerivedCoordinates(source, flowID, instanceID)
-	instancePath := coordinates.InstancePath
 	entityID := strings.TrimSpace(instanceID)
 	if instancePath != "" {
 		entityID = EntityID(instancePath)
 	}
-	return Identity{
-		TemplateID:   flowID,
-		ScopeKey:     coordinates.ScopeKey,
-		InstanceID:   instanceID,
-		InstancePath: instancePath,
-		EntityID:     entityID,
-	}
-}
-
-func DerivedCoordinates(source semanticview.Source, flowID, instanceID string) Coordinates {
-	scopeKey := normalizeRef(ScopeKey(source, flowID))
-	instancePath := normalizeRef(InstancePath(source, flowID, instanceID))
-	return Coordinates{
-		ScopeKey:     scopeKey,
-		InstancePath: instancePath,
+	return Instance{
+		TemplateID:    strings.TrimSpace(flowID),
+		ScopeKey:      scopeKey,
+		InstanceID:    instanceID,
+		InstancePath:  instancePath,
+		EntityID:      entityID,
+		HasStoredPath: instancePath != "",
 	}
 }
 
@@ -137,23 +126,37 @@ func SemanticScope(instancePath string) string {
 	return instancePath
 }
 
-func StoredCoordinates(source semanticview.Source, workflowName, materializedPath string) Coordinates {
-	instancePath := normalizeRef(materializedPath)
+func Stored(
+	source semanticview.Source,
+	workflowName,
+	materializedPath,
+	instanceID,
+	entityID,
+	subjectID,
+	parentEntityID string,
+) Instance {
+	workflowName = strings.TrimSpace(workflowName)
+	materializedPath = normalizeRef(materializedPath)
+	instancePath := materializedPath
 	if instancePath == "" {
 		instancePath = normalizeRef(ScopeKey(source, workflowName))
 	}
-	return Coordinates{
-		ScopeKey:     normalizeRef(storedScopeKey(source, workflowName, instancePath)),
-		InstancePath: instancePath,
+	if strings.TrimSpace(instanceID) == "" && materializedPath != "" {
+		instanceID = LogicalInstanceID(materializedPath)
 	}
-}
-
-func StoredScopeKey(source semanticview.Source, workflowName, materializedPath string) string {
-	return StoredCoordinates(source, workflowName, materializedPath).ScopeKey
-}
-
-func StoredInstancePath(source semanticview.Source, workflowName, materializedPath string) string {
-	return StoredCoordinates(source, workflowName, materializedPath).InstancePath
+	if strings.TrimSpace(entityID) == "" && instancePath != "" {
+		entityID = EntityID(instancePath)
+	}
+	return Instance{
+		TemplateID:     workflowName,
+		ScopeKey:       normalizeRef(storedScopeKey(source, workflowName, instancePath)),
+		InstanceID:     strings.TrimSpace(instanceID),
+		InstancePath:   instancePath,
+		EntityID:       strings.TrimSpace(entityID),
+		SubjectID:      strings.TrimSpace(subjectID),
+		ParentEntityID: strings.TrimSpace(parentEntityID),
+		HasStoredPath:  materializedPath != "",
+	}
 }
 
 func IsDescendant(scopeKey, instancePath string) bool {

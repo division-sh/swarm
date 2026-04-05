@@ -33,8 +33,14 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 	if ok != nil {
 		t.Fatalf("expected createFlowInstance to succeed: %v", ok)
 	}
-	if captured.InstanceID != "inst-42" {
-		t.Fatalf("instance id = %q, want inst-42", captured.InstanceID)
+	if captured.Instance.InstanceID != "inst-42" {
+		t.Fatalf("instance id = %q, want inst-42", captured.Instance.InstanceID)
+	}
+	if captured.Instance.InstancePath != "review/inst-42" {
+		t.Fatalf("instance path = %q, want review/inst-42", captured.Instance.InstancePath)
+	}
+	if captured.Instance.EntityID != FlowInstanceEntityID("review/inst-42") {
+		t.Fatalf("entity id = %q, want %q", captured.Instance.EntityID, FlowInstanceEntityID("review/inst-42"))
 	}
 }
 
@@ -70,6 +76,9 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 	}
 	if captured.Config["priority"] != float64(1) && captured.Config["priority"] != 1 {
 		t.Fatalf("config priority = %#v, want 1", captured.Config["priority"])
+	}
+	if captured.Instance.SubjectID != "ent-1" {
+		t.Fatalf("subject id = %q, want ent-1", captured.Instance.SubjectID)
 	}
 }
 

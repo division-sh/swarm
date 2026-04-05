@@ -423,7 +423,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		rt.Manager.SetWorkflowInstanceStore(rt.Pipeline.WorkflowInstanceStore())
 		rt.Pipeline.SetInstanceActivator(rt.Manager.ActivateFlowInstance)
 		rt.Pipeline.SetInstanceDeactivator(func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
-			return rt.Manager.DeactivateFlowInstance(ctx, req.TemplateID, req.InstanceID, req.FlowPath, req.EntityID)
+			return rt.Manager.DeactivateFlowInstanceModel(ctx, req)
 		})
 	}
 	if rt.Pipeline != nil {
@@ -715,7 +715,11 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 		return err
 	}
 	for _, instance := range instances {
-		entityID := strings.TrimSpace(instance.InstanceID)
+		instanceIdentity := runtimepipeline.StoredFlowInstance(source, instance)
+		entityID := strings.TrimSpace(instanceIdentity.EntityID)
+		if entityID == "" {
+			continue
+		}
 		for _, timerState := range instance.TimerState {
 			if timerState.Cancelled {
 				continue

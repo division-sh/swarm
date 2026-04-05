@@ -104,12 +104,15 @@ func TestStoredCoordinates_SeparateScopeFromConcretePath(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := StoredCoordinates(nil, tc.workflowName, tc.flowPath)
+			got := Stored(nil, tc.workflowName, tc.flowPath, "", "", "", "")
 			if got.ScopeKey != tc.wantScope {
-				t.Fatalf("StoredCoordinates(%q, %q).ScopeKey = %q, want %q", tc.workflowName, tc.flowPath, got.ScopeKey, tc.wantScope)
+				t.Fatalf("Stored(%q, %q).ScopeKey = %q, want %q", tc.workflowName, tc.flowPath, got.ScopeKey, tc.wantScope)
 			}
 			if got.InstancePath != tc.wantPath {
-				t.Fatalf("StoredCoordinates(%q, %q).InstancePath = %q, want %q", tc.workflowName, tc.flowPath, got.InstancePath, tc.wantPath)
+				t.Fatalf("Stored(%q, %q).InstancePath = %q, want %q", tc.workflowName, tc.flowPath, got.InstancePath, tc.wantPath)
+			}
+			if got.HasStoredPath != (tc.flowPath != "") {
+				t.Fatalf("Stored(%q, %q).HasStoredPath = %v, want %v", tc.workflowName, tc.flowPath, got.HasStoredPath, tc.flowPath != "")
 			}
 		})
 	}
