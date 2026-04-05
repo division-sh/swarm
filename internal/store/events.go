@@ -395,9 +395,9 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context, since time.Time, limit int) ([]events.Event, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
-			e.event_id::text, e.event_name, COALESCE(e.produced_by, ''),
+			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
-			e.payload, e.created_at
+			e.payload, e.created_at, COALESCE(e.source_event_id::text, '')
 		FROM events e
 		LEFT JOIN event_receipts r
 			ON r.event_id = e.event_id
@@ -419,6 +419,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 		var entityID, flowInstance, scope string
 		if err := rows.Scan(
 			&evt.ID,
+			&evt.RunID,
 			&evt.Type,
 			&evt.SourceAgent,
 			&entityID,
@@ -426,8 +427,12 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 			&scope,
 			&evt.Payload,
 			&evt.CreatedAt,
+			&evt.ParentEventID,
 		); err != nil {
 			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
+		}
+		if strings.TrimSpace(evt.RunID) == "" {
+			return nil, fmt.Errorf("scan missing pipeline receipt event %s: missing canonical run_id", strings.TrimSpace(evt.ID))
 		}
 		evt = evt.WithEnvelope(events.EventEnvelope{
 			EntityID:     entityID,
