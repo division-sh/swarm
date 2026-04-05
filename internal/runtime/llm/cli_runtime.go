@@ -25,6 +25,7 @@ type ClaudeCLIRuntime struct {
 	workspaces    workspace.Resolver
 	monitor       MonitorSink
 	events        EventPublisher
+	mcpTurns      MCPTurnContextStore
 }
 
 var ErrClaudeAuthRequired = errors.New("claude auth required")
@@ -33,6 +34,11 @@ var ErrClaudeWorkspaceRequired = errors.New("claude workspace target required")
 type promptTransportFallback struct {
 	Attempted bool
 	Used      bool
+}
+
+type ClaudeCLIRuntimeOptions struct {
+	MonitorSink         MonitorSink
+	MCPTurnContextStore MCPTurnContextStore
 }
 
 func NewClaudeCLIRuntime(
@@ -45,6 +51,24 @@ func NewClaudeCLIRuntime(
 	conversations ConversationPersistence,
 	publisher EventPublisher,
 ) *ClaudeCLIRuntime {
+	return NewClaudeCLIRuntimeWithOptions(cfg, sessions, lockOwner, turns, budget, workspaces, conversations, publisher, ClaudeCLIRuntimeOptions{})
+}
+
+func NewClaudeCLIRuntimeWithOptions(
+	cfg *config.Config,
+	sessions sessions.Registry,
+	lockOwner string,
+	turns TurnPersistence,
+	budget BudgetGuard,
+	workspaces workspace.Resolver,
+	conversations ConversationPersistence,
+	publisher EventPublisher,
+	opts ClaudeCLIRuntimeOptions,
+) *ClaudeCLIRuntime {
+	monitor := opts.MonitorSink
+	if monitor == nil {
+		monitor = NewFileMonitorSink(DefaultMonitorDir())
+	}
 	return &ClaudeCLIRuntime{
 		cfg:           cfg,
 		sessions:      sessions,
@@ -53,8 +77,9 @@ func NewClaudeCLIRuntime(
 		budget:        budget,
 		lockOwner:     lockOwner,
 		workspaces:    workspaces,
-		monitor:       NewFileMonitorSink(DefaultMonitorDir()),
+		monitor:       monitor,
 		events:        publisher,
+		mcpTurns:      opts.MCPTurnContextStore,
 	}
 }
 

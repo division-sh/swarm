@@ -12,6 +12,24 @@ import (
 	models "swarm/internal/runtime/core/actors"
 )
 
+type mcpTurnContextStoreStub struct {
+	register   func(context.Context, time.Duration) string
+	unregister func(string)
+}
+
+func (s mcpTurnContextStoreStub) RegisterTurnContextWithTTL(ctx context.Context, ttl time.Duration) string {
+	if s.register == nil {
+		return ""
+	}
+	return s.register(ctx, ttl)
+}
+
+func (s mcpTurnContextStoreStub) UnregisterTurnContext(token string) {
+	if s.unregister != nil {
+		s.unregister(token)
+	}
+}
+
 func TestShouldUseMCPBridge_DefaultsOn(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "")
 	if !shouldUseMCPBridge() {
@@ -96,15 +114,13 @@ func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:18082")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
 
-	r := &ClaudeCLIRuntime{cfg: &config.Config{}}
-	prevRegister := mcpTurnContextRegister
-	prevUnregister := mcpTurnContextUnregister
-	mcpTurnContextRegister = func(context.Context, time.Duration) string { return "ctx-token-123" }
-	mcpTurnContextUnregister = func(string) {}
-	defer func() {
-		mcpTurnContextRegister = prevRegister
-		mcpTurnContextUnregister = prevUnregister
-	}()
+	r := &ClaudeCLIRuntime{
+		cfg: &config.Config{},
+		mcpTurns: mcpTurnContextStoreStub{
+			register:   func(context.Context, time.Duration) string { return "ctx-token-123" },
+			unregister: func(string) {},
+		},
+	}
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
 		ID:   "market-research-agent",
 		Role: "market_research",
@@ -146,5 +162,25 @@ func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t
 	legacyTraceQuery := "trace" + "_id="
 	if strings.Contains(urlRaw, legacyTraceQuery) {
 		t.Fatalf("url %q should not propagate legacy trace query params", urlRaw)
+	}
+}
+
+func TestBuildMCPConfigArg_FailsClosedWithoutTurnContextStore(t *testing.T) {
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:18082")
+
+	r := &ClaudeCLIRuntime{cfg: &config.Config{}}
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:   "market-research-agent",
+		Role: "market_research",
+	})
+	s := &Session{
+		AgentID: "market-research-agent",
+		Tools:   []ToolDefinition{{Name: "query_entities"}},
+	}
+
+	_, _, _, err := r.buildMCPConfigArg(ctx, s)
+	if err == nil || !strings.Contains(err.Error(), "mcp turn context store is required") {
+		t.Fatalf("buildMCPConfigArg err = %v, want missing store error", err)
 	}
 }

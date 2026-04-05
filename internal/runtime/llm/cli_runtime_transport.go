@@ -52,6 +52,9 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	if strings.TrimSpace(actor.ID) == "" {
 		return "", "", false, nil
 	}
+	if r.mcpTurns == nil {
+		return "", "", false, errors.New("mcp turn context store is required for MCP bridge")
+	}
 
 	gatewayURL := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
 	if gatewayURL == "" {
@@ -74,7 +77,7 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	if token := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}
-	contextToken = mcpTurnContextRegister(ctx, r.mcpContextTokenTTL(ctx))
+	contextToken = r.mcpTurns.RegisterTurnContextWithTTL(ctx, r.mcpContextTokenTTL(ctx))
 	if contextToken != "" {
 		headers[mcpContextTokenHeader] = contextToken
 	}
@@ -91,7 +94,7 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	raw, marshalErr := json.Marshal(cfg)
 	if marshalErr != nil {
 		if contextToken != "" {
-			mcpTurnContextUnregister(contextToken)
+			r.mcpTurns.UnregisterTurnContext(contextToken)
 			contextToken = ""
 		}
 		return "", "", false, marshalErr

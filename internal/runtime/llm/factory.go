@@ -21,6 +21,7 @@ type RuntimeFactory struct {
 	LockOwner     string
 	Workspaces    workspace.Resolver
 	Events        EventPublisher
+	MCPTurns      MCPTurnContextStore
 }
 
 func (f RuntimeFactory) Build() (Runtime, error) {
@@ -35,7 +36,9 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 	case "api":
 		return NewAnthropicAPIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events), nil
 	case "cli_test":
-		return NewClaudeCLIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events), nil
+		return NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
+			MCPTurnContextStore: f.MCPTurns,
+		}), nil
 	default:
 		return nil, fmt.Errorf("unsupported llm runtime mode: %s", f.Cfg.LLM.RuntimeMode)
 	}
