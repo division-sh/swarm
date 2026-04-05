@@ -35,6 +35,11 @@ type Event struct {
 	CreatedAt     time.Time       `json:"created_at"`
 }
 
+type PersistedReplayEvent struct {
+	Event       Event
+	ReplayError string
+}
+
 func (e Event) WithEnvelope(envelope EventEnvelope) Event {
 	e.Envelope = envelope.Normalized()
 	return e

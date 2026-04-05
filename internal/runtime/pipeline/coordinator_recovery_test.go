@@ -126,15 +126,42 @@ func TestRecoveryManager_FailsClosedOnMissingPersistedRunID(t *testing.T) {
 	}
 	capture := &recoveryCapturePublisher{inner: bus}
 
-	eventID := uuid.NewString()
+	badEventID := uuid.NewString()
+	goodRunID := uuid.NewString()
+	goodParentID := uuid.NewString()
+	goodEventID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
 		) VALUES (
 			$1::uuid, 'system.recover', 'global', '{}'::jsonb, 'runtime', 'platform', now()
 		)
-	`, eventID); err != nil {
+	`, badEventID); err != nil {
 		t.Fatalf("seed malformed event: %v", err)
+	}
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          goodParentID,
+		Type:        events.EventType("system.parent"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"ok":true}`),
+		RunID:       goodRunID,
+		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(good parent): %v", err)
+	}
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:            goodEventID,
+		Type:          events.EventType("system.recover.good"),
+		SourceAgent:   "runtime",
+		Payload:       []byte(`{"ok":true}`),
+		RunID:         goodRunID,
+		ParentEventID: goodParentID,
+		CreatedAt:     time.Now().Add(-1 * time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(good child): %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, goodParentID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt(good parent): %v", err)
 	}
 
 	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
@@ -142,7 +169,10 @@ func TestRecoveryManager_FailsClosedOnMissingPersistedRunID(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "missing canonical run_id") {
 		t.Fatalf("Recover error = %v, want missing canonical run_id", err)
 	}
-	if len(capture.published) != 0 {
-		t.Fatalf("published events = %#v, want none", capture.published)
+	if len(capture.published) != 1 {
+		t.Fatalf("published events = %#v, want one valid replay", capture.published)
+	}
+	if capture.published[0].ID != goodEventID {
+		t.Fatalf("published event id = %q, want %q", capture.published[0].ID, goodEventID)
 	}
 }

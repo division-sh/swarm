@@ -508,14 +508,17 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	if len(missing) != 1 {
 		t.Fatalf("expected 1 missing event, got %d", len(missing))
 	}
-	if missing[0].ID != eventMissing.ID {
-		t.Fatalf("expected missing event id=%s got=%s", eventMissing.ID, missing[0].ID)
+	if missing[0].Event.ID != eventMissing.ID {
+		t.Fatalf("expected missing event id=%s got=%s", eventMissing.ID, missing[0].Event.ID)
 	}
-	if missing[0].RunID != runID {
-		t.Fatalf("missing event run_id = %q, want %q", missing[0].RunID, runID)
+	if missing[0].Event.RunID != runID {
+		t.Fatalf("missing event run_id = %q, want %q", missing[0].Event.RunID, runID)
 	}
-	if missing[0].ParentEventID != parentID {
-		t.Fatalf("missing event parent_event_id = %q, want %q", missing[0].ParentEventID, parentID)
+	if missing[0].Event.ParentEventID != parentID {
+		t.Fatalf("missing event parent_event_id = %q, want %q", missing[0].Event.ParentEventID, parentID)
+	}
+	if missing[0].ReplayError != "" {
+		t.Fatalf("missing event replay_error = %q, want empty", missing[0].ReplayError)
 	}
 }
 
