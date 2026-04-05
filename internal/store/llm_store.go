@@ -46,6 +46,16 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
 		}
 	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("append agent turn begin tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
 
 	reqPayload := normalizeJSONPayload(rec.RequestPayload)
 	respPayload := normalizeJSONPayload(rec.ResponseRaw)
@@ -95,7 +105,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		rec.Error,
 	}
 	if hasConversationRunID {
-		if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, runID); err != nil {
 			return err
 		}
 		updateQ = fmt.Sprintf(`
@@ -134,7 +144,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			rec.Error,
 		}
 	}
-	res, err := s.DB.ExecContext(ctx, updateQ,
+	res, err := tx.ExecContext(ctx, updateQ,
 		updateArgs...,
 	)
 	if err != nil {
@@ -143,10 +153,10 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		if runtimeMode == runtimesessions.RuntimeModeTask {
-			if err := s.ensureTaskConversationAuditRow(ctx, rec); err != nil {
+			if err := s.ensureTaskConversationAuditRowTx(ctx, tx, caps, rec); err != nil {
 				return err
 			}
-			res, err = s.DB.ExecContext(ctx, updateQ, updateArgs...)
+			res, err = tx.ExecContext(ctx, updateQ, updateArgs...)
 			if err != nil {
 				return fmt.Errorf("append agent turn: %w", err)
 			}
@@ -272,7 +282,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		}
 	}
 	if hasRunID {
-		if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, runID); err != nil {
 			return err
 		}
 		insertTurn = `
@@ -386,23 +396,39 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			}
 		}
 	}
-	if _, err := s.DB.ExecContext(ctx, insertTurn, insertArgs...); err != nil {
+	if _, err := tx.ExecContext(ctx, insertTurn, insertArgs...); err != nil {
 		return fmt.Errorf("insert agent turn: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("append agent turn commit: %w", err)
+	}
+	committed = true
 	return nil
 }
 
 func (s *PostgresStore) ensureTaskConversationAuditRow(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
+	return s.ensureTaskConversationAuditRowTx(ctx, nil, StoreSchemaCapabilities{}, rec)
+}
+
+func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx *sql.Tx, caps StoreSchemaCapabilities, rec runtimellm.AgentTurnRecord) error {
+	if caps.Conversations.Audits == "" {
+		var err error
+		caps, err = s.schemaCapabilities(ctx)
+		if err != nil {
+			return err
+		}
 	}
-	if err := s.ensureConversationAuditTable(ctx); err != nil {
-		return err
-	}
-	caps, err = s.schemaCapabilities(ctx)
-	if err != nil {
-		return err
+	if tx == nil {
+		if err := s.ensureConversationAuditTable(ctx); err != nil {
+			return err
+		}
+		if caps.Conversations.Audits == "" {
+			var err error
+			caps, err = s.schemaCapabilities(ctx)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	if caps.Conversations.Audits != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
@@ -447,7 +473,7 @@ func (s *PostgresStore) ensureTaskConversationAuditRow(ctx context.Context, rec 
 		runtimesessions.RuntimeModeTask,
 	}
 	if caps.Conversations.AuditRunID {
-		if err := s.ensureRunRow(ctx, caps, nil, rec.RunID); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, rec.RunID); err != nil {
 			return err
 		}
 		q = `
@@ -492,7 +518,11 @@ func (s *PostgresStore) ensureTaskConversationAuditRow(ctx context.Context, rec 
 			runtimesessions.RuntimeModeTask,
 		}
 	}
-	if _, err := s.DB.ExecContext(ctx, q,
+	execFn := s.DB.ExecContext
+	if tx != nil {
+		execFn = tx.ExecContext
+	}
+	if _, err := execFn(ctx, q,
 		args...,
 	); err != nil {
 		return fmt.Errorf("ensure task conversation audit row: %w", err)

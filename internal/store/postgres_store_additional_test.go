@@ -107,6 +107,40 @@ type execer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
+func installFailAgentTurnInsertTrigger(t *testing.T, ctx context.Context, db *sql.DB) {
+	t.Helper()
+	if _, err := db.ExecContext(ctx, `
+		CREATE OR REPLACE FUNCTION fail_agent_turn_insert()
+		RETURNS trigger
+		AS $$
+		BEGIN
+			RAISE EXCEPTION 'forced agent_turn insert failure';
+		END;
+		$$ LANGUAGE plpgsql
+	`); err != nil {
+		t.Fatalf("create fail_agent_turn_insert function: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER IF EXISTS fail_agent_turn_insert_trigger ON agent_turns`); err != nil {
+		t.Fatalf("drop existing fail_agent_turn_insert trigger: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TRIGGER fail_agent_turn_insert_trigger
+		BEFORE INSERT ON agent_turns
+		FOR EACH ROW
+		EXECUTE FUNCTION fail_agent_turn_insert()
+	`); err != nil {
+		t.Fatalf("create fail_agent_turn_insert trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS fail_agent_turn_insert_trigger ON agent_turns`); err != nil {
+			t.Fatalf("cleanup fail_agent_turn_insert trigger: %v", err)
+		}
+		if _, err := db.ExecContext(context.Background(), `DROP FUNCTION IF EXISTS fail_agent_turn_insert()`); err != nil {
+			t.Fatalf("cleanup fail_agent_turn_insert function: %v", err)
+		}
+	})
+}
+
 func TestPostgresStore_AppendEvent_NormalizesInvalidOptionalUUIDs(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -1387,6 +1421,110 @@ func TestManagerStore_AppendAgentTurn_PersistsTurnBlocksWhenColumnExists(t *test
 	}
 	if !strings.Contains(got, `"dispatch"`) || !strings.Contains(got, `"schedule"`) || !strings.Contains(got, `"14-day review scheduled."`) || !strings.Contains(got, `"turn_summary"`) {
 		t.Fatalf("turn_blocks = %s", got)
+	}
+}
+
+func TestManagerStore_AppendAgentTurn_AtomicallyPersistsSessionLastTurnAndTurnRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		AgentID:   "a1",
+		Mode:      "session",
+		ScopeKey:  "global",
+		Messages:  []llm.Message{{Role: "assistant", Content: "done"}},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(session): %v", err)
+	}
+
+	var sessionID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT session_id::text
+		FROM agent_sessions
+		WHERE agent_id = 'a1' AND scope_key = 'global'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`).Scan(&sessionID); err != nil {
+		t.Fatalf("load seeded agent_session: %v", err)
+	}
+
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "session",
+		SessionID:      sessionID,
+		RequestPayload: []byte(`{"kind":"session"}`),
+		ResponseRaw:    []byte(`{"result":"done"}`),
+		ParseOK:        true,
+		Latency:        10 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn: %v", err)
+	}
+
+	var parseOK bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE((runtime_state->'last_turn'->>'parse_ok')::boolean, false)
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&parseOK); err != nil {
+		t.Fatalf("load session runtime_state: %v", err)
+	}
+	if !parseOK {
+		t.Fatal("expected session last_turn telemetry to be persisted")
+	}
+
+	var turnCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agent_turns
+		WHERE agent_id = 'a1' AND session_id = $1::uuid AND runtime_mode = 'session'
+	`, sessionID).Scan(&turnCount); err != nil {
+		t.Fatalf("count agent_turns(session): %v", err)
+	}
+	if turnCount != 1 {
+		t.Fatalf("expected one session-mode agent_turn row, got %d", turnCount)
+	}
+}
+
+func TestManagerStore_AppendAgentTurn_RollsBackTaskAuditAndTurnRowWhenTurnInsertFails(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	installFailAgentTurnInsertTrigger(t, ctx, db)
+
+	sessionID := uuid.NewString()
+	err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "task",
+		SessionID:      sessionID,
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("expected AppendAgentTurn to fail when agent_turns insert fails")
+	}
+
+	var auditCount, turnCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM agent_conversation_audits WHERE session_id = $1::uuid),
+			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid)
+	`, sessionID).Scan(&auditCount, &turnCount); err != nil {
+		t.Fatalf("count rolled back task persistence: %v", err)
+	}
+	if auditCount != 0 {
+		t.Fatalf("expected synthesized task audit row rollback, got %d rows", auditCount)
+	}
+	if turnCount != 0 {
+		t.Fatalf("expected agent_turn insert rollback, got %d rows", turnCount)
 	}
 }
 
