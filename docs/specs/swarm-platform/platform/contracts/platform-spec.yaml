@@ -2436,9 +2436,12 @@ platform_tables:
       description: 'Append-only per-turn agent execution audit log. Records the triggering event context, visible tools,
         attempted tool calls, emitted event names, canonical per-turn turn_blocks, and sanitized request/response payloads.
         turn_blocks is the ordered per-turn projection/surface for the flight recorder. It is populated from the canonical
-        platform.runtime_log stream plus turn-local publish/tool transcript context. Used by all conversation modes. For
-        task mode, this is the primary per-turn audit record (no agent_sessions row exists). For session modes, this complements
-        the live session with a queryable historical record.'
+        platform.runtime_log stream plus turn-local publish/tool transcript context. turn_blocks MUST include exactly one
+        canonical turn_summary block when assistant-visible output, outcome, reasoning blocks, progress updates, or tool
+        results are present for the turn. The turn_summary block is the canonical persisted read-model surface for dashboard/debug
+        consumers; readers MUST NOT reconstruct those fields from raw transcript payloads. Used by all conversation modes.
+        For task mode, this is the primary per-turn audit record (no agent_sessions row exists). For session modes, this
+        complements the live session with a queryable historical record.'
       ddl: "CREATE TABLE agent_turns (\n    turn_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
         \             UUID REFERENCES runs(run_id),\n    agent_id           TEXT NOT NULL,\n    session_id         UUID\
         \ NOT NULL,\n    runtime_mode       TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n\

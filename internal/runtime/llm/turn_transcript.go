@@ -17,7 +17,12 @@ type TurnBlock struct {
 	Data     map[string]any `json:"data,omitempty"`
 }
 
+const turnSummaryBlockKind = "turn_summary"
+
 func BuildTurnBlocks(rec AgentTurnRecord) []TurnBlock {
+	if len(rec.TurnBlocks) > 0 {
+		return normalizeTurnBlocks(rec.TurnBlocks)
+	}
 	blocks := make([]TurnBlock, 0, 8)
 	if dispatch := buildDispatchBlock(rec); dispatch.Kind != "" {
 		blocks = append(blocks, dispatch)
@@ -281,9 +286,6 @@ func parseBlocksFromContent(content []any) []TurnBlock {
 		case "text":
 			if text := strings.TrimSpace(asString(entry["text"])); text != "" {
 				blocks = append(blocks, TurnBlock{Kind: "assistant_text", Text: text})
-				if looksLikeProgressUpdate(text) {
-					blocks = append(blocks, TurnBlock{Kind: "progress", Text: text})
-				}
 			}
 		case "thinking":
 			if thought := strings.TrimSpace(firstReadableString(
@@ -428,6 +430,7 @@ func dedupeTurnBlocks(blocks []TurnBlock) []TurnBlock {
 }
 
 func normalizeTurnBlocks(blocks []TurnBlock) []TurnBlock {
+	blocks = stripTurnSummaryBlocks(blocks)
 	blocks = dedupeTurnBlocks(blocks)
 	if len(blocks) == 0 {
 		return blocks
@@ -444,12 +447,9 @@ func normalizeTurnBlocks(blocks []TurnBlock) []TurnBlock {
 		}
 		toolNamesByUseID[toolUseID] = toolName
 	}
-	if len(toolNamesByUseID) == 0 {
-		return blocks
-	}
 	out := make([]TurnBlock, 0, len(blocks))
 	for _, block := range blocks {
-		if strings.TrimSpace(block.Kind) == "tool_result" && strings.TrimSpace(block.ToolName) == "" {
+		if len(toolNamesByUseID) > 0 && strings.TrimSpace(block.Kind) == "tool_result" && strings.TrimSpace(block.ToolName) == "" {
 			if toolUseID := strings.TrimSpace(blockToolUseID(block)); toolUseID != "" {
 				if toolName := strings.TrimSpace(toolNamesByUseID[toolUseID]); toolName != "" {
 					block.ToolName = toolName
@@ -458,7 +458,109 @@ func normalizeTurnBlocks(blocks []TurnBlock) []TurnBlock {
 		}
 		out = append(out, block)
 	}
+	if summary, ok := buildTurnSummaryBlock(out); ok {
+		out = append(out, summary)
+	}
 	return out
+}
+
+func stripTurnSummaryBlocks(blocks []TurnBlock) []TurnBlock {
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make([]TurnBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if strings.TrimSpace(block.Kind) == turnSummaryBlockKind {
+			continue
+		}
+		out = append(out, block)
+	}
+	return out
+}
+
+func buildTurnSummaryBlock(blocks []TurnBlock) (TurnBlock, bool) {
+	assistantVisibleOutput := ""
+	outcome := ""
+	reasoning := []string{}
+	progress := []string{}
+	toolResults := []any{}
+	reasoningSeen := map[string]struct{}{}
+	progressSeen := map[string]struct{}{}
+	for _, block := range blocks {
+		switch strings.TrimSpace(block.Kind) {
+		case "assistant_text":
+			if text := strings.TrimSpace(block.Text); text != "" {
+				assistantVisibleOutput = text
+			}
+		case "outcome":
+			if text := strings.TrimSpace(block.Text); text != "" {
+				outcome = text
+				if assistantVisibleOutput == "" {
+					assistantVisibleOutput = text
+				}
+			}
+		case "reasoning":
+			if text := strings.TrimSpace(block.Text); text != "" {
+				if _, ok := reasoningSeen[text]; ok {
+					continue
+				}
+				reasoningSeen[text] = struct{}{}
+				reasoning = append(reasoning, text)
+			}
+		case "progress":
+			if text := strings.TrimSpace(block.Text); text != "" {
+				if _, ok := progressSeen[text]; ok {
+					continue
+				}
+				progressSeen[text] = struct{}{}
+				progress = append(progress, text)
+			}
+		case "tool_result":
+			if result, ok := buildTurnSummaryToolResult(block); ok {
+				toolResults = append(toolResults, result)
+			}
+		}
+	}
+	if outcome == "" {
+		outcome = assistantVisibleOutput
+	}
+	data := map[string]any{}
+	if assistantVisibleOutput != "" {
+		data["assistant_visible_output"] = assistantVisibleOutput
+	}
+	if outcome != "" {
+		data["outcome"] = outcome
+	}
+	if len(reasoning) > 0 {
+		data["reasoning_blocks"] = reasoning
+	}
+	if len(progress) > 0 {
+		data["progress_updates"] = progress
+	}
+	if len(toolResults) > 0 {
+		data["tool_results"] = toolResults
+	}
+	if len(data) == 0 {
+		return TurnBlock{}, false
+	}
+	return TurnBlock{Kind: turnSummaryBlockKind, Data: data}, true
+}
+
+func buildTurnSummaryToolResult(block TurnBlock) (map[string]any, bool) {
+	result := map[string]any{}
+	if name := strings.TrimSpace(block.ToolName); name != "" {
+		result["tool_name"] = name
+	}
+	if toolUseID := strings.TrimSpace(blockToolUseID(block)); toolUseID != "" {
+		result["tool_use_id"] = toolUseID
+	}
+	if block.Output != nil {
+		result["output"] = block.Output
+	}
+	if len(result) == 0 {
+		return nil, false
+	}
+	return result, true
 }
 
 func blockToolUseID(block TurnBlock) string {
@@ -475,26 +577,4 @@ func firstReadableString(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func looksLikeProgressUpdate(text string) bool {
-	text = strings.TrimSpace(strings.ToLower(text))
-	if text == "" {
-		return false
-	}
-	for _, prefix := range []string{
-		"i'll ",
-		"i will ",
-		"starting ",
-		"checking ",
-		"reviewing ",
-		"analyzing ",
-		"searching ",
-		"scheduling ",
-	} {
-		if strings.HasPrefix(text, prefix) {
-			return true
-		}
-	}
-	return false
 }

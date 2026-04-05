@@ -469,11 +469,8 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	if !ok || lastTurn["parse_ok"] != true {
 		t.Fatalf("expected runtime_state.last_turn parse_ok=true, got %+v", item.RuntimeState)
 	}
-	if item.Turns[0].AssistantVisibleOutput != "14-day review scheduled." {
-		t.Fatalf("assistant_visible_output = %q", item.Turns[0].AssistantVisibleOutput)
-	}
-	if len(item.Turns[0].ToolResults) != 1 {
-		t.Fatalf("tool_results = %#v", item.Turns[0].ToolResults)
+	if item.Turns[0].AssistantVisibleOutput != "" || item.Turns[0].Outcome != "" || len(item.Turns[0].ToolResults) != 0 {
+		t.Fatalf("expected missing canonical summary to fail closed, got %+v", item.Turns[0])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -503,7 +500,8 @@ func TestSQLConversationReader_GetPrefersCanonicalTurnBlocks(t *testing.T) {
 		{"kind":"tool_use","tool_name":"schedule","input":{"delay_seconds":1209600},"data":{"tool_use_id":"toolu_1"}},
 		{"kind":"tool_result","tool_name":"schedule","output":{"status":"scheduled"},"data":{"tool_use_id":"toolu_1"}},
 		{"kind":"assistant_text","text":"Parking for manual review."},
-		{"kind":"outcome","text":"14-day review scheduled."}
+		{"kind":"outcome","text":"14-day review scheduled."},
+		{"kind":"turn_summary","data":{"assistant_visible_output":"Parking for manual review.","outcome":"14-day review scheduled.","tool_results":[{"tool_name":"schedule","tool_use_id":"toolu_1","output":{"status":"scheduled"}}]}}
 	]`
 
 	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
@@ -559,8 +557,9 @@ func TestSQLConversationReader_ListAndGet_TaskAudit(t *testing.T) {
 
 	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
 		Conversations: store.ConversationSchemaCapabilities{
-			Audits: store.SchemaFlavorCanonical,
-			Turns:  store.SchemaFlavorCanonical,
+			Audits:     store.SchemaFlavorCanonical,
+			Turns:      store.SchemaFlavorCanonical,
+			TurnBlocks: true,
 		},
 	}})
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
@@ -596,7 +595,7 @@ func TestSQLConversationReader_ListAndGet_TaskAudit(t *testing.T) {
 		}).AddRow(
 			"turn-1", "agent-1", "audit-1", "task", "", "", "evt-1", "task.run", "task-1",
 			[]byte(`[]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`),
-			[]byte(`{"message":{"content":"dispatch"}}`), []byte(`{"result":"done"}`), []byte(`[]`), true, 25, 0, "", now,
+			[]byte(`{"message":{"content":"dispatch"}}`), []byte(`{"result":"done"}`), []byte(`[{"kind":"turn_summary","data":{"assistant_visible_output":"done","outcome":"done"}}]`), true, 25, 0, "", now,
 		))
 
 	item, ok, err := reader.Get(context.Background(), "audit-1")
@@ -608,6 +607,64 @@ func TestSQLConversationReader_ListAndGet_TaskAudit(t *testing.T) {
 	}
 	if len(item.Messages) != 1 || len(item.Turns) != 1 || item.Turns[0].Outcome != "done" {
 		t.Fatalf("unexpected task audit payload: %+v", item)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLConversationReader_GetUsesCanonicalTurnSummaryProgress(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions:   store.SchemaFlavorCanonical,
+			Turns:      store.SchemaFlavorCanonical,
+			TurnBlocks: true,
+		},
+	}})
+	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
+	summaryState := `{"summary":"brief"}`
+	messagePayload := `[{"role":"assistant","content":"hello"}]`
+	turnBlocksPayload := `[
+		{"kind":"turn_summary","data":{"assistant_visible_output":"Parking for manual review.","outcome":"14-day review scheduled.","progress_updates":["Scheduling the follow-up review."],"reasoning_blocks":["Need a manual checkpoint."]}}
+	]`
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
+		WithArgs("sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(summaryState), []byte(messagePayload), now))
+
+	mock.ExpectQuery("SELECT\\s+turn_id::text,.*FROM agent_turns").
+		WithArgs("agent-1", "sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id", "trigger_event_id", "trigger_event_type", "task_id",
+			"available_tools", "tool_calls", "emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
+			"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms", "retry_count", "error", "created_at",
+		}).AddRow(
+			"turn-1", "agent-1", "sess-1", "task", "global", "entity-1", "evt-1", "scoring/vertical.marginal", "",
+			[]byte(`[]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`),
+			[]byte(`{"message":{"content":"dispatch"}}`), []byte(`{"result":"stale fallback text"}`), []byte(turnBlocksPayload), true, 92282, 0, "", now,
+		))
+
+	item, ok, err := reader.Get(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("get conversation: %v", err)
+	}
+	if !ok || len(item.Turns) != 1 {
+		t.Fatalf("unexpected detail: %+v", item)
+	}
+	if len(item.Turns[0].ProgressUpdates) != 1 || item.Turns[0].ProgressUpdates[0] != "Scheduling the follow-up review." {
+		t.Fatalf("progress_updates = %#v", item.Turns[0].ProgressUpdates)
+	}
+	if len(item.Turns[0].ReasoningBlocks) != 1 || item.Turns[0].ReasoningBlocks[0] != "Need a manual checkpoint." {
+		t.Fatalf("reasoning_blocks = %#v", item.Turns[0].ReasoningBlocks)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
