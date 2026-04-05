@@ -28,13 +28,9 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	if _, err := runtimesessions.ValidateSessionScopeIntent(agentConversationMode(rec.Config), rec.Config.SessionScope); err != nil {
 		return fmt.Errorf("invalid agent session scope: %w", err)
 	}
-	cfgJSON, err := mergeAgentConfigJSON(rec.Config)
+	projection, err := projectPersistedAgentConfig(rec.Config, rec.ParentAgentID)
 	if err != nil {
-		return fmt.Errorf("marshal agent config: %w", err)
-	}
-	runtimeDescriptorJSON, err := marshalPersistedAgentRuntimeDescriptor(rec.Config)
-	if err != nil {
-		return fmt.Errorf("marshal agent runtime descriptor: %w", err)
+		return err
 	}
 
 	var startedAt any
@@ -43,7 +39,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	}
 	switch caps.Agents {
 	case SchemaFlavorCanonical:
-		return s.upsertAgentSpec(ctx, rec, cfgJSON, runtimeDescriptorJSON, startedAt)
+		return s.upsertAgentSpec(ctx, rec, projection, startedAt)
 	default:
 		return unsupportedSchemaCapability("agents", caps.Agents)
 	}
@@ -132,16 +128,7 @@ func (s *PostgresStore) MarkAgentTerminated(ctx context.Context, agentID string)
 	return nil
 }
 
-func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.PersistedAgent, cfgJSON, runtimeDescriptorJSON []byte, startedAt any) error {
-	modelTier := agentModelTier(rec.Config)
-	conversationMode := agentConversationMode(rec.Config)
-	emitEvents := rec.Config.EmitEvents
-	tools := rec.Config.Tools
-	permissions := rec.Config.Permissions
-	subscriptions := rec.Config.Subscriptions
-	flowInstance := agentFlowInstance(rec.Config)
-	llmBackend := agentLLMBackend(rec.Config)
-
+func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.PersistedAgent, projection persistedAgentProjection, startedAt any) error {
 	const q = `
 		INSERT INTO agents (
 			agent_id, flow_instance, role, model_tier, llm_backend, conversation_mode,
@@ -171,20 +158,20 @@ func (s *PostgresStore) upsertAgentSpec(ctx context.Context, rec runtimemanager.
 			last_active_at = now()
 	`
 	_, err := s.DB.ExecContext(ctx, q,
-		rec.Config.ID,
-		flowInstance,
-		rec.Config.Role,
-		modelTier,
-		llmBackend,
-		conversationMode,
-		nullable(rec.ParentAgentID, rec.Config.ParentAgent),
-		rec.Config.EffectiveEntityID(),
-		string(cfgJSON),
-		mustJSONString(subscriptions),
-		mustJSONString(emitEvents),
-		mustJSONString(tools),
-		mustJSONString(permissions),
-		string(runtimeDescriptorJSON),
+		projection.AgentID,
+		projection.FlowInstance,
+		projection.Role,
+		projection.ModelTier,
+		projection.LLMBackend,
+		projection.ConversationMode,
+		projection.ParentAgentID,
+		projection.EntityID,
+		string(projection.ConfigJSON),
+		string(projection.SubscriptionsJSON),
+		string(projection.EmitEventsJSON),
+		string(projection.ToolsJSON),
+		string(projection.PermissionsJSON),
+		string(projection.RuntimeDescriptor),
 		agentPersistedStatus(rec.Status),
 		startedAt,
 	)
@@ -223,58 +210,33 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 	var out []runtimemanager.PersistedAgent
 	for rows.Next() {
 		var rec runtimemanager.PersistedAgent
-		var (
-			flowInstance      string
-			modelTier         string
-			llmBackend        string
-			conversationMode  string
-			cfgRaw            []byte
-			runtimeDescriptor []byte
-			subscriptionsJSON []byte
-			emitEventsJSON    []byte
-			toolsJSON         []byte
-			permissionsJSON   []byte
-		)
+		var row persistedAgentProjection
 		if err := rows.Scan(
-			&rec.Config.ID,
-			&flowInstance,
-			&rec.Config.Role,
-			&modelTier,
-			&llmBackend,
-			&conversationMode,
-			&rec.ParentAgentID,
-			&rec.Config.EntityID,
-			&cfgRaw,
-			&runtimeDescriptor,
-			&subscriptionsJSON,
-			&emitEventsJSON,
-			&toolsJSON,
-			&permissionsJSON,
+			&row.AgentID,
+			&row.FlowInstance,
+			&row.Role,
+			&row.ModelTier,
+			&row.LLMBackend,
+			&row.ConversationMode,
+			&row.ParentAgentID,
+			&row.EntityID,
+			&row.ConfigJSON,
+			&row.RuntimeDescriptor,
+			&row.SubscriptionsJSON,
+			&row.EmitEventsJSON,
+			&row.ToolsJSON,
+			&row.PermissionsJSON,
 			&rec.Status,
 			&rec.StartedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent row: %w", err)
 		}
-		desc := decodePersistedAgentRuntimeDescriptor(runtimeDescriptor)
-		rec.Config.ParentAgent = rec.ParentAgentID
-		rec.Config.NormalizeEntityID()
-		rec.Config.Config = cfgRaw
-		rec.Config.Type = coalesce(desc.Type, modelTier)
-		rec.Config.Mode = desc.Mode
-		rec.Config.ModelTier = strings.TrimSpace(modelTier)
-		rec.Config.LLMBackend = llmBackend
-		rec.Config.ConversationMode = strings.TrimSpace(conversationMode)
-		rec.Config.SessionScope = desc.SessionScope
-		rec.Config.MaxTurnsPerTask = desc.MaxTurnsPerTask
-		rec.Config.Subscriptions = decodeJSONStringList(subscriptionsJSON)
-		rec.Config.EmitEvents = decodeJSONStringList(emitEventsJSON)
-		rec.Config.Tools = decodeJSONStringList(toolsJSON)
-		rec.Config.Permissions = decodeJSONStringList(permissionsJSON)
-		rec.Config.NativeTools = desc.NativeTools
-		rec.Config.WorkspaceClass = desc.WorkspaceClass
-		rec.Config.ManagerFallback = desc.ManagerFallback
-		rec.Config.FlowPath = strings.Trim(strings.TrimSpace(flowInstance), "/")
-		rec.Config.NormalizeRuntimeDescriptor()
+		cfg, err := hydratePersistedAgentConfig(row)
+		if err != nil {
+			return nil, fmt.Errorf("hydrate agent row %s: %w", strings.TrimSpace(row.AgentID), err)
+		}
+		rec.ParentAgentID = row.ParentAgentID
+		rec.Config = cfg
 		out = append(out, rec)
 	}
 	if err := rows.Err(); err != nil {
@@ -288,6 +250,16 @@ func agentModelTier(cfg runtimeactors.AgentConfig) string {
 		return v
 	}
 	if v := strings.TrimSpace(cfg.Type); v != "" {
+		return v
+	}
+	return "generic"
+}
+
+func agentPersistedType(cfg runtimeactors.AgentConfig, modelTier string) string {
+	if v := strings.TrimSpace(cfg.Type); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(modelTier); v != "" {
 		return v
 	}
 	return "generic"
@@ -323,14 +295,6 @@ func agentPersistedStatus(raw string) string {
 	default:
 		return "active"
 	}
-}
-
-func mustJSONString(v any) string {
-	b, err := json.Marshal(v)
-	if err != nil || len(b) == 0 {
-		return "[]"
-	}
-	return string(b)
 }
 
 func decodeJSONStringList(raw []byte) []string {

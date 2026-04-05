@@ -2,10 +2,13 @@ package store
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimesessions "swarm/internal/runtime/sessions"
 )
 
 type persistedAgentRuntimeDescriptor struct {
@@ -16,6 +19,23 @@ type persistedAgentRuntimeDescriptor struct {
 	NativeTools     runtimeactors.NativeToolConfig `json:"native_tools,omitempty"`
 	WorkspaceClass  string                         `json:"workspace_class,omitempty"`
 	ManagerFallback string                         `json:"manager_fallback,omitempty"`
+}
+
+type persistedAgentProjection struct {
+	AgentID           string
+	FlowInstance      string
+	Role              string
+	ModelTier         string
+	LLMBackend        string
+	ConversationMode  string
+	ParentAgentID     string
+	EntityID          string
+	ConfigJSON        []byte
+	RuntimeDescriptor []byte
+	SubscriptionsJSON []byte
+	EmitEventsJSON    []byte
+	ToolsJSON         []byte
+	PermissionsJSON   []byte
 }
 
 var runtimeConfigKeys = map[string]struct{}{
@@ -35,6 +55,16 @@ var runtimeConfigKeys = map[string]struct{}{
 	"manager_fallback":   {},
 	"flow_path":          {},
 	"flow_instance":      {},
+}
+
+var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
+	"type":               {},
+	"mode":               {},
+	"session_scope":      {},
+	"max_turns_per_task": {},
+	"native_tools":       {},
+	"workspace_class":    {},
+	"manager_fallback":   {},
 }
 
 func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
@@ -64,9 +94,99 @@ func sanitizeOpaqueAgentConfig(raw json.RawMessage) ([]byte, error) {
 	return json.Marshal(obj)
 }
 
-func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig) ([]byte, error) {
+func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID string) (persistedAgentProjection, error) {
+	cfg.NormalizeEntityID()
+	cfg.NormalizeRuntimeDescriptor()
+	modelTier := agentModelTier(cfg)
+	conversationMode := agentConversationMode(cfg)
+	llmBackend := agentLLMBackend(cfg)
+	configJSON, err := mergeAgentConfigJSON(cfg)
+	if err != nil {
+		return persistedAgentProjection{}, fmt.Errorf("marshal agent config: %w", err)
+	}
+	runtimeDescriptorJSON, err := marshalPersistedAgentRuntimeDescriptor(cfg, modelTier)
+	if err != nil {
+		return persistedAgentProjection{}, fmt.Errorf("marshal agent runtime descriptor: %w", err)
+	}
+	return persistedAgentProjection{
+		AgentID:           strings.TrimSpace(cfg.ID),
+		FlowInstance:      agentFlowInstance(cfg),
+		Role:              strings.TrimSpace(cfg.Role),
+		ModelTier:         modelTier,
+		LLMBackend:        llmBackend,
+		ConversationMode:  conversationMode,
+		ParentAgentID:     nullable(strings.TrimSpace(parentAgentID), strings.TrimSpace(cfg.ParentAgent)),
+		EntityID:          cfg.EffectiveEntityID(),
+		ConfigJSON:        configJSON,
+		RuntimeDescriptor: runtimeDescriptorJSON,
+		SubscriptionsJSON: mustJSONBytes(cfg.Subscriptions, "[]"),
+		EmitEventsJSON:    mustJSONBytes(cfg.EmitEvents, "[]"),
+		ToolsJSON:         mustJSONBytes(cfg.Tools, "[]"),
+		PermissionsJSON:   mustJSONBytes(cfg.Permissions, "[]"),
+	}, nil
+}
+
+func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.AgentConfig, error) {
+	if strings.TrimSpace(row.AgentID) == "" {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent row missing agent_id")
+	}
+	if strings.TrimSpace(row.Role) == "" {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s missing role", strings.TrimSpace(row.AgentID))
+	}
+	modelTier := strings.TrimSpace(row.ModelTier)
+	if modelTier == "" {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s missing model_tier", strings.TrimSpace(row.AgentID))
+	}
+	llmBackend := strings.TrimSpace(row.LLMBackend)
+	if llmBackend == "" {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s missing llm_backend", strings.TrimSpace(row.AgentID))
+	}
+	conversationMode := strings.TrimSpace(row.ConversationMode)
+	if _, err := runtimesessions.ParseConversationRuntimeMode(conversationMode); err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid conversation_mode %q: %w", strings.TrimSpace(row.AgentID), conversationMode, err)
+	}
+	if err := validateOpaqueAgentConfig(row.ConfigJSON); err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid opaque config: %w", strings.TrimSpace(row.AgentID), err)
+	}
+	desc, err := decodePersistedAgentRuntimeDescriptor(row.RuntimeDescriptor)
+	if err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid runtime_descriptor: %w", strings.TrimSpace(row.AgentID), err)
+	}
+	sessionScope, err := runtimesessions.ValidateSessionScopeIntent(conversationMode, desc.SessionScope)
+	if err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid session scope: %w", strings.TrimSpace(row.AgentID), err)
+	}
+
+	cfg := runtimeactors.AgentConfig{
+		ID:               strings.TrimSpace(row.AgentID),
+		Type:             desc.Type,
+		Role:             strings.TrimSpace(row.Role),
+		Mode:             desc.Mode,
+		ModelTier:        modelTier,
+		LLMBackend:       llmBackend,
+		ConversationMode: conversationMode,
+		SessionScope:     sessionScope,
+		MaxTurnsPerTask:  desc.MaxTurnsPerTask,
+		Subscriptions:    decodeJSONStringList(row.SubscriptionsJSON),
+		EmitEvents:       decodeJSONStringList(row.EmitEventsJSON),
+		Tools:            decodeJSONStringList(row.ToolsJSON),
+		Permissions:      decodeJSONStringList(row.PermissionsJSON),
+		NativeTools:      desc.NativeTools,
+		WorkspaceClass:   desc.WorkspaceClass,
+		ManagerFallback:  desc.ManagerFallback,
+		FlowPath:         strings.Trim(strings.TrimSpace(row.FlowInstance), "/"),
+		EntityID:         strings.TrimSpace(row.EntityID),
+		ParentAgent:      strings.TrimSpace(row.ParentAgentID),
+		Config:           append(json.RawMessage(nil), row.ConfigJSON...),
+	}
+	cfg.NormalizeEntityID()
+	cfg.NormalizeRuntimeDescriptor()
+	return cfg, nil
+}
+
+func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, modelTier string) ([]byte, error) {
 	desc := persistedAgentRuntimeDescriptor{
-		Type:            strings.TrimSpace(cfg.Type),
+		Type:            agentPersistedType(cfg, modelTier),
 		Mode:            strings.TrimSpace(cfg.Mode),
 		SessionScope:    strings.TrimSpace(cfg.SessionScope),
 		MaxTurnsPerTask: cfg.MaxTurnsPerTask,
@@ -80,7 +200,36 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig) ([]by
 	return json.Marshal(desc)
 }
 
-func decodePersistedAgentRuntimeDescriptor(raw []byte) persistedAgentRuntimeDescriptor {
+func decodePersistedAgentRuntimeDescriptor(raw []byte) (persistedAgentRuntimeDescriptor, error) {
+	obj := map[string]json.RawMessage{}
+	if len(raw) == 0 {
+		raw = []byte(`{}`)
+	}
+	if !json.Valid(raw) {
+		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("runtime_descriptor must be valid json")
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("decode runtime_descriptor: %w", err)
+	}
+	if unknown := invalidPersistedAgentRuntimeDescriptorKeys(obj); len(unknown) > 0 {
+		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("runtime_descriptor contains unsupported keys: %s", strings.Join(unknown, ", "))
+	}
+	var desc persistedAgentRuntimeDescriptor
+	if err := json.Unmarshal(raw, &desc); err != nil {
+		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("decode runtime_descriptor: %w", err)
+	}
+	desc.Type = strings.TrimSpace(desc.Type)
+	desc.Mode = strings.TrimSpace(desc.Mode)
+	desc.SessionScope = strings.TrimSpace(desc.SessionScope)
+	desc.WorkspaceClass = strings.TrimSpace(desc.WorkspaceClass)
+	desc.ManagerFallback = strings.TrimSpace(desc.ManagerFallback)
+	if desc.Type == "" {
+		return persistedAgentRuntimeDescriptor{}, fmt.Errorf("missing type")
+	}
+	return desc, nil
+}
+
+func decodePersistedAgentRuntimeDescriptorLoose(raw []byte) persistedAgentRuntimeDescriptor {
 	if len(raw) == 0 || !json.Valid(raw) {
 		return persistedAgentRuntimeDescriptor{}
 	}
@@ -156,6 +305,63 @@ func extractStringListField(raw []byte, key string) []string {
 		}
 	}
 	return out
+}
+
+func validateOpaqueAgentConfig(raw []byte) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if !json.Valid(raw) {
+		return fmt.Errorf("config must be valid json")
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return fmt.Errorf("decode config: %w", err)
+	}
+	conflicts := make([]string, 0)
+	for key := range runtimeConfigKeys {
+		if _, ok := obj[key]; ok {
+			conflicts = append(conflicts, key)
+		}
+	}
+	if constraints, ok := obj["constraints"].(map[string]any); ok {
+		for _, key := range []string{"conversation_mode", "max_turns_per_task"} {
+			if _, exists := constraints[key]; exists {
+				conflicts = append(conflicts, "constraints."+key)
+			}
+		}
+	}
+	if len(conflicts) == 0 {
+		return nil
+	}
+	sort.Strings(conflicts)
+	return fmt.Errorf("config contains runtime-owned keys: %s", strings.Join(conflicts, ", "))
+}
+
+func invalidPersistedAgentRuntimeDescriptorKeys(obj map[string]json.RawMessage) []string {
+	if len(obj) == 0 {
+		return nil
+	}
+	unknown := make([]string, 0)
+	for key := range obj {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, ok := persistedAgentRuntimeDescriptorKeys[key]; !ok {
+			unknown = append(unknown, key)
+		}
+	}
+	sort.Strings(unknown)
+	return unknown
+}
+
+func mustJSONBytes(v any, fallback string) []byte {
+	b, err := json.Marshal(v)
+	if err != nil || len(b) == 0 {
+		return []byte(fallback)
+	}
+	return b
 }
 
 func normalizeJSONPayload(raw []byte) string {
