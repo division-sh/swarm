@@ -1647,6 +1647,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					Location: agentLabel,
 				})
 			}
+			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, "", agentID, agent)
 			if len(agent.Subscriptions) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
@@ -1750,6 +1751,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					Location: agentLabel,
 				})
 			}
+			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, scope.ID, agentID, agent)
 			if len(agent.Subscriptions) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
@@ -1761,6 +1763,52 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 		}
 	}
 	return c.invalidFindings
+}
+
+func appendAgentSessionScopeFindings(findings []Finding, source semanticview.Source, scopeLabel, flowID, agentID string, agent runtimecontracts.AgentRegistryEntry) []Finding {
+	agentLabel := scopedObjectLabel(scopeLabel, agentID)
+	mode, err := sessions.ParseConversationRuntimeMode(agent.ConversationMode)
+	if err != nil {
+		return findings
+	}
+	sessionScope, err := sessions.ValidateSessionScopeIntent(mode, agent.SessionScope)
+	if err != nil {
+		return append(findings, Finding{
+			CheckID:  "invalid_field_detection",
+			Severity: "error",
+			Message:  fmt.Sprintf("agent %s has invalid session_scope: %v", agentLabel, err),
+			Location: agentLabel,
+		})
+	}
+	switch sessionScope {
+	case sessions.SessionScopeFlow:
+		if strings.TrimSpace(flowID) == "" {
+			return append(findings, Finding{
+				CheckID:  "invalid_field_detection",
+				Severity: "error",
+				Message:  fmt.Sprintf("agent %s session_scope flow requires flow-scoped declaration", agentLabel),
+				Location: agentLabel,
+			})
+		}
+	case sessions.SessionScopeEntity:
+		if strings.TrimSpace(flowID) == "" {
+			return append(findings, Finding{
+				CheckID:  "invalid_field_detection",
+				Severity: "error",
+				Message:  fmt.Sprintf("agent %s session_scope entity requires flow-scoped declaration", agentLabel),
+				Location: agentLabel,
+			})
+		}
+		if flowIsStateless(source, flowID) {
+			return append(findings, Finding{
+				CheckID:  "invalid_field_detection",
+				Severity: "error",
+				Message:  fmt.Sprintf("agent %s session_scope entity requires stateful flow %s", agentLabel, validationFlowLabel(flowID)),
+				Location: agentLabel,
+			})
+		}
+	}
+	return findings
 }
 
 func (c *checkerContext) handlerFieldCompliance() []Finding {

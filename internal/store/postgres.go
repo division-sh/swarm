@@ -302,6 +302,7 @@ func decodeLegacyAgentRuntimeConfig(raw []byte) persistedAgentRuntimeDescriptor 
 	desc := persistedAgentRuntimeDescriptor{
 		Type:            strings.TrimSpace(stringValue(payload["type"])),
 		Mode:            strings.TrimSpace(stringValue(payload["mode"])),
+		SessionScope:    strings.TrimSpace(stringValue(payload["session_scope"])),
 		MaxTurnsPerTask: intValue(payload["max_turns_per_task"]),
 		NativeTools:     nativeToolConfigValue(payload["native_tools"]),
 		WorkspaceClass:  strings.TrimSpace(stringValue(payload["workspace_class"])),

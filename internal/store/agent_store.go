@@ -25,6 +25,9 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	}
 	rec.Config.NormalizeEntityID()
 	rec.Config.NormalizeRuntimeDescriptor()
+	if _, err := runtimesessions.ValidateSessionScopeIntent(agentConversationMode(rec.Config), rec.Config.SessionScope); err != nil {
+		return fmt.Errorf("invalid agent session scope: %w", err)
+	}
 	cfgJSON, err := mergeAgentConfigJSON(rec.Config)
 	if err != nil {
 		return fmt.Errorf("marshal agent config: %w", err)
@@ -261,6 +264,7 @@ func (s *PostgresStore) loadAgentsSpec(ctx context.Context) ([]runtimemanager.Pe
 		rec.Config.ModelTier = strings.TrimSpace(modelTier)
 		rec.Config.LLMBackend = llmBackend
 		rec.Config.ConversationMode = strings.TrimSpace(conversationMode)
+		rec.Config.SessionScope = desc.SessionScope
 		rec.Config.MaxTurnsPerTask = desc.MaxTurnsPerTask
 		rec.Config.Subscriptions = decodeJSONStringList(subscriptionsJSON)
 		rec.Config.EmitEvents = decodeJSONStringList(emitEventsJSON)
@@ -293,10 +297,7 @@ func agentConversationMode(cfg runtimeactors.AgentConfig) string {
 	if v := strings.TrimSpace(cfg.ConversationMode); v != "" {
 		return runtimesessions.NormalizeConversationRuntimeMode(v)
 	}
-	if cfg.EffectiveEntityID() == "" {
-		return runtimesessions.RuntimeModeTask
-	}
-	return runtimesessions.RuntimeModeSession
+	return runtimesessions.RuntimeModeTask
 }
 
 func agentFlowInstance(cfg runtimeactors.AgentConfig) string {

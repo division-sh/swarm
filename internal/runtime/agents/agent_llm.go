@@ -90,6 +90,20 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	if cfg.MaxTurnsPerTask > 0 {
 		maxTurns = cfg.MaxTurnsPerTask
 	}
+	effectiveConversationMode := strings.TrimSpace(cfg.ConversationMode)
+	if effectiveConversationMode == "" {
+		effectiveConversationMode = sessions.RuntimeModeTask
+	}
+	if _, err := sessions.ValidateSessionScopeIntent(effectiveConversationMode, cfg.SessionScope); err != nil {
+		agentLabel := strings.TrimSpace(cfg.ID)
+		if agentLabel == "" {
+			agentLabel = strings.TrimSpace(cfg.Role)
+		}
+		if agentLabel == "" {
+			agentLabel = "unknown-agent"
+		}
+		return nil, fmt.Errorf("invalid session scope for agent %s: %w", agentLabel, err)
+	}
 	c := llm.NewConversation(cfg.ID, "", systemPrompt, tools, mode, maxTurns, modelRuntime)
 	c.SetToolExecutor(toolExecutor)
 	promptCache := map[string]string{}
@@ -163,7 +177,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	ctx = models.WithActor(ctx, a.cfg)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
-	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), conversationScopeKeyForEvent(a.conversation.Mode, evt))
+	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), a.cfg.SessionScope, conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 
@@ -484,7 +498,7 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive string) (string, err
 	ctx = models.WithActor(ctx, a.cfg)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
-	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), conversationScopeKeyForEvent(a.conversation.Mode, evt))
+	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), a.cfg.SessionScope, conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 	beforeMessages := len(a.conversation.Messages)

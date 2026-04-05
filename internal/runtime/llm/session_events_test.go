@@ -54,7 +54,7 @@ func (s *failingConversationStore) UpsertConversation(context.Context, Conversat
 	return s.err
 }
 
-func (s *failingConversationStore) LoadActiveConversation(context.Context, string, string, string) (ConversationRecord, bool, error) {
+func (s *failingConversationStore) LoadActiveConversation(context.Context, string, string, string, string) (ConversationRecord, bool, error) {
 	return ConversationRecord{}, false, nil
 }
 
@@ -69,7 +69,7 @@ func (s *failingTurnStore) AppendAgentTurn(context.Context, AgentTurnRecord) err
 func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
-	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "task-1"), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "", "task-1"), runtimeactors.AgentConfig{
 		ID:       "agent-1",
 		Type:     "sonnet",
 		EntityID: "entity-1",
@@ -113,7 +113,7 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
-	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "task-1"), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "", "task-1"), runtimeactors.AgentConfig{
 		ID:   "agent-2",
 		Type: "haiku",
 	})
@@ -149,7 +149,7 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 
 func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
-	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "task-1")
+	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "", "task-1")
 
 	s, err := runtime.StartSession(ctx, "agent-2", "base prompt", []ToolDefinition{
 		{Name: "emit_market_research_scan_complete"},

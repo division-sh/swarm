@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/sessions"
 )
 
 func publishAgentStarted(ctx context.Context, publisher EventPublisher, session *Session, eventType events.EventType) {
@@ -23,10 +24,14 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 		"agent_id":          strings.TrimSpace(session.AgentID),
 		"flow_instance":     nil,
 		"conversation_mode": strings.TrimSpace(session.ConversationMode),
+		"session_scope":     strings.TrimSpace(session.SessionScope),
 		"model_tier":        sessionModelTier(actor),
 		"timestamp":         time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if flowInstance := strings.TrimSpace(session.ScopeKey); flowInstance != "" && strings.TrimSpace(session.RuntimeMode) == "session" {
+	if flowInstance := strings.TrimSpace(actor.CanonicalFlowPath()); flowInstance != "" && strings.TrimSpace(session.SessionScope) == sessions.SessionScopeEntity {
+		payload["flow_instance"] = flowInstance
+	}
+	if flowInstance := strings.TrimSpace(session.ScopeKey); flowInstance != "" && strings.TrimSpace(session.SessionScope) == sessions.SessionScopeFlow {
 		payload["flow_instance"] = flowInstance
 	}
 	raw, err := json.Marshal(payload)

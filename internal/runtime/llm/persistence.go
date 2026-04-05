@@ -140,6 +140,7 @@ const runtimeToolsMCPPrefix = "mcp__runtime-tools__"
 type ConversationRecord struct {
 	SessionID string
 	AgentID   string
+	SessionScope string
 	ScopeKey  string
 	RunID     string
 	TaskID    string
@@ -152,5 +153,5 @@ type ConversationRecord struct {
 
 type ConversationPersistence interface {
 	UpsertConversation(ctx context.Context, rec ConversationRecord) error
-	LoadActiveConversation(ctx context.Context, agentID, mode, scopeKey string) (ConversationRecord, bool, error)
+	LoadActiveConversation(ctx context.Context, agentID, mode, sessionScope, scopeKey string) (ConversationRecord, bool, error)
 }

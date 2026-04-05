@@ -30,14 +30,14 @@ func NewPostgresRegistry(db *sql.DB, lockTTL time.Duration) *PostgresRegistry {
 	}
 }
 
-func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error) {
+func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -111,12 +111,13 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, l
 			return nil, fmt.Errorf("commit acquire new: %w", err)
 		}
 		return &Lease{
-			SessionID:   r.sessionID,
-			AgentID:     agentID,
-			RuntimeMode: resolved.RuntimeMode,
-			LockOwner:   lockOwner,
-			ScopeKey:    r.scopeKey,
-			ExpiresAt:   expires,
+			SessionID:    r.sessionID,
+			AgentID:      agentID,
+			RuntimeMode:  resolved.RuntimeMode,
+			SessionScope: resolved.Scope,
+			LockOwner:    lockOwner,
+			ScopeKey:     r.scopeKey,
+			ExpiresAt:    expires,
 		}, nil
 	}
 
@@ -148,12 +149,13 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, l
 			return nil, fmt.Errorf("commit acquire recycled: %w", err)
 		}
 		return &Lease{
-			SessionID:   r.sessionID,
-			AgentID:     agentID,
-			RuntimeMode: resolved.RuntimeMode,
-			LockOwner:   lockOwner,
-			ScopeKey:    r.scopeKey,
-			ExpiresAt:   expires,
+			SessionID:    r.sessionID,
+			AgentID:      agentID,
+			RuntimeMode:  resolved.RuntimeMode,
+			SessionScope: resolved.Scope,
+			LockOwner:    lockOwner,
+			ScopeKey:     r.scopeKey,
+			ExpiresAt:    expires,
 		}, nil
 	}
 
@@ -182,6 +184,7 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, l
 		ProviderSessionID: strings.TrimSpace(r.providerSessionID.String),
 		AgentID:           agentID,
 		RuntimeMode:       resolved.RuntimeMode,
+		SessionScope:      resolved.Scope,
 		LockOwner:         lockOwner,
 		ScopeKey:          resolved.ScopeKey,
 		ExpiresAt:         expires,
@@ -221,14 +224,14 @@ func (sr *PostgresRegistry) Release(ctx context.Context, lease *Lease) error {
 	return nil
 }
 
-func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error) {
+func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, summary, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -296,20 +299,21 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID, runtimeMode, lo
 	}
 
 	return &Lease{
-		SessionID:   newSessionID,
-		AgentID:     agentID,
-		RuntimeMode: resolved.RuntimeMode,
-		LockOwner:   lockOwner,
-		ScopeKey:    resolved.ScopeKey,
-		ExpiresAt:   expiresAt,
+		SessionID:    newSessionID,
+		AgentID:      agentID,
+		RuntimeMode:  resolved.RuntimeMode,
+		SessionScope: resolved.Scope,
+		LockOwner:    lockOwner,
+		ScopeKey:     resolved.ScopeKey,
+		ExpiresAt:    expiresAt,
 	}, nil
 }
 
-func (sr *PostgresRegistry) IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionID, scopeKey string) error {
+func (sr *PostgresRegistry) IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionScope, sessionID, scopeKey string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return err
 	}
@@ -333,7 +337,7 @@ func (sr *PostgresRegistry) IncrementTurn(ctx context.Context, agentID, runtimeM
 	return nil
 }
 
-func (sr *PostgresRegistry) AdoptSessionID(ctx context.Context, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+func (sr *PostgresRegistry) AdoptSessionID(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey string) error {
 	agentID = strings.TrimSpace(agentID)
 	lockOwner = strings.TrimSpace(lockOwner)
 	newSessionID = strings.TrimSpace(newSessionID)
@@ -343,7 +347,7 @@ func (sr *PostgresRegistry) AdoptSessionID(ctx context.Context, agentID, runtime
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return err
 	}

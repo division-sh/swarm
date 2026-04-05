@@ -114,6 +114,9 @@ func canonicalRuntimeToolInput(name string, input any) any {
 			if conversationMode := strings.TrimSpace(asString(payload["conversation_mode"])); conversationMode != "" {
 				config["conversation_mode"] = conversationMode
 			}
+			if sessionScope := strings.TrimSpace(asString(payload["session_scope"])); sessionScope != "" {
+				config["session_scope"] = sessionScope
+			}
 			if maxTurns := asInt(payload["max_turns_per_task"]); maxTurns > 0 {
 				config["max_turns_per_task"] = maxTurns
 			}
@@ -153,6 +156,9 @@ func canonicalRuntimeToolInput(name string, input any) any {
 			}
 			if conversationMode := strings.TrimSpace(asString(payload["conversation_mode"])); conversationMode != "" {
 				config["conversation_mode"] = conversationMode
+			}
+			if sessionScope := strings.TrimSpace(asString(payload["session_scope"])); sessionScope != "" {
+				config["session_scope"] = sessionScope
 			}
 			if maxTurns := asInt(payload["max_turns_per_task"]); maxTurns > 0 {
 				config["max_turns_per_task"] = maxTurns

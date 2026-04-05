@@ -8,8 +8,8 @@ import (
 	"swarm/internal/runtime/sessions"
 )
 
-func resolvedSessionScope(ctx context.Context, mode, scopeKey string) (sessions.ResolvedScope, error) {
-	return sessions.ResolveScope(ctx, mode, scopeKey)
+func resolvedSessionScope(ctx context.Context, mode, sessionScope, scopeKey string) (sessions.ResolvedScope, error) {
+	return sessions.ResolveScope(ctx, mode, sessionScope, scopeKey)
 }
 
 func ensurePlatformSessionID(id string) string {

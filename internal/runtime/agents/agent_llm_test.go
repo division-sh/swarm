@@ -290,6 +290,7 @@ func (r *boardTestRuntime) StartSession(_ context.Context, agentID, systemPrompt
 		AgentID:           agentID,
 		RuntimeMode:       "api",
 		ConversationMode:  "session",
+		SessionScope:      "global",
 		SystemPrompt:      systemPrompt,
 		Tools:             tools,
 		Messages:          nil,

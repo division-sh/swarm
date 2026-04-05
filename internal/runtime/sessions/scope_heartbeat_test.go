@@ -10,13 +10,13 @@ import (
 
 func TestScopeFromContext_DefaultsToTask(t *testing.T) {
 	scope := ScopeFromContext(nil)
-	if scope.ConversationMode != "" || scope.ScopeKey != "" {
+	if scope.ConversationMode != "" || scope.SessionScope != "" || scope.ScopeKey != "" {
 		t.Fatalf("unexpected nil-context scope: %+v", scope)
 	}
 
-	ctx := WithScope(context.Background(), "TASK", "  abc  ")
+	ctx := WithScope(context.Background(), "TASK", " FLOW ", "  abc  ")
 	scope = ScopeFromContext(ctx)
-	if scope.ConversationMode != "TASK" || scope.ScopeKey != "abc" {
+	if scope.ConversationMode != "TASK" || scope.SessionScope != "FLOW" || scope.ScopeKey != "abc" {
 		t.Fatalf("unexpected scoped context: %+v", scope)
 	}
 }
@@ -25,7 +25,7 @@ func TestNormalizeConversationRuntimeMode_AcceptsStatelessAlias(t *testing.T) {
 	if got := NormalizeConversationRuntimeMode("stateless"); got != RuntimeModeTask {
 		t.Fatalf("NormalizeConversationRuntimeMode(stateless) = %q, want %q", got, RuntimeModeTask)
 	}
-	scope, err := ResolveScope(context.Background(), "stateless", "ignored")
+	scope, err := ResolveScope(context.Background(), "stateless", "", "ignored")
 	if err != nil {
 		t.Fatalf("ResolveScope(stateless): %v", err)
 	}
@@ -34,12 +34,12 @@ func TestNormalizeConversationRuntimeMode_AcceptsStatelessAlias(t *testing.T) {
 	}
 }
 
-func TestResolveScope_SessionUsesActorDeclaration(t *testing.T) {
+func TestResolveScope_SessionUsesExplicitIntent(t *testing.T) {
 	flowCtx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
 		ID:       "flow-agent",
 		FlowPath: "review/inst-1",
 	})
-	flowScope, err := ResolveScope(flowCtx, RuntimeModeSession, "")
+	flowScope, err := ResolveScope(flowCtx, RuntimeModeSession, SessionScopeFlow, "")
 	if err != nil {
 		t.Fatalf("ResolveScope(flow session): %v", err)
 	}
@@ -50,7 +50,7 @@ func TestResolveScope_SessionUsesActorDeclaration(t *testing.T) {
 	globalCtx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
 		ID: "global-agent",
 	})
-	globalScope, err := ResolveScope(globalCtx, RuntimeModeSession, "")
+	globalScope, err := ResolveScope(globalCtx, RuntimeModeSession, SessionScopeGlobal, "")
 	if err != nil {
 		t.Fatalf("ResolveScope(global session): %v", err)
 	}
@@ -60,13 +60,16 @@ func TestResolveScope_SessionUsesActorDeclaration(t *testing.T) {
 }
 
 func TestResolveScope_InvalidSessionConfigurationsFailClosed(t *testing.T) {
-	if _, err := ResolveScope(context.Background(), RuntimeModeSession, ""); err == nil {
+	if _, err := ResolveScope(context.Background(), RuntimeModeSession, "", ""); err == nil {
 		t.Fatal("expected session scope without declaration to fail")
+	}
+	if _, err := ResolveScope(context.Background(), RuntimeModeSession, SessionScopeFlow, ""); err == nil {
+		t.Fatal("expected flow session without flow context to fail")
 	}
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
 		ID: "entity-agent",
 	})
-	if _, err := ResolveScope(ctx, RuntimeModeSessionPerEntity, "entity-1"); err == nil {
+	if _, err := ResolveScope(ctx, RuntimeModeSessionPerEntity, SessionScopeEntity, "entity-1"); err == nil {
 		t.Fatal("expected session_per_entity without flow path to fail")
 	}
 }

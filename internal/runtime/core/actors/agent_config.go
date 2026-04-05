@@ -55,6 +55,7 @@ type AgentConfig struct {
 	ModelTier        string           `json:"model_tier,omitempty"`
 	LLMBackend       string           `json:"llm_backend,omitempty"`
 	ConversationMode string           `json:"conversation_mode,omitempty"`
+	SessionScope     string           `json:"session_scope,omitempty"`
 	MaxTurnsPerTask  int              `json:"max_turns_per_task,omitempty"`
 	Subscriptions    []string         `json:"subscriptions,omitempty"`
 	EmitEvents       []string         `json:"emit_events,omitempty"`
@@ -97,6 +98,7 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	cfg.ModelTier = strings.TrimSpace(cfg.ModelTier)
 	cfg.LLMBackend = strings.TrimSpace(cfg.LLMBackend)
 	cfg.ConversationMode = strings.TrimSpace(cfg.ConversationMode)
+	cfg.SessionScope = strings.TrimSpace(cfg.SessionScope)
 	cfg.WorkspaceClass = strings.TrimSpace(cfg.WorkspaceClass)
 	cfg.ManagerFallback = strings.TrimSpace(cfg.ManagerFallback)
 	cfg.FlowPath = cfg.CanonicalFlowPath()

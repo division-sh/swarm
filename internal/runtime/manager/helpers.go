@@ -147,6 +147,9 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if patch.ConversationMode != "" {
 		out.ConversationMode = patch.ConversationMode
 	}
+	if patch.SessionScope != "" {
+		out.SessionScope = patch.SessionScope
+	}
 	if patch.MaxTurnsPerTask > 0 {
 		out.MaxTurnsPerTask = patch.MaxTurnsPerTask
 	}

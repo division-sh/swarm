@@ -173,10 +173,10 @@ func dedupeToolCalls(calls []ToolCall) []ToolCall {
 }
 
 type sessionIDAdopter interface {
-	AdoptSessionID(ctx context.Context, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error
+	AdoptSessionID(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey string) error
 }
 
-func adoptRegistrySessionID(ctx context.Context, reg sessions.Registry, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+func adoptRegistrySessionID(ctx context.Context, reg sessions.Registry, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey string) error {
 	if reg == nil {
 		return nil
 	}
@@ -184,7 +184,7 @@ func adoptRegistrySessionID(ctx context.Context, reg sessions.Registry, agentID,
 	if !ok {
 		return nil
 	}
-	return adopter.AdoptSessionID(ctx, agentID, runtimeMode, lockOwner, newSessionID, scopeKey)
+	return adopter.AdoptSessionID(ctx, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey)
 }
 
 func claudeToolsArg(tools []ToolDefinition) string {
