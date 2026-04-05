@@ -58,9 +58,9 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 	if r.conversations == nil || s == nil {
 		return nil
 	}
-	mode := strings.TrimSpace(s.ConversationMode)
-	if mode == "" {
-		mode = sessions.RuntimeModeSession
+	mode, err := sessions.ParseConversationRuntimeMode(s.ConversationMode)
+	if err != nil {
+		return err
 	}
 	if !shouldPersistConversationMode(mode) {
 		return nil
@@ -80,15 +80,13 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 
 func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
 	scope := sessions.ScopeFromContext(ctx)
-	mode := strings.TrimSpace(scope.ConversationMode)
-	if mode == "" {
-		mode = sessions.RuntimeModeSession
+	resolved, err := resolvedSessionScope(ctx, scope.ConversationMode, scope.ScopeKey)
+	if err != nil {
+		return nil, err
 	}
-	resolved := resolvedSessionScope(mode, scope.ScopeKey)
 
 	var lease *sessions.Lease
 	if !resolved.Stateless {
-		var err error
 		lease, err = r.sessions.Acquire(ctx, agentID, resolved.RuntimeMode, r.lockOwner, resolved.ScopeKey)
 		if err != nil {
 			return nil, err
@@ -107,7 +105,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 		}()),
 		AgentID:          agentID,
 		RuntimeMode:      resolved.RuntimeMode,
-		ConversationMode: mode,
+		ConversationMode: resolved.RuntimeMode,
 		ScopeKey:         resolved.ScopeKey,
 		ProviderSessionID: func() string {
 			if lease != nil {
@@ -120,7 +118,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 		Messages:     nil,
 	}
 	if r.conversations != nil && !resolved.Stateless {
-		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, mode, resolved.ScopeKey); err == nil && ok {
+		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, resolved.RuntimeMode, resolved.ScopeKey); err == nil && ok {
 			s.Messages = rec.Messages
 			s.TurnCount = rec.TurnCount
 		}
@@ -148,9 +146,11 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		}
 	}
 
-	resolved := resolvedSessionScope(s.ConversationMode, s.ScopeKey)
+	resolved, err := resolvedSessionScope(ctx, coalesce(s.ConversationMode, s.RuntimeMode), s.ScopeKey)
+	if err != nil {
+		return nil, err
+	}
 	var lease *sessions.Lease
-	var err error
 	if !resolved.Stateless {
 		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, r.lockOwner, resolved.ScopeKey)
 		if err != nil {
@@ -289,9 +289,14 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 	if r.conversations == nil || s == nil {
 		return
 	}
-	mode := strings.TrimSpace(s.ConversationMode)
-	if mode == "" {
-		mode = sessions.RuntimeModeSession
+	mode, err := sessions.ParseConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode))
+	if err != nil {
+		logPublisherRuntime(ctx, r.events, "error", "persist_api_conversation_invalid_mode", "Persisting the API conversation was skipped because the session mode was invalid", s.AgentID, s.ID, "", map[string]any{
+			"conversation_mode": strings.TrimSpace(s.ConversationMode),
+			"runtime_mode":      strings.TrimSpace(s.RuntimeMode),
+			"scope_key":         strings.TrimSpace(s.ScopeKey),
+		}, err)
+		return
 	}
 	if !shouldPersistConversationMode(mode) {
 		return

@@ -1,14 +1,15 @@
 package llm
 
 import (
+	"context"
 	"strings"
 
 	"github.com/google/uuid"
 	"swarm/internal/runtime/sessions"
 )
 
-func resolvedSessionScope(mode, scopeKey string) sessions.ResolvedScope {
-	return sessions.ResolveScope(mode, scopeKey)
+func resolvedSessionScope(ctx context.Context, mode, scopeKey string) (sessions.ResolvedScope, error) {
+	return sessions.ResolveScope(ctx, mode, scopeKey)
 }
 
 func ensurePlatformSessionID(id string) string {

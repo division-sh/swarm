@@ -535,8 +535,14 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if err != nil {
 		return err
 	}
-	mode := runtimesessions.NormalizeConversationRuntimeMode(rec.Mode)
-	resolved := runtimesessions.ResolveScope(mode, rec.ScopeKey)
+	mode, err := runtimesessions.ParseConversationRuntimeMode(rec.Mode)
+	if err != nil {
+		return err
+	}
+	resolved, err := runtimesessions.ResolveScope(context.Background(), mode, rec.ScopeKey)
+	if err != nil {
+		return err
+	}
 
 	status := strings.TrimSpace(strings.ToLower(rec.Status))
 	if status == "" {
@@ -805,8 +811,14 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 		return runtimellm.ConversationRecord{}, false, fmt.Errorf("agent_id is required")
 	}
 
-	mode = runtimesessions.NormalizeConversationRuntimeMode(mode)
-	resolved := runtimesessions.ResolveScope(mode, scopeKey)
+	mode, err := runtimesessions.ParseConversationRuntimeMode(mode)
+	if err != nil {
+		return runtimellm.ConversationRecord{}, false, err
+	}
+	resolved, err := runtimesessions.ResolveScope(context.Background(), mode, scopeKey)
+	if err != nil {
+		return runtimellm.ConversationRecord{}, false, err
+	}
 	if resolved.Stateless {
 		return runtimellm.ConversationRecord{}, false, nil
 	}

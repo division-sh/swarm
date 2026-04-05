@@ -36,11 +36,11 @@ type actorScopedToolExecutor interface {
 	ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition
 }
 
-func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) *LLMAgent {
+func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) (*LLMAgent, error) {
 	return newLLMAgent(cfg, modelRuntime, toolExecutor, tools, false)
 }
 
-func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, precomposed bool) *LLMAgent {
+func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, precomposed bool) (*LLMAgent, error) {
 	subs := make([]events.EventType, 0, len(cfg.Subscriptions))
 	for _, s := range cfg.Subscriptions {
 		if strings.TrimSpace(s) == "" {
@@ -55,7 +55,18 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 
 	maxTurns := 100
 	mode := llm.TaskScoped
-	if overrideMode, ok := parseConversationMode(cfg.ConversationMode); ok {
+	if strings.TrimSpace(cfg.ConversationMode) != "" {
+		overrideMode, ok := parseConversationMode(cfg.ConversationMode)
+		if !ok {
+			agentLabel := strings.TrimSpace(cfg.ID)
+			if agentLabel == "" {
+				agentLabel = strings.TrimSpace(cfg.Role)
+			}
+			if agentLabel == "" {
+				agentLabel = "unknown-agent"
+			}
+			return nil, fmt.Errorf("invalid conversation_mode %q for agent %s", strings.TrimSpace(cfg.ConversationMode), agentLabel)
+		}
 		mode = overrideMode
 	}
 	if cfg.MaxTurnsPerTask > 0 {
@@ -72,7 +83,7 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		subscriptions: subs,
 		conversation:  c,
 		promptCache:   promptCache,
-	}
+	}, nil
 }
 
 func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, tools []llm.ToolDefinition, precomposed bool) []llm.ToolDefinition {
@@ -87,11 +98,11 @@ func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, 
 
 func parseConversationMode(raw string) (llm.ConversationMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "task", "task_scoped", "task-scoped", "stateless":
+	case "task", "stateless":
 		return llm.TaskScoped, true
-	case "session", "session_scoped", "session-scoped":
+	case "session":
 		return llm.SessionScoped, true
-	case "session_per_entity", "session-per-entity", "session_per_scope":
+	case "session_per_entity":
 		return llm.SessionPerEntityScoped, true
 	default:
 		return llm.TaskScoped, false
@@ -112,7 +123,7 @@ func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolEx
 		}
 		agentTools := tools
 		agentTools = toolExecutor.ToolDefinitionsForActor(cfg)
-		return newLLMAgent(cfg, modelRuntime, toolExecutor, agentTools, true), nil
+		return newLLMAgent(cfg, modelRuntime, toolExecutor, agentTools, true)
 	}
 }
 

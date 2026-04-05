@@ -68,11 +68,13 @@ type Conversation struct {
 func ConversationModeString(mode ConversationMode) string {
 	switch mode {
 	case TaskScoped:
-		return "task"
+		return sessions.RuntimeModeTask
+	case SessionScoped:
+		return sessions.RuntimeModeSession
 	case SessionPerEntityScoped:
-		return "session_per_entity"
+		return sessions.RuntimeModeSessionPerEntity
 	default:
-		return "session"
+		return ""
 	}
 }
 
@@ -142,21 +144,20 @@ func (c *Conversation) ensureSession(ctx context.Context) error {
 	if c.Session != nil {
 		return nil
 	}
-	scopeKey := ""
-	switch c.Mode {
-	case TaskScoped, SessionPerEntityScoped:
-		scopeKey = strings.TrimSpace(c.TaskID)
+	scope := sessions.ScopeFromContext(ctx)
+	if strings.TrimSpace(scope.ConversationMode) == "" {
+		scope.ConversationMode = ConversationModeString(c.Mode)
 	}
-	ctx = sessions.WithScope(ctx, ConversationModeString(c.Mode), scopeKey)
+	if strings.TrimSpace(scope.ScopeKey) == "" {
+		switch c.Mode {
+		case TaskScoped, SessionPerEntityScoped:
+			scope.ScopeKey = strings.TrimSpace(c.TaskID)
+		}
+	}
+	ctx = sessions.WithScope(ctx, scope.ConversationMode, scope.ScopeKey)
 	s, err := c.runtime.StartSession(ctx, c.AgentID, c.SystemPrompt, c.Tools)
 	if err != nil {
 		return err
-	}
-	if strings.TrimSpace(s.ConversationMode) == "" {
-		s.ConversationMode = ConversationModeString(c.Mode)
-	}
-	if strings.TrimSpace(s.ScopeKey) == "" {
-		s.ScopeKey = scopeKey
 	}
 	c.Session = s
 	return nil

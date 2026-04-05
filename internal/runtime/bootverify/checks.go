@@ -18,6 +18,7 @@ import (
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
 )
 
@@ -1570,6 +1571,13 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					Message:  fmt.Sprintf("agent %s missing required field conversation_mode", agentLabel),
 					Location: agentLabel,
 				})
+			} else if _, err := sessions.ParseConversationRuntimeMode(agent.ConversationMode); err != nil {
+				c.invalidFindings = append(c.invalidFindings, Finding{
+					CheckID:  "invalid_field_detection",
+					Severity: "error",
+					Message:  fmt.Sprintf("agent %s has invalid conversation_mode: %v", agentLabel, err),
+					Location: agentLabel,
+				})
 			}
 			if len(agent.Subscriptions) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
@@ -1664,6 +1672,13 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
 					Message:  fmt.Sprintf("agent %s missing required field conversation_mode", agentLabel),
+					Location: agentLabel,
+				})
+			} else if _, err := sessions.ParseConversationRuntimeMode(agent.ConversationMode); err != nil {
+				c.invalidFindings = append(c.invalidFindings, Finding{
+					CheckID:  "invalid_field_detection",
+					Severity: "error",
+					Message:  fmt.Sprintf("agent %s has invalid conversation_mode: %v", agentLabel, err),
 					Location: agentLabel,
 				})
 			}

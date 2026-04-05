@@ -1216,8 +1216,9 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		AgentID: "a1",
-		Mode:    "session",
+		AgentID:  "a1",
+		Mode:     "session",
+		ScopeKey: "global",
 		Messages: []llm.Message{
 			{Role: "user", Content: "reach me at a@example.com"},
 		},
@@ -1225,7 +1226,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertConversation: %v", err)
 	}
-	rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "")
+	rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "global")
 	if err != nil || !ok {
 		t.Fatalf("LoadActiveConversation ok=%v err=%v", ok, err)
 	}
@@ -1789,6 +1790,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		AgentID:   ceoID,
 		TaskID:    "",
 		Mode:      "session",
+		ScopeKey:  "global",
 		Messages:  []llm.Message{{Role: "user", Content: "hi"}},
 		Summary:   "sum",
 		TurnCount: 1,
@@ -1796,7 +1798,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertConversation: %v", err)
 	}
-	if rec, ok, err := pg.LoadActiveConversation(ctx, ceoID, "session", ""); err != nil || !ok || rec.AgentID != ceoID {
+	if rec, ok, err := pg.LoadActiveConversation(ctx, ceoID, "session", "global"); err != nil || !ok || rec.AgentID != ceoID {
 		t.Fatalf("LoadActiveConversation ok=%v err=%v rec=%+v", ok, err, rec)
 	}
 
@@ -1848,6 +1850,7 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		AgentID:   "agent-cleanup-1",
 		Mode:      "session",
+		ScopeKey:  "global",
 		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
 		Summary:   "x",
 		TurnCount: 1,

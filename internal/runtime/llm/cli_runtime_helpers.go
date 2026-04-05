@@ -29,9 +29,14 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 	if r.conversations == nil || s == nil {
 		return
 	}
-	mode := strings.TrimSpace(s.ConversationMode)
-	if mode == "" {
-		mode = sessions.RuntimeModeSession
+	mode, err := sessions.ParseConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode))
+	if err != nil {
+		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_invalid_mode", "Persisting the CLI conversation was skipped because the session mode was invalid", s.AgentID, s.ID, "", map[string]any{
+			"conversation_mode": strings.TrimSpace(s.ConversationMode),
+			"runtime_mode":      strings.TrimSpace(s.RuntimeMode),
+			"scope_key":         strings.TrimSpace(s.ScopeKey),
+		}, err)
+		return
 	}
 	if !shouldPersistConversationMode(mode) {
 		return

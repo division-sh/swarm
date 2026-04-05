@@ -34,12 +34,15 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, l
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
-	resolved := ResolveScope(runtimeMode, scopeKey)
-	if resolved.Stateless {
-		return nil, errors.New("task-scoped sessions are stateless")
-	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+	if err != nil {
+		return nil, err
+	}
+	if resolved.Stateless {
+		return nil, errors.New("task-scoped sessions are stateless")
 	}
 
 	tx, err := sr.db.BeginTx(ctx, &sql.TxOptions{})
@@ -192,6 +195,10 @@ func (sr *PostgresRegistry) Release(ctx context.Context, lease *Lease) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	mode, err := ParseConversationRuntimeMode(lease.RuntimeMode)
+	if err != nil {
+		return err
+	}
 	res, err := sr.db.ExecContext(ctx, `
 		UPDATE agent_sessions
 		SET lease_holder = NULL,
@@ -203,7 +210,7 @@ func (sr *PostgresRegistry) Release(ctx context.Context, lease *Lease) error {
 		  AND scope_key = $4
 		  AND lease_holder = $5
 		  AND status = 'active'
-	`, lease.AgentID, NormalizeConversationRuntimeMode(lease.RuntimeMode), lease.SessionID, strings.TrimSpace(lease.ScopeKey), lease.LockOwner)
+	`, lease.AgentID, mode, lease.SessionID, strings.TrimSpace(lease.ScopeKey), lease.LockOwner)
 	if err != nil {
 		return fmt.Errorf("release lease: %w", err)
 	}
@@ -218,12 +225,15 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID, runtimeMode, lo
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
-	resolved := ResolveScope(runtimeMode, scopeKey)
-	if resolved.Stateless {
-		return nil, errors.New("task-scoped sessions are stateless")
-	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+	if err != nil {
+		return nil, err
+	}
+	if resolved.Stateless {
+		return nil, errors.New("task-scoped sessions are stateless")
 	}
 
 	tx, err := sr.db.BeginTx(ctx, &sql.TxOptions{})
@@ -299,7 +309,10 @@ func (sr *PostgresRegistry) IncrementTurn(ctx context.Context, agentID, runtimeM
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	resolved := ResolveScope(runtimeMode, scopeKey)
+	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+	if err != nil {
+		return err
+	}
 	res, err := sr.db.ExecContext(ctx, `
 		UPDATE agent_sessions
 		SET turn_count = turn_count + 1,
@@ -327,12 +340,15 @@ func (sr *PostgresRegistry) AdoptSessionID(ctx context.Context, agentID, runtime
 	if agentID == "" || runtimeMode == "" || lockOwner == "" || newSessionID == "" {
 		return errors.New("agentID, runtimeMode, lockOwner, and newSessionID are required")
 	}
-	resolved := ResolveScope(runtimeMode, scopeKey)
-	if resolved.Stateless {
-		return nil
-	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	resolved, err := ResolveScope(ctx, runtimeMode, scopeKey)
+	if err != nil {
+		return err
+	}
+	if resolved.Stateless {
+		return nil
 	}
 
 	tx, err := sr.db.BeginTx(ctx, &sql.TxOptions{})
@@ -401,9 +417,6 @@ func (sr *PostgresRegistry) ScopeKeyEnabledForTest() bool {
 
 func (sr *PostgresRegistry) ResetAll(runtimeMode string) error {
 	runtimeMode = strings.TrimSpace(runtimeMode)
-	if runtimeMode != "" && IsStatelessRuntimeMode(runtimeMode) {
-		return nil
-	}
 	if runtimeMode == "" {
 		_, err := sr.db.Exec(`
 			UPDATE agent_sessions
@@ -419,14 +432,21 @@ func (sr *PostgresRegistry) ResetAll(runtimeMode string) error {
 		}
 		return nil
 	}
-	_, err := sr.db.Exec(`
+	mode, err := ParseConversationRuntimeMode(runtimeMode)
+	if err != nil {
+		return err
+	}
+	if mode == RuntimeModeTask {
+		return nil
+	}
+	_, err = sr.db.Exec(`
 		UPDATE agent_sessions
 		SET status = 'terminated',
 		    lease_holder = NULL,
 		    lease_expires_at = NULL,
 		    updated_at = now()
 		WHERE status = 'active' AND runtime_mode = $1
-	`, NormalizeConversationRuntimeMode(runtimeMode))
+	`, mode)
 	if err != nil {
 		return fmt.Errorf("reset sessions runtime=%s: %w", runtimeMode, err)
 	}
