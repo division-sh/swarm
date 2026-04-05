@@ -1598,12 +1598,13 @@ func TestManagerStore_AppendAgentTurn_AtomicallyPersistsSessionLastTurnAndTurnRo
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		AgentID:   "a1",
-		Mode:      "session",
-		ScopeKey:  "global",
-		Messages:  []llm.Message{{Role: "assistant", Content: "done"}},
-		TurnCount: 1,
-		Status:    "active",
+		AgentID:      "a1",
+		Mode:         "session",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Messages:     []llm.Message{{Role: "assistant", Content: "done"}},
+		TurnCount:    1,
+		Status:       "active",
 	}); err != nil {
 		t.Fatalf("UpsertConversation(session): %v", err)
 	}
@@ -1776,9 +1777,10 @@ func TestManagerStore_SessionConversationDoesNotPersistAuditRow(t *testing.T) {
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		AgentID:  "a1",
-		Mode:     "session",
-		ScopeKey: "global",
+		AgentID:      "a1",
+		Mode:         "session",
+		SessionScope: "global",
+		ScopeKey:     "global",
 		Messages: []llm.Message{
 			{Role: "user", Content: "hello"},
 		},
