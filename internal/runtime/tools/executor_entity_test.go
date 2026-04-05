@@ -272,6 +272,59 @@ func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 	}
 }
 
+func TestEntityTools_CreateEntity_LogsInitialMutationRows(t *testing.T) {
+	ctx, exec, db := newEntityToolTestHarness(t)
+	entityID := uuid.NewString()
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"flow_instance": "review/inst-1",
+		"fields": map[string]any{
+			"status": "open",
+			"score":  10.0,
+		},
+	}); err != nil {
+		t.Fatalf("create_entity: %v", err)
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT field, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
+		FROM entity_mutations
+		WHERE entity_id = $1::uuid
+		ORDER BY created_at ASC, mutation_id ASC
+	`, entityID)
+	if err != nil {
+		t.Fatalf("query entity mutations: %v", err)
+	}
+	defer rows.Close()
+
+	fields := map[string][3]string{}
+	for rows.Next() {
+		var (
+			field       string
+			writerType  string
+			writerID    string
+			handlerStep string
+		)
+		if err := rows.Scan(&field, &writerType, &writerID, &handlerStep); err != nil {
+			t.Fatalf("scan entity mutation: %v", err)
+		}
+		fields[strings.TrimSpace(field)] = [3]string{writerType, writerID, handlerStep}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read entity mutations: %v", err)
+	}
+
+	for _, want := range []string{"current_state", "score", "status"} {
+		meta, ok := fields[want]
+		if !ok {
+			t.Fatalf("missing mutation field %q in %#v", want, fields)
+		}
+		if meta[0] != "platform" || meta[1] != "create_entity" || meta[2] != "create_entity" {
+			t.Fatalf("mutation metadata for %q = %#v, want platform/create_entity/create_entity", want, meta)
+		}
+	}
+}
+
 func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarness(t)
 	entityID := uuid.NewString()

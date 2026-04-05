@@ -170,13 +170,17 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	`, entityID, fieldName, string(valueJSON)).Scan(&revision); err != nil {
 		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.update", true, err, "save entity field %s", fieldName)
 	}
-	if err := runtimemutationlog.Insert(ctx, tx, runtimemutationlog.Record{
-		EntityID:    entityID,
-		Field:       fieldName,
-		OldValue:    nullableJSONBytes(oldValue),
-		NewValue:    json.RawMessage(valueJSON),
-		WriterType:  "agent",
-		WriterID:    strings.TrimSpace(actor.ID),
+	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, entityID, runtimemutationlog.EntityStateProjection{
+		Fields: map[string]any{
+			fieldName: nullableJSONBytes(oldValue),
+		},
+	}, runtimemutationlog.EntityStateProjection{
+		Fields: map[string]any{
+			fieldName: json.RawMessage(valueJSON),
+		},
+	}, runtimemutationlog.Writer{
+		Type:        "agent",
+		ID:          strings.TrimSpace(actor.ID),
 		HandlerStep: "save_entity_field",
 	}); err != nil {
 		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.mutation_log", true, err, "record entity mutation %s", fieldName)
@@ -335,7 +339,17 @@ func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, i
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.fields", false, err, "marshal fields")
 	}
 	now := time.Now().UTC()
-	if _, err := db.ExecContext(ctx, `
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_create_entity.begin", true, err, "begin create entity tx")
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			entity_id, subject_id, flow_instance, entity_type, name,
 			current_state, gates, fields, accumulator, revision,
@@ -349,6 +363,20 @@ func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, i
 	`, entityID, subjectID, flowInstance, entityType, name, currentState, string(fieldsJSON), now); err != nil {
 		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_create_entity.insert", false, err, "create entity %s", entityID)
 	}
+	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, entityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+		CurrentState: currentState,
+		Fields:       normalizedFields,
+	}, runtimemutationlog.Writer{
+		Type:        "platform",
+		ID:          "create_entity",
+		HandlerStep: "create_entity",
+	}); err != nil {
+		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_create_entity.mutation_log", true, err, "record initial entity mutations")
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_create_entity.commit", true, err, "commit create entity")
+	}
+	committed = true
 	return map[string]any{
 		"entity_id":     entityID,
 		"subject_id":    subjectID,

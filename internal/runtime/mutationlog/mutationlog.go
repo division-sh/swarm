@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -24,6 +25,19 @@ type Record struct {
 	WriterType  string
 	WriterID    string
 	HandlerStep string
+}
+
+type Writer struct {
+	Type        string
+	ID          string
+	HandlerStep string
+}
+
+type EntityStateProjection struct {
+	CurrentState string
+	Fields       map[string]any
+	Gates        map[string]any
+	Accumulator  map[string]any
 }
 
 func Insert(ctx context.Context, db DBTX, rec Record) error {
@@ -74,6 +88,118 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 		)
 	`, runID, entityID, field, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep))
 	return err
+}
+
+func InsertEntityStateDiff(ctx context.Context, db DBTX, entityID string, before, after EntityStateProjection, writer Writer) error {
+	entityID = strings.TrimSpace(entityID)
+	if db == nil || entityID == "" {
+		return nil
+	}
+	writerType := strings.TrimSpace(writer.Type)
+	writerID := strings.TrimSpace(writer.ID)
+	if writerType == "" || writerID == "" {
+		return nil
+	}
+	if strings.TrimSpace(before.CurrentState) != strings.TrimSpace(after.CurrentState) {
+		if err := Insert(ctx, db, Record{
+			EntityID:    entityID,
+			Field:       "current_state",
+			OldValue:    stringOrNil(before.CurrentState),
+			NewValue:    stringOrNil(after.CurrentState),
+			WriterType:  writerType,
+			WriterID:    writerID,
+			HandlerStep: strings.TrimSpace(writer.HandlerStep),
+		}); err != nil {
+			return err
+		}
+	}
+	if err := insertMapDiff(ctx, db, entityID, "", before.Fields, after.Fields, writer); err != nil {
+		return err
+	}
+	if err := insertMapDiff(ctx, db, entityID, "gates.", before.Gates, after.Gates, writer); err != nil {
+		return err
+	}
+	if err := insertMapDiff(ctx, db, entityID, "accumulator.", before.Accumulator, after.Accumulator, writer); err != nil {
+		return err
+	}
+	return nil
+}
+
+func insertMapDiff(ctx context.Context, db DBTX, entityID, prefix string, before, after map[string]any, writer Writer) error {
+	keys := make([]string, 0, len(before)+len(after))
+	seen := map[string]struct{}{}
+	for key := range before {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	for key := range after {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		oldValue, oldOK := before[key]
+		newValue, newOK := after[key]
+		if !oldOK {
+			oldValue = nil
+		}
+		if !newOK {
+			newValue = nil
+		}
+		same, err := jsonValuesEqual(oldValue, newValue)
+		if err != nil {
+			return err
+		}
+		if same {
+			continue
+		}
+		if err := Insert(ctx, db, Record{
+			EntityID:    entityID,
+			Field:       strings.TrimSpace(prefix + key),
+			OldValue:    oldValue,
+			NewValue:    newValue,
+			WriterType:  strings.TrimSpace(writer.Type),
+			WriterID:    strings.TrimSpace(writer.ID),
+			HandlerStep: strings.TrimSpace(writer.HandlerStep),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func jsonValuesEqual(left, right any) (bool, error) {
+	leftJSON, err := json.Marshal(left)
+	if err != nil {
+		return false, err
+	}
+	rightJSON, err := json.Marshal(right)
+	if err != nil {
+		return false, err
+	}
+	return string(leftJSON) == string(rightJSON), nil
+}
+
+func stringOrNil(raw string) any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	return raw
 }
 
 func normalizeRunID(runID string) string {
