@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"fmt"
+
+	runtimebus "swarm/internal/runtime/bus"
 )
 
-// ListActiveAgentIDs implements runtime.ActiveAgentLister for broadcast-style events
-// such as budget.*.
-func (s *PostgresStore) ListActiveAgentIDs(ctx context.Context) ([]string, error) {
+// ListActiveAgentDescriptors implements runtime.ActiveAgentDescriptorLister for
+// explicit runtime delivery planning against persisted agent metadata.
+func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("db unavailable")
 	}
@@ -16,7 +18,10 @@ func (s *PostgresStore) ListActiveAgentIDs(ctx context.Context) ([]string, error
 		return nil, err
 	}
 	query := `
-		SELECT agent_id
+		SELECT
+			agent_id,
+			COALESCE(entity_id::text, ''),
+			COALESCE(flow_instance, '')
 		FROM agents
 		WHERE COALESCE(status, '') <> 'terminated'
 		ORDER BY agent_id ASC
@@ -32,14 +37,14 @@ func (s *PostgresStore) ListActiveAgentIDs(ctx context.Context) ([]string, error
 	}
 	defer rows.Close()
 
-	out := make([]string, 0, 64)
+	out := make([]runtimebus.ActiveAgentDescriptor, 0, 64)
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var descriptor runtimebus.ActiveAgentDescriptor
+		if err := rows.Scan(&descriptor.AgentID, &descriptor.EntityID, &descriptor.FlowInstance); err != nil {
 			return nil, err
 		}
-		if id != "" {
-			out = append(out, id)
+		if descriptor.AgentID != "" {
+			out = append(out, descriptor.Normalized())
 		}
 	}
 	if err := rows.Err(); err != nil {

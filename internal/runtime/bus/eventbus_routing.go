@@ -9,38 +9,51 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
-func (eb *EventBus) persistableRecipients(ctx context.Context, recipients []string) []string {
+func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+	lister, ok := eb.store.(ActiveAgentDescriptorLister)
+	if !ok {
+		return nil, false, nil
+	}
+	descriptors, err := lister.ListActiveAgentDescriptors(ctx)
+	if err != nil {
+		return nil, true, err
+	}
+	set := make(map[string]ActiveAgentDescriptor, len(descriptors))
+	for _, descriptor := range descriptors {
+		descriptor = descriptor.Normalized()
+		if descriptor.AgentID == "" {
+			continue
+		}
+		set[descriptor.AgentID] = descriptor
+	}
+	return set, true, nil
+}
+
+func filterRecipientsForExplicitAgentScope(evt events.Event, recipients []string, descriptors map[string]ActiveAgentDescriptor) []string {
 	recipients = uniqueStrings(recipients)
 	if len(recipients) == 0 {
 		return nil
 	}
-	lister, ok := eb.store.(ActiveAgentLister)
-	if !ok {
-		return recipients
-	}
-	ids, err := lister.ListActiveAgentIDs(ctx)
-	if err != nil {
-		return recipients
-	}
-	if len(ids) == 0 {
+	if len(descriptors) == 0 {
 		return nil
 	}
-	set := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			set[id] = struct{}{}
-		}
-	}
+	eventEntityID := strings.TrimSpace(evt.EntityID())
 	out := make([]string, 0, len(recipients))
 	for _, r := range recipients {
 		r = strings.TrimSpace(r)
 		if r == "" {
 			continue
 		}
-		if _, ok := set[r]; ok {
-			out = append(out, r)
+		descriptor, ok := descriptors[r]
+		if !ok {
+			continue
 		}
+		if descriptor.EntityID != "" {
+			if eventEntityID == "" || descriptor.EntityID != eventEntityID {
+				continue
+			}
+		}
+		out = append(out, r)
 	}
 	return out
 }
@@ -197,26 +210,6 @@ func ensurePublishEpoch(ctx context.Context) error {
 
 func filterOutAgentIDs(in []string, disallow []string) []string {
 	return FilterOutAgentIDs(in, disallow)
-}
-
-func filterOutEntityScopedAgentIDs(in []string, entityID string) []string {
-	entityID = strings.TrimSpace(entityID)
-	if len(in) == 0 || entityID == "" {
-		return in
-	}
-	suffix := "-" + entityID
-	out := make([]string, 0, len(in))
-	for _, v := range in {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		if strings.HasSuffix(v, suffix) {
-			continue
-		}
-		out = append(out, v)
-	}
-	return out
 }
 
 func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, reason string) error {

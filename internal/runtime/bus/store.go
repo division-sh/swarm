@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	"swarm/internal/events"
@@ -28,10 +29,24 @@ type FlowInstanceRoutePersistence interface {
 	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error)
 }
 
-// ActiveAgentLister is an optional capability for broadcast-style events.
-// PostgresStore implements this; InMemoryEventStore does not.
-type ActiveAgentLister interface {
-	ListActiveAgentIDs(ctx context.Context) ([]string, error)
+type ActiveAgentDescriptor struct {
+	AgentID      string
+	EntityID     string
+	FlowInstance string
+}
+
+func (d ActiveAgentDescriptor) Normalized() ActiveAgentDescriptor {
+	return ActiveAgentDescriptor{
+		AgentID:      strings.TrimSpace(d.AgentID),
+		EntityID:     strings.TrimSpace(d.EntityID),
+		FlowInstance: strings.TrimSpace(d.FlowInstance),
+	}
+}
+
+// ActiveAgentDescriptorLister is an optional capability for runtime delivery
+// planning. PostgresStore implements this; InMemoryEventStore does not.
+type ActiveAgentDescriptorLister interface {
+	ListActiveAgentDescriptors(ctx context.Context) ([]ActiveAgentDescriptor, error)
 }
 
 // PipelineReceiptPersistence is an optional capability for marking whether
