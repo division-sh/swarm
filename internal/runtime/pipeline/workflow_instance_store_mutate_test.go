@@ -171,6 +171,82 @@ func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
 	}
 }
 
+func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	store := NewWorkflowInstanceStore(db)
+	entityID := uuid.NewString()
+	storageRef := entityID
+	now := time.Now().UTC().Round(time.Microsecond)
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      storageRef,
+		WorkflowName:    "mutation-flow",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "queued",
+		Metadata:        map[string]any{},
+		StateBuckets:    map[string]any{},
+		TimerState: []WorkflowTimerState{{
+			TimerID:   "task_timer",
+			EventType: "timer.task_timeout",
+			CreatedAt: now,
+			FiresAt:   now.Add(time.Hour),
+		}},
+	}); err != nil {
+		t.Fatalf("seed workflow instance with timer state: %v", err)
+	}
+
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO timers (
+			timer_name, entity_id, flow_instance, fire_event, fire_payload,
+			fire_at, recurring, recurrence_cron, recurrence_interval,
+			owner_node, owner_agent, task_type, status
+		)
+		VALUES (
+			$1, $2::uuid, $3, $4, '{}'::jsonb,
+			$5, false, NULL, NULL,
+			NULL, $6, 'timer', 'active'
+		)
+	`, "task_timer", entityID, storageRef, "timer.task_timeout", now.Add(2*time.Hour), runtimeWorkflowID); err != nil {
+		t.Fatalf("insert scheduler-owned timer row: %v", err)
+	}
+
+	if err := store.Mutate(context.Background(), entityID, func(instance *WorkflowInstance) {
+		instance.CurrentState = "active"
+	}); err != nil {
+		t.Fatalf("mutate with scheduler-owned timer row present: %v", err)
+	}
+
+	instance, ok, err := store.Load(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance to persist")
+	}
+	if len(instance.TimerState) != 1 {
+		t.Fatalf("timer state count = %d, want 1", len(instance.TimerState))
+	}
+	if got := instance.TimerState[0].TimerID; got != "task_timer" {
+		t.Fatalf("timer state id = %q, want task_timer", got)
+	}
+
+	var schedulerRows int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM timers
+		WHERE entity_id = $1::uuid
+		  AND flow_instance = $2
+		  AND owner_agent = $3
+	`, entityID, storageRef, runtimeWorkflowID).Scan(&schedulerRows); err != nil {
+		t.Fatalf("count scheduler-owned timers: %v", err)
+	}
+	if schedulerRows != 1 {
+		t.Fatalf("scheduler-owned timer rows = %d, want 1", schedulerRows)
+	}
+}
+
 func seedWorkflowInstanceForMutationTest(t *testing.T, store *WorkflowInstanceStore, entityID string) {
 	t.Helper()
 	if err := store.Upsert(context.Background(), WorkflowInstance{
