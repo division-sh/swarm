@@ -2101,6 +2101,7 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 			ModelTier:        "sonnet",
 			LLMBackend:       "cli_test",
 			ConversationMode: "session_per_entity",
+			SessionScope:     "entity",
 			MaxTurnsPerTask:  7,
 			Subscriptions:    []string{"review.ready"},
 			EmitEvents:       []string{"review.completed"},
