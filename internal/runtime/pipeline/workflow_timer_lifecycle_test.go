@@ -15,8 +15,9 @@ import (
 )
 
 type recordingSchedulePersistence struct {
-	schedules []Schedule
-	cancels   []Schedule
+	schedules    []Schedule
+	cancels      []Schedule
+	cancelExacts int
 }
 
 func (s *recordingSchedulePersistence) UpsertSchedule(_ context.Context, sc Schedule) error {
@@ -24,19 +25,12 @@ func (s *recordingSchedulePersistence) UpsertSchedule(_ context.Context, sc Sche
 	return nil
 }
 
-func (s *recordingSchedulePersistence) CancelSchedule(context.Context, string, string) error {
-	return nil
-}
-
 func (s *recordingSchedulePersistence) LoadActiveSchedules(context.Context) ([]Schedule, error) {
 	return nil, nil
 }
 
-func (s *recordingSchedulePersistence) MarkScheduleFired(context.Context, Schedule) error {
-	return nil
-}
-
 func (s *recordingSchedulePersistence) CancelScheduleExact(_ context.Context, sc Schedule) error {
+	s.cancelExacts++
 	s.cancels = append(s.cancels, sc)
 	return nil
 }
@@ -378,6 +372,9 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 	}
 	if len(store.cancels) != 1 {
 		t.Fatalf("cancelled schedules = %d, want 1", len(store.cancels))
+	}
+	if store.cancelExacts != 1 {
+		t.Fatalf("CancelScheduleExact calls = %d, want 1", store.cancelExacts)
 	}
 	if got := store.cancels[0].TaskID; got != timeridentity.AccumulationTimeoutHandle(timeridentity.NewAccumulatorBucketRef("test-node", "item.arrived")).TaskID() {
 		t.Fatalf("cancelled task_id = %q", got)

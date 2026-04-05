@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	llm "swarm/internal/runtime/llm"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -97,7 +101,9 @@ func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 }
 
 type recordingRuntimeScheduleStore struct {
-	schedules []runtimepipeline.Schedule
+	schedules  []runtimepipeline.Schedule
+	firedExact atomic.Int32
+	fired      chan runtimepipeline.Schedule
 }
 
 func (s *recordingRuntimeScheduleStore) UpsertSchedule(_ context.Context, sc runtimepipeline.Schedule) error {
@@ -105,7 +111,7 @@ func (s *recordingRuntimeScheduleStore) UpsertSchedule(_ context.Context, sc run
 	return nil
 }
 
-func (*recordingRuntimeScheduleStore) CancelSchedule(context.Context, string, string) error {
+func (*recordingRuntimeScheduleStore) CancelScheduleExact(context.Context, runtimepipeline.Schedule) error {
 	return nil
 }
 
@@ -113,7 +119,14 @@ func (*recordingRuntimeScheduleStore) LoadActiveSchedules(context.Context) ([]ru
 	return nil, nil
 }
 
-func (*recordingRuntimeScheduleStore) MarkScheduleFired(context.Context, runtimepipeline.Schedule) error {
+func (s *recordingRuntimeScheduleStore) MarkScheduleFiredExact(_ context.Context, sc runtimepipeline.Schedule) error {
+	s.firedExact.Add(1)
+	if s.fired != nil {
+		select {
+		case s.fired <- sc:
+		default:
+		}
+	}
 	return nil
 }
 
@@ -134,6 +147,16 @@ func (semanticOnlyWorkflowRuntime) TransitionEvaluator() runtimepipeline.Transit
 }
 func (semanticOnlyWorkflowRuntime) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
 func (semanticOnlyWorkflowRuntime) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
+
+type noopLLMRuntime struct{}
+
+func (noopLLMRuntime) StartSession(context.Context, string, string, []llm.ToolDefinition) (*llm.Session, error) {
+	return &llm.Session{}, nil
+}
+
+func (noopLLMRuntime) ContinueSession(context.Context, *llm.Session, llm.Message) (*llm.Response, error) {
+	return &llm.Response{}, nil
+}
 
 func TestEnsureRecurringWorkflowSchedulesSkipsLifecycleScopedRecurringTimers(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
@@ -180,5 +203,52 @@ func TestEnsureRecurringWorkflowSchedulesRegistersBootRecurringTimers(t *testing
 	}
 	if got := store.schedules[0].EventType; got != "timer.daily_report" {
 		t.Fatalf("scheduled event = %q, want timer.daily_report", got)
+	}
+}
+
+func TestNewRuntime_SchedulerMarksSchedulesFiredThroughExactContract(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	store := &recordingRuntimeScheduleStore{fired: make(chan runtimepipeline.Schedule, 1)}
+	rt, err := NewRuntime(context.Background(), &config.Config{}, Stores{ScheduleStore: store}, RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
+		LLMRuntime:     noopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if rt.Scheduler == nil {
+		t.Fatal("expected scheduler")
+	}
+	t.Cleanup(rt.Scheduler.Stop)
+
+	sc := runtimepipeline.Schedule{
+		AgentID:   "runtime",
+		EventType: "timer.check",
+		Mode:      "once",
+		TaskID:    "check_timer",
+		At:        time.Now().Add(10 * time.Millisecond),
+		EntityID:  "ent-001",
+	}
+	if err := rt.Scheduler.Register(sc); err != nil {
+		t.Fatalf("Register(schedule): %v", err)
+	}
+
+	select {
+	case fired := <-store.fired:
+		if fired.TaskID != sc.TaskID {
+			t.Fatalf("fired task_id = %q, want %q", fired.TaskID, sc.TaskID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for exact schedule fire persistence")
+	}
+	if got := store.firedExact.Load(); got != 1 {
+		t.Fatalf("MarkScheduleFiredExact calls = %d, want 1", got)
 	}
 }
