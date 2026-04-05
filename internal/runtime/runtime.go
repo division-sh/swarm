@@ -281,17 +281,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			}
 		}
 		if stores.ScheduleStore != nil {
-			if exactStore, ok := stores.ScheduleStore.(runtimepipeline.ExactSchedulePersistence); ok {
-				if err := exactStore.MarkScheduleFiredExact(callbackCtx, sc); err != nil {
-					if rt.Logger != nil {
-						handleRuntimeLogPersistenceError("scheduler", "mark_fired_failed", rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
-							"agent_id":   sc.AgentID,
-							"event_type": sc.EventType,
-							"entity_id":  sc.EffectiveEntityID(),
-						}, err))
-					}
-				}
-			} else if err := stores.ScheduleStore.MarkScheduleFired(callbackCtx, sc); err != nil {
+			if err := stores.ScheduleStore.MarkScheduleFiredExact(callbackCtx, sc); err != nil {
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("scheduler", "mark_fired_failed", rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
 						"agent_id":   sc.AgentID,

@@ -411,16 +411,7 @@ func (pc *PipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Context, 
 	if pc.timerScheduleStore == nil {
 		return
 	}
-	if exactStore, ok := pc.timerScheduleStore.(ExactSchedulePersistence); ok {
-		if err := exactStore.CancelScheduleExact(ctx, sc); err != nil {
-			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-				"task_id": strings.TrimSpace(sc.TaskID),
-				"mode":    strings.TrimSpace(sc.Mode),
-			}, err)
-		}
-		return
-	}
-	if err := pc.timerScheduleStore.CancelSchedule(ctx, sc.AgentID, sc.EventType); err != nil {
+	if err := pc.timerScheduleStore.CancelScheduleExact(ctx, sc); err != nil {
 		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
 			"task_id": strings.TrimSpace(sc.TaskID),
 			"mode":    strings.TrimSpace(sc.Mode),
@@ -460,14 +451,7 @@ func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Cont
 		return
 	}
 	if pc.timerScheduleStore != nil {
-		if exactStore, ok := pc.timerScheduleStore.(ExactSchedulePersistence); ok {
-			if err := exactStore.CancelScheduleExact(ctx, sc); err != nil {
-				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-					"task_id": strings.TrimSpace(sc.TaskID),
-					"mode":    strings.TrimSpace(sc.Mode),
-				}, err)
-			}
-		} else if err := pc.timerScheduleStore.CancelSchedule(ctx, sc.AgentID, sc.EventType); err != nil {
+		if err := pc.timerScheduleStore.CancelScheduleExact(ctx, sc); err != nil {
 			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
 				"task_id": strings.TrimSpace(sc.TaskID),
 				"mode":    strings.TrimSpace(sc.Mode),
