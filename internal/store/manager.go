@@ -98,7 +98,10 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
 	modelTier := agentModelTier(cfg)
-	conversationMode := agentConversationMode(cfg)
+	conversationMode, err := agentConversationMode(cfg)
+	if err != nil {
+		return persistedAgentProjection{}, fmt.Errorf("invalid conversation mode: %w", err)
+	}
 	llmBackend := agentLLMBackend(cfg)
 	configJSON, err := mergeAgentConfigJSON(cfg)
 	if err != nil {
@@ -143,7 +146,7 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	}
 	conversationMode, err := runtimesessions.ParseConversationRuntimeMode(row.ConversationMode)
 	if err != nil {
-		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid conversation_mode %q: %w", strings.TrimSpace(row.AgentID), conversationMode, err)
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid conversation_mode %q: %w", strings.TrimSpace(row.AgentID), strings.TrimSpace(row.ConversationMode), err)
 	}
 	if err := validateOpaqueAgentConfig(row.ConfigJSON); err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid opaque config: %w", strings.TrimSpace(row.AgentID), err)

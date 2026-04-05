@@ -187,9 +187,13 @@ func ValidateSessionScopeIntent(runtimeMode RuntimeMode, sessionScope string) (S
 }
 
 func ValidateAgentSessionScopeConfig(actor runtimeactors.AgentConfig) (SessionScope, error) {
-	runtimeMode := NormalizeConversationRuntimeMode(actor.ConversationMode)
-	if runtimeMode == "" {
-		runtimeMode = RuntimeModeTask
+	runtimeMode := RuntimeModeTask
+	if rawMode := strings.TrimSpace(actor.ConversationMode); rawMode != "" {
+		parsedMode, err := ParseConversationRuntimeMode(rawMode)
+		if err != nil {
+			return "", err
+		}
+		runtimeMode = parsedMode
 	}
 	sessionScope, err := ValidateSessionScopeIntent(runtimeMode, actor.SessionScope)
 	if err != nil {

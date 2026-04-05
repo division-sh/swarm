@@ -74,6 +74,19 @@ func TestResolveScope_InvalidSessionConfigurationsFailClosed(t *testing.T) {
 	}
 }
 
+func TestValidateAgentSessionScopeConfig_RejectsInvalidConversationMode(t *testing.T) {
+	_, err := ValidateAgentSessionScopeConfig(runtimeactors.AgentConfig{
+		ID:               "agent-invalid-mode",
+		ConversationMode: "nonsense",
+	})
+	if err == nil {
+		t.Fatal("expected invalid conversation mode to fail")
+	}
+	if got := err.Error(); got != `invalid conversation mode "nonsense"` {
+		t.Fatalf("ValidateAgentSessionScopeConfig error = %q", got)
+	}
+}
+
 func TestLeaseHeartbeatInterval_ClampsRange(t *testing.T) {
 	if got := LeaseHeartbeatInterval(time.Time{}); got != 30*time.Second {
 		t.Fatalf("zero expiry: got %s", got)
