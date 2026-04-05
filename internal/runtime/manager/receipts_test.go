@@ -33,6 +33,30 @@ func (*recordingReceiptBus) Store() runtimebus.EventStore                       
 func (*recordingReceiptBus) ResetInMemoryState() error                                   { return nil }
 func (*recordingReceiptBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) {}
 
+type receiptReaderStub struct {
+	receipt EventReceipt
+	found   bool
+}
+
+func (*receiptReaderStub) UpsertAgent(context.Context, PersistedAgent) error { return nil }
+func (*receiptReaderStub) LoadAgents(context.Context) ([]PersistedAgent, error) {
+	return nil, nil
+}
+func (*receiptReaderStub) MarkAgentTerminated(context.Context, string) error { return nil }
+func (*receiptReaderStub) EnsureEntitySchema(context.Context, string) error  { return nil }
+func (*receiptReaderStub) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
+	return nil
+}
+func (*receiptReaderStub) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+func (*receiptReaderStub) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+func (s *receiptReaderStub) GetEventReceipt(context.Context, string, string) (EventReceipt, bool, error) {
+	return s.receipt, s.found, nil
+}
+
 type traceRecordingAgent struct{ parent string }
 
 func (a *traceRecordingAgent) ID() string                        { return "trace-agent" }
@@ -42,6 +66,15 @@ func (a *traceRecordingAgent) OnEvent(ctx context.Context, evt events.Event) ([]
 	if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
 		a.parent = inbound.ID
 	}
+	return nil, nil
+}
+
+type panicStubAgent struct{ id string }
+
+func (a panicStubAgent) ID() string                        { return a.id }
+func (a panicStubAgent) Type() string                      { return "llm" }
+func (a panicStubAgent) Subscriptions() []events.EventType { return nil }
+func (a panicStubAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
 	return nil, nil
 }
 
@@ -65,6 +98,12 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	}
 	if got := authEvt.EntityID(); got != "ent-123" {
 		t.Fatalf("auth event entity_id = %q, want ent-123", got)
+	}
+	if got := authEvt.FlowInstance(); got != "review/inst-1" {
+		t.Fatalf("auth event flow_instance = %q, want review/inst-1", got)
+	}
+	if got := authEvt.Scope(); got != events.EventScopeEntity {
+		t.Fatalf("auth event scope = %q, want %q", got, events.EventScopeEntity)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(authEvt.Payload, &payload); err != nil {
@@ -114,6 +153,76 @@ func TestRecordDeadLetterEscalation_RequiresThreshold(t *testing.T) {
 		retryCount: 4,
 	}); emit {
 		t.Fatal("expected escalation to stay suppressed inside the same window")
+	}
+}
+
+func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	store := &receiptReaderStub{
+		found: true,
+		receipt: EventReceipt{
+			EventID:    "evt-1",
+			AgentID:    "agent-a",
+			Status:     ReceiptStatusDeadLetter,
+			RetryCount: 2,
+			Error:      "boom",
+		},
+	}
+	am := NewAgentManager(bus, nil)
+	am.store = store
+	am.agentCfg["agent-a"] = runtimeactors.AgentConfig{
+		ID:       "agent-a",
+		EntityID: "ent-123",
+		FlowPath: "review/inst-1",
+	}
+
+	for i := 0; i < deadLetterEscalationThreshold; i++ {
+		am.maybeEscalateDeadLetter(context.Background(), "evt-1", "agent-a")
+	}
+
+	if len(bus.published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(bus.published))
+	}
+	evt := bus.published[0]
+	if evt.Type != events.EventType("platform.dead_letter_escalation") {
+		t.Fatalf("event type = %s, want platform.dead_letter_escalation", evt.Type)
+	}
+	if got := evt.FlowInstance(); got != "review/inst-1" {
+		t.Fatalf("dead-letter escalation flow_instance = %q, want review/inst-1", got)
+	}
+	if got := evt.Scope(); got != events.EventScopeFlow {
+		t.Fatalf("dead-letter escalation scope = %q, want %q", got, events.EventScopeFlow)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if got := payload["flow_instance"]; got != "review/inst-1" {
+		t.Fatalf("dead-letter escalation payload flow_instance = %#v, want review/inst-1", got)
+	}
+}
+
+func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	am := NewAgentManager(bus, nil)
+	am.agentCfg["agent-a"] = runtimeactors.AgentConfig{
+		ID:       "agent-a",
+		EntityID: "ent-123",
+		FlowPath: "review/inst-1",
+	}
+
+	am.handleAgentLoopPanic(context.Background(), panicStubAgent{id: "agent-a"}, 5, "scan.requested", "boom", "stack")
+
+	if len(bus.published) != 2 {
+		t.Fatalf("published events = %d, want 2", len(bus.published))
+	}
+	for i, evt := range bus.published {
+		if got := evt.FlowInstance(); got != "review/inst-1" {
+			t.Fatalf("event %d flow_instance = %q, want review/inst-1", i, got)
+		}
+		if got := evt.Scope(); got != events.EventScopeEntity {
+			t.Fatalf("event %d scope = %q, want %q", i, got, events.EventScopeEntity)
+		}
 	}
 }
 
