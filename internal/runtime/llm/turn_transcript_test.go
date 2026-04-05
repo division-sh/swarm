@@ -45,12 +45,13 @@ func TestBuildTurnBlocks_CorrelatesToolResultsWithToolUse(t *testing.T) {
 	}
 }
 
-func TestBuildTurnBlocks_IncludesPublishDiagnostics(t *testing.T) {
+func TestBuildTurnBlocks_IncludesPublishEntriesFromFlightRecorder(t *testing.T) {
 	rec := AgentTurnRecord{
 		TriggerEventType: "scan.requested",
 		EntityID:         "ent-1",
-		PublishDiagnostics: []runtimebus.PublishDiagnostic{
+		FlightRecorder: []runtimebus.FlightRecorderEntry{
 			{
+				Kind:      "publish",
 				EventID:   "evt-1",
 				EventType: "scoring/vertical.shortlisted",
 				EntityID:  "ent-1",
