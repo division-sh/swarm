@@ -140,6 +140,10 @@ func persistedSchedulePayload(sc runtimepipeline.Schedule) []byte {
 	return encoded
 }
 
+func exactScheduleTaskIDSQL() string {
+	return `COALESCE(fire_payload->>'__schedule_task_id', '')`
+}
+
 func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -148,16 +152,16 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 	defer func() { _ = tx.Rollback() }()
 
 	payload := persistedSchedulePayload(sc)
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE timers
 		SET status = 'cancelled'
 		WHERE owner_agent = $1
 		  AND fire_event = $2
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
-		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $5
+		  AND %s = $5
 		  AND status = 'active'
-	`, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)); err != nil {
+	`, exactScheduleTaskIDSQL()), sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)); err != nil {
 		return fmt.Errorf("deactivate previous timer: %w", err)
 	}
 
@@ -213,16 +217,16 @@ func (s *PostgresStore) cancelScheduleSpec(ctx context.Context, agentID, eventTy
 }
 
 func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
-	_, err := s.DB.ExecContext(ctx, `
+	_, err := s.DB.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE timers
 		SET status = 'cancelled'
 		WHERE owner_agent = $1
 		  AND fire_event = $2
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
-		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $5
+		  AND %s = $5
 		  AND status = 'active'
-	`, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
+	`, exactScheduleTaskIDSQL()), sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
 	if err != nil {
 		return fmt.Errorf("cancel exact timer: %w", err)
 	}
@@ -302,7 +306,7 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 	if !strings.EqualFold(strings.TrimSpace(sc.Mode), "once") {
 		status = "active"
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	_, err := s.DB.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE timers
 		SET status = $6,
 		    fired_at = now()
@@ -310,9 +314,9 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 		  AND fire_event = $2
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
-		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $5
+		  AND %s = $5
 		  AND status = 'active'
-	`, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), status)
+	`, exactScheduleTaskIDSQL()), sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), status)
 	if err != nil {
 		return fmt.Errorf("mark exact timer fired: %w", err)
 	}

@@ -102,6 +102,7 @@ func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 
 type recordingRuntimeScheduleStore struct {
 	schedules  []runtimepipeline.Schedule
+	active     []runtimepipeline.Schedule
 	firedExact atomic.Int32
 	fired      chan runtimepipeline.Schedule
 }
@@ -115,8 +116,8 @@ func (*recordingRuntimeScheduleStore) CancelScheduleExact(context.Context, runti
 	return nil
 }
 
-func (*recordingRuntimeScheduleStore) LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error) {
-	return nil, nil
+func (s *recordingRuntimeScheduleStore) LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error) {
+	return append([]runtimepipeline.Schedule(nil), s.active...), nil
 }
 
 func (s *recordingRuntimeScheduleStore) MarkScheduleFiredExact(_ context.Context, sc runtimepipeline.Schedule) error {
@@ -250,5 +251,75 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughExactContract(t *testing.
 	}
 	if got := store.firedExact.Load(); got != 1 {
 		t.Fatalf("MarkScheduleFiredExact calls = %d, want 1", got)
+	}
+}
+
+func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	store := &recordingRuntimeScheduleStore{
+		active: []runtimepipeline.Schedule{
+			{
+				AgentID:      "runtime",
+				EventType:    "timer.check",
+				Mode:         "once",
+				At:           time.Now().Add(25 * time.Millisecond),
+				EntityID:     "ent-001",
+				FlowInstance: "review/inst-1",
+				TaskID:       "check_timer",
+				Payload:      []byte(`{"timer_id":"check_timer"}`),
+			},
+			{
+				AgentID:      "runtime",
+				EventType:    "timer.check",
+				Mode:         "once",
+				At:           time.Now().Add(50 * time.Millisecond),
+				EntityID:     "ent-001",
+				FlowInstance: "review/inst-2",
+				TaskID:       "check_timer",
+				Payload:      []byte(`{"timer_id":"check_timer"}`),
+			},
+		},
+		fired: make(chan runtimepipeline.Schedule, 2),
+	}
+	rt, err := NewRuntime(context.Background(), &config.Config{}, Stores{ScheduleStore: store}, RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
+		LLMRuntime:     noopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if rt.Scheduler == nil {
+		t.Fatal("expected scheduler")
+	}
+	t.Cleanup(rt.Scheduler.Stop)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := rt.Start(runCtx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	seenFlows := map[string]bool{}
+	deadline := time.After(2 * time.Second)
+	for len(seenFlows) < 2 {
+		select {
+		case fired := <-store.fired:
+			if fired.TaskID != "check_timer" {
+				t.Fatalf("fired task_id = %q, want check_timer", fired.TaskID)
+			}
+			seenFlows[fired.FlowInstance] = true
+		case <-deadline:
+			t.Fatalf("timed out waiting for restored exact schedules to fire; seen flow instances = %#v", seenFlows)
+		}
+	}
+	if got := store.firedExact.Load(); got != 2 {
+		t.Fatalf("MarkScheduleFiredExact calls = %d, want 2 for distinct restored flow instances", got)
 	}
 }
