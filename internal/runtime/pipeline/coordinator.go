@@ -465,6 +465,9 @@ func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID 
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now().UTC(),
 	}).WithEntityID(entityID)
+	if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
+		emitted = emitted.WithFlowInstance(flowInstance)
+	}
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, emitted)
 		return nil
@@ -496,6 +499,9 @@ func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, ent
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now().UTC(),
 	}).WithEntityID(entityID)
+	if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
+		emitted = emitted.WithFlowInstance(flowInstance)
+	}
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, emitted)
 		return nil

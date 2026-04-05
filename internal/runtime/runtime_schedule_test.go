@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -62,6 +63,36 @@ func TestScheduleEventPayloadPreservesAccumulationTimeoutHandle(t *testing.T) {
 	}
 	if got := decoded["entity_id"]; got != "ent-001" {
 		t.Fatalf("entity_id = %#v, want %q", got, "ent-001")
+	}
+}
+
+func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
+	evt := scheduledEvent(runtimepipeline.Schedule{
+		AgentID:      "runtime",
+		EventType:    "timer.check",
+		EntityID:     "ent-001",
+		FlowInstance: "review/inst-1",
+		Payload:      []byte(`{"entity_id":"payload-entity","flow_instance":"payload-flow"}`),
+	})
+
+	if got := evt.EntityID(); got != "ent-001" {
+		t.Fatalf("event entity_id = %q, want ent-001", got)
+	}
+	if got := evt.FlowInstance(); got != "review/inst-1" {
+		t.Fatalf("event flow_instance = %q, want review/inst-1", got)
+	}
+	if got := evt.Scope(); got != events.EventScopeEntity {
+		t.Fatalf("event scope = %q, want %q", got, events.EventScopeEntity)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+		t.Fatalf("Unmarshal(payload): %v", err)
+	}
+	if got := payload["entity_id"]; got != "payload-entity" {
+		t.Fatalf("payload entity_id = %#v, want payload-entity", got)
+	}
+	if got := payload["flow_instance"]; got != "payload-flow" {
+		t.Fatalf("payload flow_instance = %#v, want payload-flow", got)
 	}
 }
 

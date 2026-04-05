@@ -245,7 +245,8 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 	q := fmt.Sprintf(`
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
-			COALESCE(e.entity_id::text, ''), e.payload, e.created_at,
+			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
+			e.payload, e.created_at,
 			COALESCE(e.source_event_id::text, '')
 		FROM event_deliveries d
 		INNER JOIN events e ON e.event_id = d.event_id
@@ -281,7 +282,8 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 	q := fmt.Sprintf(`
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
-			COALESCE(e.entity_id::text, ''), e.payload, e.created_at,
+			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
+			e.payload, e.created_at,
 			COALESCE(e.source_event_id::text, '')
 		FROM events e
 		LEFT JOIN event_receipts r
@@ -393,7 +395,7 @@ func scanLegacyPendingEvents(rows *sql.Rows) ([]events.Event, error) {
 		); err != nil {
 			return nil, fmt.Errorf("scan pending event: %w", err)
 		}
-		evt = evt.WithEntityID(legacyEntityID)
+		evt = evt.WithEnvelope(events.EventEnvelope{EntityID: legacyEntityID})
 		out = append(out, evt)
 	}
 	if err := rows.Err(); err != nil {
@@ -406,20 +408,26 @@ func scanSpecPendingEvents(rows *sql.Rows) ([]events.Event, error) {
 	out := make([]events.Event, 0)
 	for rows.Next() {
 		var evt events.Event
-		var entityID string
+		var entityID, flowInstance, scope string
 		if err := rows.Scan(
 			&evt.ID,
 			&evt.RunID,
 			&evt.Type,
 			&evt.SourceAgent,
 			&entityID,
+			&flowInstance,
+			&scope,
 			&evt.Payload,
 			&evt.CreatedAt,
 			&evt.ParentEventID,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending event: %w", err)
 		}
-		evt = evt.WithEntityID(entityID)
+		evt = evt.WithEnvelope(events.EventEnvelope{
+			EntityID:     entityID,
+			FlowInstance: flowInstance,
+			Scope:        events.EventScope(scope),
+		})
 		out = append(out, evt)
 	}
 	if err := rows.Err(); err != nil {

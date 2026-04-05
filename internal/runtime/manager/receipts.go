@@ -289,7 +289,7 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 				"timestamp":     now.Format(time.RFC3339Nano),
 			}),
 			CreatedAt: now,
-		}.WithEntityID(entityID)
+		}.WithEntityID(entityID).WithFlowInstance(flowInstance)
 		if err := am.bus.Publish(am.runtimeContext(), authEvt); err != nil {
 			if am.bus != nil {
 				am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
@@ -453,7 +453,7 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 			"timestamp":         time.Now().UTC().Format(time.RFC3339Nano),
 		}),
 		CreatedAt: time.Now().UTC(),
-	}); err != nil {
+	}.WithFlowInstance(flowInstance)); err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
 				Level:     "error",

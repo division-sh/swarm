@@ -823,7 +823,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 			"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
 		}),
 		CreatedAt: time.Now().UTC(),
-	}).WithEntityID(entityID)); err != nil {
+	}).WithEntityID(entityID).WithFlowInstance(flowInstance)); err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
@@ -866,7 +866,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 			"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
 		}),
 		CreatedAt: time.Now().UTC(),
-	}).WithEntityID(entityID)); err != nil {
+	}).WithEntityID(entityID).WithFlowInstance(flowInstance)); err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",

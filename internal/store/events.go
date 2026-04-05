@@ -400,7 +400,8 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
 			e.event_id::text, e.event_name, COALESCE(e.produced_by, ''),
-			COALESCE(e.entity_id::text, ''), e.payload, e.created_at
+			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
+			e.payload, e.created_at
 		FROM events e
 		LEFT JOIN event_receipts r
 			ON r.event_id = e.event_id
@@ -419,18 +420,24 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 	out := make([]events.Event, 0, limit)
 	for rows.Next() {
 		var evt events.Event
-		var entityID string
+		var entityID, flowInstance, scope string
 		if err := rows.Scan(
 			&evt.ID,
 			&evt.Type,
 			&evt.SourceAgent,
 			&entityID,
+			&flowInstance,
+			&scope,
 			&evt.Payload,
 			&evt.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
 		}
-		evt = evt.WithEntityID(entityID)
+		evt = evt.WithEnvelope(events.EventEnvelope{
+			EntityID:     entityID,
+			FlowInstance: flowInstance,
+			Scope:        events.EventScope(scope),
+		})
 		out = append(out, evt)
 	}
 	if err := rows.Err(); err != nil {
@@ -497,13 +504,12 @@ func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName 
 	runID = runIDOrEventID(evt.RunID, id)
 	eventName = strings.TrimSpace(string(evt.Type))
 	payload = eventPayloadForStorage(evt)
-	entityID = sanitizeOptionalUUID(evt.EntityID())
-	flowInstance = eventPayloadString(payload, "flow_instance")
-	scope = "global"
-	if entityID != "" {
-		scope = "entity"
-	} else if flowInstance != "" {
-		scope = "flow"
+	envelope := evt.NormalizedEnvelope()
+	entityID = sanitizeOptionalUUID(envelope.EntityID)
+	flowInstance = envelope.FlowInstance
+	scope = string(envelope.Scope)
+	if scope == "" {
+		scope = string(events.EventScopeGlobal)
 	}
 	chainDepth = evt.ChainDepth
 	if chainDepth < 0 {
@@ -544,18 +550,6 @@ func eventPayloadForStorage(evt events.Event) []byte {
 		return evt.Payload
 	}
 	return encoded
-}
-
-func eventPayloadString(raw []byte, key string) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
-		return ""
-	}
-	value, _ := payload[strings.TrimSpace(key)].(string)
-	return strings.TrimSpace(value)
 }
 
 func mapPipelineStatusToOutcome(status string) string {

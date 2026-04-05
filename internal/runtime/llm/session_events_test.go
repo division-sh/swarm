@@ -278,12 +278,12 @@ func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T)
 
 func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), "run-123")
-	ctx = runtimebus.WithInboundEvent(ctx, events.Event{
+	ctx = runtimebus.WithInboundEvent(ctx, (events.Event{
 		ID:      "11111111-1111-1111-1111-111111111111",
 		RunID:   "run-123",
 		Type:    events.EventType("scan.requested"),
 		Payload: []byte(`{"entity_id":"22222222-2222-2222-2222-222222222222"}`),
-	})
+	}).WithEnvelope(events.EventEnvelope{EntityID: "22222222-2222-2222-2222-222222222222"}))
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	recorder.Append(events.Event{Type: events.EventType("discovery/category.assessed")})
 	recorder.Append(events.Event{Type: events.EventType("discovery/category.assessed")})

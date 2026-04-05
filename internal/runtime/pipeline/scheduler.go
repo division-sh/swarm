@@ -11,14 +11,15 @@ import (
 )
 
 type Schedule struct {
-	AgentID   string
-	EventType string
-	Mode      string // once | cron
-	Cron      string // supports "@every <duration>" and plain duration string
-	At        time.Time
-	EntityID  string
-	TaskID    string
-	Payload   []byte
+	AgentID      string
+	EventType    string
+	Mode         string // once | cron
+	Cron         string // supports "@every <duration>" and plain duration string
+	At           time.Time
+	EntityID     string
+	FlowInstance string
+	TaskID       string
+	Payload      []byte
 }
 
 func (s Schedule) EffectiveEntityID() string {
@@ -31,6 +32,17 @@ func (s *Schedule) NormalizeEntityID() {
 	}
 	entityID := s.EffectiveEntityID()
 	s.EntityID = entityID
+}
+
+func (s Schedule) EffectiveFlowInstance() string {
+	return strings.Trim(strings.TrimSpace(s.FlowInstance), "/")
+}
+
+func (s *Schedule) NormalizeFlowInstance() {
+	if s == nil {
+		return
+	}
+	s.FlowInstance = s.EffectiveFlowInstance()
 }
 
 type Scheduler struct {
@@ -65,6 +77,7 @@ func (s *Scheduler) Register(sc Schedule) error {
 		return errors.New("agent_id and event_type are required")
 	}
 	sc.NormalizeEntityID()
+	sc.NormalizeFlowInstance()
 	if sc.Mode == "" {
 		sc.Mode = "once"
 	}

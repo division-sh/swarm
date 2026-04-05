@@ -407,6 +407,51 @@ func TestPostgresStore_ListPendingEventsForAgentSpec_PreservesRunID(t *testing.T
 	}
 }
 
+func TestPostgresStore_ListPendingEventsForAgentSpec_UsesTypedEnvelopeMetadata(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	entityID := uuid.NewString()
+	const flowInstance = "review/inst-1"
+	seedSpecAgent(t, ctx, pg, "analysis-agent", "", "scoring.requested")
+
+	eventID := uuid.NewString()
+	evt := events.Event{
+		ID:          eventID,
+		Type:        events.EventType("scoring.requested"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEnvelope(events.EventEnvelope{
+		EntityID:     entityID,
+		FlowInstance: flowInstance,
+	})
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	if err := pg.InsertEventDeliveries(ctx, eventID, []string{"analysis-agent"}); err != nil {
+		t.Fatalf("InsertEventDeliveries: %v", err)
+	}
+
+	got, err := pg.ListPendingEventsForAgent(ctx, "analysis-agent", time.Now().Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ListPendingEventsForAgent: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("pending events = %d, want 1", len(got))
+	}
+	if got := got[0].EntityID(); got != entityID {
+		t.Fatalf("pending event entity_id = %q, want %q", got, entityID)
+	}
+	if got := got[0].FlowInstance(); got != flowInstance {
+		t.Fatalf("pending event flow_instance = %q, want %q", got, flowInstance)
+	}
+	if got := got[0].Scope(); got != events.EventScopeEntity {
+		t.Fatalf("pending event scope = %q, want %q", got, events.EventScopeEntity)
+	}
+}
+
 func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -877,6 +922,126 @@ func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
 	}
 	if len(exact) != 1 || exact[0].TaskID != "timer-b" {
 		t.Fatalf("expected only timer-b to remain active, got %+v", exact)
+	}
+}
+
+func TestSchedules_LoadActiveSchedulesPreservesFlowInstance(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	entityID := uuid.NewString()
+
+	sc := runtimepipeline.Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		At:           time.Now().Add(30 * time.Minute).UTC(),
+		EntityID:     entityID,
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-a",
+		Payload:      []byte(`{"timer_id":"timer-a"}`),
+	}
+	if err := pg.UpsertSchedule(ctx, sc); err != nil {
+		t.Fatalf("upsert schedule: %v", err)
+	}
+
+	active, err := pg.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("active schedules = %d, want 1", len(active))
+	}
+	if got := active[0].FlowInstance; got != "review/inst-1" {
+		t.Fatalf("loaded flow_instance = %q, want review/inst-1", got)
+	}
+}
+
+func TestSchedules_MarkScheduleFiredExact_PreservesRecurringReplayAndFiresOnceSchedules(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	entityID := uuid.NewString()
+
+	recurring := runtimepipeline.Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "cron",
+		Cron:         "@every 30m",
+		At:           time.Now().Add(30 * time.Minute).UTC(),
+		EntityID:     entityID,
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-recurring",
+		Payload:      []byte(`{"timer_id":"timer-recurring"}`),
+	}
+	once := runtimepipeline.Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		At:           time.Now().Add(60 * time.Minute).UTC(),
+		EntityID:     entityID,
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-once",
+		Payload:      []byte(`{"timer_id":"timer-once"}`),
+	}
+	if err := pg.UpsertSchedule(ctx, recurring); err != nil {
+		t.Fatalf("upsert recurring schedule: %v", err)
+	}
+	if err := pg.UpsertSchedule(ctx, once); err != nil {
+		t.Fatalf("upsert once schedule: %v", err)
+	}
+
+	if err := pg.MarkScheduleFiredExact(ctx, recurring); err != nil {
+		t.Fatalf("MarkScheduleFiredExact(recurring): %v", err)
+	}
+	if err := pg.MarkScheduleFiredExact(ctx, once); err != nil {
+		t.Fatalf("MarkScheduleFiredExact(once): %v", err)
+	}
+
+	var recurringStatus, onceStatus string
+	if err := db.QueryRowContext(ctx, `
+		SELECT status
+		FROM timers
+		WHERE owner_agent = $1
+		  AND fire_event = $2
+		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $3
+	`, recurring.AgentID, recurring.EventType, recurring.TaskID).Scan(&recurringStatus); err != nil {
+		t.Fatalf("query recurring timer status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT status
+		FROM timers
+		WHERE owner_agent = $1
+		  AND fire_event = $2
+		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $3
+	`, once.AgentID, once.EventType, once.TaskID).Scan(&onceStatus); err != nil {
+		t.Fatalf("query once timer status: %v", err)
+	}
+	if recurringStatus != "active" {
+		t.Fatalf("recurring timer status = %q, want active", recurringStatus)
+	}
+	if onceStatus != "fired" {
+		t.Fatalf("once timer status = %q, want fired", onceStatus)
+	}
+
+	active, err := pg.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules: %v", err)
+	}
+	var recurringFound, onceFound bool
+	for _, sc := range active {
+		if sc.AgentID == recurring.AgentID && sc.EventType == recurring.EventType && sc.TaskID == recurring.TaskID {
+			recurringFound = true
+		}
+		if sc.AgentID == once.AgentID && sc.EventType == once.EventType && sc.TaskID == once.TaskID {
+			onceFound = true
+		}
+	}
+	if !recurringFound {
+		t.Fatal("expected recurring exact schedule to remain active after firing")
+	}
+	if onceFound {
+		t.Fatal("expected once exact schedule to be absent from active schedule restore after firing")
 	}
 }
 

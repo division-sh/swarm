@@ -85,7 +85,7 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 			SourceAgent: "builder",
 			Payload:     encoded,
 			CreatedAt:   time.Now().UTC(),
-		}
+		}.WithEntityID(entityID)
 		if err := rt.Bus.Publish(ctx, evt); err != nil {
 			h.emit(runID, map[string]any{
 				"id":        uuid.NewString(),

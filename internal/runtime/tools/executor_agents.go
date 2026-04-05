@@ -194,14 +194,15 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	}
 
 	schedule := Schedule{
-		AgentID:   in.AgentID,
-		EventType: in.EventType,
-		Mode:      in.Mode,
-		Cron:      in.Cron,
-		At:        at,
-		EntityID:  entityID,
-		TaskID:    in.TaskID,
-		Payload:   payload,
+		AgentID:      in.AgentID,
+		EventType:    in.EventType,
+		Mode:         in.Mode,
+		Cron:         in.Cron,
+		At:           at,
+		EntityID:     entityID,
+		FlowInstance: actor.CanonicalFlowPath(),
+		TaskID:       in.TaskID,
+		Payload:      payload,
 	}
 	if err := e.scheduler.Register(schedule); err != nil {
 		return nil, err

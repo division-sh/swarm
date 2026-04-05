@@ -93,6 +93,9 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		Payload:     mustJSON(payloadMap),
 		CreatedAt:   time.Now(),
 	}).WithEntityID(strings.TrimSpace(asString(payloadMap["entity_id"])))
+	if flowInstance := strings.Trim(strings.TrimSpace(asString(payloadMap["flow_instance"])), "/"); flowInstance != "" {
+		emitted = emitted.WithFlowInstance(flowInstance)
+	}
 	if emitted.EntityID() == "" {
 		emitted = emitted.WithEntityID(strings.TrimSpace(actor.EffectiveEntityID()))
 	}

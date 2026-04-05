@@ -298,15 +298,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	rt.Scheduler = runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
 		callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		payload := scheduleEventPayload(sc)
-		if err := rt.Bus.Publish(callbackCtx, (events.Event{
-			ID:          uuid.NewString(),
-			Type:        events.EventType(sc.EventType),
-			SourceAgent: sc.AgentID,
-			TaskID:      sc.TaskID,
-			Payload:     payload,
-			CreatedAt:   time.Now(),
-		}).WithEntityID(sc.EffectiveEntityID())); err != nil {
+		if err := rt.Bus.Publish(callbackCtx, scheduledEvent(sc)); err != nil {
 			if rt.Logger != nil {
 				rt.Logger.Error(callbackCtx, "scheduler", "publish_failed", map[string]any{
 					"agent_id":   sc.AgentID,
@@ -497,11 +489,31 @@ func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
 			decoded["entity_id"] = entityID
 		}
 	}
+	flowInstance := strings.TrimSpace(sc.EffectiveFlowInstance())
+	if _, ok := decoded["flow_instance"]; !ok {
+		if flowInstance != "" {
+			decoded["flow_instance"] = flowInstance
+		}
+	}
 	encoded, err := json.Marshal(decoded)
 	if err != nil {
 		return payload
 	}
 	return encoded
+}
+
+func scheduledEvent(sc runtimepipeline.Schedule) events.Event {
+	return (events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType(sc.EventType),
+		SourceAgent: sc.AgentID,
+		TaskID:      sc.TaskID,
+		Payload:     scheduleEventPayload(sc),
+		CreatedAt:   time.Now(),
+	}).WithEnvelope(events.EventEnvelope{
+		EntityID:     sc.EffectiveEntityID(),
+		FlowInstance: sc.EffectiveFlowInstance(),
+	})
 }
 
 func (rt *Runtime) Start(ctx context.Context) error {
@@ -777,13 +789,14 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 				continue
 			}
 			sc := runtimepipeline.Schedule{
-				AgentID:   owner,
-				EventType: eventType,
-				Mode:      "once",
-				At:        timerState.FiresAt,
-				EntityID:  entityID,
-				TaskID:    timeridentity.WorkflowTimerHandle(timerID).TaskID(),
-				Payload:   recurringWorkflowTimerPayload(timer),
+				AgentID:      owner,
+				EventType:    eventType,
+				Mode:         "once",
+				At:           timerState.FiresAt,
+				EntityID:     entityID,
+				FlowInstance: strings.TrimSpace(instance.StorageRef),
+				TaskID:       timeridentity.WorkflowTimerHandle(timerID).TaskID(),
+				Payload:      recurringWorkflowTimerPayload(timer),
 			}
 			if err := store.UpsertSchedule(ctx, sc); err != nil {
 				return err

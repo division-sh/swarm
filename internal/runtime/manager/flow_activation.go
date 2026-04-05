@@ -149,7 +149,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			SourceAgent: "flow-instance-activator",
 			Payload:     encoded,
 			CreatedAt:   time.Now().UTC(),
-		}).WithEntityID(flowEntityID)
+		}).WithEntityID(flowEntityID).WithFlowInstance(flowPath)
 		publishAutoEmit := func() {
 			if err := am.bus.Publish(context.Background(), autoEmitEvent); err != nil {
 				am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
