@@ -229,6 +229,7 @@ func scheduleKey(sc Schedule) string {
 		strings.TrimSpace(sc.AgentID),
 		strings.TrimSpace(sc.EventType),
 		strings.TrimSpace(sc.EffectiveEntityID()),
+		strings.TrimSpace(sc.EffectiveFlowInstance()),
 		strings.TrimSpace(sc.TaskID),
 	}, "|")
 }

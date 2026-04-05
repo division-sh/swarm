@@ -140,6 +140,22 @@ func persistedSchedulePayload(sc runtimepipeline.Schedule) []byte {
 	return encoded
 }
 
+func exactScheduleTaskID(taskID, timerName, eventType string) string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID != "" {
+		return taskID
+	}
+	timerName = strings.TrimSpace(timerName)
+	if timerName != "" && timerName != strings.TrimSpace(eventType) {
+		return timerName
+	}
+	return ""
+}
+
+func exactScheduleTaskIDSQL() string {
+	return `COALESCE(NULLIF(fire_payload->>'__schedule_task_id', ''), CASE WHEN NULLIF(timer_name, '') IS NOT NULL AND timer_name IS DISTINCT FROM fire_event THEN timer_name ELSE '' END, '')`
+}
+
 func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -148,16 +164,16 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 	defer func() { _ = tx.Rollback() }()
 
 	payload := persistedSchedulePayload(sc)
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE timers
 		SET status = 'cancelled'
 		WHERE owner_agent = $1
 		  AND fire_event = $2
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
-		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $5
+		  AND %s = $5
 		  AND status = 'active'
-	`, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)); err != nil {
+	`, exactScheduleTaskIDSQL()), sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)); err != nil {
 		return fmt.Errorf("deactivate previous timer: %w", err)
 	}
 
@@ -213,16 +229,16 @@ func (s *PostgresStore) cancelScheduleSpec(ctx context.Context, agentID, eventTy
 }
 
 func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimepipeline.Schedule) error {
-	_, err := s.DB.ExecContext(ctx, `
+	_, err := s.DB.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE timers
 		SET status = 'cancelled'
 		WHERE owner_agent = $1
 		  AND fire_event = $2
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
-		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $5
+		  AND %s = $5
 		  AND status = 'active'
-	`, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
+	`, exactScheduleTaskIDSQL()), sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
 	if err != nil {
 		return fmt.Errorf("cancel exact timer: %w", err)
 	}
@@ -239,6 +255,7 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			fire_at,
 			COALESCE(entity_id::text, ''),
 			COALESCE(flow_instance, ''),
+			COALESCE(timer_name, ''),
 			fire_payload
 		FROM timers
 		WHERE status = 'active'
@@ -252,9 +269,10 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 	out := make([]runtimepipeline.Schedule, 0)
 	for rows.Next() {
 		var (
-			sc      runtimepipeline.Schedule
-			fireAt  time.Time
-			payload []byte
+			sc        runtimepipeline.Schedule
+			fireAt    time.Time
+			timerName string
+			payload   []byte
 		)
 		if err := rows.Scan(
 			&sc.AgentID,
@@ -264,12 +282,13 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			&fireAt,
 			&sc.EntityID,
 			&sc.FlowInstance,
+			&timerName,
 			&payload,
 		); err != nil {
 			return nil, fmt.Errorf("scan active timer: %w", err)
 		}
 		sc.At = fireAt
-		sc.TaskID, sc.Payload = extractPersistedScheduleTaskID(payload)
+		sc.TaskID, sc.Payload = extractPersistedScheduleTaskID(payload, timerName, sc.EventType)
 		out = append(out, sc)
 	}
 	if err := rows.Err(); err != nil {
@@ -302,7 +321,7 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 	if !strings.EqualFold(strings.TrimSpace(sc.Mode), "once") {
 		status = "active"
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	_, err := s.DB.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE timers
 		SET status = $6,
 		    fired_at = now()
@@ -310,28 +329,31 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 		  AND fire_event = $2
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
-		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $5
+		  AND %s = $5
 		  AND status = 'active'
-	`, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), status)
+	`, exactScheduleTaskIDSQL()), sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), status)
 	if err != nil {
 		return fmt.Errorf("mark exact timer fired: %w", err)
 	}
 	return nil
 }
 
-func extractPersistedScheduleTaskID(payload []byte) (string, []byte) {
+func extractPersistedScheduleTaskID(payload []byte, timerName, eventType string) (string, []byte) {
+	taskID := exactScheduleTaskID("", timerName, eventType)
 	if len(payload) == 0 {
-		return "", payload
+		return taskID, payload
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(payload, &decoded); err != nil || decoded == nil {
-		return "", payload
+		return taskID, payload
 	}
-	taskID, _ := decoded["__schedule_task_id"].(string)
+	if decodedTaskID, _ := decoded["__schedule_task_id"].(string); strings.TrimSpace(decodedTaskID) != "" {
+		taskID = exactScheduleTaskID(decodedTaskID, timerName, eventType)
+	}
 	delete(decoded, "__schedule_task_id")
 	encoded, err := json.Marshal(decoded)
 	if err != nil {
-		return strings.TrimSpace(taskID), payload
+		return taskID, payload
 	}
-	return strings.TrimSpace(taskID), encoded
+	return taskID, encoded
 }

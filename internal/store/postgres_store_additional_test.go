@@ -925,6 +925,100 @@ func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
 	}
 }
 
+func TestSchedules_ExactIdentityUsesFlowInstance(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	entityID := uuid.NewString()
+
+	first := runtimepipeline.Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		At:           time.Now().Add(30 * time.Minute).UTC(),
+		EntityID:     entityID,
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-a",
+		Payload:      []byte(`{"timer_id":"timer-a"}`),
+	}
+	second := runtimepipeline.Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		At:           time.Now().Add(60 * time.Minute).UTC(),
+		EntityID:     entityID,
+		FlowInstance: "review/inst-2",
+		TaskID:       "timer-a",
+		Payload:      []byte(`{"timer_id":"timer-a"}`),
+	}
+	if err := pg.UpsertSchedule(ctx, first); err != nil {
+		t.Fatalf("upsert first exact schedule: %v", err)
+	}
+	if err := pg.UpsertSchedule(ctx, second); err != nil {
+		t.Fatalf("upsert second exact schedule: %v", err)
+	}
+
+	active, err := pg.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules: %v", err)
+	}
+	var exact []runtimepipeline.Schedule
+	for _, sc := range active {
+		if sc.AgentID == first.AgentID &&
+			sc.EventType == first.EventType &&
+			sc.EntityID == first.EntityID &&
+			sc.TaskID == first.TaskID {
+			exact = append(exact, sc)
+		}
+	}
+	if len(exact) != 2 {
+		t.Fatalf("expected two exact schedules to coexist across flow instances, got %+v", exact)
+	}
+
+	if err := pg.CancelScheduleExact(ctx, first); err != nil {
+		t.Fatalf("CancelScheduleExact(first): %v", err)
+	}
+	if err := pg.MarkScheduleFiredExact(ctx, second); err != nil {
+		t.Fatalf("MarkScheduleFiredExact(second): %v", err)
+	}
+
+	var firstStatus, secondStatus string
+	firstStatusQuery := `
+		SELECT status
+		FROM timers
+		WHERE owner_agent = $1
+		  AND fire_event = $2
+		  AND flow_instance = $3
+		  AND ` + exactScheduleTaskIDSQL() + ` = $4
+	`
+	if err := db.QueryRowContext(ctx, firstStatusQuery, first.AgentID, first.EventType, first.FlowInstance, first.TaskID).Scan(&firstStatus); err != nil {
+		t.Fatalf("query first exact timer status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, firstStatusQuery, second.AgentID, second.EventType, second.FlowInstance, second.TaskID).Scan(&secondStatus); err != nil {
+		t.Fatalf("query second exact timer status: %v", err)
+	}
+	if firstStatus != "cancelled" {
+		t.Fatalf("first exact timer status = %q, want cancelled", firstStatus)
+	}
+	if secondStatus != "fired" {
+		t.Fatalf("second exact timer status = %q, want fired", secondStatus)
+	}
+
+	active, err = pg.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules(after exact cancel/fire): %v", err)
+	}
+	for _, sc := range active {
+		if sc.AgentID == first.AgentID &&
+			sc.EventType == first.EventType &&
+			sc.EntityID == first.EntityID &&
+			sc.TaskID == first.TaskID &&
+			(sc.FlowInstance == first.FlowInstance || sc.FlowInstance == second.FlowInstance) {
+			t.Fatalf("expected no remaining exact schedules after targeted cancel/fire, found %+v", sc)
+		}
+	}
+}
+
 func TestSchedules_LoadActiveSchedulesPreservesFlowInstance(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -954,6 +1048,62 @@ func TestSchedules_LoadActiveSchedulesPreservesFlowInstance(t *testing.T) {
 	}
 	if got := active[0].FlowInstance; got != "review/inst-1" {
 		t.Fatalf("loaded flow_instance = %q, want review/inst-1", got)
+	}
+}
+
+func TestSchedules_LoadActiveSchedulesFallsBackToTimerNameTaskIDForExactRows(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	entityID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO timers (
+			timer_name, entity_id, flow_instance, fire_event, fire_payload,
+			fire_at, recurring, recurrence_cron, recurrence_interval,
+			owner_node, owner_agent, task_type, status
+		)
+		VALUES (
+			$1, $2::uuid, $3, $4, $5::jsonb,
+			$6, false, NULL, NULL,
+			NULL, $7, 'timer', 'active'
+		)
+	`, "timer-a", entityID, "review/inst-1", "timer.validation_timeout", `{"timer_id":"timer-a"}`, time.Now().Add(30*time.Minute).UTC(), "validation-orchestrator"); err != nil {
+		t.Fatalf("seed exact timer row: %v", err)
+	}
+
+	active, err := pg.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("active schedules = %d, want 1", len(active))
+	}
+	if got := active[0].TaskID; got != "timer-a" {
+		t.Fatalf("loaded task_id = %q, want timer-a", got)
+	}
+	if string(active[0].Payload) != `{"timer_id":"timer-a"}` {
+		t.Fatalf("loaded payload = %s, want task metadata without synthetic task id", string(active[0].Payload))
+	}
+
+	if err := pg.MarkScheduleFiredExact(ctx, active[0]); err != nil {
+		t.Fatalf("MarkScheduleFiredExact(loaded fallback task): %v", err)
+	}
+
+	var status string
+	statusQuery := `
+		SELECT status
+		FROM timers
+		WHERE owner_agent = $1
+		  AND fire_event = $2
+		  AND flow_instance = $3
+		  AND ` + exactScheduleTaskIDSQL() + ` = $4
+	`
+	if err := db.QueryRowContext(ctx, statusQuery, active[0].AgentID, active[0].EventType, active[0].FlowInstance, active[0].TaskID).Scan(&status); err != nil {
+		t.Fatalf("query exact timer status: %v", err)
+	}
+	if status != "fired" {
+		t.Fatalf("exact timer status = %q, want fired", status)
 	}
 }
 
