@@ -103,16 +103,16 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 		return nil
 	}
 	return r.conversations.UpsertConversation(ctx, ConversationRecord{
-		SessionID: s.ID,
-		AgentID:   s.AgentID,
+		SessionID:    s.ID,
+		AgentID:      s.AgentID,
 		SessionScope: strings.TrimSpace(s.SessionScope),
-		ScopeKey:  strings.TrimSpace(s.ScopeKey),
-		RunID:     strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
-		Mode:      mode,
-		Messages:  s.Messages,
-		Summary:   BuildSessionSummary(s),
-		TurnCount: s.TurnCount,
-		Status:    "active",
+		ScopeKey:     strings.TrimSpace(s.ScopeKey),
+		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
+		Mode:         mode,
+		Messages:     s.Messages,
+		Summary:      BuildSessionSummary(s),
+		TurnCount:    s.TurnCount,
+		Status:       "active",
 	})
 }
 
