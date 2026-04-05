@@ -158,12 +158,12 @@ func scanConversationSummary(scanner rowScanner) (ConversationSummary, error) {
 	); err != nil {
 		return ConversationSummary{}, err
 	}
-	runtimeState, err := decodeJSONMap(runtimeStateRaw)
+	runtimeState, err := decodeConversationRuntimeStateProjection(runtimeStateRaw)
 	if err != nil {
 		return ConversationSummary{}, fmt.Errorf("decode conversation runtime_state: %w", err)
 	}
-	item.Summary = readString(runtimeState["summary"])
-	item.Metadata = compactMap(runtimeState, "summary", "last_turn")
+	item.Summary = runtimeState.Summary
+	item.Metadata = runtimeState.metadataMap()
 	return item, nil
 }
 
@@ -188,12 +188,12 @@ func scanConversationDetail(scanner rowScanner) (ConversationDetail, error) {
 	); err != nil {
 		return ConversationDetail{}, err
 	}
-	runtimeState, err := decodeJSONMap(runtimeStateRaw)
+	runtimeState, err := decodeConversationRuntimeStateProjection(runtimeStateRaw)
 	if err != nil {
 		return ConversationDetail{}, fmt.Errorf("decode conversation runtime_state: %w", err)
 	}
-	item.Summary = readString(runtimeState["summary"])
-	item.RuntimeState = runtimeState
+	item.Summary = runtimeState.Summary
+	item.RuntimeState = runtimeState.runtimeStateMap()
 	item.Messages, err = decodeJSONArray(messagesRaw)
 	if err != nil {
 		return ConversationDetail{}, fmt.Errorf("decode conversation messages: %w", err)
@@ -427,6 +427,10 @@ func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {
 	}
 	item.CreatedAt = createdAt.Format(time.RFC3339Nano)
 	var err error
+	summary, hasSummary, err := decodeTurnSummaryProjection(turnBlocksRaw)
+	if err != nil {
+		return ConversationTurn{}, err
+	}
 	if item.AvailableTools, err = decodeJSONArray(availableToolsRaw); err != nil {
 		return ConversationTurn{}, fmt.Errorf("decode turn available_tools: %w", err)
 	}
@@ -456,83 +460,22 @@ func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {
 			return ConversationTurn{}, fmt.Errorf("decode turn turn_blocks: %w", err)
 		}
 	}
+	if hasSummary {
+		item.AssistantVisibleOutput, item.Outcome, item.ReasoningBlocks, item.ProgressUpdates, item.ToolResults = summary.conversationFields()
+	}
 	return item, nil
 }
 
 func summarizeConversationTurnBlocks(blocks []any) (string, string, []string, []string, []any) {
-	summary, ok := readTurnSummaryBlock(blocks)
-	if !ok {
+	raw, err := json.Marshal(blocks)
+	if err != nil {
 		return "", "", nil, nil, nil
 	}
-	assistantText := strings.TrimSpace(readString(summary["assistant_visible_output"]))
-	outcome := strings.TrimSpace(readString(summary["outcome"]))
-	if outcome == "" {
-		outcome = assistantText
+	summary, ok, err := decodeTurnSummaryProjection(raw)
+	if err != nil || !ok {
+		return "", "", nil, nil, nil
 	}
-	reasoning := readStringSlice(summary["reasoning_blocks"])
-	progress := readStringSlice(summary["progress_updates"])
-	toolResults := readAnySlice(summary["tool_results"])
-	return assistantText, outcome, reasoning, progress, toolResults
-}
-
-func readTurnSummaryBlock(blocks []any) (map[string]any, bool) {
-	for _, raw := range blocks {
-		entry, _ := raw.(map[string]any)
-		if strings.TrimSpace(readString(entry["kind"])) != "turn_summary" {
-			continue
-		}
-		data, _ := entry["data"].(map[string]any)
-		if len(data) == 0 {
-			return map[string]any{}, false
-		}
-		return data, true
-	}
-	return map[string]any{}, false
-}
-
-func readStringSlice(value any) []string {
-	list, ok := value.([]any)
-	if !ok || len(list) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(list))
-	for _, item := range list {
-		text := strings.TrimSpace(readString(item))
-		if text == "" {
-			continue
-		}
-		out = append(out, text)
-	}
-	return out
-}
-
-func readAnySlice(value any) []any {
-	list, _ := value.([]any)
-	if len(list) == 0 {
-		return nil
-	}
-	return append([]any(nil), list...)
-}
-
-func compactMap(in map[string]any, keys ...string) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	drop := map[string]struct{}{}
-	for _, key := range keys {
-		drop[key] = struct{}{}
-	}
-	out := map[string]any{}
-	for key, value := range in {
-		if _, skip := drop[key]; skip {
-			continue
-		}
-		out[key] = value
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return summary.conversationFields()
 }
 
 func readString(value any) string {

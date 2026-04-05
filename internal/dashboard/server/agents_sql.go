@@ -276,29 +276,12 @@ func enrichAgentAggregateFromLatestTurn(aggregate *agentRuntimeAggregate, taskID
 		return nil
 	}
 	aggregate.CurrentTaskID = strings.TrimSpace(taskID)
-	turnBlocks, err := decodeJSONArray(turnBlocksRaw)
+	summary, ok, err := decodeTurnSummaryProjection(turnBlocksRaw)
 	if err != nil {
-		return fmt.Errorf("decode latest agent turn turn_blocks: %w", err)
+		return fmt.Errorf("decode latest agent turn turn_summary: %w", err)
 	}
-	summary, ok := readTurnSummaryBlock(turnBlocks)
-	if !ok {
-		return nil
-	}
-	toolResults := readAnySlice(summary["tool_results"])
-	if len(toolResults) == 0 {
-		return nil
-	}
-	lastResult, _ := toolResults[len(toolResults)-1].(map[string]any)
-	toolName := strings.TrimSpace(readString(lastResult["tool_name"]))
-	if toolName == "" {
-		return nil
-	}
-	aggregate.LastTool = map[string]any{
-		"name": toolName,
-		"ok":   parseOK,
-	}
-	if output, ok := lastResult["output"]; ok && output != nil {
-		aggregate.LastTool["result"] = output
+	if ok {
+		aggregate.LastTool = summary.lastToolMap(parseOK)
 	}
 	return nil
 }
