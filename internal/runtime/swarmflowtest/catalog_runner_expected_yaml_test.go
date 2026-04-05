@@ -40,7 +40,7 @@ minimum_score: 80
 trigger:
   event: "  check.requested  "
   payload:
-    entity_id: ent-001
+    entity_id: 11111111-1111-4111-8111-111111111111
     score: "85"
   entity_fields_before:
     " expected_count ": 1
@@ -106,9 +106,9 @@ test-node:
 trigger:
   sequence:
     - event: " item.arrived "
-      payload: {entity_id: ent-001, item_id: a}
+      payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: a}
     - event: item.arrived
-      payload: {entity_id: ent-001, item_id: b}
+      payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: b}
   entity_fields_before:
     expected_count: "2"
 

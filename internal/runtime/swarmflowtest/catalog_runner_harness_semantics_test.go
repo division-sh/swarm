@@ -39,9 +39,9 @@ test-node:
 trigger:
   sequence:
     - event: item.arrived
-      payload: {entity_id: ent-001, item_id: a}
+      payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: a}
     - event: item.arrived
-      payload: {entity_id: ent-001, item_id: b}
+      payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: b}
   entity_fields_before:
     expected_count: 3
 
@@ -97,11 +97,11 @@ test-node:
 trigger:
   sequence:
     - event: item.arrived
-      payload: {entity_id: ent-001, item_id: a}
+      payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: a}
     - event: item.arrived
-      payload: {entity_id: ent-001, item_id: b}
+      payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: b}
     - event: item.arrived
-      payload: {entity_id: ent-001, item_id: c}
+      payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: c}
   entity_fields_before:
     threshold_count: 2
 
@@ -157,11 +157,11 @@ test-node:
 trigger:
   sequence:
     - event: item.arrived
-      payload: {entity_id: ent-001, item_id: a}
+      payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: a}
     - event: item.arrived
-      payload: {entity_id: ent-001, item_id: a}
+      payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: a}
     - event: item.arrived
-      payload: {entity_id: ent-001, item_id: b}
+      payload: {entity_id: 11111111-1111-4111-8111-111111111111, item_id: b}
   entity_fields_before:
     expected_count: 2
 

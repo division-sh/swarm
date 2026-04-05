@@ -1,18 +1,18 @@
 trigger:
   concurrent:
     - event: task.submitted
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-4111-8111-111111111111 }
     - event: task.submitted
-      payload: { entity_id: ent-002 }
+      payload: { entity_id: 22222222-2222-4222-8222-222222222222 }
 
 expected:
   entities:
-    ent-001:
+    11111111-1111-4111-8111-111111111111:
       handler_outcome: success
       entity_state: done
       emitted_events:
         - task.accepted
-    ent-002:
+    22222222-2222-4222-8222-222222222222:
       handler_outcome: success
       entity_state: done
       emitted_events:
