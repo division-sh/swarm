@@ -265,11 +265,11 @@ func agentPersistedType(cfg runtimeactors.AgentConfig, modelTier string) string 
 	return "generic"
 }
 
-func agentConversationMode(cfg runtimeactors.AgentConfig) string {
+func agentConversationMode(cfg runtimeactors.AgentConfig) (runtimesessions.RuntimeMode, error) {
 	if v := strings.TrimSpace(cfg.ConversationMode); v != "" {
-		return runtimesessions.NormalizeConversationRuntimeMode(v)
+		return runtimesessions.ParseConversationRuntimeMode(v)
 	}
-	return runtimesessions.RuntimeModeTask
+	return runtimesessions.RuntimeModeTask, nil
 }
 
 func agentFlowInstance(cfg runtimeactors.AgentConfig) string {

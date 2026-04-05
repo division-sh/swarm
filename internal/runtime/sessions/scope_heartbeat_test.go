@@ -25,7 +25,7 @@ func TestNormalizeConversationRuntimeMode_AcceptsStatelessAlias(t *testing.T) {
 	if got := NormalizeConversationRuntimeMode("stateless"); got != RuntimeModeTask {
 		t.Fatalf("NormalizeConversationRuntimeMode(stateless) = %q, want %q", got, RuntimeModeTask)
 	}
-	scope, err := ResolveScope(context.Background(), "stateless", "", "ignored")
+	scope, err := ResolveScope(context.Background(), NormalizeConversationRuntimeMode("stateless"), "", "ignored")
 	if err != nil {
 		t.Fatalf("ResolveScope(stateless): %v", err)
 	}
@@ -71,6 +71,19 @@ func TestResolveScope_InvalidSessionConfigurationsFailClosed(t *testing.T) {
 	})
 	if _, err := ResolveScope(ctx, RuntimeModeSessionPerEntity, SessionScopeEntity, "entity-1"); err == nil {
 		t.Fatal("expected session_per_entity without flow path to fail")
+	}
+}
+
+func TestValidateAgentSessionScopeConfig_RejectsInvalidConversationMode(t *testing.T) {
+	_, err := ValidateAgentSessionScopeConfig(runtimeactors.AgentConfig{
+		ID:               "agent-invalid-mode",
+		ConversationMode: "nonsense",
+	})
+	if err == nil {
+		t.Fatal("expected invalid conversation mode to fail")
+	}
+	if got := err.Error(); got != `invalid conversation mode "nonsense"` {
+		t.Fatalf("ValidateAgentSessionScopeConfig error = %q", got)
 	}
 }
 

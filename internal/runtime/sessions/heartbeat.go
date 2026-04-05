@@ -13,19 +13,18 @@ const (
 	maxLeaseHeartbeatInterval = 45 * time.Second
 )
 
-func StartLeaseHeartbeat(ctx context.Context, sessions Registry, lease *Lease, runtimeMode string) func() {
+func StartLeaseHeartbeat(ctx context.Context, sessions Registry, lease *Lease, runtimeMode RuntimeMode) func() {
 	return StartLeaseHeartbeatWithErrorHandler(ctx, sessions, lease, runtimeMode, nil)
 }
 
-func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry, lease *Lease, runtimeMode string, onError func(error)) func() {
+func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry, lease *Lease, runtimeMode RuntimeMode, onError func(error)) func() {
 	if sessions == nil || lease == nil {
 		return func() {}
 	}
 	agentID := strings.TrimSpace(lease.AgentID)
 	lockOwner := strings.TrimSpace(lease.LockOwner)
 	scopeKey := strings.TrimSpace(lease.ScopeKey)
-	sessionScope := strings.TrimSpace(lease.SessionScope)
-	runtimeMode = strings.TrimSpace(runtimeMode)
+	sessionScope := lease.SessionScope
 	if agentID == "" || lockOwner == "" || runtimeMode == "" {
 		return func() {}
 	}
@@ -51,7 +50,7 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 					if onError != nil {
 						onError(err)
 					} else {
-						log.Printf("session lease heartbeat failed: agent=%s runtime=%s err=%v", agentID, runtimeMode, err)
+						log.Printf("session lease heartbeat failed: agent=%s runtime=%s err=%v", agentID, runtimeMode.String(), err)
 					}
 					continue
 				}

@@ -28,8 +28,8 @@ func TestReconfigureAgent_RotatesFlowScopedSession(t *testing.T) {
 
 	cfg := models.AgentConfig{
 		ID:               "flow-agent",
-		ConversationMode: sessions.RuntimeModeSession,
-		SessionScope:     sessions.SessionScopeFlow,
+		ConversationMode: sessions.RuntimeModeSession.String(),
+		SessionScope:     sessions.SessionScopeFlow.String(),
 		FlowPath:         "review/inst-1",
 	}
 	if err := am.SpawnAgent(cfg); err != nil {
@@ -37,7 +37,7 @@ func TestReconfigureAgent_RotatesFlowScopedSession(t *testing.T) {
 	}
 
 	seedCtx := models.WithActor(context.Background(), cfg)
-	lease, err := registry.Acquire(seedCtx, cfg.ID, cfg.ConversationMode, cfg.SessionScope, "reconfigure", cfg.CanonicalFlowPath())
+	lease, err := registry.Acquire(seedCtx, cfg.ID, sessions.NormalizeConversationRuntimeMode(cfg.ConversationMode), sessions.NormalizeSessionScope(cfg.SessionScope), "reconfigure", cfg.CanonicalFlowPath())
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
@@ -66,8 +66,8 @@ func TestReconfigureAgent_RotatesEntityScopedSession(t *testing.T) {
 
 	cfg := models.AgentConfig{
 		ID:               "entity-agent",
-		ConversationMode: sessions.RuntimeModeSessionPerEntity,
-		SessionScope:     sessions.SessionScopeEntity,
+		ConversationMode: sessions.RuntimeModeSessionPerEntity.String(),
+		SessionScope:     sessions.SessionScopeEntity.String(),
 		FlowPath:         "review/inst-1",
 		EntityID:         "entity-1",
 	}
@@ -76,7 +76,7 @@ func TestReconfigureAgent_RotatesEntityScopedSession(t *testing.T) {
 	}
 
 	seedCtx := models.WithActor(context.Background(), cfg)
-	lease, err := registry.Acquire(seedCtx, cfg.ID, cfg.ConversationMode, cfg.SessionScope, "reconfigure", cfg.EffectiveEntityID())
+	lease, err := registry.Acquire(seedCtx, cfg.ID, sessions.NormalizeConversationRuntimeMode(cfg.ConversationMode), sessions.NormalizeSessionScope(cfg.SessionScope), "reconfigure", cfg.EffectiveEntityID())
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestReconfigureAgent_RotatesEntityScopedSession(t *testing.T) {
 
 func TestReconfigureAgent_ClearsSessionScopeWhenSwitchingToTask(t *testing.T) {
 	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
-		if _, err := sessions.ValidateSessionScopeIntent(cfg.ConversationMode, cfg.SessionScope); err != nil {
+		if _, err := sessions.ValidateSessionScopeIntent(sessions.NormalizeConversationRuntimeMode(cfg.ConversationMode), cfg.SessionScope); err != nil {
 			return nil, err
 		}
 		return reconfigureTestAgent{id: cfg.ID}, nil
@@ -107,20 +107,20 @@ func TestReconfigureAgent_ClearsSessionScopeWhenSwitchingToTask(t *testing.T) {
 
 	cfg := models.AgentConfig{
 		ID:               "task-switch-agent",
-		ConversationMode: sessions.RuntimeModeSession,
-		SessionScope:     sessions.SessionScopeGlobal,
+		ConversationMode: sessions.RuntimeModeSession.String(),
+		SessionScope:     sessions.SessionScopeGlobal.String(),
 	}
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{ConversationMode: sessions.RuntimeModeTask}); err != nil {
+	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{ConversationMode: sessions.RuntimeModeTask.String()}); err != nil {
 		t.Fatalf("ReconfigureAgent(task): %v", err)
 	}
 
 	got := am.agentCfg[cfg.ID]
-	if got.ConversationMode != sessions.RuntimeModeTask {
-		t.Fatalf("ConversationMode = %q, want %q", got.ConversationMode, sessions.RuntimeModeTask)
+	if got.ConversationMode != sessions.RuntimeModeTask.String() {
+		t.Fatalf("ConversationMode = %q, want %q", got.ConversationMode, sessions.RuntimeModeTask.String())
 	}
 	if got.SessionScope != "" {
 		t.Fatalf("SessionScope = %q, want empty", got.SessionScope)

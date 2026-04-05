@@ -8,8 +8,29 @@ import (
 	"strings"
 )
 
+type Level string
+
+const (
+	LevelInfo  Level = "info"
+	LevelWarn  Level = "warn"
+	LevelError Level = "error"
+)
+
+func (l Level) String() string { return string(l) }
+
+func NormalizeLevel(raw string) Level {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "warn", "warning":
+		return LevelWarn
+	case "error":
+		return LevelError
+	default:
+		return LevelInfo
+	}
+}
+
 type RunEntry struct {
-	Level       string
+	Level       Level
 	Message     string
 	Component   string
 	Action      string
@@ -47,11 +68,8 @@ func RunLog(ctx context.Context, logger RunLogger, entry RunEntry) error {
 	return logger.LogRuntime(ctx, entry)
 }
 
-func ProcessLog(level, component, message string, fields ...any) {
-	level = strings.TrimSpace(strings.ToLower(level))
-	if level == "" {
-		level = "info"
-	}
+func ProcessLog(level Level, component, message string, fields ...any) {
+	level = NormalizeLevel(level.String())
 	component = strings.TrimSpace(component)
 	if component == "" {
 		component = "runtime"
@@ -82,11 +100,11 @@ func ProcessLog(level, component, message string, fields ...any) {
 	log.Printf("%s component=%s detail=%s", levelTag(level), component, string(raw))
 }
 
-func levelTag(level string) string {
-	switch strings.TrimSpace(strings.ToLower(level)) {
-	case "warn", "warning":
+func levelTag(level Level) string {
+	switch NormalizeLevel(level.String()) {
+	case LevelWarn:
 		return "runtime.warn"
-	case "error":
+	case LevelError:
 		return "runtime.error"
 	default:
 		return "runtime.info"

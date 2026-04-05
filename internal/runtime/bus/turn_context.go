@@ -135,7 +135,7 @@ func (r *EmittedEventsRecorder) AppendRuntimeLog(entry diaglog.RunEntry) {
 	r.mu.Lock()
 	r.flightRecorder = append(r.flightRecorder, FlightRecorderEntry{
 		Kind:       "runtime_log",
-		LogLevel:   strings.TrimSpace(entry.Level),
+		LogLevel:   entry.Level.String(),
 		Message:    strings.TrimSpace(entry.Message),
 		Details:    cloneJSONValue(runtimeLogDetails(entry)),
 		StackTrace: strings.TrimSpace(entry.StackTrace),

@@ -82,7 +82,7 @@ func (s *failingTurnStore) AppendAgentTurn(context.Context, AgentTurnRecord) err
 func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
-	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "", "task-1"), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1"), runtimeactors.AgentConfig{
 		ID:       "agent-1",
 		Type:     "sonnet",
 		EntityID: "entity-1",
@@ -112,7 +112,7 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if got := payload["agent_id"]; got != "agent-1" {
 		t.Fatalf("agent_id = %#v, want agent-1", got)
 	}
-	if got := payload["conversation_mode"]; got != sessions.RuntimeModeTask {
+	if got := payload["conversation_mode"]; got != sessions.RuntimeModeTask.String() {
 		t.Fatalf("conversation_mode = %#v, want task", got)
 	}
 	if got := payload["model_tier"]; got != "sonnet" {
@@ -126,7 +126,7 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
-	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "", "task-1"), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1"), runtimeactors.AgentConfig{
 		ID:   "agent-2",
 		Type: "haiku",
 	})
@@ -162,7 +162,7 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 
 func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
-	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "", "task-1")
+	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1")
 
 	s, err := runtime.StartSession(ctx, "agent-2", "base prompt", []ToolDefinition{
 		{Name: "emit_market_research_scan_complete"},
@@ -194,14 +194,14 @@ func TestAnthropicAPIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
 
 	runtime.persistTurn(context.Background(), AgentTurnRecord{
 		AgentID:     "agent-1",
-		RuntimeMode: sessions.RuntimeModeTask,
+		RuntimeMode: sessions.RuntimeModeTask.String(),
 		SessionID:   "session-1",
 	})
 
 	if len(turns.records) != 1 {
 		t.Fatalf("expected task-mode turn to persist, got %d records", len(turns.records))
 	}
-	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask {
+	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask.String() {
 		t.Fatalf("runtime_mode = %q, want task", turns.records[0].RuntimeMode)
 	}
 }
@@ -212,14 +212,14 @@ func TestClaudeCLIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
 
 	runtime.persistTurn(context.Background(), AgentTurnRecord{
 		AgentID:     "agent-2",
-		RuntimeMode: sessions.RuntimeModeTask,
+		RuntimeMode: sessions.RuntimeModeTask.String(),
 		SessionID:   "session-2",
 	})
 
 	if len(turns.records) != 1 {
 		t.Fatalf("expected task-mode turn to persist, got %d records", len(turns.records))
 	}
-	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask {
+	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask.String() {
 		t.Fatalf("runtime_mode = %q, want task", turns.records[0].RuntimeMode)
 	}
 }
@@ -237,8 +237,8 @@ func TestPublishAgentStarted_LogsRuntimeFailures(t *testing.T) {
 	publishAgentStarted(ctx, publisher, &Session{
 		ID:                "session-1",
 		AgentID:           "agent-1",
-		ConversationMode:  sessions.RuntimeModeTask,
-		RuntimeMode:       sessions.RuntimeModeTask,
+		ConversationMode:  sessions.RuntimeModeTask.String(),
+		RuntimeMode:       sessions.RuntimeModeTask.String(),
 		ProviderSessionID: "provider-1",
 	}, events.EventType("platform.agent_started"))
 
@@ -278,7 +278,7 @@ func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T)
 	runtime.persistConversation(context.Background(), &Session{
 		ID:               "session-3",
 		AgentID:          "agent-3",
-		ConversationMode: sessions.RuntimeModeTask,
+		ConversationMode: sessions.RuntimeModeTask.String(),
 		ScopeKey:         "task-3",
 	})
 
@@ -297,12 +297,12 @@ func TestAnthropicAPIRuntime_PersistConversationIncludesSessionScope(t *testing.
 	runtime.persistConversation(context.Background(), &Session{
 		ID:               "session-3",
 		AgentID:          "agent-3",
-		ConversationMode: sessions.RuntimeModeSession,
-		SessionScope:     sessions.SessionScopeFlow,
+		ConversationMode: sessions.RuntimeModeSession.String(),
+		SessionScope:     sessions.SessionScopeFlow.String(),
 		ScopeKey:         "review/inst-1",
 	})
 
-	if store.record.SessionScope != sessions.SessionScopeFlow {
+	if store.record.SessionScope != sessions.SessionScopeFlow.String() {
 		t.Fatalf("SessionScope = %q, want %q", store.record.SessionScope, sessions.SessionScopeFlow)
 	}
 }
@@ -314,12 +314,12 @@ func TestClaudeCLIRuntime_PersistConversationIncludesSessionScope(t *testing.T) 
 	runtime.persistConversation(context.Background(), &Session{
 		ID:               "session-4",
 		AgentID:          "agent-4",
-		ConversationMode: sessions.RuntimeModeSessionPerEntity,
-		SessionScope:     sessions.SessionScopeEntity,
+		ConversationMode: sessions.RuntimeModeSessionPerEntity.String(),
+		SessionScope:     sessions.SessionScopeEntity.String(),
 		ScopeKey:         "entity-1",
 	})
 
-	if store.record.SessionScope != sessions.SessionScopeEntity {
+	if store.record.SessionScope != sessions.SessionScopeEntity.String() {
 		t.Fatalf("SessionScope = %q, want %q", store.record.SessionScope, sessions.SessionScopeEntity)
 	}
 }
@@ -387,7 +387,7 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 
 	rec := enrichTurnRecord(ctx, session, AgentTurnRecord{
 		AgentID:     "market-research-agent",
-		RuntimeMode: sessions.RuntimeModeSession,
+		RuntimeMode: sessions.RuntimeModeSession.String(),
 		SessionID:   session.ID,
 	}, resp)
 

@@ -8,7 +8,7 @@ import (
 	"swarm/internal/runtime/sessions"
 )
 
-func resolvedSessionScope(ctx context.Context, mode, sessionScope, scopeKey string) (sessions.ResolvedScope, error) {
+func resolvedSessionScope(ctx context.Context, mode sessions.RuntimeMode, sessionScope sessions.SessionScope, scopeKey string) (sessions.ResolvedScope, error) {
 	return sessions.ResolveScope(ctx, mode, sessionScope, scopeKey)
 }
 
@@ -30,6 +30,6 @@ func sessionToken(s *Session) string {
 	return strings.TrimSpace(s.ID)
 }
 
-func shouldPersistConversationMode(mode string) bool {
+func shouldPersistConversationMode(mode sessions.RuntimeMode) bool {
 	return true
 }

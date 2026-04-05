@@ -8,14 +8,31 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 )
 
+type RuntimeMode string
+
 const (
-	RuntimeModeTask             = "task"
-	RuntimeModeSession          = "session"
-	RuntimeModeSessionPerEntity = "session_per_entity"
-	SessionScopeGlobal          = "global"
-	SessionScopeFlow            = "flow"
-	SessionScopeEntity          = "entity"
+	RuntimeModeTask             RuntimeMode = "task"
+	RuntimeModeSession          RuntimeMode = "session"
+	RuntimeModeSessionPerEntity RuntimeMode = "session_per_entity"
 )
+
+func (m RuntimeMode) String() string { return string(m) }
+func (m RuntimeMode) IsStateless() bool {
+	return m == RuntimeModeTask
+}
+func (m RuntimeMode) IsLiveSession() bool {
+	return m != "" && m != RuntimeModeTask
+}
+
+type SessionScope string
+
+const (
+	SessionScopeGlobal SessionScope = "global"
+	SessionScopeFlow   SessionScope = "flow"
+	SessionScopeEntity SessionScope = "entity"
+)
+
+func (s SessionScope) String() string { return string(s) }
 
 type ScopeContext struct {
 	ConversationMode string
@@ -24,9 +41,9 @@ type ScopeContext struct {
 }
 
 type ResolvedScope struct {
-	RuntimeMode  string
+	RuntimeMode  RuntimeMode
 	ScopeKey     string
-	Scope        string
+	Scope        SessionScope
 	EntityID     string
 	FlowInstance string
 	Stateless    bool
@@ -58,25 +75,25 @@ func ScopeFromContext(ctx context.Context) ScopeContext {
 	return payload
 }
 
-func canonicalConversationRuntimeMode(raw string) (string, bool) {
+func canonicalConversationRuntimeMode(raw string) (RuntimeMode, bool) {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
-	case RuntimeModeTask, "stateless":
+	case RuntimeModeTask.String(), "stateless":
 		return RuntimeModeTask, true
-	case RuntimeModeSession:
+	case RuntimeModeSession.String():
 		return RuntimeModeSession, true
-	case RuntimeModeSessionPerEntity:
+	case RuntimeModeSessionPerEntity.String():
 		return RuntimeModeSessionPerEntity, true
 	default:
 		return "", false
 	}
 }
 
-func NormalizeConversationRuntimeMode(raw string) string {
+func NormalizeConversationRuntimeMode(raw string) RuntimeMode {
 	mode, _ := canonicalConversationRuntimeMode(raw)
 	return mode
 }
 
-func ParseConversationRuntimeMode(raw string) (string, error) {
+func ParseConversationRuntimeMode(raw string) (RuntimeMode, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("conversation mode is required")
@@ -90,33 +107,33 @@ func ParseConversationRuntimeMode(raw string) (string, error) {
 
 func IsStatelessRuntimeMode(raw string) bool {
 	mode, ok := canonicalConversationRuntimeMode(raw)
-	return ok && mode == RuntimeModeTask
+	return ok && mode.IsStateless()
 }
 
 func IsLiveSessionRuntimeMode(raw string) bool {
 	mode, ok := canonicalConversationRuntimeMode(raw)
-	return ok && mode != RuntimeModeTask
+	return ok && mode.IsLiveSession()
 }
 
-func canonicalSessionScope(raw string) (string, bool) {
+func canonicalSessionScope(raw string) (SessionScope, bool) {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
-	case SessionScopeGlobal:
+	case SessionScopeGlobal.String():
 		return SessionScopeGlobal, true
-	case SessionScopeFlow:
+	case SessionScopeFlow.String():
 		return SessionScopeFlow, true
-	case SessionScopeEntity:
+	case SessionScopeEntity.String():
 		return SessionScopeEntity, true
 	default:
 		return "", false
 	}
 }
 
-func NormalizeSessionScope(raw string) string {
+func NormalizeSessionScope(raw string) SessionScope {
 	scope, _ := canonicalSessionScope(raw)
 	return scope
 }
 
-func ParseSessionScope(raw string) (string, error) {
+func ParseSessionScope(raw string) (SessionScope, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("session scope is required")
@@ -128,11 +145,8 @@ func ParseSessionScope(raw string) (string, error) {
 	return scope, nil
 }
 
-func ValidateSessionScopeIntent(runtimeMode, sessionScope string) (string, error) {
-	mode, err := ParseConversationRuntimeMode(runtimeMode)
-	if err != nil {
-		return "", err
-	}
+func ValidateSessionScopeIntent(runtimeMode RuntimeMode, sessionScope string) (SessionScope, error) {
+	mode := runtimeMode
 	sessionScope = strings.TrimSpace(sessionScope)
 	switch mode {
 	case RuntimeModeTask:
@@ -172,10 +186,14 @@ func ValidateSessionScopeIntent(runtimeMode, sessionScope string) (string, error
 	}
 }
 
-func ValidateAgentSessionScopeConfig(actor runtimeactors.AgentConfig) (string, error) {
-	runtimeMode := strings.TrimSpace(actor.ConversationMode)
-	if runtimeMode == "" {
-		runtimeMode = RuntimeModeTask
+func ValidateAgentSessionScopeConfig(actor runtimeactors.AgentConfig) (SessionScope, error) {
+	runtimeMode := RuntimeModeTask
+	if rawMode := strings.TrimSpace(actor.ConversationMode); rawMode != "" {
+		parsedMode, err := ParseConversationRuntimeMode(rawMode)
+		if err != nil {
+			return "", err
+		}
+		runtimeMode = parsedMode
 	}
 	sessionScope, err := ValidateSessionScopeIntent(runtimeMode, actor.SessionScope)
 	if err != nil {
@@ -203,7 +221,7 @@ func DeclaredScopeKey(actor runtimeactors.AgentConfig) (string, error) {
 	case "":
 		return "", nil
 	case SessionScopeGlobal:
-		return SessionScopeGlobal, nil
+		return SessionScopeGlobal.String(), nil
 	case SessionScopeFlow:
 		flowPath := actor.CanonicalFlowPath()
 		if flowPath == "" {
@@ -221,12 +239,9 @@ func DeclaredScopeKey(actor runtimeactors.AgentConfig) (string, error) {
 	}
 }
 
-func ResolveScope(ctx context.Context, runtimeMode, sessionScope, scopeKey string) (ResolvedScope, error) {
-	mode, err := ParseConversationRuntimeMode(runtimeMode)
-	if err != nil {
-		return ResolvedScope{}, err
-	}
-	sessionScope, err = ValidateSessionScopeIntent(mode, sessionScope)
+func ResolveScope(ctx context.Context, runtimeMode RuntimeMode, sessionScope SessionScope, scopeKey string) (ResolvedScope, error) {
+	mode := runtimeMode
+	resolvedScope, err := ValidateSessionScopeIntent(mode, sessionScope.String())
 	if err != nil {
 		return ResolvedScope{}, err
 	}
@@ -244,7 +259,7 @@ func ResolveScope(ctx context.Context, runtimeMode, sessionScope, scopeKey strin
 		out.Stateless = true
 		return out, nil
 	case RuntimeModeSessionPerEntity:
-		if sessionScope != SessionScopeEntity {
+		if resolvedScope != SessionScopeEntity {
 			return ResolvedScope{}, fmt.Errorf("session_per_entity requires explicit session_scope: entity")
 		}
 		if scopeKey == "" {
@@ -253,24 +268,24 @@ func ResolveScope(ctx context.Context, runtimeMode, sessionScope, scopeKey strin
 		if flowPath == "" {
 			return ResolvedScope{}, fmt.Errorf("session_per_entity requires actor flow path")
 		}
-		out.Scope = "entity"
+		out.Scope = SessionScopeEntity
 		out.EntityID = scopeKey
 		out.FlowInstance = flowPath
 		return out, nil
 	case RuntimeModeSession:
-		switch sessionScope {
+		switch resolvedScope {
 		case SessionScopeGlobal:
 			switch scopeKey {
-			case "", SessionScopeGlobal:
+			case "", SessionScopeGlobal.String():
 				out.Scope = SessionScopeGlobal
-				out.ScopeKey = SessionScopeGlobal
+				out.ScopeKey = SessionScopeGlobal.String()
 				return out, nil
 			default:
 				return ResolvedScope{}, fmt.Errorf("session_scope global requires scope_key global or empty")
 			}
 		case SessionScopeFlow:
 			switch {
-			case scopeKey == SessionScopeGlobal:
+			case scopeKey == SessionScopeGlobal.String():
 				return ResolvedScope{}, fmt.Errorf("session_scope flow does not allow global scope key")
 			case scopeKey != "" && flowPath != "" && scopeKey != flowPath:
 				return ResolvedScope{}, fmt.Errorf("session_scope flow scope key %q does not match actor flow path %q", scopeKey, flowPath)
@@ -292,5 +307,5 @@ func ResolveScope(ctx context.Context, runtimeMode, sessionScope, scopeKey strin
 		}
 	}
 
-	return ResolvedScope{}, fmt.Errorf("unsupported conversation mode %q", runtimeMode)
+	return ResolvedScope{}, fmt.Errorf("unsupported conversation mode %q", runtimeMode.String())
 }

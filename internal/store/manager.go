@@ -98,7 +98,10 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
 	modelTier := agentModelTier(cfg)
-	conversationMode := agentConversationMode(cfg)
+	conversationMode, err := agentConversationMode(cfg)
+	if err != nil {
+		return persistedAgentProjection{}, fmt.Errorf("invalid conversation mode: %w", err)
+	}
 	llmBackend := agentLLMBackend(cfg)
 	configJSON, err := mergeAgentConfigJSON(cfg)
 	if err != nil {
@@ -114,7 +117,7 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 		Role:              strings.TrimSpace(cfg.Role),
 		ModelTier:         modelTier,
 		LLMBackend:        llmBackend,
-		ConversationMode:  conversationMode,
+		ConversationMode:  conversationMode.String(),
 		ParentAgentID:     nullable(strings.TrimSpace(parentAgentID), strings.TrimSpace(cfg.ParentAgent)),
 		EntityID:          cfg.EffectiveEntityID(),
 		ConfigJSON:        configJSON,
@@ -141,9 +144,9 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	if llmBackend == "" {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s missing llm_backend", strings.TrimSpace(row.AgentID))
 	}
-	conversationMode := strings.TrimSpace(row.ConversationMode)
-	if _, err := runtimesessions.ParseConversationRuntimeMode(conversationMode); err != nil {
-		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid conversation_mode %q: %w", strings.TrimSpace(row.AgentID), conversationMode, err)
+	conversationMode, err := runtimesessions.ParseConversationRuntimeMode(row.ConversationMode)
+	if err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid conversation_mode %q: %w", strings.TrimSpace(row.AgentID), strings.TrimSpace(row.ConversationMode), err)
 	}
 	if err := validateOpaqueAgentConfig(row.ConfigJSON); err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid opaque config: %w", strings.TrimSpace(row.AgentID), err)
@@ -164,8 +167,8 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 		Mode:             desc.Mode,
 		ModelTier:        modelTier,
 		LLMBackend:       llmBackend,
-		ConversationMode: conversationMode,
-		SessionScope:     sessionScope,
+		ConversationMode: conversationMode.String(),
+		SessionScope:     sessionScope.String(),
 		MaxTurnsPerTask:  desc.MaxTurnsPerTask,
 		Subscriptions:    decodeJSONStringList(row.SubscriptionsJSON),
 		EmitEvents:       decodeJSONStringList(row.EmitEventsJSON),

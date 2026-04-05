@@ -2240,6 +2240,36 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 	}
 }
 
+func TestManagerStore_UpsertAgent_RejectsInvalidConversationModeAtAdmission(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "agent-invalid-mode",
+			Role:             "reviewer",
+			Type:             "review-worker",
+			ConversationMode: "nonsense",
+		},
+		Status: "active",
+	})
+	if err == nil {
+		t.Fatal("expected invalid conversation mode to fail")
+	}
+	if !strings.Contains(err.Error(), `invalid agent session scope: invalid conversation mode "nonsense"`) {
+		t.Fatalf("UpsertAgent error = %q", err.Error())
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents WHERE agent_id = 'agent-invalid-mode'`).Scan(&count); err != nil {
+		t.Fatalf("count invalid-mode agent rows: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("persisted invalid-mode agent rows = %d, want 0", count)
+	}
+}
+
 func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeKeys(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

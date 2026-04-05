@@ -30,7 +30,7 @@ func NewPostgresRegistry(db *sql.DB, lockTTL time.Duration) *PostgresRegistry {
 	}
 }
 
-func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, scopeKey string) (*Lease, error) {
+func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
@@ -198,10 +198,6 @@ func (sr *PostgresRegistry) Release(ctx context.Context, lease *Lease) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	mode, err := ParseConversationRuntimeMode(lease.RuntimeMode)
-	if err != nil {
-		return err
-	}
 	res, err := sr.db.ExecContext(ctx, `
 		UPDATE agent_sessions
 		SET lease_holder = NULL,
@@ -213,7 +209,7 @@ func (sr *PostgresRegistry) Release(ctx context.Context, lease *Lease) error {
 		  AND scope_key = $4
 		  AND lease_holder = $5
 		  AND status = 'active'
-	`, lease.AgentID, mode, lease.SessionID, strings.TrimSpace(lease.ScopeKey), lease.LockOwner)
+	`, lease.AgentID, lease.RuntimeMode, lease.SessionID, strings.TrimSpace(lease.ScopeKey), lease.LockOwner)
 	if err != nil {
 		return fmt.Errorf("release lease: %w", err)
 	}
@@ -224,7 +220,7 @@ func (sr *PostgresRegistry) Release(ctx context.Context, lease *Lease) error {
 	return nil
 }
 
-func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, summary, scopeKey string) (*Lease, error) {
+func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, summary, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
@@ -309,7 +305,7 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID, runtimeMode, se
 	}, nil
 }
 
-func (sr *PostgresRegistry) IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionScope, sessionID, scopeKey string) error {
+func (sr *PostgresRegistry) IncrementTurn(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, sessionID, scopeKey string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -337,7 +333,7 @@ func (sr *PostgresRegistry) IncrementTurn(ctx context.Context, agentID, runtimeM
 	return nil
 }
 
-func (sr *PostgresRegistry) AdoptSessionID(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey string) error {
+func (sr *PostgresRegistry) AdoptSessionID(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, newSessionID, scopeKey string) error {
 	agentID = strings.TrimSpace(agentID)
 	lockOwner = strings.TrimSpace(lockOwner)
 	newSessionID = strings.TrimSpace(newSessionID)
@@ -419,8 +415,7 @@ func (sr *PostgresRegistry) ScopeKeyEnabledForTest() bool {
 	return true
 }
 
-func (sr *PostgresRegistry) ResetAll(runtimeMode string) error {
-	runtimeMode = strings.TrimSpace(runtimeMode)
+func (sr *PostgresRegistry) ResetAll(runtimeMode RuntimeMode) error {
 	if runtimeMode == "" {
 		_, err := sr.db.Exec(`
 			UPDATE agent_sessions
@@ -436,23 +431,19 @@ func (sr *PostgresRegistry) ResetAll(runtimeMode string) error {
 		}
 		return nil
 	}
-	mode, err := ParseConversationRuntimeMode(runtimeMode)
-	if err != nil {
-		return err
-	}
-	if mode == RuntimeModeTask {
+	if runtimeMode == RuntimeModeTask {
 		return nil
 	}
-	_, err = sr.db.Exec(`
+	_, err := sr.db.Exec(`
 		UPDATE agent_sessions
 		SET status = 'terminated',
 		    lease_holder = NULL,
 		    lease_expires_at = NULL,
 		    updated_at = now()
 		WHERE status = 'active' AND runtime_mode = $1
-	`, mode)
+	`, runtimeMode)
 	if err != nil {
-		return fmt.Errorf("reset sessions runtime=%s: %w", runtimeMode, err)
+		return fmt.Errorf("reset sessions runtime=%s: %w", runtimeMode.String(), err)
 	}
 	return nil
 }

@@ -14,7 +14,7 @@ import (
 
 // RuntimeLogEntry is a structured runtime operation record (spec v2.0.14).
 type RuntimeLogEntry struct {
-	Level     string
+	Level     diaglog.Level
 	Message   string
 	Component string
 	Action    string
@@ -73,10 +73,7 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 	if l == nil {
 		return nil
 	}
-	level := strings.ToLower(strings.TrimSpace(e.Level))
-	if level == "" {
-		level = "info"
-	}
+	level := diaglog.NormalizeLevel(e.Level.String())
 	component := strings.TrimSpace(e.Component)
 	if component == "" {
 		component = "runtime"
@@ -116,7 +113,7 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 	}
 
 	detail := marshalJSONOrEmpty(e.Detail)
-	if err := logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, hasRunID, level, component, action, e, detail); err != nil {
+	if err := logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, hasRunID, level.String(), component, action, e, detail); err != nil {
 		return err
 	}
 	return nil
@@ -131,8 +128,8 @@ func (l *RuntimeLogger) Warn(ctx context.Context, component, action string, deta
 		errText = strings.TrimSpace(err.Error())
 	}
 	return l.Log(ctx, RuntimeLogEntry{
-		Level:     "warn",
-		Message:   runtimeLogHelperMessage("warn", component, action),
+		Level:     diaglog.LevelWarn,
+		Message:   runtimeLogHelperMessage(diaglog.LevelWarn, component, action),
 		Component: strings.TrimSpace(component),
 		Action:    strings.TrimSpace(action),
 		Detail:    detail,
@@ -149,8 +146,8 @@ func (l *RuntimeLogger) Error(ctx context.Context, component, action string, det
 		errText = strings.TrimSpace(err.Error())
 	}
 	return l.Log(ctx, RuntimeLogEntry{
-		Level:     "error",
-		Message:   runtimeLogHelperMessage("error", component, action),
+		Level:     diaglog.LevelError,
+		Message:   runtimeLogHelperMessage(diaglog.LevelError, component, action),
 		Component: strings.TrimSpace(component),
 		Action:    strings.TrimSpace(action),
 		Detail:    detail,
@@ -158,11 +155,11 @@ func (l *RuntimeLogger) Error(ctx context.Context, component, action string, det
 	})
 }
 
-func runtimeLogHelperMessage(level, component, action string) string {
+func runtimeLogHelperMessage(level diaglog.Level, component, action string) string {
 	component = strings.TrimSpace(component)
 	action = strings.TrimSpace(action)
-	switch strings.ToLower(strings.TrimSpace(level)) {
-	case "error":
+	switch diaglog.NormalizeLevel(level.String()) {
+	case diaglog.LevelError:
 		if component != "" {
 			return "Runtime error recorded by " + component
 		}

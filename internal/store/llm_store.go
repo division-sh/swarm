@@ -28,7 +28,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	runtimeMode := runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode)
 	targetTable := "agent_sessions"
 	hasConversationRunID := caps.Conversations.SessionRunID
-	if runtimesessions.IsStatelessRuntimeMode(runtimeMode) {
+	if runtimeMode.IsStateless() {
 		if err := s.ensureConversationAuditTable(ctx); err != nil {
 			return err
 		}
@@ -207,7 +207,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	insertArgs := []any{
 		rec.AgentID,
 		rec.SessionID,
-		runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode),
+		runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
 		rec.ScopeKey,
 		rec.EntityID,
 		rec.TriggerEventID,
@@ -260,7 +260,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		insertArgs = []any{
 			rec.AgentID,
 			rec.SessionID,
-			runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode),
+			runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
 			rec.ScopeKey,
 			rec.EntityID,
 			rec.TriggerEventID,
@@ -319,7 +319,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			nullUUIDString(runID),
 			rec.AgentID,
 			rec.SessionID,
-			runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode),
+			runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
 			rec.ScopeKey,
 			rec.EntityID,
 			rec.TriggerEventID,
@@ -374,7 +374,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 				nullUUIDString(runID),
 				rec.AgentID,
 				rec.SessionID,
-				runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode),
+				runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode).String(),
 				rec.ScopeKey,
 				rec.EntityID,
 				rec.TriggerEventID,
@@ -470,7 +470,7 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 		rec.EntityID,
 		scopeKey,
 		"global",
-		runtimesessions.RuntimeModeTask,
+		runtimesessions.RuntimeModeTask.String(),
 	}
 	if caps.Conversations.AuditRunID {
 		if err := s.ensureRunRow(ctx, caps, tx, rec.RunID); err != nil {
@@ -515,7 +515,7 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			rec.EntityID,
 			scopeKey,
 			"global",
-			runtimesessions.RuntimeModeTask,
+			runtimesessions.RuntimeModeTask.String(),
 		}
 	}
 	execFn := s.DB.ExecContext
@@ -569,7 +569,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if err != nil {
 		return err
 	}
-	resolved, err := runtimesessions.ResolveScope(ctx, mode, rec.SessionScope, rec.ScopeKey)
+	resolved, err := runtimesessions.ResolveScope(ctx, mode, runtimesessions.NormalizeSessionScope(rec.SessionScope), rec.ScopeKey)
 	if err != nil {
 		return err
 	}
@@ -609,9 +609,9 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
 		}
 		scopeKey := strings.TrimSpace(rec.ScopeKey)
-		scope := strings.TrimSpace(resolved.Scope)
+		scope := resolved.Scope.String()
 		if scope == "" {
-			scope = "global"
+			scope = runtimesessions.SessionScopeGlobal.String()
 		}
 		q := `
 			INSERT INTO agent_conversation_audits (
@@ -655,7 +655,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			scope,
 			string(msgJSON),
 			rec.TurnCount,
-			mode,
+			mode.String(),
 			summary,
 			status,
 		}
@@ -708,7 +708,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 				scope,
 				string(msgJSON),
 				rec.TurnCount,
-				mode,
+				mode.String(),
 				summary,
 				status,
 			}
@@ -738,7 +738,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			$7,
 			$8,
 			jsonb_build_object('summary', NULLIF($9,'')),
-			$10,
+					$10,
 			now(),
 			now()
 		)
@@ -758,10 +758,10 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		resolved.EntityID,
 		resolved.FlowInstance,
 		resolved.ScopeKey,
-		resolved.Scope,
+		resolved.Scope.String(),
 		string(msgJSON),
 		rec.TurnCount,
-		mode,
+		mode.String(),
 		summary,
 		status,
 		sessionID,
@@ -808,10 +808,10 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			resolved.EntityID,
 			resolved.FlowInstance,
 			resolved.ScopeKey,
-			resolved.Scope,
+			resolved.Scope.String(),
 			string(msgJSON),
 			rec.TurnCount,
-			mode,
+			mode.String(),
 			summary,
 			status,
 			runID,
@@ -841,11 +841,11 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 		return runtimellm.ConversationRecord{}, false, fmt.Errorf("agent_id is required")
 	}
 
-	mode, err := runtimesessions.ParseConversationRuntimeMode(mode)
+	resolvedMode, err := runtimesessions.ParseConversationRuntimeMode(mode)
 	if err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
-	resolved, err := runtimesessions.ResolveScope(ctx, mode, sessionScope, scopeKey)
+	resolved, err := runtimesessions.ResolveScope(ctx, resolvedMode, runtimesessions.NormalizeSessionScope(sessionScope), scopeKey)
 	if err != nil {
 		return runtimellm.ConversationRecord{}, false, err
 	}
@@ -878,11 +878,11 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 
 	var rec runtimellm.ConversationRecord
 	rec.AgentID = agentID
-	rec.Mode = mode
-	rec.SessionScope = resolved.Scope
+	rec.Mode = resolvedMode.String()
+	rec.SessionScope = resolved.Scope.String()
 
 	var rawMessages []byte
-	err = s.DB.QueryRowContext(ctx, q, agentID, mode, resolved.ScopeKey).Scan(
+	err = s.DB.QueryRowContext(ctx, q, agentID, resolvedMode.String(), resolved.ScopeKey).Scan(
 		&rec.ScopeKey,
 		&rawMessages,
 		&rec.Summary,

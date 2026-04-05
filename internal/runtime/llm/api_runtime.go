@@ -71,7 +71,7 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 		SessionScope: strings.TrimSpace(s.SessionScope),
 		ScopeKey:     strings.TrimSpace(s.ScopeKey),
 		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
-		Mode:         mode,
+		Mode:         mode.String(),
 		Messages:     s.Messages,
 		Summary:      BuildSessionSummary(s),
 		TurnCount:    s.TurnCount,
@@ -81,7 +81,7 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 
 func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
 	scope := sessions.ScopeFromContext(ctx)
-	resolved, err := resolvedSessionScope(ctx, scope.ConversationMode, scope.SessionScope, scope.ScopeKey)
+	resolved, err := resolvedSessionScope(ctx, sessions.NormalizeConversationRuntimeMode(scope.ConversationMode), sessions.NormalizeSessionScope(scope.SessionScope), scope.ScopeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -105,9 +105,9 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 			return ""
 		}()),
 		AgentID:          agentID,
-		RuntimeMode:      resolved.RuntimeMode,
-		ConversationMode: resolved.RuntimeMode,
-		SessionScope:     resolved.Scope,
+		RuntimeMode:      resolved.RuntimeMode.String(),
+		ConversationMode: resolved.RuntimeMode.String(),
+		SessionScope:     resolved.Scope.String(),
 		ScopeKey:         resolved.ScopeKey,
 		ProviderSessionID: func() string {
 			if lease != nil {
@@ -120,7 +120,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 		Messages:     nil,
 	}
 	if r.conversations != nil && !resolved.Stateless {
-		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, resolved.RuntimeMode, resolved.Scope, resolved.ScopeKey); err == nil && ok {
+		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, resolved.RuntimeMode.String(), resolved.Scope.String(), resolved.ScopeKey); err == nil && ok {
 			s.Messages = rec.Messages
 			s.TurnCount = rec.TurnCount
 		}
@@ -148,7 +148,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		}
 	}
 
-	resolved, err := resolvedSessionScope(ctx, coalesce(s.ConversationMode, s.RuntimeMode), coalesce(s.SessionScope, ""), s.ScopeKey)
+	resolved, err := resolvedSessionScope(ctx, sessions.NormalizeConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode)), sessions.NormalizeSessionScope(coalesce(s.SessionScope, "")), s.ScopeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -161,14 +161,14 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, resolved.RuntimeMode, func(heartbeatErr error) {
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the API session lease heartbeat failed", s.AgentID, s.ID, entityID, map[string]any{
-				"runtime_mode": resolved.RuntimeMode,
+				"runtime_mode": resolved.RuntimeMode.String(),
 				"scope_key":    resolved.ScopeKey,
 			}, heartbeatErr)
 		})
 		defer stopLeaseHeartbeat()
 
 		if lease.SessionID != s.ID {
-			LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode, s.ID, lease.SessionID, resolved.ScopeKey)
+			LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode.String(), s.ID, lease.SessionID, resolved.ScopeKey)
 			s.ID = lease.SessionID
 		}
 	}
@@ -226,7 +226,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		s.ParseFailures++
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
-			RuntimeMode:    resolved.RuntimeMode,
+			RuntimeMode:    resolved.RuntimeMode.String(),
 			SessionID:      s.ID,
 			RequestPayload: reqJSON,
 			ResponseRaw:    rawResp,
@@ -257,7 +257,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 
 	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:        s.AgentID,
-		RuntimeMode:    resolved.RuntimeMode,
+		RuntimeMode:    resolved.RuntimeMode.String(),
 		SessionID:      s.ID,
 		RequestPayload: reqJSON,
 		ResponseRaw:    rawResp,
@@ -308,14 +308,14 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 		AgentID:      s.AgentID,
 		SessionScope: strings.TrimSpace(s.SessionScope),
 		ScopeKey:     strings.TrimSpace(s.ScopeKey),
-		Mode:         mode,
+		Mode:         mode.String(),
 		Messages:     s.Messages,
 		Summary:      BuildSessionSummary(s),
 		TurnCount:    s.TurnCount,
 		Status:       "active",
 	}); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_api_conversation_failed", "Persisting the API conversation failed", s.AgentID, s.ID, "", map[string]any{
-			"conversation_mode": mode,
+			"conversation_mode": mode.String(),
 			"scope_key":         strings.TrimSpace(s.ScopeKey),
 		}, err)
 	}

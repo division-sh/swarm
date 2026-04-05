@@ -11,6 +11,7 @@ import (
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
+	"swarm/internal/runtime/diaglog"
 )
 
 func (h *runHub) handleRuntimeLog(entry runtimepkg.RuntimeLogEntry) {
@@ -66,7 +67,7 @@ func (h *runHub) toRunEvent(entry runtimepkg.RuntimeLogEntry) RunEventEnvelope {
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
 		"instance_id": strings.TrimSpace(entry.EntityID),
 		"payload": map[string]any{
-			"level":      strings.TrimSpace(entry.Level),
+			"level":      entry.Level.String(),
 			"component":  strings.TrimSpace(entry.Component),
 			"action":     strings.TrimSpace(entry.Action),
 			"event_type": strings.TrimSpace(entry.EventType),
@@ -267,7 +268,7 @@ type runtimeLoggerHook struct {
 	hub  *runHub
 }
 
-func (h runtimeLoggerHook) Log(ctx context.Context, level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
+func (h runtimeLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
 	entry := runtimepkg.RuntimeLogEntry{
 		Level: level, Message: message, Component: component, Action: action, EventID: eventID, EventType: eventType,
 		AgentID: agentID, EntityID: entityID, SessionID: sessionID, Correlation: correlation,

@@ -17,6 +17,7 @@ import (
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
 	runtimecredentials "swarm/internal/runtime/credentials"
+	"swarm/internal/runtime/diaglog"
 	llm "swarm/internal/runtime/llm"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -336,7 +337,7 @@ func (e *Executor) emitToolExecutionEvent(
 		detail["actor_role"] = strings.TrimSpace(actor.Role)
 	}
 	logger.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-		Level:      level,
+		Level:      diaglog.NormalizeLevel(level),
 		Message:    toolExecutionMessage(toolName, execErr),
 		Component:  "tool-executor",
 		Action:     action,

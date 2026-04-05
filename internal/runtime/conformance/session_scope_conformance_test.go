@@ -49,13 +49,13 @@ func TestSessionScopeConformance(t *testing.T) {
 	cases := []sessionScopeConformanceCase{
 		{
 			name:               "task_stateless",
-			actor:              runtimeactors.AgentConfig{ID: "task-agent", Role: "task_agent", ConversationMode: runtimesessions.RuntimeModeTask},
+			actor:              runtimeactors.AgentConfig{ID: "task-agent", Role: "task_agent", ConversationMode: runtimesessions.RuntimeModeTask.String()},
 			expectLoadFound:    false,
 			acquireErrContains: "task-scoped sessions are stateless",
 		},
 		{
 			name:               "task_rejects_session_scope",
-			actor:              runtimeactors.AgentConfig{ID: "task-invalid", Role: "task_invalid", ConversationMode: runtimesessions.RuntimeModeTask, SessionScope: runtimesessions.SessionScopeGlobal},
+			actor:              runtimeactors.AgentConfig{ID: "task-invalid", Role: "task_invalid", ConversationMode: runtimesessions.RuntimeModeTask.String(), SessionScope: runtimesessions.SessionScopeGlobal.String()},
 			bootErrContains:    "task mode does not use sessions; session_scope must be absent",
 			buildErrContains:   "task mode does not use sessions; session_scope must be absent",
 			acquireErrContains: "task mode does not use sessions; session_scope must be absent",
@@ -64,14 +64,14 @@ func TestSessionScopeConformance(t *testing.T) {
 		},
 		{
 			name:            "session_global_root",
-			actor:           runtimeactors.AgentConfig{ID: "global-agent", Role: "global_agent", ConversationMode: runtimesessions.RuntimeModeSession, SessionScope: runtimesessions.SessionScopeGlobal},
+			actor:           runtimeactors.AgentConfig{ID: "global-agent", Role: "global_agent", ConversationMode: runtimesessions.RuntimeModeSession.String(), SessionScope: runtimesessions.SessionScopeGlobal.String()},
 			expectLoadFound: true,
-			expectScope:     runtimesessions.SessionScopeGlobal,
-			expectScopeKey:  runtimesessions.SessionScopeGlobal,
+			expectScope:     runtimesessions.SessionScopeGlobal.String(),
+			expectScopeKey:  runtimesessions.SessionScopeGlobal.String(),
 		},
 		{
 			name:               "session_requires_explicit_scope",
-			actor:              runtimeactors.AgentConfig{ID: "session-invalid", Role: "session_invalid", ConversationMode: runtimesessions.RuntimeModeSession},
+			actor:              runtimeactors.AgentConfig{ID: "session-invalid", Role: "session_invalid", ConversationMode: runtimesessions.RuntimeModeSession.String()},
 			bootErrContains:    "session mode requires explicit session_scope (global or flow)",
 			buildErrContains:   "session mode requires explicit session_scope (global or flow)",
 			acquireErrContains: "session mode requires explicit session_scope (global or flow)",
@@ -80,15 +80,15 @@ func TestSessionScopeConformance(t *testing.T) {
 		},
 		{
 			name:            "session_flow_in_flow",
-			actor:           runtimeactors.AgentConfig{ID: "flow-agent", Role: "flow_agent", ConversationMode: runtimesessions.RuntimeModeSession, SessionScope: runtimesessions.SessionScopeFlow, FlowPath: "support/inst-1"},
+			actor:           runtimeactors.AgentConfig{ID: "flow-agent", Role: "flow_agent", ConversationMode: runtimesessions.RuntimeModeSession.String(), SessionScope: runtimesessions.SessionScopeFlow.String(), FlowPath: "support/inst-1"},
 			bootInFlow:      true,
 			expectLoadFound: true,
-			expectScope:     runtimesessions.SessionScopeFlow,
+			expectScope:     runtimesessions.SessionScopeFlow.String(),
 			expectScopeKey:  "support/inst-1",
 		},
 		{
 			name:               "session_flow_requires_flow_metadata",
-			actor:              runtimeactors.AgentConfig{ID: "flow-root-invalid", Role: "flow_root_invalid", ConversationMode: runtimesessions.RuntimeModeSession, SessionScope: runtimesessions.SessionScopeFlow},
+			actor:              runtimeactors.AgentConfig{ID: "flow-root-invalid", Role: "flow_root_invalid", ConversationMode: runtimesessions.RuntimeModeSession.String(), SessionScope: runtimesessions.SessionScopeFlow.String()},
 			bootErrContains:    "session_scope flow requires flow-scoped declaration",
 			buildErrContains:   "session_scope flow requires flow path metadata",
 			acquireErrContains: "session_scope flow requires actor flow path",
@@ -97,16 +97,16 @@ func TestSessionScopeConformance(t *testing.T) {
 		},
 		{
 			name:            "session_per_entity_in_flow",
-			actor:           runtimeactors.AgentConfig{ID: "entity-agent", Role: "entity_agent", ConversationMode: runtimesessions.RuntimeModeSessionPerEntity, SessionScope: runtimesessions.SessionScopeEntity, FlowPath: "support/inst-1"},
+			actor:           runtimeactors.AgentConfig{ID: "entity-agent", Role: "entity_agent", ConversationMode: runtimesessions.RuntimeModeSessionPerEntity.String(), SessionScope: runtimesessions.SessionScopeEntity.String(), FlowPath: "support/inst-1"},
 			bootInFlow:      true,
 			runtimeScopeKey: "11111111-1111-1111-1111-111111111111",
 			expectLoadFound: true,
-			expectScope:     runtimesessions.SessionScopeEntity,
+			expectScope:     runtimesessions.SessionScopeEntity.String(),
 			expectScopeKey:  "11111111-1111-1111-1111-111111111111",
 		},
 		{
 			name:               "session_per_entity_rejects_global_scope",
-			actor:              runtimeactors.AgentConfig{ID: "entity-global-invalid", Role: "entity_global_invalid", ConversationMode: runtimesessions.RuntimeModeSessionPerEntity, SessionScope: runtimesessions.SessionScopeGlobal, FlowPath: "support/inst-1"},
+			actor:              runtimeactors.AgentConfig{ID: "entity-global-invalid", Role: "entity_global_invalid", ConversationMode: runtimesessions.RuntimeModeSessionPerEntity.String(), SessionScope: runtimesessions.SessionScopeGlobal.String(), FlowPath: "support/inst-1"},
 			bootInFlow:         true,
 			bootErrContains:    "session_per_entity does not support global scope; use session with session_scope: global",
 			buildErrContains:   "session_per_entity does not support global scope; use session with session_scope: global",
@@ -153,7 +153,7 @@ func assertSessionAcquisitionBoundary(t *testing.T, tc sessionScopeConformanceCa
 	t.Helper()
 	registry := runtimesessions.NewInMemoryRegistry(0)
 	ctx := runtimeactors.WithActor(context.Background(), tc.actor)
-	lease, err := registry.Acquire(ctx, tc.actor.ID, conversationModeOrTask(tc.actor), tc.actor.SessionScope, "conformance", tc.scopeKey())
+	lease, err := registry.Acquire(ctx, tc.actor.ID, conversationModeOrTask(tc.actor), runtimesessions.NormalizeSessionScope(tc.actor.SessionScope), "conformance", tc.scopeKey())
 	if strings.TrimSpace(tc.acquireErrContains) != "" {
 		assertErrorContains(t, "session acquisition", err, tc.acquireErrContains)
 		return
@@ -164,7 +164,7 @@ func assertSessionAcquisitionBoundary(t *testing.T, tc sessionScopeConformanceCa
 	if lease == nil {
 		t.Fatal("session acquisition returned nil lease")
 	}
-	if lease.SessionScope != tc.expectScope {
+	if lease.SessionScope.String() != tc.expectScope {
 		t.Fatalf("lease.SessionScope = %q, want %q", lease.SessionScope, tc.expectScope)
 	}
 	if lease.ScopeKey != tc.expectScopeKey {
@@ -189,7 +189,7 @@ func assertConversationPersistenceBoundary(t *testing.T, ctx context.Context, pg
 		AgentID:      tc.actor.ID,
 		SessionScope: tc.actor.SessionScope,
 		ScopeKey:     tc.scopeKey(),
-		Mode:         conversationModeOrTask(tc.actor),
+		Mode:         conversationModeOrTask(tc.actor).String(),
 		Messages:     []runtimellm.Message{{Role: "assistant", Content: "ok"}},
 		Summary:      "ok",
 		TurnCount:    1,
@@ -204,7 +204,7 @@ func assertConversationPersistenceBoundary(t *testing.T, ctx context.Context, pg
 		t.Fatalf("conversation persistence: %v", err)
 	}
 
-	loaded, ok, err := pg.LoadActiveConversation(ctx, tc.actor.ID, conversationModeOrTask(tc.actor), tc.actor.SessionScope, tc.scopeKey())
+	loaded, ok, err := pg.LoadActiveConversation(ctx, tc.actor.ID, conversationModeOrTask(tc.actor).String(), tc.actor.SessionScope, tc.scopeKey())
 	if err != nil {
 		t.Fatalf("conversation load: %v", err)
 	}
@@ -247,8 +247,8 @@ func assertRecoveryBoundary(t *testing.T, tc sessionScopeConformanceCase) {
 	if !ok {
 		t.Fatalf("recover did not restore agent %s", tc.actor.ID)
 	}
-	if cfg.ConversationMode != conversationModeOrTask(tc.actor) {
-		t.Fatalf("recovered ConversationMode = %q, want %q", cfg.ConversationMode, conversationModeOrTask(tc.actor))
+	if cfg.ConversationMode != conversationModeOrTask(tc.actor).String() {
+		t.Fatalf("recovered ConversationMode = %q, want %q", cfg.ConversationMode, conversationModeOrTask(tc.actor).String())
 	}
 	if cfg.SessionScope != tc.actor.SessionScope {
 		t.Fatalf("recovered SessionScope = %q, want %q", cfg.SessionScope, tc.actor.SessionScope)
@@ -260,18 +260,18 @@ func (tc sessionScopeConformanceCase) scopeKey() string {
 		return scopeKey
 	}
 	switch strings.TrimSpace(tc.actor.SessionScope) {
-	case runtimesessions.SessionScopeGlobal:
-		return runtimesessions.SessionScopeGlobal
-	case runtimesessions.SessionScopeFlow:
+	case runtimesessions.SessionScopeGlobal.String():
+		return runtimesessions.SessionScopeGlobal.String()
+	case runtimesessions.SessionScopeFlow.String():
 		return tc.actor.CanonicalFlowPath()
 	default:
 		return ""
 	}
 }
 
-func conversationModeOrTask(actor runtimeactors.AgentConfig) string {
+func conversationModeOrTask(actor runtimeactors.AgentConfig) runtimesessions.RuntimeMode {
 	if mode := strings.TrimSpace(actor.ConversationMode); mode != "" {
-		return mode
+		return runtimesessions.NormalizeConversationRuntimeMode(mode)
 	}
 	return runtimesessions.RuntimeModeTask
 }

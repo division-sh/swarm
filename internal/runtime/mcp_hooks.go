@@ -7,6 +7,7 @@ import (
 
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/diaglog"
 	llm "swarm/internal/runtime/llm"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimetools "swarm/internal/runtime/tools"
@@ -112,7 +113,7 @@ func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, ag
 		return
 	}
 	handleRuntimeLogPersistenceError("mcp-gateway", action, logger.Log(ctx, RuntimeLogEntry{
-		Level:     strings.ToLower(strings.TrimSpace(level)),
+		Level:     diaglog.NormalizeLevel(level),
 		Message:   runtimeMCPMessage(action, detail, errText),
 		Component: "mcp-gateway",
 		Action:    strings.TrimSpace(action),

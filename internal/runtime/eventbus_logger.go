@@ -8,6 +8,7 @@ import (
 
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/diaglog"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
 )
@@ -76,7 +77,7 @@ type runtimeLoggerHook struct {
 	logger *RuntimeLogger
 }
 
-func (h runtimeLoggerHook) Log(ctx context.Context, level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
+func (h runtimeLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
 	if h.logger == nil {
 		return nil
 	}
