@@ -46,6 +46,9 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	if entityID := actor.EffectiveEntityID(); entityID != "" {
 		evt = evt.WithEntityID(entityID)
 	}
+	if flowInstance := strings.TrimSpace(asString(payload["flow_instance"])); flowInstance != "" {
+		evt = evt.WithFlowInstance(flowInstance)
+	}
 	if err := publisher.Publish(ctx, evt); err != nil {
 		logPublisherRuntime(ctx, publisher, "error", "publish_agent_started_failed", "Publishing the agent-started event failed", session.AgentID, session.ID, evt.EntityID(), map[string]any{
 			"event_type": strings.TrimSpace(string(eventType)),

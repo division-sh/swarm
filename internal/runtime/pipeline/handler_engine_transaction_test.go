@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -145,6 +146,45 @@ func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollecto
 	}
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("bus published count = %d, want 1", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+	}
+
+	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
+	}, workflowTriggerContext{
+		Event: (events.Event{
+			Type:      events.EventType("custom.trigger"),
+			Payload:   []byte(`{"entity_id":"payload-ent"}`),
+			CreatedAt: time.Now().UTC(),
+		}).WithEnvelope(events.EventEnvelope{EntityID: "env-ent"}),
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	if got := bus.publishedEvent(0).EntityID(); got != "env-ent" {
+		t.Fatalf("emitted event entity_id = %q, want env-ent", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
+		t.Fatalf("unmarshal emitted payload: %v", err)
+	}
+	if got := payload["entity_id"]; got != "env-ent" {
+		t.Fatalf("emitted payload entity_id = %#v, want env-ent", got)
 	}
 }
 
@@ -437,7 +477,7 @@ func TestResolveHandlerEntityIDForFlowPreservesCrossFlowEntityWithoutCreateEntit
 	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, incomingEntityID, events.Event{
 		Type:    events.EventType("vertical.discovered"),
 		Payload: mustJSON(map[string]any{"entity_id": incomingEntityID}),
-	}, &state)
+	}.WithEnvelope(events.EventEnvelope{EntityID: incomingEntityID}), &state)
 
 	if gotID != incomingEntityID {
 		t.Fatalf("entityID = %q, want preserved %q", gotID, incomingEntityID)
@@ -552,7 +592,7 @@ func TestResolveHandlerEntityIDForFlowCreateEntityKeepsInboundReferenceAndClears
 	inbound := events.Event{
 		Type:    events.EventType("vertical.discovered"),
 		Payload: mustJSON(map[string]any{"entity_id": inboundEntityID, "name": "Parent"}),
-	}
+	}.WithEnvelope(events.EventEnvelope{EntityID: inboundEntityID})
 
 	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "scoring", handler, inboundEntityID, inbound, &state)
 

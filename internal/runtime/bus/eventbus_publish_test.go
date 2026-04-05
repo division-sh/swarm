@@ -326,6 +326,41 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"control-plane", "reviewer-ent-1"})
 }
 
+func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(t *testing.T) {
+	store := &descriptorAwareEventStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "reviewer-ent-1", EntityID: "ent-1"},
+			{AgentID: "reviewer-ent-2", EntityID: "ent-2"},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	matchCh := eb.Subscribe("reviewer-ent-1", events.EventType("custom.trigger"))
+	otherCh := eb.Subscribe("reviewer-ent-2", events.EventType("custom.trigger"))
+
+	err = eb.Publish(context.Background(), (events.Event{
+		Type:      events.EventType("custom.trigger"),
+		Payload:   []byte(`{"entity_id":"ent-2"}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEnvelope(events.EventEnvelope{EntityID: "ent-1"}))
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case evt := <-matchCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("matched event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("entity-scoped reviewer did not receive typed-envelope match")
+	}
+	waitForNoEvent(t, otherCh)
+	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"reviewer-ent-1"})
+}
+
 func TestEventBusPublish_DropsRecipientsMissingExplicitDescriptor(t *testing.T) {
 	store := &descriptorAwareEventStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{

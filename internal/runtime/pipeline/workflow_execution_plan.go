@@ -41,14 +41,11 @@ type handlerExecutionPlan struct {
 }
 
 func workflowEventEntityID(evt events.Event) string {
-	return workflowEventEntityIDWithPayload(evt, parsePayloadMap(evt.Payload))
+	return workflowEventEntityIDWithPayload(evt, nil)
 }
 
 func workflowEventEntityIDWithPayload(evt events.Event, payload map[string]any) string {
-	return strings.TrimSpace(firstNonEmptyString(
-		asString(payload["entity_id"]),
-		evt.EntityID(),
-	))
+	return strings.TrimSpace(evt.EntityID())
 }
 
 func handlerGuardID(spec *runtimecontracts.GuardSpec) string {

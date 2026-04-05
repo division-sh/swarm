@@ -407,6 +407,51 @@ func TestPostgresStore_ListPendingEventsForAgentSpec_PreservesRunID(t *testing.T
 	}
 }
 
+func TestPostgresStore_ListPendingEventsForAgentSpec_UsesTypedEnvelopeMetadata(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	entityID := uuid.NewString()
+	const flowInstance = "review/inst-1"
+	seedSpecAgent(t, ctx, pg, "analysis-agent", "", "scoring.requested")
+
+	eventID := uuid.NewString()
+	evt := events.Event{
+		ID:          eventID,
+		Type:        events.EventType("scoring.requested"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"entity_id":"payload-ent","flow_instance":"payload-flow"}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEnvelope(events.EventEnvelope{
+		EntityID:     entityID,
+		FlowInstance: flowInstance,
+	})
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	if err := pg.InsertEventDeliveries(ctx, eventID, []string{"analysis-agent"}); err != nil {
+		t.Fatalf("InsertEventDeliveries: %v", err)
+	}
+
+	got, err := pg.ListPendingEventsForAgent(ctx, "analysis-agent", time.Now().Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ListPendingEventsForAgent: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("pending events = %d, want 1", len(got))
+	}
+	if got := got[0].EntityID(); got != entityID {
+		t.Fatalf("pending event entity_id = %q, want %q", got, entityID)
+	}
+	if got := got[0].FlowInstance(); got != flowInstance {
+		t.Fatalf("pending event flow_instance = %q, want %q", got, flowInstance)
+	}
+	if got := got[0].Scope(); got != events.EventScopeEntity {
+		t.Fatalf("pending event scope = %q, want %q", got, events.EventScopeEntity)
+	}
+}
+
 func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

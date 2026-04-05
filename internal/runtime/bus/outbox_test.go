@@ -114,7 +114,7 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 			AddRow("event_deliveries", "created_at"),
 	)
 	mock.ExpectExec("INSERT INTO events").
-		WithArgs("evt-1", "custom.emitted", "", "", "global", sqlmock.AnyArg(), 0, "", "platform", "", sqlmock.AnyArg()).
+		WithArgs("evt-1", "custom.emitted", "", "", "entity", sqlmock.AnyArg(), 0, "", "platform", "", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO event_deliveries").
 		WithArgs("evt-1", "reviewer").
