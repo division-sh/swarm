@@ -44,7 +44,7 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 				continue
 			}
 			timerState.Cancelled = true
-			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, timerState.FiresAt, workflowTimerPolicy(source)))
+			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, instance.StorageRef, timerState.FiresAt, workflowTimerPolicy(source)))
 		}
 		for _, timer := range source.WorkflowTimers() {
 			startTrigger, ok := workflowTimerStartTrigger(timer)
@@ -66,7 +66,7 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 				StartedBy: "state:" + nextStage,
 				Recurring: timer.Recurring,
 			})
-			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, fireAt, workflowTimerPolicy(source)))
+			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, instance.StorageRef, fireAt, workflowTimerPolicy(source)))
 		}
 	}); err != nil {
 		return err
@@ -129,7 +129,7 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 				continue
 			}
 			timerState.Cancelled = true
-			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, timerState.FiresAt, workflowTimerPolicy(source)))
+			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, instance.StorageRef, timerState.FiresAt, workflowTimerPolicy(source)))
 		}
 		for _, timer := range source.WorkflowTimers() {
 			startTrigger, ok := workflowTimerStartTrigger(timer)
@@ -151,7 +151,7 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 				StartedBy: "event:" + sourceEvent,
 				Recurring: timer.Recurring,
 			})
-			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, fireAt, workflowTimerPolicy(source)))
+			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, instance.StorageRef, fireAt, workflowTimerPolicy(source)))
 		}
 	}); err != nil {
 		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_event_timer_projection_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{
@@ -191,7 +191,7 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 	if !ok {
 		return nil
 	}
-	sc := accumulationTimeoutSchedule(entityID, bucketRef, time.Time{}, spec.TimeoutMS)
+	sc := accumulationTimeoutSchedule(entityID, evt.FlowInstance(), bucketRef, time.Time{}, spec.TimeoutMS)
 	if isAccumulationTimeoutEvent(evt.Type) || !waiting {
 		pc.persistWorkflowTimerCancellation(ctx, sc)
 		return nil
@@ -244,16 +244,17 @@ func accumulationTimeoutStartedAt(stateBuckets map[string]any, bucketRef timerid
 	return parsed.UTC(), true
 }
 
-func accumulationTimeoutSchedule(entityID string, bucketRef timeridentity.AccumulatorBucketRef, fireAt time.Time, timeoutMS int) Schedule {
+func accumulationTimeoutSchedule(entityID, flowInstance string, bucketRef timeridentity.AccumulatorBucketRef, fireAt time.Time, timeoutMS int) Schedule {
 	handle := timeridentity.AccumulationTimeoutHandle(bucketRef)
 	return Schedule{
-		AgentID:   runtimeWorkflowID,
-		EventType: "accumulate.timeout",
-		Mode:      "once",
-		At:        fireAt,
-		EntityID:  strings.TrimSpace(entityID),
-		TaskID:    handle.TaskID(),
-		Payload:   mustJSON(accumulationTimeoutPayload(handle, timeoutMS)),
+		AgentID:      runtimeWorkflowID,
+		EventType:    "accumulate.timeout",
+		Mode:         "once",
+		At:           fireAt,
+		EntityID:     strings.TrimSpace(entityID),
+		FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"),
+		TaskID:       handle.TaskID(),
+		Payload:      mustJSON(accumulationTimeoutPayload(handle, timeoutMS)),
 	}
 }
 
@@ -327,16 +328,17 @@ func workflowTimerPolicy(source semanticview.Source) map[string]any {
 	return policyDocumentToMap(source.ResolvedPolicyForFlow(""))
 }
 
-func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, entityID string, fireAt time.Time, policy map[string]any) Schedule {
+func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, entityID, flowInstance string, fireAt time.Time, policy map[string]any) Schedule {
 	handle := timeridentity.WorkflowTimerHandle(timer.ID)
 	sc := Schedule{
-		AgentID:   strings.TrimSpace(timer.Owner),
-		EventType: strings.TrimSpace(timer.Event),
-		Mode:      "once",
-		At:        fireAt,
-		EntityID:  strings.TrimSpace(entityID),
-		TaskID:    handle.TaskID(),
-		Payload:   mustJSON(handle.PayloadMetadata()),
+		AgentID:      strings.TrimSpace(timer.Owner),
+		EventType:    strings.TrimSpace(timer.Event),
+		Mode:         "once",
+		At:           fireAt,
+		EntityID:     strings.TrimSpace(entityID),
+		FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"),
+		TaskID:       handle.TaskID(),
+		Payload:      mustJSON(handle.PayloadMetadata()),
 	}
 	if timer.Recurring {
 		if cronSpec, ok := workflowTimerRecurringSpec(timer, policy); ok {

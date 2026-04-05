@@ -925,6 +925,38 @@ func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
 	}
 }
 
+func TestSchedules_LoadActiveSchedulesPreservesFlowInstance(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	entityID := uuid.NewString()
+
+	sc := runtimepipeline.Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		At:           time.Now().Add(30 * time.Minute).UTC(),
+		EntityID:     entityID,
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-a",
+		Payload:      []byte(`{"timer_id":"timer-a"}`),
+	}
+	if err := pg.UpsertSchedule(ctx, sc); err != nil {
+		t.Fatalf("upsert schedule: %v", err)
+	}
+
+	active, err := pg.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("active schedules = %d, want 1", len(active))
+	}
+	if got := active[0].FlowInstance; got != "review/inst-1" {
+		t.Fatalf("loaded flow_instance = %q, want review/inst-1", got)
+	}
+}
+
 func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

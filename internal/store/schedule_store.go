@@ -23,6 +23,8 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	}
 	entityID := sc.EffectiveEntityID()
 	sc.EntityID = entityID
+	flowInstance := sc.EffectiveFlowInstance()
+	sc.FlowInstance = flowInstance
 
 	switch caps.Schedules {
 	case SchemaFlavorCanonical:
@@ -58,6 +60,8 @@ func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipel
 	}
 	entityID := sc.EffectiveEntityID()
 	sc.EntityID = entityID
+	flowInstance := sc.EffectiveFlowInstance()
+	sc.FlowInstance = flowInstance
 	switch caps.Schedules {
 	case SchemaFlavorCanonical:
 		return s.cancelScheduleExactSpec(ctx, sc)
@@ -105,6 +109,8 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 	}
 	entityID := sc.EffectiveEntityID()
 	sc.EntityID = entityID
+	flowInstance := sc.EffectiveFlowInstance()
+	sc.FlowInstance = flowInstance
 	switch caps.Schedules {
 	case SchemaFlavorCanonical:
 		return s.markScheduleFiredExactSpec(ctx, sc)
@@ -148,9 +154,10 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 		WHERE owner_agent = $1
 		  AND fire_event = $2
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
-		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $4
+		  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
+		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $5
 		  AND status = 'active'
-	`, sc.AgentID, sc.EventType, sc.EntityID, strings.TrimSpace(sc.TaskID)); err != nil {
+	`, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)); err != nil {
 		return fmt.Errorf("deactivate previous timer: %w", err)
 	}
 
@@ -177,11 +184,11 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 			owner_node, owner_agent, task_type, status
 		)
 		VALUES (
-			$1, NULLIF($2,'')::uuid, NULL, $3, $4::jsonb,
-			$5, $6, NULLIF($7,''), NULL,
-			NULL, $8, $9, 'active'
+			$1, NULLIF($2,'')::uuid, NULLIF($3,''), $4, $5::jsonb,
+			$6, $7, NULLIF($8,''), NULL,
+			NULL, $9, $10, 'active'
 		)
-	`, timerName, sc.EntityID, sc.EventType, string(payload), fireAt, recurring, sc.Cron, sc.AgentID, taskType)
+	`, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(payload), fireAt, recurring, sc.Cron, sc.AgentID, taskType)
 	if err != nil {
 		return fmt.Errorf("insert timer: %w", err)
 	}
@@ -212,9 +219,10 @@ func (s *PostgresStore) cancelScheduleExactSpec(ctx context.Context, sc runtimep
 		WHERE owner_agent = $1
 		  AND fire_event = $2
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
-		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $4
+		  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
+		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $5
 		  AND status = 'active'
-	`, sc.AgentID, sc.EventType, sc.EntityID, strings.TrimSpace(sc.TaskID))
+	`, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID))
 	if err != nil {
 		return fmt.Errorf("cancel exact timer: %w", err)
 	}
@@ -230,6 +238,7 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			COALESCE(recurrence_cron, ''),
 			fire_at,
 			COALESCE(entity_id::text, ''),
+			COALESCE(flow_instance, ''),
 			fire_payload
 		FROM timers
 		WHERE status = 'active'
@@ -254,6 +263,7 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			&sc.Cron,
 			&fireAt,
 			&sc.EntityID,
+			&sc.FlowInstance,
 			&payload,
 		); err != nil {
 			return nil, fmt.Errorf("scan active timer: %w", err)
@@ -299,9 +309,10 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 		WHERE owner_agent = $1
 		  AND fire_event = $2
 		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
-		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $4
+		  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
+		  AND COALESCE(fire_payload->>'__schedule_task_id', '') = $5
 		  AND status = 'active'
-	`, sc.AgentID, sc.EventType, sc.EntityID, strings.TrimSpace(sc.TaskID), status)
+	`, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID), status)
 	if err != nil {
 		return fmt.Errorf("mark exact timer fired: %w", err)
 	}
