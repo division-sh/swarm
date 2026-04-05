@@ -13,6 +13,10 @@ type missingPipelineReceiptReader interface {
 	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error)
 }
 
+type pipelineReceiptRecorder interface {
+	UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error
+}
+
 type EventStore interface {
 	AppendEvent(ctx context.Context, evt events.Event) error
 	InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error
@@ -63,6 +67,7 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	recorder, _ := r.store.(pipelineReceiptRecorder)
 	var firstErr error
 	for _, record := range eventsToReplay {
 		evt := record.Event
@@ -73,8 +78,16 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			continue
 		}
 		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("replay event %s: %s", evt.ID, replayErr)
+			if recorder == nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("mark replay event %s error receipt: missing pipeline receipt recorder", evt.ID)
+				}
+				continue
+			}
+			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID, "error", replayErr); err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("mark replay event %s error receipt: %w", evt.ID, err)
+				}
 			}
 			continue
 		}
