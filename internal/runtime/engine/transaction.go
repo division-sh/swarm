@@ -22,7 +22,8 @@ func ClassifyFailure(err error) FailureClass {
 		ErrMissingDispatcher,
 		ErrMissingNodeID,
 		ErrMissingNodeHandler,
-		ErrInvalidTransition:
+		ErrInvalidTransition,
+		ErrEmitPersistencePrerequisite:
 		return FailureLogic
 	default:
 		return FailureTransient
