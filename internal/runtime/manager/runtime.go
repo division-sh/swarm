@@ -597,7 +597,7 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 		am.resetRuntimeOwnedState()
 	}
 	if resetter, ok := am.sessions.(sessions.Resetter); ok && resetter != nil {
-		if err := resetter.ResetAll(am.runtimeMode); err != nil {
+		if err := resetter.ResetAll(sessions.NormalizeConversationRuntimeMode(am.runtimeMode)); err != nil {
 			if am.bus != nil {
 				am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
 					Level:     "error",

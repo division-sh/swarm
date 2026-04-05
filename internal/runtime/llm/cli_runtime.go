@@ -108,7 +108,7 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 		SessionScope: strings.TrimSpace(s.SessionScope),
 		ScopeKey:     strings.TrimSpace(s.ScopeKey),
 		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
-		Mode:         mode,
+		Mode:         mode.String(),
 		Messages:     s.Messages,
 		Summary:      BuildSessionSummary(s),
 		TurnCount:    s.TurnCount,
@@ -118,7 +118,7 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 
 func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
 	scope := sessions.ScopeFromContext(ctx)
-	resolved, err := resolvedSessionScope(ctx, scope.ConversationMode, scope.SessionScope, scope.ScopeKey)
+	resolved, err := resolvedSessionScope(ctx, sessions.NormalizeConversationRuntimeMode(scope.ConversationMode), sessions.NormalizeSessionScope(scope.SessionScope), scope.ScopeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -148,16 +148,16 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 			return ""
 		}(),
 		AgentID:          agentID,
-		RuntimeMode:      resolved.RuntimeMode,
-		ConversationMode: resolved.RuntimeMode,
-		SessionScope:     resolved.Scope,
+		RuntimeMode:      resolved.RuntimeMode.String(),
+		ConversationMode: resolved.RuntimeMode.String(),
+		SessionScope:     resolved.Scope.String(),
 		ScopeKey:         resolved.ScopeKey,
 		SystemPrompt:     augmentCLISystemPrompt(systemPrompt, tools),
 		Tools:            tools,
 		Messages:         nil,
 	}
 	if r.conversations != nil && !resolved.Stateless {
-		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, resolved.RuntimeMode, resolved.Scope, resolved.ScopeKey); err == nil && ok {
+		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, resolved.RuntimeMode.String(), resolved.Scope.String(), resolved.ScopeKey); err == nil && ok {
 			s.Messages = rec.Messages
 			s.TurnCount = rec.TurnCount
 		}
@@ -187,7 +187,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	}
 
-	resolved, err := resolvedSessionScope(ctx, coalesce(s.ConversationMode, s.RuntimeMode), coalesce(s.SessionScope, ""), s.ScopeKey)
+	resolved, err := resolvedSessionScope(ctx, sessions.NormalizeConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode)), sessions.NormalizeSessionScope(coalesce(s.SessionScope, "")), s.ScopeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -200,14 +200,14 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, resolved.RuntimeMode, func(heartbeatErr error) {
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the CLI session lease heartbeat failed", s.AgentID, s.ID, entityID, map[string]any{
-				"runtime_mode": resolved.RuntimeMode,
+				"runtime_mode": resolved.RuntimeMode.String(),
 				"scope_key":    resolved.ScopeKey,
 			}, heartbeatErr)
 		})
 		defer stopLeaseHeartbeat()
 
 		if lease.SessionID != s.ID {
-			LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode, s.ID, lease.SessionID, resolved.ScopeKey)
+			LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode.String(), s.ID, lease.SessionID, resolved.ScopeKey)
 			s.ID = lease.SessionID
 		}
 		if sid := strings.TrimSpace(lease.ProviderSessionID); sid != "" {
@@ -225,7 +225,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		s.ParseFailures++
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
-			RuntimeMode:    resolved.RuntimeMode,
+			RuntimeMode:    resolved.RuntimeMode.String(),
 			SessionID:      s.ID,
 			RequestPayload: jsonBytes(map[string]any{"message": message}),
 			ParseOK:        false,
@@ -334,7 +334,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 				if len(s.Messages) > 0 {
 					s.Messages = []Message{{Role: "system", Content: "Session rotated due to CLI runtime recovery."}}
 				}
-				LogSessionRotatedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode, oldSessionID, rotated.SessionID, resolved.ScopeKey, rotateReason, oldTurnCount, oldParseFailures)
+				LogSessionRotatedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode.String(), oldSessionID, rotated.SessionID, resolved.ScopeKey, rotateReason, oldTurnCount, oldParseFailures)
 				args = []string{
 					"-p",
 					"--session-id", sessionToken(s),
@@ -387,7 +387,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		s.ParseFailures++
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:     s.AgentID,
-			RuntimeMode: resolved.RuntimeMode,
+			RuntimeMode: resolved.RuntimeMode.String(),
 			SessionID:   s.ID,
 			RequestPayload: jsonBytes(map[string]any{
 				"args":                          args,
@@ -419,7 +419,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 				}, err)
 			} else {
 				s.ProviderSessionID = sid
-				LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode, oldSessionID, sid, resolved.ScopeKey)
+				LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode.String(), oldSessionID, sid, resolved.ScopeKey)
 			}
 		} else {
 			s.ProviderSessionID = sid
@@ -436,7 +436,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 
 	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:     s.AgentID,
-		RuntimeMode: resolved.RuntimeMode,
+		RuntimeMode: resolved.RuntimeMode.String(),
 		SessionID:   s.ID,
 		RequestPayload: jsonBytes(map[string]any{
 			"args":                          args,

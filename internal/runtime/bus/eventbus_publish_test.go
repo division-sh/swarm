@@ -15,6 +15,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	"swarm/internal/runtime/diaglog"
 	"swarm/internal/runtime/flowmodel"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -164,7 +165,7 @@ type recordedLogEntry struct {
 	Detail any
 }
 
-func (h *recordingLoggerHook) Log(_ context.Context, _, _, _, action, _, _, _, _, _ string, _ map[string]string, detail any, _ string, _ int) error {
+func (h *recordingLoggerHook) Log(_ context.Context, _ diaglog.Level, _, _, action, _, _, _, _, _ string, _ map[string]string, detail any, _ string, _ int) error {
 	h.entries = append(h.entries, recordedLogEntry{Action: action, Detail: detail})
 	return nil
 }

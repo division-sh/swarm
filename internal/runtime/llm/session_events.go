@@ -28,10 +28,10 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 		"model_tier":        sessionModelTier(actor),
 		"timestamp":         time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if flowInstance := strings.TrimSpace(actor.CanonicalFlowPath()); flowInstance != "" && strings.TrimSpace(session.SessionScope) == sessions.SessionScopeEntity {
+	if flowInstance := strings.TrimSpace(actor.CanonicalFlowPath()); flowInstance != "" && strings.TrimSpace(session.SessionScope) == sessions.SessionScopeEntity.String() {
 		payload["flow_instance"] = flowInstance
 	}
-	if flowInstance := strings.TrimSpace(session.ScopeKey); flowInstance != "" && strings.TrimSpace(session.SessionScope) == sessions.SessionScopeFlow {
+	if flowInstance := strings.TrimSpace(session.ScopeKey); flowInstance != "" && strings.TrimSpace(session.SessionScope) == sessions.SessionScopeFlow.String() {
 		payload["flow_instance"] = flowInstance
 	}
 	raw, err := json.Marshal(payload)

@@ -265,7 +265,7 @@ func agentPersistedType(cfg runtimeactors.AgentConfig, modelTier string) string 
 	return "generic"
 }
 
-func agentConversationMode(cfg runtimeactors.AgentConfig) string {
+func agentConversationMode(cfg runtimeactors.AgentConfig) runtimesessions.RuntimeMode {
 	if v := strings.TrimSpace(cfg.ConversationMode); v != "" {
 		return runtimesessions.NormalizeConversationRuntimeMode(v)
 	}

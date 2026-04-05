@@ -47,14 +47,14 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 		SessionScope: strings.TrimSpace(s.SessionScope),
 		ScopeKey:     strings.TrimSpace(s.ScopeKey),
 		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
-		Mode:         mode,
+		Mode:         mode.String(),
 		Messages:     s.Messages,
 		Summary:      BuildSessionSummary(s),
 		TurnCount:    s.TurnCount,
 		Status:       "active",
 	}); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_failed", "Persisting the CLI conversation failed", s.AgentID, s.ID, "", map[string]any{
-			"conversation_mode": mode,
+			"conversation_mode": mode.String(),
 			"scope_key":         strings.TrimSpace(s.ScopeKey),
 		}, err)
 	}
@@ -174,10 +174,10 @@ func dedupeToolCalls(calls []ToolCall) []ToolCall {
 }
 
 type sessionIDAdopter interface {
-	AdoptSessionID(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey string) error
+	AdoptSessionID(ctx context.Context, agentID string, runtimeMode sessions.RuntimeMode, sessionScope sessions.SessionScope, lockOwner, newSessionID, scopeKey string) error
 }
 
-func adoptRegistrySessionID(ctx context.Context, reg sessions.Registry, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey string) error {
+func adoptRegistrySessionID(ctx context.Context, reg sessions.Registry, agentID string, runtimeMode sessions.RuntimeMode, sessionScope sessions.SessionScope, lockOwner, newSessionID, scopeKey string) error {
 	if reg == nil {
 		return nil
 	}

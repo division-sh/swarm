@@ -114,7 +114,7 @@ func projectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 		Role:              strings.TrimSpace(cfg.Role),
 		ModelTier:         modelTier,
 		LLMBackend:        llmBackend,
-		ConversationMode:  conversationMode,
+		ConversationMode:  conversationMode.String(),
 		ParentAgentID:     nullable(strings.TrimSpace(parentAgentID), strings.TrimSpace(cfg.ParentAgent)),
 		EntityID:          cfg.EffectiveEntityID(),
 		ConfigJSON:        configJSON,
@@ -141,8 +141,8 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 	if llmBackend == "" {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s missing llm_backend", strings.TrimSpace(row.AgentID))
 	}
-	conversationMode := strings.TrimSpace(row.ConversationMode)
-	if _, err := runtimesessions.ParseConversationRuntimeMode(conversationMode); err != nil {
+	conversationMode, err := runtimesessions.ParseConversationRuntimeMode(row.ConversationMode)
+	if err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid conversation_mode %q: %w", strings.TrimSpace(row.AgentID), conversationMode, err)
 	}
 	if err := validateOpaqueAgentConfig(row.ConfigJSON); err != nil {
@@ -164,8 +164,8 @@ func hydratePersistedAgentConfig(row persistedAgentProjection) (runtimeactors.Ag
 		Mode:             desc.Mode,
 		ModelTier:        modelTier,
 		LLMBackend:       llmBackend,
-		ConversationMode: conversationMode,
-		SessionScope:     sessionScope,
+		ConversationMode: conversationMode.String(),
+		SessionScope:     sessionScope.String(),
 		MaxTurnsPerTask:  desc.MaxTurnsPerTask,
 		Subscriptions:    decodeJSONStringList(row.SubscriptionsJSON),
 		EmitEvents:       decodeJSONStringList(row.EmitEventsJSON),

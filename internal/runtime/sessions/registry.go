@@ -12,22 +12,22 @@ import (
 )
 
 type Registry interface {
-	Acquire(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, scopeKey string) (*Lease, error)
+	Acquire(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, scopeKey string) (*Lease, error)
 	Release(ctx context.Context, lease *Lease) error
-	Rotate(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, summary, scopeKey string) (*Lease, error)
-	IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionScope, sessionID, scopeKey string) error
+	Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, summary, scopeKey string) (*Lease, error)
+	IncrementTurn(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, sessionID, scopeKey string) error
 }
 
 type Resetter interface {
-	ResetAll(runtimeMode string) error
+	ResetAll(runtimeMode RuntimeMode) error
 }
 
 type Lease struct {
 	SessionID         string
 	ProviderSessionID string
 	AgentID           string
-	RuntimeMode       string
-	SessionScope      string
+	RuntimeMode       RuntimeMode
+	SessionScope      SessionScope
 	LockOwner         string
 	ScopeKey          string
 	ExpiresAt         time.Time
@@ -37,7 +37,7 @@ type Record struct {
 	SessionID         string
 	ProviderSessionID string
 	AgentID           string
-	RuntimeMode       string
+	RuntimeMode       RuntimeMode
 	ScopeKey          string
 	Status            string
 	TurnCount         int
@@ -69,11 +69,11 @@ func NewRegistry(lockTTL time.Duration) Registry {
 	return NewInMemoryRegistry(lockTTL)
 }
 
-func registryKey(agentID, runtimeMode, scopeKey string) string {
-	return strings.TrimSpace(agentID) + "|" + strings.TrimSpace(runtimeMode) + "|" + strings.TrimSpace(scopeKey)
+func registryKey(agentID string, runtimeMode RuntimeMode, scopeKey string) string {
+	return strings.TrimSpace(agentID) + "|" + runtimeMode.String() + "|" + strings.TrimSpace(scopeKey)
 }
 
-func (sr *InMemoryRegistry) Acquire(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, scopeKey string) (*Lease, error) {
+func (sr *InMemoryRegistry) Acquire(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
@@ -145,7 +145,7 @@ func (sr *InMemoryRegistry) Release(_ context.Context, lease *Lease) error {
 	return nil
 }
 
-func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, summary, scopeKey string) (*Lease, error) {
+func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, summary, scopeKey string) (*Lease, error) {
 	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return nil, err
@@ -190,7 +190,7 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID, runtimeMode, se
 	}, nil
 }
 
-func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionScope, sessionID, scopeKey string) error {
+func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, sessionID, scopeKey string) error {
 	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return err
@@ -213,9 +213,8 @@ func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, agentID, runtimeM
 	return fmt.Errorf("session for agent %s not found", agentID)
 }
 
-func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, agentID, runtimeMode, sessionScope, lockOwner, newSessionID, scopeKey string) error {
+func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, newSessionID, scopeKey string) error {
 	agentID = strings.TrimSpace(agentID)
-	runtimeMode = strings.TrimSpace(runtimeMode)
 	lockOwner = strings.TrimSpace(lockOwner)
 	newSessionID = strings.TrimSpace(newSessionID)
 	if agentID == "" || runtimeMode == "" || lockOwner == "" || newSessionID == "" {
@@ -283,19 +282,14 @@ func (sr *InMemoryRegistry) Snapshot(agentID string) (*Record, bool) {
 	return nil, false
 }
 
-func (sr *InMemoryRegistry) ResetAll(runtimeMode string) error {
-	runtimeMode = strings.TrimSpace(runtimeMode)
+func (sr *InMemoryRegistry) ResetAll(runtimeMode RuntimeMode) error {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	if runtimeMode == "" {
 		sr.byKey = make(map[string]*Record)
 		return nil
 	}
-	mode, err := ParseConversationRuntimeMode(runtimeMode)
-	if err != nil {
-		return err
-	}
-	if mode == RuntimeModeTask {
+	if runtimeMode == RuntimeModeTask {
 		return nil
 	}
 	for key, rec := range sr.byKey {
@@ -303,7 +297,7 @@ func (sr *InMemoryRegistry) ResetAll(runtimeMode string) error {
 			delete(sr.byKey, key)
 			continue
 		}
-		if strings.TrimSpace(rec.RuntimeMode) == mode {
+		if rec.RuntimeMode == runtimeMode {
 			delete(sr.byKey, key)
 		}
 	}

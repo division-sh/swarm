@@ -13,7 +13,7 @@ type RuntimeLogSink interface {
 	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error
 }
 
-func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, message, agentID, sessionID, entityID string, detail any, err error) {
+func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level diaglog.Level, action, message, agentID, sessionID, entityID string, detail any, err error) {
 	if logger == nil {
 		return
 	}
@@ -23,7 +23,7 @@ func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, me
 		errText = strings.TrimSpace(err.Error())
 	}
 	if err := diaglog.RunLog(ctx, logger, runtimepipeline.RuntimeLogEntry{
-		Level:     strings.TrimSpace(level),
+		Level:     diaglog.NormalizeLevel(level.String()),
 		Message:   strings.TrimSpace(message),
 		Component: "llm-runtime",
 		Action:    strings.TrimSpace(action),
@@ -43,7 +43,7 @@ func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, me
 	}
 }
 
-func logPublisherRuntime(ctx context.Context, publisher EventPublisher, level, action, message, agentID, sessionID, entityID string, detail any, err error) {
+func logPublisherRuntime(ctx context.Context, publisher EventPublisher, level diaglog.Level, action, message, agentID, sessionID, entityID string, detail any, err error) {
 	if publisher == nil {
 		return
 	}

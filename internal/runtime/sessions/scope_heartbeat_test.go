@@ -25,7 +25,7 @@ func TestNormalizeConversationRuntimeMode_AcceptsStatelessAlias(t *testing.T) {
 	if got := NormalizeConversationRuntimeMode("stateless"); got != RuntimeModeTask {
 		t.Fatalf("NormalizeConversationRuntimeMode(stateless) = %q, want %q", got, RuntimeModeTask)
 	}
-	scope, err := ResolveScope(context.Background(), "stateless", "", "ignored")
+	scope, err := ResolveScope(context.Background(), NormalizeConversationRuntimeMode("stateless"), "", "ignored")
 	if err != nil {
 		t.Fatalf("ResolveScope(stateless): %v", err)
 	}

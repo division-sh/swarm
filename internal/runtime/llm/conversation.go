@@ -68,11 +68,11 @@ type Conversation struct {
 func ConversationModeString(mode ConversationMode) string {
 	switch mode {
 	case TaskScoped:
-		return sessions.RuntimeModeTask
+		return sessions.RuntimeModeTask.String()
 	case SessionScoped:
-		return sessions.RuntimeModeSession
+		return sessions.RuntimeModeSession.String()
 	case SessionPerEntityScoped:
-		return sessions.RuntimeModeSessionPerEntity
+		return sessions.RuntimeModeSessionPerEntity.String()
 	default:
 		return ""
 	}
