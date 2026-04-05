@@ -457,6 +457,8 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
+	runID := uuid.NewString()
+	parentID := uuid.NewString()
 	eventProcessed := events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("system.started"),
@@ -465,17 +467,35 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 		CreatedAt:   time.Now().Add(-2 * time.Minute),
 	}
 	eventMissing := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("system.directive"),
-		SourceAgent: "human",
-		Payload:     []byte(`{"directive":"x"}`),
-		CreatedAt:   time.Now().Add(-1 * time.Minute),
+		ID:            uuid.NewString(),
+		Type:          events.EventType("system.directive"),
+		SourceAgent:   "human",
+		Payload:       []byte(`{"directive":"x"}`),
+		RunID:         runID,
+		ParentEventID: parentID,
+		CreatedAt:     time.Now().Add(-1 * time.Minute),
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running') ON CONFLICT (run_id) DO NOTHING`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          parentID,
+		Type:        events.EventType("system.parent"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"ok":true}`),
+		RunID:       runID,
+		CreatedAt:   time.Now().Add(-3 * time.Minute),
+	}); err != nil {
+		t.Fatalf("append parent event: %v", err)
 	}
 	if err := pg.AppendEvent(ctx, eventProcessed); err != nil {
 		t.Fatalf("append processed event: %v", err)
 	}
 	if err := pg.AppendEvent(ctx, eventMissing); err != nil {
 		t.Fatalf("append missing event: %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+		t.Fatalf("upsert parent receipt: %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, eventProcessed.ID, "processed", ""); err != nil {
 		t.Fatalf("upsert processed receipt: %v", err)
@@ -490,6 +510,12 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	}
 	if missing[0].ID != eventMissing.ID {
 		t.Fatalf("expected missing event id=%s got=%s", eventMissing.ID, missing[0].ID)
+	}
+	if missing[0].RunID != runID {
+		t.Fatalf("missing event run_id = %q, want %q", missing[0].RunID, runID)
+	}
+	if missing[0].ParentEventID != parentID {
+		t.Fatalf("missing event parent_event_id = %q, want %q", missing[0].ParentEventID, parentID)
 	}
 }
 
