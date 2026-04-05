@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"strings"
 
 	"swarm/internal/runtime/core/toolcapabilities"
@@ -11,7 +12,14 @@ type ToolInputValidator struct {
 	definitions func() ([]llm.ToolDefinition, error)
 }
 
+var errToolDefinitionsProviderRequired = errors.New("tool definitions provider is required")
+
 func NewToolInputValidator(definitions func() ([]llm.ToolDefinition, error)) *ToolInputValidator {
+	if definitions == nil {
+		definitions = func() ([]llm.ToolDefinition, error) {
+			return nil, errToolDefinitionsProviderRequired
+		}
+	}
 	return &ToolInputValidator{definitions: definitions}
 }
 
@@ -19,6 +27,9 @@ func (v *ToolInputValidator) Validate(name string, input any) error {
 	name = normalizeNativeToolName(name)
 	if name == "" || toolKindPolicy(name) == toolcapabilities.KindEmit {
 		return nil
+	}
+	if v == nil || v.definitions == nil {
+		return errToolDefinitionsProviderRequired
 	}
 	input = validatorNormalizeRuntimeToolInput(name, input)
 	payload := map[string]any{}
