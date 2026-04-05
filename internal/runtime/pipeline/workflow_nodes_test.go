@@ -112,3 +112,75 @@ func TestWorkflowNodeExternalEventType_ExternalizesLocalFlowOutputs(t *testing.T
 		t.Fatalf("workflowNodeExternalEventType = %q, want child/work.completed", got)
 	}
 }
+
+func TestLoadWorkflowNodes_UsesHandlerKeysForCrossFlowPinAutoWire(t *testing.T) {
+	producer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		Path: "producer",
+	}
+	consumer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		Path: "consumer",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"consumer-node": {
+				ID:       "consumer-node",
+				Produces: []string{"scan.completed"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"scan.requested": {
+						Emits: runtimecontracts.EventEmission{Single: "scan.completed"},
+					},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.completed": {OwningNode: "consumer-node"},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, consumer}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"producer": &root.Children[0],
+				"consumer": &root.Children[1],
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"consumer-node": {
+					"scan.requested": {},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"consumer-node": consumer.Nodes["consumer-node"],
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"consumer/scan.completed": {OwningNode: "consumer-node"},
+		},
+	}
+
+	nodes, err := LoadWorkflowNodes(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("LoadWorkflowNodes: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("LoadWorkflowNodes returned %d nodes, want 1", len(nodes))
+	}
+	for _, subscription := range nodes[0].Subscriptions {
+		if string(subscription) == "producer/scan.requested" {
+			return
+		}
+	}
+	t.Fatalf("Subscriptions = %#v, want producer/scan.requested", nodes[0].Subscriptions)
+}

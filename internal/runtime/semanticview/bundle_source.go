@@ -165,6 +165,9 @@ func (s bundleSource) FlowHasInputEvent(flowID, eventType string) bool {
 func (s bundleSource) FlowHasOutputEvent(flowID, eventType string) bool {
 	return s.bundle.FlowHasOutputEvent(flowID, eventType)
 }
+func (s bundleSource) ResolveFlowInputAutoWire(flowID, eventType string) runtimecontracts.FlowInputAutoWireResolution {
+	return s.bundle.ResolveFlowInputAutoWire(flowID, eventType)
+}
 func (s bundleSource) FlowInputProducerPatterns(flowID, eventType string) []string {
 	return s.bundle.FlowInputProducerPatterns(flowID, eventType)
 }
@@ -209,6 +212,9 @@ func (s bundleSource) AgentContractSource(agentID string) (runtimecontracts.Cont
 }
 func (s bundleSource) ResolveNodeEventReference(nodeID, eventType string) string {
 	return s.bundle.ResolveNodeEventReference(nodeID, eventType)
+}
+func (s bundleSource) NodeRuntimeSubscriptions(nodeID string) []string {
+	return s.bundle.NodeRuntimeSubscriptions(nodeID)
 }
 func (s bundleSource) NodeHandlerSubscriptions(nodeID string) []string {
 	return s.bundle.NodeHandlerSubscriptions(nodeID)

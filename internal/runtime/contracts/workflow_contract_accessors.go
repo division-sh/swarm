@@ -142,6 +142,20 @@ func (b *WorkflowContractBundle) NodeEntries() map[string]SystemNodeContract {
 	if b == nil {
 		return nil
 	}
+	if len(b.Nodes) == 0 {
+		out := make(map[string]SystemNodeContract)
+		for _, view := range b.ProjectViews() {
+			for key, entry := range view.Nodes {
+				out[key] = entry
+			}
+		}
+		for _, view := range b.FlowViews() {
+			for key, entry := range view.Nodes {
+				out[key] = entry
+			}
+		}
+		return out
+	}
 	return cloneSystemNodeContractMap(b.Nodes)
 }
 func (b *WorkflowContractBundle) NodeEntry(id string) (SystemNodeContract, bool) {
@@ -382,44 +396,55 @@ func (b *WorkflowContractBundle) FlowHasInputEvent(flowID, eventType string) boo
 func (b *WorkflowContractBundle) FlowHasOutputEvent(flowID, eventType string) bool {
 	return b.flowEventScope(flowID).HasOutput(eventType)
 }
-func (b *WorkflowContractBundle) FlowInputProducerPatterns(targetFlowID, eventType string) []string {
+func (b *WorkflowContractBundle) ResolveFlowInputAutoWire(targetFlowID, eventType string) FlowInputAutoWireResolution {
 	targetFlowID = strings.TrimSpace(targetFlowID)
 	eventType = eventidentity.Normalize(eventType)
-	if b == nil || targetFlowID == "" || eventType == "" {
-		return nil
+	if b == nil || targetFlowID == "" || eventType == "" || !b.FlowHasInputEvent(targetFlowID, eventType) {
+		return FlowInputAutoWireResolution{EventType: eventType}
 	}
-	seen := make(map[string]struct{})
-	out := make([]string, 0, 4)
+
+	out := FlowInputAutoWireResolution{EventType: eventType}
+	seenPatterns := make(map[string]struct{})
 	appendPattern := func(value string) {
 		value = eventidentity.Normalize(value)
 		if value == "" {
 			return
 		}
-		if _, ok := seen[value]; ok {
+		if _, ok := seenPatterns[value]; ok {
 			return
 		}
-		seen[value] = struct{}{}
-		out = append(out, value)
+		seenPatterns[value] = struct{}{}
+		out.Patterns = append(out.Patterns, value)
 	}
+
 	for _, view := range b.ProjectViews() {
 		if _, ok := view.Events[eventType]; ok {
 			appendPattern(eventType)
 		}
 	}
+
+	seenFlows := make(map[string]struct{})
 	for _, view := range b.FlowViews() {
 		flowID := strings.TrimSpace(view.Paths.ID)
-		if flowID == "" || flowID == targetFlowID {
+		if flowID == "" || flowID == targetFlowID || !b.FlowHasOutputEvent(flowID, eventType) {
 			continue
 		}
-		for _, output := range view.Schema.Pins.Outputs.Events {
-			if eventidentity.Normalize(output) != eventType {
-				continue
-			}
-			appendPattern(b.ResolveFlowEventReference(flowID, eventType))
+		if _, ok := seenFlows[flowID]; ok {
+			continue
 		}
+		seenFlows[flowID] = struct{}{}
+		out.ProducerFlows = append(out.ProducerFlows, flowID)
 	}
-	sort.Strings(out)
+
+	sort.Strings(out.ProducerFlows)
+	if len(out.ProducerFlows) == 1 {
+		appendPattern(b.ResolveFlowEventReference(out.ProducerFlows[0], eventType))
+	}
+	sort.Strings(out.Patterns)
 	return out
+}
+func (b *WorkflowContractBundle) FlowInputProducerPatterns(targetFlowID, eventType string) []string {
+	return append([]string{}, b.ResolveFlowInputAutoWire(targetFlowID, eventType).Patterns...)
 }
 func (b *WorkflowContractBundle) ResolveFlowEventReference(flowID, eventType string) string {
 	scope := b.flowEventScope(flowID)
@@ -460,8 +485,35 @@ func (b *WorkflowContractBundle) NodeContractSource(nodeID string) (ContractItem
 	if b == nil {
 		return ContractItemSource{}, false
 	}
-	source, ok := b.nodeSources[strings.TrimSpace(nodeID)]
-	return source, ok
+	nodeID = strings.TrimSpace(nodeID)
+	source, ok := b.nodeSources[nodeID]
+	if ok {
+		return source, true
+	}
+	for _, view := range b.ProjectViews() {
+		for key, entry := range view.Nodes {
+			if strings.TrimSpace(key) != nodeID && strings.TrimSpace(entry.ID) != nodeID {
+				continue
+			}
+			return ContractItemSource{
+				PackageKey: strings.TrimSpace(view.Paths.Key),
+				Layer:      "project",
+			}, true
+		}
+	}
+	for _, view := range b.FlowViews() {
+		for key, entry := range view.Nodes {
+			if strings.TrimSpace(key) != nodeID && strings.TrimSpace(entry.ID) != nodeID {
+				continue
+			}
+			return ContractItemSource{
+				PackageKey: strings.TrimSpace(view.Paths.PackageKey),
+				FlowID:     strings.TrimSpace(view.Paths.ID),
+				Layer:      "flow",
+			}, true
+		}
+	}
+	return ContractItemSource{}, false
 }
 func (b *WorkflowContractBundle) EventContractSource(eventType string) (ContractItemSource, bool) {
 	if b == nil {
@@ -483,6 +535,37 @@ func (b *WorkflowContractBundle) ResolveNodeEventReference(nodeID, eventType str
 	}
 	return b.nodeEventScope(nodeID).ResolveEvent(eventType, b.flowEventDescendants(b.nodeFlowID(nodeID)))
 }
+func (b *WorkflowContractBundle) NodeRuntimeSubscriptions(nodeID string) []string {
+	nodeID = strings.TrimSpace(nodeID)
+	if b == nil || nodeID == "" {
+		return nil
+	}
+	entry, ok := b.nodeContract(nodeID)
+	if !ok {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(entry.SubscribesTo)+len(entry.EventHandlers))
+	appendSubscription := func(value string) {
+		value = eventidentity.Normalize(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	for _, eventType := range entry.SubscribesTo {
+		appendSubscription(eventType)
+	}
+	for _, eventType := range b.NodeHandlerSubscriptions(nodeID) {
+		appendSubscription(eventType)
+	}
+	sort.Strings(out)
+	return out
+}
 func (b *WorkflowContractBundle) ScopedAgentEntries() map[string]AgentRegistryEntry {
 	if b == nil {
 		return nil
@@ -501,8 +584,12 @@ func (b *WorkflowContractBundle) NodeEventHandlers(nodeID string) map[string]Sys
 	}
 	nodeID = strings.TrimSpace(nodeID)
 	handlers, ok := b.Semantics.NodeHandlers[nodeID]
-	if !ok {
-		return nil
+	if !ok || len(handlers) == 0 {
+		entry, ok := b.nodeContract(nodeID)
+		if !ok || len(entry.EventHandlers) == 0 {
+			return nil
+		}
+		handlers = entry.EventHandlers
 	}
 	out := make(map[string]SystemNodeEventHandler, len(handlers))
 	for eventType, handler := range handlers {
@@ -511,12 +598,8 @@ func (b *WorkflowContractBundle) NodeEventHandlers(nodeID string) map[string]Sys
 	return out
 }
 func (b *WorkflowContractBundle) NodeHandlerSubscriptions(nodeID string) []string {
-	if b == nil {
-		return nil
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	handlers, ok := b.Semantics.NodeHandlers[nodeID]
-	if !ok {
+	handlers := b.NodeEventHandlers(nodeID)
+	if len(handlers) == 0 {
 		return nil
 	}
 	out := make([]string, 0, len(handlers))
@@ -528,6 +611,42 @@ func (b *WorkflowContractBundle) NodeHandlerSubscriptions(nodeID string) []strin
 	}
 	sort.Strings(out)
 	return out
+}
+
+func (b *WorkflowContractBundle) nodeContract(nodeID string) (SystemNodeContract, bool) {
+	nodeID = strings.TrimSpace(nodeID)
+	if b == nil || nodeID == "" {
+		return SystemNodeContract{}, false
+	}
+	if entry, ok := b.Nodes[nodeID]; ok {
+		return entry, true
+	}
+	for _, entry := range b.Nodes {
+		if strings.TrimSpace(entry.ID) == nodeID {
+			return entry, true
+		}
+	}
+	for _, view := range b.ProjectViews() {
+		if entry, ok := view.Nodes[nodeID]; ok {
+			return entry, true
+		}
+		for _, entry := range view.Nodes {
+			if strings.TrimSpace(entry.ID) == nodeID {
+				return entry, true
+			}
+		}
+	}
+	for _, view := range b.FlowViews() {
+		if entry, ok := view.Nodes[nodeID]; ok {
+			return entry, true
+		}
+		for _, entry := range view.Nodes {
+			if strings.TrimSpace(entry.ID) == nodeID {
+				return entry, true
+			}
+		}
+	}
+	return SystemNodeContract{}, false
 }
 func (b *WorkflowContractBundle) NodeEventHandler(nodeID, eventType string) (SystemNodeEventHandler, bool) {
 	if b == nil {

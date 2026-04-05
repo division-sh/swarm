@@ -163,6 +163,126 @@ func TestDeriveRouteTable_InputPinsAutoWireFromProducerOutput(t *testing.T) {
 	}
 }
 
+func TestDeriveRouteTable_HandlerOnlyInputPinsAutoWireFromProducerOutput(t *testing.T) {
+	producer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		Path: "producer",
+	}
+	consumer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		Path: "consumer",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"consumer-node": {
+				ID: "consumer-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"scan.requested": {},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, consumer}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"producer": &root.Children[0],
+				"consumer": &root.Children[1],
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"consumer-node": {
+					"scan.requested": {},
+				},
+			},
+		},
+	}
+	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	got := rt.Resolve("producer/scan.requested")
+	if len(got) != 1 || got[0].ID != "consumer-node" {
+		t.Fatalf("Resolve(producer/scan.requested) = %#v, want consumer-node", got)
+	}
+}
+
+func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *testing.T) {
+	producerA := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer_a", Flow: "producer_a"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"ticket.ready"}},
+			},
+		},
+		Path: "producer_a",
+	}
+	producerB := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer_b", Flow: "producer_b"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"ticket.ready"}},
+			},
+		},
+		Path: "producer_b",
+	}
+	consumer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"ticket.ready"}},
+			},
+		},
+		Path: "consumer",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"consumer-node": {
+				ID: "consumer-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"ticket.ready": {},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producerA, producerB, consumer}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"producer_a": &root.Children[0],
+				"producer_b": &root.Children[1],
+				"consumer":   &root.Children[2],
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"consumer-node": {
+					"ticket.ready": {},
+				},
+			},
+		},
+	}
+	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	if got := rt.Resolve("producer_a/ticket.ready"); len(got) != 0 {
+		t.Fatalf("Resolve(producer_a/ticket.ready) = %#v, want none", got)
+	}
+	if got := rt.Resolve("producer_b/ticket.ready"); len(got) != 0 {
+		t.Fatalf("Resolve(producer_b/ticket.ready) = %#v, want none", got)
+	}
+}
+
 func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T) {
 	scoring := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "scoring", Flow: "scoring"},

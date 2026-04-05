@@ -187,8 +187,6 @@ validation.started:
 validation-orchestrator:
   id: validation-orchestrator
   execution_type: system_node
-  subscribes_to:
-    - scoring/vertical.shortlisted
   produces:
     - validation.started
   event_handlers:
