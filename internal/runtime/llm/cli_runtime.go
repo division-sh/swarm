@@ -70,9 +70,9 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 	if r.conversations == nil || s == nil {
 		return nil
 	}
-	mode := strings.TrimSpace(s.ConversationMode)
-	if mode == "" {
-		mode = sessions.RuntimeModeSession
+	mode, err := sessions.ParseConversationRuntimeMode(s.ConversationMode)
+	if err != nil {
+		return err
 	}
 	if !shouldPersistConversationMode(mode) {
 		return nil
@@ -100,15 +100,13 @@ func (r *ClaudeCLIRuntime) SetMonitorSink(sink MonitorSink) {
 
 func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
 	scope := sessions.ScopeFromContext(ctx)
-	mode := strings.TrimSpace(scope.ConversationMode)
-	if mode == "" {
-		mode = sessions.RuntimeModeSession
+	resolved, err := resolvedSessionScope(ctx, scope.ConversationMode, scope.ScopeKey)
+	if err != nil {
+		return nil, err
 	}
-	resolved := resolvedSessionScope(mode, scope.ScopeKey)
 
 	var lease *sessions.Lease
 	if !resolved.Stateless {
-		var err error
 		lease, err = r.sessions.Acquire(ctx, agentID, resolved.RuntimeMode, r.lockOwner, resolved.ScopeKey)
 		if err != nil {
 			return nil, err
@@ -133,14 +131,14 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 		}(),
 		AgentID:          agentID,
 		RuntimeMode:      resolved.RuntimeMode,
-		ConversationMode: mode,
+		ConversationMode: resolved.RuntimeMode,
 		ScopeKey:         resolved.ScopeKey,
 		SystemPrompt:     augmentCLISystemPrompt(systemPrompt, tools),
 		Tools:            tools,
 		Messages:         nil,
 	}
 	if r.conversations != nil && !resolved.Stateless {
-		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, mode, resolved.ScopeKey); err == nil && ok {
+		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, resolved.RuntimeMode, resolved.ScopeKey); err == nil && ok {
 			s.Messages = rec.Messages
 			s.TurnCount = rec.TurnCount
 		}
@@ -170,9 +168,11 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	}
 
-	resolved := resolvedSessionScope(s.ConversationMode, s.ScopeKey)
+	resolved, err := resolvedSessionScope(ctx, coalesce(s.ConversationMode, s.RuntimeMode), s.ScopeKey)
+	if err != nil {
+		return nil, err
+	}
 	var lease *sessions.Lease
-	var err error
 	if !resolved.Stateless {
 		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, r.lockOwner, resolved.ScopeKey)
 		if err != nil {

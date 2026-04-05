@@ -4,17 +4,19 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	runtimeactors "swarm/internal/runtime/core/actors"
 )
 
 func TestScopeFromContext_DefaultsToTask(t *testing.T) {
 	scope := ScopeFromContext(nil)
-	if scope.ConversationMode != "task" || scope.ScopeKey != "" {
+	if scope.ConversationMode != "" || scope.ScopeKey != "" {
 		t.Fatalf("unexpected nil-context scope: %+v", scope)
 	}
 
 	ctx := WithScope(context.Background(), "TASK", "  abc  ")
 	scope = ScopeFromContext(ctx)
-	if scope.ConversationMode != "task" || scope.ScopeKey != "abc" {
+	if scope.ConversationMode != "TASK" || scope.ScopeKey != "abc" {
 		t.Fatalf("unexpected scoped context: %+v", scope)
 	}
 }
@@ -23,9 +25,49 @@ func TestNormalizeConversationRuntimeMode_AcceptsStatelessAlias(t *testing.T) {
 	if got := NormalizeConversationRuntimeMode("stateless"); got != RuntimeModeTask {
 		t.Fatalf("NormalizeConversationRuntimeMode(stateless) = %q, want %q", got, RuntimeModeTask)
 	}
-	scope := ResolveScope("stateless", "ignored")
+	scope, err := ResolveScope(context.Background(), "stateless", "ignored")
+	if err != nil {
+		t.Fatalf("ResolveScope(stateless): %v", err)
+	}
 	if scope.RuntimeMode != RuntimeModeTask || !scope.Stateless {
 		t.Fatalf("ResolveScope(stateless) = %+v, want task/stateless", scope)
+	}
+}
+
+func TestResolveScope_SessionUsesActorDeclaration(t *testing.T) {
+	flowCtx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID:       "flow-agent",
+		FlowPath: "review/inst-1",
+	})
+	flowScope, err := ResolveScope(flowCtx, RuntimeModeSession, "")
+	if err != nil {
+		t.Fatalf("ResolveScope(flow session): %v", err)
+	}
+	if flowScope.Scope != "flow" || flowScope.ScopeKey != "review/inst-1" || flowScope.FlowInstance != "review/inst-1" {
+		t.Fatalf("unexpected flow scope: %+v", flowScope)
+	}
+
+	globalCtx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID: "global-agent",
+	})
+	globalScope, err := ResolveScope(globalCtx, RuntimeModeSession, "")
+	if err != nil {
+		t.Fatalf("ResolveScope(global session): %v", err)
+	}
+	if globalScope.Scope != "global" || globalScope.ScopeKey != "global" {
+		t.Fatalf("unexpected global scope: %+v", globalScope)
+	}
+}
+
+func TestResolveScope_InvalidSessionConfigurationsFailClosed(t *testing.T) {
+	if _, err := ResolveScope(context.Background(), RuntimeModeSession, ""); err == nil {
+		t.Fatal("expected session scope without declaration to fail")
+	}
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID: "entity-agent",
+	})
+	if _, err := ResolveScope(ctx, RuntimeModeSessionPerEntity, "entity-1"); err == nil {
+		t.Fatal("expected session_per_entity without flow path to fail")
 	}
 }
 

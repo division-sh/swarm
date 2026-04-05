@@ -210,6 +210,24 @@ func TestParseConversationMode_AcceptsStatelessAlias(t *testing.T) {
 	}
 }
 
+func TestNewLLMAgent_RejectsInvalidConversationMode(t *testing.T) {
+	if _, err := NewLLMAgent(models.AgentConfig{
+		ID:               "agent-1",
+		ConversationMode: "session-scoped",
+	}, nil, nil, nil); err == nil {
+		t.Fatal("expected invalid conversation mode to fail closed")
+	}
+}
+
+func mustNewLLMAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) *LLMAgent {
+	t.Helper()
+	agent, err := NewLLMAgent(cfg, modelRuntime, toolExecutor, tools)
+	if err != nil {
+		t.Fatalf("NewLLMAgent: %v", err)
+	}
+	return agent
+}
+
 func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 	runtimetools.InitEventSchemaRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -224,7 +242,7 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 			},
 		},
 	}))
-	agent := NewLLMAgent(
+	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
 			ID:         "coordinator-1",
 			Role:       "coordinator",
@@ -342,7 +360,7 @@ func (actorScopedFactoryToolExec) ToolDefinitionsForActor(cfg models.AgentConfig
 }
 
 func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
-	agent := NewLLMAgent(
+	agent := mustNewLLMAgent(t,
 		models.AgentConfig{ID: "coordinator-1", Role: "coordinator"},
 		&boardTestRuntime{
 			steps: []*llm.Response{
@@ -364,7 +382,7 @@ func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
 }
 
 func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
-	agent := NewLLMAgent(
+	agent := mustNewLLMAgent(t,
 		models.AgentConfig{ID: "coordinator-1", Role: "coordinator"},
 		&boardTestRuntime{
 			steps: []*llm.Response{
@@ -392,7 +410,7 @@ func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
 }
 
 func TestNewLLMAgent_DefaultsToTaskConversationMode(t *testing.T) {
-	agent := NewLLMAgent(
+	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
 			ID:       "entity-agent-1",
 			Role:     "operator",
@@ -467,7 +485,7 @@ func (r *taskRetryRuntime) ContinueSession(_ context.Context, _ *llm.Session, _ 
 
 func TestLLMAgent_TaskScopedFatalCLIErrorResetsConversationAndRetries(t *testing.T) {
 	rt := &taskRetryRuntime{}
-	agent := NewLLMAgent(
+	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
 			ID:               "spec-reviewer",
 			Role:             "spec_reviewer",
@@ -514,7 +532,7 @@ func (r *runIDCaptureRuntime) ContinueSession(ctx context.Context, _ *llm.Sessio
 
 func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 	rt := &runIDCaptureRuntime{}
-	agent := NewLLMAgent(
+	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
 			ID:       "analysis-agent",
 			Role:     "analysis_agent",
@@ -563,7 +581,7 @@ func (s nativeCapabilityRuntimeStub) NativeToolCapabilities() llm.NativeToolCapa
 }
 
 func TestNewLLMAgent_InjectsNativeFallbackToolsWhenProviderLacksSupport(t *testing.T) {
-	agent := NewLLMAgent(
+	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
 			ID:   "researcher-1",
 			Role: "researcher",
@@ -589,7 +607,7 @@ func TestNewLLMAgent_InjectsNativeFallbackToolsWhenProviderLacksSupport(t *testi
 }
 
 func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWhenProviderSupportsCapability(t *testing.T) {
-	agent := NewLLMAgent(
+	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
 			ID:   "ops-1",
 			Role: "ops",

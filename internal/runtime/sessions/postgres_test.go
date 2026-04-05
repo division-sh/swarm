@@ -29,7 +29,7 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "lease_expires_at"}).AddRow("sess-1", "global", fixedNow.Add(30*time.Second)))
 	mock.ExpectCommit()
 
-	lease, err := sr.Acquire(context.Background(), "a1", RuntimeModeSession, "owner-1", "")
+	lease, err := sr.Acquire(context.Background(), "a1", RuntimeModeSession, "owner-1", "global")
 	if err != nil {
 		t.Fatalf("Acquire new: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"lease_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
 	mock.ExpectCommit()
 
-	lease2, err := sr.Acquire(context.Background(), "a1", RuntimeModeSession, "owner-1", "")
+	lease2, err := sr.Acquire(context.Background(), "a1", RuntimeModeSession, "owner-1", "global")
 	if err != nil {
 		t.Fatalf("Acquire existing: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestPostgresSessionRegistry_AcquireLeasedByOtherReturnsErrLeased(t *testing
 		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "status", "provider_session_id", "lease_holder", "lease_expires_at"}).
 			AddRow("sess-1", "global", "active", nil, "someone-else", fixedNow.Add(10*time.Second)))
 
-	_, err = sr.Acquire(context.Background(), "a1", RuntimeModeSession, "owner-1", "")
+	_, err = sr.Acquire(context.Background(), "a1", RuntimeModeSession, "owner-1", "global")
 	if err != ErrSessionLeased {
 		t.Fatalf("expected ErrSessionLeased, got %v", err)
 	}
@@ -121,7 +121,7 @@ func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"lease_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
 	mock.ExpectCommit()
 
-	lease, err := sr.Rotate(context.Background(), "a1", RuntimeModeSession, "owner-1", "sum", "")
+	lease, err := sr.Rotate(context.Background(), "a1", RuntimeModeSession, "owner-1", "sum", "global")
 	if err != nil {
 		t.Fatalf("Rotate: %v", err)
 	}
@@ -132,14 +132,14 @@ func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET turn_count = turn_count \\+ 1").
 		WithArgs("a1", RuntimeModeSession, lease.SessionID, "global").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := sr.IncrementTurn(context.Background(), "a1", RuntimeModeSession, lease.SessionID, ""); err != nil {
+	if err := sr.IncrementTurn(context.Background(), "a1", RuntimeModeSession, lease.SessionID, "global"); err != nil {
 		t.Fatalf("IncrementTurn: %v", err)
 	}
 
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET turn_count = turn_count \\+ 1").
 		WithArgs("a1", RuntimeModeSession, "missing", "global").
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	if err := sr.IncrementTurn(context.Background(), "a1", RuntimeModeSession, "missing", ""); err == nil {
+	if err := sr.IncrementTurn(context.Background(), "a1", RuntimeModeSession, "missing", "global"); err == nil {
 		t.Fatal("expected IncrementTurn to error on missing session")
 	}
 
@@ -169,7 +169,7 @@ func TestPostgresSessionRegistry_AdoptSessionID(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	if err := sr.AdoptSessionID(context.Background(), "a1", RuntimeModeSession, "owner-1", "claude-session-1", ""); err != nil {
+	if err := sr.AdoptSessionID(context.Background(), "a1", RuntimeModeSession, "owner-1", "claude-session-1", "global"); err != nil {
 		t.Fatalf("AdoptSessionID: %v", err)
 	}
 
@@ -188,6 +188,19 @@ func TestPostgresSessionRegistry_TaskModeIsStateless(t *testing.T) {
 	sr := NewPostgresRegistry(db, 30*time.Second)
 	if _, err := sr.Acquire(context.Background(), "a1", RuntimeModeTask, "owner-1", "task-1"); err == nil {
 		t.Fatal("expected task mode acquire to reject stateless sessions")
+	}
+}
+
+func TestPostgresSessionRegistry_SessionScopeRequiresExplicitDeclaration(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	sr := NewPostgresRegistry(db, 30*time.Second)
+	if _, err := sr.Acquire(context.Background(), "a1", RuntimeModeSession, "owner-1", ""); err == nil {
+		t.Fatal("expected session acquire without explicit scope to fail closed")
 	}
 }
 

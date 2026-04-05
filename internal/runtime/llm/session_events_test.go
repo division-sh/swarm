@@ -148,8 +148,9 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 
 func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeTask, "task-1")
 
-	s, err := runtime.StartSession(context.Background(), "agent-2", "base prompt", []ToolDefinition{
+	s, err := runtime.StartSession(ctx, "agent-2", "base prompt", []ToolDefinition{
 		{Name: "emit_market_research_scan_complete"},
 		{Name: "read_file"},
 	})
