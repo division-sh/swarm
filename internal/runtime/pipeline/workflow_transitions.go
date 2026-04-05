@@ -13,11 +13,13 @@ import (
 )
 
 type DeferredPipelineTransition struct {
-	db    *sql.DB
-	input PipelineTransitionInput
+	db         *sql.DB
+	input      PipelineTransitionInput
+	capability func(context.Context) (bool, error)
 }
 
 type pipelineTransitionCollectorKey struct{}
+type pipelineTransitionCapabilityKey struct{}
 
 type PipelineTransitionInput struct {
 	EventID       string
@@ -34,11 +36,21 @@ type PipelineTransitionInput struct {
 	Duration      time.Duration
 }
 
-func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransitionInput) error {
+func RecordPipelineTransition(ctx context.Context, db *sql.DB, capability func(context.Context) (bool, error), in PipelineTransitionInput) error {
 	if db == nil {
 		return nil
 	}
 	ctx = withoutSQLTxContext(ctx)
+	if capability == nil {
+		return nil
+	}
+	enabled, err := capability(ctx)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
 	eventID := strings.TrimSpace(in.EventID)
 	pipelineID := strings.TrimSpace(in.PipelineID)
 	if _, err := uuid.Parse(eventID); err != nil {
@@ -76,16 +88,25 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransi
 	return recordPipelineTransitionReceipt(ctx, db, eventID, handler, pipelineType, pipelineID, action, before, after, eventsEmitted, durationUS, in.DropReason, in.Error)
 }
 
-func WithPipelineTransitionCollector(ctx context.Context, collector *[]DeferredPipelineTransition) context.Context {
+func WithPipelineTransitionCollector(ctx context.Context, collector *[]DeferredPipelineTransition, capability func(context.Context) (bool, error)) context.Context {
 	if collector == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, pipelineTransitionCollectorKey{}, collector)
+	ctx = context.WithValue(ctx, pipelineTransitionCollectorKey{}, collector)
+	if capability != nil {
+		ctx = context.WithValue(ctx, pipelineTransitionCapabilityKey{}, capability)
+	}
+	return ctx
 }
 
 func AppendDeferredPipelineTransition(ctx context.Context, item DeferredPipelineTransition) bool {
 	if item.db == nil {
 		return false
+	}
+	if item.capability == nil {
+		if capability, ok := ctx.Value(pipelineTransitionCapabilityKey{}).(func(context.Context) (bool, error)); ok {
+			item.capability = capability
+		}
 	}
 	collector, ok := ctx.Value(pipelineTransitionCollectorKey{}).(*[]DeferredPipelineTransition)
 	if !ok || collector == nil {
@@ -97,7 +118,7 @@ func AppendDeferredPipelineTransition(ctx context.Context, item DeferredPipeline
 
 func FlushDeferredPipelineTransitions(ctx context.Context, deferred []DeferredPipelineTransition) {
 	for _, item := range deferred {
-		if err := RecordPipelineTransition(ctx, item.db, item.input); err != nil {
+		if err := RecordPipelineTransition(ctx, item.db, item.capability, item.input); err != nil {
 			processWarn("diagnostics", "failed to persist deferred pipeline transition event_id=%s event_type=%s pipeline_id=%s: %v", strings.TrimSpace(item.input.EventID), strings.TrimSpace(item.input.EventType), strings.TrimSpace(item.input.PipelineID), err)
 		}
 	}
@@ -136,17 +157,6 @@ func sanitizeStringSlice(in []string) []string {
 		out = append(out, v)
 	}
 	return out
-}
-
-func isMissingDiagnosticsTable(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "subscriber_id") ||
-		strings.Contains(msg, "reason_code") ||
-		strings.Contains(msg, "side_effects") ||
-		strings.Contains(msg, "duration_ms")
 }
 
 func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason, errText string) error {
@@ -198,26 +208,5 @@ func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, h
 			duration_ms = EXCLUDED.duration_ms,
 			processed_at = now()
 	`, eventID, "pipeline:"+pipelineID, outcome, reasonCode, string(before), string(after), string(sideEffects), durationMS)
-	if err == nil || !isMissingDiagnosticsTable(err) {
-		return err
-	}
-	_, err = db.ExecContext(ctx, `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, state_before, state_after, side_effects, duration_ms, processed_at
-		)
-		SELECT
-			e.event_id, 'platform', $2, e.entity_id, e.flow_instance,
-			$3, NULLIF($4,''), NULLIF($5,''), $6::jsonb, NULLIF($7,0), now()
-		FROM events e
-		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
-			outcome = EXCLUDED.outcome,
-			state_before = EXCLUDED.state_before,
-			state_after = EXCLUDED.state_after,
-			side_effects = EXCLUDED.side_effects,
-			duration_ms = EXCLUDED.duration_ms,
-			processed_at = now()
-	`, eventID, "pipeline:"+pipelineID, outcome, string(before), string(after), string(sideEffects), durationMS)
 	return err
 }
