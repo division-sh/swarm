@@ -336,7 +336,12 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	am.mu.RUnlock()
 	conversationMode := strings.TrimSpace(updated.ConversationMode)
 	if sessionRegistry != nil && conversationMode != "" && sessions.IsLiveSessionRuntimeMode(conversationMode) {
-		rotated, err := sessionRegistry.Rotate(am.runtimeContext(), agentID, conversationMode, strings.TrimSpace(updated.SessionScope), "reconfigure", "agent reconfigured", "")
+		scopeKey, err := sessions.DeclaredScopeKey(updated)
+		if err != nil {
+			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, conversationMode, err)
+		}
+		rotationCtx := models.WithActor(am.runtimeContext(), updated)
+		rotated, err := sessionRegistry.Rotate(rotationCtx, agentID, conversationMode, strings.TrimSpace(updated.SessionScope), "reconfigure", "agent reconfigured", scopeKey)
 		if err != nil {
 			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, conversationMode, err)
 		} else if rotated != nil {

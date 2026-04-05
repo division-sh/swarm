@@ -172,6 +172,37 @@ func ValidateSessionScopeIntent(runtimeMode, sessionScope string) (string, error
 	}
 }
 
+func DeclaredScopeKey(actor runtimeactors.AgentConfig) (string, error) {
+	runtimeMode := strings.TrimSpace(actor.ConversationMode)
+	if runtimeMode == "" {
+		runtimeMode = RuntimeModeTask
+	}
+	sessionScope, err := ValidateSessionScopeIntent(runtimeMode, actor.SessionScope)
+	if err != nil {
+		return "", err
+	}
+	switch sessionScope {
+	case "":
+		return "", nil
+	case SessionScopeGlobal:
+		return SessionScopeGlobal, nil
+	case SessionScopeFlow:
+		flowPath := actor.CanonicalFlowPath()
+		if flowPath == "" {
+			return "", fmt.Errorf("session_scope flow requires flow path metadata")
+		}
+		return flowPath, nil
+	case SessionScopeEntity:
+		entityID := actor.EffectiveEntityID()
+		if entityID == "" {
+			return "", fmt.Errorf("session_scope entity requires entity_id metadata")
+		}
+		return entityID, nil
+	default:
+		return "", fmt.Errorf("unsupported session scope %q", actor.SessionScope)
+	}
+}
+
 func ResolveScope(ctx context.Context, runtimeMode, sessionScope, scopeKey string) (ResolvedScope, error) {
 	mode, err := ParseConversationRuntimeMode(runtimeMode)
 	if err != nil {
