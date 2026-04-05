@@ -51,7 +51,7 @@ func fmtSscanf(s string, out *int) {
 	*out = n
 }
 
-func TestPostgresStore_HelpersAndDigest(t *testing.T) {
+func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	port := portFromDSN(t, dsn)
@@ -79,7 +79,6 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 		t.Fatalf("Ping: %v", err)
 	}
 
-	// Seed entities for digest coverage.
 	entityID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
@@ -97,25 +96,6 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 		)
 	`, entityID); err != nil {
 		t.Fatalf("seed entity state: %v", err)
-	}
-	pg.SetTerminalInstanceStates([]string{"done"})
-	// Active count includes active workflow instances.
-	if n, err := pg.CountActiveInstances(ctx); err != nil || n < 1 {
-		t.Fatalf("CountActiveInstances n=%d err=%v", n, err)
-	}
-
-	// Digest rows: entity_state + spend.
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO spend_ledger (
-			ledger_id, entity_id, flow_instance, agent_id, model,
-			input_tokens, output_tokens, cost_usd, invocation_type, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'testco', 'agent-digest', 'test', 1, 1, 5.000000, 'api', now())
-	`, uuid.NewString(), entityID); err != nil {
-		t.Fatalf("seed spend: %v", err)
-	}
-	if rows, err := pg.ListInstanceDigestRows(ctx, 10); err != nil || len(rows) == 0 {
-		t.Fatalf("ListInstanceDigestRows err=%v len=%d", err, len(rows))
 	}
 
 	// Active agent descriptors.
@@ -141,15 +121,4 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 		t.Fatalf("descriptor flow_instance = %q, want review/inst-1", got)
 	}
 
-}
-
-func TestPostgresStore_DigestRequiresTerminalInstanceStates(t *testing.T) {
-	pg := &PostgresStore{}
-
-	if _, err := pg.CountActiveInstances(context.Background()); err == nil || !strings.Contains(err.Error(), "terminal instance states are required") {
-		t.Fatalf("CountActiveInstances err = %v, want terminal state requirement", err)
-	}
-	if _, err := pg.ListInstanceDigestRows(context.Background(), 10); err == nil || !strings.Contains(err.Error(), "terminal instance states are required") {
-		t.Fatalf("ListInstanceDigestRows err = %v, want terminal state requirement", err)
-	}
 }

@@ -42,7 +42,6 @@ type Stores struct {
 	ScheduleStore     runtimepipeline.SchedulePersistence
 	MailboxStore      runtimetools.MailboxPersistence
 	InboundStore      InboundPersistence
-	DigestStore       DigestPersistence
 	TurnStore         llm.TurnPersistence
 }
 
@@ -77,10 +76,6 @@ type Runtime struct {
 	Authority      runtimeauthority.Provider
 	EmitRegistry   *runtimetools.EmitRegistry
 	PromptResolver runtimecontracts.PromptResolver
-}
-
-type terminalInstanceStateSetter interface {
-	SetTerminalInstanceStates(states []string)
 }
 
 const runtimeQuiescenceStableChecks = 3
@@ -186,30 +181,6 @@ func bootWarningsFatal() bool {
 	return runtimeEnvBool("SWARM_BOOT_WARNINGS_FATAL", true)
 }
 
-func bindRuntimeTerminalInstanceStates(stores Stores, source semanticview.Source) {
-	if source == nil {
-		return
-	}
-	states := source.WorkflowTerminalStages()
-	candidates := []any{
-		stores.EventStore,
-		stores.ConversationStore,
-		stores.ManagerStore,
-		stores.ScheduleStore,
-		stores.MailboxStore,
-		stores.InboundStore,
-		stores.DigestStore,
-		stores.TurnStore,
-	}
-	for _, candidate := range candidates {
-		setter, ok := candidate.(terminalInstanceStateSetter)
-		if !ok || setter == nil {
-			continue
-		}
-		setter.SetTerminalInstanceStates(states)
-	}
-}
-
 func newRuntimePromptResolver(source semanticview.Source) (runtimecontracts.PromptResolver, error) {
 	if source == nil {
 		return nil, fmt.Errorf("semantic source is required")
@@ -232,7 +203,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 	source := opts.WorkflowModule.SemanticSource()
-	bindRuntimeTerminalInstanceStates(stores, source)
 	promptResolver, err := newRuntimePromptResolver(source)
 	if err != nil {
 		return nil, fmt.Errorf("build prompt resolver: %w", err)
