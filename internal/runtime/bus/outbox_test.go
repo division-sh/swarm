@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeengine "swarm/internal/runtime/engine"
@@ -87,6 +88,7 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	}
 	defer db.Close()
 
+	entityID := uuid.NewString()
 	mock.ExpectBegin()
 	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(
 		sqlmock.NewRows([]string{"table_name", "column_name"}).
@@ -114,7 +116,7 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 			AddRow("event_deliveries", "created_at"),
 	)
 	mock.ExpectExec("INSERT INTO events").
-		WithArgs("evt-1", "custom.emitted", "", "", "entity", sqlmock.AnyArg(), 0, "", "platform", "", sqlmock.AnyArg()).
+		WithArgs("evt-1", "custom.emitted", entityID, "", "entity", sqlmock.AnyArg(), 0, "", "platform", "", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO event_deliveries").
 		WithArgs("evt-1", "reviewer").
@@ -134,9 +136,9 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 		Event: events.Event{
 			ID:        "evt-1",
 			Type:      events.EventType("custom.emitted"),
-			Payload:   []byte(`{"entity_id":"ent-1"}`),
+			Payload:   []byte(`{"entity_id":"` + entityID + `"}`),
 			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("ent-1"),
+		}.WithEntityID(entityID),
 		Recipients: []string{"reviewer"},
 	}
 	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
