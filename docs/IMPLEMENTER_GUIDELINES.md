@@ -106,6 +106,9 @@ Practical implication:
 - if a schema or data shape is obsolete, remove it
 - if a migration can rewrite data forward cleanly, do that instead of carrying dual semantics
 - do not add new fallback branches unless there is a clearly justified operational need
+- do not add backward-compatibility read-path or write-path shims by default
+- do not preserve older persisted shapes with new fallback matching just because it is locally convenient
+- if old data would stop working under the new canonical shape, that is usually acceptable in this project unless the issue explicitly requires rollout or migration compatibility
 - when choosing between:
   - a clean migration plus code deletion
   - preserving legacy runtime behavior
@@ -120,6 +123,12 @@ Exception standard:
 
 - only preserve a legacy path when there is a concrete, current operational dependency
 - if that dependency exists, document it explicitly near the code and in the relevant planning/watchlist document
+- a compatibility shim requires explicit justification in the issue or PR
+- if compatibility is intentionally required, keep it:
+  - narrow
+  - time-bounded
+  - isolated to one explicit boundary
+- otherwise, prefer canonical-only behavior and fail closed semantics
 
 ### 2. Do not use heuristic fallback for core semantics
 
