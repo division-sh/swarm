@@ -190,7 +190,12 @@ func (s *PostgresStore) migrateLegacyAgentRuntimeDescriptors(ctx context.Context
 		if err := rows.Scan(&agentID, &modelTier, &configRaw, &runtimeDescriptor); err != nil {
 			return fmt.Errorf("scan agent runtime descriptor migration row: %w", err)
 		}
-		desc := decodePersistedAgentRuntimeDescriptorLoose(runtimeDescriptor)
+		desc, ok := decodePersistedAgentRuntimeDescriptorLoose(runtimeDescriptor)
+		if !ok {
+			// Malformed canonical descriptors must fail closed during hydration rather than
+			// being silently rewritten into a new shape by the legacy migration pass.
+			continue
+		}
 		legacy := decodeLegacyAgentRuntimeConfig(configRaw)
 		if desc.Type == "" {
 			desc.Type = coalesce(legacy.Type, strings.TrimSpace(modelTier))
