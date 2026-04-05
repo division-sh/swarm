@@ -172,12 +172,30 @@ func ValidateSessionScopeIntent(runtimeMode, sessionScope string) (string, error
 	}
 }
 
-func DeclaredScopeKey(actor runtimeactors.AgentConfig) (string, error) {
+func ValidateAgentSessionScopeConfig(actor runtimeactors.AgentConfig) (string, error) {
 	runtimeMode := strings.TrimSpace(actor.ConversationMode)
 	if runtimeMode == "" {
 		runtimeMode = RuntimeModeTask
 	}
 	sessionScope, err := ValidateSessionScopeIntent(runtimeMode, actor.SessionScope)
+	if err != nil {
+		return "", err
+	}
+	switch sessionScope {
+	case SessionScopeFlow:
+		if actor.CanonicalFlowPath() == "" {
+			return "", fmt.Errorf("session_scope flow requires flow path metadata")
+		}
+	case SessionScopeEntity:
+		if actor.CanonicalFlowPath() == "" {
+			return "", fmt.Errorf("session_scope entity requires flow path metadata")
+		}
+	}
+	return sessionScope, nil
+}
+
+func DeclaredScopeKey(actor runtimeactors.AgentConfig) (string, error) {
+	sessionScope, err := ValidateAgentSessionScopeConfig(actor)
 	if err != nil {
 		return "", err
 	}

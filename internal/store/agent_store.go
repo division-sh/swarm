@@ -25,7 +25,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	}
 	rec.Config.NormalizeEntityID()
 	rec.Config.NormalizeRuntimeDescriptor()
-	if _, err := runtimesessions.ValidateSessionScopeIntent(agentConversationMode(rec.Config), rec.Config.SessionScope); err != nil {
+	if _, err := runtimesessions.ValidateAgentSessionScopeConfig(rec.Config); err != nil {
 		return fmt.Errorf("invalid agent session scope: %w", err)
 	}
 	projection, err := projectPersistedAgentConfig(rec.Config, rec.ParentAgentID)

@@ -90,11 +90,7 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	if cfg.MaxTurnsPerTask > 0 {
 		maxTurns = cfg.MaxTurnsPerTask
 	}
-	effectiveConversationMode := strings.TrimSpace(cfg.ConversationMode)
-	if effectiveConversationMode == "" {
-		effectiveConversationMode = sessions.RuntimeModeTask
-	}
-	if _, err := sessions.ValidateSessionScopeIntent(effectiveConversationMode, cfg.SessionScope); err != nil {
+	if _, err := sessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
 		agentLabel := strings.TrimSpace(cfg.ID)
 		if agentLabel == "" {
 			agentLabel = strings.TrimSpace(cfg.Role)
