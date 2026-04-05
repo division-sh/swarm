@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/store"
@@ -144,6 +145,76 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 	}
 	if len(evts) != 0 {
 		t.Fatalf("list subscribed pending (dead_letter): got %d events, want 0", len(evts))
+	}
+}
+
+func TestListPendingSubscribedEvents_UsesCanonicalMatcherParity(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+
+	deep := seedEvent(t, ctx, pg, entityID, "operating/child/grandchild/opco.launched")
+	segment := seedEvent(t, ctx, pg, entityID, "review.ready")
+	tooDeep := seedEvent(t, ctx, pg, entityID, "scoring/a/b")
+	invalidPattern := seedEvent(t, ctx, pg, entityID, "budget.alert")
+
+	since := time.Now().Add(-2 * time.Hour)
+	tests := []struct {
+		name          string
+		subscriptions []events.EventType
+		eventType     string
+		wantIDs       []string
+	}{
+		{
+			name:          "recursive wildcard matches deep scoped event",
+			subscriptions: []events.EventType{"operating/**/opco.launched"},
+			eventType:     string(deep.Type),
+			wantIDs:       []string{deep.ID},
+		},
+		{
+			name:          "segment glob matches canonical runtime semantics",
+			subscriptions: []events.EventType{"*.ready"},
+			eventType:     string(segment.Type),
+			wantIDs:       []string{segment.ID},
+		},
+		{
+			name:          "single segment wildcard does not span multiple segments",
+			subscriptions: []events.EventType{"scoring/*"},
+			eventType:     string(tooDeep.Type),
+			wantIDs:       nil,
+		},
+		{
+			name:          "invalid pattern fails closed",
+			subscriptions: []events.EventType{"["},
+			eventType:     string(invalidPattern.Type),
+			wantIDs:       nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := runtimebus.RouteMatches(string(tt.subscriptions[0]), tt.eventType); got != (len(tt.wantIDs) > 0) {
+				t.Fatalf("runtime matcher parity mismatch for %q vs %q: got %v want %v", tt.subscriptions[0], tt.eventType, got, len(tt.wantIDs) > 0)
+			}
+			evts, err := pg.ListPendingSubscribedEvents(ctx, agentID, tt.subscriptions, since, 100)
+			if err != nil {
+				t.Fatalf("ListPendingSubscribedEvents: %v", err)
+			}
+			gotIDs := make([]string, 0, len(evts))
+			for _, evt := range evts {
+				gotIDs = append(gotIDs, evt.ID)
+			}
+			if len(gotIDs) != len(tt.wantIDs) {
+				t.Fatalf("subscriptions=%v got=%v want=%v", tt.subscriptions, gotIDs, tt.wantIDs)
+			}
+			for i := range gotIDs {
+				if gotIDs[i] != tt.wantIDs[i] {
+					t.Fatalf("subscriptions=%v got=%v want=%v", tt.subscriptions, gotIDs, tt.wantIDs)
+				}
+			}
+		})
 	}
 }
 

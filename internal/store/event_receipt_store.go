@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"swarm/internal/events"
+	"swarm/internal/runtime/core/eventidentity"
 	runtimemanager "swarm/internal/runtime/manager"
 )
 
@@ -326,8 +327,11 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 	}
 	filtered := make([]events.Event, 0, len(out))
 	for _, evt := range out {
-		if matchesAnySubscription(string(evt.Type), subscriptions) {
-			filtered = append(filtered, evt)
+		for _, subscription := range subscriptions {
+			if eventidentity.MatchPattern(string(subscription), string(evt.Type)) {
+				filtered = append(filtered, evt)
+				break
+			}
 		}
 	}
 	return filtered, nil
