@@ -3,13 +3,13 @@ package server
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimesessions "swarm/internal/runtime/sessions"
+	"swarm/internal/store"
 )
 
 type SQLAgentReader struct {
@@ -96,7 +96,15 @@ type agentRuntimeAggregate struct {
 }
 
 func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRuntimeAggregate, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	caps, err := r.resolveCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	latestTurnBlocksExpr := `'[]'::jsonb`
+	if caps.Conversations.TurnBlocks {
+		latestTurnBlocksExpr = `COALESCE(turn_blocks, '[]'::jsonb)`
+	}
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
 			a.agent_id,
 			COALESCE(sess.turn_count, 0),
@@ -107,14 +115,15 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 			COALESCE(f.failures_24h, 0),
 			COALESCE(f.dead_letters_24h, 0),
 			0,
-			COALESCE(sess.runtime_state, '{}'::jsonb)
+			COALESCE(latest_turn.task_id, ''),
+			COALESCE(latest_turn.parse_ok, false),
+			COALESCE(latest_turn.turn_blocks, '[]'::jsonb)
 		FROM agents a
 		LEFT JOIN LATERAL (
 			SELECT
 				turn_count,
 				lease_holder,
-				lease_expires_at,
-				runtime_state
+				lease_expires_at
 			FROM agent_sessions
 			WHERE agent_id = a.agent_id
 			  AND status = 'active'
@@ -122,6 +131,16 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 			ORDER BY updated_at DESC, created_at DESC
 			LIMIT 1
 		) sess ON true
+		LEFT JOIN LATERAL (
+			SELECT
+				COALESCE(task_id, '') AS task_id,
+				parse_ok,
+				%s AS turn_blocks
+			FROM agent_turns
+			WHERE agent_id = a.agent_id
+			ORDER BY created_at DESC, turn_id DESC
+			LIMIT 1
+		) latest_turn ON true
 		LEFT JOIN LATERAL (
 			SELECT
 				COUNT(*)::int AS pending_count,
@@ -150,7 +169,7 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 		) f ON true
 		WHERE a.status NOT IN ('terminated', 'ephemeral')
 		ORDER BY a.created_at ASC, a.agent_id ASC
-	`, runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
+	`, latestTurnBlocksExpr), runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
 	if err != nil {
 		return nil, fmt.Errorf("query agent aggregates: %w", err)
 	}
@@ -159,10 +178,12 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 	out := map[string]agentRuntimeAggregate{}
 	for rows.Next() {
 		var (
-			id              string
-			aggregate       agentRuntimeAggregate
-			lockExpiresAt   sql.NullTime
-			runtimeStateRaw []byte
+			id            string
+			aggregate     agentRuntimeAggregate
+			lockExpiresAt sql.NullTime
+			latestTaskID  string
+			latestParseOK bool
+			latestTurnRaw []byte
 		)
 		if err := rows.Scan(
 			&id,
@@ -174,7 +195,9 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 			&aggregate.Failures24h,
 			&aggregate.DeadLetters24h,
 			&aggregate.Turns24h,
-			&runtimeStateRaw,
+			&latestTaskID,
+			&latestParseOK,
+			&latestTurnRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent aggregate: %w", err)
 		}
@@ -184,13 +207,31 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 				aggregate.InFlightTurn = true
 			}
 		}
-		enrichAgentAggregateFromRuntimeState(&aggregate, runtimeStateRaw)
+		if err := enrichAgentAggregateFromLatestTurn(&aggregate, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
+			return nil, err
+		}
 		out[strings.TrimSpace(id)] = aggregate
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read agent aggregate rows: %w", err)
 	}
 	return out, nil
+}
+
+func (r *SQLAgentReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
+	if r != nil {
+		if source, ok := r.base.(conversationCapabilitySource); ok && source != nil {
+			return source.ResolveSchemaCapabilities(ctx)
+		}
+	}
+	return store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions:   store.SchemaFlavorCanonical,
+			Audits:     store.SchemaFlavorCanonical,
+			Turns:      store.SchemaFlavorCanonical,
+			TurnBlocks: true,
+		},
+	}, nil
 }
 
 func applyAggregate(agent *genericAgent, aggregate agentRuntimeAggregate, turnLimit int) {
@@ -230,35 +271,36 @@ func deriveGenericAgentState(agent genericAgent, aggregate agentRuntimeAggregate
 	return "idle"
 }
 
-func enrichAgentAggregateFromRuntimeState(aggregate *agentRuntimeAggregate, raw []byte) {
-	if aggregate == nil || len(raw) == 0 {
-		return
+func enrichAgentAggregateFromLatestTurn(aggregate *agentRuntimeAggregate, taskID string, parseOK bool, turnBlocksRaw []byte) error {
+	if aggregate == nil {
+		return nil
 	}
-	var state map[string]any
-	if err := json.Unmarshal(raw, &state); err != nil {
-		return
+	aggregate.CurrentTaskID = strings.TrimSpace(taskID)
+	turnBlocks, err := decodeJSONArray(turnBlocksRaw)
+	if err != nil {
+		return fmt.Errorf("decode latest agent turn turn_blocks: %w", err)
 	}
-	lastTurn, _ := state["last_turn"].(map[string]any)
-	if len(lastTurn) == 0 {
-		return
+	summary, ok := readTurnSummaryBlock(turnBlocks)
+	if !ok {
+		return nil
 	}
-	aggregate.CurrentTaskID = readString(lastTurn["task_id"])
-	responsePayload, _ := lastTurn["response_payload"].(map[string]any)
-	if len(responsePayload) == 0 {
-		return
+	toolResults := readAnySlice(summary["tool_results"])
+	if len(toolResults) == 0 {
+		return nil
 	}
-	if calls, ok := responsePayload["tool_calls"].([]any); ok && len(calls) > 0 {
-		first, _ := calls[0].(map[string]any)
-		aggregate.LastTool = map[string]any{
-			"name": readString(first["name"]),
-			"ok":   lastTurn["parse_ok"] == true,
-		}
-		if result := readString(responsePayload["result"]); result != "" {
-			aggregate.LastTool["result"] = result
-		} else if result := readString(responsePayload["assistant_text"]); result != "" {
-			aggregate.LastTool["result"] = result
-		}
+	lastResult, _ := toolResults[len(toolResults)-1].(map[string]any)
+	toolName := strings.TrimSpace(readString(lastResult["tool_name"]))
+	if toolName == "" {
+		return nil
 	}
+	aggregate.LastTool = map[string]any{
+		"name": toolName,
+		"ok":   parseOK,
+	}
+	if output, ok := lastResult["output"]; ok && output != nil {
+		aggregate.LastTool["result"] = output
+	}
+	return nil
 }
 
 func maxInt(v, floor int) int {
