@@ -115,14 +115,6 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 	})
 }
 
-func (r *ClaudeCLIRuntime) SetWorkspaceResolver(resolver workspace.Resolver) {
-	r.workspaces = resolver
-}
-
-func (r *ClaudeCLIRuntime) SetMonitorSink(sink MonitorSink) {
-	r.monitor = sink
-}
-
 func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
 	scope := sessions.ScopeFromContext(ctx)
 	resolved, err := resolvedSessionScope(ctx, scope.ConversationMode, scope.ScopeKey)

@@ -38,6 +38,9 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if req.ContractBundle == nil {
 		return fmt.Errorf("contract bundle is required")
 	}
+	if am.workflowInstances == nil {
+		return fmt.Errorf("workflow instance store is required")
+	}
 	instance := req.Instance
 	templateID := strings.TrimSpace(instance.TemplateID)
 	instanceID := strings.TrimSpace(instance.InstanceID)
@@ -58,32 +61,30 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return fmt.Errorf("derive flow entity id for %s", flowPath)
 	}
 	sourceEntityID := strings.TrimSpace(instance.SubjectID)
-	if am.workflowInstances != nil {
-		initialState := strings.TrimSpace(schema.InitialState)
-		if initialState == "" {
-			initialState = strings.TrimSpace(req.InitialState)
-		}
-		if initialState == "" {
-			initialState = "pending"
-		}
-		if err := am.workflowInstances.Upsert(ctx, runtimepipeline.WorkflowInstance{
-			InstanceID:      instanceID,
-			SubjectID:       strings.TrimSpace(sourceEntityID),
-			StorageRef:      flowPath,
-			WorkflowName:    templateID,
-			WorkflowVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
-			CurrentState:    initialState,
-			Config:          cloneFlowConfig(req.Config),
-			Metadata: map[string]any{
-				"entity_id":        flowEntityID,
-				"instance_id":      instanceID,
-				"flow_path":        flowPath,
-				"subject_id":       strings.TrimSpace(sourceEntityID),
-				"parent_entity_id": strings.TrimSpace(instance.ParentEntityID),
-			},
-		}); err != nil {
-			return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
-		}
+	initialState := strings.TrimSpace(schema.InitialState)
+	if initialState == "" {
+		initialState = strings.TrimSpace(req.InitialState)
+	}
+	if initialState == "" {
+		initialState = "pending"
+	}
+	if err := am.workflowInstances.Upsert(ctx, runtimepipeline.WorkflowInstance{
+		InstanceID:      instanceID,
+		SubjectID:       strings.TrimSpace(sourceEntityID),
+		StorageRef:      flowPath,
+		WorkflowName:    templateID,
+		WorkflowVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
+		CurrentState:    initialState,
+		Config:          cloneFlowConfig(req.Config),
+		Metadata: map[string]any{
+			"entity_id":        flowEntityID,
+			"instance_id":      instanceID,
+			"flow_path":        flowPath,
+			"subject_id":       strings.TrimSpace(sourceEntityID),
+			"parent_entity_id": strings.TrimSpace(instance.ParentEntityID),
+		},
+	}); err != nil {
+		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
 	}
 
 	vars := flowActivationVars(req)

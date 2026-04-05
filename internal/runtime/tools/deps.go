@@ -47,7 +47,6 @@ type ExecutorOptions struct {
 	MCPClient         *runtimemcp.Client
 	SQLDB             *sql.DB
 	WorkflowSource    semanticview.Source
-	FlowActivator     runtimepipeline.FlowInstanceActivator
 	WorkspaceResolver workspace.Resolver
 	AuthorityProvider runtimeauthority.Provider
 	EmitRegistry      *EmitRegistry

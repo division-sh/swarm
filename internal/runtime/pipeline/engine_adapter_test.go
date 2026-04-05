@@ -194,16 +194,16 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 			"root": {},
 		},
 	}
+	deactivated := false
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &pipelineFixtureWorkflowModule{
 			source:   semanticview.Wrap(bundle),
 			workflow: NewWorkflowDefinition("root", []WorkflowStage{{Name: "pending"}, {Name: "done", Terminal: true}}, nil),
 		},
-	})
-	deactivated := false
-	pc.SetInstanceDeactivator(func(context.Context, FlowInstanceDeactivationRequest) error {
-		deactivated = true
-		return nil
+		InstanceDeactivator: func(context.Context, FlowInstanceDeactivationRequest) error {
+			deactivated = true
+			return nil
+		},
 	})
 
 	const entityID = "11111111-1111-1111-1111-111111111111"
