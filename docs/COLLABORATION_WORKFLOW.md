@@ -168,6 +168,76 @@ And every review should ask:
 - did this avoid product leakage?
 - did this keep core logic elegant rather than branch-heavy?
 
+## Risk Classification
+
+Every PR review must start with a risk classification:
+
+- `risk: low`
+- `risk: medium`
+- `risk: high`
+
+High-risk PRs include:
+
+- canonical-owner migrations
+- fail-closed semantic shifts
+- typed-surface rollouts that stop trusting an older form
+- store/runtime contract boundary changes
+- broad dependency wiring refactors
+
+Default rule:
+
+- high-risk PRs require a second reviewer before merge
+- the reviewer must state why the PR is high risk
+- no high-risk PR merges on one review alone
+
+## Migration Completeness Gate
+
+For any PR that changes a canonical owner or removes trust in an older form:
+
+1. Identify the new canonical owner explicitly.
+2. Identify the old producers/readers/writers that are now invalid.
+3. Check all relevant production paths, not only the main path.
+
+Examples of paths that must be checked when relevant:
+
+- builder
+- scheduler
+- replay / restore
+- bootstrap
+- reconfigure
+- repair / retry
+- store-side readers
+- runtime-side readers
+
+Default rule:
+
+- "main path looks good" is not enough
+- before approval, the reviewer must be able to say either:
+  - `migration complete`
+  - or `migration incomplete`
+
+If migration is incomplete:
+
+- the PR is not approved
+
+## Semantic PR Workflow
+
+For non-trivial semantic changes, default to:
+
+1. reviewed branch-local spec delta first
+2. implementation second
+3. PR review against the reviewed spec delta
+
+Use this by default for:
+
+- contract changes
+- identity / scope / routing changes
+- persistence / read-model contract changes
+- fail-closed semantic changes
+
+This is not only for blocked work.
+It is the default operating model for non-trivial semantic seams.
+
 ## Pull Request Standards
 
 Default rule:
@@ -184,6 +254,32 @@ PR opening rule:
 
 - open a normal PR only when the branch is ready for actual review
 - if the work is not ready for review yet, keep working locally on the issue branch instead of opening a draft PR
+
+PR description rule:
+
+- every PR description must include:
+  - `Human Summary`
+  - `What Changed`
+  - `Why This Is Needed`
+  - `Scope Boundaries`
+  - `Tests Run`
+  - `Residual Risk`
+  - `Follow-Up`
+
+Default expectation:
+
+- `Human Summary` must be plain language and easy to read quickly
+- `Residual Risk` must name what still feels sharp, incomplete, or assumption-heavy
+- `Scope Boundaries` must say what is intentionally not covered in the PR
+- `Tests Run` must list exact commands, not vague claims like "tests passed"
+- `Follow-Up` must not be used to push out narrow same-seam work that should be absorbed before merge
+
+Review rule:
+
+- reviewers must read the implementer summary and residual risk before deciding whether the code review is complete
+- no merge recommendation should be given without checking that PR description context first
+- if the PR describes a narrow follow-up item in the same seam, reviewers should flag it and ask for it to be encompassed in the PR instead of creating another tiny issue
+- leave a follow-up separate only when it is meaningfully broader, riskier, or cross-boundary
 
 PR title rule:
 
@@ -209,6 +305,55 @@ Default rule:
   - `runtime cleanup`
   - `[codex] update`
 - the title should make ownership and workstream identity obvious without opening the PR
+
+## External Side-Effect Protocol
+
+For external actions such as:
+
+- PR merge
+- issue close
+- branch delete
+- push
+- deployment
+
+Use this sequence:
+
+1. attempt the action
+2. verify the result against the authoritative external system
+3. only then report completion
+
+Default rule:
+
+- textual narration is not authoritative
+- completion claims must follow post-action verification
+- if verification is missing or fails, report `attempted, unverified` or `failed`, not `done`
+
+Preferred runtime/event model:
+
+- action requested
+- action attempted
+- action verified
+- action failed
+
+Absence of a verified terminal event/state means:
+
+- the work is not complete
+- retry or escalate instead of advancing workflow
+
+## Post-Merge Protocol
+
+After a merge, follow this sequence in order:
+
+1. verify the PR is actually merged on GitHub
+2. close the linked issue only after merge verification
+3. create any follow-on issue only after merge verification
+4. update the local coordination/watchlist docs
+5. send reassignment / cleanup instructions
+
+Default rule:
+
+- do not advance downstream workflow from a merge claim alone
+- advance only from verified merge state
 
 ## Coordination Rules
 
