@@ -15,6 +15,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/timeridentity"
 	"swarm/internal/runtime/core/values"
 )
 
@@ -323,21 +324,21 @@ func nextChainDepth(current, max int) (int, error) {
 	return next, nil
 }
 
-func accumulatorBucketID(nodeID identity.NodeID, eventType events.EventType) string {
-	nodeName := nodeID.String()
-	eventName := strings.TrimSpace(string(eventType))
-	if nodeName == "" {
-		return eventName
-	}
-	return nodeName + ":" + eventName
+func accumulatorBucketRef(nodeID identity.NodeID, eventType events.EventType) timeridentity.AccumulatorBucketRef {
+	return timeridentity.NewAccumulatorBucketRef(nodeID.String(), string(eventType))
 }
 
 func loadAccumulator(state StateSnapshot, nodeID identity.NodeID, eventType events.EventType) (*Accumulator, bool) {
-	if nodeID.IsZero() {
+	return loadAccumulatorForBucket(state, accumulatorBucketRef(nodeID, eventType))
+}
+
+func loadAccumulatorForBucket(state StateSnapshot, bucketRef timeridentity.AccumulatorBucketRef) (*Accumulator, bool) {
+	bucketRef = bucketRef.Normalize()
+	if !bucketRef.Valid() {
 		return nil, false
 	}
 	root := state.EnsureStateBucketsBucket()
-	bucket, ok := root.Map(nodeID.String())
+	bucket, ok := root.Map(bucketRef.NodeID)
 	if !ok {
 		return nil, false
 	}
@@ -345,7 +346,7 @@ func loadAccumulator(state StateSnapshot, nodeID identity.NodeID, eventType even
 	if !ok {
 		return nil, false
 	}
-	raw, ok := rawAccumulators.Map(accumulatorBucketID(nodeID, eventType))
+	raw, ok := rawAccumulators.Map(bucketRef.Key())
 	if !ok {
 		return nil, false
 	}
@@ -369,11 +370,16 @@ func loadAccumulator(state StateSnapshot, nodeID identity.NodeID, eventType even
 }
 
 func storeAccumulator(state *StateSnapshot, nodeID identity.NodeID, eventType events.EventType, acc *Accumulator) {
-	if state == nil || acc == nil || nodeID.IsZero() {
+	storeAccumulatorForBucket(state, accumulatorBucketRef(nodeID, eventType), acc)
+}
+
+func storeAccumulatorForBucket(state *StateSnapshot, bucketRef timeridentity.AccumulatorBucketRef, acc *Accumulator) {
+	bucketRef = bucketRef.Normalize()
+	if state == nil || acc == nil || !bucketRef.Valid() {
 		return
 	}
 	root := state.EnsureStateBucketsBucket()
-	bucket := root.EnsureMap(nodeID.String())
+	bucket := root.EnsureMap(bucketRef.NodeID)
 	accumulators := bucket.EnsureMap(handlerAccumulatorBucketKey)
 	received := map[string]any{}
 	keys := make([]string, 0, len(acc.Received))
@@ -388,7 +394,7 @@ func storeAccumulator(state *StateSnapshot, nodeID identity.NodeID, eventType ev
 	for _, item := range acc.Items {
 		items = append(items, cloneStringAnyMap(item))
 	}
-	accumulators.Set(accumulatorBucketID(nodeID, eventType), map[string]any{
+	accumulators.Set(bucketRef.Key(), map[string]any{
 		"expected":         append([]string{}, acc.Expected...),
 		"expected_count":   acc.ExpectedCount,
 		"received":         received,
@@ -406,59 +412,8 @@ func isAccumulationTimeoutEvent(eventType events.EventType) bool {
 	return strings.HasSuffix(eventName, ".timeout") || strings.EqualFold(eventName, "accumulate.timeout")
 }
 
-func loadNodeAccumulatorForTimeout(state StateSnapshot, nodeID identity.NodeID) (*Accumulator, events.EventType, bool) {
-	if nodeID.IsZero() {
-		return nil, "", false
-	}
-	root := state.EnsureStateBucketsBucket()
-	bucket, ok := root.Map(nodeID.String())
-	if !ok {
-		return nil, "", false
-	}
-	rawAccumulators, ok := bucket.Map(handlerAccumulatorBucketKey)
-	if !ok {
-		return nil, "", false
-	}
-	var (
-		bestAcc     *Accumulator
-		bestEvent   events.EventType
-		bestSortKey string
-	)
-	for _, bucketID := range rawAccumulators.Keys() {
-		raw, ok := rawAccumulators.Map(bucketID)
-		if !ok {
-			continue
-		}
-		acc := &Accumulator{
-			Expected:       normalizeStrings(stringSliceFromAny(raw.Raw()["expected"])),
-			ExpectedCount:  raw.Int("expected_count"),
-			Received:       map[string]bool{},
-			Items:          sliceOfMapsFromAny(raw.Raw()["items"]),
-			StartedAt:      raw.String("started_at"),
-			LastEventID:    raw.String("last_event_id"),
-			LastEventType:  raw.String("last_event_type"),
-			LastSource:     raw.String("last_source"),
-			LastReceivedAt: raw.String("last_received_at"),
-		}
-		if received, ok := raw.Map("received"); ok {
-			for _, key := range received.Keys() {
-				acc.Received[strings.TrimSpace(key)] = received.Bool(key)
-			}
-		}
-		sortKey := strings.TrimSpace(firstNonEmpty(acc.LastReceivedAt, acc.StartedAt, bucketID))
-		if bestAcc == nil || sortKey > bestSortKey {
-			bestAcc = acc
-			bestSortKey = sortKey
-			bestEvent = events.EventType(strings.TrimSpace(raw.String("last_event_type")))
-			if bestEvent == "" {
-				bestEvent = events.EventType(strings.TrimSpace(strings.TrimPrefix(bucketID, nodeID.String()+":")))
-			}
-		}
-	}
-	if bestAcc == nil {
-		return nil, "", false
-	}
-	return bestAcc, bestEvent, true
+func accumulationTimeoutBucketRefFromPayload(payload map[string]any) (timeridentity.AccumulatorBucketRef, bool) {
+	return timeridentity.ParseAccumulatorBucketRef(payload)
 }
 
 func expectedAccumulatorTargets(base BaseContext, state ExecutionState, parsed paths.Path, raw string) ([]string, int) {

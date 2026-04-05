@@ -8,6 +8,7 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/timeridentity"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -22,7 +23,7 @@ func (r *recordingExecutionEngine) ExecuteHandlerSteps(_ context.Context, handle
 	return &HandlerOutcome{Handled: true}, nil
 }
 
-func TestFindAccumulationTimeoutHandler_OnTimeoutFixture(t *testing.T) {
+func TestFindAccumulationTimeoutHandlerForBucket_OnTimeoutFixture(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-on-timeout")
 	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
@@ -30,12 +31,10 @@ func TestFindAccumulationTimeoutHandler_OnTimeoutFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
 	}
-	nodeID, handler, ok := findAccumulationTimeoutHandler(semanticview.Wrap(bundle), "accumulate.timeout")
+	bucket := timeridentity.NewAccumulatorBucketRef("test-node", "item.arrived")
+	handler, ok := findAccumulationTimeoutHandlerForBucket(semanticview.Wrap(bundle), bucket)
 	if !ok {
 		t.Fatal("expected timeout handler")
-	}
-	if nodeID != "test-node" {
-		t.Fatalf("nodeID = %q", nodeID)
 	}
 	if handler.Accumulate == nil || handler.Accumulate.OnTimeout == nil {
 		t.Fatalf("handler missing accumulate on_timeout: %#v", handler.Accumulate)
@@ -58,7 +57,18 @@ func TestDeclarativeNodeHandleEvent_SelectsOnTimeoutAccumulatorHandler(t *testin
 	entry := bundle.NodeEntries()["test-node"]
 	engine := &recordingExecutionEngine{}
 	node := NewNode(entry, engine, nil)
-	handled := node.Handle(context.Background(), events.Event{Type: "accumulate.timeout"})
+	handled := node.Handle(context.Background(), events.Event{
+		Type: "accumulate.timeout",
+		Payload: mustJSON(map[string]any{
+			"timer_handle": map[string]any{
+				"kind": "accumulation_timeout",
+				"bucket": map[string]any{
+					"node_id":    "test-node",
+					"event_type": "item.arrived",
+				},
+			},
+		}),
+	})
 	if !handled {
 		t.Fatal("expected timeout event to be handled")
 	}

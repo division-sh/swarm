@@ -8,6 +8,7 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/timeridentity"
 	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/testutil"
@@ -45,7 +46,7 @@ func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) 
 		StateBuckets: map[string]any{
 			"test-node": map[string]any{
 				"handler_accumulators": map[string]any{
-					"test-node:item.arrived": map[string]any{
+					timeridentity.NewAccumulatorBucketRef("test-node", "item.arrived").Key(): map[string]any{
 						"expected":       []string{},
 						"expected_count": 3,
 						"received": map[string]any{
@@ -71,8 +72,17 @@ func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) 
 	}
 
 	timeoutEvt := events.Event{
-		ID:        "timeout-1",
-		Type:      events.EventType("accumulate.timeout"),
+		ID:   "timeout-1",
+		Type: events.EventType("accumulate.timeout"),
+		Payload: mustJSON(map[string]any{
+			"timer_handle": map[string]any{
+				"kind": "accumulation_timeout",
+				"bucket": map[string]any{
+					"node_id":    "test-node",
+					"event_type": "item.arrived",
+				},
+			},
+		}),
 		CreatedAt: time.Now().UTC(),
 	}.WithEntityID("ent-001")
 	result, err := pc.executeAuthoritativeNodeHandler(context.Background(), timeoutEvt, workflowTriggerContext{

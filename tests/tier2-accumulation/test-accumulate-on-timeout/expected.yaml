@@ -5,7 +5,13 @@ trigger:
     - event: item.arrived
       payload: { entity_id: ent-001, item_id: b }
     - event: accumulate.timeout
-      payload: { entity_id: ent-001 }
+      payload:
+        entity_id: ent-001
+        timer_handle:
+          kind: accumulation_timeout
+          bucket:
+            node_id: test-node
+            event_type: item.arrived
   entity_fields_before:
     expected_count: 3
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	"swarm/internal/runtime/core/timeridentity"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
 	runtimeengine "swarm/internal/runtime/engine"
 )
@@ -240,7 +241,10 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	}
 	handler, ok := source.NodeEventHandler(nodeID, trigger)
 	if !ok && isAccumulationTimeoutEvent(events.EventType(trigger)) {
-		handler, ok = findAccumulationTimeoutHandlerForNode(source, nodeID, trigger)
+		bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload))
+		if bucketOK && strings.TrimSpace(bucket.NodeID) == nodeID {
+			handler, ok = findAccumulationTimeoutHandlerForBucket(source, bucket)
+		}
 	}
 	if !ok {
 		return false, nil

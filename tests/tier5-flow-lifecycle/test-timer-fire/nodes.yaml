@@ -7,7 +7,7 @@ test-node:
     - id: check_timer
       event: timer.check
       delay: 1s
-      start_on: timer.scheduled
+      start_on: event:timer.scheduled
   event_handlers:
     timer.scheduled:
       advances_to: waiting

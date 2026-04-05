@@ -9,6 +9,7 @@ import (
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
+	"swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/semanticview"
@@ -82,20 +83,10 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		matched = true
 	}
 	if !matched && isAccumulationTimeoutEvent(events.EventType(trigger)) {
-		payload := parsePayloadMap(evt.Payload)
-		hintNodeID := strings.TrimSpace(asString(payload["node_id"]))
-		if hintNodeID != "" {
-			timeoutHandler, ok := findAccumulationTimeoutHandlerForNode(source, hintNodeID, trigger)
+		if bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload)); ok {
+			timeoutHandler, ok := findAccumulationTimeoutHandlerForBucket(source, bucket)
 			if ok {
-				nodeID = hintNodeID
-				handler = timeoutHandler
-				matched = true
-			}
-		}
-		if !matched {
-			timeoutNodeID, timeoutHandler, ok := findAccumulationTimeoutHandler(source, trigger)
-			if ok {
-				nodeID = timeoutNodeID
+				nodeID = bucket.NodeID
 				handler = timeoutHandler
 				matched = true
 			}
@@ -112,68 +103,34 @@ func isAccumulationTimeoutEvent(eventType events.EventType) bool {
 	return strings.HasSuffix(eventName, ".timeout") || strings.EqualFold(eventName, "accumulate.timeout")
 }
 
-func findAccumulationTimeoutHandler(source interface {
+func findAccumulationTimeoutHandlerForBucket(source interface {
 	NodeEntries() map[string]runtimecontracts.SystemNodeContract
 	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
-}, trigger string) (string, runtimecontracts.SystemNodeEventHandler, bool) {
-	trigger = strings.TrimSpace(trigger)
-	if source == nil || trigger == "" {
-		return "", runtimecontracts.SystemNodeEventHandler{}, false
-	}
-	var (
-		nodeID  string
-		handler runtimecontracts.SystemNodeEventHandler
-		matched bool
-	)
-	for candidateNodeID, node := range source.NodeEntries() {
-		if !containsString(node.SubscribesTo, trigger) {
-			continue
-		}
-		for _, candidate := range source.NodeEventHandlers(candidateNodeID) {
-			if candidate.Accumulate == nil {
-				continue
-			}
-			if candidate.Accumulate.Completion.Mode != runtimecontracts.AccumulateModeTimeout && candidate.Accumulate.OnTimeout == nil {
-				continue
-			}
-			if matched {
-				return "", runtimecontracts.SystemNodeEventHandler{}, false
-			}
-			nodeID = strings.TrimSpace(candidateNodeID)
-			handler = candidate
-			matched = true
-			break
-		}
-	}
-	if !matched {
-		return "", runtimecontracts.SystemNodeEventHandler{}, false
-	}
-	return nodeID, handler, true
-}
-
-func findAccumulationTimeoutHandlerForNode(source interface {
-	NodeEntries() map[string]runtimecontracts.SystemNodeContract
-	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
-}, nodeID, trigger string) (runtimecontracts.SystemNodeEventHandler, bool) {
-	nodeID = strings.TrimSpace(nodeID)
-	trigger = strings.TrimSpace(trigger)
-	if source == nil || nodeID == "" || trigger == "" {
+}, bucket timeridentity.AccumulatorBucketRef) (runtimecontracts.SystemNodeEventHandler, bool) {
+	bucket = bucket.Normalize()
+	if source == nil || !bucket.Valid() {
 		return runtimecontracts.SystemNodeEventHandler{}, false
 	}
-	node, ok := source.NodeEntries()[nodeID]
-	if !ok || !containsString(node.SubscribesTo, trigger) {
+	node, ok := source.NodeEntries()[bucket.NodeID]
+	if !ok || !containsString(node.SubscribesTo, "accumulate.timeout") {
 		return runtimecontracts.SystemNodeEventHandler{}, false
 	}
-	for _, candidate := range source.NodeEventHandlers(nodeID) {
-		if candidate.Accumulate == nil {
+	for eventType, candidate := range source.NodeEventHandlers(bucket.NodeID) {
+		if strings.TrimSpace(eventType) != bucket.EventType {
 			continue
 		}
-		if candidate.Accumulate.Completion.Mode != runtimecontracts.AccumulateModeTimeout && candidate.Accumulate.OnTimeout == nil {
-			continue
+		if accumulationTimeoutHandler(candidate) {
+			return candidate, true
 		}
-		return candidate, true
 	}
 	return runtimecontracts.SystemNodeEventHandler{}, false
+}
+
+func accumulationTimeoutHandler(handler runtimecontracts.SystemNodeEventHandler) bool {
+	if handler.Accumulate == nil {
+		return false
+	}
+	return handler.Accumulate.Completion.Mode == runtimecontracts.AccumulateModeTimeout || handler.Accumulate.OnTimeout != nil
 }
 
 func (pc *PipelineCoordinator) executeNodeContractHandler(

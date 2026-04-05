@@ -14,7 +14,7 @@ import (
 func TestScheduleEventPayloadInjectsEntityID(t *testing.T) {
 	payload := scheduleEventPayload(runtimepipeline.Schedule{
 		EntityID: "ent-001",
-		Payload:  []byte(`{"timer_id":"check_timer","trigger_reason":"check_timer"}`),
+		Payload:  []byte(`{"timer_handle":{"kind":"workflow_timer","timer_id":"check_timer"}}`),
 	})
 	var decoded map[string]any
 	if err := json.Unmarshal(payload, &decoded); err != nil {
@@ -23,18 +23,15 @@ func TestScheduleEventPayloadInjectsEntityID(t *testing.T) {
 	if got := decoded["entity_id"]; got != "ent-001" {
 		t.Fatalf("entity_id = %#v, want %q", got, "ent-001")
 	}
-	if _, ok := decoded["timer_id"]; ok {
-		t.Fatalf("timer_id should be stripped from published payload, got %#v", decoded["timer_id"])
-	}
-	if _, ok := decoded["trigger_reason"]; ok {
-		t.Fatalf("trigger_reason should be stripped from published payload, got %#v", decoded["trigger_reason"])
+	if _, ok := decoded["timer_handle"]; ok {
+		t.Fatalf("timer_handle should be stripped from published workflow timer payload, got %#v", decoded["timer_handle"])
 	}
 }
 
 func TestScheduleEventPayloadPreservesExistingEntityID(t *testing.T) {
 	payload := scheduleEventPayload(runtimepipeline.Schedule{
 		EntityID: "ent-001",
-		Payload:  []byte(`{"entity_id":"payload-entity","timer_id":"check_timer","__schedule_task_id":"timer-1"}`),
+		Payload:  []byte(`{"entity_id":"payload-entity","timer_handle":{"kind":"workflow_timer","timer_id":"check_timer"},"__schedule_task_id":"timer-1"}`),
 	})
 	var decoded map[string]any
 	if err := json.Unmarshal(payload, &decoded); err != nil {
@@ -43,11 +40,28 @@ func TestScheduleEventPayloadPreservesExistingEntityID(t *testing.T) {
 	if got := decoded["entity_id"]; got != "payload-entity" {
 		t.Fatalf("entity_id = %#v, want %q", got, "payload-entity")
 	}
-	if _, ok := decoded["timer_id"]; ok {
-		t.Fatalf("timer_id should be stripped from published payload, got %#v", decoded["timer_id"])
+	if _, ok := decoded["timer_handle"]; ok {
+		t.Fatalf("timer_handle should be stripped from published workflow timer payload, got %#v", decoded["timer_handle"])
 	}
 	if _, ok := decoded["__schedule_task_id"]; ok {
 		t.Fatalf("__schedule_task_id should be stripped from published payload, got %#v", decoded["__schedule_task_id"])
+	}
+}
+
+func TestScheduleEventPayloadPreservesAccumulationTimeoutHandle(t *testing.T) {
+	payload := scheduleEventPayload(runtimepipeline.Schedule{
+		EntityID: "ent-001",
+		Payload:  []byte(`{"timer_handle":{"kind":"accumulation_timeout","bucket":{"node_id":"collector","event_type":"item.arrived"}}}`),
+	})
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("Unmarshal(payload): %v", err)
+	}
+	if _, ok := decoded["timer_handle"]; !ok {
+		t.Fatalf("expected accumulation timeout handle to remain in published payload, got %#v", decoded)
+	}
+	if got := decoded["entity_id"]; got != "ent-001" {
+		t.Fatalf("entity_id = %#v, want %q", got, "ent-001")
 	}
 }
 
@@ -107,5 +121,33 @@ func TestEnsureRecurringWorkflowSchedulesSkipsLifecycleScopedRecurringTimers(t *
 	}
 	if len(store.schedules) != 0 {
 		t.Fatalf("startup recurring schedules = %#v, want none for start_on recurring timers", store.schedules)
+	}
+}
+
+func TestEnsureRecurringWorkflowSchedulesRegistersBootRecurringTimers(t *testing.T) {
+	store := &recordingRuntimeScheduleStore{}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{{
+				ID:        "daily_report",
+				Owner:     "runtime",
+				Event:     "timer.daily_report",
+				Delay:     "24h",
+				StartOn:   "boot",
+				Recurring: true,
+			}},
+		},
+	}
+	err := ensureRecurringWorkflowSchedules(context.Background(), store, semanticOnlyWorkflowRuntime{
+		source: semanticview.Wrap(bundle),
+	})
+	if err != nil {
+		t.Fatalf("ensureRecurringWorkflowSchedules: %v", err)
+	}
+	if len(store.schedules) != 1 {
+		t.Fatalf("startup recurring schedules = %#v, want 1 boot schedule", store.schedules)
+	}
+	if got := store.schedules[0].EventType; got != "timer.daily_report" {
+		t.Fatalf("scheduled event = %q, want timer.daily_report", got)
 	}
 }

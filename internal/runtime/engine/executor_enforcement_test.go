@@ -277,6 +277,15 @@ func TestExecutor_AccumulateOnTimeoutAppliesRule(t *testing.T) {
 		Event: events.Event{
 			ID:   "timeout-1",
 			Type: events.EventType("accumulate.timeout"),
+			Payload: mustEncodeJSON(t, map[string]any{
+				"timer_handle": map[string]any{
+					"kind": "accumulation_timeout",
+					"bucket": map[string]any{
+						"node_id":    "node-1",
+						"event_type": "item.arrived",
+					},
+				},
+			}),
 		},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Accumulate: &runtimecontracts.AccumulateSpec{
@@ -301,6 +310,15 @@ func TestExecutor_AccumulateOnTimeoutAppliesRule(t *testing.T) {
 	if repo.snapshot.CurrentState != "partial" {
 		t.Fatalf("persisted CurrentState = %q", repo.snapshot.CurrentState)
 	}
+}
+
+func mustEncodeJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal(%#v): %v", value, err)
+	}
+	return encoded
 }
 
 func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {

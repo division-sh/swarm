@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/timeridentity"
 )
 
 type catalogTriggerStep struct {
@@ -2168,10 +2169,10 @@ func applyCatalogNodeTimers(nodeID string, node catalogNodeContract, event strin
 		return
 	}
 	for _, timer := range node.Timers {
-		if strings.EqualFold(strings.TrimSpace(timer.StartOn), event) {
+		if trigger, err := timeridentity.ParseStartTrigger(timer.StartOn); err == nil && trigger.MatchesEvent(event) {
 			activeTimers[catalogNodeTimerKey(nodeID, timer)] = timer
 		}
-		if strings.EqualFold(strings.TrimSpace(timer.CancelOn), event) {
+		if trigger, err := timeridentity.ParseCancelTrigger(timer.CancelOn); err == nil && trigger.MatchesEvent(event) {
 			delete(activeTimers, catalogNodeTimerKey(nodeID, timer))
 		}
 	}

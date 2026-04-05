@@ -7,6 +7,7 @@ import (
 	"time"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/timeridentity"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -38,14 +39,16 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 				continue
 			}
 			timer, ok := source.WorkflowTimerByID(timerState.TimerID)
-			if !ok || !workflowTimerLifecycleMatches(timer.CancelOn, nextStage, sourceEvent) {
+			cancelTrigger, ok := workflowTimerCancelTrigger(timer)
+			if !ok || !workflowTimerLifecycleMatches(cancelTrigger, nextStage, sourceEvent) {
 				continue
 			}
 			timerState.Cancelled = true
 			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, timerState.FiresAt, workflowTimerPolicy(source)))
 		}
 		for _, timer := range source.WorkflowTimers() {
-			if !workflowTimerLifecycleMatches(timer.StartOn, nextStage, sourceEvent) {
+			startTrigger, ok := workflowTimerStartTrigger(timer)
+			if !ok || !workflowTimerLifecycleMatches(startTrigger, nextStage, sourceEvent) {
 				continue
 			}
 			if workflowTimerStateActive(instance.TimerState, timer.ID) {
@@ -121,14 +124,16 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 				continue
 			}
 			timer, ok := source.WorkflowTimerByID(timerState.TimerID)
-			if !ok || !workflowTimerLifecycleMatches(timer.CancelOn, "", sourceEvent) {
+			cancelTrigger, ok := workflowTimerCancelTrigger(timer)
+			if !ok || !workflowTimerLifecycleMatches(cancelTrigger, "", sourceEvent) {
 				continue
 			}
 			timerState.Cancelled = true
 			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, timerState.FiresAt, workflowTimerPolicy(source)))
 		}
 		for _, timer := range source.WorkflowTimers() {
-			if !workflowTimerLifecycleMatches(timer.StartOn, "", sourceEvent) {
+			startTrigger, ok := workflowTimerStartTrigger(timer)
+			if !ok || !workflowTimerLifecycleMatches(startTrigger, "", sourceEvent) {
 				continue
 			}
 			if workflowTimerStateActive(instance.TimerState, timer.ID) {
@@ -182,16 +187,16 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 	if entityID == "" || nodeID == "" {
 		return nil
 	}
-	bucketEventType := accumulationTimeoutBucketEventType(evt, stateBuckets, nodeID)
-	if strings.TrimSpace(bucketEventType) == "" {
+	bucketRef, ok := accumulationTimeoutBucketRef(evt, nodeID)
+	if !ok {
 		return nil
 	}
-	sc := accumulationTimeoutSchedule(entityID, nodeID, bucketEventType, time.Time{}, spec.TimeoutMS)
+	sc := accumulationTimeoutSchedule(entityID, bucketRef, time.Time{}, spec.TimeoutMS)
 	if isAccumulationTimeoutEvent(evt.Type) || !waiting {
 		pc.persistWorkflowTimerCancellation(ctx, sc)
 		return nil
 	}
-	startedAt, ok := accumulationTimeoutStartedAt(stateBuckets, nodeID, bucketEventType)
+	startedAt, ok := accumulationTimeoutStartedAt(stateBuckets, bucketRef)
 	if !ok {
 		return nil
 	}
@@ -200,54 +205,31 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 	return nil
 }
 
-func workflowTimerLifecycleMatches(trigger, stage, sourceEvent string) bool {
-	trigger = strings.TrimSpace(trigger)
-	stage = strings.TrimSpace(stage)
-	sourceEvent = strings.TrimSpace(sourceEvent)
-	if trigger == "" {
-		return false
-	}
-	switch {
-	case strings.HasPrefix(trigger, "state:"):
-		return strings.TrimSpace(strings.TrimPrefix(trigger, "state:")) == stage
-	case strings.HasPrefix(trigger, "event:"):
-		return strings.TrimSpace(strings.TrimPrefix(trigger, "event:")) == sourceEvent
-	default:
-		return trigger == stage || trigger == sourceEvent
-	}
+func workflowTimerLifecycleMatches(trigger timeridentity.Trigger, stage, sourceEvent string) bool {
+	return trigger.MatchesStage(stage) || trigger.MatchesEvent(sourceEvent)
 }
 
-func accumulationTimeoutBucketEventType(evt Event, stateBuckets map[string]any, nodeID string) string {
-	payload := parsePayloadMap(evt.Payload)
-	if raw := strings.TrimSpace(asString(payload["bucket_event_type"])); raw != "" {
-		return raw
+func accumulationTimeoutBucketRef(evt Event, nodeID string) (timeridentity.AccumulatorBucketRef, bool) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return timeridentity.AccumulatorBucketRef{}, false
 	}
 	if !isAccumulationTimeoutEvent(evt.Type) {
-		return strings.TrimSpace(string(evt.Type))
+		bucket := timeridentity.NewAccumulatorBucketRef(nodeID, string(evt.Type))
+		return bucket, bucket.Valid()
 	}
-	nodeBucket, _ := stateBuckets[strings.TrimSpace(nodeID)].(map[string]any)
-	accumulators, _ := nodeBucket["handler_accumulators"].(map[string]any)
-	var (
-		bestBucket string
-		bestTime   string
-	)
-	for bucketID, raw := range accumulators {
-		bucket, _ := raw.(map[string]any)
-		sortKey := strings.TrimSpace(firstNonEmptyString(asString(bucket["last_received_at"]), asString(bucket["started_at"]), bucketID))
-		if bestBucket == "" || sortKey > bestTime {
-			bestBucket = strings.TrimSpace(bucketID)
-			bestTime = sortKey
-		}
+	bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload))
+	if !ok || strings.TrimSpace(bucket.NodeID) != nodeID {
+		return timeridentity.AccumulatorBucketRef{}, false
 	}
-	prefix := strings.TrimSpace(nodeID) + ":"
-	return strings.TrimSpace(strings.TrimPrefix(bestBucket, prefix))
+	return bucket, true
 }
 
-func accumulationTimeoutStartedAt(stateBuckets map[string]any, nodeID, bucketEventType string) (time.Time, bool) {
-	nodeBucket, _ := stateBuckets[strings.TrimSpace(nodeID)].(map[string]any)
+func accumulationTimeoutStartedAt(stateBuckets map[string]any, bucketRef timeridentity.AccumulatorBucketRef) (time.Time, bool) {
+	bucketRef = bucketRef.Normalize()
+	nodeBucket, _ := stateBuckets[bucketRef.NodeID].(map[string]any)
 	accumulators, _ := nodeBucket["handler_accumulators"].(map[string]any)
-	bucketID := strings.TrimSpace(nodeID) + ":" + strings.TrimSpace(bucketEventType)
-	raw, ok := accumulators[bucketID].(map[string]any)
+	raw, ok := accumulators[bucketRef.Key()].(map[string]any)
 	if !ok {
 		return time.Time{}, false
 	}
@@ -262,27 +244,26 @@ func accumulationTimeoutStartedAt(stateBuckets map[string]any, nodeID, bucketEve
 	return parsed.UTC(), true
 }
 
-func accumulationTimeoutSchedule(entityID, nodeID, bucketEventType string, fireAt time.Time, timeoutMS int) Schedule {
-	taskID := accumulationTimeoutTaskID(nodeID, bucketEventType)
+func accumulationTimeoutSchedule(entityID string, bucketRef timeridentity.AccumulatorBucketRef, fireAt time.Time, timeoutMS int) Schedule {
+	handle := timeridentity.AccumulationTimeoutHandle(bucketRef)
 	return Schedule{
 		AgentID:   runtimeWorkflowID,
 		EventType: "accumulate.timeout",
 		Mode:      "once",
 		At:        fireAt,
 		EntityID:  strings.TrimSpace(entityID),
-		TaskID:    taskID,
-		Payload: mustJSON(map[string]any{
-			"timer_id":          taskID,
-			"trigger_reason":    "accumulate_timeout",
-			"node_id":           strings.TrimSpace(nodeID),
-			"bucket_event_type": strings.TrimSpace(bucketEventType),
-			"timeout_ms":        timeoutMS,
-		}),
+		TaskID:    handle.TaskID(),
+		Payload:   mustJSON(accumulationTimeoutPayload(handle, timeoutMS)),
 	}
 }
 
-func accumulationTimeoutTaskID(nodeID, bucketEventType string) string {
-	return "accumulate_timeout:" + strings.TrimSpace(nodeID) + ":" + strings.TrimSpace(bucketEventType)
+func accumulationTimeoutPayload(handle timeridentity.TimerHandle, timeoutMS int) map[string]any {
+	payload := handle.PayloadMetadata()
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["timeout_ms"] = timeoutMS
+	return payload
 }
 
 func workflowTimerStateActive(items []WorkflowTimerState, timerID string) bool {
@@ -347,14 +328,15 @@ func workflowTimerPolicy(source semanticview.Source) map[string]any {
 }
 
 func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, entityID string, fireAt time.Time, policy map[string]any) Schedule {
+	handle := timeridentity.WorkflowTimerHandle(timer.ID)
 	sc := Schedule{
 		AgentID:   strings.TrimSpace(timer.Owner),
 		EventType: strings.TrimSpace(timer.Event),
 		Mode:      "once",
 		At:        fireAt,
 		EntityID:  strings.TrimSpace(entityID),
-		TaskID:    strings.TrimSpace(timer.ID),
-		Payload:   mustJSON(map[string]any{"timer_id": strings.TrimSpace(timer.ID), "trigger_reason": strings.TrimSpace(timer.ID)}),
+		TaskID:    handle.TaskID(),
+		Payload:   mustJSON(handle.PayloadMetadata()),
 	}
 	if timer.Recurring {
 		if cronSpec, ok := workflowTimerRecurringSpec(timer, policy); ok {
@@ -364,6 +346,16 @@ func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, entityI
 		}
 	}
 	return sc
+}
+
+func workflowTimerStartTrigger(timer runtimecontracts.WorkflowTimerContract) (timeridentity.Trigger, bool) {
+	trigger, err := timeridentity.ParseStartTrigger(timer.StartOn)
+	return trigger, err == nil && trigger.Valid()
+}
+
+func workflowTimerCancelTrigger(timer runtimecontracts.WorkflowTimerContract) (timeridentity.Trigger, bool) {
+	trigger, err := timeridentity.ParseCancelTrigger(timer.CancelOn)
+	return trigger, err == nil && trigger.Valid()
 }
 
 func workflowTimerRecurringSpec(timer runtimecontracts.WorkflowTimerContract, policy map[string]any) (string, bool) {

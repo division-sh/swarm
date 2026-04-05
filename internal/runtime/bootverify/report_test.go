@@ -791,6 +791,46 @@ func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsErrorForUnprefixedTimerStartOn(t *testing.T) {
+	root := writeTimerValidationFixture(t, "ticket.opened", "")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "start_on") {
+		t.Fatalf("expected timer_validation start_on error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForTimerCancelOnBoot(t *testing.T) {
+	root := writeTimerValidationFixture(t, "event:ticket.opened", "boot")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "cancel_on") {
+		t.Fatalf("expected timer_validation cancel_on error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForUnknownTimerTriggerState(t *testing.T) {
+	root := writeTimerValidationFixture(t, "state:missing_state", "")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "unknown state") {
+		t.Fatalf("expected timer_validation unknown state error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsWarningForUnknownTimerTriggerEvent(t *testing.T) {
+	root := writeTimerValidationFixture(t, "event:ticket.unknown", "")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Warnings(), "timer_validation", "unknown event") {
+		t.Fatalf("expected timer_validation unknown event warning, got %#v", report.Warnings())
+	}
+}
+
 func repoRootForBootverifyTest(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -808,6 +848,83 @@ func writeBootverifyFixtureFile(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func writeTimerValidationFixture(t *testing.T, startOn, cancelOn string) string {
+	t.Helper()
+	root := t.TempDir()
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: timer-validation
+version: "1.0.0"
+platform: ">=1.6.0"
+entity_schema:
+  groups:
+    - name: ticket
+      fields:
+        - name: ticket_id
+          type: string
+flows:
+  - id: support
+    flow: support
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: timer-validation\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+name: support
+initial_state: waiting
+terminal_states: [done]
+states: [waiting, active, done]
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+ticket.opened:
+  payload:
+    properties:
+      entity_id:
+        type: string
+ticket.closed:
+  payload:
+    properties:
+      entity_id:
+        type: string
+timer.reminder:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	timerBlock := `
+    - id: reminder
+      event: timer.reminder
+      delay: 1m
+      start_on: ` + startOn + "\n"
+	if strings.TrimSpace(cancelOn) != "" {
+		timerBlock += "      cancel_on: " + cancelOn + "\n"
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
+support-node:
+  id: support-node
+  execution_type: system_node
+  subscribes_to:
+    - ticket.opened
+    - ticket.closed
+    - timer.reminder
+  timers:
+`+timerBlock+`  event_handlers:
+    ticket.opened:
+      create_entity: true
+      advances_to: active
+    ticket.closed:
+      advances_to: done
+    timer.reminder:
+      advances_to: done
+`)
+	return root
 }
 
 func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {
