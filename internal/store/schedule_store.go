@@ -304,7 +304,7 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 	}
 	_, err := s.DB.ExecContext(ctx, `
 		UPDATE timers
-		SET status = $5,
+		SET status = $6,
 		    fired_at = now()
 		WHERE owner_agent = $1
 		  AND fire_event = $2
