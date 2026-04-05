@@ -128,6 +128,7 @@ type AgentManagerOptions struct {
 	Sessions                  sessions.Registry
 	SemanticSource            semanticview.Source
 	PromptResolver            runtimecontracts.PromptResolver
+	WorkflowInstances         flowInstancePersistence
 	RuntimeMode               string
 	Budget                    BudgetGuard
 	ResetRuntimeOwnedState    func()

@@ -286,15 +286,8 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
 	rt.Bus = bus
-	if stores.SQLDB != nil {
-		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
-			Module: opts.WorkflowModule,
-		})
-		if rt.Pipeline != nil {
-			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
-		}
-	}
 
+	var managerRef *runtimemanager.AgentManager
 	rt.Scheduler = runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
 		callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
@@ -337,6 +330,28 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			}
 		}
 	})
+	if stores.SQLDB != nil {
+		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
+			Module: opts.WorkflowModule,
+			InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+				if managerRef == nil {
+					return fmt.Errorf("flow instance activator is required")
+				}
+				return managerRef.ActivateFlowInstance(ctx, req)
+			},
+			InstanceDeactivator: func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
+				if managerRef == nil {
+					return fmt.Errorf("flow instance deactivator is required")
+				}
+				return managerRef.DeactivateFlowInstanceModel(ctx, req)
+			},
+			TimerScheduler:     rt.Scheduler,
+			TimerScheduleStore: stores.ScheduleStore,
+		})
+		if rt.Pipeline != nil {
+			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
+		}
+	}
 
 	if stores.SQLDB != nil {
 		rt.Budget = NewBudgetTracker(stores.SQLDB, rt.Bus, cfg, stores.MailboxStore, rt.Logger, source)
@@ -375,14 +390,12 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		}
 	}
 
-	var managerRef *runtimemanager.AgentManager
 	rt.ToolExecutor = runtimetools.NewExecutorWithOptions(rt.Bus, rt.Scheduler, runtimetools.ExecutorOptions{
 		Config:            cfg,
 		Credentials:       rt.Credentials,
 		MailboxStore:      stores.MailboxStore,
 		SQLDB:             stores.SQLDB,
 		WorkflowSource:    source,
-		FlowActivator:     nil,
 		WorkspaceResolver: rt.Workspace,
 		AuthorityProvider: rt.Authority,
 		EmitRegistry:      rt.EmitRegistry,
@@ -433,13 +446,18 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		AuthorityProvider: rt.Authority,
 		EmitRegistry:      rt.EmitRegistry,
 	})
+	var workflowInstances runtimepipeline.WorkflowInstancePersistence
+	if rt.Pipeline != nil {
+		workflowInstances = rt.Pipeline.WorkflowInstanceStore()
+	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
-		Workspaces:     rt.Workspace,
-		Sessions:       stores.SessionRegistry,
-		SemanticSource: source,
-		PromptResolver: rt.PromptResolver,
-		RuntimeMode:    cfg.LLM.RuntimeMode,
-		Budget:         rt.Budget,
+		Workspaces:        rt.Workspace,
+		Sessions:          stores.SessionRegistry,
+		SemanticSource:    source,
+		PromptResolver:    rt.PromptResolver,
+		WorkflowInstances: workflowInstances,
+		RuntimeMode:       cfg.LLM.RuntimeMode,
+		Budget:            rt.Budget,
 		ResetRuntimeOwnedState: func() {
 			if rt.MCPTurns != nil {
 				rt.MCPTurns.Reset()
@@ -449,19 +467,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		DisableSpinupControl:     true,
 	}, stores.ManagerStore)
 	managerRef = rt.Manager
-	if rt.ToolExecutor != nil && rt.Manager != nil {
-		rt.ToolExecutor.SetFlowActivator(rt.Manager.ActivateFlowInstance)
-	}
-	if rt.Pipeline != nil && rt.Manager != nil {
-		rt.Manager.SetWorkflowInstanceStore(rt.Pipeline.WorkflowInstanceStore())
-		rt.Pipeline.SetInstanceActivator(rt.Manager.ActivateFlowInstance)
-		rt.Pipeline.SetInstanceDeactivator(func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
-			return rt.Manager.DeactivateFlowInstanceModel(ctx, req)
-		})
-	}
-	if rt.Pipeline != nil {
-		rt.Pipeline.SetTimerScheduling(rt.Scheduler, stores.ScheduleStore)
-	}
 
 	if stores.InboundStore != nil {
 		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, stores.InboundStore)

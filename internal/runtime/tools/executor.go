@@ -38,7 +38,6 @@ type Executor struct {
 	httpClient      *http.Client
 	mcpClient       *runtimemcp.Client
 	workflowSource  semanticview.Source
-	flowActivator   runtimepipeline.FlowInstanceActivator
 	workspaces      workspace.Resolver
 	authority       runtimeauthority.Provider
 	emitRegistry    *EmitRegistry
@@ -75,7 +74,6 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		httpClient:      &http.Client{Timeout: 30 * time.Second},
 		mcpClient:       opts.MCPClient,
 		workflowSource:  opts.WorkflowSource,
-		flowActivator:   opts.FlowActivator,
 		workspaces:      opts.WorkspaceResolver,
 		authority:       runtimeauthority.ProviderOrNoop(opts.AuthorityProvider),
 		oneShotEmits:    make(map[string]struct{}),
@@ -128,49 +126,6 @@ func (e *Executor) contractDefinitions() ([]llm.ToolDefinition, error) {
 		discovered = client.DiscoveredTools()
 	}
 	return toolDefinitionsForRuntime(source, discovered)
-}
-
-func (e *Executor) SetWorkflowSource(source semanticview.Source) {
-	e.mu.Lock()
-	e.workflowSource = source
-	client := e.mcpClient
-	e.emitRegistry = NewEmitRegistry(source, e.authority)
-	e.mu.Unlock()
-	if client != nil {
-		for _, err := range client.Refresh(context.Background(), source) {
-			processWarn("tool-executor", "mcp discovery warning: %v", err)
-		}
-	}
-}
-
-func (e *Executor) SetManager(manager Manager) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if manager == nil {
-		e.manager = nil
-		return
-	}
-	e.manager = manager
-	e.managerProvider = nil
-}
-
-func (e *Executor) SetFlowActivator(activator runtimepipeline.FlowInstanceActivator) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.flowActivator = activator
-}
-
-func (e *Executor) SetConfig(cfg *config.Config) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.cfg = cfg
-}
-
-func (e *Executor) SetAuthorityProvider(provider runtimeauthority.Provider) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.authority = runtimeauthority.ProviderOrNoop(provider)
-	e.emitRegistry = NewEmitRegistry(e.workflowSource, e.authority)
 }
 
 func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool, error) {

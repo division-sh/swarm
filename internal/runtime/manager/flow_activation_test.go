@@ -28,6 +28,12 @@ type flowActivationTestStore struct {
 	upserts []PersistedAgent
 }
 
+func newFlowActivationManager(bus Bus, instances flowInstancePersistence, stores ...ManagerPersistence) *AgentManager {
+	return NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
+		WorkflowInstances: instances,
+	}, stores...)
+}
+
 func (s *flowActivationTestInstanceStore) Upsert(_ context.Context, instance runtimepipeline.WorkflowInstance) error {
 	s.upserts = append(s.upserts, instance)
 	return nil
@@ -228,7 +234,7 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 
 func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := NewAgentManager(bus, nil)
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("")
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -251,7 +257,7 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 
 func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := NewAgentManager(bus, nil)
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("task.started")
 
 	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
@@ -275,7 +281,7 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 
 func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := NewAgentManager(bus, nil)
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("task.started")
 	postCommit := make([]func(), 0, 1)
 	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
@@ -329,8 +335,7 @@ func TestNormalizedFlowAgentEmitEvents_ExternalizesInstanceLocalEvents(t *testin
 func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := NewAgentManager(bus, nil)
-	am.SetWorkflowInstanceStore(instances)
+	am := newFlowActivationManager(bus, instances)
 	bundle := testFlowBundle("task.started")
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -365,7 +370,7 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 
 func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := NewAgentManager(bus, nil)
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("")
 	reviewFlow := bundle.FlowTree.ByID["review"]
 	reviewFlow.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
@@ -399,7 +404,7 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 
 func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := NewAgentManager(bus, nil)
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("")
 
 	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
@@ -419,7 +424,7 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 
 func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := NewAgentManager(bus, nil)
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	bundle := testNestedFlowBundle()
 
 	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "grandchild", "inst-1", "ent-1", "child/grandchild/inst-1"))
@@ -463,7 +468,7 @@ func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsFromExactFlowPath(t 
 func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	store := &flowActivationTestStore{}
-	am := NewAgentManager(bus, nil, store)
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{}, store)
 	bundle := testStaticFlowBundle()
 
 	if err := am.EnsureStaticFlowRequiredAgents(context.Background(), semanticview.Wrap(bundle)); err != nil {
@@ -489,7 +494,7 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 
 func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := NewAgentManager(bus, nil)
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Version: "v-test",
@@ -538,6 +543,16 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 	}
 	if len(flowCfg.Subscriptions) != 1 || flowCfg.Subscriptions[0] != "ops-flow/work.requested" {
 		t.Fatalf("flow subscriptions = %#v, want [ops-flow/work.requested]", flowCfg.Subscriptions)
+	}
+}
+
+func TestActivateFlowInstanceFailsWithoutWorkflowInstanceStore(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := NewAgentManager(bus, nil)
+
+	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(testFlowBundle(""), "review", "inst-1", "ent-1", "review/inst-1"))
+	if err == nil || !strings.Contains(err.Error(), "workflow instance store is required") {
+		t.Fatalf("ActivateFlowInstance err = %v, want workflow instance store error", err)
 	}
 }
 

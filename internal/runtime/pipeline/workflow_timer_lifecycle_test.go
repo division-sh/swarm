@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,6 +45,15 @@ func (s *recordingSchedulePersistence) MarkScheduleFiredExact(context.Context, S
 	return nil
 }
 
+func newTimerLifecycleCoordinator(bus Bus, db *sql.DB, module WorkflowModule, store SchedulePersistence) *PipelineCoordinator {
+	opts := PipelineCoordinatorOptions{Module: module}
+	if store != nil {
+		opts.TimerScheduler = NewScheduler()
+		opts.TimerScheduleStore = store
+	}
+	return NewPipelineCoordinatorWithOptions(bus, db, opts)
+}
+
 func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier5-flow-lifecycle", "test-timer-fire")
@@ -59,14 +69,11 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: module,
-	})
+	store := &recordingSchedulePersistence{}
+	pc := newTimerLifecycleCoordinator(noopPipelineBus{}, db, module, store)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
-	store := &recordingSchedulePersistence{}
-	pc.SetTimerScheduling(NewScheduler(), store)
 
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      "ent-001",
@@ -123,14 +130,11 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: module,
-	})
+	store := &recordingSchedulePersistence{}
+	pc := newTimerLifecycleCoordinator(noopPipelineBus{}, db, module, store)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
-	store := &recordingSchedulePersistence{}
-	pc.SetTimerScheduling(NewScheduler(), store)
 
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      "ent-001",
@@ -253,14 +257,11 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: module,
-	})
+	store := &recordingSchedulePersistence{}
+	pc := newTimerLifecycleCoordinator(noopPipelineBus{}, db, module, store)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
-	store := &recordingSchedulePersistence{}
-	pc.SetTimerScheduling(NewScheduler(), store)
 
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      "ent-001",
@@ -329,14 +330,11 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: module,
-	})
+	store := &recordingSchedulePersistence{}
+	pc := newTimerLifecycleCoordinator(noopPipelineBus{}, db, module, store)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
-	store := &recordingSchedulePersistence{}
-	pc.SetTimerScheduling(NewScheduler(), store)
 
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      "ent-001",

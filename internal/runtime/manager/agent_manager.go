@@ -101,6 +101,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		sessions:                 opts.Sessions,
 		semanticSource:           opts.SemanticSource,
 		promptResolver:           opts.PromptResolver,
+		workflowInstances:        opts.WorkflowInstances,
 		runtimeMode:              strings.TrimSpace(opts.RuntimeMode),
 		budget:                   opts.Budget,
 		resetRuntimeOwnedState:   opts.ResetRuntimeOwnedState,
@@ -113,27 +114,6 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		deadLetterWindows:        make(map[string][]deadLetterEscalationSample),
 		deadLetterLastRaised:     make(map[string]time.Time),
 	}
-}
-
-// SetSessionRegistry enables spec v2.0 session rotation behavior on reconfigure.
-// runtimeMode should match the LLM runtime (e.g. "api" or "cli_test").
-func (am *AgentManager) SetSessionRegistry(sessions sessions.Registry, runtimeMode string) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	am.sessions = sessions
-	am.runtimeMode = strings.TrimSpace(runtimeMode)
-}
-
-func (am *AgentManager) SetBudgetTracker(tracker BudgetGuard) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	am.budget = tracker
-}
-
-func (am *AgentManager) SetWorkflowInstanceStore(store flowInstancePersistence) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	am.workflowInstances = store
 }
 
 func (am *AgentManager) runtimeContext() context.Context {

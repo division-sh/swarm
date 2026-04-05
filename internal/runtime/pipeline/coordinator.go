@@ -65,6 +65,8 @@ type PipelineCoordinatorOptions struct {
 	Module              WorkflowModule
 	InstanceActivator   FlowInstanceActivator
 	InstanceDeactivator FlowInstanceDeactivator
+	TimerScheduler      *Scheduler
+	TimerScheduleStore  SchedulePersistence
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
@@ -83,6 +85,8 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		expressionEval:      newWorkflowExpressionEvaluator(),
 		instanceActivator:   opts.InstanceActivator,
 		instanceDeactivator: opts.InstanceDeactivator,
+		timerScheduler:      opts.TimerScheduler,
+		timerScheduleStore:  opts.TimerScheduleStore,
 		entityLocks:         make(map[string]*sync.Mutex),
 	}
 }
@@ -106,34 +110,6 @@ func (pc *PipelineCoordinator) SetTestEntityStateHook(fn func(entityID, state st
 	}
 	pc.mu.Lock()
 	pc.testEntityStateHook = fn
-	pc.mu.Unlock()
-}
-
-func (pc *PipelineCoordinator) SetInstanceActivator(activator FlowInstanceActivator) {
-	if pc == nil {
-		return
-	}
-	pc.mu.Lock()
-	pc.instanceActivator = activator
-	pc.mu.Unlock()
-}
-
-func (pc *PipelineCoordinator) SetInstanceDeactivator(deactivator FlowInstanceDeactivator) {
-	if pc == nil {
-		return
-	}
-	pc.mu.Lock()
-	pc.instanceDeactivator = deactivator
-	pc.mu.Unlock()
-}
-
-func (pc *PipelineCoordinator) SetTimerScheduling(scheduler *Scheduler, store SchedulePersistence) {
-	if pc == nil {
-		return
-	}
-	pc.mu.Lock()
-	pc.timerScheduler = scheduler
-	pc.timerScheduleStore = store
 	pc.mu.Unlock()
 }
 
