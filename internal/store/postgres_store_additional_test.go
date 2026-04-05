@@ -1461,6 +1461,68 @@ func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *test
 	}
 }
 
+func TestManagerStore_SessionConversationDoesNotPersistAuditRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	if err := pg.ensureConversationAuditTable(ctx); err != nil {
+		t.Fatalf("ensureConversationAuditTable: %v", err)
+	}
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		AgentID:  "a1",
+		Mode:     "session",
+		ScopeKey: "global",
+		Messages: []llm.Message{
+			{Role: "user", Content: "hello"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(session): %v", err)
+	}
+
+	var sessionID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT session_id::text
+		FROM agent_sessions
+		WHERE agent_id = 'a1' AND runtime_mode = 'session'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`).Scan(&sessionID); err != nil {
+		t.Fatalf("load session row: %v", err)
+	}
+
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "session",
+		SessionID:      sessionID,
+		RequestPayload: []byte(`{"kind":"session"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn(session): %v", err)
+	}
+
+	var auditCount, turnCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM agent_conversation_audits WHERE agent_id = 'a1'),
+			(SELECT COUNT(*) FROM agent_turns WHERE agent_id = 'a1' AND session_id = $1::uuid AND runtime_mode = 'session')
+	`, sessionID).Scan(&auditCount, &turnCount); err != nil {
+		t.Fatalf("count persisted rows: %v", err)
+	}
+	if auditCount != 0 {
+		t.Fatalf("expected no audit rows for session-mode persistence, got %d", auditCount)
+	}
+	if turnCount != 1 {
+		t.Fatalf("expected one session-mode turn row, got %d", turnCount)
+	}
+}
+
 func TestManagerStore_TaskConversationUpsertIsIdempotentBySessionID(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -1573,6 +1635,59 @@ func TestManagerStore_AppendAgentTurn_TaskCreatesAuditRowIfMissing(t *testing.T)
 	}
 	if turns != 1 {
 		t.Fatalf("expected one task agent_turn row after synthesized append, got %d", turns)
+	}
+}
+
+func TestManagerStore_TaskConversationDoesNotPersistLiveSessionRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := uuid.NewString()
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "a1",
+		Mode:      "task",
+		Messages: []llm.Message{
+			{Role: "assistant", Content: "done"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task): %v", err)
+	}
+
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "task",
+		SessionID:      sessionID,
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn(task): %v", err)
+	}
+
+	var sessionCount, auditCount, turnCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM agent_sessions WHERE agent_id = 'a1'),
+			(SELECT COUNT(*) FROM agent_conversation_audits WHERE agent_id = 'a1' AND session_id = $1::uuid AND runtime_mode = 'task'),
+			(SELECT COUNT(*) FROM agent_turns WHERE agent_id = 'a1' AND session_id = $1::uuid AND runtime_mode = 'task')
+	`, sessionID).Scan(&sessionCount, &auditCount, &turnCount); err != nil {
+		t.Fatalf("count persisted rows: %v", err)
+	}
+	if sessionCount != 0 {
+		t.Fatalf("expected no live session rows for task-mode persistence, got %d", sessionCount)
+	}
+	if auditCount != 1 {
+		t.Fatalf("expected one task audit row, got %d", auditCount)
+	}
+	if turnCount != 1 {
+		t.Fatalf("expected one task turn row, got %d", turnCount)
 	}
 }
 

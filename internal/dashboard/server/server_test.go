@@ -672,6 +672,28 @@ func TestSQLConversationReader_GetUsesCanonicalTurnSummaryProgress(t *testing.T)
 	}
 }
 
+func TestSummarizeConversationTurnBlocks_FailsClosedOnEmptyCanonicalSummary(t *testing.T) {
+	blocks := []any{
+		map[string]any{"kind": "assistant_text", "text": "stale fallback text"},
+		map[string]any{"kind": "outcome", "text": "stale outcome"},
+		map[string]any{"kind": "turn_summary", "data": map[string]any{}},
+	}
+
+	assistantText, outcome, reasoning, progress, toolResults := summarizeConversationTurnBlocks(blocks)
+	if assistantText != "" || outcome != "" {
+		t.Fatalf("expected empty canonical summary strings, got assistant=%q outcome=%q", assistantText, outcome)
+	}
+	if reasoning != nil {
+		t.Fatalf("expected nil reasoning blocks, got %#v", reasoning)
+	}
+	if progress != nil {
+		t.Fatalf("expected nil progress updates, got %#v", progress)
+	}
+	if toolResults != nil {
+		t.Fatalf("expected nil tool results, got %#v", toolResults)
+	}
+}
+
 func TestSQLConversationReader_GetUsesSessionIDNotAgentID(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

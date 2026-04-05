@@ -156,3 +156,67 @@ func TestPostgresStore_BindSchemaCapabilities_DetectsLegacyShapes(t *testing.T) 
 		t.Fatalf("expectations: %v", err)
 	}
 }
+
+func TestPostgresStore_BindSchemaCapabilities_FailsClosedOnPartialCanonicalShapes(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"table_name", "column_name"})
+	addColumns := func(table string, columns ...string) {
+		for _, column := range columns {
+			rows.AddRow(table, column)
+		}
+	}
+
+	addColumns("events",
+		"event_id", "event_name", "entity_id", "flow_instance", "scope", "payload",
+		"chain_depth", "produced_by", "produced_by_type", "created_at",
+	)
+	addColumns("agent_sessions",
+		"session_id", "agent_id", "scope_key", "scope", "conversation",
+		"turn_count", "runtime_mode", "status", "created_at", "updated_at",
+	)
+	addColumns("agent_turns",
+		"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key",
+		"request_payload", "response_payload", "parse_ok", "latency_ms", "created_at",
+	)
+	addColumns("timers", "timer_id")
+
+	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(rows)
+
+	pg := &PostgresStore{DB: db}
+	caps, err := pg.BindSchemaCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("BindSchemaCapabilities: %v", err)
+	}
+	if caps.Events.Log != SchemaFlavorUnsupported {
+		t.Fatalf("events log flavor = %s, want %s", caps.Events.Log, SchemaFlavorUnsupported)
+	}
+	if caps.Conversations.Sessions != SchemaFlavorUnsupported {
+		t.Fatalf("sessions flavor = %s, want %s", caps.Conversations.Sessions, SchemaFlavorUnsupported)
+	}
+	if caps.Conversations.Turns != SchemaFlavorUnsupported {
+		t.Fatalf("turns flavor = %s, want %s", caps.Conversations.Turns, SchemaFlavorUnsupported)
+	}
+	if caps.Schedules != SchemaFlavorUnsupported {
+		t.Fatalf("schedules flavor = %s, want %s", caps.Schedules, SchemaFlavorUnsupported)
+	}
+	if caps.Conversations.Audits != SchemaFlavorUnavailable {
+		t.Fatalf("audits flavor = %s, want %s", caps.Conversations.Audits, SchemaFlavorUnavailable)
+	}
+	if caps.Mailbox != SchemaFlavorUnavailable {
+		t.Fatalf("mailbox flavor = %s, want %s", caps.Mailbox, SchemaFlavorUnavailable)
+	}
+	if caps.Events.LogIdempotencyKey {
+		t.Fatalf("expected partial canonical events table to report missing idempotency_key: %+v", caps.Events)
+	}
+	if caps.Conversations.TurnBlocks {
+		t.Fatalf("expected partial canonical turns table to report missing turn_blocks: %+v", caps.Conversations)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
