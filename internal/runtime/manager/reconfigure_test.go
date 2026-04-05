@@ -96,3 +96,33 @@ func TestReconfigureAgent_RotatesEntityScopedSession(t *testing.T) {
 		t.Fatalf("scope_key = %q, want %q", rec.ScopeKey, cfg.EffectiveEntityID())
 	}
 }
+
+func TestReconfigureAgent_ClearsSessionScopeWhenSwitchingToTask(t *testing.T) {
+	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
+		if _, err := sessions.ValidateSessionScopeIntent(cfg.ConversationMode, cfg.SessionScope); err != nil {
+			return nil, err
+		}
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	})
+
+	cfg := models.AgentConfig{
+		ID:               "task-switch-agent",
+		ConversationMode: sessions.RuntimeModeSession,
+		SessionScope:     sessions.SessionScopeGlobal,
+	}
+	if err := am.SpawnAgent(cfg); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+
+	if err := am.ReconfigureAgent(cfg.ID, models.AgentConfig{ConversationMode: sessions.RuntimeModeTask}); err != nil {
+		t.Fatalf("ReconfigureAgent(task): %v", err)
+	}
+
+	got := am.agentCfg[cfg.ID]
+	if got.ConversationMode != sessions.RuntimeModeTask {
+		t.Fatalf("ConversationMode = %q, want %q", got.ConversationMode, sessions.RuntimeModeTask)
+	}
+	if got.SessionScope != "" {
+		t.Fatalf("SessionScope = %q, want empty", got.SessionScope)
+	}
+}
