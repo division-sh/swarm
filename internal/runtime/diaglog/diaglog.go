@@ -37,14 +37,14 @@ func (e *RunEntry) NormalizeEntityID() {
 }
 
 type RunLogger interface {
-	LogRuntime(ctx context.Context, entry RunEntry)
+	LogRuntime(ctx context.Context, entry RunEntry) error
 }
 
-func RunLog(ctx context.Context, logger RunLogger, entry RunEntry) {
+func RunLog(ctx context.Context, logger RunLogger, entry RunEntry) error {
 	if logger == nil {
-		return
+		return nil
 	}
-	logger.LogRuntime(ctx, entry)
+	return logger.LogRuntime(ctx, entry)
 }
 
 func ProcessLog(level, component, message string, fields ...any) {

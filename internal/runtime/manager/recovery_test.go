@@ -24,9 +24,11 @@ func (*recoveryTestBus) PublishDirect(context.Context, events.Event, []string) e
 func (*recoveryTestBus) Subscribe(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
-func (*recoveryTestBus) Unsubscribe(string)                                              {}
-func (*recoveryTestBus) ResetInMemoryState() error                                       { return nil }
-func (*recoveryTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry)     {}
+func (*recoveryTestBus) Unsubscribe(string)        {}
+func (*recoveryTestBus) ResetInMemoryState() error { return nil }
+func (*recoveryTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+	return nil
+}
 func (b *recoveryTestBus) Store() runtimebus.EventStore                                  { return b }
 func (b *recoveryTestBus) AppendEvent(context.Context, events.Event) error               { return nil }
 func (b *recoveryTestBus) InsertEventDeliveries(context.Context, string, []string) error { return nil }

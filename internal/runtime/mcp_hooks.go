@@ -111,7 +111,7 @@ func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, ag
 	if logger == nil {
 		return
 	}
-	logger.Log(ctx, RuntimeLogEntry{
+	handleRuntimeLogPersistenceError("mcp-gateway", action, logger.Log(ctx, RuntimeLogEntry{
 		Level:     strings.ToLower(strings.TrimSpace(level)),
 		Message:   runtimeMCPMessage(action, detail, errText),
 		Component: "mcp-gateway",
@@ -120,7 +120,7 @@ func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, ag
 		EntityID:  strings.TrimSpace(entityID),
 		Detail:    detail,
 		Error:     strings.TrimSpace(errText),
-	})
+	}))
 }
 
 func runtimeMCPAfterToolSuccess(logger *RuntimeLogger, ctx context.Context, r *http.Request, toolName string) {

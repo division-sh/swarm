@@ -41,8 +41,9 @@ func (s *eventPublisherStub) MarkDeliveryInProgress(_ context.Context, agentID, 
 	return nil
 }
 
-func (s *eventPublisherStub) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) {
+func (s *eventPublisherStub) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	s.runtimeLogs = append(s.runtimeLogs, entry)
+	return nil
 }
 
 type failingConversationStore struct {

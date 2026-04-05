@@ -49,7 +49,7 @@ type Executor struct {
 }
 
 type runtimeToolLogSink interface {
-	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry)
+	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error
 }
 
 func NewExecutor(bus EventPublisher, scheduler Scheduler, manager Manager, stores ...SchedulePersistence) *Executor {

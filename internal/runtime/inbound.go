@@ -161,20 +161,20 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:   now,
 		}).WithEntityID(entityID)); err != nil {
 			if g.logger != nil {
-				g.logger.Error(r.Context(), "inbound-gateway", "publish_failed", map[string]any{
+				handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", g.logger.Error(r.Context(), "inbound-gateway", "publish_failed", map[string]any{
 					"provider":          provider,
 					"entity_id":         entityID,
 					"provider_event_id": providerEventID,
-				}, err)
+				}, err))
 			}
 			if rollback, ok := g.store.(InboundFailureRollback); ok && rollback != nil {
 				if rollbackErr := rollback.DeleteInboundEvent(r.Context(), providerEventID, entityID, provider); rollbackErr != nil {
 					if g.logger != nil {
-						g.logger.Error(r.Context(), "inbound-gateway", "rollback_failed", map[string]any{
+						handleRuntimeLogPersistenceError("inbound-gateway", "rollback_failed", g.logger.Error(r.Context(), "inbound-gateway", "rollback_failed", map[string]any{
 							"provider":          provider,
 							"entity_id":         entityID,
 							"provider_event_id": providerEventID,
-						}, rollbackErr)
+						}, rollbackErr))
 					}
 				}
 			}

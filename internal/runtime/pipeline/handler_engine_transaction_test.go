@@ -43,7 +43,7 @@ func (*recordingPipelineBus) Subscribe(string, ...events.EventType) <-chan event
 
 func (*recordingPipelineBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
 func (*recordingPipelineBus) ResolveSubscribedRecipients(string) []string                 { return nil }
-func (*recordingPipelineBus) LogRuntime(context.Context, RuntimeLogEntry)                 {}
+func (*recordingPipelineBus) LogRuntime(context.Context, RuntimeLogEntry) error           { return nil }
 func (*recordingPipelineBus) EngineOutbox() runtimeengine.OutboxWriter                    { return noOpEngineOutbox{} }
 func (b *recordingPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return recordingPipelineDispatcher{bus: b}

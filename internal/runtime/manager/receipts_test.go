@@ -28,10 +28,12 @@ func (*recordingReceiptBus) PublishDirect(context.Context, events.Event, []strin
 func (*recordingReceiptBus) Subscribe(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
-func (*recordingReceiptBus) Unsubscribe(string)                                          {}
-func (*recordingReceiptBus) Store() runtimebus.EventStore                                { return runtimebus.InMemoryEventStore{} }
-func (*recordingReceiptBus) ResetInMemoryState() error                                   { return nil }
-func (*recordingReceiptBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) {}
+func (*recordingReceiptBus) Unsubscribe(string)           {}
+func (*recordingReceiptBus) Store() runtimebus.EventStore { return runtimebus.InMemoryEventStore{} }
+func (*recordingReceiptBus) ResetInMemoryState() error    { return nil }
+func (*recordingReceiptBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+	return nil
+}
 
 type receiptReaderStub struct {
 	receipt EventReceipt
