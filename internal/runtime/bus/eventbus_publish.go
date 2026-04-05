@@ -133,10 +133,11 @@ func (eb *EventBus) publishTransactional(
 		return fmt.Errorf("persist event: %w", err)
 	}
 
-	inboundPlan, err := eb.buildDeliveryPlan(txctx, evt)
+	inboundPlan, err := eb.deliveryPlanner.Plan(txctx, evt)
 	if err != nil {
 		return err
 	}
+	eb.recordPublishDiagnostic(txctx, evt, inboundPlan)
 	if len(inboundPlan.PersistedRecipients) > 0 {
 		if err := txStore.InsertEventDeliveriesTx(txctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
@@ -280,10 +281,11 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		}
 		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 	}()
-	plan, err := eb.buildDeliveryPlan(ctx, evt)
+	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
 	if err != nil {
 		return err
 	}
+	eb.recordPublishDiagnostic(ctx, evt, plan)
 	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients); err != nil {
 		return err
 	}
@@ -372,10 +374,11 @@ func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, duration
 }
 
 func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error {
-	plan, err := eb.buildDeliveryPlan(ctx, evt)
+	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
 	if err != nil {
 		return err
 	}
+	eb.recordPublishDiagnostic(ctx, evt, plan)
 	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients); err != nil {
 		return err
 	}
@@ -392,41 +395,6 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 		_ = eb.emitContradiction(ctx, evt, plan.ContradictionReason)
 	}
 	return nil
-}
-
-func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
-	plan := eventDeliveryPlan{Event: evt}
-	if evt.Type == events.EventType("platform.runtime_log") {
-		return plan, nil
-	}
-	plan.RoutedRecipients = eb.resolveRoutedSubscribers(string(evt.Type))
-	plan.SubscribedRecipients = eb.resolveSubscribedRecipients(string(evt.Type))
-	plan.Recipients = uniqueStrings(append(
-		subscriberIDs(plan.RoutedRecipients),
-		plan.SubscribedRecipients...,
-	))
-	plan.ExtraDetail = map[string]any{
-		"routed_recipients_count":       len(plan.RoutedRecipients),
-		"subscription_recipients_count": len(plan.SubscribedRecipients),
-	}
-	if described := publishDiagnosticRecipientMaps(eb.describeSubscribersForEvent(string(evt.Type), plan.RoutedRecipients)); len(described) > 0 {
-		plan.ExtraDetail["routed_recipients"] = described
-	}
-	if direct := uniqueStrings(plan.SubscribedRecipients); len(direct) > 0 {
-		plan.ExtraDetail["subscription_recipients"] = direct
-	}
-	descriptors, ok, err := eb.activeAgentDescriptors(ctx)
-	if err != nil {
-		return eventDeliveryPlan{}, err
-	}
-	if ok {
-		plan.Recipients = filterRecipientsForExplicitAgentScope(evt, plan.Recipients, descriptors)
-		plan.PersistedRecipients = append([]string(nil), plan.Recipients...)
-	} else {
-		plan.PersistedRecipients = uniqueStrings(plan.Recipients)
-	}
-	eb.recordPublishDiagnostic(ctx, evt, plan)
-	return plan, nil
 }
 
 func (eb *EventBus) persistEventRecord(ctx context.Context, evt events.Event, recipients []string) error {
