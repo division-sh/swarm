@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -97,12 +96,7 @@ func (s *PostgresStore) CancelActiveRunWorkByProducer(ctx context.Context, produ
 		return nil, fmt.Errorf("read affected agents: %w", err)
 	}
 
-	sideEffects, err := json.Marshal(map[string]any{
-		"manager_status": "dead_letter",
-		"reason_code":    "cancelled_by_kill_previous",
-		"retry_count":    0,
-		"error":          "cancelled by --kill-previous",
-	})
+	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects("dead_letter", "cancelled_by_kill_previous", 0, "cancelled by --kill-previous"))
 	if err != nil {
 		return nil, fmt.Errorf("marshal kill_previous receipt side effects: %w", err)
 	}

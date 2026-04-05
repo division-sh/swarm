@@ -361,11 +361,7 @@ func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, caps Stor
 
 func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
 	reasonCode := pipelineReceiptReasonCode(status, errText)
-	sideEffects, err := json.Marshal(map[string]any{
-		"manager_status": strings.TrimSpace(status),
-		"reason_code":    reasonCode,
-		"error":          strings.TrimSpace(errText),
-	})
+	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects(status, reasonCode, errText))
 	if err != nil {
 		return fmt.Errorf("marshal pipeline receipt side effects: %w", err)
 	}

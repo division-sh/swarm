@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -134,14 +133,26 @@ func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID st
 }
 
 func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
-	var retryCount int
-	_ = s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE((side_effects->>'retry_count')::int, 0)
+	var sideEffectsRaw []byte
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(side_effects, '{}'::jsonb)
 		FROM event_receipts
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
-	`, eventID, agentID).Scan(&retryCount)
+	`, eventID, agentID).Scan(&sideEffectsRaw)
+	var retryCount int
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return fmt.Errorf("load event receipt side effects: %w", err)
+	default:
+		payload, err := decodeAgentReceiptSideEffects(sideEffectsRaw)
+		if err != nil {
+			return fmt.Errorf("decode event receipt side effects: %w", err)
+		}
+		retryCount = payload.RetryCount
+	}
 	if status == runtimemanager.ReceiptStatusError {
 		retryCount++
 	}
@@ -150,12 +161,7 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, age
 		finalStatus = runtimemanager.ReceiptStatusDeadLetter
 	}
 	reasonCode := managerReceiptReasonCode(finalStatus, errText)
-	sideEffects, err := json.Marshal(map[string]any{
-		"manager_status": finalStatus,
-		"reason_code":    reasonCode,
-		"retry_count":    retryCount,
-		"error":          strings.TrimSpace(errText),
-	})
+	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(finalStatus, reasonCode, retryCount, errText))
 	if err != nil {
 		return fmt.Errorf("marshal event receipt side effects: %w", err)
 	}
@@ -362,19 +368,13 @@ func (s *PostgresStore) getEventReceiptSpec(ctx context.Context, eventID, agentI
 		Status:  mapOutcomeToManagerReceiptStatus(outcome),
 	}
 	if len(sideEffects) > 0 {
-		var payload map[string]any
-		if json.Unmarshal(sideEffects, &payload) == nil {
-			if raw, ok := payload["manager_status"].(string); ok && strings.TrimSpace(raw) != "" {
-				receipt.Status = runtimemanager.ReceiptStatus(strings.TrimSpace(raw))
-			}
-			switch raw := payload["retry_count"].(type) {
-			case float64:
-				receipt.RetryCount = int(raw)
-			}
-			if raw, ok := payload["error"].(string); ok {
-				receipt.Error = strings.TrimSpace(raw)
-			}
+		payload, err := decodeAgentReceiptSideEffects(sideEffects)
+		if err != nil {
+			return runtimemanager.EventReceipt{}, false, fmt.Errorf("decode event receipt side effects: %w", err)
 		}
+		receipt.Status = payload.ManagerStatus
+		receipt.RetryCount = payload.RetryCount
+		receipt.Error = payload.Error
 	}
 	return receipt, true, nil
 }
