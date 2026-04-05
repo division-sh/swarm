@@ -86,6 +86,24 @@ func TestScopeResolveEvent_ExternalizesLocalAndDescendantEvents(t *testing.T) {
 	}
 }
 
+func TestScopeResolveEvent_LeavesUndeclaredDescendantEventUnchanged(t *testing.T) {
+	scope := Scope{
+		Path:        "child",
+		LocalEvents: []string{"step.result"},
+	}
+	descendants := []DescendantScope{{
+		Path:        "child/grandchild",
+		LocalEvents: []string{"micro.done"},
+	}}
+
+	if got := scope.ResolveEvent("grandchild/not-local", descendants); got != "grandchild/not-local" {
+		t.Fatalf("ResolveEvent(non-local descendant) = %q, want grandchild/not-local", got)
+	}
+	if got := scope.ResolveSubscriptionPattern("grandchild/not-local", descendants); got != "grandchild/not-local" {
+		t.Fatalf("ResolveSubscriptionPattern(non-local descendant) = %q, want grandchild/not-local", got)
+	}
+}
+
 func TestScopeMatches_TreatsLocalAndScopedInputEventsAsEquivalent(t *testing.T) {
 	scope := Scope{
 		Path:        "discovery",
