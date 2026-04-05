@@ -306,6 +306,40 @@ Default rule:
   - `[codex] update`
 - the title should make ownership and workstream identity obvious without opening the PR
 
+Commit message rule:
+
+- every commit subject should use:
+  - `<type>: <short summary>`
+
+Allowed commit types:
+
+- `runtime`
+- `store`
+- `security`
+- `conformance`
+- `maintenance`
+- `docs`
+- `spec`
+- `tests`
+
+Default expectation:
+
+- keep the subject short and readable in `git log`
+- prefer verb + object phrasing
+- keep issue numbers in branch names and PR titles, not in every commit subject unless they add real value
+- do not use vague commit subjects such as:
+  - `fix`
+  - `updates`
+  - `wip`
+
+Examples:
+
+- `runtime: preserve replay correlation envelope`
+- `store: fail closed on non-UUID entity_id`
+- `security: require auth on builder websocket`
+- `maintenance: split boot verification modules`
+- `docs: require PR summaries and narrow follow-up absorption`
+
 ## External Side-Effect Protocol
 
 For external actions such as:

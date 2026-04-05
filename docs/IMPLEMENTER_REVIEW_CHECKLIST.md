@@ -91,6 +91,7 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - Was this opened as a normal reviewable PR rather than a draft PR?
 - Does the PR title follow the required format:
   - `[agent-x][issue #123] Short workstream title`
+- Do the commit subjects in the PR follow the required `<type>: <short summary>` format?
 - For any semantic migration:
   - what is the new canonical owner?
   - what old producer / reader / writer path is now invalid?
