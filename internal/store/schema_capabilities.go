@@ -284,7 +284,7 @@ func (s *PostgresStore) CanonicalEventReceiptsCapability(ctx context.Context) (b
 	if err != nil {
 		return false, err
 	}
-	return caps.Events.Receipts == SchemaFlavorCanonical, nil
+	return caps.Events.Log == SchemaFlavorCanonical && caps.Events.Receipts == SchemaFlavorCanonical, nil
 }
 
 func unsupportedSchemaCapability(subject string, flavor SchemaFlavor) error {
