@@ -125,8 +125,6 @@ type runtimeHarness struct {
 	mu             sync.Mutex
 }
 
-var catalogEntityIDNamespace = uuid.MustParse("9fe445fe-6e58-43bb-9bdb-ec0d4d5a1b2c")
-
 type agentFixtureDoc struct {
 	AgentFixtures map[string][]agentFixtureStep `yaml:"agent_fixtures"`
 }
@@ -268,7 +266,6 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 	items := make([]publishItem, 0, len(steps))
 	for _, step := range steps {
 		payload := cloneStringAnyMap(step.Payload)
-		canonicalizeCatalogPayloadEntityID(payload)
 		if entityID := triggerPayloadEntityID(payload); entityID != "" {
 			h.seedInitialState(entityID)
 		}
@@ -327,7 +324,6 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 func (h *runtimeHarness) publishRuntimeEvent(eventType, sourceAgent string, payload map[string]any, timeout time.Duration, recordOutcome bool, excludeFromEmitted bool) {
 	h.t.Helper()
 	payload = cloneStringAnyMap(payload)
-	canonicalizeCatalogPayloadEntityID(payload)
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		h.t.Fatalf("marshal trigger payload: %v", err)
@@ -567,7 +563,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	if h == nil || h.workflow == nil || h.bundle == nil {
 		return
 	}
-	entityID = catalogEntityID(entityID)
+	entityID = strings.TrimSpace(entityID)
 	if entityID == "" {
 		return
 	}
@@ -674,29 +670,7 @@ func triggerPayloadEntityID(payload map[string]any) string {
 	if payload == nil {
 		return ""
 	}
-	return catalogEntityID(asString(payload["entity_id"]))
-}
-
-func canonicalizeCatalogPayloadEntityID(payload map[string]any) {
-	if payload == nil {
-		return
-	}
-	entityID := catalogEntityID(asString(payload["entity_id"]))
-	if entityID == "" {
-		return
-	}
-	payload["entity_id"] = entityID
-}
-
-func catalogEntityID(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if _, err := uuid.Parse(raw); err == nil {
-		return raw
-	}
-	return uuid.NewSHA1(catalogEntityIDNamespace, []byte(raw)).String()
+	return strings.TrimSpace(asString(payload["entity_id"]))
 }
 
 func cloneStringAnyMap(in map[string]any) map[string]any {

@@ -1,11 +1,11 @@
 trigger:
   sequence:
     - event: score.received
-      payload: { entity_id: ent-001, score: 80 }
+      payload: { entity_id: 11111111-1111-4111-8111-111111111111, score: 80 }
     - event: score.received
-      payload: { entity_id: ent-001, score: 90 }
+      payload: { entity_id: 11111111-1111-4111-8111-111111111111, score: 90 }
     - event: score.received
-      payload: { entity_id: ent-001, score: 70 }
+      payload: { entity_id: 11111111-1111-4111-8111-111111111111, score: 70 }
   entity_fields_before:
     expected_count: 3
 

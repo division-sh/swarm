@@ -63,7 +63,6 @@ func assertSubjectFlowEntities(t testing.TB, workflow *runtimepipeline.WorkflowI
 	if len(want) == 0 {
 		return
 	}
-	subjectID = catalogEntityID(subjectID)
 	for flowID, expected := range want {
 		flowID = strings.TrimSpace(flowID)
 		got, found, err := catalogFlowInstanceForSubject(workflow, semanticview.Wrap(bundle), strings.TrimSpace(subjectID), flowID)
@@ -80,7 +79,6 @@ func assertSubjectFlowEntities(t testing.TB, workflow *runtimepipeline.WorkflowI
 			t.Fatalf("subject flow instance for %s/%s not found", subjectID, flowID)
 		}
 		if wantSubjectID := strings.TrimSpace(expected.SubjectID); wantSubjectID != "" {
-			wantSubjectID = catalogEntityID(wantSubjectID)
 			if gotSubjectID := strings.TrimSpace(got.SubjectID); gotSubjectID != wantSubjectID {
 				t.Fatalf("subject flow instance %s/%s subject_id = %q, want %q", subjectID, flowID, gotSubjectID, wantSubjectID)
 			}
@@ -121,7 +119,7 @@ func assertSubjectFlowEntities(t testing.TB, workflow *runtimepipeline.WorkflowI
 func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[string]catalogEntityExpected, flowPrefix string) {
 	t.Helper()
 	for entityID, want := range expected {
-		entityID = catalogEntityID(entityID)
+		entityID = strings.TrimSpace(entityID)
 		if entityID == "" {
 			continue
 		}
@@ -142,8 +140,7 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 
 func assertEntitySubjectID(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, entityID, wantSubjectID string) {
 	t.Helper()
-	entityID = catalogEntityID(entityID)
-	wantSubjectID = catalogEntityID(wantSubjectID)
+	wantSubjectID = strings.TrimSpace(wantSubjectID)
 	if wantSubjectID == "" {
 		return
 	}
@@ -167,7 +164,6 @@ func assertEntitySubjectIDSelf(t testing.TB, workflow *runtimepipeline.WorkflowI
 	if wantSelf == nil {
 		return
 	}
-	entityID = catalogEntityID(entityID)
 	if workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
@@ -193,7 +189,6 @@ func assertGates(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, 
 	if len(want) == 0 {
 		return
 	}
-	entityID = catalogEntityID(entityID)
 	if workflow == nil {
 		t.Fatal("workflow instance store is required for gates assertions")
 	}
@@ -228,7 +223,6 @@ func assertEntityFields(t testing.TB, workflow *runtimepipeline.WorkflowInstance
 	if len(want) == 0 {
 		return
 	}
-	entityID = catalogEntityID(entityID)
 	if workflow == nil {
 		t.Fatal("workflow instance store is required for entity_fields assertions")
 	}
@@ -267,7 +261,6 @@ func assertEntityFields(t testing.TB, workflow *runtimepipeline.WorkflowInstance
 
 func assertEntityState(t testing.TB, db *sql.DB, workflow *runtimepipeline.WorkflowInstanceStore, entityID, wantState string) {
 	t.Helper()
-	entityID = catalogEntityID(entityID)
 	if workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
@@ -293,7 +286,6 @@ func assertFlowState(t testing.TB, workflow *runtimepipeline.WorkflowInstanceSto
 	if wantState == "" {
 		return
 	}
-	entityID = catalogEntityID(entityID)
 	if workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
@@ -328,7 +320,7 @@ func catalogFlowInstanceForSubject(workflow *runtimepipeline.WorkflowInstanceSto
 	if err != nil {
 		return runtimepipeline.WorkflowInstance{}, false, err
 	}
-	subjectID = catalogEntityID(subjectID)
+	subjectID = strings.TrimSpace(subjectID)
 	flowID = strings.TrimSpace(flowID)
 	candidates := map[string]struct{}{}
 	if flowID != "" {
@@ -417,7 +409,6 @@ func workflowStateDebugRows(db *sql.DB) (string, error) {
 
 func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs map[string]struct{}, entityID string, want []string, flowPrefix string, source semanticview.Source) {
 	t.Helper()
-	entityID = catalogEntityID(entityID)
 	relevantEntityIDs := catalogSubjectEntityIDs(t, db, entityID)
 	rows, err := db.QueryContext(context.Background(), `
 		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
@@ -607,7 +598,6 @@ func shouldIgnoreCatalogE2EEvent(eventName string) bool {
 
 func assertDeadLetter(t testing.TB, db *sql.DB, since time.Time, entityID string, want bool) {
 	t.Helper()
-	entityID = catalogEntityID(entityID)
 	var count int
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
@@ -788,7 +778,7 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 		t.Fatal("database is required for handler_outcome assertions")
 	}
 	want = strings.TrimSpace(strings.ToLower(want))
-	entityID = catalogEntityID(entityID)
+	entityID = strings.TrimSpace(entityID)
 	if want == "" {
 		return
 	}
@@ -861,7 +851,6 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 
 func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, entityID string) bool {
 	t.Helper()
-	entityID = catalogEntityID(entityID)
 	var count int
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
@@ -883,7 +872,7 @@ func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, en
 
 func assertChainDepthExceeded(t testing.TB, db *sql.DB, since time.Time, entityID string, want bool) {
 	t.Helper()
-	entityID = catalogEntityID(entityID)
+	entityID = strings.TrimSpace(entityID)
 	if entityID == "" {
 		if want {
 			t.Fatalf("chain_depth_exceeded = true requires entity_id in trigger payload")

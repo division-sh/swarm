@@ -50,7 +50,7 @@ func TestTier11Probe(t *testing.T) {
 				t.Fatalf("debug rows: %v", err)
 			}
 			t.Logf("rows=%s", rows)
-			instance, ok, err := h.workflow.Load(context.Background(), catalogEntityID("ent-001"))
+			instance, ok, err := h.workflow.Load(context.Background(), "11111111-1111-4111-8111-111111111111")
 			if err == nil && ok {
 				t.Logf("root metadata=%#v", instance.Metadata)
 			}

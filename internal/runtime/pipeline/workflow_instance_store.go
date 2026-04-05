@@ -447,12 +447,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM timers
-		WHERE entity_id = $1::uuid
-		  AND flow_instance = $2
-		  AND owner_agent IS NULL
-	`, rowID, storageRef); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM timers WHERE entity_id = $1::uuid AND flow_instance = $2`, rowID, storageRef); err != nil {
 		return err
 	}
 	for _, timer := range instance.TimerState {
@@ -577,7 +572,6 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, enti
 			status = 'cancelled'
 		FROM timers
 		WHERE entity_id = $1::uuid
-		  AND owner_agent IS NULL
 		ORDER BY created_at ASC, timer_name ASC
 	`, entityID)
 	if err != nil {

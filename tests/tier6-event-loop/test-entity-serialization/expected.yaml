@@ -1,9 +1,9 @@
 trigger:
   sequence:
     - event: step.first
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-4111-8111-111111111111 }
     - event: step.second
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-4111-8111-111111111111 }
   assert_serial_processing: true
 
 expected:
