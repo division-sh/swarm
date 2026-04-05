@@ -70,10 +70,12 @@ func (*flowActivationTestBus) PublishDirect(context.Context, events.Event, []str
 func (*flowActivationTestBus) Subscribe(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }
-func (*flowActivationTestBus) Unsubscribe(string)                                          {}
-func (*flowActivationTestBus) Store() runtimebus.EventStore                                { return nil }
-func (*flowActivationTestBus) ResetInMemoryState() error                                   { return nil }
-func (*flowActivationTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) {}
+func (*flowActivationTestBus) Unsubscribe(string)           {}
+func (*flowActivationTestBus) Store() runtimebus.EventStore { return nil }
+func (*flowActivationTestBus) ResetInMemoryState() error    { return nil }
+func (*flowActivationTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+	return nil
+}
 
 func (b *flowActivationTestBus) AddFlowInstanceRoute(_ runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
 	b.addedPaths = append(b.addedPaths, identity.InstancePath)

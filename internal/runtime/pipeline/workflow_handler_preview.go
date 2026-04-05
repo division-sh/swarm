@@ -71,7 +71,7 @@ func (previewBus) PublishDirect(context.Context, events.Event, []string) error {
 
 func (previewBus) ResolveSubscribedRecipients(string) []string { return nil }
 
-func (previewBus) LogRuntime(context.Context, RuntimeLogEntry) {}
+func (previewBus) LogRuntime(context.Context, RuntimeLogEntry) error { return nil }
 
 func (previewBus) EngineOutbox() runtimeengine.OutboxWriter { return noOpEngineOutbox{} }
 

@@ -36,7 +36,7 @@ type Bus interface {
 	Unsubscribe(agentID string)
 	Store() runtimebus.EventStore
 	ResetInMemoryState() error
-	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry)
+	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error
 }
 
 type PersistedAgent struct {

@@ -23,8 +23,9 @@ func (*telemetryBusStub) Publish(context.Context, events.Event) error { return n
 
 func (*telemetryBusStub) PublishDirect(context.Context, events.Event, []string) error { return nil }
 
-func (b *telemetryBusStub) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) {
+func (b *telemetryBusStub) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	b.logs = append(b.logs, entry)
+	return nil
 }
 
 func TestExecutorTelemetry_LogsSuccess(t *testing.T) {

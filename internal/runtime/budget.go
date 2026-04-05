@@ -163,7 +163,7 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 	// Evaluate system-wide budget.
 	if err := t.evaluateAndEmit(ctx, ""); err != nil {
 		if t.logger != nil {
-			t.logger.Warn(ctx, "budget", "evaluate_system_failed", nil, err)
+			handleRuntimeLogPersistenceError("budget", "evaluate_system_failed", t.logger.Warn(ctx, "budget", "evaluate_system_failed", nil, err))
 		}
 	}
 
@@ -185,7 +185,7 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 		}
 		if err := t.evaluateAndEmit(ctx, strings.TrimSpace(id)); err != nil {
 			if t.logger != nil {
-				t.logger.Warn(ctx, "budget", "evaluate_entity_failed", map[string]any{"entity_id": strings.TrimSpace(id)}, err)
+				handleRuntimeLogPersistenceError("budget", "evaluate_entity_failed", t.logger.Warn(ctx, "budget", "evaluate_entity_failed", map[string]any{"entity_id": strings.TrimSpace(id)}, err))
 			}
 		}
 	}
@@ -282,7 +282,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	// Best-effort guardrail evaluation.
 	if err := t.evaluateAndEmit(ctx, rec.EffectiveEntityID()); err != nil {
 		if t.logger != nil {
-			t.logger.Warn(ctx, "budget", "evaluate_on_spend_failed", map[string]any{"entity_id": rec.EffectiveEntityID()}, err)
+			handleRuntimeLogPersistenceError("budget", "evaluate_on_spend_failed", t.logger.Warn(ctx, "budget", "evaluate_on_spend_failed", map[string]any{"entity_id": rec.EffectiveEntityID()}, err))
 		}
 	}
 	return nil
@@ -514,11 +514,11 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 			Summary:   summary,
 		}); err != nil {
 			if t.logger != nil {
-				t.logger.Warn(ctx, "budget", "budget_emergency_mailbox_insert_failed", map[string]any{
+				handleRuntimeLogPersistenceError("budget", "budget_emergency_mailbox_insert_failed", t.logger.Warn(ctx, "budget", "budget_emergency_mailbox_insert_failed", map[string]any{
 					"event_id":  strings.TrimSpace(evtID),
 					"entity_id": strings.TrimSpace(entityID),
 					"scope":     strings.TrimSpace(scope),
-				}, err)
+				}, err))
 			} else {
 				processWarn("budget", "failed to insert emergency budget mailbox item entity=%s scope=%s: %v", entityID, scope, err)
 			}

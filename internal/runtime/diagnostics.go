@@ -73,9 +73,9 @@ func NewRuntimeLogger(db *sql.DB) *RuntimeLogger {
 	return &RuntimeLogger{db: db}
 }
 
-func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
+func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 	if l == nil {
-		return
+		return nil
 	}
 	level := strings.ToLower(strings.TrimSpace(e.Level))
 	if level == "" {
@@ -109,22 +109,25 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
 		})
 	}
 	if l.db == nil {
-		return
+		return nil
 	}
 
 	detail := marshalJSONOrEmpty(e.Detail)
-	_ = logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, level, component, action, e, detail)
+	if err := logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, level, component, action, e, detail); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (l *RuntimeLogger) Warn(ctx context.Context, component, action string, detail any, err error) {
+func (l *RuntimeLogger) Warn(ctx context.Context, component, action string, detail any, err error) error {
 	if l == nil {
-		return
+		return nil
 	}
 	errText := ""
 	if err != nil {
 		errText = strings.TrimSpace(err.Error())
 	}
-	l.Log(ctx, RuntimeLogEntry{
+	return l.Log(ctx, RuntimeLogEntry{
 		Level:     "warn",
 		Message:   runtimeLogHelperMessage("warn", component, action),
 		Component: strings.TrimSpace(component),
@@ -134,15 +137,15 @@ func (l *RuntimeLogger) Warn(ctx context.Context, component, action string, deta
 	})
 }
 
-func (l *RuntimeLogger) Error(ctx context.Context, component, action string, detail any, err error) {
+func (l *RuntimeLogger) Error(ctx context.Context, component, action string, detail any, err error) error {
 	if l == nil {
-		return
+		return nil
 	}
 	errText := ""
 	if err != nil {
 		errText = strings.TrimSpace(err.Error())
 	}
-	l.Log(ctx, RuntimeLogEntry{
+	return l.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
 		Message:   runtimeLogHelperMessage("error", component, action),
 		Component: strings.TrimSpace(component),
@@ -167,6 +170,17 @@ func runtimeLogHelperMessage(level, component, action string) string {
 		}
 		return "Runtime warning recorded"
 	}
+}
+
+func handleRuntimeLogPersistenceError(component, action string, err error) {
+	if err == nil {
+		return
+	}
+	diaglog.ProcessLog("error", "diagnostics", "runtime log persistence failed",
+		"component", strings.TrimSpace(component),
+		"action", strings.TrimSpace(action),
+		"error", err.Error(),
+	)
 }
 
 type PipelineTransitionInput struct {

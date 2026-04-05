@@ -115,8 +115,8 @@ func (noopPipelineBus) Publish(context.Context, events.Event) error { return nil
 func (noopPipelineBus) PublishDirect(context.Context, events.Event, []string) error {
 	return nil
 }
-func (noopPipelineBus) ResolveSubscribedRecipients(string) []string { return nil }
-func (noopPipelineBus) LogRuntime(context.Context, RuntimeLogEntry) {}
+func (noopPipelineBus) ResolveSubscribedRecipients(string) []string       { return nil }
+func (noopPipelineBus) LogRuntime(context.Context, RuntimeLogEntry) error { return nil }
 func (noopPipelineBus) EngineOutbox() runtimeengine.OutboxWriter {
 	return noOpEngineOutbox{}
 }

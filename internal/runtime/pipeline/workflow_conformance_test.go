@@ -18,11 +18,11 @@ func (pipelineTestBus) DirectSubscribe(string) <-chan events.Event { return make
 func (pipelineTestBus) PublishDirect(context.Context, events.Event, []string) error {
 	return nil
 }
-func (pipelineTestBus) SubscribeAll(string) <-chan events.Event     { return make(chan events.Event) }
-func (pipelineTestBus) ResetSubscribers()                           {}
-func (pipelineTestBus) LogRuntime(context.Context, RuntimeLogEntry) {}
-func (pipelineTestBus) ResolveSubscribedRecipients(string) []string { return nil }
-func (pipelineTestBus) EngineOutbox() runtimeengine.OutboxWriter    { return noOpEngineOutbox{} }
+func (pipelineTestBus) SubscribeAll(string) <-chan events.Event           { return make(chan events.Event) }
+func (pipelineTestBus) ResetSubscribers()                                 {}
+func (pipelineTestBus) LogRuntime(context.Context, RuntimeLogEntry) error { return nil }
+func (pipelineTestBus) ResolveSubscribedRecipients(string) []string       { return nil }
+func (pipelineTestBus) EngineOutbox() runtimeengine.OutboxWriter          { return noOpEngineOutbox{} }
 func (pipelineTestBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return noOpEngineDispatcher{}
 }

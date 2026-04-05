@@ -109,7 +109,7 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	entityID := uuid.NewString()
 	parentEventID := uuid.NewString()
 	logger := runtimepkg.NewRuntimeLogger(db)
-	logger.Log(ctx, runtimepkg.RuntimeLogEntry{
+	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:      "warn",
 		Message:    "Tool execution was denied for save_entity_field",
 		Component:  "tool-executor",
@@ -128,7 +128,9 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 			"handler_id":      "tool-handler",
 			"parent_event_id": parentEventID,
 		},
-	})
+	}); err != nil {
+		t.Fatalf("logger.Log() error = %v", err)
+	}
 
 	reader := dashboardserver.NewSQLObservabilityReader(db)
 	if reader == nil {

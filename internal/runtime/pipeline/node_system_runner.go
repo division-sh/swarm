@@ -21,7 +21,7 @@ type systemNodeBus interface {
 }
 
 type systemNodeRuntimeLogger interface {
-	LogRuntime(context.Context, RuntimeLogEntry)
+	LogRuntime(context.Context, RuntimeLogEntry) error
 }
 
 type systemNodeRunner struct {

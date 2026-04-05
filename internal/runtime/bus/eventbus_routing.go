@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"swarm/internal/events"
+	"swarm/internal/runtime/diaglog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
@@ -238,19 +239,27 @@ func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, er
 	}
 }
 
-func (eb *EventBus) logRuntime(ctx context.Context, level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) {
+func (eb *EventBus) logRuntime(ctx context.Context, level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
 	if eb == nil {
-		return
+		return nil
 	}
 	eb.mu.RLock()
 	logger := eb.logger
 	eb.mu.RUnlock()
 	if logger == nil {
-		return
+		return nil
 	}
-	logger.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, errText, durationUS)
+	if err := logger.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, errText, durationUS); err != nil {
+		diaglog.ProcessLog("error", "diagnostics", "runtime log persistence failed",
+			"component", strings.TrimSpace(component),
+			"action", strings.TrimSpace(action),
+			"error", err.Error(),
+		)
+		return err
+	}
+	return nil
 }
 
-func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) {
-	eb.logRuntime(ctx, entry.Level, entry.Message, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.EffectiveEntityID(), entry.SessionID, entry.Correlation, entry.Detail, entry.Error, entry.DurationUS)
+func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	return eb.logRuntime(ctx, entry.Level, entry.Message, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.EffectiveEntityID(), entry.SessionID, entry.Correlation, entry.Detail, entry.Error, entry.DurationUS)
 }

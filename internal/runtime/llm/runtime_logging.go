@@ -10,7 +10,7 @@ import (
 )
 
 type RuntimeLogSink interface {
-	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry)
+	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error
 }
 
 func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, message, agentID, sessionID, entityID string, detail any, err error) {
@@ -22,7 +22,7 @@ func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, me
 	if err != nil {
 		errText = strings.TrimSpace(err.Error())
 	}
-	diaglog.RunLog(ctx, logger, runtimepipeline.RuntimeLogEntry{
+	if err := diaglog.RunLog(ctx, logger, runtimepipeline.RuntimeLogEntry{
 		Level:     strings.TrimSpace(level),
 		Message:   strings.TrimSpace(message),
 		Component: "llm-runtime",
@@ -34,7 +34,13 @@ func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, me
 		SessionID: strings.TrimSpace(sessionID),
 		Detail:    detail,
 		Error:     errText,
-	})
+	}); err != nil {
+		diaglog.ProcessLog("error", "diagnostics", "runtime log persistence failed",
+			"component", "llm-runtime",
+			"action", strings.TrimSpace(action),
+			"error", err.Error(),
+		)
+	}
 }
 
 func logPublisherRuntime(ctx context.Context, publisher EventPublisher, level, action, message, agentID, sessionID, entityID string, detail any, err error) {

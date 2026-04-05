@@ -293,31 +293,31 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		defer cancel()
 		if err := rt.Bus.Publish(callbackCtx, scheduledEvent(sc)); err != nil {
 			if rt.Logger != nil {
-				rt.Logger.Error(callbackCtx, "scheduler", "publish_failed", map[string]any{
+				handleRuntimeLogPersistenceError("scheduler", "publish_failed", rt.Logger.Error(callbackCtx, "scheduler", "publish_failed", map[string]any{
 					"agent_id":   sc.AgentID,
 					"event_type": sc.EventType,
 					"entity_id":  sc.EffectiveEntityID(),
-				}, err)
+				}, err))
 			}
 		}
 		if stores.ScheduleStore != nil {
 			if exactStore, ok := stores.ScheduleStore.(runtimepipeline.ExactSchedulePersistence); ok {
 				if err := exactStore.MarkScheduleFiredExact(callbackCtx, sc); err != nil {
 					if rt.Logger != nil {
-						rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
+						handleRuntimeLogPersistenceError("scheduler", "mark_fired_failed", rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
 							"agent_id":   sc.AgentID,
 							"event_type": sc.EventType,
 							"entity_id":  sc.EffectiveEntityID(),
-						}, err)
+						}, err))
 					}
 				}
 			} else if err := stores.ScheduleStore.MarkScheduleFired(callbackCtx, sc); err != nil {
 				if rt.Logger != nil {
-					rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
+					handleRuntimeLogPersistenceError("scheduler", "mark_fired_failed", rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
 						"agent_id":   sc.AgentID,
 						"event_type": sc.EventType,
 						"entity_id":  sc.EffectiveEntityID(),
-					}, err)
+					}, err))
 				}
 			}
 		}
@@ -541,33 +541,33 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		for _, sc := range schedules {
 			if err := rt.Scheduler.Register(sc); err != nil {
 				if rt.Logger != nil {
-					rt.Logger.Error(ctx, "scheduler", "restore_schedule_failed", map[string]any{
+					handleRuntimeLogPersistenceError("scheduler", "restore_schedule_failed", rt.Logger.Error(ctx, "scheduler", "restore_schedule_failed", map[string]any{
 						"agent_id":   sc.AgentID,
 						"event_type": sc.EventType,
 						"entity_id":  sc.EffectiveEntityID(),
-					}, err)
+					}, err))
 				}
 			}
 		}
 		if err := ensureLifecycleWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
 			if rt.Logger != nil {
-				rt.Logger.Error(ctx, "scheduler", "ensure_lifecycle_failed", nil, err)
+				handleRuntimeLogPersistenceError("scheduler", "ensure_lifecycle_failed", rt.Logger.Error(ctx, "scheduler", "ensure_lifecycle_failed", nil, err))
 			}
 		}
 		if err := ensureRecurringWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Pipeline); err != nil {
 			if rt.Logger != nil {
-				rt.Logger.Error(ctx, "scheduler", "ensure_recurring_failed", nil, err)
+				handleRuntimeLogPersistenceError("scheduler", "ensure_recurring_failed", rt.Logger.Error(ctx, "scheduler", "ensure_recurring_failed", nil, err))
 			}
 		}
 	}
 	if rt.Config.Runtime.RecoveryOnStartup && rt.Manager != nil {
 		if err := rt.Manager.Recover(ctx); err != nil {
 			if rt.Logger != nil {
-				rt.Logger.Error(ctx, "runtime", "recovery_failed", nil, err)
+				handleRuntimeLogPersistenceError("runtime", "recovery_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed", nil, err))
 			}
 			if resetErr := rt.Manager.ResetRuntimeState(); resetErr != nil {
 				if rt.Logger != nil {
-					rt.Logger.Error(ctx, "runtime", "recovery_reset_failed", nil, resetErr)
+					handleRuntimeLogPersistenceError("runtime", "recovery_reset_failed", rt.Logger.Error(ctx, "runtime", "recovery_reset_failed", nil, resetErr))
 				}
 			}
 			if rt.Stores.MailboxStore != nil {
@@ -584,7 +584,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 					Summary:   runtimeTruncateString("Runtime recovery failed: "+err.Error(), 200),
 				}); mailboxErr != nil {
 					if rt.Logger != nil {
-						rt.Logger.Error(ctx, "runtime", "recovery_mailbox_insert_failed", nil, mailboxErr)
+						handleRuntimeLogPersistenceError("runtime", "recovery_mailbox_insert_failed", rt.Logger.Error(ctx, "runtime", "recovery_mailbox_insert_failed", nil, mailboxErr))
 					}
 				}
 			}
@@ -601,7 +601,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				CreatedAt:   time.Now(),
 			}); publishErr != nil {
 				if rt.Logger != nil {
-					rt.Logger.Error(ctx, "runtime", "recovery_failed_publish_failed", nil, publishErr)
+					handleRuntimeLogPersistenceError("runtime", "recovery_failed_publish_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed_publish_failed", nil, publishErr))
 				}
 			}
 		}

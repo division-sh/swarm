@@ -23,7 +23,7 @@ type Bus interface {
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	ResolveSubscribedRecipients(eventType string) []string
-	LogRuntime(ctx context.Context, entry RuntimeLogEntry)
+	LogRuntime(ctx context.Context, entry RuntimeLogEntry) error
 	EngineOutbox() runtimeengine.OutboxWriter
 	EngineDispatcher() runtimeengine.PostCommitDispatcher
 }
