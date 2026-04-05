@@ -19,9 +19,7 @@ func (r *ClaudeCLIRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord
 	if r.turns == nil {
 		return
 	}
-	if len(turn.TurnBlocks) == 0 {
-		turn.TurnBlocks = BuildTurnBlocks(turn)
-	}
+	turn.TurnBlocks = BuildTurnBlocks(turn)
 	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_cli_turn_failed", "Persisting the CLI agent turn failed", turn.AgentID, turn.SessionID, turn.EntityID, nil, err)
 	}

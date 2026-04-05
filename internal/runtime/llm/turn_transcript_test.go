@@ -20,7 +20,7 @@ func TestBuildTurnBlocks_CorrelatesToolResultsWithToolUse(t *testing.T) {
 		t.Fatalf("expected multiple turn blocks, got %#v", blocks)
 	}
 
-	var sawToolUse, sawToolResult, sawOutcome bool
+	var sawToolUse, sawToolResult, sawOutcome, sawSummary bool
 	for _, block := range blocks {
 		switch block.Kind {
 		case "tool_use":
@@ -36,9 +36,11 @@ func TestBuildTurnBlocks_CorrelatesToolResultsWithToolUse(t *testing.T) {
 			if block.Text == "14-day review scheduled." {
 				sawOutcome = true
 			}
+		case turnSummaryBlockKind:
+			sawSummary = true
 		}
 	}
-	if !sawToolUse || !sawToolResult || !sawOutcome {
+	if !sawToolUse || !sawToolResult || !sawOutcome || !sawSummary {
 		t.Fatalf("blocks missing expected kinds: %#v", blocks)
 	}
 }
@@ -119,5 +121,45 @@ func TestBuildTurnBlocks_IncludesSpecShapedRuntimeLogFlightRecorderEntries(t *te
 	}
 	if details["denial_layer"] != "executor" {
 		t.Fatalf("details.denial_layer = %#v", details["denial_layer"])
+	}
+}
+
+func TestBuildTurnBlocks_AppendsCanonicalSummaryForExplicitBlocks(t *testing.T) {
+	blocks := BuildTurnBlocks(AgentTurnRecord{
+		TurnBlocks: []TurnBlock{
+			{Kind: "progress", Text: "Scheduling the follow-up review."},
+			{Kind: "tool_result", ToolName: "schedule", Output: map[string]any{"status": "scheduled"}, Data: map[string]any{"tool_use_id": "toolu_1"}},
+			{Kind: "assistant_text", Text: "Parking for manual review."},
+			{Kind: "outcome", Text: "14-day review scheduled."},
+		},
+	})
+
+	var summary map[string]any
+	for _, block := range blocks {
+		if block.Kind == turnSummaryBlockKind {
+			summary = block.Data
+			break
+		}
+	}
+	if len(summary) == 0 {
+		t.Fatalf("expected turn summary block, got %#v", blocks)
+	}
+	if got := asString(summary["assistant_visible_output"]); got != "Parking for manual review." {
+		t.Fatalf("assistant_visible_output = %q", got)
+	}
+	if got := asString(summary["outcome"]); got != "14-day review scheduled." {
+		t.Fatalf("outcome = %q", got)
+	}
+	progress, _ := summary["progress_updates"].([]string)
+	if len(progress) != 1 || progress[0] != "Scheduling the follow-up review." {
+		t.Fatalf("progress_updates = %#v", summary["progress_updates"])
+	}
+	results, _ := summary["tool_results"].([]any)
+	if len(results) != 1 {
+		t.Fatalf("tool_results = %#v", summary["tool_results"])
+	}
+	result, _ := results[0].(map[string]any)
+	if result["tool_name"] != "schedule" {
+		t.Fatalf("tool_result = %#v", result)
 	}
 }

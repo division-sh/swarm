@@ -1406,7 +1406,7 @@ func TestManagerStore_AppendAgentTurn_PersistsTurnBlocksWhenColumnExists(t *test
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(turn_blocks::text, '[]') FROM agent_turns WHERE session_id = $1::uuid ORDER BY created_at DESC LIMIT 1`, sessionID).Scan(&got); err != nil {
 		t.Fatalf("load turn_blocks: %v", err)
 	}
-	if !strings.Contains(got, `"dispatch"`) || !strings.Contains(got, `"schedule"`) || !strings.Contains(got, `"14-day review scheduled."`) {
+	if !strings.Contains(got, `"dispatch"`) || !strings.Contains(got, `"schedule"`) || !strings.Contains(got, `"14-day review scheduled."`) || !strings.Contains(got, `"turn_summary"`) {
 		t.Fatalf("turn_blocks = %s", got)
 	}
 }

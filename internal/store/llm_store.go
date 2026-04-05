@@ -50,7 +50,6 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	reqPayload := normalizeJSONPayload(rec.RequestPayload)
 	respPayload := normalizeJSONPayload(rec.ResponseRaw)
 	toolCallsPayload := normalizeJSONArray(rec.ToolCalls)
-	turnBlocksPayload := normalizeJSONArray(rec.TurnBlocks)
 	availableToolsPayload := normalizeJSONArray(rec.AvailableTools)
 	emittedEventsPayload := normalizeJSONArray(rec.EmittedEvents)
 	mcpServersPayload := normalizeJSONObject(rec.MCPServers)
@@ -160,6 +159,11 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 
 	hasRunID := caps.Conversations.TurnRunID
 	hasTurnBlocks := caps.Conversations.TurnBlocks
+	turnBlocksPayload := ""
+	if hasTurnBlocks {
+		rec.TurnBlocks = runtimellm.BuildTurnBlocks(rec)
+		turnBlocksPayload = normalizeJSONArray(rec.TurnBlocks)
+	}
 
 	insertTurn := `
 		INSERT INTO agent_turns (

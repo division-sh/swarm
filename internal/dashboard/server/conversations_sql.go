@@ -464,222 +464,62 @@ func normalizeConversationTurn(item ConversationTurn) ConversationTurn {
 }
 
 func summarizeConversationTurn(item ConversationTurn) (string, string, []string, []string, []any) {
-	if len(item.TurnBlocks) > 0 {
-		return summarizeConversationTurnBlocks(item.TurnBlocks)
-	}
-	return summarizeConversationTurnResponse(item.ResponsePayload)
-}
-
-func summarizeConversationTurnResponse(payload map[string]any) (string, string, []string, []string, []any) {
-	if len(payload) == 0 {
-		return "", "", nil, nil, nil
-	}
-	assistantText := strings.TrimSpace(readString(payload["result"]))
-	if assistantText == "" {
-		assistantText = strings.TrimSpace(readString(payload["assistant_text"]))
-	}
-	outcome := assistantText
-	reasoning := []string{}
-	progress := []string{}
-	toolResults := []any{}
-
-	raw := strings.TrimSpace(readString(payload["raw"]))
-	if raw == "" {
-		return assistantText, outcome, reasoning, progress, toolResults
-	}
-	lines := strings.Split(raw, "\n")
-	assistantSeen := map[string]struct{}{}
-	reasoningSeen := map[string]struct{}{}
-	progressSeen := map[string]struct{}{}
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		obj := map[string]any{}
-		if err := json.Unmarshal([]byte(line), &obj); err != nil {
-			continue
-		}
-		switch strings.TrimSpace(readString(obj["type"])) {
-		case "assistant":
-			blocks := cliContentBlocks(obj)
-			texts, thinks := parseConversationBlocks(blocks)
-			for _, text := range texts {
-				if text == "" {
-					continue
-				}
-				if _, ok := assistantSeen[text]; ok {
-					continue
-				}
-				assistantSeen[text] = struct{}{}
-				if assistantText == "" {
-					assistantText = text
-				} else if looksLikeProgressUpdate(text) {
-					if _, ok := progressSeen[text]; !ok {
-						progressSeen[text] = struct{}{}
-						progress = append(progress, text)
-					}
-				}
-			}
-			for _, thought := range thinks {
-				if thought == "" {
-					continue
-				}
-				if _, ok := reasoningSeen[thought]; ok {
-					continue
-				}
-				reasoningSeen[thought] = struct{}{}
-				reasoning = append(reasoning, thought)
-			}
-		case "user":
-			for _, entry := range cliToolResults(obj) {
-				toolResults = append(toolResults, entry)
-			}
-		case "result":
-			if text := strings.TrimSpace(readString(obj["result"])); text != "" {
-				if assistantText == "" {
-					assistantText = text
-				}
-				outcome = text
-			}
-		}
-	}
-	if outcome == "" {
-		outcome = assistantText
-	}
-	return assistantText, outcome, reasoning, progress, toolResults
+	return summarizeConversationTurnBlocks(item.TurnBlocks)
 }
 
 func summarizeConversationTurnBlocks(blocks []any) (string, string, []string, []string, []any) {
-	assistantText := ""
-	outcome := ""
-	reasoning := []string{}
-	progress := []string{}
-	toolResults := []any{}
-	for _, raw := range blocks {
-		entry, _ := raw.(map[string]any)
-		switch strings.TrimSpace(readString(entry["kind"])) {
-		case "assistant_text":
-			if text := strings.TrimSpace(readString(entry["text"])); text != "" {
-				assistantText = text
-			}
-		case "outcome":
-			if text := strings.TrimSpace(readString(entry["text"])); text != "" {
-				outcome = text
-				if assistantText == "" {
-					assistantText = text
-				}
-			}
-		case "reasoning":
-			if text := strings.TrimSpace(readString(entry["text"])); text != "" {
-				reasoning = append(reasoning, text)
-			}
-		case "progress":
-			if text := strings.TrimSpace(readString(entry["text"])); text != "" {
-				progress = append(progress, text)
-			}
-		case "tool_result":
-			toolResults = append(toolResults, entry)
-		}
+	summary, ok := readTurnSummaryBlock(blocks)
+	if !ok {
+		return "", "", nil, nil, nil
 	}
+	assistantText := strings.TrimSpace(readString(summary["assistant_visible_output"]))
+	outcome := strings.TrimSpace(readString(summary["outcome"]))
 	if outcome == "" {
 		outcome = assistantText
 	}
+	reasoning := readStringSlice(summary["reasoning_blocks"])
+	progress := readStringSlice(summary["progress_updates"])
+	toolResults := readAnySlice(summary["tool_results"])
 	return assistantText, outcome, reasoning, progress, toolResults
 }
 
-func cliContentBlocks(obj map[string]any) []any {
-	if content, ok := obj["content"].([]any); ok {
-		return content
-	}
-	msg, _ := obj["message"].(map[string]any)
-	if content, ok := msg["content"].([]any); ok {
-		return content
-	}
-	return nil
-}
-
-func parseConversationBlocks(blocks []any) ([]string, []string) {
-	texts := []string{}
-	reasoning := []string{}
-	for _, block := range blocks {
-		entry, _ := block.(map[string]any)
-		if len(entry) == 0 {
+func readTurnSummaryBlock(blocks []any) (map[string]any, bool) {
+	for _, raw := range blocks {
+		entry, _ := raw.(map[string]any)
+		if strings.TrimSpace(readString(entry["kind"])) != "turn_summary" {
 			continue
 		}
-		switch strings.TrimSpace(readString(entry["type"])) {
-		case "text":
-			if text := strings.TrimSpace(readString(entry["text"])); text != "" {
-				texts = append(texts, text)
-			}
-		case "thinking":
-			if thought := strings.TrimSpace(firstReadableString(
-				readString(entry["thinking"]),
-				readString(entry["text"]),
-			)); thought != "" {
-				reasoning = append(reasoning, thought)
-			}
-		default:
-			if thought := strings.TrimSpace(readString(entry["thinking"])); thought != "" {
-				reasoning = append(reasoning, thought)
-			}
+		data, _ := entry["data"].(map[string]any)
+		if len(data) == 0 {
+			return map[string]any{}, false
 		}
+		return data, true
 	}
-	return texts, reasoning
+	return map[string]any{}, false
 }
 
-func cliToolResults(obj map[string]any) []any {
-	blocks := cliContentBlocks(obj)
-	if len(blocks) == 0 {
+func readStringSlice(value any) []string {
+	list, ok := value.([]any)
+	if !ok || len(list) == 0 {
 		return nil
 	}
-	out := []any{}
-	for _, item := range blocks {
-		entry, _ := item.(map[string]any)
-		if strings.TrimSpace(readString(entry["type"])) != "tool_result" {
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		text := strings.TrimSpace(readString(item))
+		if text == "" {
 			continue
 		}
-		result := map[string]any{
-			"tool_use_id": readString(entry["tool_use_id"]),
-		}
-		if content, ok := entry["content"].([]any); ok && len(content) > 0 {
-			result["content"] = content
-			if first, ok := content[0].(map[string]any); ok {
-				if text := strings.TrimSpace(readString(first["text"])); text != "" {
-					var decoded any
-					if json.Unmarshal([]byte(text), &decoded) == nil {
-						result["output"] = decoded
-					} else {
-						result["output"] = text
-					}
-				}
-			}
-		}
-		out = append(out, result)
+		out = append(out, text)
 	}
 	return out
 }
 
-func looksLikeProgressUpdate(text string) bool {
-	text = strings.TrimSpace(strings.ToLower(text))
-	if text == "" {
-		return false
+func readAnySlice(value any) []any {
+	list, _ := value.([]any)
+	if len(list) == 0 {
+		return nil
 	}
-	for _, prefix := range []string{
-		"i'll ",
-		"i will ",
-		"starting ",
-		"checking ",
-		"reviewing ",
-		"analyzing ",
-		"searching ",
-		"scheduling ",
-	} {
-		if strings.HasPrefix(text, prefix) {
-			return true
-		}
-	}
-	return false
+	return append([]any(nil), list...)
 }
 
 func firstReadableString(values ...string) string {
