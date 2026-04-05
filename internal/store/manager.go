@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 
-	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
 )
 
@@ -172,26 +171,6 @@ func normalizeJSONPayload(raw []byte) string {
 	}
 	b, _ := json.Marshal(map[string]string{"raw": redactText(string(raw))})
 	return string(b)
-}
-
-func matchesAnySubscription(eventType string, patterns []events.EventType) bool {
-	for _, p := range patterns {
-		if subscriptionMatch(string(p), eventType) {
-			return true
-		}
-	}
-	return false
-}
-
-func subscriptionMatch(pattern, eventType string) bool {
-	switch {
-	case pattern == "", pattern == "*":
-		return true
-	case strings.HasSuffix(pattern, "*"):
-		return strings.HasPrefix(eventType, strings.TrimSuffix(pattern, "*"))
-	default:
-		return pattern == eventType
-	}
 }
 
 func nullable(value, fallback string) string {

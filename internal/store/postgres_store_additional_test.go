@@ -4,19 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"github.com/google/uuid"
 	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/eventidentity"
 	llm "swarm/internal/runtime/llm"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/testutil"
-	"testing"
-	"time"
 )
 
 func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *PostgresStore) {
@@ -713,30 +715,6 @@ func TestNormalizeJSONPayload_RedactsSensitiveText(t *testing.T) {
 	out = normalizeJSONPayload([]byte(`{"timestamp":"2026-02-21T02:47:05Z","notes":"at 2026-02-21T02:47:05Z"}`))
 	if strings.Contains(out, "[PHONE]") {
 		t.Fatalf("expected timestamp not redacted as phone, got %q", out)
-	}
-}
-
-func TestSubscriptionMatchPatterns(t *testing.T) {
-	if !subscriptionMatch("", "x.y") {
-		t.Fatalf("empty should match all")
-	}
-	if !subscriptionMatch("*", "x.y") {
-		t.Fatalf("* should match all")
-	}
-	if !subscriptionMatch("inbound.*", "inbound.a") {
-		t.Fatalf("prefix star should match")
-	}
-	if subscriptionMatch("inbound.*", "room.message") {
-		t.Fatalf("prefix star should not match other prefix")
-	}
-	if !subscriptionMatch("room.message", "room.message") {
-		t.Fatalf("exact should match")
-	}
-	if subscriptionMatch("room.message", "room.messages") {
-		t.Fatalf("exact should not match different")
-	}
-	if !matchesAnySubscription("inbound.a", []events.EventType{"review.*", "inbound.*"}) {
-		t.Fatalf("matchesAnySubscription expected true")
 	}
 }
 
@@ -1637,10 +1615,6 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: runtimeactors.AgentConfig{}}); err == nil {
 		t.Fatalf("expected agent id required error")
 	}
-
-	if !matchesAnySubscription("inbound.a", []events.EventType{"inbound.*"}) {
-		t.Fatalf("expected matchesAnySubscription true")
-	}
 }
 
 func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
@@ -1913,10 +1887,10 @@ func TestManagerHelpers_MatchingAndRedaction(t *testing.T) {
 	if normalizeJSONPayload([]byte(`{"b":1,"a":2}`)) == "" {
 		t.Fatal("expected normalized json")
 	}
-	if !matchesAnySubscription("review.chat", []events.EventType{"review.*"}) {
+	if !eventidentity.MatchPattern("review.*", "review.chat") {
 		t.Fatal("expected subscription match")
 	}
-	if subscriptionMatch("review.*", "budget.alert") {
+	if eventidentity.MatchPattern("review.*", "budget.alert") {
 		t.Fatal("unexpected match")
 	}
 	if nullable("", "x") != "x" {
