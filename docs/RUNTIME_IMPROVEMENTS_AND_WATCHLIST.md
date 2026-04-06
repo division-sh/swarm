@@ -2,9 +2,22 @@
 
 ## Purpose
 
-This is a living document for recurring runtime issues.
+This is a living document for recurring runtime issues, debugging patterns, and architectural pressure notes.
 
-It is expected to grow as new runtime failure patterns are discovered.
+It is expected to grow as new runtime failure patterns are discovered, but it is no longer the canonical backlog.
+
+Source of truth:
+
+- GitHub issues are the canonical system for:
+  - open work
+  - prioritization
+  - ownership
+  - completion tracking
+- this document is for:
+  - incident memory
+  - symptom-to-root-cause guidance
+  - architectural pressure notes
+  - links to the GitHub issues that own the corresponding work
 
 Implementation baseline:
 
@@ -40,8 +53,8 @@ Follow this protocol whenever a runtime debugging session finds a real issue.
    - Do not add every minor annoyance.
 
 2. Record the issue in two places.
-   - Add or update the relevant symptom/root-cause section.
-   - Cross-reference the backlog item(s) that this incident proves important.
+   - Add or update the relevant symptom/root-cause section here.
+   - Link the corresponding GitHub issue(s) that own the work.
 
 3. Keep entries concrete.
    - Capture:
@@ -51,10 +64,11 @@ Follow this protocol whenever a runtime debugging session finds a real issue.
      - current fix or mitigation
      - what signal or invariant should have caught it
 
-4. Update backlog items only when incidents validate them.
+4. Update GitHub issue links only when incidents validate them.
    - Add short notes like:
+     - `tracked in: #...`
      - `proved critical by: ...`
-   - Avoid constant backlog reshuffling without new evidence.
+   - Avoid turning this document back into a parallel issue tracker.
 
 5. Prefer appending over rewriting history.
    - Preserve institutional memory.
@@ -63,7 +77,7 @@ Follow this protocol whenever a runtime debugging session finds a real issue.
 6. Periodically collapse duplicates.
    - If several incidents reduce to the same architectural flaw, merge them into one stronger pattern.
 
-7. Treat this as a local issue ledger, not polished product documentation.
+7. Treat this as an incident/triage ledger, not polished product documentation.
    - Continuity and correctness matter more than presentation.
 
 8. Update this file at the end of any debugging session that took real effort.
@@ -80,6 +94,10 @@ Follow this protocol whenever a runtime debugging session finds a real issue.
      - or more than one semantically meaningful implementation of the same rule
    - record that here as an architectural issue, not as an isolated bug only.
 
+11. Do not maintain duplicate backlog state here.
+   - If work needs to be tracked, create or link the GitHub issue.
+   - If an item is only a pressure note or debugging heuristic, keep it here without pretending it is an assigned task.
+
 ## Incident Template
 
 Use this shape whenever adding a new incident:
@@ -89,7 +107,7 @@ Use this shape whenever adding a new incident:
 - `Actual root cause`
 - `Fix`
 - `What should have caught it`
-- `Backlog links`
+- `GitHub links`
 
 ## Symptom Watchlist
 
@@ -119,12 +137,14 @@ Current mitigations:
 Still brittle because:
 
 - authorization still exists in multiple layers
+- transport choice can still change whether canonical turn context is required
 
 Improvement items:
 
 - centralize canonical tool identity
 - centralize canonical event identity
 - share one authorization predicate across gateway and executor
+- unify `/mcp` and `/tools/*` context-token policy so the same tool call fails or succeeds for the same reason across transports
 
 ### Agent delivery marked in progress but no useful turn output appears
 
@@ -212,12 +232,14 @@ Symptoms:
 - delivery says `in_progress` but no launch actually happened
 - delivery retries without a clear explanation
 - delivery looks complete but downstream state never changed
+- recovery skips an event that never actually reached subscribers
 
 Likely causes:
 
 - launch state is inferred indirectly
 - retry lifecycle is not surfaced clearly
 - delivery bookkeeping is weaker than turn/session bookkeeping
+- the authoritative delivered marker is recorded earlier than real subscriber fan-out
 
 Current mitigations:
 
@@ -225,6 +247,8 @@ Current mitigations:
 
 Improvement items:
 
+- align the authoritative delivered marker with real subscriber fan-out
+- align recovery replay semantics with the spec's undelivered-event contract
 - define explicit delivery states such as:
   - `queued`
   - `launching`
@@ -256,6 +280,31 @@ Improvement items:
 
 - preserve end-to-end boot assertions per agent capability set
 - dry-run required tool auth at boot
+
+### Spec-valid contracts still fail boot or behave differently at runtime
+
+Symptoms:
+
+- a contract that appears valid against the authoritative YAML still fails boot
+- a contract using documented values is rejected while undocumented values are accepted
+- runtime semantics differ from what the authoritative spec describes
+
+Likely causes:
+
+- boot/loader/runtime widened or narrowed contract vocabulary independently of the spec
+- validation severity does not match the spec's boot-failure contract
+- runtime fallback behavior still exists outside explicit spec-owned actions
+
+Current mitigations:
+
+- ad hoc conformance and boot tests for selected seams
+- manual comparison against the authoritative YAML
+
+Improvement items:
+
+- reconcile boot and loader vocabulary with the authoritative spec
+- make invalid event payloads fail closed before persistence in canonical runtime paths
+- align delivery receipts and restart recovery semantics with the spec
 
 ### Host/container path or network split causes environment confusion
 
@@ -386,16 +435,30 @@ Symptoms:
 - runtime restarts while a turn is active
 - old Claude/container process may still exist
 - delivery/session ownership after restart is ambiguous
+- replayed events come back under a fresh run lineage
+- some recovered work is replayed with weaker identity than what was originally persisted
+- a run or template flow appears finished operationally but has no durable terminal proof
 
 Likely causes:
 
 - recovery model is not explicit enough
 - stale external processes can outlive runtime ownership
+- recovery loaders do not always preserve the full persisted event envelope
+- persisted exact identity is tighter than the in-memory recovery key used to restore it
+- completion is still inferred from quiescence or teardown side effects instead of one persisted terminal owner
 
 Current mitigations:
 
 - aggressive reset scripts
 - manual orphan checks
+
+Improvement items:
+
+- preserve full persisted correlation ancestry during recovery replay
+- unify exact timer/schedule identity across persistence, recovery, and in-memory scheduler keys
+- expose recovery decisions and dropped identity/context in logs/status APIs
+- persist canonical run completion instead of narrating it from quiescence
+- persist canonical terminal lifecycle for template flow instances instead of inferring it from teardown
 
 Improvement items:
 
@@ -611,8 +674,7 @@ Likely causes:
 
 Current mitigations:
 
-- manual scoped subscriptions can make cross-flow routing work
-- stricter runtime routing fixes reduce some classes of mis-targeting
+- completed at the 2026-04-05 checkpoint via issue `#23` / PR `#30`
 
 Still brittle because:
 
@@ -622,13 +684,12 @@ Still brittle because:
 
 Improvement items:
 
-- move to pin-based cross-flow auto-wiring by default
-- keep node `subscribes_to` and handler keys local-name only
-- resolve cross-flow routes at boot from:
-  - producer `pins.outputs.events`
-  - consumer `pins.inputs.events`
-- treat manual scoped subscriptions as an escape hatch, not the default
-- fail boot on ambiguous wiring unless the contract disambiguates explicitly
+- completed at the 2026-04-05 checkpoint via issue `#23` / PR `#30`:
+  - moved to pin-based cross-flow auto-wiring by default in the touched seams
+  - kept node `subscribes_to` and handler keys local-name oriented for the default path
+  - resolved cross-flow routes from producer/output and consumer/input pin interfaces
+  - treated manual scoped subscriptions as an explicit escape hatch
+  - failed boot on ambiguous wiring unless the contract disambiguated explicitly
 
 ### Cross-flow event is emitted and subscribed, but target handler never runs
 
@@ -1231,14 +1292,15 @@ Likely causes:
 
 Current mitigations:
 
-- prompt rules and event notes say to save before emit
+- completed at the 2026-04-05 checkpoint via issue `#24` / PR `#29`
 
 Improvement items:
 
-- make save-before-emit a stronger invariant for milestone events
-- add conformance tests that assert required field persistence before milestone emits
-- surface missing prerequisite fields at the first invalid emit, not later in downstream loops
-- capture prerequisite persistence status in the flight recorder for milestone events
+- completed at the 2026-04-05 checkpoint via issue `#24` / PR `#29`:
+  - made save-before-emit a runtime invariant for the touched milestone paths
+  - added conformance tests asserting required field persistence before emit
+  - surfaced missing prerequisite fields at the first invalid emit
+  - captured the failure through the engine rejection path before post-commit dispatch
 
 ### Agent session gets contaminated by prior failure and stops acting usefully
 
@@ -1392,18 +1454,19 @@ Likely causes:
 
 Current mitigations:
 
-- repeated decode/normalize logic in each subsystem
+- completed at the 2026-04-05 checkpoint via issue `#10` / PR `#26`
 
 Still brittle because:
 
-- the real control plane is implicit inside opaque JSON
-- subsystems can stay “individually correct” while disagreeing semantically
+- historical risk: the real control plane was implicit inside opaque JSON
+- historical risk: subsystems could stay “individually correct” while disagreeing semantically
 
 Improvement items:
 
-- introduce a typed persisted runtime descriptor for agent control semantics
-- separate opaque agent config payload from runtime-owned fields
-- stop re-deriving subscriptions/flow path/fallback semantics from arbitrary JSON blobs
+- completed at the 2026-04-05 checkpoint via issue `#10` / PR `#26`:
+  - introduced a typed persisted runtime descriptor for agent control semantics
+  - separated opaque agent config payload from runtime-owned fields
+  - stopped re-deriving subscriptions/flow path/fallback semantics from arbitrary JSON blobs in the touched seams
 
 ### Tool invocation semantics are still distributed across multiple layers
 
@@ -1512,19 +1575,19 @@ Likely causes:
 
 Current mitigations:
 
-- SQL-side payload parsing
-- fallback summary extraction from raw transcript blobs
+- completed at the 2026-04-05 checkpoint via issue `#31` / PR `#34`
 
 Still brittle because:
 
-- debugging views can diverge from actual runtime behavior even when rows exist
-- the observability layer becomes another heuristic interpreter
+- historical risk: debugging views could diverge from actual runtime behavior even when rows existed
+- historical risk: the observability layer could become another heuristic interpreter
 
 Improvement items:
 
-- persist one canonical turn transcript/outcome model from the runtime
-- stop reconstructing operator-facing summaries from raw transcript wire formats
-- make dashboard readers consumers of canonical persisted turn summaries rather than heuristic parsers
+- completed at the 2026-04-05 checkpoint via issue `#31` / PR `#34`:
+  - persisted one canonical turn-summary read-model surface from the runtime
+  - stopped reconstructing operator-facing summaries from raw transcript wire formats in the touched seams
+  - made dashboard readers consumers of canonical persisted turn summaries rather than heuristic parsers
 
 ### Residual entity-id derivation is still split across namespaces
 
@@ -1665,7 +1728,8 @@ Symptoms:
 
 Likely causes:
 
-- semantic-source ownership is still ambient rather than constructor-injected
+- status: completed at the 2026-04-05 checkpoint via issue `#28` / PR `#33`
+- historical risk: semantic-source ownership was ambient rather than constructor-injected
 - some subsystems treat missing semantic source as “skip logic” while others keep going differently
 
 Current mitigations:
@@ -1710,115 +1774,33 @@ Improvement items:
 
 ## Improvement Backlog
 
-### High Priority
+The flat backlog has been split into themed watchlists so this file can stay an index instead of the day-to-day working surface.
 
-1. Canonical tool invocation model across the whole runtime.
-   - proved critical by: tool identity, visibility, authorization, context requirements, and compatibility normalization are still split across gateway, validator, authorizer, executor, and native-tool registration
-   - status: completed at 2026-04-04 checkpoint via canonical tool identity, capability policy, per-turn capability materialization, explicit context requirements, canonical telemetry, and strict runtime executor/offering contracts
-2. Canonical event identity across scoped/local/emit forms.
-   - proved critical by: over-broad parent retargeting rewrote top-level flow outputs
-   - proved critical by: flow-control event emitted in the wrong lifecycle phase (`opco.teardown_requested` on a scoring-only subject)
-   - proved critical by: cross-flow validation handoff payload used `entity_id` for the target entity while prompts still treated it as the source scoring entity
-3. One shared authorization predicate for gateway and executor.
-   - proved critical by: validation agents were denied writes to their own validation-owned entity
-   - status: materially addressed by the completed tool invocation unification checkpoint; keep only if a non-tool authorization seam remains
-4. Precomputed per-turn capability set instead of recomputing auth in multiple places.
-   - proved critical by: offered/visible/allowed/callable tool sets can still diverge depending on which normalization/auth layer was consulted
-   - status: completed at 2026-04-04 checkpoint as part of tool invocation unification
-5. Better structured denial diagnostics with layer attribution.
-   - status: completed at 2026-04-04 checkpoint via issue `#4` / PR `#13`
-6. Add a per-turn structured flight recorder as the primary debugging surface.
-   - proved critical by: over-broad parent retargeting rewrote top-level flow outputs
-   - proved critical by: flow-control event emitted in the wrong lifecycle phase (`opco.teardown_requested` on a scoring-only subject)
-   - proved critical by: `data_accumulation` arithmetic expressions failed silently and left revision counters at `0`
-   - proved critical by: validation agents advanced the workflow after denied writes and later sessions anchored on stale operator-fix instructions
-   - status: completed at 2026-04-04 checkpoint via issue `#4` / PR `#13`
-7. Audit and prove mutation-log completeness for all `entity_state` write paths.
-   - proved critical by: revision-loop debugging required proving whether declarative writes became persisted field deltas
-   - proved critical by: state transitions occurred on run `51b45b57-d82a-4d89-84c7-d0a3a7222fef` while `entity_mutations` remained completely empty
-8. Move cross-flow routing to pin-based auto-wiring so contracts do not encode topology by default.
-   - proved critical by: repeated cross-flow routing bugs and topology leakage into contracts
-9. Make declarative `data_accumulation` expression semantics fully explicit and CEL-capable.
-   - proved critical by: validation revision counters never incremented despite declarative `entity.revision_count + 1` expressions
-10. Enforce or validate persistence prerequisites before milestone emits.
-   - proved critical by: `research.completed` and `spec.draft_ready` were emitted while `business_brief` and `mvp_spec` were still absent from entity state
-11. Introduce a first-class flow-instance model instead of passing identity/scope semantics through loosely-related strings.
-   - proved critical by: canonical flow-entity ids fixed nested descendant routing but exposed child-gate projection still using instance paths as if they were scope keys
-   - proved critical by: root terminal workflow rows were later misclassified as flow-instance teardown targets because deactivation still inferred identity from generic workflow rows instead of explicit flow-instance metadata
-12. Separate semantic flow scope from concrete flow-instance path everywhere.
-   - proved critical by: child gates were stored under `child/...` while projection filtered using `child/<instance-id>/...`
-   - proved critical by: nested template subscribers were later materialized against semantic template scope instead of exact instance path, leaving instance-local subscriptions on the wrong namespace
-13. Replace implicit store schema fallback logic with an explicit schema-capability boundary.
-   - proved critical by: event/store persistence still routes through legacy paths by matching SQL error substrings and ad hoc `columnExists(...)` checks
-   - status: completed at 2026-04-04 checkpoint via issue `#1` / PR `#5`
-14. Introduce a typed persisted runtime descriptor for agents instead of reconstructing control semantics from opaque config JSON.
-   - proved critical by: manager, authority, workspace, and store paths all re-decode control semantics like `flow_path`, subscriptions, and `manager_fallback` from raw config payloads
-15. Replace the engine helper fallback interpreter with an explicit typed expression model.
-   - proved critical by: declarative strings can still slide between CEL, ref, and literal semantics depending on parse/eval path and lookup order
-16. Make boot verification consume the compiled routing/semantic model instead of re-deriving local candidate sets.
-   - proved critical by: `bootverify` still maintains its own event candidate, localization, and wildcard matching logic instead of validating against one canonical semantic graph
-17. Separate live session state from conversation/turn audit state.
-   - proved critical by: stateless task-mode turns still back-project into `agent_sessions`, forcing dashboards and recovery logic to distinguish real sessions from observability shims after the fact
-18. Unify flow-instance entity-id derivation across runtime and store layers.
-   - proved critical by: residual store-side row-id derivation still carries a separate namespace branch that can disagree with centralized `flowidentity.EntityID(...)`
-   - status: completed at 2026-04-04 checkpoint via issue `#7` / PR `#9`
-19. Replace flat expression-context merging with explicit scoped variable semantics.
-   - proved critical by: expression context still relies on silent overwrite precedence across `vars`, `policy`, `entity`, and `payload`
-20. Implement canonical tool-execution telemetry as a first-class runtime surface.
-   - proved critical by: executor already collects actor, tool, latency, input, output, and error, but the current hook still discards it entirely
-   - status: completed at 2026-04-04 checkpoint on the runtime-log surface
+### Active Watchlists
 
-### Medium Priority
+- [Semantic Correctness](./watchlists/semantic-correctness.md)
+  - spec drift, persistence/recovery truth, lifecycle proof, conformance, and fail-closed boundary semantics
+- [Operator Surfaces](./watchlists/operator-surfaces.md)
+  - dashboard, CLI, builder, API/read-models, observability, and canonical run-scoped query ownership
+- [Runtime Operations](./watchlists/runtime-operations.md)
+  - execution-boundary, security, concurrency, replay, shutdown, multi-runtime, and operational config work
+- [Maintenance And Cleanup](./watchlists/maintenance-and-cleanup.md)
+  - decomposition, dead code, conformance-fixture coverage, and legacy compatibility removal
 
-1. Replace comma-separated request allowlists with canonical capability materialization.
-2. Add turn-level observability for:
-   - offered tools
-   - visible tools
-   - allowed tools
-   - called tools
-   - denied tools
-   - also record emitted event target decisions:
-     - source entity id
-     - chosen target entity id
-     - retarget reason
-3. Strengthen startup dry-run validation for required agent capabilities.
-4. Improve agent launch observability and runtime lifecycle reporting.
-5. Add watchdogs for long-running/no-output turns and stalled runs.
-6. Make tool visibility dependency-aware.
-7. Reduce context fallback for mutating tools.
-8. Make delivery lifecycle first-class and observable.
-9. Improve restart/recovery observability for in-flight turns.
-10. Improve status output so it names the failing layer directly.
-   - proved critical by: `no such key: composite_score` masking wrong emitted `entity_id`
-11. Implement more of the spec-aligned run-debug/flight-recorder API surface.
-12. Make cross-flow handoff payload contracts explicit and prompt-safe.
-   - proved critical by: validation prompts treated payload `entity_id` as the source scoring entity while runtime used it as the target validation entity
-13. Add session-recovery policy for infrastructure-contaminated agent sessions.
-   - proved critical by: validation agent sessions degraded into “no action / operator must inject fields” after early write failures
-14. Centralize entity-target resolution for handler execution and emitted-event retargeting.
-   - proved critical by: one correct entity-targeting fix later exposed a separate gate-projection and boundary-semantics mismatch in adjacent codepaths
-15. Unify store-side subscription/event matching with the canonical runtime matcher.
-   - proved critical by: store and receipt paths still have simpler local matching semantics that can drift from the bus/router matcher
-16. Make session/runtime scope invalid configurations fail closed instead of silently normalizing to task/global behavior.
-   - proved critical by: session scope semantics still silently collapse unknown modes into `task` and missing scopes into `global`
-17. Replace legacy route materialization adapters with canonical flow-instance route identity.
-   - proved critical by: route persistence and deletion still reconstruct template/instance identity from concrete paths instead of using one canonical instance identity
-18. Replace string-encoded timer and accumulation-timeout identity with typed runtime descriptors.
-   - proved critical by: timer trigger ids, timeout ids, and accumulation bucket targeting still rely on concatenated string conventions and heuristic bucket recovery
-19. Persist canonical turn summaries instead of reconstructing dashboard views from raw transcript payloads.
-   - proved critical by: conversation/debug surfaces still infer assistant output and progress state from raw payload shape and English prefix matching
-20. Replace ambient semantic-source lookup with explicit subsystem injection.
-   - proved critical by: manager, workspace, and bus still retrieve semantic state through a package-level accessor instead of one explicit injected dependency
-21. Replace string-suffix agent/entity scope inference with explicit metadata.
-   - proved critical by: some routing behavior still infers entity scoping from agent ids ending with `-{entityID}`
+### Current Active Wave
 
-### Lower Priority
+- `#115` Preserve full persisted correlation envelope during pipeline recovery replay.
+- `#116` Make workflow instance mutation atomic across load, mutate, and upsert.
+- `#118` Add a reusable cross-boundary delivery lifecycle conformance suite.
+- `#119` Persist canonical terminal lifecycle for template flow instances.
+- `#120` Persist canonical run completion instead of inferring it from quiescence.
+- `#159` Legacy compatibility removal wave.
 
-1. Replace shell-script lifecycle management with a more explicit local supervisor path.
-2. Further simplify persistence/control-plane seams where behavior is correct but structure is still indirect.
-3. Add purpose-built readers for large structured inputs such as corpora.
-4. Formalize an operator-facing observability contract across status/debug/conversation APIs.
+### Notes
 
+- This file still owns the maintenance protocol, incident watchlist, recent root causes, and healthy-state definition.
+- Each open backlog item should now have one canonical home in the themed watchlists above.
+- Completed checkpoints remain visible through the issue tracker, merged PRs, and git history rather than an ever-growing flat list here.
 ## Known Recent Root Causes
 
 ### Scoped emit auth mismatch
