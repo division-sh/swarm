@@ -51,6 +51,19 @@ func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *Postgres
 	}
 }
 
+func acquireLiveTestSession(t *testing.T, ctx context.Context, db *sql.DB, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, scopeKey string) string {
+	t.Helper()
+	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	lease, err := registry.Acquire(ctx, agentID, runtimeMode, sessionScope, "test-owner", scopeKey)
+	if err != nil {
+		t.Fatalf("Acquire(%s,%s,%s): %v", agentID, runtimeMode, scopeKey, err)
+	}
+	if err := registry.Release(ctx, lease); err != nil {
+		t.Fatalf("Release(%s,%s): %v", agentID, lease.SessionID, err)
+	}
+	return lease.SessionID
+}
+
 func seedSpecEntityState(t *testing.T, ctx context.Context, db execer, entityID, flowInstance, slug, name, state string) {
 	t.Helper()
 	if strings.TrimSpace(flowInstance) == "" {
@@ -1786,8 +1799,10 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    sessionID,
 		AgentID:      "a1",
 		Mode:         "session",
 		SessionScope: "global",
@@ -1812,16 +1827,6 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 
 	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{AgentID: "a1", RuntimeMode: "session", SessionID: uuid.NewString()}); err == nil {
 		t.Fatalf("expected missing session row error")
-	}
-	var sessionID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT session_id::text
-		FROM agent_sessions
-		WHERE agent_id = 'a1' AND scope_key = 'global'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&sessionID); err != nil {
-		t.Fatalf("load seeded agent_session: %v", err)
 	}
 	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
@@ -1870,8 +1875,10 @@ func TestManagerStore_ConversationPersistence_SessionPerEntityUsesActorContext(t
 		FlowPath: "review/inst-1",
 		EntityID: entityID,
 	})
+	sessionID := acquireLiveTestSession(t, ctx, db, "entity-agent", runtimesessions.RuntimeModeSessionPerEntity, runtimesessions.SessionScopeEntity, entityID)
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    sessionID,
 		AgentID:      "entity-agent",
 		Mode:         "session_per_entity",
 		SessionScope: "entity",
@@ -1901,6 +1908,39 @@ func TestManagerStore_ConversationPersistence_SessionPerEntityUsesActorContext(t
 	}
 	if flowInstance != "review/inst-1" {
 		t.Fatalf("flow_instance = %q, want review/inst-1", flowInstance)
+	}
+}
+
+func TestManagerStore_LiveConversationPersistenceRequiresCanonicalLiveSession(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    uuid.NewString(),
+		AgentID:      "a1",
+		Mode:         "session",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Messages:     []llm.Message{{Role: "assistant", Content: "hello"}},
+		TurnCount:    1,
+		Status:       "active",
+	})
+	if err == nil {
+		t.Fatal("expected live conversation persistence without a live session row to fail")
+	}
+	if !strings.Contains(err.Error(), "no active live session row found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE agent_id = 'a1'`).Scan(&count); err != nil {
+		t.Fatalf("count agent_sessions: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no live session rows to be created by conversation persistence, got %d", count)
 	}
 }
 
@@ -2090,8 +2130,10 @@ func TestManagerStore_AppendAgentTurn_AtomicallyPersistsSessionLastTurnAndTurnRo
 	ctx := context.Background()
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    sessionID,
 		AgentID:      "a1",
 		Mode:         "session",
 		SessionScope: "global",
@@ -2101,17 +2143,6 @@ func TestManagerStore_AppendAgentTurn_AtomicallyPersistsSessionLastTurnAndTurnRo
 		Status:       "active",
 	}); err != nil {
 		t.Fatalf("UpsertConversation(session): %v", err)
-	}
-
-	var sessionID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT session_id::text
-		FROM agent_sessions
-		WHERE agent_id = 'a1' AND scope_key = 'global'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&sessionID); err != nil {
-		t.Fatalf("load seeded agent_session: %v", err)
 	}
 
 	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
@@ -2269,8 +2300,10 @@ func TestManagerStore_SessionConversationDoesNotPersistAuditRow(t *testing.T) {
 		t.Fatalf("ensureConversationAuditTable: %v", err)
 	}
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    sessionID,
 		AgentID:      "a1",
 		Mode:         "session",
 		SessionScope: "global",
@@ -2282,17 +2315,6 @@ func TestManagerStore_SessionConversationDoesNotPersistAuditRow(t *testing.T) {
 		Status:    "active",
 	}); err != nil {
 		t.Fatalf("UpsertConversation(session): %v", err)
-	}
-
-	var sessionID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT session_id::text
-		FROM agent_sessions
-		WHERE agent_id = 'a1' AND runtime_mode = 'session'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&sessionID); err != nil {
-		t.Fatalf("load session row: %v", err)
 	}
 
 	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
@@ -2879,6 +2901,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    sessionID,
 		AgentID:      ceoID,
 		TaskID:       "",
 		Mode:         "session",
@@ -3001,6 +3024,7 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	}
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    acquireLiveTestSession(t, ctx, db, "agent-cleanup-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global"),
 		AgentID:      "agent-cleanup-1",
 		Mode:         "session",
 		SessionScope: "global",

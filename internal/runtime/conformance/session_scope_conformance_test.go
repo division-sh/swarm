@@ -184,8 +184,20 @@ func assertConversationPersistenceBoundary(t *testing.T, ctx context.Context, pg
 			t.Fatalf("seed persisted agent: %v", err)
 		}
 	}
+	sessionID := uuid.NewString()
+	if strings.TrimSpace(tc.persistErrContains) == "" && !conversationModeOrTask(tc.actor).IsStateless() {
+		registry := runtimesessions.NewPostgresRegistry(pg.DB, 30*time.Second)
+		lease, err := registry.Acquire(ctx, tc.actor.ID, conversationModeOrTask(tc.actor), runtimesessions.NormalizeSessionScope(tc.actor.SessionScope), "conformance", tc.scopeKey())
+		if err != nil {
+			t.Fatalf("seed live session lease: %v", err)
+		}
+		sessionID = lease.SessionID
+		if err := registry.Release(ctx, lease); err != nil {
+			t.Fatalf("release seeded live session lease: %v", err)
+		}
+	}
 	rec := runtimellm.ConversationRecord{
-		SessionID:    uuid.NewString(),
+		SessionID:    sessionID,
 		AgentID:      tc.actor.ID,
 		SessionScope: tc.actor.SessionScope,
 		ScopeKey:     tc.scopeKey(),
