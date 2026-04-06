@@ -216,9 +216,18 @@ def control_state_changed(current: dict[str, str], fields: dict[str, str]) -> bo
     return any(current.get(key, "").strip() != fields.get(key, "").strip() for key in watched)
 
 
+def work_pending(fields: dict[str, str], action: Action | None) -> bool:
+    state = fields.get("State", "").strip()
+    if state in {"changes_requested", "blocked"}:
+        return True
+    if state == "assigned" and action is not None:
+        return True
+    return False
+
+
 def derive_status(
     agent: str, cwd: Path, status_path: Path
-) -> tuple[dict[str, str], Action | None, bool]:
+) -> tuple[dict[str, str], Action | None, bool, bool]:
     current = parse_status_file(status_path)
     last_seen = current.get("Last-Seen-Comment-ID", "").strip()
     branch = git_branch(cwd)
@@ -249,8 +258,8 @@ def derive_status(
             "Last-Updated": now_iso(),
             "Next-Action": next_action,
         }
-        actionable = (action is not None and action.comment_id != last_seen) or control_state_changed(current, fields)
-        return fields, action, actionable
+        new_event = (action is not None and action.comment_id != last_seen) or control_state_changed(current, fields)
+        return fields, action, new_event, work_pending(fields, action)
 
     issue = assigned_issue(cwd, agent)
     if issue is not None:
@@ -272,8 +281,8 @@ def derive_status(
             "Last-Updated": now_iso(),
             "Next-Action": next_action,
         }
-        actionable = (action is not None and action.comment_id != last_seen) or control_state_changed(current, fields)
-        return fields, action, actionable
+        new_event = (action is not None and action.comment_id != last_seen) or control_state_changed(current, fields)
+        return fields, action, new_event, work_pending(fields, action)
 
     fields = {
         "Agent": agent,
@@ -286,17 +295,18 @@ def derive_status(
         "Last-Updated": now_iso(),
         "Next-Action": "polling for assigned issue",
     }
-    return fields, None, control_state_changed(current, fields)
+    return fields, None, control_state_changed(current, fields), False
 
 
-def print_summary(fields: dict[str, str], action: Action | None, actionable: bool) -> None:
+def print_summary(fields: dict[str, str], action: Action | None, new_event: bool, pending: bool) -> None:
     print(f"Agent: {fields.get('Agent', '')}")
     print(f"State: {fields.get('State', '')}")
     print(f"Issue: {fields.get('Issue', '')}")
     print(f"PR: {fields.get('PR', '')}")
     print(f"Branch: {fields.get('Branch', '')}")
     print(f"Control-Target: {fields.get('Control-Target', '')}")
-    print(f"Actionable: {'yes' if actionable else 'no'}")
+    print(f"New-Event: {'yes' if new_event else 'no'}")
+    print(f"Work-Pending: {'yes' if pending else 'no'}")
     print(f"Next-Action: {fields.get('Next-Action', '')}")
     if action is not None:
         print(f"Comment-ID: {action.comment_id}")
@@ -334,7 +344,7 @@ def main() -> int:
 
     while True:
         try:
-            fields, action, actionable = derive_status(agent, cwd, status_path)
+            fields, action, new_event, pending = derive_status(agent, cwd, status_path)
             write_status_file(status_path, fields)
         except subprocess.CalledProcessError as exc:
             print(exc.stderr or exc.stdout or str(exc), file=sys.stderr)
@@ -344,15 +354,15 @@ def main() -> int:
             return 1
 
         if not args.watch:
-            print_summary(fields, action, actionable)
-            return 10 if actionable else 0
+            print_summary(fields, action, new_event, pending)
+            return 10 if new_event else 0
 
-        if actionable:
-            print_summary(fields, action, actionable)
+        if new_event:
+            print_summary(fields, action, new_event, pending)
             return 10
 
         if args.verbose_wait:
-            print_summary(fields, action, actionable)
+            print_summary(fields, action, new_event, pending)
             print("---")
 
         time.sleep(max(args.interval, 1))

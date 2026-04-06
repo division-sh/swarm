@@ -157,6 +157,13 @@ Default command:
 python scripts/agent_poll.py --agent A --watch
 ```
 
+Poller interpretation:
+
+- `New-Event: yes` means the control state changed since the last seen poller state
+- `Work-Pending: yes` means the agent has work to do now
+- `Work-Pending: yes` is authoritative even when `New-Event: no`
+  - for example, after an agent has already seen a `changes-needed` comment and reruns one-shot mode
+
 ### Rebase And Refresh Rule
 
 Other PRs may merge while an agent is still working.
@@ -330,6 +337,8 @@ Supported modes:
   - check once
   - update `AGENT_STATUS.md`
   - print the current state
+  - print `New-Event: yes|no`
+  - print `Work-Pending: yes|no`
   - exit `0` when no actionable change is found
   - exit `10` when actionable work is found
 - `--watch`
@@ -361,6 +370,12 @@ Default rule:
 
 - use `--watch` for normal idle / waiting operation
 - use one-shot mode for explicit manual checks
+
+Interpretation rule:
+
+- `New-Event` controls whether the poller wakes and returns
+- `Work-Pending` controls whether the agent should do work now
+- do not treat `New-Event: no` as “nothing to do” when `Work-Pending: yes`
 
 ## Lead Responsibilities
 
