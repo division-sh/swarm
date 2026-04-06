@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -90,7 +91,9 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	}
 	for _, intent := range intents {
 		if err := d.dispatchIntent(ctx, intent); err != nil {
-			d.bus.markPipelineReceipt(ctx, intent.Event.ID, "error", err.Error())
+			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
+				d.bus.markPipelineReceipt(ctx, intent.Event.ID, "error", err.Error())
+			}
 			return err
 		}
 		d.bus.markPipelineReceipt(ctx, intent.Event.ID, "processed", "")
@@ -99,45 +102,34 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 }
 
 func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) error {
-	if len(intent.Recipients) > 0 {
-		recipients := uniqueStrings(intent.Recipients)
-		if len(recipients) > 0 {
-			d.bus.deliverToAgents(ctx, intent.Event, recipients)
-			d.bus.logRuntime(ctx, "debug", "Deferred event intent was delivered", "eventbus", "delivered", intent.Event.ID, string(intent.Event.Type), "", intent.Event.EntityID(), "", nil, map[string]any{
-				"direct":           true,
-				"recipients_count": len(recipients),
-			}, "", 0)
-		}
-		return nil
-	}
-	passthrough, deferred, err := d.bus.runInterceptors(ctx, intent.Event)
-	if err != nil {
-		return err
-	}
-	for _, next := range deferred {
-		if err := d.bus.publishDeferred(ctx, next); err != nil {
+	if intent.Recipients == nil {
+		passthrough, deferred, err := d.bus.runInterceptors(ctx, intent.Event)
+		if err != nil {
 			return err
 		}
-	}
-	if !passthrough {
-		return nil
-	}
-	plan, err := d.bus.deliveryPlanner.Plan(ctx, intent.Event)
-	if err != nil {
-		return err
-	}
-	d.bus.recordPublishDiagnostic(ctx, intent.Event, plan)
-	if len(plan.Recipients) > 0 {
-		d.bus.deliverToAgents(ctx, intent.Event, plan.Recipients)
-		d.bus.logDelivery(ctx, intent.Event, plan.Recipients, plan.ExtraDetail)
-	}
-	if plan.BlockedByCycle && plan.CycleEscalation != nil {
-		if err := d.bus.publishDeferred(ctx, *plan.CycleEscalation); err != nil {
+		for _, next := range deferred {
+			if err := d.bus.publishDeferred(ctx, next); err != nil {
+				return err
+			}
+		}
+		if !passthrough {
+			return nil
+		}
+		recipients, err := d.bus.authoritativeRecipientsForEvent(ctx, intent.Event.ID)
+		if err != nil {
 			return err
 		}
+		intent.Recipients = recipients
 	}
-	if strings.TrimSpace(plan.ContradictionReason) != "" {
-		_ = d.bus.emitContradiction(ctx, intent.Event, plan.ContradictionReason)
+	recipients := uniqueStrings(intent.Recipients)
+	if len(recipients) > 0 {
+		if err := d.bus.deliverToAgents(ctx, intent.Event, recipients); err != nil {
+			return err
+		}
+		d.bus.logRuntime(ctx, "debug", "Deferred event intent was delivered", "eventbus", "delivered", intent.Event.ID, string(intent.Event.Type), "", intent.Event.EntityID(), "", nil, map[string]any{
+			"direct":           true,
+			"recipients_count": len(recipients),
+		}, "", 0)
 	}
 	return nil
 }

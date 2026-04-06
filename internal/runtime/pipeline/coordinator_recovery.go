@@ -13,6 +13,10 @@ type missingPipelineReceiptReader interface {
 	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error)
 }
 
+type authoritativeDeliveryRecipientReader interface {
+	ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error)
+}
+
 type pipelineReceiptRecorder interface {
 	UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error
 }
@@ -24,6 +28,7 @@ type EventStore interface {
 
 type Publisher interface {
 	Publish(ctx context.Context, evt events.Event) error
+	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 }
 
 type RecoveryManager struct {
@@ -68,6 +73,10 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		return err
 	}
 	recorder, _ := r.store.(pipelineReceiptRecorder)
+	recipients, ok := r.store.(authoritativeDeliveryRecipientReader)
+	if !ok {
+		return fmt.Errorf("recover pipeline receipts: missing authoritative delivery recipient reader")
+	}
 	var firstErr error
 	for _, record := range eventsToReplay {
 		evt := record.Event
@@ -91,8 +100,28 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			}
 			continue
 		}
-		if err := r.bus.Publish(ctx, evt); err != nil {
-			// Keep replaying remaining events; one poison/bad event should not block full recovery.
+		persistedRecipients, err := recipients.ListEventDeliveryRecipients(ctx, evt.ID)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("load persisted recipients for replay event %s: %w", evt.ID, err)
+			}
+			continue
+		}
+		if len(persistedRecipients) == 0 {
+			if recorder == nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("mark replay event %s delivered receipt: missing pipeline receipt recorder", evt.ID)
+				}
+				continue
+			}
+			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID, "processed", ""); err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID, err)
+				}
+			}
+			continue
+		}
+		if err := r.bus.PublishDirect(ctx, evt, persistedRecipients); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("replay event %s: %w", evt.ID, err)
 			}

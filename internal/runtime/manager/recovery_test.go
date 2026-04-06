@@ -33,6 +33,9 @@ func (*recoveryTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEn
 func (b *recoveryTestBus) Store() runtimebus.EventStore                                  { return b }
 func (b *recoveryTestBus) AppendEvent(context.Context, events.Event) error               { return nil }
 func (b *recoveryTestBus) InsertEventDeliveries(context.Context, string, []string) error { return nil }
+func (*recoveryTestBus) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return []string{}, nil
+}
 func (b *recoveryTestBus) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
 	return nil, nil
 }

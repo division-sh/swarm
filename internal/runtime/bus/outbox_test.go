@@ -31,6 +31,10 @@ func (*recordingEventStore) InsertEventDeliveries(context.Context, string, []str
 	return nil
 }
 
+func (*recordingEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return []string{}, nil
+}
+
 func (s *recordingEventStore) eventTypes() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -2,6 +2,8 @@ package bus
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -9,6 +11,8 @@ import (
 	"swarm/internal/runtime/diaglog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
+
+var errAuthoritativeDeliveryIncomplete = errors.New("authoritative delivery incomplete")
 
 func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
 	lister, ok := eb.store.(ActiveAgentDescriptorLister)
@@ -98,19 +102,59 @@ func (eb *EventBus) resolveRoutedRecipients(eventType string) []string {
 	return out
 }
 
-func (eb *EventBus) deliverToAgents(ctx context.Context, evt events.Event, agentIDs []string) {
-	recipients := eb.snapshotRecipientChans(agentIDs)
+func (eb *EventBus) deliverToAgents(ctx context.Context, evt events.Event, agentIDs []string) error {
+	expected := uniqueStrings(agentIDs)
+	if len(expected) == 0 {
+		return nil
+	}
+	recipients := eb.snapshotRecipientChans(expected)
+	delivered := make([]string, 0, len(recipients))
+	seen := make(map[string]struct{}, len(recipients))
+	for _, recipient := range recipients {
+		seen[recipient.agentID] = struct{}{}
+	}
+	missing := make([]string, 0, len(expected))
+	for _, recipient := range expected {
+		if _, ok := seen[recipient]; !ok {
+			missing = append(missing, recipient)
+		}
+	}
+	timedOut := make([]string, 0, len(recipients))
 	for _, recipient := range recipients {
 		select {
 		case recipient.ch <- evt:
+			delivered = append(delivered, recipient.agentID)
 		case <-ctx.Done():
-			return
+			remaining := make([]string, 0, len(recipients)-len(delivered))
+			for _, candidate := range recipients {
+				if _, ok := seen[candidate.agentID]; ok {
+					delete(seen, candidate.agentID)
+				}
+			}
+			for _, recipient := range expected {
+				found := false
+				for _, sent := range delivered {
+					if sent == recipient {
+						found = true
+						break
+					}
+				}
+				if !found {
+					remaining = append(remaining, recipient)
+				}
+			}
+			return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, remaining, ctx.Err())
 		case <-time.After(deliverySendTimeout):
+			timedOut = append(timedOut, recipient.agentID)
 			eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
 				"timeout_ms": int(deliverySendTimeout / time.Millisecond),
 			}, "", 0)
 		}
 	}
+	if len(missing) > 0 || len(timedOut) > 0 {
+		return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, timedOut, nil)
+	}
+	return nil
 }
 
 type agentRecipient struct {
@@ -144,7 +188,7 @@ func (eb *EventBus) deliverByType(evt events.Event) {
 		eb.resolveRoutedRecipients(string(evt.Type)),
 		eb.resolveSubscribedRecipients(string(evt.Type))...,
 	))
-	eb.deliverToAgents(context.Background(), evt, recipients)
+	_ = eb.deliverToAgents(context.Background(), evt, recipients)
 }
 
 func (eb *EventBus) resolveSubscribedRecipients(eventType string) []string {
@@ -237,6 +281,39 @@ func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, er
 			"status": status,
 		}, err.Error(), 0)
 	}
+}
+
+func (eb *EventBus) logAuthoritativeDeliveryIncomplete(ctx context.Context, evt events.Event, expected, delivered, missing, timedOut []string, cause error) error {
+	detail := map[string]any{
+		"expected_recipients":  expected,
+		"delivered_recipients": delivered,
+	}
+	if len(missing) > 0 {
+		detail["missing_recipients"] = missing
+	}
+	if len(timedOut) > 0 {
+		detail["timed_out_recipients"] = timedOut
+	}
+	errText := ""
+	if cause != nil {
+		errText = cause.Error()
+		detail["cause"] = errText
+	}
+	eb.logRuntime(ctx, "warn", "Authoritative delivery fan-out was incomplete", "eventbus", "delivery_incomplete", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, detail, errText, 0)
+	parts := make([]string, 0, 3)
+	if len(missing) > 0 {
+		parts = append(parts, "missing="+strings.Join(missing, ","))
+	}
+	if len(timedOut) > 0 {
+		parts = append(parts, "timed_out="+strings.Join(timedOut, ","))
+	}
+	if cause != nil {
+		parts = append(parts, cause.Error())
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "incomplete")
+	}
+	return fmt.Errorf("%w: %s", errAuthoritativeDeliveryIncomplete, strings.Join(parts, "; "))
 }
 
 func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
