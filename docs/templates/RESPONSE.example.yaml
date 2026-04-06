@@ -1,0 +1,13 @@
+version: 1
+agent: A
+state: working
+issue: 184
+pr: 204
+response_type: pr-opened
+response_status: waiting-review
+summary: Started issue #184 and opened PR #204.
+tests_run:
+  - go test ./internal/runtime ./internal/store -count=1
+needs_lead: false
+source_control_version: 1
+updated_at: 2026-04-06T02:20:00Z

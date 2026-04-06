@@ -9,6 +9,8 @@
 .claude
 .codex
 AGENT_STATUS.md
+CONTROL.yaml
+RESPONSE.yaml
 
 # Local shared data mount
 data/*

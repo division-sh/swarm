@@ -1,0 +1,17 @@
+version: 1
+agent: A
+state: assigned
+issue: 184
+pr: null
+action_type: next-task
+action_status: assigned
+branch_base: origin/master
+next_step: Stop runtime diagnostics from inferring run_id from payload details.
+scope_rule: Keep scope on the diagnostics/run-id seam; absorb narrow same-seam fixes only.
+tests: Focused runtime/store/operator tests proving diagnostics no longer infer run selection from payload details.
+risk: medium
+agent_mode: work
+source_issue: 184
+source_pr: null
+source_url: https://github.com/yazzaoui/Swarm/issues/184#issuecomment-example
+updated_at: 2026-04-06T02:07:00Z
