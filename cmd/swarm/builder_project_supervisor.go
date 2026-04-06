@@ -151,13 +151,32 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
+
+	s.mu.RLock()
+	oldRT := s.currentRT
+	s.mu.RUnlock()
+	if oldRT != nil {
+		if err := oldRT.Shutdown(); err != nil {
+			return builderpkg.ProjectStatus{}, err
+		}
+	}
+
+	s.mu.Lock()
+	s.currentRoot = ""
+	s.currentSource = nil
+	s.currentBundle = nil
+	s.currentRT = nil
+	if s.ready != nil {
+		s.ready.Store(false)
+	}
+	s.mu.Unlock()
+
 	if err := newRT.Start(ctx); err != nil {
 		_ = newRT.Shutdown()
 		return builderpkg.ProjectStatus{}, err
 	}
 
 	s.mu.Lock()
-	oldRT := s.currentRT
 	s.currentRoot = resolvedRoot
 	s.currentSource = source
 	s.currentBundle = bundle
@@ -167,12 +186,6 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	}
 	status := s.projectStatusLocked()
 	s.mu.Unlock()
-
-	if oldRT != nil {
-		if err := oldRT.Shutdown(); err != nil {
-			slog.Warn("builder project supervisor shutdown previous runtime", "error", err)
-		}
-	}
 	slog.Info("builder project loaded", "project_dir", filepath.Clean(resolvedRoot), "workflow", strings.TrimSpace(status.WorkflowName))
 	return status, nil
 }

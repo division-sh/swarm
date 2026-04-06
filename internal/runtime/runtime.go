@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,6 +65,12 @@ type RuntimeOptions struct {
 }
 
 type Runtime struct {
+	lifecycleMu    sync.Mutex
+	startCtx       context.Context
+	cancelStart    context.CancelFunc
+	ownershipLease runtimeStoreOwnershipLease
+	ownerID        string
+
 	Config         *config.Config
 	Stores         Stores
 	Options        RuntimeOptions
@@ -235,6 +242,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	}
 
 	rt := &Runtime{
+		ownerID:        newRuntimeOwnerID(),
 		Config:         cfg,
 		Stores:         stores,
 		Options:        opts,
@@ -537,12 +545,37 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
 	}
+	rt.lifecycleMu.Lock()
+	if rt.cancelStart != nil || rt.ownershipLease != nil {
+		rt.lifecycleMu.Unlock()
+		return fmt.Errorf("runtime already started")
+	}
+	startCtx, cancelStart := context.WithCancel(ctx)
+	lease, err := acquireRuntimeStoreOwnership(ctx, rt.Stores.SQLDB, rt.ownerID)
+	if err != nil {
+		cancelStart()
+		rt.lifecycleMu.Unlock()
+		return err
+	}
+	rt.startCtx = startCtx
+	rt.cancelStart = cancelStart
+	rt.ownershipLease = lease
+	rt.lifecycleMu.Unlock()
+
+	started := false
+	defer func() {
+		if started {
+			return
+		}
+		rt.cleanupStartFailure()
+	}()
+
 	if rt.Pipeline != nil {
-		go rt.Pipeline.RunMaintenance(ctx)
+		go rt.Pipeline.RunMaintenance(startCtx)
 	}
 	for _, node := range rt.SystemNodes {
 		if node != nil {
-			go node.Run(ctx)
+			go node.Run(startCtx)
 		}
 	}
 	if rt.Scheduler != nil && rt.Stores.ScheduleStore != nil {
@@ -619,7 +652,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 	}
 	if rt.Bus != nil {
-		rt.Bus.StartOutboxSweeper(ctx, runtimebus.DefaultOutboxSweeperConfig())
+		rt.Bus.StartOutboxSweeper(startCtx, runtimebus.DefaultOutboxSweeperConfig())
 	}
 	if rt.Manager != nil {
 		if err := rt.Manager.EnsureStaticAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
@@ -638,7 +671,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}
 	if rt.Manager != nil {
-		rt.Manager.Run(ctx)
+		rt.Manager.Run(startCtx)
 	}
 	if rt.Stores.SQLDB != nil && rt.Logger != nil {
 	}
@@ -654,6 +687,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			return fmt.Errorf("self-check failed: %w", err)
 		}
 	}
+	started = true
 	return nil
 }
 
@@ -670,7 +704,51 @@ func (rt *Runtime) Shutdown() error {
 	if rt.Scheduler != nil {
 		rt.Scheduler.Stop()
 	}
+	rt.lifecycleMu.Lock()
+	cancelStart := rt.cancelStart
+	lease := rt.ownershipLease
+	rt.cancelStart = nil
+	rt.startCtx = nil
+	rt.ownershipLease = nil
+	rt.lifecycleMu.Unlock()
+	if cancelStart != nil {
+		cancelStart()
+	}
+	if lease != nil {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := lease.Release(releaseCtx); err != nil && shutdownErr == nil {
+			shutdownErr = err
+		}
+		cancel()
+	}
 	return shutdownErr
+}
+
+func (rt *Runtime) cleanupStartFailure() {
+	if rt == nil {
+		return
+	}
+	if rt.Manager != nil {
+		_ = rt.Manager.Shutdown()
+	}
+	if rt.Scheduler != nil {
+		rt.Scheduler.Stop()
+	}
+	rt.lifecycleMu.Lock()
+	cancelStart := rt.cancelStart
+	lease := rt.ownershipLease
+	rt.cancelStart = nil
+	rt.startCtx = nil
+	rt.ownershipLease = nil
+	rt.lifecycleMu.Unlock()
+	if cancelStart != nil {
+		cancelStart()
+	}
+	if lease != nil {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = lease.Release(releaseCtx)
+		cancel()
+	}
 }
 
 func (rt *Runtime) Wait(ctx context.Context) {
