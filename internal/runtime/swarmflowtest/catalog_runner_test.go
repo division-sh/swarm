@@ -20,9 +20,10 @@ import (
 )
 
 type catalogTriggerStep struct {
-	Event   string         `yaml:"event"`
-	Payload map[string]any `yaml:"payload"`
-	Sender  string         `yaml:"sender"`
+	Event         string         `yaml:"event"`
+	Payload       map[string]any `yaml:"payload"`
+	Sender        string         `yaml:"sender"`
+	ErrorContains string         `yaml:"error_contains"`
 }
 
 type catalogExpectedDocument struct {
@@ -41,6 +42,7 @@ type catalogExpectedDocument struct {
 		AssertPersistedBeforeDelivery bool                 `yaml:"assert_persisted_before_delivery"`
 		AssertSerialProcessing        bool                 `yaml:"assert_serial_processing"`
 		InjectFailure                 string               `yaml:"inject_failure"`
+		ErrorContains                 string               `yaml:"error_contains"`
 	} `yaml:"trigger"`
 	Expected struct {
 		RuntimeOnly            bool                                `yaml:"runtime_only"`
@@ -855,9 +857,12 @@ func runEventLoopCatalogCase(
 		ev := queue[0]
 		queue = queue[1:]
 
-		if !catalogEventPayloadValid(eventCatalog[ev.Event], ev.Payload) {
-			result.handlerOutcome = "reject"
-			result.deadLetter = true
+		if err := catalogEventPayloadError(eventCatalog[ev.Event], ev.Payload); err != nil {
+			result.handlerOutcome = ""
+			result.errorContains = err.Error()
+			result.deadLetter = false
+			result.deadLetterReason = ""
+			result.chainDepthAtDeadLetter = 0
 			result.entityState = initialState
 			result.entityFields = cloneStringAnyMapCatalog(snapshot.Entity)
 			result.gates = cloneStringAnyMapCatalog(snapshot.Gates)
@@ -2714,18 +2719,18 @@ func catalogAgentProduces(agent catalogAgentRegistryEntry) []string {
 	return normalizeStrings(out)
 }
 
-func catalogEventPayloadValid(spec catalogEventSchemaEntry, payload map[string]any) bool {
+func catalogEventPayloadError(spec catalogEventSchemaEntry, payload map[string]any) error {
 	if len(spec.Required) == 0 {
-		return true
+		return nil
 	}
 	for _, key := range spec.Required {
 		key = strings.TrimSpace(key)
 		value, ok := payload[key]
 		if !ok || value == nil || strings.TrimSpace(asStringForCatalog(value)) == "" {
-			return false
+			return fmt.Errorf("%s is required", key)
 		}
 	}
-	return true
+	return nil
 }
 
 func catalogEventPatternMatches(pattern, event string) bool {
@@ -3058,6 +3063,18 @@ func assertCatalogRunResult(t testing.TB, result catalogRunResult, expected cata
 		}
 		return
 	}
+	if want := strings.TrimSpace(expected.Trigger.ErrorContains); want != "" {
+		if !strings.Contains(result.errorContains, want) {
+			t.Fatalf("trigger error contains = %q, want substring %q", result.errorContains, want)
+		}
+		if result.handlerOutcome != "" {
+			t.Fatalf("handler outcome = %q, want empty for trigger-level publish rejection", result.handlerOutcome)
+		}
+		if len(result.emittedEvents) > 0 {
+			t.Fatalf("emitted events = %#v, want none for trigger-level publish rejection", result.emittedEvents)
+		}
+		return
+	}
 	if len(expected.Expected.Entities) > 0 {
 		for entityID, want := range expected.Expected.Entities {
 			got, ok := result.entities[strings.TrimSpace(entityID)]
@@ -3143,7 +3160,10 @@ func validateCatalogExpectedDocument(dir string, expected catalogExpectedDocumen
 		if len(expected.Trigger.Concurrent) > 0 && len(expected.Expected.Entities) == 0 {
 			return fmt.Errorf("concurrent trigger requires expected.entities")
 		}
-		if len(expected.Trigger.Concurrent) == 0 && strings.TrimSpace(expected.Expected.HandlerOutcome) == "" && !expected.Expected.DeadLetter {
+		if len(expected.Trigger.Concurrent) == 0 &&
+			strings.TrimSpace(expected.Trigger.ErrorContains) == "" &&
+			strings.TrimSpace(expected.Expected.HandlerOutcome) == "" &&
+			!expected.Expected.DeadLetter {
 			return fmt.Errorf("runtime case requires expected.handler_outcome")
 		}
 	}

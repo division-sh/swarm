@@ -18,6 +18,23 @@ type rowQueryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
+func (s *PostgresStore) SetEventPayloadValidator(validator func(eventType string, payload []byte) error) {
+	if s == nil {
+		return
+	}
+	s.eventPayloadValidator = EventPayloadValidator(validator)
+}
+
+func (s *PostgresStore) validateEventPayload(eventType string, payload []byte) error {
+	if s == nil || s.eventPayloadValidator == nil {
+		return nil
+	}
+	if err := s.eventPayloadValidator(strings.TrimSpace(eventType), payload); err != nil {
+		return fmt.Errorf("validate event payload: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresStore) AppendEvent(ctx context.Context, evt events.Event) error {
 	return s.AppendEventTx(ctx, nil, evt)
 }
@@ -241,6 +258,9 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, evt events.Event) error {
 	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, sourceEventID, createdAt, err := eventStorageEnvelope(evt)
 	if err != nil {
+		return err
+	}
+	if err := s.validateEventPayload(name, payload); err != nil {
 		return err
 	}
 	execFn := s.DB.ExecContext

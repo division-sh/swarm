@@ -262,6 +262,83 @@ func TestPostgresStore_PersistEventWithDeliveries_RejectsInvalidEntityID(t *test
 	}
 }
 
+func TestPostgresStore_AppendEvent_RejectsPayloadValidatorFailureBeforePersistence(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	pg.SetEventPayloadValidator(func(eventType string, payload []byte) error {
+		if strings.TrimSpace(eventType) != "task.completed" {
+			t.Fatalf("unexpected event type %q", eventType)
+		}
+		if string(payload) != `{"ok":"bad"}` {
+			t.Fatalf("unexpected payload %s", string(payload))
+		}
+		return runtimetools.ValidatePayloadAgainstSchema(map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"ok": map[string]any{"type": "boolean"},
+			},
+			"required":             []any{"ok"},
+			"additionalProperties": false,
+		}, map[string]any{"ok": "bad"})
+	})
+	ctx := context.Background()
+	eventID := uuid.NewString()
+
+	err := pg.AppendEvent(ctx, events.Event{
+		ID:          eventID,
+		Type:        events.EventType("task.completed"),
+		SourceAgent: "control-plane",
+		Payload:     []byte(`{"ok":"bad"}`),
+		CreatedAt:   time.Now().UTC(),
+	})
+	if err == nil {
+		t.Fatal("expected AppendEvent to fail on payload validator rejection")
+	}
+	if !strings.Contains(err.Error(), "validate event payload") {
+		t.Fatalf("AppendEvent payload validator error = %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&count); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected rejected payload not to persist, count=%d", count)
+	}
+}
+
+func TestPostgresStore_RecordInboundEvent_RejectsPayloadValidatorFailureBeforePersistence(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	pg.SetEventPayloadValidator(func(eventType string, payload []byte) error {
+		if strings.TrimSpace(eventType) != "platform.inbound_recorded" {
+			t.Fatalf("unexpected event type %q", eventType)
+		}
+		return sql.ErrTxDone
+	})
+	ctx := context.Background()
+	entityID := uuid.NewString()
+
+	inserted, err := pg.RecordInboundEvent(ctx, "provider-evt-1", entityID, "github")
+	if err == nil {
+		t.Fatal("expected RecordInboundEvent to fail on payload validator rejection")
+	}
+	if inserted {
+		t.Fatal("expected rejected inbound marker not to report insertion")
+	}
+	if !strings.Contains(err.Error(), "validate event payload") {
+		t.Fatalf("RecordInboundEvent payload validator error = %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name = 'platform.inbound_recorded'`).Scan(&count); err != nil {
+		t.Fatalf("count inbound event markers: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected rejected inbound marker not to persist, count=%d", count)
+	}
+}
+
 func TestPostgresStore_CancelActiveRunWorkByProducer_DeadLettersOldRunDeliveries(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

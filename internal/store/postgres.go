@@ -20,7 +20,11 @@ type PostgresStore struct {
 	schemaCapsMu    sync.RWMutex
 	schemaCaps      StoreSchemaCapabilities
 	schemaCapsBound bool
+
+	eventPayloadValidator EventPayloadValidator
 }
+
+type EventPayloadValidator func(eventType string, payload []byte) error
 
 func DSNFromConfig(cfg config.DatabaseConfig) string {
 	sslMode := cfg.SSLMode

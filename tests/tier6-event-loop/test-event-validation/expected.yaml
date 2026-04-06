@@ -2,13 +2,4 @@ trigger:
   event: task.submitted
   payload:
     entity_id: 11111111-1111-4111-8111-111111111111
-
-expected:
-  handler_outcome: success
-  diagnostics:
-    - type: spec.payload_validation
-      severity: warning
-      message: "Missing required field: priority"
-  entity_state: done
-  emitted_events:
-    - task.accepted
+  error_contains: "priority is required"

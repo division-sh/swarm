@@ -255,7 +255,16 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if stores.SQLDB != nil {
 		rt.Logger = NewRuntimeLogger(stores.SQLDB, logCaps)
 	}
-	payloadValidator := newRuntimePayloadValidator(runtimeEnvBool("SWARM_STRICT_PAYLOAD_VALIDATION", false), rt.Logger, emitRegistry.EventSchemaSnapshot())
+	payloadValidator := newRuntimePayloadValidator(rt.Logger, emitRegistry.EventSchemaSnapshot())
+	type eventPayloadValidationBinder interface {
+		SetEventPayloadValidator(func(eventType string, payload []byte) error)
+	}
+	if binder, ok := stores.EventStore.(eventPayloadValidationBinder); ok && binder != nil {
+		binder.SetEventPayloadValidator(payloadValidator)
+	}
+	if binder, ok := stores.InboundStore.(eventPayloadValidationBinder); ok && binder != nil {
+		binder.SetEventPayloadValidator(payloadValidator)
+	}
 	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
