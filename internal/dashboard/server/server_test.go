@@ -27,6 +27,8 @@ import (
 type builderRPCResponse = builderpkg.RPCResponse
 type builderWSEventFrame = builderpkg.WSEventFrame
 
+const testBuilderAuthToken = "builder-test-token"
+
 type stubAgents struct {
 	rows []runtimemanager.PersistedAgent
 }
@@ -202,10 +204,21 @@ func newBuilderHandlerForTest(
 		Health:         builderpkg.HealthChecker(health),
 		Instances:      instances,
 		Runtime:        runtimeCtl,
+		AuthToken:      testBuilderAuthToken,
 		Version:        version,
 		CurrentRuntime: runtimeProvider,
 		ProjectControl: projectCtl,
 	})
+}
+
+func builderAuthRequest(method, path, body string) *http.Request {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+testBuilderAuthToken)
+	return req
+}
+
+func builderAuthHeader() http.Header {
+	return http.Header{"Authorization": []string{"Bearer " + testBuilderAuthToken}}
 }
 
 func TestHandler_ConversationsAndAggregates(t *testing.T) {
@@ -1095,7 +1108,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"engine.ping"}`))
+	req := builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"1","method":"engine.ping"}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("engine.ping status=%d body=%s", rec.Code, rec.Body.String())
@@ -1113,7 +1126,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"2","method":"state.list_instances"}`))
+	req = builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"2","method":"state.list_instances"}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("state.list_instances status=%d body=%s", rec.Code, rec.Body.String())
@@ -1132,14 +1145,14 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"3","method":"state.get_instances"}`))
+	req = builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"3","method":"state.get_instances"}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("state.get_instances status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"4","method":"state.get_entity","params":{"instance_id":"wf-1"}}`))
+	req = builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"4","method":"state.get_entity","params":{"instance_id":"wf-1"}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("state.get_entity status=%d body=%s", rec.Code, rec.Body.String())
@@ -1173,7 +1186,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"5","method":"project.open","params":{"project_dir":"/tmp/builder-project"}}`))
+	req = builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"5","method":"project.open","params":{"project_dir":"/tmp/builder-project"}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("project.open status=%d body=%s", rec.Code, rec.Body.String())
@@ -1188,7 +1201,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"6","method":"engine.ping"}`))
+	req = builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"6","method":"engine.ping"}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/api/rpc engine.ping status=%d body=%s", rec.Code, rec.Body.String())
@@ -1217,7 +1230,7 @@ func TestHandler_BuilderWSHealthHeartbeat(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -1257,7 +1270,7 @@ func TestHandler_BuilderWSHealthHeartbeat_APIAlias(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial builder ws alias: %v", err)
 	}
@@ -1339,7 +1352,7 @@ func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -1351,7 +1364,7 @@ func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_001","inputs":{"intake.requested":{"topic":"sample"}}}}`))
+	req := builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_001","inputs":{"intake.requested":{"topic":"sample"}}}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
@@ -1433,7 +1446,7 @@ func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -1445,14 +1458,14 @@ func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_stop_001","inputs":{"intake.requested":{"topic":"sample"}}}}`))
+	req := builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_stop_001","inputs":{"intake.requested":{"topic":"sample"}}}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.stop","params":{"run_id":"run_test_stop_001"}}`))
+	req = builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"11","method":"run.stop","params":{"run_id":"run_test_stop_001"}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.stop status=%d body=%s", rec.Code, rec.Body.String())
@@ -1516,7 +1529,7 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -1528,21 +1541,21 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_pause_001","inputs":{"intake.requested":{"topic":"sample"}}}}`))
+	req := builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_pause_001","inputs":{"intake.requested":{"topic":"sample"}}}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.pause","params":{"run_id":"run_test_pause_001"}}`))
+	req = builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"11","method":"run.pause","params":{"run_id":"run_test_pause_001"}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.pause status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"12","method":"run.continue","params":{"run_id":"run_test_pause_001"}}`))
+	req = builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"12","method":"run.continue","params":{"run_id":"run_test_pause_001"}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.continue status=%d body=%s", rec.Code, rec.Body.String())
@@ -1616,7 +1629,7 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial websocket alias: %v", err)
 	}
@@ -1631,33 +1644,21 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_api_alias_001","inputs":{"intake.requested":{"topic":"sample"}}}}`),
-	)
+	req := builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_api_alias_001","inputs":{"intake.requested":{"topic":"sample"}}}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.pause","params":{"run_id":"run_test_api_alias_001"}}`),
-	)
+	req = builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"11","method":"run.pause","params":{"run_id":"run_test_api_alias_001"}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.pause alias status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"12","method":"run.continue","params":{"run_id":"run_test_api_alias_001"}}`),
-	)
+	req = builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"12","method":"run.continue","params":{"run_id":"run_test_api_alias_001"}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.continue alias status=%d body=%s", rec.Code, rec.Body.String())
@@ -1737,7 +1738,7 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial websocket alias: %v", err)
 	}
@@ -1752,11 +1753,7 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_breakpoint_001","inputs":{"intake.requested":{"topic":"sample"}},"breakpoints":["agent-source"]}}`),
-	)
+	req := builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_breakpoint_001","inputs":{"intake.requested":{"topic":"sample"}},"breakpoints":["agent-source"]}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
@@ -1838,7 +1835,7 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial websocket alias: %v", err)
 	}
@@ -1853,11 +1850,7 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_human_001","inputs":{"intake.requested":{"topic":"sample"}}}}`),
-	)
+	req := builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_human_001","inputs":{"intake.requested":{"topic":"sample"}}}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
@@ -1907,11 +1900,7 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.continue","params":{"run_id":"run_test_human_001","decision":"approved","instance_ids":["run_test_human_001"]}}`),
-	)
+	req = builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"11","method":"run.continue","params":{"run_id":"run_test_human_001","decision":"approved","instance_ids":["run_test_human_001"]}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.continue alias status=%d body=%s", rec.Code, rec.Body.String())
@@ -1982,7 +1971,7 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial websocket alias: %v", err)
 	}
@@ -1997,22 +1986,14 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_step_001","inputs":{"intake.requested":{"topic":"sample"}}}}`),
-	)
+	req := builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_step_001","inputs":{"intake.requested":{"topic":"sample"}}}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.step","params":{"run_id":"run_test_step_001","node_id":"agent-source","instance_id":"run_test_step_001"}}`),
-	)
+	req = builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"11","method":"run.step","params":{"run_id":"run_test_step_001","node_id":"agent-source","instance_id":"run_test_step_001"}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.step alias status=%d body=%s", rec.Code, rec.Body.String())
@@ -2100,7 +2081,7 @@ func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial websocket alias: %v", err)
 	}
@@ -2115,22 +2096,14 @@ func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_retry_001","inputs":{"intake.requested":{"topic":"sample"}}}}`),
-	)
+	req := builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_retry_001","inputs":{"intake.requested":{"topic":"sample"}}}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.retry","params":{"run_id":"run_test_retry_001","node_id":"agent-source","instance_id":"run_test_retry_001"}}`),
-	)
+	req = builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"11","method":"run.retry","params":{"run_id":"run_test_retry_001","node_id":"agent-source","instance_id":"run_test_retry_001"}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.retry alias status=%d body=%s", rec.Code, rec.Body.String())
@@ -2201,7 +2174,7 @@ func TestHandler_RunSkipEmitsSkippedAndResumed(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
 	if err != nil {
 		t.Fatalf("dial websocket alias: %v", err)
 	}
@@ -2216,22 +2189,14 @@ func TestHandler_RunSkipEmitsSkippedAndResumed(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_skip_001","inputs":{"intake.requested":{"topic":"sample"}}}}`),
-	)
+	req := builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_skip_001","inputs":{"intake.requested":{"topic":"sample"}}}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(
-		http.MethodPost,
-		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.skip","params":{"run_id":"run_test_skip_001","node_id":"agent-source","instance_id":"run_test_skip_001"}}`),
-	)
+	req = builderAuthRequest(http.MethodPost, "/api/rpc", `{"jsonrpc":"2.0","id":"11","method":"run.skip","params":{"run_id":"run_test_skip_001","node_id":"agent-source","instance_id":"run_test_skip_001"}}`)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.skip alias status=%d body=%s", rec.Code, rec.Body.String())

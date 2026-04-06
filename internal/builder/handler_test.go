@@ -14,6 +14,8 @@ import (
 	"swarm/internal/runtime/semanticview"
 )
 
+const testBuilderAuthToken = "builder-test-token"
+
 func TestHandler_CredentialsListSetDelete(t *testing.T) {
 	ctx := context.Background()
 	fileStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
@@ -41,6 +43,7 @@ func TestHandler_CredentialsListSetDelete(t *testing.T) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
 		Credentials:    store,
+		AuthToken:      testBuilderAuthToken,
 		SemanticSource: source,
 		Version:        "test",
 	})
@@ -106,6 +109,7 @@ func callBuilderRPC(t *testing.T, handler http.Handler, req Request) RPCResponse
 	}
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(raw))
+	httpReq.Header.Set("Authorization", "Bearer "+testBuilderAuthToken)
 	handler.ServeHTTP(rec, httpReq)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d body=%s", rec.Code, rec.Body.String())

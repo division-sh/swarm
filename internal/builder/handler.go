@@ -14,6 +14,7 @@ type handler struct {
 	instances      InstanceReader
 	runtime        RuntimeController
 	credentials    runtimecredentials.Store
+	authToken      string
 	version        string
 	semanticSource semanticview.Source
 	currentSource  SourceProvider
