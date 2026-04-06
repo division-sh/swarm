@@ -102,6 +102,7 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	pendingPredicate := store.CanonicalPendingAgentDeliveryPredicateSQL("r")
 	latestTurnBlocksExpr := `'[]'::jsonb`
 	if caps.Conversations.TurnBlocks {
 		latestTurnBlocksExpr = `COALESCE(turn_blocks, '[]'::jsonb)`
@@ -146,13 +147,17 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 		) latest_turn ON true
 		LEFT JOIN LATERAL (
 			SELECT
-				COUNT(*) FILTER (WHERE d.status IN ('pending', 'failed'))::int AS pending_count,
+				COUNT(*) FILTER (WHERE %s)::int AS pending_count,
 				COALESCE(MAX(CASE
-					WHEN d.status IN ('pending', 'failed') THEN EXTRACT(EPOCH FROM now() - e.created_at)
+					WHEN %s THEN EXTRACT(EPOCH FROM now() - e.created_at)
 					ELSE NULL
 				END)::int, 0) AS oldest_pending_age_sec
 			FROM event_deliveries d
 			INNER JOIN events e ON e.event_id = d.event_id
+			LEFT JOIN event_receipts r
+				ON r.event_id = d.event_id
+				AND r.subscriber_type = 'agent'
+				AND r.subscriber_id = d.subscriber_id
 			WHERE d.subscriber_type = 'agent'
 			  AND d.subscriber_id = a.agent_id
 		) p ON true
@@ -167,7 +172,7 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 		) f ON true
 		WHERE a.status NOT IN ('terminated', 'ephemeral')
 		ORDER BY a.created_at ASC, a.agent_id ASC
-	`, latestTurnBlocksExpr), runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
+	`, latestTurnBlocksExpr, pendingPredicate, pendingPredicate), runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
 	if err != nil {
 		return nil, fmt.Errorf("query agent operator projections: %w", err)
 	}

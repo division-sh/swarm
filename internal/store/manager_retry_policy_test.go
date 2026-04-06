@@ -215,6 +215,29 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 	}
 }
 
+func TestListPendingEventsForAgent_InProgressWithoutReceipt_RemainsPending(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.pending_in_progress")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+		t.Fatalf("insert deliveries: %v", err)
+	}
+	if err := pg.MarkEventDeliveryInProgress(ctx, evt.ID, agentID, ""); err != nil {
+		t.Fatalf("MarkEventDeliveryInProgress: %v", err)
+	}
+
+	evts, err := pg.ListPendingEventsForAgent(ctx, agentID, time.Now().Add(-2*time.Hour), 100)
+	if err != nil {
+		t.Fatalf("ListPendingEventsForAgent: %v", err)
+	}
+	if len(evts) != 1 || evts[0].ID != evt.ID {
+		t.Fatalf("in_progress without receipt pending events = %#v, want [%s]", evts, evt.ID)
+	}
+}
+
 func TestListPendingSubscribedEvents_UsesCanonicalMatcherParity(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
