@@ -2803,6 +2803,70 @@ func TestManagerStore_AppendAgentTurn_TaskCreatesAuditRowIfMissing(t *testing.T)
 	}
 }
 
+func TestManagerStore_AppendAgentTurn_TaskReactivatesExistingInactiveAuditRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := uuid.NewString()
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "a1",
+		Mode:      "task",
+		Messages: []llm.Message{
+			{Role: "assistant", Content: "done"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task): %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE agent_conversation_audits
+		SET status = 'terminated', updated_at = now() - interval '1 minute'
+		WHERE session_id = $1::uuid
+	`, sessionID); err != nil {
+		t.Fatalf("terminate task audit row: %v", err)
+	}
+
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "task",
+		SessionID:      sessionID,
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn(task inactive audit): %v", err)
+	}
+
+	var status string
+	var parseOK bool
+	var turnCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			status,
+			COALESCE((runtime_state->'last_turn'->>'parse_ok')::boolean, false),
+			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid AND runtime_mode = 'task')
+		FROM agent_conversation_audits
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&status, &parseOK, &turnCount); err != nil {
+		t.Fatalf("load reactivated task audit row: %v", err)
+	}
+	if status != "active" {
+		t.Fatalf("expected inactive task audit row to be reactivated, got %q", status)
+	}
+	if !parseOK {
+		t.Fatal("expected reactivated task audit row to record last_turn telemetry")
+	}
+	if turnCount != 1 {
+		t.Fatalf("expected one task turn row after reactivation, got %d", turnCount)
+	}
+}
+
 func TestManagerStore_TaskConversationDoesNotPersistLiveSessionRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
