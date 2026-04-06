@@ -61,6 +61,30 @@ type WorkflowTimerState struct {
 	Cancelled bool      `json:"cancelled,omitempty"`
 }
 
+type workflowInstancePersistedProjection struct {
+	Fields      map[string]any
+	Gates       map[string]bool
+	Accumulator map[string]any
+	Config      map[string]any
+	Control     workflowInstancePersistedControl
+}
+
+type workflowInstancePersistedControl struct {
+	SubjectID         string
+	StorageRef        string
+	Slug              string
+	Name              string
+	EntityType        string
+	InstanceID        string
+	FlowPath          string
+	InstanceKind      string
+	TemplateVersion   string
+	LastSourceEvent   string
+	Status            string
+	ParentEntityID    string
+	TransitionHistory []WorkflowTransitionRecord
+}
+
 type WorkflowInstanceStore struct {
 	db *sql.DB
 }
@@ -292,18 +316,27 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 		return WorkflowInstance{}, false, err
 	}
 	item.SubjectID = strings.TrimSpace(subjectID.String)
-	if err := json.Unmarshal(accRaw, &item.StateBuckets); err != nil {
+	projection, err := decodeWorkflowInstancePersistedProjection(fieldsRaw, gatesRaw, accRaw, configRaw, workflowInstancePersistedControl{
+		SubjectID:  item.SubjectID,
+		StorageRef: strings.TrimSpace(flowInstance),
+		Slug:       slug.String,
+		Name:       name.String,
+		EntityType: entityType,
+	})
+	if err != nil {
 		return WorkflowInstance{}, false, err
 	}
-	item.Metadata = workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw, slug.String, name.String, entityType, flowInstance, item.SubjectID)
-	item.StorageRef = strings.TrimSpace(flowInstance)
+	item.StateBuckets = projection.Accumulator
+	item.Config = projection.Config
+	item.Metadata = projection.Metadata()
+	item.StorageRef = projection.Control.StorageRef
 	item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
 	timers, err := s.loadWorkflowTimersSpec(ctx, keys[0])
 	if err != nil {
 		return WorkflowInstance{}, false, err
 	}
 	item.TimerState = timers
-	item.TransitionHistory = workflowInstanceTransitionHistory(item.Metadata)
+	item.TransitionHistory = append([]WorkflowTransitionRecord{}, projection.Control.TransitionHistory...)
 	if item.StateBuckets == nil {
 		item.StateBuckets = map[string]any{}
 	}
@@ -375,13 +408,22 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			return nil, err
 		}
 		item.SubjectID = strings.TrimSpace(subjectID.String)
-		if err := json.Unmarshal(accRaw, &item.StateBuckets); err != nil {
+		projection, err := decodeWorkflowInstancePersistedProjection(fieldsRaw, gatesRaw, accRaw, configRaw, workflowInstancePersistedControl{
+			SubjectID:  item.SubjectID,
+			StorageRef: strings.TrimSpace(flowInstance),
+			Slug:       slug.String,
+			Name:       name.String,
+			EntityType: entityType,
+		})
+		if err != nil {
 			return nil, err
 		}
-		item.Metadata = workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw, slug.String, name.String, entityType, flowInstance, item.SubjectID)
-		item.StorageRef = strings.TrimSpace(flowInstance)
+		item.StateBuckets = projection.Accumulator
+		item.Config = projection.Config
+		item.Metadata = projection.Metadata()
+		item.StorageRef = projection.Control.StorageRef
 		item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
-		item.TransitionHistory = workflowInstanceTransitionHistory(item.Metadata)
+		item.TransitionHistory = append([]WorkflowTransitionRecord{}, projection.Control.TransitionHistory...)
 		timers, err := s.loadWorkflowTimersSpec(ctx, runtimeflowidentity.EntityID(item.StorageRef))
 		if err != nil {
 			return nil, err
@@ -419,22 +461,24 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 		return err
 	}
 
-	metadata := cloneStringAnyMap(instance.Metadata)
-	config := workflowInstanceConfigPayload(instance, storageRef)
-	fields, gates, slug, name, entityType := workflowInstanceEntityProjection(metadata)
-	fieldsJSON, err := json.Marshal(fields)
+	projection, err := workflowInstancePersistedProjectionFromInstance(instance, storageRef)
 	if err != nil {
 		return err
 	}
-	gatesJSON, err := json.Marshal(gates)
+	fieldsJSON, err := json.Marshal(projection.Fields)
 	if err != nil {
 		return err
 	}
+	gatesJSON, err := json.Marshal(projection.GatesAny())
+	if err != nil {
+		return err
+	}
+	config := projection.ConfigPayload(instance.WorkflowVersion)
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		return err
 	}
-	accumulatorState, err := json.Marshal(instance.StateBuckets)
+	accumulatorState, err := json.Marshal(projection.Accumulator)
 	if err != nil {
 		return err
 	}
@@ -478,7 +522,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 			revision = entity_state.revision + 1,
 			entered_state_at = EXCLUDED.entered_state_at,
 			updated_at = now()
-	`, rowID, instance.SubjectID, storageRef, entityType, slug, name, instance.CurrentState,
+	`, rowID, projection.Control.SubjectID, storageRef, projection.Control.EntityType, projection.Control.Slug, projection.Control.Name, instance.CurrentState,
 		jsonOrDefault(gatesJSON, "{}"),
 		jsonOrDefault(fieldsJSON, "{}"),
 		jsonOrDefault(accumulatorState, "{}"),
@@ -488,9 +532,9 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}
 	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, rowID, previous, runtimemutationlog.EntityStateProjection{
 		CurrentState: strings.TrimSpace(instance.CurrentState),
-		Fields:       fields,
-		Gates:        gates,
-		Accumulator:  cloneStringAnyMap(instance.StateBuckets),
+		Fields:       projection.Fields,
+		Gates:        projection.GatesAny(),
+		Accumulator:  projection.Accumulator,
 	}, runtimemutationlog.Writer{
 		Type:        "platform",
 		ID:          "workflow_instance_store",
@@ -594,26 +638,24 @@ func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, entityID 
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
+	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	gates, err := decodeWorkflowInstanceJSONBoolMap("entity_state.gates", gatesRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	accumulator, err := decodeWorkflowInstanceJSONMap("entity_state.accumulator", accRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
 	return runtimemutationlog.EntityStateProjection{
 		CurrentState: strings.TrimSpace(currentState.String),
-		Fields:       jsonObjectMap(fieldsRaw),
-		Gates:        jsonObjectMap(gatesRaw),
-		Accumulator:  jsonObjectMap(accRaw),
+		Fields:       fields,
+		Gates:        workflowBoolGatesAsMap(gates),
+		Accumulator:  accumulator,
 	}, nil
-}
-
-func jsonObjectMap(raw []byte) map[string]any {
-	if len(raw) == 0 {
-		return nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, entityID string) ([]WorkflowTimerState, error) {
@@ -654,106 +696,299 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, enti
 	return out, rows.Err()
 }
 
-func workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw []byte, slug, name, entityType, flowInstance, subjectID string) map[string]any {
-	metadata := map[string]any{}
-	var fields map[string]any
-	if len(fieldsRaw) > 0 {
-		_ = json.Unmarshal(fieldsRaw, &fields)
+func decodeWorkflowInstancePersistedProjection(
+	fieldsRaw, gatesRaw, accRaw, configRaw []byte,
+	control workflowInstancePersistedControl,
+) (workflowInstancePersistedProjection, error) {
+	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
+	if err != nil {
+		return workflowInstancePersistedProjection{}, err
 	}
-	for key, value := range fields {
-		metadata[key] = value
+	gates, err := decodeWorkflowInstanceJSONBoolMap("entity_state.gates", gatesRaw)
+	if err != nil {
+		return workflowInstancePersistedProjection{}, err
 	}
-	if strings.TrimSpace(slug) != "" {
-		metadata["slug"] = strings.TrimSpace(slug)
+	accumulator, err := decodeWorkflowInstanceJSONMap("entity_state.accumulator", accRaw)
+	if err != nil {
+		return workflowInstancePersistedProjection{}, err
 	}
-	if strings.TrimSpace(name) != "" {
-		metadata["name"] = strings.TrimSpace(name)
+	config, control, err := decodeWorkflowInstanceConfigPayload(configRaw, control)
+	if err != nil {
+		return workflowInstancePersistedProjection{}, err
 	}
-	if strings.TrimSpace(entityType) != "" {
-		metadata["entity_type"] = strings.TrimSpace(entityType)
+	if strings.TrimSpace(control.EntityType) == "" {
+		control.EntityType = "default"
 	}
-	if strings.TrimSpace(flowInstance) != "" {
-		metadata["storage_ref"] = strings.TrimSpace(flowInstance)
+	return workflowInstancePersistedProjection{
+		Fields:      fields,
+		Gates:       gates,
+		Accumulator: accumulator,
+		Config:      config,
+		Control:     control,
+	}, nil
+}
+
+func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, storageRef string) (workflowInstancePersistedProjection, error) {
+	metadata := cloneStringAnyMap(instance.Metadata)
+	gates, err := workflowInstanceMetadataGates(metadata)
+	if err != nil {
+		return workflowInstancePersistedProjection{}, err
 	}
-	if strings.TrimSpace(subjectID) != "" {
-		metadata["subject_id"] = strings.TrimSpace(subjectID)
+	delete(metadata, "gates")
+	control := workflowInstancePersistedControl{
+		SubjectID:         strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"]))),
+		StorageRef:        strings.TrimSpace(storageRef),
+		Slug:              strings.TrimSpace(asString(instance.Metadata["slug"])),
+		Name:              strings.TrimSpace(asString(instance.Metadata["name"])),
+		EntityType:        strings.TrimSpace(asString(instance.Metadata["entity_type"])),
+		InstanceID:        strings.TrimSpace(firstNonEmptyString(asString(instance.Metadata["instance_id"]), instance.InstanceID)),
+		FlowPath:          strings.TrimSpace(asString(instance.Metadata["flow_path"])),
+		InstanceKind:      strings.TrimSpace(asString(instance.Metadata["instance_kind"])),
+		TemplateVersion:   strings.TrimSpace(asString(instance.Metadata["template_version"])),
+		LastSourceEvent:   strings.TrimSpace(asString(instance.Metadata["last_source_event"])),
+		Status:            strings.TrimSpace(asString(instance.Metadata["status"])),
+		ParentEntityID:    strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
+		TransitionHistory: append([]WorkflowTransitionRecord{}, instance.TransitionHistory...),
 	}
-	var gates map[string]any
-	if len(gatesRaw) > 0 && json.Unmarshal(gatesRaw, &gates) == nil && len(gates) > 0 {
-		metadata["gates"] = gates
+	for _, key := range []string{
+		"slug", "name", "entity_type", "subject_id", "parent_entity_id",
+		"instance_id", "storage_ref", "flow_path", "instance_kind",
+		"template_version", "workflow_version", "transition_history",
+	} {
+		delete(metadata, key)
 	}
-	var config map[string]any
-	if len(configRaw) > 0 && json.Unmarshal(configRaw, &config) == nil {
-		for _, key := range []string{"instance_id", "flow_path", "storage_ref", "instance_kind", "template_version", "last_source_event", "status", "parent_entity_id"} {
-			if value, ok := config[key]; ok {
-				metadata[key] = value
-			}
-		}
-		if value, ok := config["transition_history"]; ok {
-			metadata["transition_history"] = value
-		}
+	if control.EntityType == "" {
+		control.EntityType = "default"
+	}
+	return workflowInstancePersistedProjection{
+		Fields:      metadata,
+		Gates:       gates,
+		Accumulator: cloneStringAnyMap(instance.StateBuckets),
+		Config:      cloneStringAnyMap(instance.Config),
+		Control:     control,
+	}, nil
+}
+
+func (p workflowInstancePersistedProjection) Metadata() map[string]any {
+	metadata := cloneStringAnyMap(p.Fields)
+	if len(p.Gates) > 0 {
+		metadata["gates"] = p.GatesAny()
+	}
+	if strings.TrimSpace(p.Control.Slug) != "" {
+		metadata["slug"] = strings.TrimSpace(p.Control.Slug)
+	}
+	if strings.TrimSpace(p.Control.Name) != "" {
+		metadata["name"] = strings.TrimSpace(p.Control.Name)
+	}
+	if strings.TrimSpace(p.Control.EntityType) != "" {
+		metadata["entity_type"] = strings.TrimSpace(p.Control.EntityType)
+	}
+	if strings.TrimSpace(p.Control.StorageRef) != "" {
+		metadata["storage_ref"] = strings.TrimSpace(p.Control.StorageRef)
+	}
+	if strings.TrimSpace(p.Control.SubjectID) != "" {
+		metadata["subject_id"] = strings.TrimSpace(p.Control.SubjectID)
+	}
+	if strings.TrimSpace(p.Control.InstanceID) != "" {
+		metadata["instance_id"] = strings.TrimSpace(p.Control.InstanceID)
+	}
+	if strings.TrimSpace(p.Control.FlowPath) != "" {
+		metadata["flow_path"] = strings.TrimSpace(p.Control.FlowPath)
+	}
+	if strings.TrimSpace(p.Control.InstanceKind) != "" {
+		metadata["instance_kind"] = strings.TrimSpace(p.Control.InstanceKind)
+	}
+	if strings.TrimSpace(p.Control.TemplateVersion) != "" {
+		metadata["template_version"] = strings.TrimSpace(p.Control.TemplateVersion)
+	}
+	if strings.TrimSpace(p.Control.LastSourceEvent) != "" {
+		metadata["last_source_event"] = strings.TrimSpace(p.Control.LastSourceEvent)
+	}
+	if strings.TrimSpace(p.Control.Status) != "" {
+		metadata["status"] = strings.TrimSpace(p.Control.Status)
+	}
+	if strings.TrimSpace(p.Control.ParentEntityID) != "" {
+		metadata["parent_entity_id"] = strings.TrimSpace(p.Control.ParentEntityID)
+	}
+	if len(p.Control.TransitionHistory) > 0 {
+		metadata["transition_history"] = append([]WorkflowTransitionRecord{}, p.Control.TransitionHistory...)
 	}
 	return metadata
 }
 
-func workflowInstanceTransitionHistory(metadata map[string]any) []WorkflowTransitionRecord {
-	if metadata == nil {
-		return nil
+func (p workflowInstancePersistedProjection) ConfigPayload(workflowVersion string) map[string]any {
+	config := cloneStringAnyMap(p.Config)
+	if config == nil {
+		config = map[string]any{}
 	}
-	raw, ok := metadata["transition_history"]
-	if !ok {
-		return nil
+	config["workflow_version"] = strings.TrimSpace(workflowVersion)
+	config["instance_id"] = strings.TrimSpace(p.Control.InstanceID)
+	config["storage_ref"] = strings.TrimSpace(p.Control.StorageRef)
+	if strings.TrimSpace(p.Control.FlowPath) != "" {
+		config["flow_path"] = strings.TrimSpace(p.Control.FlowPath)
 	}
-	encoded, err := json.Marshal(raw)
-	if err != nil {
-		return nil
+	if strings.TrimSpace(p.Control.InstanceKind) != "" {
+		config["instance_kind"] = strings.TrimSpace(p.Control.InstanceKind)
 	}
-	var out []WorkflowTransitionRecord
-	if err := json.Unmarshal(encoded, &out); err != nil {
-		return nil
+	if strings.TrimSpace(p.Control.TemplateVersion) != "" {
+		config["template_version"] = strings.TrimSpace(p.Control.TemplateVersion)
 	}
-	return out
-}
-
-func workflowInstanceConfigPayload(instance WorkflowInstance, storageRef string) map[string]any {
-	config := map[string]any{
-		"workflow_version": strings.TrimSpace(instance.WorkflowVersion),
-		"instance_id":      strings.TrimSpace(instance.InstanceID),
-		"storage_ref":      strings.TrimSpace(storageRef),
+	if strings.TrimSpace(p.Control.LastSourceEvent) != "" {
+		config["last_source_event"] = strings.TrimSpace(p.Control.LastSourceEvent)
 	}
-	for key, value := range instance.Config {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		config[key] = value
+	if strings.TrimSpace(p.Control.Status) != "" {
+		config["status"] = strings.TrimSpace(p.Control.Status)
 	}
-	metadata := cloneStringAnyMap(instance.Metadata)
-	for _, key := range []string{"flow_path", "instance_kind", "template_version", "status", "last_source_event", "parent_entity_id"} {
-		if value, ok := metadata[key]; ok {
-			config[key] = value
-		}
+	if strings.TrimSpace(p.Control.ParentEntityID) != "" {
+		config["parent_entity_id"] = strings.TrimSpace(p.Control.ParentEntityID)
 	}
-	if len(instance.TransitionHistory) > 0 {
-		config["transition_history"] = instance.TransitionHistory
+	if len(p.Control.TransitionHistory) > 0 {
+		config["transition_history"] = append([]WorkflowTransitionRecord{}, p.Control.TransitionHistory...)
 	}
 	return config
 }
 
-func workflowInstanceEntityProjection(metadata map[string]any) (map[string]any, map[string]any, string, string, string) {
-	metadata = cloneStringAnyMap(metadata)
-	gates := payloadMap(metadata["gates"])
-	delete(metadata, "gates")
-	slug := strings.TrimSpace(asString(metadata["slug"]))
-	name := strings.TrimSpace(asString(metadata["name"]))
-	entityType := strings.TrimSpace(asString(metadata["entity_type"]))
-	for _, key := range []string{"slug", "name", "entity_type", "subject_id", "parent_entity_id", "instance_id", "storage_ref", "flow_path", "instance_kind", "template_version", "workflow_version", "transition_history"} {
-		delete(metadata, key)
+func (p workflowInstancePersistedProjection) GatesAny() map[string]any {
+	return workflowBoolGatesAsMap(p.Gates)
+}
+
+func decodeWorkflowInstanceJSONMap(label string, raw []byte) (map[string]any, error) {
+	if len(raw) == 0 {
+		return map[string]any{}, nil
 	}
-	if entityType == "" {
-		entityType = "default"
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("%s must be a JSON object: %w", label, err)
 	}
-	return metadata, gates, slug, name, entityType
+	if out == nil {
+		return map[string]any{}, nil
+	}
+	return out, nil
+}
+
+func decodeWorkflowInstanceJSONBoolMap(label string, raw []byte) (map[string]bool, error) {
+	if len(raw) == 0 {
+		return map[string]bool{}, nil
+	}
+	var out map[string]bool
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("%s must be an object of booleans: %w", label, err)
+	}
+	if out == nil {
+		return map[string]bool{}, nil
+	}
+	return out, nil
+}
+
+func workflowInstanceMetadataGates(metadata map[string]any) (map[string]bool, error) {
+	if metadata == nil {
+		return map[string]bool{}, nil
+	}
+	raw, ok := metadata["gates"]
+	if !ok || raw == nil {
+		return map[string]bool{}, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("workflow instance metadata.gates must be JSON-serializable: %w", err)
+	}
+	return decodeWorkflowInstanceJSONBoolMap("workflow instance metadata.gates", encoded)
+}
+
+func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePersistedControl) (map[string]any, workflowInstancePersistedControl, error) {
+	config, err := decodeWorkflowInstanceJSONMap("flow_instances.config", raw)
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	instanceID, err := workflowInstanceOptionalString(config, "instance_id")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	flowPath, err := workflowInstanceOptionalString(config, "flow_path")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	configStorageRef, err := workflowInstanceOptionalString(config, "storage_ref")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	instanceKind, err := workflowInstanceOptionalString(config, "instance_kind")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	templateVersion, err := workflowInstanceOptionalString(config, "template_version")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	lastSourceEvent, err := workflowInstanceOptionalString(config, "last_source_event")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	status, err := workflowInstanceOptionalString(config, "status")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	parentEntityID, err := workflowInstanceOptionalString(config, "parent_entity_id")
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	transitionHistory, err := workflowInstanceTransitionHistoryFromConfig(config)
+	if err != nil {
+		return nil, workflowInstancePersistedControl{}, err
+	}
+	delete(config, "workflow_version")
+	delete(config, "instance_id")
+	delete(config, "storage_ref")
+	delete(config, "flow_path")
+	delete(config, "instance_kind")
+	delete(config, "template_version")
+	delete(config, "last_source_event")
+	delete(config, "status")
+	delete(config, "parent_entity_id")
+	delete(config, "transition_history")
+	control.InstanceID = strings.TrimSpace(instanceID)
+	control.FlowPath = strings.TrimSpace(flowPath)
+	if strings.TrimSpace(control.StorageRef) == "" {
+		control.StorageRef = strings.TrimSpace(configStorageRef)
+	}
+	if strings.TrimSpace(control.StorageRef) != "" && strings.TrimSpace(configStorageRef) != "" && strings.TrimSpace(control.StorageRef) != strings.TrimSpace(configStorageRef) {
+		return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config storage_ref %q disagrees with entity_state.flow_instance %q", configStorageRef, control.StorageRef)
+	}
+	control.InstanceKind = strings.TrimSpace(instanceKind)
+	control.TemplateVersion = strings.TrimSpace(templateVersion)
+	control.LastSourceEvent = strings.TrimSpace(lastSourceEvent)
+	control.Status = strings.TrimSpace(status)
+	control.ParentEntityID = strings.TrimSpace(parentEntityID)
+	control.TransitionHistory = transitionHistory
+	return config, control, nil
+}
+
+func workflowInstanceOptionalString(config map[string]any, key string) (string, error) {
+	value, ok := config[key]
+	if !ok || value == nil {
+		return "", nil
+	}
+	typed, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("flow_instances.config %s must be a string", key)
+	}
+	return strings.TrimSpace(typed), nil
+}
+
+func workflowInstanceTransitionHistoryFromConfig(config map[string]any) ([]WorkflowTransitionRecord, error) {
+	raw, ok := config["transition_history"]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("flow_instances.config transition_history must be JSON-serializable: %w", err)
+	}
+	var out []WorkflowTransitionRecord
+	if err := json.Unmarshal(encoded, &out); err != nil {
+		return nil, fmt.Errorf("flow_instances.config transition_history must be an array of workflow transition records: %w", err)
+	}
+	return out, nil
 }
 
 func workflowInstanceMode(storageRef string) string {
