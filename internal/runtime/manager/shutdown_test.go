@@ -213,3 +213,103 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 		t.Fatalf("processed events = %d, want 1 after shutdown drain", got)
 	}
 }
+
+func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	firstStarted := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+
+	agent := shutdownTestAgent{
+		id:            "agent-1",
+		subscriptions: []events.EventType{"test.in"},
+		onEvent: func(ctx context.Context, evt events.Event) ([]events.Event, error) {
+			select {
+			case firstStarted <- struct{}{}:
+			default:
+			}
+			select {
+			case <-releaseFirst:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			return nil, nil
+		},
+	}
+
+	am := NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+		return agent, nil
+	})
+	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+		Config: runtimeactors.AgentConfig{ID: agent.id},
+	}, false); err != nil {
+		t.Fatalf("spawnAgentInternal: %v", err)
+	}
+
+	am.Run(context.Background())
+	am.runMu.Lock()
+	initialRunCtx := am.runCtx
+	am.runMu.Unlock()
+	if initialRunCtx == nil {
+		t.Fatal("expected initial run context")
+	}
+
+	if err := bus.Publish(context.Background(), events.Event{
+		ID:          "evt-in-1",
+		Type:        events.EventType("test.in"),
+		SourceAgent: "tester",
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first event to start")
+	}
+
+	shutdownErrCh := make(chan error, 1)
+	go func() {
+		shutdownErrCh <- am.Shutdown()
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for !am.isShuttingDown() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for shutdown drain to begin")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	am.Run(context.Background())
+
+	am.runMu.Lock()
+	currentRunCtx := am.runCtx
+	running := am.running
+	shuttingDown := am.shuttingDown
+	am.runMu.Unlock()
+	if currentRunCtx != initialRunCtx {
+		t.Fatal("Run replaced the active run context during shutdown drain")
+	}
+	if running {
+		t.Fatal("Run reopened manager during shutdown drain")
+	}
+	if !shuttingDown {
+		t.Fatal("shutdown drain state was cleared by concurrent Run")
+	}
+
+	close(releaseFirst)
+
+	select {
+	case err := <-shutdownErrCh:
+		if err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for shutdown to finish")
+	}
+}
