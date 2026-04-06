@@ -221,9 +221,6 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 	detailMap := map[string]any{}
 	_ = json.Unmarshal(detail, &detailMap)
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	if runID == "" {
-		runID = strings.TrimSpace(asString(detailMap["run_id"]))
-	}
 	parentEventID := strings.TrimSpace(asString(detailMap["parent_event_id"]))
 	handlerID := strings.TrimSpace(runtimecorrelation.HandlerIDFromContext(ctx))
 	if handlerID == "" {
@@ -290,6 +287,9 @@ func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detai
 	for k, v := range detailMap {
 		key := strings.TrimSpace(k)
 		if key == "" {
+			continue
+		}
+		if key == "run_id" {
 			continue
 		}
 		details[key] = v
