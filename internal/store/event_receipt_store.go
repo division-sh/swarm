@@ -482,16 +482,18 @@ func (s *PostgresStore) getEventReceiptSpec(ctx context.Context, eventID, agentI
 		receipt.Error = payload.Error
 	}
 	if deliverySeen {
-		mappedStatus, ok := mapDeliveryStatusToManagerReceiptStatus(delivery)
-		if !ok {
-			return runtimemanager.EventReceipt{}, false, fmt.Errorf("get event receipt: invalid delivery status %q", strings.TrimSpace(delivery))
+		mappedStatus, override, err := terminalManagerReceiptStatusFromDelivery(delivery)
+		if err != nil {
+			return runtimemanager.EventReceipt{}, false, fmt.Errorf("get event receipt: %w", err)
 		}
-		receipt.Status = mappedStatus
-		if retryCount.Valid {
-			receipt.RetryCount = int(retryCount.Int64)
-		}
-		if strings.TrimSpace(deliveryErr) != "" {
-			receipt.Error = strings.TrimSpace(deliveryErr)
+		if override {
+			receipt.Status = mappedStatus
+			if retryCount.Valid {
+				receipt.RetryCount = int(retryCount.Int64)
+			}
+			if strings.TrimSpace(deliveryErr) != "" {
+				receipt.Error = strings.TrimSpace(deliveryErr)
+			}
 		}
 	}
 	return receipt, true, nil
@@ -572,16 +574,18 @@ func mapOutcomeToManagerReceiptStatus(outcome string) runtimemanager.ReceiptStat
 	}
 }
 
-func mapDeliveryStatusToManagerReceiptStatus(status string) (runtimemanager.ReceiptStatus, bool) {
+func terminalManagerReceiptStatusFromDelivery(status string) (runtimemanager.ReceiptStatus, bool, error) {
 	switch strings.TrimSpace(strings.ToLower(status)) {
 	case "delivered":
-		return runtimemanager.ReceiptStatusProcessed, true
+		return runtimemanager.ReceiptStatusProcessed, true, nil
 	case "failed":
-		return runtimemanager.ReceiptStatusError, true
+		return runtimemanager.ReceiptStatusError, true, nil
 	case "dead_letter":
-		return runtimemanager.ReceiptStatusDeadLetter, true
+		return runtimemanager.ReceiptStatusDeadLetter, true, nil
+	case "pending", "in_progress", "":
+		return "", false, nil
 	default:
-		return "", false
+		return "", false, fmt.Errorf("invalid delivery status %q", strings.TrimSpace(status))
 	}
 }
 

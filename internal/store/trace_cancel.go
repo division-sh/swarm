@@ -102,24 +102,47 @@ func (s *PostgresStore) CancelActiveRunWorkByProducer(ctx context.Context, produ
 	}
 
 	if _, err := tx.ExecContext(ctx, `
+		WITH targeted AS (
+			SELECT
+				d.delivery_id,
+				d.event_id,
+				d.subscriber_type,
+				d.subscriber_id,
+				e.entity_id,
+				e.flow_instance
+			FROM event_deliveries d
+			JOIN events e ON e.event_id = d.event_id
+			WHERE e.run_id::text = ANY($1::text[])
+			  AND d.status IN ('pending', 'in_progress')
+			FOR UPDATE OF d
+		),
+		updated AS (
+			UPDATE event_deliveries d
+			SET
+				status = 'dead_letter',
+				reason_code = 'cancelled_by_kill_previous',
+				last_error = 'cancelled by --kill-previous',
+				active_session_id = NULL,
+				delivered_at = now()
+			FROM targeted t
+			WHERE d.delivery_id = t.delivery_id
+			RETURNING t.event_id, t.subscriber_type, t.subscriber_id, t.entity_id, t.flow_instance
+		)
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
 			outcome, reason_code, side_effects, processed_at
 		)
 		SELECT
-			e.event_id,
-			d.subscriber_type,
-			d.subscriber_id,
-			e.entity_id,
-			e.flow_instance,
+			u.event_id,
+			u.subscriber_type,
+			u.subscriber_id,
+			u.entity_id,
+			u.flow_instance,
 			'dead_letter',
 			'cancelled_by_kill_previous',
 			$2::jsonb,
 			now()
-		FROM event_deliveries d
-		JOIN events e ON e.event_id = d.event_id
-		WHERE e.run_id::text = ANY($1::text[])
-		  AND d.status IN ('pending', 'in_progress')
+		FROM updated u
 		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
 			entity_id = EXCLUDED.entity_id,
 			flow_instance = EXCLUDED.flow_instance,
@@ -128,23 +151,7 @@ func (s *PostgresStore) CancelActiveRunWorkByProducer(ctx context.Context, produ
 			side_effects = EXCLUDED.side_effects,
 			processed_at = now()
 	`, pq.Array(runIDs), string(sideEffects)); err != nil {
-		return nil, fmt.Errorf("upsert kill_previous receipts: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE event_deliveries d
-		SET
-			status = 'dead_letter',
-			reason_code = 'cancelled_by_kill_previous',
-			last_error = 'cancelled by --kill-previous',
-			active_session_id = NULL,
-			delivered_at = now()
-		FROM events e
-		WHERE e.event_id = d.event_id
-		  AND e.run_id::text = ANY($1::text[])
-		  AND d.status IN ('pending', 'in_progress')
-	`, pq.Array(runIDs)); err != nil {
-		return nil, fmt.Errorf("mark kill_previous deliveries dead_letter: %w", err)
+		return nil, fmt.Errorf("cancel kill_previous deliveries/receipts: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
