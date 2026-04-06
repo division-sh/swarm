@@ -12,11 +12,37 @@ func TestHandlerRuleEntryDecode_RejectsLegacyComputeExpressionShorthand(t *testi
 	err := yaml.Unmarshal([]byte(`
 condition: "else"
 compute:
-  output_field: composite
+  store_as: entity.composite
   expression: "weighted_average(accumulated.scores, accumulated.weights)"
 `), &rule)
 	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
 		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}
+
+func TestHandlerRuleEntryDecode_AcceptsSpecComputeMetadataFields(t *testing.T) {
+	var rule HandlerRuleEntry
+	if err := yaml.Unmarshal([]byte(`
+condition: "else"
+compute:
+  operation: pick_or_average
+  description: choose the strongest score
+  params:
+    strategy: strict
+  store_as: entity.composite
+  keys:
+    numeric_keys: [score]
+`), &rule); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if rule.Compute == nil {
+		t.Fatal("expected rule compute to be preserved")
+	}
+	if got := rule.Compute.Description; got != "choose the strongest score" {
+		t.Fatalf("Compute.Description = %q", got)
+	}
+	if got := rule.Compute.Params["strategy"]; got != "strict" {
+		t.Fatalf("Compute.Params[strategy] = %#v", got)
 	}
 }
 
@@ -52,6 +78,21 @@ compute:
 `), &rule)
 	if err == nil || !strings.Contains(err.Error(), "unsupported compute operation") {
 		t.Fatalf("yaml.Unmarshal error = %v, want unsupported compute operation", err)
+	}
+}
+
+func TestHandlerRuleEntryDecode_RejectsLegacyOutputFieldAlias(t *testing.T) {
+	var rule HandlerRuleEntry
+	err := yaml.Unmarshal([]byte(`
+condition: "else"
+compute:
+  operation: pick_or_average
+  output_field: composite
+  keys:
+    numeric_keys: [score]
+`), &rule)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
 	}
 }
 

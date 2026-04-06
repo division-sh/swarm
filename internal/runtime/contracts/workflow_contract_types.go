@@ -159,8 +159,9 @@ type ComputeSpec struct {
 	Operation   ComputeOperation `yaml:"operation"`
 	Tiers       []ComputeTier    `yaml:"tiers"`
 	Keys        ComputeKeyConfig `yaml:"keys"`
+	Params      map[string]any   `yaml:"params"`
 	StoreAs     string           `yaml:"store_as"`
-	ItemsFrom   string           `yaml:"items_from"`
+	Description string           `yaml:"description"`
 	ValueField  string           `yaml:"value_field"`
 	WeightField string           `yaml:"weight_field"`
 }

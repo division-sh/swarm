@@ -136,11 +136,9 @@ func (s *ComputeSpec) UnmarshalYAML(node *yaml.Node) error {
 		Operation   ComputeOperation `yaml:"operation"`
 		Tiers       []ComputeTier    `yaml:"tiers"`
 		Keys        ComputeKeyConfig `yaml:"keys"`
+		Params      map[string]any   `yaml:"params"`
 		StoreAs     string           `yaml:"store_as"`
-		ItemsFrom   string           `yaml:"items_from"`
-		ValueField  string           `yaml:"value_field"`
-		WeightField string           `yaml:"weight_field"`
-		OutputField string           `yaml:"output_field"`
+		Description string           `yaml:"description"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -149,19 +147,9 @@ func (s *ComputeSpec) UnmarshalYAML(node *yaml.Node) error {
 		Operation:   aux.Operation,
 		Tiers:       aux.Tiers,
 		Keys:        aux.Keys,
+		Params:      aux.Params,
 		StoreAs:     strings.TrimSpace(aux.StoreAs),
-		ItemsFrom:   strings.TrimSpace(aux.ItemsFrom),
-		ValueField:  strings.TrimSpace(aux.ValueField),
-		WeightField: strings.TrimSpace(aux.WeightField),
-	}
-	if s.StoreAs == "" {
-		if outputField := strings.TrimSpace(aux.OutputField); outputField != "" {
-			if strings.HasPrefix(outputField, "entity.") || strings.HasPrefix(outputField, "metadata.") {
-				s.StoreAs = outputField
-			} else {
-				s.StoreAs = "entity." + outputField
-			}
-		}
+		Description: strings.TrimSpace(aux.Description),
 	}
 	if err := validateTieredWeightedAverageSpec(*s); err != nil {
 		return err
@@ -174,14 +162,12 @@ func validateComputeFieldNodes(node *yaml.Node) error {
 		return nil
 	}
 	allowed := map[string]struct{}{
-		"operation":    {},
-		"tiers":        {},
-		"keys":         {},
-		"store_as":     {},
-		"items_from":   {},
-		"value_field":  {},
-		"weight_field": {},
-		"output_field": {},
+		"operation":   {},
+		"tiers":       {},
+		"keys":        {},
+		"params":      {},
+		"store_as":    {},
+		"description": {},
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
