@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	ErrCodeMCPAuthUnconfigured  = runtimemcp.ErrCodeAuthUnconfigured
 	ErrCodeMCPAuthMissingBearer = runtimemcp.ErrCodeAuthMissingBearer
 	ErrCodeMCPAuthInvalidBearer = runtimemcp.ErrCodeAuthInvalidBearer
 	ErrCodeMCPContextMissing    = runtimemcp.ErrCodeContextMissing

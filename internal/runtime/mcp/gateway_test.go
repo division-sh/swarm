@@ -18,6 +18,14 @@ import (
 	llm "swarm/internal/runtime/llm"
 )
 
+const testGatewayToken = "gateway-token"
+
+func authorizeGatewayRequest(req *http.Request) {
+	if req != nil {
+		req.Header.Set("Authorization", "Bearer "+testGatewayToken)
+	}
+}
+
 type testToolExecutor func(context.Context, string, any) (any, error)
 
 func (f testToolExecutor) Execute(ctx context.Context, name string, input any) (any, error) {
@@ -150,6 +158,54 @@ func (s *capabilityAwareExecutorStub) ToolCapabilitiesForActor(_ models.AgentCon
 	return toolcapabilities.NewSet(caps)
 }
 
+type actorAwareToolExecutorStub struct {
+	callCount int
+}
+
+func (s *actorAwareToolExecutorStub) Execute(context.Context, string, any) (any, error) {
+	s.callCount++
+	return map[string]any{"ok": true}, nil
+}
+
+func (s *actorAwareToolExecutorStub) ToolDefinitions() []llm.ToolDefinition {
+	return []llm.ToolDefinition{
+		{Name: "query_entities"},
+		{Name: "emit_score_dimension_complete"},
+	}
+}
+
+func (s *actorAwareToolExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
+	return s.ToolDefinitions()
+}
+
+func (s *actorAwareToolExecutorStub) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, raw := range names {
+		name := toolidentity.CanonicalName(raw)
+		if name == "" {
+			continue
+		}
+		visible := true
+		callable := true
+		if name == "emit_score_dimension_complete" && strings.TrimSpace(actor.Role) != "campaign_coordinator" {
+			visible = false
+			callable = false
+		}
+		kind := toolcapabilities.KindStandard
+		if toolidentity.IsEmitToolName(name) {
+			kind = toolcapabilities.KindEmit
+		}
+		caps = append(caps, toolcapabilities.Capability{
+			Name:               name,
+			Kind:               kind,
+			Visible:            visible,
+			Callable:           callable,
+			ContextRequirement: toolcapabilities.ContextRequirementTurnContext,
+		})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
 func newTestTurnContextRegistry() *TurnContextRegistry {
 	return NewTurnContextRegistry(nil)
 }
@@ -162,7 +218,7 @@ func putTestTurnContext(t testing.TB, registry *TurnContextRegistry, token strin
 	})
 }
 
-func TestGatewayHydrateActorMergesResolvedConfig(t *testing.T) {
+func TestGatewayHydrateActor_PrefersResolvedRuntimeConfig(t *testing.T) {
 	g := NewGateway(nil, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
 			if agentID != "market-research-agent" {
@@ -181,7 +237,8 @@ func TestGatewayHydrateActorMergesResolvedConfig(t *testing.T) {
 
 	hydrated := g.hydrateActor(models.AgentConfig{
 		ID:   "market-research-agent",
-		Role: "market_research",
+		Role: "spoofed_role",
+		Mode: "spoofed_mode",
 	})
 
 	if len(hydrated.EmitEvents) != 2 {
@@ -189,6 +246,9 @@ func TestGatewayHydrateActorMergesResolvedConfig(t *testing.T) {
 	}
 	if hydrated.Mode != "discovery" {
 		t.Fatalf("mode = %q, want discovery", hydrated.Mode)
+	}
+	if hydrated.Role != "market_research" {
+		t.Fatalf("role = %q, want market_research", hydrated.Role)
 	}
 	if len(hydrated.Permissions) != 1 || hydrated.Permissions[0] != "schedule" {
 		t.Fatalf("permissions = %#v", hydrated.Permissions)
@@ -331,7 +391,7 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 	}
 }
 
-func TestGatewayMCPToolsForRequest_FiltersListedToolsThroughCanonicalCapabilitySet(t *testing.T) {
+func TestGatewayMCPToolsForRequest_IgnoresCallerAllowlist(t *testing.T) {
 	g := NewGateway(actorScopedToolExecutorStub{
 		actorDefs: []llm.ToolDefinition{
 			{Name: "query_entities", Description: "actor scoped"},
@@ -345,15 +405,17 @@ func TestGatewayMCPToolsForRequest_FiltersListedToolsThroughCanonicalCapabilityS
 
 	req := httptest.NewRequest("POST", "/mcp?agent_id=analysis-agent&allowed_tools=Read", nil)
 	tools := g.mcpToolsForRequest(req)
-	if len(tools) != 1 {
-		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
+	if len(tools) != 2 {
+		t.Fatalf("tool count = %d, want 2 (%#v)", len(tools), tools)
 	}
-	if tools[0].Name != "read_file" {
-		t.Fatalf("tool name = %q, want read_file", tools[0].Name)
+	names := []string{tools[0].Name, tools[1].Name}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"query_entities", "read_file"}) {
+		t.Fatalf("tool names = %#v", names)
 	}
 }
 
-func TestGatewayMCPToolsForRequest_DoesNotInventUnknownAllowedToolEntries(t *testing.T) {
+func TestGatewayMCPToolsForRequest_DoesNotTrustUnknownCallerAllowlist(t *testing.T) {
 	g := NewGateway(actorScopedToolExecutorStub{
 		actorDefs: []llm.ToolDefinition{
 			{Name: "query_entities", Description: "actor scoped"},
@@ -366,8 +428,11 @@ func TestGatewayMCPToolsForRequest_DoesNotInventUnknownAllowedToolEntries(t *tes
 
 	req := httptest.NewRequest("POST", "/mcp?agent_id=analysis-agent&allowed_tools=does_not_exist", nil)
 	tools := g.mcpToolsForRequest(req)
-	if len(tools) != 0 {
-		t.Fatalf("tool count = %d, want 0 (%#v)", len(tools), tools)
+	if len(tools) != 1 {
+		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
+	}
+	if tools[0].Name != "query_entities" {
+		t.Fatalf("tool name = %q, want query_entities", tools[0].Name)
 	}
 }
 
@@ -412,7 +477,7 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{
+	}), testGatewayToken, GatewayHooks{
 		ResolveTurnContext: registry.ResolveTurnContext,
 		MarkEmitKeyUsed:    registry.MarkEmitKeyUsed,
 	})
@@ -437,6 +502,7 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 			t.Fatalf("marshal request: %v", err)
 		}
 		req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-emit-gateway", strings.NewReader(string(body)))
+		authorizeGatewayRequest(req)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		return rec
@@ -462,16 +528,17 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 	}
 }
 
-func TestGatewayHandleMCP_AllowsPrefixedToolNameWhenAllowedListUsesLocalName(t *testing.T) {
+func TestGatewayHandleMCP_AllowsPrefixedToolNameFromRuntimeOwnedTurnContext(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	exec := &capabilityAwareExecutorStub{}
-	g := NewGateway(exec, "", GatewayHooks{
+	g := NewGateway(exec, testGatewayToken, GatewayHooks{
 		ResolveTurnContext: registry.ResolveTurnContext,
 		MarkEmitKeyUsed:    registry.MarkEmitKeyUsed,
 	})
 
 	putTestTurnContext(t, registry, "ctx-prefixed-emit", TurnContext{
 		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Allowed:   map[string]struct{}{"emit_score_dimension_complete": {}},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -487,7 +554,8 @@ func TestGatewayHandleMCP_AllowsPrefixedToolNameWhenAllowedListUsesLocalName(t *
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-prefixed-emit&allowed_tools=emit_score_dimension_complete", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-prefixed-emit&allowed_tools=query_entities", strings.NewReader(string(body)))
+	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
@@ -502,12 +570,12 @@ func TestGatewayHandleMCP_AllowsPrefixedToolNameWhenAllowedListUsesLocalName(t *
 	}
 }
 
-func TestGatewayHandleMCP_RejectsToolWhenRequestAllowlistDoesNotIncludeIt(t *testing.T) {
+func TestGatewayHandleMCP_DoesNotLetCallerAllowlistGrantToolAccess(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	exec := &capabilityAwareExecutorStub{}
 	var loggedAction string
 	var denialLayer string
-	g := NewGateway(exec, "", GatewayHooks{
+	g := NewGateway(exec, testGatewayToken, GatewayHooks{
 		ResolveTurnContext: registry.ResolveTurnContext,
 		MarkEmitKeyUsed:    registry.MarkEmitKeyUsed,
 		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
@@ -518,6 +586,7 @@ func TestGatewayHandleMCP_RejectsToolWhenRequestAllowlistDoesNotIncludeIt(t *tes
 
 	putTestTurnContext(t, registry, "ctx-denied-allowlist", TurnContext{
 		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Allowed:   map[string]struct{}{"query_entities": {}},
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
@@ -533,7 +602,8 @@ func TestGatewayHandleMCP_RejectsToolWhenRequestAllowlistDoesNotIncludeIt(t *tes
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-denied-allowlist&allowed_tools=query_entities", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-denied-allowlist&allowed_tools=emit_score_dimension_complete", strings.NewReader(string(body)))
+	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
@@ -554,12 +624,12 @@ func TestGatewayHandleMCP_RejectsToolWhenRequestAllowlistDoesNotIncludeIt(t *tes
 	}
 }
 
-func TestGatewayHandleMCP_RejectsMutatingToolWhenContextTokenMisses(t *testing.T) {
+func TestGatewayHandleMCP_RejectsToolWhenContextTokenMisses(t *testing.T) {
 	callCount := 0
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{})
+	}), testGatewayToken, GatewayHooks{})
 
 	body, err := json.Marshal(map[string]any{
 		"id":     "req-1",
@@ -573,6 +643,7 @@ func TestGatewayHandleMCP_RejectsMutatingToolWhenContextTokenMisses(t *testing.T
 		t.Fatalf("marshal request: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
+	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
@@ -655,12 +726,40 @@ func TestGatewayMCPExecutionContext_KeepsOtherRegistryTokensValidAfterGlobalEpoc
 	}
 }
 
-func TestGatewayHandleMCP_AllowsReadOnlyToolWhenContextTokenMisses(t *testing.T) {
+func TestGatewayAuthorize_FailsClosedWithoutConfiguredToken(t *testing.T) {
+	g := NewGateway(nil, "", GatewayHooks{})
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	err := g.AuthorizeForTest(req)
+	if err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("AuthorizeForTest err = %v, want unconfigured auth error", err)
+	}
+}
+
+func TestGatewayAuthorize_DeniesMissingBearer(t *testing.T) {
+	g := NewGateway(nil, testGatewayToken, GatewayHooks{})
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	err := g.AuthorizeForTest(req)
+	if err == nil || !strings.Contains(err.Error(), "missing authorization bearer token") {
+		t.Fatalf("AuthorizeForTest err = %v, want missing bearer error", err)
+	}
+}
+
+func TestGatewayAuthorize_DeniesInvalidBearer(t *testing.T) {
+	g := NewGateway(nil, testGatewayToken, GatewayHooks{})
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	err := g.AuthorizeForTest(req)
+	if err == nil || !strings.Contains(err.Error(), "invalid token") {
+		t.Fatalf("AuthorizeForTest err = %v, want invalid token error", err)
+	}
+}
+
+func TestGatewayHandleMCP_RejectsReadOnlyToolWhenContextTokenMisses(t *testing.T) {
 	callCount := 0
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{})
+	}), testGatewayToken, GatewayHooks{})
 
 	body, err := json.Marshal(map[string]any{
 		"id":     "req-1",
@@ -674,16 +773,17 @@ func TestGatewayHandleMCP_AllowsReadOnlyToolWhenContextTokenMisses(t *testing.T)
 		t.Fatalf("marshal request: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
+	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if callCount != 1 {
-		t.Fatalf("executor call count = %d, want 1", callCount)
+	if callCount != 0 {
+		t.Fatalf("executor call count = %d, want 0", callCount)
 	}
-	if strings.Contains(rec.Body.String(), "missing or invalid mcp context token") {
+	if !strings.Contains(rec.Body.String(), "missing or invalid mcp context token") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
@@ -693,7 +793,7 @@ func TestGatewayHandleTool_RejectsMutatingToolWithoutContextToken(t *testing.T) 
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{})
+	}), testGatewayToken, GatewayHooks{})
 
 	body, err := json.Marshal(ToolGatewayRequest{
 		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
@@ -703,6 +803,7 @@ func TestGatewayHandleTool_RejectsMutatingToolWithoutContextToken(t *testing.T) 
 		t.Fatalf("marshal request: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/tools/emit_score_dimension_complete", strings.NewReader(string(body)))
+	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
@@ -717,12 +818,12 @@ func TestGatewayHandleTool_RejectsMutatingToolWithoutContextToken(t *testing.T) 
 	}
 }
 
-func TestGatewayHandleTool_AllowsReadOnlyToolWithoutContextToken(t *testing.T) {
+func TestGatewayHandleTool_RejectsReadOnlyToolWithoutContextToken(t *testing.T) {
 	callCount := 0
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{})
+	}), testGatewayToken, GatewayHooks{})
 
 	body, err := json.Marshal(ToolGatewayRequest{
 		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
@@ -732,28 +833,102 @@ func TestGatewayHandleTool_AllowsReadOnlyToolWithoutContextToken(t *testing.T) {
 		t.Fatalf("marshal request: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/tools/query_entities", strings.NewReader(string(body)))
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if callCount != 0 {
+		t.Fatalf("executor call count = %d, want 0", callCount)
+	}
+	if !strings.Contains(rec.Body.String(), "missing or invalid mcp context token") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestGatewayHandleTool_IgnoresCallerSuppliedPrivilegeFields(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	exec := &actorAwareToolExecutorStub{}
+	g := NewGateway(exec, testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-analysis", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	body, err := json.Marshal(ToolGatewayRequest{
+		Actor: models.AgentConfig{
+			ID:          "analysis-agent",
+			Role:        "campaign_coordinator",
+			Tools:       []string{"emit_score_dimension_complete"},
+			Permissions: []string{"schedule"},
+			EmitEvents:  []string{"score_dimension.complete"},
+		},
+		Input: map[string]any{"dimension": "build_complexity", "score": 72},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tools/emit_score_dimension_complete?ctx_token=ctx-analysis", strings.NewReader(string(body)))
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if exec.callCount != 0 {
+		t.Fatalf("executor call count = %d, want 0", exec.callCount)
+	}
+	if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestGatewayHandleTool_AllowsLegitimateRuntimeOwnedActorContext(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	exec := &actorAwareToolExecutorStub{}
+	g := NewGateway(exec, testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-coordinator", TurnContext{
+		Actor:     models.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	body, err := json.Marshal(ToolGatewayRequest{
+		Input: map[string]any{"dimension": "build_complexity", "score": 72},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tools/emit_score_dimension_complete?ctx_token=ctx-coordinator", strings.NewReader(string(body)))
+	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if callCount != 1 {
-		t.Fatalf("executor call count = %d, want 1", callCount)
+	if exec.callCount != 1 {
+		t.Fatalf("executor call count = %d, want 1", exec.callCount)
 	}
 }
 
-func TestGatewayHandleMCP_LogsFallbackUsedReason(t *testing.T) {
+func TestGatewayHandleMCP_DoesNotLogFallbackUsedReason(t *testing.T) {
 	var actions []string
-	var reasons []string
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{
+	}), testGatewayToken, GatewayHooks{
 		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
 			actions = append(actions, action)
-			if reason, _ := detail["reason"].(string); strings.TrimSpace(reason) != "" {
-				reasons = append(reasons, strings.TrimSpace(reason))
-			}
 		},
 	})
 
@@ -769,31 +944,25 @@ func TestGatewayHandleMCP_LogsFallbackUsedReason(t *testing.T) {
 		t.Fatalf("marshal request: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
+	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if !slices.Contains(actions, "mcp.context.fallback_used") {
-		t.Fatalf("actions = %#v, want mcp.context.fallback_used", actions)
-	}
-	if !slices.Contains(reasons, "token_not_found") {
-		t.Fatalf("reasons = %#v, want token_not_found", reasons)
+	if slices.Contains(actions, "mcp.context.fallback_used") {
+		t.Fatalf("actions = %#v, did not expect mcp.context.fallback_used", actions)
 	}
 }
 
-func TestGatewayHandleTool_LogsFallbackBlockedReason(t *testing.T) {
+func TestGatewayHandleTool_DoesNotLogFallbackBlockedReason(t *testing.T) {
 	var actions []string
-	var reasons []string
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{
+	}), testGatewayToken, GatewayHooks{
 		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
 			actions = append(actions, action)
-			if reason, _ := detail["reason"].(string); strings.TrimSpace(reason) != "" {
-				reasons = append(reasons, strings.TrimSpace(reason))
-			}
 		},
 	})
 
@@ -805,16 +974,14 @@ func TestGatewayHandleTool_LogsFallbackBlockedReason(t *testing.T) {
 		t.Fatalf("marshal request: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/tools/emit_score_dimension_complete", strings.NewReader(string(body)))
+	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
-	if !slices.Contains(actions, "tool.context.fallback_blocked") {
-		t.Fatalf("actions = %#v, want tool.context.fallback_blocked", actions)
-	}
-	if !slices.Contains(reasons, "token_missing") {
-		t.Fatalf("reasons = %#v, want token_missing", reasons)
+	if slices.Contains(actions, "tool.context.fallback_blocked") {
+		t.Fatalf("actions = %#v, did not expect tool.context.fallback_blocked", actions)
 	}
 }

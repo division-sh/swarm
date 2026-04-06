@@ -39,5 +39,6 @@ func asString(v any) string {
 
 type MCPTurnContextStore interface {
 	RegisterTurnContextWithTTL(context.Context, time.Duration) string
+	RegisterTurnContextWithAllowedTools(context.Context, time.Duration, []string) string
 	UnregisterTurnContext(string)
 }

@@ -46,9 +46,6 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	if strings.TrimSpace(actor.ID) == "" {
 		actor.ID = strings.TrimSpace(s.AgentID)
 	}
-	if strings.TrimSpace(actor.Role) == "" {
-		actor.Role = actor.ID
-	}
 	if strings.TrimSpace(actor.ID) == "" {
 		return "", "", false, nil
 	}
@@ -64,24 +61,16 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	if serverURL == "" {
 		return "", "", false, nil
 	}
-	allowedTools := toolNamesCSV(s.Tools)
-	headers := map[string]string{
-		mcpActorIDHeader:      strings.TrimSpace(actor.ID),
-		mcpActorRoleHeader:    strings.TrimSpace(actor.Role),
-		mcpEntityIDHeader:     strings.TrimSpace(actor.EffectiveEntityID()),
-		mcpAllowedToolsHeader: allowedTools,
-	}
-	if mode := strings.TrimSpace(actor.Mode); mode != "" {
-		headers[mcpActorModeHeader] = mode
-	}
+	allowedTools := toolNames(s.Tools)
+	headers := map[string]string{}
 	if token := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}
-	contextToken = r.mcpTurns.RegisterTurnContextWithTTL(ctx, r.mcpContextTokenTTL(ctx))
+	contextToken = r.mcpTurns.RegisterTurnContextWithAllowedTools(ctx, r.mcpContextTokenTTL(ctx), allowedTools)
 	if contextToken != "" {
 		headers[mcpContextTokenHeader] = contextToken
 	}
-	serverURL = withMCPContextQuery(serverURL, actor, contextToken, allowedTools)
+	serverURL = withMCPContextQuery(serverURL, contextToken)
 	cfg := map[string]any{
 		"mcpServers": map[string]any{
 			"runtime-tools": map[string]any{
@@ -152,7 +141,7 @@ func normalizeMCPServerURL(raw string) string {
 	return strings.TrimSpace(u.String())
 }
 
-func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, allowedTools string) string {
+func withMCPContextQuery(rawURL string, contextToken string) string {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return rawURL
@@ -164,21 +153,6 @@ func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, 
 	q := u.Query()
 	if v := strings.TrimSpace(contextToken); v != "" {
 		q.Set(mcpContextTokenQuery, v)
-	}
-	if v := strings.TrimSpace(actor.ID); v != "" {
-		q.Set(mcpActorIDQuery, v)
-	}
-	if v := strings.TrimSpace(actor.Role); v != "" {
-		q.Set(mcpActorRoleQuery, v)
-	}
-	if v := strings.TrimSpace(actor.Mode); v != "" {
-		q.Set(mcpActorModeQuery, v)
-	}
-	if v := strings.TrimSpace(actor.EffectiveEntityID()); v != "" {
-		q.Set(mcpEntityIDQuery, v)
-	}
-	if v := strings.TrimSpace(allowedTools); v != "" {
-		q.Set(mcpAllowedToolsQuery, v)
 	}
 	u.RawQuery = q.Encode()
 	return strings.TrimSpace(u.String())
