@@ -84,6 +84,34 @@ func TestCatalogAssertsAuthoritativeHandlerOutcome_OnlySuccess(t *testing.T) {
 	}
 }
 
+func TestCatalogRecognizesHandlerOutcome_RejectsTyposAndUnsupportedValues(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "empty", raw: "", want: true},
+		{name: "success", raw: "success", want: true},
+		{name: "reject", raw: "reject", want: true},
+		{name: "blocked", raw: "blocked", want: true},
+		{name: "terminal reject", raw: "terminal_reject", want: true},
+		{name: "success typo", raw: "succes", want: false},
+		{name: "unsupported", raw: "maybe", want: false},
+		{name: "trimmed unsupported", raw: " waiting ", want: false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := catalogRecognizesHandlerOutcome(tc.raw); got != tc.want {
+				t.Fatalf("catalogRecognizesHandlerOutcome(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAssertCatalogRuntimeOutcome_IgnoresTopLevelNonSuccessPreviewProof(t *testing.T) {
 	h := newCatalogAssertionHarness(t)
 	entityID := uuid.NewString()
