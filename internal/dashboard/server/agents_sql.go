@@ -48,19 +48,20 @@ func (r *SQLAgentReader) ListGenericAgents(ctx context.Context) ([]genericAgent,
 	if r == nil || r.db == nil || len(items) == 0 {
 		return items, nil
 	}
-	aggregates, err := r.loadAggregates(ctx)
+	projections, err := r.loadOperatorProjections(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for i := range items {
-		aggregate, ok := aggregates[items[i].ID]
+	out := make([]genericAgent, 0, len(items))
+	for _, item := range items {
+		projection, ok := projections[item.ID]
 		if !ok {
-			items[i].State = deriveGenericAgentState(items[i], agentRuntimeAggregate{})
-			continue
+			return nil, fmt.Errorf("missing agent operator projection: %s", strings.TrimSpace(item.ID))
 		}
-		applyAggregate(&items[i], aggregate, r.turnLimit)
+		applyOperatorProjection(&item, projection, r.turnLimit)
+		out = append(out, item)
 	}
-	return items, nil
+	return out, nil
 }
 
 func (r *SQLAgentReader) GetGenericAgent(ctx context.Context, id string) (genericAgent, bool, error) {
@@ -80,7 +81,8 @@ func (r *SQLAgentReader) GetGenericAgent(ctx context.Context, id string) (generi
 	return genericAgent{}, false, nil
 }
 
-type agentRuntimeAggregate struct {
+type agentOperatorProjection struct {
+	Status              string
 	PendingEvents       int
 	OldestPendingAgeSec int
 	LockOwner           string
@@ -95,7 +97,7 @@ type agentRuntimeAggregate struct {
 	LastTool            map[string]any
 }
 
-func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRuntimeAggregate, error) {
+func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[string]agentOperatorProjection, error) {
 	caps, err := r.resolveCapabilities(ctx)
 	if err != nil {
 		return nil, err
@@ -107,6 +109,7 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
 			a.agent_id,
+			COALESCE(a.status, 'active'),
 			COALESCE(sess.turn_count, 0),
 			COALESCE(sess.lease_holder, ''),
 			sess.lease_expires_at,
@@ -171,15 +174,15 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 		ORDER BY a.created_at ASC, a.agent_id ASC
 	`, latestTurnBlocksExpr), runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
 	if err != nil {
-		return nil, fmt.Errorf("query agent aggregates: %w", err)
+		return nil, fmt.Errorf("query agent operator projections: %w", err)
 	}
 	defer rows.Close()
 
-	out := map[string]agentRuntimeAggregate{}
+	out := map[string]agentOperatorProjection{}
 	for rows.Next() {
 		var (
 			id            string
-			aggregate     agentRuntimeAggregate
+			projection    agentOperatorProjection
 			lockExpiresAt sql.NullTime
 			latestTaskID  string
 			latestParseOK bool
@@ -187,33 +190,34 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 		)
 		if err := rows.Scan(
 			&id,
-			&aggregate.TurnCount,
-			&aggregate.LockOwner,
+			&projection.Status,
+			&projection.TurnCount,
+			&projection.LockOwner,
 			&lockExpiresAt,
-			&aggregate.PendingEvents,
-			&aggregate.OldestPendingAgeSec,
-			&aggregate.Failures24h,
-			&aggregate.DeadLetters24h,
-			&aggregate.Turns24h,
+			&projection.PendingEvents,
+			&projection.OldestPendingAgeSec,
+			&projection.Failures24h,
+			&projection.DeadLetters24h,
+			&projection.Turns24h,
 			&latestTaskID,
 			&latestParseOK,
 			&latestTurnRaw,
 		); err != nil {
-			return nil, fmt.Errorf("scan agent aggregate: %w", err)
+			return nil, fmt.Errorf("scan agent operator projection: %w", err)
 		}
 		if lockExpiresAt.Valid {
-			aggregate.LockExpiresAt = lockExpiresAt.Time
-			if lockExpiresAt.Time.After(time.Now()) && strings.TrimSpace(aggregate.LockOwner) != "" {
-				aggregate.InFlightTurn = true
+			projection.LockExpiresAt = lockExpiresAt.Time
+			if lockExpiresAt.Time.After(time.Now()) && strings.TrimSpace(projection.LockOwner) != "" {
+				projection.InFlightTurn = true
 			}
 		}
-		if err := enrichAgentAggregateFromLatestTurn(&aggregate, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
+		if err := enrichAgentOperatorProjectionFromLatestTurn(&projection, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
 			return nil, err
 		}
-		out[strings.TrimSpace(id)] = aggregate
+		out[strings.TrimSpace(id)] = projection
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read agent aggregate rows: %w", err)
+		return nil, fmt.Errorf("read agent operator projection rows: %w", err)
 	}
 	return out, nil
 }
@@ -234,54 +238,55 @@ func (r *SQLAgentReader) resolveCapabilities(ctx context.Context) (store.StoreSc
 	}, nil
 }
 
-func applyAggregate(agent *genericAgent, aggregate agentRuntimeAggregate, turnLimit int) {
+func applyOperatorProjection(agent *genericAgent, projection agentOperatorProjection, turnLimit int) {
 	if agent == nil {
 		return
 	}
-	agent.PendingEvents = aggregate.PendingEvents
-	agent.OldestPendingAgeSec = aggregate.OldestPendingAgeSec
-	agent.LockOwner = strings.TrimSpace(aggregate.LockOwner)
-	agent.LockExpiresAt = formatTime(aggregate.LockExpiresAt)
-	agent.InFlightTurn = aggregate.InFlightTurn
-	agent.InFlightSeconds = aggregate.InFlightSeconds
-	agent.Failures24h = aggregate.Failures24h
-	agent.DeadLetters24h = aggregate.DeadLetters24h
-	agent.TurnCount = aggregate.TurnCount
+	agent.Status = strings.TrimSpace(projection.Status)
+	agent.PendingEvents = projection.PendingEvents
+	agent.OldestPendingAgeSec = projection.OldestPendingAgeSec
+	agent.LockOwner = strings.TrimSpace(projection.LockOwner)
+	agent.LockExpiresAt = formatTime(projection.LockExpiresAt)
+	agent.InFlightTurn = projection.InFlightTurn
+	agent.InFlightSeconds = projection.InFlightSeconds
+	agent.Failures24h = projection.Failures24h
+	agent.DeadLetters24h = projection.DeadLetters24h
+	agent.TurnCount = projection.TurnCount
 	agent.TurnLimit = maxInt(turnLimit, 0)
-	agent.Turns24h = maxInt(aggregate.Turns24h, 0)
-	agent.CurrentTaskID = strings.TrimSpace(aggregate.CurrentTaskID)
-	agent.LastTool = aggregate.LastTool
+	agent.Turns24h = maxInt(projection.Turns24h, 0)
+	agent.CurrentTaskID = strings.TrimSpace(projection.CurrentTaskID)
+	agent.LastTool = projection.LastTool
 	if agent.TurnLimit > 0 {
 		agent.NearBreaker = agent.TurnCount*100 >= agent.TurnLimit*85
 	}
-	agent.State = deriveGenericAgentState(*agent, aggregate)
+	agent.State = projection.state()
 }
 
-func deriveGenericAgentState(agent genericAgent, aggregate agentRuntimeAggregate) string {
-	status := strings.ToLower(strings.TrimSpace(agent.Status))
+func (p agentOperatorProjection) state() string {
+	status := strings.ToLower(strings.TrimSpace(p.Status))
 	if status == "terminated" {
 		return "terminated"
 	}
-	if aggregate.InFlightTurn {
+	if p.InFlightTurn {
 		return "running"
 	}
-	if aggregate.DeadLetters24h > 0 || aggregate.Failures24h > 0 {
+	if p.DeadLetters24h > 0 || p.Failures24h > 0 {
 		return "stuck"
 	}
 	return "idle"
 }
 
-func enrichAgentAggregateFromLatestTurn(aggregate *agentRuntimeAggregate, taskID string, parseOK bool, turnBlocksRaw []byte) error {
-	if aggregate == nil {
+func enrichAgentOperatorProjectionFromLatestTurn(projection *agentOperatorProjection, taskID string, parseOK bool, turnBlocksRaw []byte) error {
+	if projection == nil {
 		return nil
 	}
-	aggregate.CurrentTaskID = strings.TrimSpace(taskID)
+	projection.CurrentTaskID = strings.TrimSpace(taskID)
 	summary, ok, err := decodeTurnSummaryProjection(turnBlocksRaw)
 	if err != nil {
 		return fmt.Errorf("decode latest agent turn turn_summary: %w", err)
 	}
 	if ok {
-		aggregate.LastTool = summary.lastToolMap(parseOK)
+		projection.LastTool = summary.lastToolMap(parseOK)
 	}
 	return nil
 }
