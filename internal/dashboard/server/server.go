@@ -109,7 +109,7 @@ type ConversationRuntimeState struct {
 
 type ConversationRuntimeLastTurn struct {
 	TaskID  string `json:"task_id,omitempty"`
-	ParseOK bool   `json:"parse_ok,omitempty"`
+	ParseOK bool   `json:"parse_ok"`
 }
 
 type ConversationMessage struct {
