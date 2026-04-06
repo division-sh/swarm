@@ -101,11 +101,16 @@ type startupProbeToolExecutor struct {
 	defs     []llm.ToolDefinition
 	caps     map[string]toolcapabilities.Capability
 	executed []string
+	execErrs map[string]error
 }
 
 func (s *startupProbeToolExecutor) Execute(_ context.Context, name string, _ any) (any, error) {
-	s.executed = append(s.executed, strings.TrimSpace(name))
-	return map[string]any{"ok": true, "tool": strings.TrimSpace(name)}, nil
+	name = strings.TrimSpace(name)
+	s.executed = append(s.executed, name)
+	if err, ok := s.execErrs[name]; ok {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "tool": name}, nil
 }
 
 func (s *startupProbeToolExecutor) ToolDefinitions() []llm.ToolDefinition {
@@ -259,5 +264,48 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsOnEmptyVisibleToolSurface(t
 	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager)
 	if err == nil || !strings.Contains(err.Error(), "found no visible tools") {
 		t.Fatalf("expected empty visible tools error, got %v", err)
+	}
+}
+
+func TestValidateClaudeMCPToolsForManagedAgents_ToleratesValidationStyleCallableProbeErrors(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: startupProbeDefs(),
+		caps: startupProbeCaps(),
+		execErrs: map[string]error{
+			"query_entities": errors.New("runtime tool input validation failed: schema validation failed: input.query is required"),
+		},
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager); err != nil {
+		t.Fatalf("expected validation-style probe error to be tolerated, got %v", err)
+	}
+}
+
+func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedCallableProbeError(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: startupProbeDefs(),
+		caps: startupProbeCaps(),
+		execErrs: map[string]error{
+			"query_entities": errors.New("unexpected tool failure"),
+		},
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager)
+	if err == nil || !strings.Contains(err.Error(), "unexpected tool failure") {
+		t.Fatalf("expected unexpected callable probe error, got %v", err)
 	}
 }
