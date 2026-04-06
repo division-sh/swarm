@@ -50,6 +50,73 @@ func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
 	}
 }
 
+func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.retry_delivery_status")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+		t.Fatalf("insert deliveries: %v", err)
+	}
+
+	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert retryable error: %v", err)
+	}
+
+	var (
+		deliveryStatus string
+		reasonCode     string
+		deliveryRetry  int
+		managerStatus  string
+	)
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(d.status, ''),
+			COALESCE(d.reason_code, ''),
+			COALESCE(d.retry_count, 0),
+			COALESCE(r.side_effects->>'manager_status', '')
+		FROM event_deliveries d
+		INNER JOIN event_receipts r
+			ON r.event_id = d.event_id
+			AND r.subscriber_type = 'agent'
+			AND r.subscriber_id = d.subscriber_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'agent'
+		  AND d.subscriber_id = $2
+	`, evt.ID, agentID).Scan(&deliveryStatus, &reasonCode, &deliveryRetry, &managerStatus); err != nil {
+		t.Fatalf("query retryable delivery status: %v", err)
+	}
+	if deliveryStatus != "failed" || managerStatus != "error" || deliveryRetry != 1 || reasonCode != "handler_error" {
+		t.Fatalf("retryable status mismatch: delivery=%q manager=%q retry=%d reason=%q", deliveryStatus, managerStatus, deliveryRetry, reasonCode)
+	}
+
+	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert terminal error: %v", err)
+	}
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(d.status, ''),
+			COALESCE(d.reason_code, ''),
+			COALESCE(d.retry_count, 0),
+			COALESCE(r.side_effects->>'manager_status', '')
+		FROM event_deliveries d
+		INNER JOIN event_receipts r
+			ON r.event_id = d.event_id
+			AND r.subscriber_type = 'agent'
+			AND r.subscriber_id = d.subscriber_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'agent'
+		  AND d.subscriber_id = $2
+	`, evt.ID, agentID).Scan(&deliveryStatus, &reasonCode, &deliveryRetry, &managerStatus); err != nil {
+		t.Fatalf("query terminal delivery status: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || managerStatus != "dead_letter" || deliveryRetry != 2 || reasonCode != "retry_exhausted" {
+		t.Fatalf("terminal status mismatch: delivery=%q manager=%q retry=%d reason=%q", deliveryStatus, managerStatus, deliveryRetry, reasonCode)
+	}
+}
+
 func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()

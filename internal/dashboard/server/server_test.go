@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/events"
@@ -22,6 +23,7 @@ import (
 	runtimesessions "swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
+	"swarm/internal/testutil"
 )
 
 type builderRPCResponse = builderpkg.RPCResponse
@@ -884,6 +886,89 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLAgentReader_ListGenericAgents_PreservesRetryableVsTerminalDeliveryOutcome(t *testing.T) {
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg, err := store.NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:     "agent-1",
+			Role:   "researcher",
+			Mode:   "global",
+			Type:   "managed",
+			Config: json.RawMessage(`{"system_prompt":"You are an operator agent."}`),
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	failedEventID := uuid.NewString()
+	deadEventID := uuid.NewString()
+	for _, eventID := range []string{failedEventID, deadEventID} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '5 minutes'
+			)
+		`, eventID, runID); err != nil {
+			t.Fatalf("seed event %s: %v", eventID, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, last_error, delivered_at, created_at
+		) VALUES
+			($1::uuid, $2::uuid, 'agent', 'agent-1', 'failed', 1, 'retryable-failure', now() - interval '2 minutes', now() - interval '5 minutes'),
+			($1::uuid, $3::uuid, 'agent', 'agent-1', 'dead_letter', 2, 'terminal-dead-letter', now() - interval '1 minute', now() - interval '6 minutes')
+	`, runID, failedEventID, deadEventID); err != nil {
+		t.Fatalf("seed deliveries: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, outcome, side_effects, processed_at
+		) VALUES
+			($1::uuid, 'agent', 'agent-1', 'dead_letter', '{"manager_status":"error","retry_count":1,"error":"retryable-failure"}'::jsonb, now()),
+			($2::uuid, 'agent', 'agent-1', 'success', '{"manager_status":"dead_letter","retry_count":2,"error":"terminal-dead-letter"}'::jsonb, now())
+	`, failedEventID, deadEventID); err != nil {
+		t.Fatalf("seed conflicting receipts: %v", err)
+	}
+
+	reader := NewSQLAgentReader(db, pg, 12)
+	items, err := reader.ListGenericAgents(ctx)
+	if err != nil {
+		t.Fatalf("ListGenericAgents: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one agent, got %+v", items)
+	}
+	if items[0].PendingEvents != 1 {
+		t.Fatalf("pending_events = %d, want 1 retryable failed delivery", items[0].PendingEvents)
+	}
+	if items[0].Failures24h != 1 {
+		t.Fatalf("failures_24h = %d, want 1 failed delivery", items[0].Failures24h)
+	}
+	if items[0].DeadLetters24h != 1 {
+		t.Fatalf("dead_letters_24h = %d, want 1 dead-letter delivery", items[0].DeadLetters24h)
+	}
+	if items[0].State != "stuck" {
+		t.Fatalf("state = %q, want stuck", items[0].State)
 	}
 }
 
