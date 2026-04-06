@@ -53,6 +53,21 @@ func TestNormalizeWorkflowExpression_RewritesQueryEntitiesCount(t *testing.T) {
 	}
 }
 
+func TestWorkflowExpressionEvaluator_EvalBoolFailsClosedOnMissingEntityField(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	_, err := eval.EvalBool(`entity.score >= 70`, workflowExpressionContext{
+		Entity:  map[string]any{},
+		Payload: map[string]any{},
+		Policy:  map[string]any{},
+	})
+	if err == nil {
+		t.Fatal("expected missing entity field to fail closed")
+	}
+	if got := err.Error(); got == "" || got == "no such key: score" {
+		t.Fatalf("expected explicit lifecycle-safe missing-field error, got %q", got)
+	}
+}
+
 func TestParseWorkflowEntityQueryPredicate_ResolvesPayloadReference(t *testing.T) {
 	predicate, err := parseWorkflowEntityQueryPredicate(
 		`name == payload.name`,
