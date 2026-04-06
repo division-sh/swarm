@@ -139,7 +139,7 @@ If the PR is merged:
 
 The agent should:
 
-1. run the one-shot poller
+1. run the poller in waiting mode
 2. read the latest structured PR review comment
 3. act on the latest valid review state
 
@@ -154,7 +154,7 @@ Rules:
 Default command:
 
 ```sh
-python scripts/agent_poll.py --agent A
+python scripts/agent_poll.py --agent A --watch
 ```
 
 ### Rebase And Refresh Rule
@@ -188,7 +188,7 @@ Rebase when branch drift is likely to affect correctness, mergeability, or revie
 
 The agent should:
 
-1. run the one-shot poller
+1. run the poller in waiting mode
 2. filter for its own label, for example `agent:A`
 3. if one assigned issue exists:
    - read the latest structured assignment comment
@@ -214,42 +214,42 @@ Default rules:
 Default command:
 
 ```sh
-python scripts/agent_poll.py --agent A
+python scripts/agent_poll.py --agent A --watch
 ```
 
-## Default Polling Loop
+## Polling Modes
 
-The default operating mode is one-shot polling in a simple shell loop.
+The poller has two useful modes.
 
-Use this pattern:
+### Waiting Mode
 
 ```sh
-while true; do
-  python scripts/agent_poll.py --agent A
-  rc=$?
-  if [ "$rc" -eq 10 ]; then
-    break
-  fi
-  if [ "$rc" -ne 0 ]; then
-    exit "$rc"
-  fi
-  sleep 600
-done
+python scripts/agent_poll.py --agent A --watch
 ```
 
 Rules:
 
-- if the one-shot poller exits `0`, no actionable change was found; let the shell loop sleep and check again
-- if the one-shot poller exits `10`, actionable work was found; break the loop, do the work, and then restart the loop after the work cycle finishes
-- if the one-shot poller exits non-zero other than `10`, stop and escalate instead of guessing
+- use `--watch` when the agent is idle or waiting for review
+- `--watch` owns the sleep / retry loop internally
+- when actionable work appears, `--watch` returns control to the agent
 - if the poller reports an invalid control state, stop and escalate instead of guessing
-- do not use blocking `--watch` mode as the default TUI operating mode
 
-Default interpretation of the shell loop:
+### One-Shot Mode
 
-- use the shell loop only while the agent is idle or waiting for review
-- when the poller returns actionable work, leave the loop, do the work, then re-enter the loop afterward
-- do not leave the agent stuck in a foreground blocking watcher during active coding work
+```sh
+python scripts/agent_poll.py --agent A
+```
+
+Use one-shot mode for:
+
+- manual verification
+- debugging the current control state
+- checking the latest status before starting the waiting loop
+
+Default rule:
+
+- normal autonomous waiting should use `--watch`
+- one-shot mode is for explicit checks, not the steady-state waiting loop
 
 ## Agent Required Responses
 
@@ -340,7 +340,6 @@ Examples:
 
 ```sh
 python scripts/agent_poll.py --agent A
-while true; do python scripts/agent_poll.py --agent A; rc=$?; if [ "$rc" -eq 10 ]; then break; fi; if [ "$rc" -ne 0 ]; then exit "$rc"; fi; sleep 600; done
 python scripts/agent_poll.py --agent A --watch
 ```
 
@@ -360,8 +359,8 @@ Examples:
 
 Default rule:
 
-- use one-shot mode for normal agent operation
-- reserve `--watch` for a future background-process setup, not normal foreground TUI work
+- use `--watch` for normal idle / waiting operation
+- use one-shot mode for explicit manual checks
 
 ## Lead Responsibilities
 
