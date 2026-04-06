@@ -279,14 +279,14 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 					AgentID:   "agent-1",
 					SessionID: "sess-1",
 					UpdatedAt: now.Format(time.RFC3339),
-					Messages:  []any{map[string]any{"role": "assistant", "content": "hi"}},
+					Messages:  []ConversationMessage{{Role: "assistant", Content: "hi"}},
 					Turns: []ConversationTurn{{
 						TurnID:                 "turn-1",
 						AssistantVisibleOutput: "done",
 					}},
-					RuntimeState: map[string]any{
-						"summary":   "summarized",
-						"last_turn": map[string]any{"parse_ok": true},
+					RuntimeState: ConversationRuntimeState{
+						Summary:  "summarized",
+						LastTurn: &ConversationRuntimeLastTurn{ParseOK: true},
 					},
 				},
 			},
@@ -599,10 +599,10 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	if items[0].SessionID != "sess-1" || items[0].Kind != "live_session" {
 		t.Fatalf("unexpected summary identity: %+v", items[0])
 	}
-	if items[0].Metadata["provider_session_id"] != "sess-1" {
+	if items[0].Metadata.ProviderSessionID != "sess-1" {
 		t.Fatalf("expected metadata to retain provider_session_id: %+v", items[0].Metadata)
 	}
-	if items[0].Metadata["retry_reason"] != "session not found" || items[0].Metadata["retries_from_session_id"] != "sess-0" {
+	if items[0].Metadata.RetryReason != "session not found" || items[0].Metadata.RetriesFromSessionID != "sess-0" {
 		t.Fatalf("expected retry lineage metadata, got %+v", items[0].Metadata)
 	}
 
@@ -637,11 +637,10 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	if item.Kind != "live_session" {
 		t.Fatalf("expected live_session detail kind, got %+v", item)
 	}
-	lastTurn, ok := item.RuntimeState["last_turn"].(map[string]any)
-	if !ok || lastTurn["parse_ok"] != true {
+	if item.RuntimeState.LastTurn == nil || !item.RuntimeState.LastTurn.ParseOK {
 		t.Fatalf("expected runtime_state.last_turn parse_ok=true, got %+v", item.RuntimeState)
 	}
-	if item.RuntimeState["retry_reason"] != "session not found" || item.RuntimeState["retries_from_session_id"] != "sess-0" {
+	if item.RuntimeState.RetryReason != "session not found" || item.RuntimeState.RetriesFromSessionID != "sess-0" {
 		t.Fatalf("expected retry lineage in runtime_state, got %+v", item.RuntimeState)
 	}
 	if item.Turns[0].AssistantVisibleOutput != "" || item.Turns[0].Outcome != "" || len(item.Turns[0].ToolResults) != 0 {
@@ -1066,8 +1065,8 @@ func TestSQLConversationReader_GetPrefersCanonicalTurnBlocks(t *testing.T) {
 	if len(item.Turns[0].ToolResults) != 1 {
 		t.Fatalf("tool_results = %#v", item.Turns[0].ToolResults)
 	}
-	result, _ := item.Turns[0].ToolResults[0].(map[string]any)
-	if result["tool_name"] != "schedule" {
+	result := item.Turns[0].ToolResults[0]
+	if result.ToolName != "schedule" {
 		t.Fatalf("tool_result = %#v", result)
 	}
 
@@ -1260,11 +1259,54 @@ func TestSQLConversationReader_GetUsesCanonicalTurnSummaryProgress(t *testing.T)
 	}
 }
 
+func TestSQLConversationReader_GetFailsOnMalformedTypedTurnPayload(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions:   store.SchemaFlavorCanonical,
+			Turns:      store.SchemaFlavorCanonical,
+			TurnBlocks: true,
+		},
+	}})
+	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
+		WithArgs("sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 1, []byte(`{"summary":"brief"}`), []byte(`[{"role":"assistant","content":"hello"}]`), now))
+
+	mock.ExpectQuery("SELECT\\s+turn_id::text,.*FROM agent_turns").
+		WithArgs("agent-1", "sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id", "trigger_event_id", "trigger_event_type", "task_id",
+			"available_tools", "tool_calls", "emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
+			"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms", "retry_count", "error", "created_at",
+		}).AddRow(
+			"turn-1", "agent-1", "sess-1", "task", "global", "entity-1", "evt-1", "task.run", "",
+			[]byte(`["schedule"]`), []byte(`[{"name":"schedule","arguments":{"delay_seconds":1209600}}]`), []byte(`["workflow.started"]`), []byte(`{"runtime-tools":{"status":"connected"}}`), []byte(`["mcp__runtime-tools__schedule"]`), []byte(`["mcp__runtime-tools__schedule"]`),
+			[]byte(`{"message":{"content":"dispatch"}}`), []byte(`{"result":"done"}`), []byte(`[]`), true, 25, 0, "", now,
+		))
+
+	if _, _, err := reader.Get(context.Background(), "sess-1"); err == nil || !strings.Contains(err.Error(), "decode turn mcp_servers") {
+		t.Fatalf("expected malformed typed turn payload to fail closed, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestSummarizeConversationTurnBlocks_FailsClosedOnEmptyCanonicalSummary(t *testing.T) {
-	blocks := []any{
-		map[string]any{"kind": "assistant_text", "text": "stale fallback text"},
-		map[string]any{"kind": "outcome", "text": "stale outcome"},
-		map[string]any{"kind": "turn_summary", "data": map[string]any{}},
+	blocks := []ConversationTurnBlock{
+		{Kind: "assistant_text", Text: "stale fallback text"},
+		{Kind: "outcome", Text: "stale outcome"},
+		{Kind: "turn_summary", Data: json.RawMessage(`{}`)},
 	}
 
 	assistantText, outcome, reasoning, progress, toolResults := summarizeConversationTurnBlocks(blocks)
@@ -1283,12 +1325,10 @@ func TestSummarizeConversationTurnBlocks_FailsClosedOnEmptyCanonicalSummary(t *t
 }
 
 func TestSummarizeConversationTurnBlocks_DoesNotInferOutcomeWithoutCanonicalField(t *testing.T) {
-	blocks := []any{
-		map[string]any{"kind": "assistant_text", "text": "stale fallback text"},
-		map[string]any{"kind": "outcome", "text": "stale outcome"},
-		map[string]any{"kind": "turn_summary", "data": map[string]any{
-			"assistant_visible_output": "Parking for manual review.",
-		}},
+	blocks := []ConversationTurnBlock{
+		{Kind: "assistant_text", Text: "stale fallback text"},
+		{Kind: "outcome", Text: "stale outcome"},
+		{Kind: "turn_summary", Data: json.RawMessage(`{"assistant_visible_output":"Parking for manual review."}`)},
 	}
 
 	assistantText, outcome, reasoning, progress, toolResults := summarizeConversationTurnBlocks(blocks)

@@ -93,9 +93,8 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	if len(turn.ToolResults) != 1 {
 		t.Fatalf("tool_results = %#v, want 1 canonical summary tool result", turn.ToolResults)
 	}
-	result, _ := turn.ToolResults[0].(map[string]any)
-	if strings.TrimSpace(readString(result["tool_name"])) != "schedule" {
-		t.Fatalf("tool_result.tool_name = %#v, want schedule", result["tool_name"])
+	if strings.TrimSpace(turn.ToolResults[0].ToolName) != "schedule" {
+		t.Fatalf("tool_result.tool_name = %#v, want schedule", turn.ToolResults[0].ToolName)
 	}
 }
 
@@ -380,11 +379,10 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 	}
 }
 
-func countTurnSummaryBlocks(blocks []any) int {
+func countTurnSummaryBlocks(blocks []dashboardserver.ConversationTurnBlock) int {
 	count := 0
-	for _, raw := range blocks {
-		entry, _ := raw.(map[string]any)
-		if strings.TrimSpace(readString(entry["kind"])) == "turn_summary" {
+	for _, block := range blocks {
+		if strings.TrimSpace(block.Kind) == "turn_summary" {
 			count++
 		}
 	}
