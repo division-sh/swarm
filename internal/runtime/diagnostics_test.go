@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
@@ -9,8 +10,10 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	"swarm/internal/testutil"
 )
 
 type runtimeLogCapabilityStub struct {
@@ -213,6 +216,120 @@ func TestRuntimeLogger_Log_FailsClosedWithoutCanonicalCapability(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestRuntimeLogger_Log_PersistsCanonicalRunOwnershipFromContext(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	runID := uuid.NewString()
+	spoofedRunID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+
+	if err := logger.Log(ctx, RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "canonical runtime log",
+		Component: "diagnostics",
+		Action:    "canonical_run_context",
+		Detail: map[string]any{
+			"run_id": spoofedRunID,
+			"note":   "context must win",
+		},
+	}); err != nil {
+		t.Fatalf("logger.Log() error = %v", err)
+	}
+
+	row := loadLatestRuntimeLogRow(t, db)
+	if row.RunID != runID {
+		t.Fatalf("persisted run_id = %q, want %q", row.RunID, runID)
+	}
+	if got := strings.TrimSpace(asString(row.Detail["run_id"])); got != runID {
+		t.Fatalf("payload details.run_id = %q, want %q", got, runID)
+	}
+	if got := strings.TrimSpace(asString(row.Detail["note"])); got != "context must win" {
+		t.Fatalf("payload details.note = %q, want context must win", got)
+	}
+	assertRunRowExists(t, db, runID, true)
+	assertRunRowExists(t, db, spoofedRunID, false)
+}
+
+func TestRuntimeLogger_Log_DoesNotInferRunOwnershipFromDetailPayload(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	payloadRunID := uuid.NewString()
+
+	if err := logger.Log(ctx, RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "uncorrelated runtime log",
+		Component: "diagnostics",
+		Action:    "payload_run_id_ignored",
+		Detail: map[string]any{
+			"run_id": payloadRunID,
+			"note":   "must remain unscoped",
+		},
+	}); err != nil {
+		t.Fatalf("logger.Log() error = %v", err)
+	}
+
+	row := loadLatestRuntimeLogRow(t, db)
+	if row.RunID != "" {
+		t.Fatalf("persisted run_id = %q, want empty", row.RunID)
+	}
+	if got := strings.TrimSpace(asString(row.Detail["run_id"])); got != "" {
+		t.Fatalf("payload details.run_id = %q, want empty", got)
+	}
+	if got := strings.TrimSpace(asString(row.Detail["note"])); got != "must remain unscoped" {
+		t.Fatalf("payload details.note = %q, want must remain unscoped", got)
+	}
+	assertRunRowExists(t, db, payloadRunID, false)
+}
+
+type persistedRuntimeLogRow struct {
+	RunID  string
+	Detail map[string]any
+}
+
+func loadLatestRuntimeLogRow(t *testing.T, db *sql.DB) persistedRuntimeLogRow {
+	t.Helper()
+	var (
+		runID      string
+		payloadRaw []byte
+	)
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(run_id::text, ''), payload
+		FROM events
+		WHERE event_name = 'platform.runtime_log'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`).Scan(&runID, &payloadRaw); err != nil {
+		t.Fatalf("load runtime log row: %v", err)
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
+		t.Fatalf("decode runtime log payload: %v", err)
+	}
+	detail, _ := payload["details"].(map[string]any)
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	return persistedRuntimeLogRow{
+		RunID:  strings.TrimSpace(runID),
+		Detail: detail,
+	}
+}
+
+func assertRunRowExists(t *testing.T, db *sql.DB, runID string, want bool) {
+	t.Helper()
+	var exists bool
+	if err := db.QueryRowContext(context.Background(), `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, runID).Scan(&exists); err != nil {
+		t.Fatalf("check run row %s: %v", runID, err)
+	}
+	if exists != want {
+		t.Fatalf("run row exists = %v for %q, want %v", exists, runID, want)
 	}
 }
 
