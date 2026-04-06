@@ -255,7 +255,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if stores.SQLDB != nil {
 		rt.Logger = NewRuntimeLogger(stores.SQLDB, logCaps)
 	}
-	payloadValidator := newRuntimePayloadValidator(rt.Logger, source, emitRegistry.EventSchemaSnapshot())
+	payloadValidator := newRuntimePayloadValidator(rt.Logger, emitRegistry.EventSchemaSnapshot())
 	type eventPayloadValidationBinder interface {
 		SetEventPayloadValidator(func(eventType string, payload []byte) error)
 	}

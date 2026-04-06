@@ -10,11 +10,13 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeeventidentity "swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
 	runtimeregistry "swarm/internal/runtime/core/registry"
 	runtimeengine "swarm/internal/runtime/engine"
+	runtimeeventpayload "swarm/internal/runtime/eventpayload"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -707,7 +709,78 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 	if entityID != "" {
 		out["entity_id"] = entityID
 	}
-	return out, nil
+	return trimPipelineEmitPayloadToSchema(pc.SemanticSource(), req.FlowID.String(), eventType, out), nil
+}
+
+func trimPipelineEmitPayloadToSchema(source semanticview.Source, flowID, eventType string, payload map[string]any) map[string]any {
+	if payload == nil {
+		return map[string]any{}
+	}
+	if source == nil {
+		return cloneStringAnyMap(payload)
+	}
+	allowed := pipelineEmitPayloadProperties(source, flowID, eventType)
+	if len(allowed) == 0 {
+		return cloneStringAnyMap(payload)
+	}
+	return runtimeeventpayload.TrimToAllowedKeys(payload, allowed)
+}
+
+func pipelineEmitPayloadProperties(source semanticview.Source, flowID, eventType string) map[string]struct{} {
+	if source == nil {
+		return nil
+	}
+	candidates := make([]string, 0, 4)
+	eventType = strings.TrimSpace(eventType)
+	flowID = strings.TrimSpace(flowID)
+	if eventType != "" {
+		candidates = append(candidates, eventType)
+	}
+	if flowID != "" && eventType != "" {
+		candidates = append(candidates, source.ResolveFlowEventReference(flowID, eventType))
+	}
+	if leaf := runtimeeventidentity.LeafName(eventType); leaf != "" && leaf != eventType {
+		candidates = append(candidates, leaf)
+		if flowID != "" {
+			candidates = append(candidates, source.ResolveFlowEventReference(flowID, leaf))
+		}
+	}
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		entry, ok := source.EventEntry(candidate)
+		if !ok {
+			entry, _, ok = source.ResolveFlowEventCatalogEntry(flowID, candidate)
+		}
+		if !ok {
+			continue
+		}
+		allowed := eventPayloadProperties(entry)
+		if len(allowed) > 0 {
+			return allowed
+		}
+		return map[string]struct{}{}
+	}
+	return nil
+}
+
+func eventPayloadProperties(entry runtimecontracts.EventCatalogEntry) map[string]struct{} {
+	allowed := make(map[string]struct{}, len(entry.Payload.Properties))
+	for key := range entry.Payload.Properties {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		allowed[key] = struct{}{}
+	}
+	return allowed
 }
 
 func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine.StateMutation, allowedFields map[string]struct{}, source semanticview.Source, flowID string) {
