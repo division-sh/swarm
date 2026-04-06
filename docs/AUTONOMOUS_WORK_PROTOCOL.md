@@ -104,13 +104,42 @@ Allowed review statuses:
 - `superseded`
 - `awaiting-second-review`
 
+## Review State Semantics
+
+Agents must not infer what a review state means.
+
+Default meanings:
+
+- `changes-needed`
+  - actionable
+  - stop waiting and do the requested work
+- `approved`
+  - not actionable
+  - no new code change is requested
+  - keep polling until merge or a newer structured comment changes the state
+- `awaiting-second-review`
+  - not actionable by default
+  - wait unless a newer structured comment requests code changes or explicitly hands the agent back to the queue
+- `blocked`
+  - stop that stream
+  - escalate rather than guessing
+- `superseded`
+  - stop following the older instruction
+  - the newer structured comment wins
+
+If the PR is merged:
+
+- do not wait for another comment
+- return to idle state immediately
+- switch to issue polling on the next one-shot cycle
+
 ## Agent Polling Loop
 
 ### While the agent has an open PR
 
 The agent should:
 
-1. poll the PR every 10 minutes
+1. run the one-shot poller
 2. read the latest structured PR review comment
 3. act on the latest valid review state
 
@@ -118,12 +147,14 @@ Rules:
 
 - if status is `changes-needed`, address it
 - if status is `approved`, wait for merge
+- if status is `awaiting-second-review`, wait unless a newer structured comment changes the instruction
+- if status is `blocked`, stop that stream and escalate
 - if the PR is merged, return to unassigned state and switch to issue polling
 
-Recommended command:
+Default command:
 
 ```sh
-python scripts/agent_poll.py --agent A --watch
+python scripts/agent_poll.py --agent A
 ```
 
 ### Rebase And Refresh Rule
@@ -157,7 +188,7 @@ Rebase when branch drift is likely to affect correctness, mergeability, or revie
 
 The agent should:
 
-1. poll GitHub open issues every 10 minutes
+1. run the one-shot poller
 2. filter for its own label, for example `agent:A`
 3. if one assigned issue exists:
    - read the latest structured assignment comment
@@ -165,6 +196,12 @@ The agent should:
 4. if none exists:
    - remain idle
    - poll again later
+
+If an issue has the agent label but no structured assignment comment:
+
+- treat it as not yet assigned
+- wait
+- do not infer the task from the label alone
 
 Default rules:
 
@@ -174,11 +211,37 @@ Default rules:
   - its current PR review comments
   - or the issue carrying its agent label
 
-Recommended command:
+Default command:
 
 ```sh
-python scripts/agent_poll.py --agent A --watch
+python scripts/agent_poll.py --agent A
 ```
+
+## Default Polling Loop
+
+The default operating mode is one-shot polling in a simple shell loop.
+
+Use this pattern:
+
+```sh
+while true; do
+  python scripts/agent_poll.py --agent A
+  sleep 600
+done
+```
+
+Rules:
+
+- if the one-shot poller reports no actionable change, let the shell loop sleep and check again
+- if the one-shot poller reports an actionable change, stop the loop, do the work, and then restart the loop after the work cycle finishes
+- if the poller reports an invalid control state, stop and escalate instead of guessing
+- do not use blocking `--watch` mode as the default TUI operating mode
+
+Default interpretation of the shell loop:
+
+- use the shell loop only while the agent is idle or waiting for review
+- when the poller returns actionable work, leave the loop, do the work, then re-enter the loop afterward
+- do not leave the agent stuck in a foreground blocking watcher during active coding work
 
 ## Agent Required Responses
 
@@ -267,8 +330,8 @@ Examples:
 
 ```sh
 python scripts/agent_poll.py --agent A
+while true; do python scripts/agent_poll.py --agent A; sleep 600; done
 python scripts/agent_poll.py --agent A --watch
-python scripts/agent_poll.py --agent A --watch --interval 300
 ```
 
 The poller uses:
@@ -276,6 +339,19 @@ The poller uses:
 - the current branch to discover an open PR
 - the agent label to discover issue assignments when no PR is open
 - the latest structured top-level `[agent-action]` comment as the current instruction
+
+If the poller detects an invalid control state, it should stop and report it instead of guessing.
+
+Examples:
+
+- more than one active PR for the same agent branch state
+- more than one open issue with the same agent label
+- assignment label present but the expected structured control comment is malformed or ambiguous
+
+Default rule:
+
+- use one-shot mode for normal agent operation
+- reserve `--watch` for a future background-process setup, not normal foreground TUI work
 
 ## Lead Responsibilities
 
@@ -318,6 +394,11 @@ This means:
 - agents may still open high-risk PRs
 - but those PRs do not auto-advance through the autonomous loop
 - high-risk PRs require explicit lead review handling before merge
+
+After first review, the lead should make one of two agent-availability decisions for a high-risk PR:
+
+- keep the agent on the PR
+- or hand the agent back to the assignment queue while the PR stays under manual lead control
 
 ## Lead Polling Loop
 
@@ -390,6 +471,27 @@ Default rules:
   - `approved`
   - `changes-needed`
   - or `blocked`
+
+If the lead wants to free the agent while the PR stays under manual handling, the structured comment should say so explicitly.
+
+Recommended extension:
+
+```text
+[agent-action]
+Type: review-update
+Agent: A
+PR: #203
+Status: awaiting-second-review
+Blocking: no
+Agent-Mode: handoff-and-reassign
+Next-Step: wait for manual review; return to issue polling
+Reason:
+- high-risk seam; manual second review pending
+```
+
+Default rule:
+
+- if `Agent-Mode: handoff-and-reassign` is present, the agent returns to issue polling on the next cycle instead of waiting on the PR
 
 ## Pause-One-Agent Rule
 
@@ -469,6 +571,12 @@ If an issue label exists but no structured assignment comment exists:
 
 - the agent should wait
 - do not assume scope from the label alone
+
+If the agent session restarts:
+
+- run the one-shot poller immediately
+- rebuild state from GitHub
+- do not trust old terminal memory over the current GitHub control state
 
 ## Failure Prevention Rules
 
