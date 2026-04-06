@@ -163,7 +163,7 @@ func scanConversationSummary(scanner rowScanner) (ConversationSummary, error) {
 		return ConversationSummary{}, fmt.Errorf("decode conversation runtime_state: %w", err)
 	}
 	item.Summary = runtimeState.Summary
-	item.Metadata = runtimeState.metadataMap()
+	item.Metadata = runtimeState.metadata()
 	return item, nil
 }
 
@@ -193,15 +193,26 @@ func scanConversationDetail(scanner rowScanner) (ConversationDetail, error) {
 		return ConversationDetail{}, fmt.Errorf("decode conversation runtime_state: %w", err)
 	}
 	item.Summary = runtimeState.Summary
-	item.RuntimeState = runtimeState.runtimeStateMap()
-	item.Messages, err = decodeJSONArray(messagesRaw)
+	item.RuntimeState = runtimeState.runtimeState()
+	item.Messages, err = decodeJSONArray[ConversationMessage](messagesRaw)
 	if err != nil {
 		return ConversationDetail{}, fmt.Errorf("decode conversation messages: %w", err)
 	}
 	if item.Messages == nil {
-		item.Messages = []any{}
+		item.Messages = []ConversationMessage{}
 	}
 	return item, nil
+}
+
+func decodeJSONObjectRaw(raw []byte) (json.RawMessage, error) {
+	if len(raw) == 0 {
+		return json.RawMessage(`{}`), nil
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return append(json.RawMessage(nil), raw...), nil
 }
 
 func decodeJSONMap(raw []byte) (map[string]any, error) {
@@ -215,11 +226,22 @@ func decodeJSONMap(raw []byte) (map[string]any, error) {
 	return out, nil
 }
 
-func decodeJSONArray(raw []byte) ([]any, error) {
+func decodeJSONArray[T any](raw []byte) ([]T, error) {
 	if len(raw) == 0 {
-		return []any{}, nil
+		return []T{}, nil
 	}
-	out := []any{}
+	out := []T{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func decodeJSONStringMap(raw []byte) (map[string]string, error) {
+	if len(raw) == 0 {
+		return map[string]string{}, nil
+	}
+	out := map[string]string{}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, err
 	}
@@ -431,32 +453,32 @@ func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {
 	if err != nil {
 		return ConversationTurn{}, err
 	}
-	if item.AvailableTools, err = decodeJSONArray(availableToolsRaw); err != nil {
+	if item.AvailableTools, err = decodeJSONArray[string](availableToolsRaw); err != nil {
 		return ConversationTurn{}, fmt.Errorf("decode turn available_tools: %w", err)
 	}
-	if item.ToolCalls, err = decodeJSONArray(toolCallsRaw); err != nil {
+	if item.ToolCalls, err = decodeJSONArray[ConversationToolCall](toolCallsRaw); err != nil {
 		return ConversationTurn{}, fmt.Errorf("decode turn tool_calls: %w", err)
 	}
-	if item.EmittedEvents, err = decodeJSONArray(emittedEventsRaw); err != nil {
+	if item.EmittedEvents, err = decodeJSONArray[string](emittedEventsRaw); err != nil {
 		return ConversationTurn{}, fmt.Errorf("decode turn emitted_events: %w", err)
 	}
-	if item.MCPToolsListed, err = decodeJSONArray(mcpToolsListedRaw); err != nil {
+	if item.MCPToolsListed, err = decodeJSONArray[string](mcpToolsListedRaw); err != nil {
 		return ConversationTurn{}, fmt.Errorf("decode turn mcp_tools_listed: %w", err)
 	}
-	if item.MCPToolsVisible, err = decodeJSONArray(mcpToolsVisibleRaw); err != nil {
+	if item.MCPToolsVisible, err = decodeJSONArray[string](mcpToolsVisibleRaw); err != nil {
 		return ConversationTurn{}, fmt.Errorf("decode turn mcp_tools_visible: %w", err)
 	}
-	if item.MCPServers, err = decodeJSONMap(mcpServersRaw); err != nil {
+	if item.MCPServers, err = decodeJSONStringMap(mcpServersRaw); err != nil {
 		return ConversationTurn{}, fmt.Errorf("decode turn mcp_servers: %w", err)
 	}
-	if item.RequestPayload, err = decodeJSONMap(requestPayloadRaw); err != nil {
+	if item.RequestPayload, err = decodeJSONObjectRaw(requestPayloadRaw); err != nil {
 		return ConversationTurn{}, fmt.Errorf("decode turn request_payload: %w", err)
 	}
-	if item.ResponsePayload, err = decodeJSONMap(responsePayloadRaw); err != nil {
+	if item.ResponsePayload, err = decodeJSONObjectRaw(responsePayloadRaw); err != nil {
 		return ConversationTurn{}, fmt.Errorf("decode turn response_payload: %w", err)
 	}
 	if len(turnBlocksRaw) > 0 {
-		if item.TurnBlocks, err = decodeJSONArray(turnBlocksRaw); err != nil {
+		if item.TurnBlocks, err = decodeJSONArray[ConversationTurnBlock](turnBlocksRaw); err != nil {
 			return ConversationTurn{}, fmt.Errorf("decode turn turn_blocks: %w", err)
 		}
 	}
@@ -466,7 +488,7 @@ func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {
 	return item, nil
 }
 
-func summarizeConversationTurnBlocks(blocks []any) (string, string, []string, []string, []any) {
+func summarizeConversationTurnBlocks(blocks []ConversationTurnBlock) (string, string, []string, []string, []ConversationToolResult) {
 	raw, err := json.Marshal(blocks)
 	if err != nil {
 		return "", "", nil, nil, nil

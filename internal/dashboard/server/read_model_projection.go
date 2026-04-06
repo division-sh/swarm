@@ -8,9 +8,11 @@ import (
 )
 
 type projectedConversationRuntimeState struct {
-	Summary  string
-	LastTurn *projectedConversationLastTurn
-	raw      map[string]any
+	Summary              string
+	LastTurn             *projectedConversationLastTurn
+	ProviderSessionID    string
+	RetryReason          string
+	RetriesFromSessionID string
 }
 
 type projectedConversationLastTurn struct {
@@ -20,30 +22,49 @@ type projectedConversationLastTurn struct {
 
 func decodeConversationRuntimeStateProjection(raw []byte) (projectedConversationRuntimeState, error) {
 	if len(raw) == 0 {
-		return projectedConversationRuntimeState{raw: map[string]any{}}, nil
-	}
-	var projected projectedConversationRuntimeState
-	if err := json.Unmarshal(raw, &projected.raw); err != nil {
-		return projectedConversationRuntimeState{}, err
+		return projectedConversationRuntimeState{}, nil
 	}
 	var typed struct {
-		Summary  string                         `json:"summary"`
-		LastTurn *projectedConversationLastTurn `json:"last_turn,omitempty"`
+		Summary              string                         `json:"summary"`
+		LastTurn             *projectedConversationLastTurn `json:"last_turn,omitempty"`
+		ProviderSessionID    string                         `json:"provider_session_id,omitempty"`
+		RetryReason          string                         `json:"retry_reason,omitempty"`
+		RetriesFromSessionID string                         `json:"retries_from_session_id,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &typed); err != nil {
 		return projectedConversationRuntimeState{}, err
 	}
-	projected.Summary = strings.TrimSpace(typed.Summary)
-	projected.LastTurn = typed.LastTurn
-	return projected, nil
+	return projectedConversationRuntimeState{
+		Summary:              strings.TrimSpace(typed.Summary),
+		LastTurn:             typed.LastTurn,
+		ProviderSessionID:    strings.TrimSpace(typed.ProviderSessionID),
+		RetryReason:          strings.TrimSpace(typed.RetryReason),
+		RetriesFromSessionID: strings.TrimSpace(typed.RetriesFromSessionID),
+	}, nil
 }
 
-func (p projectedConversationRuntimeState) metadataMap() map[string]any {
-	return omitKnownKeys(p.raw, "summary", "last_turn")
+func (p projectedConversationRuntimeState) metadata() ConversationSummaryMetadata {
+	return ConversationSummaryMetadata{
+		ProviderSessionID:    p.ProviderSessionID,
+		RetryReason:          p.RetryReason,
+		RetriesFromSessionID: p.RetriesFromSessionID,
+	}
 }
 
-func (p projectedConversationRuntimeState) runtimeStateMap() map[string]any {
-	return cloneAnyMap(p.raw)
+func (p projectedConversationRuntimeState) runtimeState() ConversationRuntimeState {
+	state := ConversationRuntimeState{
+		Summary:              p.Summary,
+		ProviderSessionID:    p.ProviderSessionID,
+		RetryReason:          p.RetryReason,
+		RetriesFromSessionID: p.RetriesFromSessionID,
+	}
+	if p.LastTurn != nil {
+		state.LastTurn = &ConversationRuntimeLastTurn{
+			TaskID:  strings.TrimSpace(p.LastTurn.TaskID),
+			ParseOK: p.LastTurn.ParseOK,
+		}
+	}
+	return state
 }
 
 type projectedTurnSummary struct {
@@ -55,9 +76,9 @@ type projectedTurnSummary struct {
 }
 
 type projectedTurnSummaryToolItem struct {
-	ToolName  string `json:"tool_name,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Output    any    `json:"output,omitempty"`
+	ToolName  string          `json:"tool_name,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Output    json.RawMessage `json:"output,omitempty"`
 }
 
 type projectedTurnBlockEnvelope struct {
@@ -121,24 +142,24 @@ func (p projectedTurnSummary) isZero() bool {
 		len(p.ToolResults) == 0
 }
 
-func (p projectedTurnSummary) conversationFields() (string, string, []string, []string, []any) {
-	return p.AssistantVisibleOutput, p.Outcome, cloneStringSlice(p.ReasoningBlocks), cloneStringSlice(p.ProgressUpdates), p.toolResultsAny()
+func (p projectedTurnSummary) conversationFields() (string, string, []string, []string, []ConversationToolResult) {
+	return p.AssistantVisibleOutput, p.Outcome, cloneStringSlice(p.ReasoningBlocks), cloneStringSlice(p.ProgressUpdates), p.toolResultsTransport()
 }
 
-func (p projectedTurnSummary) toolResultsAny() []any {
+func (p projectedTurnSummary) toolResultsTransport() []ConversationToolResult {
 	if len(p.ToolResults) == 0 {
 		return nil
 	}
-	out := make([]any, 0, len(p.ToolResults))
+	out := make([]ConversationToolResult, 0, len(p.ToolResults))
 	for _, item := range p.ToolResults {
-		row := map[string]any{
-			"tool_name": item.ToolName,
+		row := ConversationToolResult{
+			ToolName: item.ToolName,
 		}
 		if item.ToolUseID != "" {
-			row["tool_use_id"] = item.ToolUseID
+			row.ToolUseID = item.ToolUseID
 		}
 		if item.Output != nil {
-			row["output"] = item.Output
+			row.Output = append(json.RawMessage(nil), item.Output...)
 		}
 		out = append(out, row)
 	}
@@ -158,39 +179,10 @@ func (p projectedTurnSummary) lastToolMap(parseOK bool) map[string]any {
 		"ok":   parseOK,
 	}
 	if last.Output != nil {
-		out["result"] = last.Output
-	}
-	return out
-}
-
-func cloneAnyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func omitKnownKeys(in map[string]any, keys ...string) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	drop := map[string]struct{}{}
-	for _, key := range keys {
-		drop[key] = struct{}{}
-	}
-	out := map[string]any{}
-	for key, value := range in {
-		if _, skip := drop[key]; skip {
-			continue
+		var value any
+		if err := json.Unmarshal(last.Output, &value); err == nil {
+			out["result"] = value
 		}
-		out[key] = value
-	}
-	if len(out) == 0 {
-		return nil
 	}
 	return out
 }

@@ -33,64 +33,109 @@ type InstanceReader interface {
 }
 
 type ConversationSummary struct {
-	SessionID   string         `json:"session_id,omitempty"`
-	AgentID     string         `json:"agent_id"`
-	Kind        string         `json:"kind,omitempty"`
-	ScopeKey    string         `json:"scope_key,omitempty"`
-	Scope       string         `json:"scope,omitempty"`
-	RuntimeMode string         `json:"runtime_mode,omitempty"`
-	Status      string         `json:"status,omitempty"`
-	TurnCount   int            `json:"turn_count,omitempty"`
-	Summary     string         `json:"summary,omitempty"`
-	UpdatedAt   string         `json:"updated_at,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
+	SessionID   string                      `json:"session_id,omitempty"`
+	AgentID     string                      `json:"agent_id"`
+	Kind        string                      `json:"kind,omitempty"`
+	ScopeKey    string                      `json:"scope_key,omitempty"`
+	Scope       string                      `json:"scope,omitempty"`
+	RuntimeMode string                      `json:"runtime_mode,omitempty"`
+	Status      string                      `json:"status,omitempty"`
+	TurnCount   int                         `json:"turn_count,omitempty"`
+	Summary     string                      `json:"summary,omitempty"`
+	UpdatedAt   string                      `json:"updated_at,omitempty"`
+	Metadata    ConversationSummaryMetadata `json:"metadata,omitempty"`
+}
+
+type ConversationSummaryMetadata struct {
+	ProviderSessionID    string `json:"provider_session_id,omitempty"`
+	RetryReason          string `json:"retry_reason,omitempty"`
+	RetriesFromSessionID string `json:"retries_from_session_id,omitempty"`
 }
 
 type ConversationDetail struct {
-	AgentID      string             `json:"agent_id"`
-	SessionID    string             `json:"session_id,omitempty"`
-	Kind         string             `json:"kind,omitempty"`
-	ScopeKey     string             `json:"scope_key,omitempty"`
-	Scope        string             `json:"scope,omitempty"`
-	RuntimeMode  string             `json:"runtime_mode,omitempty"`
-	Status       string             `json:"status,omitempty"`
-	TurnCount    int                `json:"turn_count,omitempty"`
-	Summary      string             `json:"summary,omitempty"`
-	UpdatedAt    string             `json:"updated_at,omitempty"`
-	Messages     []any              `json:"messages"`
-	Turns        []ConversationTurn `json:"turns,omitempty"`
-	RuntimeState map[string]any     `json:"runtime_state,omitempty"`
+	AgentID      string                   `json:"agent_id"`
+	SessionID    string                   `json:"session_id,omitempty"`
+	Kind         string                   `json:"kind,omitempty"`
+	ScopeKey     string                   `json:"scope_key,omitempty"`
+	Scope        string                   `json:"scope,omitempty"`
+	RuntimeMode  string                   `json:"runtime_mode,omitempty"`
+	Status       string                   `json:"status,omitempty"`
+	TurnCount    int                      `json:"turn_count,omitempty"`
+	Summary      string                   `json:"summary,omitempty"`
+	UpdatedAt    string                   `json:"updated_at,omitempty"`
+	Messages     []ConversationMessage    `json:"messages"`
+	Turns        []ConversationTurn       `json:"turns,omitempty"`
+	RuntimeState ConversationRuntimeState `json:"runtime_state,omitempty"`
 }
 
 type ConversationTurn struct {
-	TurnID                 string         `json:"turn_id"`
-	AgentID                string         `json:"agent_id,omitempty"`
-	SessionID              string         `json:"session_id,omitempty"`
-	RuntimeMode            string         `json:"runtime_mode,omitempty"`
-	ScopeKey               string         `json:"scope_key,omitempty"`
-	EntityID               string         `json:"entity_id,omitempty"`
-	TriggerEventID         string         `json:"trigger_event_id,omitempty"`
-	TriggerEventType       string         `json:"trigger_event_type,omitempty"`
-	TaskID                 string         `json:"task_id,omitempty"`
-	AvailableTools         []any          `json:"available_tools,omitempty"`
-	ToolCalls              []any          `json:"tool_calls,omitempty"`
-	ToolResults            []any          `json:"tool_results,omitempty"`
-	TurnBlocks             []any          `json:"turn_blocks,omitempty"`
-	EmittedEvents          []any          `json:"emitted_events,omitempty"`
-	MCPServers             map[string]any `json:"mcp_servers,omitempty"`
-	MCPToolsListed         []any          `json:"mcp_tools_listed,omitempty"`
-	MCPToolsVisible        []any          `json:"mcp_tools_visible,omitempty"`
-	RequestPayload         map[string]any `json:"request_payload,omitempty"`
-	ResponsePayload        map[string]any `json:"response_payload,omitempty"`
-	AssistantVisibleOutput string         `json:"assistant_visible_output,omitempty"`
-	ReasoningBlocks        []string       `json:"reasoning_blocks,omitempty"`
-	ProgressUpdates        []string       `json:"progress_updates,omitempty"`
-	Outcome                string         `json:"outcome,omitempty"`
-	ParseOK                bool           `json:"parse_ok"`
-	LatencyMS              int            `json:"latency_ms,omitempty"`
-	RetryCount             int            `json:"retry_count,omitempty"`
-	Error                  string         `json:"error,omitempty"`
-	CreatedAt              string         `json:"created_at,omitempty"`
+	TurnID                 string                   `json:"turn_id"`
+	AgentID                string                   `json:"agent_id,omitempty"`
+	SessionID              string                   `json:"session_id,omitempty"`
+	RuntimeMode            string                   `json:"runtime_mode,omitempty"`
+	ScopeKey               string                   `json:"scope_key,omitempty"`
+	EntityID               string                   `json:"entity_id,omitempty"`
+	TriggerEventID         string                   `json:"trigger_event_id,omitempty"`
+	TriggerEventType       string                   `json:"trigger_event_type,omitempty"`
+	TaskID                 string                   `json:"task_id,omitempty"`
+	AvailableTools         []string                 `json:"available_tools,omitempty"`
+	ToolCalls              []ConversationToolCall   `json:"tool_calls,omitempty"`
+	ToolResults            []ConversationToolResult `json:"tool_results,omitempty"`
+	TurnBlocks             []ConversationTurnBlock  `json:"turn_blocks,omitempty"`
+	EmittedEvents          []string                 `json:"emitted_events,omitempty"`
+	MCPServers             map[string]string        `json:"mcp_servers,omitempty"`
+	MCPToolsListed         []string                 `json:"mcp_tools_listed,omitempty"`
+	MCPToolsVisible        []string                 `json:"mcp_tools_visible,omitempty"`
+	RequestPayload         json.RawMessage          `json:"request_payload,omitempty"`
+	ResponsePayload        json.RawMessage          `json:"response_payload,omitempty"`
+	AssistantVisibleOutput string                   `json:"assistant_visible_output,omitempty"`
+	ReasoningBlocks        []string                 `json:"reasoning_blocks,omitempty"`
+	ProgressUpdates        []string                 `json:"progress_updates,omitempty"`
+	Outcome                string                   `json:"outcome,omitempty"`
+	ParseOK                bool                     `json:"parse_ok"`
+	LatencyMS              int                      `json:"latency_ms,omitempty"`
+	RetryCount             int                      `json:"retry_count,omitempty"`
+	Error                  string                   `json:"error,omitempty"`
+	CreatedAt              string                   `json:"created_at,omitempty"`
+}
+
+type ConversationRuntimeState struct {
+	Summary              string                       `json:"summary,omitempty"`
+	LastTurn             *ConversationRuntimeLastTurn `json:"last_turn,omitempty"`
+	ProviderSessionID    string                       `json:"provider_session_id,omitempty"`
+	RetryReason          string                       `json:"retry_reason,omitempty"`
+	RetriesFromSessionID string                       `json:"retries_from_session_id,omitempty"`
+}
+
+type ConversationRuntimeLastTurn struct {
+	TaskID  string `json:"task_id,omitempty"`
+	ParseOK bool   `json:"parse_ok,omitempty"`
+}
+
+type ConversationMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type ConversationToolCall struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+type ConversationToolResult struct {
+	ToolName  string          `json:"tool_name,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Output    json.RawMessage `json:"output,omitempty"`
+}
+
+type ConversationTurnBlock struct {
+	Kind     string          `json:"kind"`
+	Title    string          `json:"title,omitempty"`
+	Text     string          `json:"text,omitempty"`
+	ToolName string          `json:"tool_name,omitempty"`
+	Input    json.RawMessage `json:"input,omitempty"`
+	Output   json.RawMessage `json:"output,omitempty"`
+	Data     json.RawMessage `json:"data,omitempty"`
 }
 
 type ConversationReader interface {
