@@ -194,7 +194,15 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	case "tools/list":
-		WriteRPCResult(w, req.ID, map[string]any{"tools": g.mcpToolsForRequest(r)})
+		tools, err := g.mcpToolsForRequest(r)
+		if err != nil {
+			g.logMCP(r, "warn", "mcp.tools.list.context_error", err, map[string]any{
+				"method": "tools/list",
+			})
+			WriteRPCError(w, req.ID, -32003, g.formatError(err))
+			return
+		}
+		WriteRPCResult(w, req.ID, map[string]any{"tools": tools})
 		return
 	case "tools/call":
 		if g.executor == nil {
@@ -296,60 +304,20 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (g *Gateway) mcpExecutionContext(r *http.Request, toolName string) (context.Context, error) {
-	toolName = normalizeGatewayToolName(toolName)
-	token := ContextTokenFromRequest(r)
-	if token == "" {
-		return nil, g.newRuntimeError(ErrCodeContextMissing, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
+func (g *Gateway) mcpExecutionContext(r *http.Request, _ string) (context.Context, error) {
+	turn, err := g.runtimeTurnContextForRequest(r, "mcp.context.resolve")
+	if err != nil {
+		return nil, err
 	}
-	turn, ok := g.resolveRuntimeTurnContext(token)
-	if !ok {
-		return nil, g.newRuntimeError(ErrCodeContextNotFound, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
-	}
-	ctx := context.Background()
-	if g.hooks.WithActor != nil {
-		ctx = g.hooks.WithActor(ctx, turn.Actor)
-	}
-	if g.hooks.WithCurrentRuntimeEpoch != nil {
-		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
-	}
-	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
-	if turn.HasInbound && g.hooks.WithInboundEvent != nil {
-		ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
-	}
-	if turn.Recorder != nil && g.hooks.WithEmittedEventsRecorder != nil {
-		ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
-	}
-	ctx = g.withToolCapabilities(ctx, turn.Actor, g.catalogNames(g.toolCatalog(turn.Actor, true)), turn.Allowed)
-	return ctx, nil
+	return g.contextForResolvedTurn(context.Background(), turn), nil
 }
 
-func (g *Gateway) toolExecutionContext(r *http.Request, toolName string) (context.Context, error) {
-	toolName = normalizeGatewayToolName(toolName)
-	token := ContextTokenFromRequest(r)
-	if token == "" {
-		return nil, g.newRuntimeError(ErrCodeContextMissing, "tool.context.resolve", false, nil, "missing or invalid mcp context token")
+func (g *Gateway) toolExecutionContext(r *http.Request, _ string) (context.Context, error) {
+	turn, err := g.runtimeTurnContextForRequest(r, "tool.context.resolve")
+	if err != nil {
+		return nil, err
 	}
-	turn, ok := g.resolveRuntimeTurnContext(token)
-	if !ok {
-		return nil, g.newRuntimeError(ErrCodeContextNotFound, "tool.context.resolve", false, nil, "missing or invalid mcp context token")
-	}
-	ctx := r.Context()
-	if g.hooks.WithActor != nil {
-		ctx = g.hooks.WithActor(ctx, turn.Actor)
-	}
-	if g.hooks.WithCurrentRuntimeEpoch != nil {
-		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
-	}
-	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
-	if turn.HasInbound && g.hooks.WithInboundEvent != nil {
-		ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
-	}
-	if turn.Recorder != nil && g.hooks.WithEmittedEventsRecorder != nil {
-		ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
-	}
-	ctx = g.withToolCapabilities(ctx, turn.Actor, g.catalogNames(g.toolCatalog(turn.Actor, true)), turn.Allowed)
-	return ctx, nil
+	return g.contextForResolvedTurn(r.Context(), turn), nil
 }
 
 func (g *Gateway) withToolCapabilities(ctx context.Context, actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) context.Context {
@@ -421,9 +389,12 @@ func emitTurnDedupeKey(toolName string, arguments any) string {
 	return normalized + "\n" + string(encoded)
 }
 
-func (g *Gateway) mcpToolsForRequest(r *http.Request) []ToolDef {
-	actor, allowed, actorOK := g.actorForCatalogRequest(r)
-	return g.mcpToolsForActor(actor, allowed, actorOK)
+func (g *Gateway) mcpToolsForRequest(r *http.Request) ([]ToolDef, error) {
+	turn, err := g.runtimeTurnContextForRequest(r, "mcp.tools.list.context.resolve")
+	if err != nil {
+		return nil, err
+	}
+	return g.mcpToolsForActor(turn.Actor, turn.Allowed, true), nil
 }
 
 func (g *Gateway) MCPToolsForActor(actor models.AgentConfig) []ToolDef {
@@ -588,13 +559,33 @@ func (g *Gateway) resolveRuntimeTurnContext(token string) (TurnContext, bool) {
 	return turn, strings.TrimSpace(turn.Actor.ID) != ""
 }
 
-func (g *Gateway) actorForCatalogRequest(r *http.Request) (models.AgentConfig, map[string]struct{}, bool) {
-	if token := ContextTokenFromRequest(r); token != "" {
-		if turn, ok := g.resolveRuntimeTurnContext(token); ok {
-			return turn.Actor, turn.Allowed, true
-		}
+func (g *Gateway) runtimeTurnContextForRequest(r *http.Request, operation string) (TurnContext, error) {
+	token := ContextTokenFromRequest(r)
+	if token == "" {
+		return TurnContext{}, g.newRuntimeError(ErrCodeContextMissing, operation, false, nil, "missing or invalid mcp context token")
 	}
-	return models.AgentConfig{}, nil, false
+	turn, ok := g.resolveRuntimeTurnContext(token)
+	if !ok {
+		return TurnContext{}, g.newRuntimeError(ErrCodeContextNotFound, operation, false, nil, "missing or invalid mcp context token")
+	}
+	return turn, nil
+}
+
+func (g *Gateway) contextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
+	if g.hooks.WithActor != nil {
+		ctx = g.hooks.WithActor(ctx, turn.Actor)
+	}
+	if g.hooks.WithCurrentRuntimeEpoch != nil {
+		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
+	}
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
+	if turn.HasInbound && g.hooks.WithInboundEvent != nil {
+		ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
+	}
+	if turn.Recorder != nil && g.hooks.WithEmittedEventsRecorder != nil {
+		ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
+	}
+	return g.withToolCapabilities(ctx, turn.Actor, g.catalogNames(g.toolCatalog(turn.Actor, true)), turn.Allowed)
 }
 
 func (g *Gateway) AuthorizeForTest(r *http.Request) error {
