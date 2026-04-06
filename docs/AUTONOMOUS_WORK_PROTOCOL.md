@@ -425,6 +425,24 @@ Default rule:
 - PR comments are the live correction channel
 - issue comments are the live assignment channel
 
+The lead-side poller lives at:
+
+- `scripts/lead_poll.py`
+
+Recommended commands:
+
+```sh
+python scripts/lead_poll.py
+python scripts/lead_poll.py --watch
+```
+
+Default behavior:
+
+- one-shot mode prints the current system snapshot and exits
+- `--watch` sleeps internally and returns when the system snapshot changes
+- use `--watch` when the lead is waiting for the next event
+- after taking a lead action, restart `--watch` to wait for the next one
+
 ## Escalation Rules
 
 Escalate to the user when:
