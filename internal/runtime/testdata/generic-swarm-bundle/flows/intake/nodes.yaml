@@ -1,6 +1,6 @@
 intake-router:
   id: intake-router
-  execution_type: workflow_node
+  execution_type: system_node
   idempotency_table: intake_router_idempotency
   state_table: intake_router_state
   subscribes_to:

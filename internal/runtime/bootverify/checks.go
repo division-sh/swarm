@@ -1604,6 +1604,13 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					Message:  fmt.Sprintf("node %s missing required field execution_type", nodeLabel),
 					Location: nodeLabel,
 				})
+			} else if err := runtimecontracts.ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
+				c.invalidFindings = append(c.invalidFindings, Finding{
+					CheckID:  "invalid_field_detection",
+					Severity: "error",
+					Message:  fmt.Sprintf("node %s execution_type must be %s", nodeLabel, runtimecontracts.SystemNodeExecutionType),
+					Location: nodeLabel,
+				})
 			}
 			if len(c.source.NodeRuntimeSubscriptions(nodeID)) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
@@ -1706,6 +1713,13 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
 					Message:  fmt.Sprintf("node %s missing required field execution_type", nodeLabel),
+					Location: nodeLabel,
+				})
+			} else if err := runtimecontracts.ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
+				c.invalidFindings = append(c.invalidFindings, Finding{
+					CheckID:  "invalid_field_detection",
+					Severity: "error",
+					Message:  fmt.Sprintf("node %s execution_type must be %s", nodeLabel, runtimecontracts.SystemNodeExecutionType),
 					Location: nodeLabel,
 				})
 			}
@@ -2009,15 +2023,13 @@ func (c *checkerContext) requiredAgentsMatch() []Finding {
 				})
 				continue
 			}
-			if flowRequiresStaticSubscriptionValidation(c.source, flowID) {
-				if diff := missingStrings(required.SubscribesTo, agentSubscriptions(agent)); diff != "" {
-					c.requiredFindings = append(c.requiredFindings, Finding{
-						CheckID:  "required_agents_match",
-						Severity: "error",
-						Message:  fmt.Sprintf("flow %s required agent %s subscriptions mismatch (%s)", flowID, agentID, diff),
-						Location: strings.TrimSpace(flowID),
-					})
-				}
+			if diff := missingStrings(required.SubscribesTo, agentSubscriptions(agent)); diff != "" {
+				c.requiredFindings = append(c.requiredFindings, Finding{
+					CheckID:  "required_agents_match",
+					Severity: "error",
+					Message:  fmt.Sprintf("flow %s required agent %s subscriptions mismatch (%s)", flowID, agentID, diff),
+					Location: strings.TrimSpace(flowID),
+				})
 			}
 			if diff := missingStrings(required.Emits, agent.EmitEvents); diff != "" {
 				c.requiredFindings = append(c.requiredFindings, Finding{
@@ -2049,6 +2061,14 @@ func (c *checkerContext) requiredAgentsMatch() []Finding {
 				Location: "root",
 			})
 			continue
+		}
+		if diff := missingStrings(required.SubscribesTo, agentSubscriptions(agent)); diff != "" {
+			c.requiredFindings = append(c.requiredFindings, Finding{
+				CheckID:  "required_agents_match",
+				Severity: "error",
+				Message:  fmt.Sprintf("root required agent %s subscriptions mismatch (%s)", agentID, diff),
+				Location: "root",
+			})
 		}
 		if diff := missingStrings(required.Emits, agent.EmitEvents); diff != "" {
 			c.requiredFindings = append(c.requiredFindings, Finding{
@@ -3223,21 +3243,6 @@ func normalizeRoleKey(raw string) string {
 	return raw
 }
 
-func flowRequiresStaticSubscriptionValidation(source semanticview.Source, flowID string) bool {
-	if source == nil {
-		return true
-	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		return true
-	}
-	schema, ok := source.FlowSchemaByID(flowID)
-	if !ok {
-		return true
-	}
-	return !strings.EqualFold(strings.TrimSpace(schema.Mode), "template")
-}
-
 func flowSchemaIsTemplate(source semanticview.Source, flowID string) bool {
 	if source == nil {
 		return false
@@ -3631,7 +3636,6 @@ func validateGuardOnFailLocal(onFail string) error {
 	}
 	switch parsed.Action {
 	case runtimeengine.GuardFailureReject,
-		runtimeengine.GuardFailureBlocked,
 		runtimeengine.GuardFailureDiscard,
 		runtimeengine.GuardFailureKill:
 		return nil
@@ -3772,27 +3776,11 @@ func normalizeWorkflowBuiltinActionID(id string) string {
 }
 
 func isSupportedWorkflowActionBuiltin(id string) bool {
-	switch normalizeWorkflowBuiltinActionID(id) {
-	case "increment_revision_count",
-		"record_state_change",
-		"update_state",
-		"cancel_state_timers",
-		"start_state_timers",
-		"record_evidence",
-		"create_flow_instance":
-		return true
-	default:
-		return false
-	}
+	return runtimecontracts.IsSupportedHandlerActionID(normalizeWorkflowBuiltinActionID(id))
 }
 
 func isSupportedWorkflowHandlerActionID(id string) bool {
-	switch normalizeWorkflowBuiltinActionID(id) {
-	case "create_flow_instance", "record_evidence":
-		return true
-	default:
-		return isSupportedWorkflowActionBuiltin(id)
-	}
+	return runtimecontracts.IsSupportedHandlerActionID(normalizeWorkflowBuiltinActionID(id))
 }
 
 func handlerActionExecutable(source semanticview.Source, actionID string) bool {

@@ -920,7 +920,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 	}
 }
 
-func TestExecuteNodeContractHandlerExecutesHandlerActionInsideEngine(t *testing.T) {
+func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
 		Module: NewGenericTestWorkflowModule(),
@@ -928,7 +928,7 @@ func TestExecuteNodeContractHandlerExecutesHandlerActionInsideEngine(t *testing.
 	entityID := "ent-1"
 
 	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
-		Action: runtimecontracts.ActionSpec{ID: "increment_revision_count"},
+		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID(entityID),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
@@ -939,10 +939,7 @@ func TestExecuteNodeContractHandlerExecutesHandlerActionInsideEngine(t *testing.
 	if !result.Handled {
 		t.Fatal("expected handled result")
 	}
-	if got := result.Outcome.ActionsExecuted; len(got) != 1 || got[0] != "increment_revision_count" {
-		t.Fatalf("actions executed = %#v, want [increment_revision_count]", got)
-	}
-	if got := bus.publishedCount(); got != 0 {
-		t.Fatalf("bus published count = %d, want 0", got)
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
 	}
 }

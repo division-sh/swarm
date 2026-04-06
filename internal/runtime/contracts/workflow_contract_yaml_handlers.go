@@ -473,7 +473,11 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
 			return ActionSpec{}, nil
 		}
-		return ActionSpec{ID: strings.TrimSpace(node.Value)}, nil
+		actionID, err := ParseHandlerActionID(node.Value)
+		if err != nil {
+			return ActionSpec{}, err
+		}
+		return ActionSpec{ID: actionID}, nil
 	case yaml.MappingNode:
 		var aux struct {
 			ID             string    `yaml:"id"`
@@ -484,12 +488,16 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 		if err := node.Decode(&aux); err != nil {
 			return ActionSpec{}, err
 		}
+		actionID, err := ParseHandlerActionID(aux.ID)
+		if err != nil {
+			return ActionSpec{}, err
+		}
 		configFrom, err := decodeConfigFromSpecNode(&aux.ConfigFrom)
 		if err != nil {
 			return ActionSpec{}, err
 		}
 		return ActionSpec{
-			ID:             strings.TrimSpace(aux.ID),
+			ID:             actionID,
 			Template:       strings.TrimSpace(aux.Template),
 			InstanceIDFrom: strings.TrimSpace(aux.InstanceIDFrom),
 			InstanceIDPath: paths.Parse(aux.InstanceIDFrom),

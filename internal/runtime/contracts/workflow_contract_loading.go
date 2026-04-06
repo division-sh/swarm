@@ -128,6 +128,9 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 	errs := make([]error, 0, 8)
 	for nodeID, node := range bundle.Nodes {
 		nodeID = strings.TrimSpace(nodeID)
+		if err := ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
+			errs = append(errs, fmt.Errorf("%w: node %s %v", ErrInvalidField, nodeID, err))
+		}
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			if workflowHandlerDeclaresConflictingCompletion(handler) {
@@ -135,6 +138,9 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			}
 			if usesDeprecatedGuardFallback(handler.Guard) {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s uses deprecated id-only guard; migrate to check:", ErrDeprecatedGuardFallback, nodeID, eventType))
+			}
+			if strings.TrimSpace(handler.Action.ID) != "" && !IsSupportedHandlerActionID(handler.Action.ID) {
+				errs = append(errs, fmt.Errorf("%w: node %s handler %s action %s is not in platform spec", ErrInvalidField, nodeID, eventType, strings.TrimSpace(handler.Action.ID)))
 			}
 		}
 	}

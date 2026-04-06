@@ -88,7 +88,6 @@ type GuardFailureAction uint8
 const (
 	GuardFailureUnknown GuardFailureAction = iota
 	GuardFailureReject
-	GuardFailureBlocked
 	GuardFailureDiscard
 	GuardFailureKill
 	GuardFailureEscalate
@@ -98,8 +97,6 @@ func (a GuardFailureAction) String() string {
 	switch a {
 	case GuardFailureReject:
 		return "reject"
-	case GuardFailureBlocked:
-		return "blocked"
 	case GuardFailureDiscard:
 		return "discard"
 	case GuardFailureKill:
@@ -121,8 +118,6 @@ func ParseGuardFailure(action string) (GuardFailure, error) {
 	switch normalized {
 	case "", "reject":
 		return GuardFailure{Action: GuardFailureReject}, nil
-	case "block", "blocked":
-		return GuardFailure{Action: GuardFailureBlocked}, nil
 	case "discard":
 		return GuardFailure{Action: GuardFailureDiscard}, nil
 	case "kill":

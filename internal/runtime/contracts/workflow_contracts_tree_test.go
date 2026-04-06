@@ -284,7 +284,7 @@ evidence.recorded:
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 audit-node:
   id: audit-node
-  execution_type: workflow_node
+  execution_type: system_node
   subscribes_to:
     - item.created
   produces:
@@ -328,6 +328,7 @@ mode: static
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "nodes.yaml"), `
 parent-node:
   id: parent-node
+  execution_type: system_node
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "events.yaml"), `
 parent.started:
@@ -360,6 +361,7 @@ mode: static
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "nodes.yaml"), `
 child-node:
   id: child-node
+  execution_type: system_node
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "events.yaml"), `
 child.completed:

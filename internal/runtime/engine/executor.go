@@ -1446,10 +1446,6 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 		frame.result.Status = OutcomeRejected
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "reject")
 		return nil
-	case GuardFailureBlocked:
-		frame.result.Status = OutcomeBlocked
-		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "blocked")
-		return nil
 	case GuardFailureDiscard:
 		frame.result.Status = OutcomeDiscarded
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "discard")

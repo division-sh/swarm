@@ -20,17 +20,13 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 		t.Fatal("expected engine")
 	}
 	outcome, err := engine.ExecuteHandlerSteps(context.Background(), runtimecontracts.SystemNodeEventHandler{
-		Emits:  runtimecontracts.EventEmission{Single: "custom.emitted"},
-		Action: runtimecontracts.ActionSpec{ID: "increment_revision_count"},
+		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
 	}, events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"))
 	if err != nil {
 		t.Fatalf("ExecuteHandlerSteps: %v", err)
 	}
 	if outcome == nil || !outcome.Handled {
 		t.Fatalf("handled outcome = %#v", outcome)
-	}
-	if len(outcome.ActionsExecuted) == 0 || outcome.ActionsExecuted[0] != "increment_revision_count" {
-		t.Fatalf("actions executed = %#v", outcome.ActionsExecuted)
 	}
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("bus published count = %d, want 1", got)

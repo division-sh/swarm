@@ -5,6 +5,7 @@ control-plane:
   subscriptions:
     - item.review_requested
     - item.completed
+    - item.rejected
   emit_events:
     - item.created
 worker-a:
@@ -13,15 +14,21 @@ worker-a:
   manager_fallback: control-plane
   subscriptions:
     - item.review_requested
+    - item.processed
+    - item.completed
   emit_events:
     - item.processed
     - item.completed
+    - item.rejected
 worker-b:
   id: worker-b
   role: worker
   manager_fallback: control-plane
   subscriptions:
     - item.review_requested
+    - item.processed
+    - item.completed
   emit_events:
     - item.processed
     - item.completed
+    - item.rejected

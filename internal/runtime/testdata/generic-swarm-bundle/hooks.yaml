@@ -7,8 +7,3 @@ guards:
     category: policy
     description: Delivery must remain enabled.
     policy_ref: delivery_enabled
-actions:
-  - id: record_state_change
-    category: bookkeeping
-    description: Records a generic state transition.
-    effect: store status and gate updates

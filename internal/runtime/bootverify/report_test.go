@@ -284,6 +284,59 @@ func TestRun_MapsRequiredAgentMismatchToNamedError(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsRequiredAgentSubscriptionMismatchForTemplateFlow(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
+	schema := bundle.FlowSchemas["child"]
+	schema.Mode = "template"
+	schema.RequiredAgents = []runtimecontracts.FlowRequiredAgent{{
+		Role:         "worker",
+		SubscribesTo: []string{"work.completed"},
+		Emits:        []string{"work.completed"},
+	}}
+	bundle.FlowSchemas["child"] = schema
+	bundle.Semantics.FlowAgents["child"] = append([]runtimecontracts.FlowRequiredAgent(nil), schema.RequiredAgents...)
+	bundle.Agents["worker"] = runtimecontracts.AgentRegistryEntry{
+		ID:               "worker",
+		Role:             "worker",
+		ModelTier:        "small",
+		ConversationMode: "task",
+		Subscriptions:    []string{"work.requested"},
+		EmitEvents:       []string{"work.completed"},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "required_agents_match", "subscriptions mismatch") {
+		t.Fatalf("expected template-flow required_agents_match subscriptions error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsRootRequiredAgentSubscriptionMismatch(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-success")
+	if bundle.RootSchema == nil {
+		bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{}
+	}
+	bundle.RootSchema.RequiredAgents = []runtimecontracts.FlowRequiredAgent{{
+		Role:         "worker",
+		SubscribesTo: []string{"task.completed"},
+		Emits:        []string{"task.completed"},
+	}}
+	bundle.Agents["worker"] = runtimecontracts.AgentRegistryEntry{
+		ID:               "worker",
+		Role:             "worker",
+		ModelTier:        "small",
+		ConversationMode: "task",
+		Subscriptions:    []string{"task.requested"},
+		EmitEvents:       []string{"task.completed"},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "required_agents_match", "root required agent worker subscriptions mismatch") {
+		t.Fatalf("expected root required_agents_match subscriptions error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsConditionPayloadMismatchToNamedError(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-condition-payload-mismatch")
 

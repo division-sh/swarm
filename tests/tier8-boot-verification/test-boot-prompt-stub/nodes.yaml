@@ -1,6 +1,6 @@
 stub-agent-node:
   id: stub-agent-node
-  execution_type: agent_node
+  execution_type: system_node
   subscribes_to: [task.requested]
   produces: [task.completed]
   agent: stub-agent

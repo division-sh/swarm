@@ -2,13 +2,10 @@ package contracts
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
-
-var legacyComputeExpressionPattern = regexp.MustCompile(`^\s*weighted_average\s*\(\s*accumulated\.([a-zA-Z0-9_]+)\s*,\s*accumulated\.([a-zA-Z0-9_]+)\s*\)\s*$`)
 
 func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind == yaml.ScalarNode {
@@ -132,6 +129,9 @@ func (s *ComputeSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
 	}
+	if err := validateComputeFieldNodes(node); err != nil {
+		return err
+	}
 	var aux struct {
 		Operation   ComputeOperation `yaml:"operation"`
 		Tiers       []ComputeTier    `yaml:"tiers"`
@@ -141,7 +141,6 @@ func (s *ComputeSpec) UnmarshalYAML(node *yaml.Node) error {
 		ValueField  string           `yaml:"value_field"`
 		WeightField string           `yaml:"weight_field"`
 		OutputField string           `yaml:"output_field"`
-		Expression  string           `yaml:"expression"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -164,22 +163,35 @@ func (s *ComputeSpec) UnmarshalYAML(node *yaml.Node) error {
 			}
 		}
 	}
-	if s.Operation == ComputeOpUnknown {
-		if valueField, weightField, ok := parseLegacyComputeExpression(strings.TrimSpace(aux.Expression)); ok {
-			s.Operation = ComputeOpWeightedAverage
-			if s.ItemsFrom == "" {
-				s.ItemsFrom = "accumulated.items"
-			}
-			if s.ValueField == "" {
-				s.ValueField = valueField
-			}
-			if s.WeightField == "" {
-				s.WeightField = weightField
-			}
-		}
-	}
 	if err := validateTieredWeightedAverageSpec(*s); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateComputeFieldNodes(node *yaml.Node) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"operation":    {},
+		"tiers":        {},
+		"keys":         {},
+		"store_as":     {},
+		"items_from":   {},
+		"value_field":  {},
+		"weight_field": {},
+		"output_field": {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; ok {
+			continue
+		}
+		return fmt.Errorf("UNDEFINED-FIELD: compute field %q not in platform spec", key)
 	}
 	return nil
 }
@@ -195,22 +207,6 @@ func validateTieredWeightedAverageSpec(spec ComputeSpec) error {
 		return fmt.Errorf("invalid compute spec: weighted_average with tiers requires keys.score_keys")
 	}
 	return nil
-}
-
-func parseLegacyComputeExpression(expression string) (string, string, bool) {
-	match := legacyComputeExpressionPattern.FindStringSubmatch(expression)
-	if len(match) != 3 {
-		return "", "", false
-	}
-	return singularizeLegacyComputeField(match[1]), singularizeLegacyComputeField(match[2]), true
-}
-
-func singularizeLegacyComputeField(name string) string {
-	name = strings.TrimSpace(name)
-	if len(name) > 1 && strings.HasSuffix(name, "s") {
-		return strings.TrimSpace(strings.TrimSuffix(name, "s"))
-	}
-	return name
 }
 
 func (v *FlowVariable) UnmarshalYAML(node *yaml.Node) error {

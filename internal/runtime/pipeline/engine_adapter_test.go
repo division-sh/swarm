@@ -1000,7 +1000,7 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 
 func TestPipelineEngineActionRegistry_SynthesizesSupportedBuiltinActions(t *testing.T) {
 	registry := pipelineEngineActionRegistry{}
-	id := identity.NormalizeActionKey("increment_revision_count")
+	id := identity.NormalizeActionKey("create_flow_instance")
 
 	if !registry.HasAction(id) {
 		t.Fatal("expected builtin action to be discoverable without explicit registry entry")
@@ -1012,7 +1012,22 @@ func TestPipelineEngineActionRegistry_SynthesizesSupportedBuiltinActions(t *test
 	if !ok {
 		t.Fatal("expected builtin action instruction")
 	}
-	if got := instruction.Builtin; got != "increment_revision_count" {
+	if got := instruction.Builtin; got != "create_flow_instance" {
 		t.Fatalf("Builtin = %q", got)
+	}
+}
+
+func TestPipelineEngineActionRegistry_DoesNotSynthesizeRemovedBuiltinActions(t *testing.T) {
+	registry := pipelineEngineActionRegistry{}
+	id := identity.NormalizeActionKey("increment_revision_count")
+
+	if registry.HasAction(id) {
+		t.Fatal("did not expect removed builtin action to be discoverable")
+	}
+	if registry.IsExecutable(id) {
+		t.Fatal("did not expect removed builtin action to be executable")
+	}
+	if _, ok := registry.Action(id); ok {
+		t.Fatal("did not expect removed builtin action instruction")
 	}
 }
