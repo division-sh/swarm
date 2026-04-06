@@ -737,6 +737,31 @@ func TestRun_ReportsExpressionFieldReferenceErrorForDataAccumulationExpressionTh
 	}
 }
 
+func TestRun_AllowsTopLevelDataAccumulationExpressionToReadRuleProducedField(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+		Condition: "payload.score >= 70",
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{{
+				TargetField: "base_score",
+				SourceField: "score",
+			}},
+		},
+	}}
+	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{
+		TargetField: "adjusted_score",
+		Value:       runtimecontracts.CELExpression("entity.base_score + 1"),
+	}}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score") {
+		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_SuppressesExpressionFieldReferenceFindingWhenComputeMakesFieldAvailableBeforeOnComplete(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)

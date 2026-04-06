@@ -68,6 +68,21 @@ func TestWorkflowExpressionEvaluator_EvalBoolFailsClosedOnMissingEntityField(t *
 	}
 }
 
+func TestWorkflowExpressionEvaluator_EvalBoolIgnoresEntityRefsInsideStringLiterals(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	ok, err := eval.EvalBool(`payload.label == "entity.score"`, workflowExpressionContext{
+		Entity:  map[string]any{},
+		Payload: map[string]any{"label": "entity.score"},
+		Policy:  map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("EvalBool error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected quoted entity.* text to stay a string literal, not a missing entity ref")
+	}
+}
+
 func TestParseWorkflowEntityQueryPredicate_ResolvesPayloadReference(t *testing.T) {
 	predicate, err := parseWorkflowEntityQueryPredicate(
 		`name == payload.name`,
