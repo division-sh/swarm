@@ -2,10 +2,7 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"sort"
 	"strings"
 
@@ -68,58 +65,21 @@ func validateClaudeMCPToolsForManagedAgents(cfg *config.Config, gateway *runtime
 	if manager == nil {
 		return fmt.Errorf("agent manager is required for claude cli runtime")
 	}
-	token := strings.TrimSpace(toolGatewayToken)
-	if token == "" {
+	if strings.TrimSpace(toolGatewayToken) == "" {
 		return fmt.Errorf("tool gateway token must be configured for claude cli runtime")
 	}
-	handler := gateway.Handler()
 	for _, agentCfg := range manager.ListAgentConfigs() {
 		agentID := strings.TrimSpace(agentCfg.ID)
 		if agentID == "" {
 			continue
 		}
-		reqBody, err := json.Marshal(map[string]any{
-			"jsonrpc": "2.0",
-			"id":      agentID,
-			"method":  "tools/list",
-		})
-		if err != nil {
-			return fmt.Errorf("encode mcp tools/list for agent %s: %w", agentID, err)
-		}
-		req := httptest.NewRequest(http.MethodPost, "/mcp?agent_id="+agentID, strings.NewReader(string(reqBody)))
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			return fmt.Errorf("mcp tools/list failed for agent %s: http %d", agentID, rec.Code)
-		}
-		var rpcResp struct {
-			Result map[string]json.RawMessage `json:"result"`
-			Error  *struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &rpcResp); err != nil {
-			return fmt.Errorf("decode mcp tools/list for agent %s: %w", agentID, err)
-		}
-		if rpcResp.Error != nil {
-			return fmt.Errorf("mcp tools/list failed for agent %s: %s", agentID, strings.TrimSpace(rpcResp.Error.Message))
-		}
-		rawTools, ok := rpcResp.Result["tools"]
-		if !ok {
-			return fmt.Errorf("mcp tools/list returned no tools payload for agent %s", agentID)
-		}
-		var tools []map[string]any
-		if err := json.Unmarshal(rawTools, &tools); err != nil {
-			return fmt.Errorf("decode mcp tools array for agent %s: %w", agentID, err)
-		}
+		tools := gateway.MCPToolsForActor(agentCfg)
 		if len(tools) == 0 {
 			return fmt.Errorf("mcp tools/list returned no tools for agent %s", agentID)
 		}
 		toolNames := make(map[string]struct{}, len(tools))
 		for _, tool := range tools {
-			name := strings.TrimSpace(asString(tool["name"]))
+			name := strings.TrimSpace(tool.Name)
 			if name == "" {
 				continue
 			}

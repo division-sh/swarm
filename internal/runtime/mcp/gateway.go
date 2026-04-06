@@ -423,6 +423,18 @@ func emitTurnDedupeKey(toolName string, arguments any) string {
 
 func (g *Gateway) mcpToolsForRequest(r *http.Request) []ToolDef {
 	actor, allowed, actorOK := g.actorForCatalogRequest(r)
+	return g.mcpToolsForActor(actor, allowed, actorOK)
+}
+
+func (g *Gateway) MCPToolsForActor(actor models.AgentConfig) []ToolDef {
+	actor = g.hydrateActor(actor)
+	if strings.TrimSpace(actor.ID) == "" {
+		return nil
+	}
+	return g.mcpToolsForActor(actor, nil, true)
+}
+
+func (g *Gateway) mcpToolsForActor(actor models.AgentConfig, allowed map[string]struct{}, actorOK bool) []ToolDef {
 	catalog := g.toolCatalog(actor, actorOK)
 	set, hasSet := g.requestToolCapabilities(actor, actorOK, catalog, allowed)
 
@@ -582,26 +594,7 @@ func (g *Gateway) actorForCatalogRequest(r *http.Request) (models.AgentConfig, m
 			return turn.Actor, turn.Allowed, true
 		}
 	}
-	agentID := strings.TrimSpace(requestAgentID(r))
-	if agentID == "" || g == nil || g.hooks.ResolveActorConfig == nil {
-		return models.AgentConfig{}, nil, false
-	}
-	actor, ok := g.hooks.ResolveActorConfig(agentID)
-	if !ok {
-		return models.AgentConfig{}, nil, false
-	}
-	actor = g.hydrateActor(actor)
-	if strings.TrimSpace(actor.ID) == "" {
-		return models.AgentConfig{}, nil, false
-	}
-	return actor, nil, true
-}
-
-func requestAgentID(r *http.Request) string {
-	return FirstNonEmpty(
-		headerValue(r, actorIDHeader),
-		strings.TrimSpace(r.URL.Query().Get(actorIDQuery)),
-	)
+	return models.AgentConfig{}, nil, false
 }
 
 func (g *Gateway) AuthorizeForTest(r *http.Request) error {
