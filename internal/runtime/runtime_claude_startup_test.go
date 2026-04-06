@@ -309,3 +309,25 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedCallableP
 		t.Fatalf("expected unexpected callable probe error, got %v", err)
 	}
 }
+
+func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnGenericPhraseNonValidationProbeError(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: startupProbeDefs(),
+		caps: startupProbeCaps(),
+		execErrs: map[string]error{
+			"query_entities": errors.New("execution path must be enabled before use"),
+		},
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager)
+	if err == nil || !strings.Contains(err.Error(), "execution path must be enabled before use") {
+		t.Fatalf("expected generic phrase non-validation probe error, got %v", err)
+	}
+}
