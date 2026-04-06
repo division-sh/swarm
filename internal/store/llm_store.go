@@ -434,6 +434,108 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 		return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
 	}
 	scopeKey := strings.TrimSpace(rec.ScopeKey)
+	if caps.Conversations.AuditRunID {
+		if err := s.ensureRunRow(ctx, caps, tx, rec.RunID); err != nil {
+			return err
+		}
+	}
+	execFn := s.DB.ExecContext
+	if tx != nil {
+		execFn = tx.ExecContext
+	}
+	adoptLegacyQuery := `
+		INSERT INTO agent_conversation_audits (
+			session_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+		)
+		SELECT
+			session_id,
+			agent_id,
+			entity_id,
+			flow_instance,
+			NULLIF(scope_key, ''),
+			COALESCE(NULLIF(scope, ''), 'global'),
+			conversation,
+			turn_count,
+			runtime_mode,
+			runtime_state,
+			status,
+			created_at,
+			updated_at
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+		  AND agent_id = $2
+		  AND runtime_mode = 'task'
+		  AND status = 'active'
+		ON CONFLICT (session_id) DO NOTHING
+	`
+	adoptLegacyArgs := []any{rec.SessionID, rec.AgentID}
+	if caps.Conversations.AuditRunID && caps.Conversations.SessionRunID {
+		adoptLegacyQuery = `
+			INSERT INTO agent_conversation_audits (
+				session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+				conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+			)
+			SELECT
+				session_id,
+				run_id,
+				agent_id,
+				entity_id,
+				flow_instance,
+				NULLIF(scope_key, ''),
+				COALESCE(NULLIF(scope, ''), 'global'),
+				conversation,
+				turn_count,
+				runtime_mode,
+				runtime_state,
+				status,
+				created_at,
+				updated_at
+			FROM agent_sessions
+			WHERE session_id = $1::uuid
+			  AND agent_id = $2
+			  AND runtime_mode = 'task'
+			  AND status = 'active'
+			ON CONFLICT (session_id) DO NOTHING
+		`
+		adoptLegacyArgs = []any{rec.SessionID, rec.AgentID}
+	} else if caps.Conversations.AuditRunID {
+		adoptLegacyQuery = `
+			INSERT INTO agent_conversation_audits (
+				session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+				conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+			)
+			SELECT
+				session_id,
+				NULLIF($3,'')::uuid,
+				agent_id,
+				entity_id,
+				flow_instance,
+				NULLIF(scope_key, ''),
+				COALESCE(NULLIF(scope, ''), 'global'),
+				conversation,
+				turn_count,
+				runtime_mode,
+				runtime_state,
+				status,
+				created_at,
+				updated_at
+			FROM agent_sessions
+			WHERE session_id = $1::uuid
+			  AND agent_id = $2
+			  AND runtime_mode = 'task'
+			  AND status = 'active'
+			ON CONFLICT (session_id) DO NOTHING
+		`
+		adoptLegacyArgs = []any{rec.SessionID, rec.AgentID, nullUUIDString(rec.RunID)}
+	}
+	res, err := execFn(ctx, adoptLegacyQuery, adoptLegacyArgs...)
+	if err != nil {
+		return fmt.Errorf("adopt legacy task conversation row: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows > 0 {
+		return nil
+	}
 	q := `
 		INSERT INTO agent_conversation_audits (
 			session_id, agent_id, entity_id, flow_instance, scope_key, scope,
@@ -454,15 +556,7 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			now(),
 			now()
 		)
-		ON CONFLICT (session_id) DO UPDATE SET
-			agent_id = EXCLUDED.agent_id,
-			entity_id = EXCLUDED.entity_id,
-			flow_instance = EXCLUDED.flow_instance,
-			scope_key = EXCLUDED.scope_key,
-			scope = EXCLUDED.scope,
-			runtime_mode = EXCLUDED.runtime_mode,
-			status = 'active',
-			updated_at = now()
+		ON CONFLICT (session_id) DO NOTHING
 	`
 	args := []any{
 		rec.SessionID,
@@ -473,9 +567,6 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 		runtimesessions.RuntimeModeTask.String(),
 	}
 	if caps.Conversations.AuditRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, rec.RunID); err != nil {
-			return err
-		}
 		q = `
 			INSERT INTO agent_conversation_audits (
 				session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
@@ -497,16 +588,7 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 				now(),
 				now()
 			)
-			ON CONFLICT (session_id) DO UPDATE SET
-				run_id = COALESCE(EXCLUDED.run_id, agent_conversation_audits.run_id),
-				agent_id = EXCLUDED.agent_id,
-				entity_id = EXCLUDED.entity_id,
-				flow_instance = EXCLUDED.flow_instance,
-				scope_key = EXCLUDED.scope_key,
-				scope = EXCLUDED.scope,
-				runtime_mode = EXCLUDED.runtime_mode,
-				status = 'active',
-				updated_at = now()
+			ON CONFLICT (session_id) DO NOTHING
 		`
 		args = []any{
 			rec.SessionID,
@@ -518,13 +600,7 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			runtimesessions.RuntimeModeTask.String(),
 		}
 	}
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
-	}
-	if _, err := execFn(ctx, q,
-		args...,
-	); err != nil {
+	if _, err := execFn(ctx, q, args...); err != nil {
 		return fmt.Errorf("ensure task conversation audit row: %w", err)
 	}
 	return nil

@@ -388,10 +388,10 @@ func conversationQuerySources(caps store.StoreSchemaCapabilities) []string {
 			  AND runtime_mode IN ('session', 'session_per_entity')
 		`)
 	}
-	if caps.Conversations.Audits == store.SchemaFlavorCanonical {
-		sources = append(sources, `
+	if taskSource := store.CanonicalTaskConversationVisibilitySourceSQL(caps.Conversations); taskSource != "" {
+		sources = append(sources, fmt.Sprintf(`
 			SELECT
-				session_id::text AS session_id,
+				session_id,
 				agent_id,
 				'turn_audit' AS kind,
 				scope_key,
@@ -403,9 +403,10 @@ func conversationQuerySources(caps store.StoreSchemaCapabilities) []string {
 				conversation,
 				updated_at,
 				created_at
-			FROM agent_conversation_audits
-			WHERE status = 'active'
-		`)
+			FROM (
+				%s
+			) task_conversations
+		`, taskSource))
 	}
 	return sources
 }

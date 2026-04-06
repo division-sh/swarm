@@ -150,6 +150,101 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	}
 }
 
+func TestTaskConversationReader_ShowsLegacyTaskRowsDuringMixedRollout(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalConversationSurface(t, ctx, pg)
+	seedConformanceAgent(t, ctx, pg, "agent-1")
+
+	sessionID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `ALTER TABLE agent_sessions DROP CONSTRAINT IF EXISTS agent_sessions_runtime_mode_check`); err != nil {
+		t.Fatalf("drop task-runtime_mode check for mixed-rollout fixture: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+		) VALUES (
+			$1::uuid,
+			'agent-1',
+			'',
+			'global',
+			'[{"role":"assistant","content":"legacy task"}]'::jsonb,
+			1,
+			'task',
+			'{"summary":"legacy task"}'::jsonb,
+			'active',
+			now() - interval '5 minutes',
+			now() - interval '5 minutes'
+		)
+	`, sessionID); err != nil {
+		t.Fatalf("seed legacy task session row: %v", err)
+	}
+
+	reader := dashboardserver.NewSQLConversationReader(db, pg)
+	if reader == nil {
+		t.Fatal("NewSQLConversationReader returned nil")
+	}
+	items, err := reader.List(ctx, 10)
+	if err != nil {
+		t.Fatalf("List conversations: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("conversation count = %d, want 1", len(items))
+	}
+	if items[0].Kind != "turn_audit" || items[0].SessionID != sessionID || items[0].Summary != "legacy task" {
+		t.Fatalf("unexpected mixed-rollout summary: %+v", items[0])
+	}
+
+	item, ok, err := reader.Get(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("Get conversation: %v", err)
+	}
+	if !ok {
+		t.Fatalf("conversation %s not found", sessionID)
+	}
+	if item.Kind != "turn_audit" || len(item.Messages) != 1 || item.Messages[0].Content != "legacy task" {
+		t.Fatalf("unexpected mixed-rollout detail: %+v", item)
+	}
+
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "agent-1",
+		Mode:      "task",
+		Messages: []runtimellm.Message{
+			{Role: "assistant", Content: "canonical task"},
+		},
+		Summary:   "canonical task",
+		TurnCount: 2,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task): %v", err)
+	}
+
+	items, err = reader.List(ctx, 10)
+	if err != nil {
+		t.Fatalf("List conversations after canonical write: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("conversation count after canonical write = %d, want 1", len(items))
+	}
+	if items[0].SessionID != sessionID || items[0].Summary != "canonical task" {
+		t.Fatalf("unexpected canonical mixed-rollout summary: %+v", items[0])
+	}
+
+	item, ok, err = reader.Get(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("Get conversation after canonical write: %v", err)
+	}
+	if !ok {
+		t.Fatalf("canonical conversation %s not found", sessionID)
+	}
+	if len(item.Messages) != 1 || item.Messages[0].Content != "canonical task" || item.TurnCount != 2 {
+		t.Fatalf("unexpected canonical mixed-rollout detail: %+v", item)
+	}
+}
+
 func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
