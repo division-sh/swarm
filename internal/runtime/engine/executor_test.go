@@ -105,7 +105,9 @@ func (s contextualBoolEvaluator) EvalBool(expression string, base BaseContext) (
 	}
 	return false, nil
 }
-func (s contextualBoolEvaluator) EvalValue(string, BaseContext) (any, error) { return nil, ErrNotImplemented }
+func (s contextualBoolEvaluator) EvalValue(string, BaseContext) (any, error) {
+	return nil, ErrNotImplemented
+}
 func (r stubGuardRegistry) HasGuard(id identity.GuardKey) bool     { _, ok := r.entries[id]; return ok }
 func (r stubGuardRegistry) IsExecutable(id identity.GuardKey) bool { _, ok := r.entries[id]; return ok }
 func (r stubGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool) {
