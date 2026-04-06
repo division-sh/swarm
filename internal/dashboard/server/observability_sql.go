@@ -43,20 +43,47 @@ type eventDeliveryRecord struct {
 	RetryCount int    `json:"retry_count,omitempty"`
 }
 
+type deliveryLifecycleSummary struct {
+	Pending    int `json:"pending,omitempty"`
+	InProgress int `json:"in_progress,omitempty"`
+	Delivered  int `json:"delivered,omitempty"`
+	Failed     int `json:"failed,omitempty"`
+	DeadLetter int `json:"dead_letter,omitempty"`
+}
+
+func (s *deliveryLifecycleSummary) record(status string) {
+	if s == nil {
+		return
+	}
+	switch strings.TrimSpace(status) {
+	case "pending":
+		s.Pending++
+	case "in_progress":
+		s.InProgress++
+	case "delivered":
+		s.Delivered++
+	case "failed":
+		s.Failed++
+	case "dead_letter":
+		s.DeadLetter++
+	}
+}
+
 type eventRecord struct {
-	ID            string                `json:"id"`
-	EventID       string                `json:"event_id,omitempty"`
-	Type          string                `json:"type,omitempty"`
-	CreatedAt     string                `json:"created_at,omitempty"`
-	SourceAgent   string                `json:"source_agent,omitempty"`
-	EntityID      string                `json:"entity_id,omitempty"`
-	Scope         string                `json:"scope,omitempty"`
-	ParentEventID string                `json:"parent_event_id,omitempty"`
-	Payload       any                   `json:"payload,omitempty"`
-	Deliveries    []eventDeliveryRecord `json:"deliveries,omitempty"`
-	ErrorCount    int                   `json:"error_count,omitempty"`
-	DeadCount     int                   `json:"dead_count,omitempty"`
-	PendingCount  int                   `json:"pending_count,omitempty"`
+	ID                string                   `json:"id"`
+	EventID           string                   `json:"event_id,omitempty"`
+	Type              string                   `json:"type,omitempty"`
+	CreatedAt         string                   `json:"created_at,omitempty"`
+	SourceAgent       string                   `json:"source_agent,omitempty"`
+	EntityID          string                   `json:"entity_id,omitempty"`
+	Scope             string                   `json:"scope,omitempty"`
+	ParentEventID     string                   `json:"parent_event_id,omitempty"`
+	Payload           any                      `json:"payload,omitempty"`
+	DeliveryLifecycle deliveryLifecycleSummary `json:"delivery_lifecycle,omitempty"`
+	Deliveries        []eventDeliveryRecord    `json:"deliveries,omitempty"`
+	ErrorCount        int                      `json:"error_count,omitempty"`
+	DeadCount         int                      `json:"dead_count,omitempty"`
+	PendingCount      int                      `json:"pending_count,omitempty"`
 }
 
 type runtimeLogRecord struct {
@@ -105,6 +132,16 @@ func NewSQLObservabilityReader(db *sql.DB) *SQLObservabilityReader {
 	return &SQLObservabilityReader{db: db}
 }
 
+func applyDeliveryLifecycle(record *eventRecord, lifecycle deliveryLifecycleSummary) {
+	if record == nil {
+		return
+	}
+	record.DeliveryLifecycle = lifecycle
+	record.PendingCount = lifecycle.Pending
+	record.ErrorCount = lifecycle.Failed
+	record.DeadCount = lifecycle.DeadLetter
+}
+
 func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFilter, limit int) ([]eventRecord, error) {
 	if r == nil || r.db == nil {
 		return []eventRecord{}, nil
@@ -122,28 +159,22 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 			COALESCE(e.scope, ''),
 			COALESCE(e.source_event_id::text, '') AS parent_event_id,
 			COALESCE(e.payload, '{}'::jsonb),
-			COALESCE((
-				SELECT COUNT(*)::int
-				FROM event_receipts r
-				WHERE r.event_id = e.event_id
-				  AND r.outcome = 'dead_letter'
-			), 0) AS dead_count,
-			COALESCE((
-				SELECT COUNT(*)::int
-				FROM event_receipts r
-				WHERE r.event_id = e.event_id
-				  AND r.outcome IN ('reject', 'kill', 'escalate')
-			), 0) AS error_count,
-			COALESCE((
-				SELECT COUNT(*)::int
-				FROM event_deliveries d
-				LEFT JOIN event_receipts r
-					ON r.event_id = d.event_id
-					AND r.subscriber_id = d.subscriber_id
-				WHERE d.event_id = e.event_id
-				  AND r.receipt_id IS NULL
-			), 0) AS pending_count
+			COALESCE(dl.pending_count, 0),
+			COALESCE(dl.in_progress_count, 0),
+			COALESCE(dl.delivered_count, 0),
+			COALESCE(dl.failed_count, 0),
+			COALESCE(dl.dead_letter_count, 0)
 		FROM events e
+		LEFT JOIN LATERAL (
+			SELECT
+				COUNT(*) FILTER (WHERE d.status = 'pending')::int AS pending_count,
+				COUNT(*) FILTER (WHERE d.status = 'in_progress')::int AS in_progress_count,
+				COUNT(*) FILTER (WHERE d.status = 'delivered')::int AS delivered_count,
+				COUNT(*) FILTER (WHERE d.status = 'failed')::int AS failed_count,
+				COUNT(*) FILTER (WHERE d.status = 'dead_letter')::int AS dead_letter_count
+			FROM event_deliveries d
+			WHERE d.event_id = e.event_id
+		) dl ON TRUE
 		WHERE e.event_name <> 'platform.runtime_log'
 		  AND ($1 = '' OR e.event_name = $1)
 		  AND ($2 = '' OR COALESCE(e.produced_by, '') = $2)
@@ -168,8 +199,23 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 		var (
 			item       eventRecord
 			payloadRaw []byte
+			lifecycle  deliveryLifecycleSummary
 		)
-		if err := rows.Scan(&item.ID, &item.Type, &item.CreatedAt, &item.SourceAgent, &item.EntityID, &item.Scope, &item.ParentEventID, &payloadRaw, &item.DeadCount, &item.ErrorCount, &item.PendingCount); err != nil {
+		if err := rows.Scan(
+			&item.ID,
+			&item.Type,
+			&item.CreatedAt,
+			&item.SourceAgent,
+			&item.EntityID,
+			&item.Scope,
+			&item.ParentEventID,
+			&payloadRaw,
+			&lifecycle.Pending,
+			&lifecycle.InProgress,
+			&lifecycle.Delivered,
+			&lifecycle.Failed,
+			&lifecycle.DeadLetter,
+		); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
 		item.EventID = item.ID
@@ -181,6 +227,7 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 		if strings.TrimSpace(item.EntityID) == "" {
 			item.EntityID = readString(payloadMap["entity_id"])
 		}
+		applyDeliveryLifecycle(&item, lifecycle)
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -230,57 +277,45 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 		item.EntityID = readString(payloadMap["entity_id"])
 	}
 
-	deliveries, deadCount, errorCount, pendingCount, err := r.loadEventDeliveries(ctx, id)
+	deliveries, lifecycle, err := r.loadEventDeliveries(ctx, id)
 	if err != nil {
 		return eventRecord{}, false, err
 	}
 	item.Deliveries = deliveries
-	item.DeadCount = deadCount
-	item.ErrorCount = errorCount
-	item.PendingCount = pendingCount
+	applyDeliveryLifecycle(&item, lifecycle)
 	return item, true, nil
 }
 
-func (r *SQLObservabilityReader) loadEventDeliveries(ctx context.Context, id string) ([]eventDeliveryRecord, int, int, int, error) {
+func (r *SQLObservabilityReader) loadEventDeliveries(ctx context.Context, id string) ([]eventDeliveryRecord, deliveryLifecycleSummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			d.subscriber_id,
-			COALESCE(r.outcome, d.status, 'pending'),
-			COALESCE(r.side_effects->>'error', d.last_error, ''),
-			COALESCE((r.side_effects->>'retry_count')::int, d.retry_count, 0)
+			COALESCE(d.status, 'pending'),
+			COALESCE(d.last_error, ''),
+			COALESCE(d.retry_count, 0)
 		FROM event_deliveries d
-		LEFT JOIN event_receipts r
-			ON r.event_id = d.event_id
-			AND r.subscriber_id = d.subscriber_id
 		WHERE d.event_id::text = $1
 		ORDER BY d.created_at ASC, d.subscriber_id ASC
 	`, id)
 	if err != nil {
-		return nil, 0, 0, 0, fmt.Errorf("load event deliveries: %w", err)
+		return nil, deliveryLifecycleSummary{}, fmt.Errorf("load event deliveries: %w", err)
 	}
 	defer rows.Close()
 
 	out := []eventDeliveryRecord{}
-	var deadCount, errorCount, pendingCount int
+	var lifecycle deliveryLifecycleSummary
 	for rows.Next() {
 		var item eventDeliveryRecord
 		if err := rows.Scan(&item.AgentID, &item.Status, &item.Error, &item.RetryCount); err != nil {
-			return nil, 0, 0, 0, fmt.Errorf("scan event delivery: %w", err)
+			return nil, deliveryLifecycleSummary{}, fmt.Errorf("scan event delivery: %w", err)
 		}
-		switch strings.TrimSpace(item.Status) {
-		case "dead_letter":
-			deadCount++
-		case "reject", "kill", "escalate", "error", "failed":
-			errorCount++
-		case "pending":
-			pendingCount++
-		}
+		lifecycle.record(item.Status)
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, 0, 0, fmt.Errorf("event delivery rows: %w", err)
+		return nil, deliveryLifecycleSummary{}, fmt.Errorf("event delivery rows: %w", err)
 	}
-	return out, deadCount, errorCount, pendingCount, nil
+	return out, lifecycle, nil
 }
 
 func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter RuntimeLogFilter, limit int) ([]runtimeLogRecord, error) {
