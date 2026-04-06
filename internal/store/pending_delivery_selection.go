@@ -15,15 +15,41 @@ func RequireCanonicalPendingAgentDeliveryCapabilities(caps StoreSchemaCapabiliti
 	}
 }
 
-func CanonicalPendingAgentDeliveryPredicateSQL(receiptAlias string) string {
+func CanonicalPendingAgentDeliveryPredicateSQL(deliveryAlias, receiptAlias string) string {
 	return fmt.Sprintf(`(
-		%s.event_id IS NULL
-		OR (
-			COALESCE(%s.side_effects->>'manager_status', '') = 'error'
-			AND COALESCE((%s.side_effects->>'retry_count')::int, 0) <= 1
+		(
+			%s.delivery_id IS NOT NULL
 			AND (
-				(COALESCE((%s.side_effects->>'retry_count')::int, 0) = 1 AND %s.processed_at <= now() - interval '1 minute')
+				%s.status IN ('pending', 'in_progress')
+				OR (
+					%s.status = 'failed'
+					AND COALESCE(%s.retry_count, 0) < 2
+					AND COALESCE(%s.delivered_at, %s.created_at) <= now() - interval '1 minute'
+				)
 			)
 		)
-	)`, receiptAlias, receiptAlias, receiptAlias, receiptAlias, receiptAlias)
+		OR (
+			%s.delivery_id IS NULL
+			AND (
+				%s.event_id IS NULL
+				OR (
+					COALESCE(%s.side_effects->>'manager_status', '') = 'error'
+					AND COALESCE((%s.side_effects->>'retry_count')::int, 0) < 2
+					AND %s.processed_at <= now() - interval '1 minute'
+				)
+			)
+		)
+	)`,
+		deliveryAlias,
+		deliveryAlias,
+		deliveryAlias,
+		deliveryAlias,
+		deliveryAlias,
+		deliveryAlias,
+		deliveryAlias,
+		receiptAlias,
+		receiptAlias,
+		receiptAlias,
+		receiptAlias,
+	)
 }
