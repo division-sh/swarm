@@ -21,6 +21,7 @@ import (
 
 type flowInstancePersistence interface {
 	Upsert(ctx context.Context, instance runtimepipeline.WorkflowInstance) error
+	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
 }
 
 type flowInstanceRouteInstaller interface {
@@ -245,6 +246,9 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
 	}
+	if am.workflowInstances == nil {
+		return fmt.Errorf("workflow instance store is required")
+	}
 	instance := req.Instance
 	templateID := strings.TrimSpace(instance.TemplateID)
 	instanceID := strings.TrimSpace(instance.InstanceID)
@@ -257,6 +261,9 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	routeIdentity := instance.Route()
 	if !routeIdentity.Valid() {
 		return fmt.Errorf("derive route identity for flow path %s", flowPath)
+	}
+	if err := am.workflowInstances.MarkTerminated(ctx, flowPath, time.Now().UTC()); err != nil {
+		return fmt.Errorf("persist flow instance terminal state %s: %w", flowPath, err)
 	}
 	am.mu.RLock()
 	agentIDs := make([]string, 0, len(am.agentCfg))

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"strings"
+	"time"
 
 	"swarm/internal/events"
 	"swarm/internal/runtime/core/identity"
@@ -46,6 +47,7 @@ type WorkflowInstancePersistence interface {
 	Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error)
 	List(ctx context.Context) ([]WorkflowInstance, error)
 	Upsert(ctx context.Context, instance WorkflowInstance) error
+	MarkTerminated(ctx context.Context, instanceID string, terminatedAt time.Time) error
 	Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error
 	Delete(ctx context.Context, instanceID string) error
 }

@@ -228,6 +228,75 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 	}
 }
 
+func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeactivation(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:         "root",
+			InitialStage: "pending",
+			FlowTerminal: map[string][]string{
+				"review": {"completed"},
+			},
+			FlowPrefix: map[string]string{
+				"review": "review",
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"review": {Mode: "template"},
+		},
+	}
+	var got FlowInstanceDeactivationRequest
+	called := false
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
+		Module: &pipelineFixtureWorkflowModule{
+			source:   semanticview.Wrap(bundle),
+			workflow: NewWorkflowDefinition("root", []WorkflowStage{{Name: "pending"}, {Name: "completed", Terminal: true}}, nil),
+		},
+		InstanceDeactivator: func(_ context.Context, req FlowInstanceDeactivationRequest) error {
+			called = true
+			got = req
+			return nil
+		},
+	})
+
+	const flowPath = "review/inst-1"
+	entityID := FlowInstanceEntityID(flowPath)
+	const subjectID = "11111111-1111-1111-1111-111111111111"
+	const parentEntityID = "22222222-2222-2222-2222-222222222222"
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      "inst-1",
+		SubjectID:       subjectID,
+		StorageRef:      flowPath,
+		WorkflowName:    "review",
+		WorkflowVersion: "v-test",
+		CurrentState:    "pending",
+		Metadata: map[string]any{
+			"entity_id":        entityID,
+			"instance_id":      "inst-1",
+			"flow_path":        flowPath,
+			"subject_id":       subjectID,
+			"parent_entity_id": parentEntityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed template instance: %v", err)
+	}
+
+	if err := pc.maybeDeactivateTerminalFlowInstance(context.Background(), entityID, "completed"); err != nil {
+		t.Fatalf("maybeDeactivateTerminalFlowInstance: %v", err)
+	}
+	if !called {
+		t.Fatal("expected template flow deactivation")
+	}
+	if got.FinalState != "completed" {
+		t.Fatalf("FinalState = %q, want completed", got.FinalState)
+	}
+	if got.Instance.InstancePath != flowPath {
+		t.Fatalf("InstancePath = %q, want %q", got.Instance.InstancePath, flowPath)
+	}
+}
+
 func TestProjectWorkflowSubjectGatesRequiresCanonicalEntityID(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := NewWorkflowInstanceStore(db)

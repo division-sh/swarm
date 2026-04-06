@@ -172,6 +172,54 @@ func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, f
 	return nil
 }
 
+func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	storageRef = strings.TrimSpace(storageRef)
+	if storageRef == "" {
+		return fmt.Errorf("workflow instance storage_ref is required")
+	}
+	if terminatedAt.IsZero() {
+		terminatedAt = time.Now().UTC()
+	}
+	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	committed := !ownedTx
+	if ownedTx {
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+			}
+		}()
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE flow_instances
+		SET status = 'terminated',
+		    terminated_at = COALESCE(terminated_at, $2)
+		WHERE instance_id = $1
+	`, storageRef, terminatedAt)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("flow instance not found: %s", storageRef)
+	}
+	if ownedTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		committed = true
+	}
+	return nil
+}
+
 func (s *WorkflowInstanceStore) Delete(context.Context, string) error {
 	return fmt.Errorf("workflow instance deletion is unsupported: entity_state writes must stay on the mutation-logged upsert path")
 }
