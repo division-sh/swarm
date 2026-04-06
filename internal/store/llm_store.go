@@ -467,7 +467,9 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 		  AND agent_id = $2
 		  AND runtime_mode = 'task'
 		  AND status = 'active'
-		ON CONFLICT (session_id) DO NOTHING
+		ON CONFLICT (session_id) DO UPDATE SET
+			status = 'active',
+			updated_at = now()
 	`
 	adoptLegacyArgs := []any{rec.SessionID, rec.AgentID}
 	if caps.Conversations.AuditRunID && caps.Conversations.SessionRunID {
@@ -496,7 +498,10 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			  AND agent_id = $2
 			  AND runtime_mode = 'task'
 			  AND status = 'active'
-			ON CONFLICT (session_id) DO NOTHING
+			ON CONFLICT (session_id) DO UPDATE SET
+				run_id = COALESCE(agent_conversation_audits.run_id, EXCLUDED.run_id),
+				status = 'active',
+				updated_at = now()
 		`
 		adoptLegacyArgs = []any{rec.SessionID, rec.AgentID}
 	} else if caps.Conversations.AuditRunID {
@@ -525,7 +530,10 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			  AND agent_id = $2
 			  AND runtime_mode = 'task'
 			  AND status = 'active'
-			ON CONFLICT (session_id) DO NOTHING
+			ON CONFLICT (session_id) DO UPDATE SET
+				run_id = COALESCE(agent_conversation_audits.run_id, EXCLUDED.run_id),
+				status = 'active',
+				updated_at = now()
 		`
 		adoptLegacyArgs = []any{rec.SessionID, rec.AgentID, nullUUIDString(rec.RunID)}
 	}
@@ -556,7 +564,9 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			now(),
 			now()
 		)
-		ON CONFLICT (session_id) DO NOTHING
+		ON CONFLICT (session_id) DO UPDATE SET
+			status = 'active',
+			updated_at = now()
 	`
 	args := []any{
 		rec.SessionID,
@@ -588,7 +598,10 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 				now(),
 				now()
 			)
-			ON CONFLICT (session_id) DO NOTHING
+			ON CONFLICT (session_id) DO UPDATE SET
+				run_id = COALESCE(agent_conversation_audits.run_id, EXCLUDED.run_id),
+				status = 'active',
+				updated_at = now()
 		`
 		args = []any{
 			rec.SessionID,
