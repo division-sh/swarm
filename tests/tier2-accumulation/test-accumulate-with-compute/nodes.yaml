@@ -11,9 +11,17 @@ test-node:
       on_complete:
         - compute:
             operation: weighted_average
-            output_field: composite
-            value_field: score
-            weight_field: weight
+            store_as: entity.composite
+            keys:
+              dimension_key: dimension
+              score_keys: [score]
+            tiers:
+              - dimensions: [a]
+                weight: 0.5
+              - dimensions: [b]
+                weight: 0.3
+              - dimensions: [c]
+                weight: 0.2
       advances_to: complete
       emits: scores.aggregated
   state_schema:
