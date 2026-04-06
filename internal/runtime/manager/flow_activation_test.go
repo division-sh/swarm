@@ -12,6 +12,7 @@ import (
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/testutil"
 )
 
 type flowActivationTestBus struct {
@@ -21,7 +22,9 @@ type flowActivationTestBus struct {
 }
 
 type flowActivationTestInstanceStore struct {
-	upserts []runtimepipeline.WorkflowInstance
+	upserts          []runtimepipeline.WorkflowInstance
+	terminatedPaths  []string
+	terminatedAtSeen []time.Time
 }
 
 type flowActivationTestStore struct {
@@ -36,6 +39,12 @@ func newFlowActivationManager(bus Bus, instances flowInstancePersistence, stores
 
 func (s *flowActivationTestInstanceStore) Upsert(_ context.Context, instance runtimepipeline.WorkflowInstance) error {
 	s.upserts = append(s.upserts, instance)
+	return nil
+}
+
+func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, storageRef string, terminatedAt time.Time) error {
+	s.terminatedPaths = append(s.terminatedPaths, strings.TrimSpace(storageRef))
+	s.terminatedAtSeen = append(s.terminatedAtSeen, terminatedAt)
 	return nil
 }
 
@@ -406,7 +415,8 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 
 func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	instances := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(bus, instances)
 	bundle := testFlowBundle("")
 
 	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
@@ -422,11 +432,18 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
 		t.Fatalf("removed pairs = %#v, want [review/inst-1]", bus.removedPairs)
 	}
+	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "review/inst-1" {
+		t.Fatalf("terminated paths = %#v, want [review/inst-1]", instances.terminatedPaths)
+	}
+	if len(instances.terminatedAtSeen) != 1 || instances.terminatedAtSeen[0].IsZero() {
+		t.Fatalf("terminated_at seen = %#v, want one non-zero timestamp", instances.terminatedAtSeen)
+	}
 }
 
 func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	instances := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(bus, instances)
 	bundle := testNestedFlowBundle()
 
 	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "grandchild", "inst-1", "ent-1", "child/grandchild/inst-1"))
@@ -438,6 +455,67 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 	}
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "child/grandchild/inst-1" {
 		t.Fatalf("removed pairs = %#v, want [child/grandchild/inst-1]", bus.removedPairs)
+	}
+	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "child/grandchild/inst-1" {
+		t.Fatalf("terminated paths = %#v, want [child/grandchild/inst-1]", instances.terminatedPaths)
+	}
+}
+
+func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bus := &flowActivationTestBus{}
+	store := runtimepipeline.NewWorkflowInstanceStore(db)
+	am := newFlowActivationManager(bus, store)
+	bundle := testFlowBundle("")
+	const subjectID = "11111111-1111-1111-1111-111111111111"
+	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
+
+	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if err := store.Mutate(context.Background(), req.Instance.EntityID, func(instance *runtimepipeline.WorkflowInstance) {
+		instance.CurrentState = "completed"
+	}); err != nil {
+		t.Fatalf("Mutate: %v", err)
+	}
+
+	if err := am.DeactivateFlowInstanceModel(context.Background(), runtimepipeline.FlowInstanceDeactivationRequest{
+		ContractBundle: semanticview.Wrap(bundle),
+		Instance:       req.Instance,
+		FinalState:     "completed",
+	}); err != nil {
+		t.Fatalf("DeactivateFlowInstanceModel: %v", err)
+	}
+
+	var (
+		status       string
+		terminatedAt time.Time
+	)
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT status, terminated_at
+		FROM flow_instances
+		WHERE instance_id = $1
+	`, "review/inst-1").Scan(&status, &terminatedAt); err != nil {
+		t.Fatalf("query flow_instances: %v", err)
+	}
+	if strings.TrimSpace(status) != "terminated" {
+		t.Fatalf("flow_instances.status = %q, want terminated", status)
+	}
+	if terminatedAt.IsZero() {
+		t.Fatal("flow_instances.terminated_at is zero")
+	}
+
+	instance, ok, err := store.Load(context.Background(), req.Instance.EntityID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance")
+	}
+	if got := strings.TrimSpace(instance.CurrentState); got != "completed" {
+		t.Fatalf("current_state = %q, want completed", got)
 	}
 }
 
