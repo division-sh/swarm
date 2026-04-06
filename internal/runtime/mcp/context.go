@@ -10,6 +10,7 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolidentity"
 )
 
 type actorResolverFn func(context.Context) (models.AgentConfig, bool)
@@ -18,6 +19,7 @@ type TurnContext struct {
 	Actor      models.AgentConfig
 	Inbound    events.Event
 	HasInbound bool
+	Allowed    map[string]struct{}
 	Recorder   *runtimebus.EmittedEventsRecorder
 	Emitted    map[string]struct{}
 	CreatedAt  time.Time
@@ -48,6 +50,10 @@ func (r *TurnContextRegistry) RegisterTurnContext(ctx context.Context) string {
 }
 
 func (r *TurnContextRegistry) RegisterTurnContextWithTTL(ctx context.Context, ttl time.Duration) string {
+	return r.RegisterTurnContextWithAllowedTools(ctx, ttl, nil)
+}
+
+func (r *TurnContextRegistry) RegisterTurnContextWithAllowedTools(ctx context.Context, ttl time.Duration, allowedTools []string) string {
 	if r == nil || r.actorResolver == nil {
 		return ""
 	}
@@ -66,6 +72,7 @@ func (r *TurnContextRegistry) RegisterTurnContextWithTTL(ctx context.Context, tt
 		Actor:      actor,
 		Inbound:    inbound,
 		HasInbound: hasInbound,
+		Allowed:    normalizeAllowedTools(allowedTools),
 		Recorder:   recorder,
 		CreatedAt:  now,
 		ExpiresAt:  now.Add(ttl),
@@ -135,6 +142,14 @@ func (r *TurnContextRegistry) put(token string, data TurnContext) {
 	if data.ExpiresAt.IsZero() {
 		data.ExpiresAt = data.CreatedAt.Add(r.defaultTTL)
 	}
+	data.Allowed = copyAllowedTools(data.Allowed)
+	if data.Emitted != nil {
+		cloned := make(map[string]struct{}, len(data.Emitted))
+		for key := range data.Emitted {
+			cloned[key] = struct{}{}
+		}
+		data.Emitted = cloned
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pruneLocked(now)
@@ -150,6 +165,14 @@ func (r *TurnContextRegistry) get(token string) (TurnContext, bool) {
 	defer r.mu.Unlock()
 	r.pruneLocked(now)
 	v, ok := r.data[token]
+	v.Allowed = copyAllowedTools(v.Allowed)
+	if v.Emitted != nil {
+		cloned := make(map[string]struct{}, len(v.Emitted))
+		for key := range v.Emitted {
+			cloned[key] = struct{}{}
+		}
+		v.Emitted = cloned
+	}
 	return v, ok
 }
 
@@ -206,4 +229,33 @@ func (r *TurnContextRegistry) pruneLocked(now time.Time) {
 			delete(r.data, k)
 		}
 	}
+}
+
+func normalizeAllowedTools(values []string) map[string]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		name := toolidentity.CanonicalName(raw)
+		if name == "" {
+			continue
+		}
+		out[name] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func copyAllowedTools(values map[string]struct{}) map[string]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(values))
+	for key := range values {
+		out[key] = struct{}{}
+	}
+	return out
 }

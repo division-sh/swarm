@@ -6,6 +6,7 @@ import (
 )
 
 const (
+	ErrCodeAuthUnconfigured  = "mcp_auth_unconfigured"
 	ErrCodeAuthMissingBearer = "mcp_auth_missing_bearer"
 	ErrCodeAuthInvalidBearer = "mcp_auth_invalid_bearer"
 	ErrCodeContextMissing    = "mcp_context_token_missing"

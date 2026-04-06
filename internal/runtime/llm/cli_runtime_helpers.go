@@ -387,8 +387,12 @@ func estimateTokensFromBytes(b []byte) int {
 }
 
 func toolNamesCSV(tools []ToolDefinition) string {
+	return strings.Join(toolNames(tools), ",")
+}
+
+func toolNames(tools []ToolDefinition) []string {
 	if len(tools) == 0 {
-		return ""
+		return nil
 	}
 	names := make([]string, 0, len(tools))
 	seen := make(map[string]struct{}, len(tools))
@@ -403,7 +407,7 @@ func toolNamesCSV(tools []ToolDefinition) string {
 		seen[name] = struct{}{}
 		names = append(names, name)
 	}
-	return strings.Join(names, ",")
+	return names
 }
 
 func buildInitialPrompt(s *Session, firstMessage string) string {

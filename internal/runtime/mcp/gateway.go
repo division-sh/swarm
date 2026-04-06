@@ -59,28 +59,17 @@ func NewGateway(executor runtimeGatewayExecutor, authToken string, hooks Gateway
 }
 
 func (g *Gateway) hydrateActor(actor models.AgentConfig) models.AgentConfig {
+	actor.NormalizeRuntimeDescriptor()
+	actor.NormalizeEntityID()
 	actor.ID = strings.TrimSpace(actor.ID)
 	if actor.ID == "" || g.hooks.ResolveActorConfig == nil {
-		actor.NormalizeEntityID()
 		return actor
 	}
 	if resolved, ok := g.hooks.ResolveActorConfig(actor.ID); ok {
-		if strings.TrimSpace(actor.Role) != "" {
-			resolved.Role = strings.TrimSpace(actor.Role)
-		}
-		if strings.TrimSpace(actor.Mode) != "" {
-			resolved.Mode = strings.TrimSpace(actor.Mode)
-		}
-		if strings.TrimSpace(actor.ParentAgent) != "" {
-			resolved.ParentAgent = strings.TrimSpace(actor.ParentAgent)
-		}
-		if strings.TrimSpace(actor.EntityID) != "" {
-			resolved.EntityID = strings.TrimSpace(actor.EntityID)
-		}
+		resolved.NormalizeRuntimeDescriptor()
 		resolved.NormalizeEntityID()
 		return resolved
 	}
-	actor.NormalizeEntityID()
 	return actor
 }
 
@@ -131,21 +120,7 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.NormalizeEntityID()
-	actor := req.Actor
-	if strings.TrimSpace(actor.ID) == "" {
-		actor.ID = strings.TrimSpace(req.AgentID)
-		actor.Role = strings.TrimSpace(req.AgentRole)
-		actor.EntityID = strings.TrimSpace(req.EffectiveEntityID())
-		actor.Mode = strings.TrimSpace(req.Mode)
-	}
-	actor.NormalizeEntityID()
-	if strings.TrimSpace(actor.ID) == "" {
-		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: "actor id is required"})
-		return
-	}
-	actor = g.hydrateActor(actor)
-
-	ctx, err := g.toolExecutionContext(r, actor, toolName)
+	ctx, err := g.toolExecutionContext(r, toolName)
 	if err != nil {
 		g.logMCP(r, "warn", "tool.context_error", err, map[string]any{
 			"tool_name": toolName,
@@ -323,131 +298,57 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gateway) mcpExecutionContext(r *http.Request, toolName string) (context.Context, error) {
 	toolName = normalizeGatewayToolName(toolName)
-	allowed := ParseAllowedToolsFromRequest(r)
-	if token := ContextTokenFromRequest(r); token != "" {
-		if g.hooks.ResolveTurnContext != nil {
-			if turn, ok := g.hooks.ResolveTurnContext(token); ok {
-				ctx := context.Background()
-				if g.hooks.WithActor != nil {
-					ctx = g.hooks.WithActor(ctx, g.hydrateActor(turn.Actor))
-				}
-				if g.hooks.WithCurrentRuntimeEpoch != nil {
-					ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
-				}
-				ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
-				if turn.HasInbound && g.hooks.WithInboundEvent != nil {
-					ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
-				}
-				if turn.Recorder != nil && g.hooks.WithEmittedEventsRecorder != nil {
-					ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
-				}
-				actor := g.hydrateActor(turn.Actor)
-				ctx = g.withToolCapabilities(ctx, actor, g.catalogNames(g.toolCatalog(actor, true, strings.TrimSpace(actor.Role))), allowed)
-				return ctx, nil
-			}
-		}
-		if actor, ok := ActorFromRequest(r); ok {
-			actor = g.hydrateActor(actor)
-			fallbackAllowed := g.contextFallbackAllowed(actor, true, strings.TrimSpace(actor.Role), toolName, allowed)
-			if AllowContextFallbackOnMiss() && fallbackAllowed {
-				g.logContextFallback(r, "mcp.context.fallback_used", toolName, "token_not_found", token, true, fallbackAllowed)
-				ctx := context.Background()
-				if g.hooks.WithActor != nil {
-					ctx = g.hooks.WithActor(ctx, actor)
-				}
-				if g.hooks.WithCurrentRuntimeEpoch != nil {
-					ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
-				}
-				ctx = g.withToolCapabilities(ctx, actor, g.catalogNames(g.toolCatalog(actor, true, strings.TrimSpace(actor.Role))), allowed)
-				return ctx, nil
-			}
-			g.logContextFallback(r, "mcp.context.fallback_blocked", toolName, "token_not_found", token, false, fallbackAllowed)
-			return nil, g.newRuntimeError(ErrCodeContextNotFound, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
-		}
-		g.logContextFallback(r, "mcp.context.fallback_blocked", toolName, "token_not_found", token, false, false)
+	token := ContextTokenFromRequest(r)
+	if token == "" {
+		return nil, g.newRuntimeError(ErrCodeContextMissing, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
+	}
+	turn, ok := g.resolveRuntimeTurnContext(token)
+	if !ok {
 		return nil, g.newRuntimeError(ErrCodeContextNotFound, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
 	}
-	actor, ok := ActorFromRequest(r)
-	if !ok {
-		return nil, g.newRuntimeError(ErrCodeActorMissing, "mcp.context.resolve", false, nil, "missing actor id for mcp tool execution")
-	}
-	actor = g.hydrateActor(actor)
-	fallbackAllowed := g.contextFallbackAllowed(actor, true, strings.TrimSpace(actor.Role), toolName, allowed)
-	if !fallbackAllowed {
-		g.logContextFallback(r, "mcp.context.fallback_blocked", toolName, "token_missing", "", false, fallbackAllowed)
-		return nil, g.newRuntimeError(ErrCodeContextMissing, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
-	}
-	if RequireContextToken() {
-		g.logContextFallback(r, "mcp.context.fallback_blocked", toolName, "token_missing", "", false, fallbackAllowed)
-		return nil, g.newRuntimeError(ErrCodeContextMissing, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
-	}
-	g.logContextFallback(r, "mcp.context.fallback_used", toolName, "token_missing", "", true, fallbackAllowed)
 	ctx := context.Background()
 	if g.hooks.WithActor != nil {
-		ctx = g.hooks.WithActor(ctx, actor)
+		ctx = g.hooks.WithActor(ctx, turn.Actor)
 	}
 	if g.hooks.WithCurrentRuntimeEpoch != nil {
 		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 	}
-	ctx = g.withToolCapabilities(ctx, actor, g.catalogNames(g.toolCatalog(actor, true, strings.TrimSpace(actor.Role))), allowed)
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
+	if turn.HasInbound && g.hooks.WithInboundEvent != nil {
+		ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
+	}
+	if turn.Recorder != nil && g.hooks.WithEmittedEventsRecorder != nil {
+		ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
+	}
+	ctx = g.withToolCapabilities(ctx, turn.Actor, g.catalogNames(g.toolCatalog(turn.Actor, true)), turn.Allowed)
 	return ctx, nil
 }
 
-func (g *Gateway) toolExecutionContext(r *http.Request, actor models.AgentConfig, toolName string) (context.Context, error) {
+func (g *Gateway) toolExecutionContext(r *http.Request, toolName string) (context.Context, error) {
 	toolName = normalizeGatewayToolName(toolName)
-	allowed := ParseAllowedToolsFromRequest(r)
-	if token := ContextTokenFromRequest(r); token != "" {
-		if g.hooks.ResolveTurnContext != nil {
-			if turn, ok := g.hooks.ResolveTurnContext(token); ok {
-				ctx := r.Context()
-				if g.hooks.WithActor != nil {
-					ctx = g.hooks.WithActor(ctx, g.hydrateActor(turn.Actor))
-				}
-				if g.hooks.WithCurrentRuntimeEpoch != nil {
-					ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
-				}
-				ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
-				if turn.HasInbound && g.hooks.WithInboundEvent != nil {
-					ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
-				}
-				if turn.Recorder != nil && g.hooks.WithEmittedEventsRecorder != nil {
-					ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
-				}
-				resolvedActor := g.hydrateActor(turn.Actor)
-				ctx = g.withToolCapabilities(ctx, resolvedActor, g.catalogNames(g.toolCatalog(resolvedActor, true, strings.TrimSpace(resolvedActor.Role))), allowed)
-				return ctx, nil
-			}
-		}
-		fallbackAllowed := g.contextFallbackAllowed(actor, true, strings.TrimSpace(actor.Role), toolName, allowed)
-		if AllowContextFallbackOnMiss() && fallbackAllowed {
-			g.logContextFallback(r, "tool.context.fallback_used", toolName, "token_not_found", token, true, fallbackAllowed)
-			ctx := r.Context()
-			if g.hooks.WithActor != nil {
-				ctx = g.hooks.WithActor(ctx, actor)
-			}
-			if g.hooks.WithCurrentRuntimeEpoch != nil {
-				ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
-			}
-			ctx = g.withToolCapabilities(ctx, actor, g.catalogNames(g.toolCatalog(actor, true, strings.TrimSpace(actor.Role))), allowed)
-			return ctx, nil
-		}
-		g.logContextFallback(r, "tool.context.fallback_blocked", toolName, "token_not_found", token, false, fallbackAllowed)
-		return nil, g.newRuntimeError(ErrCodeContextNotFound, "tool.context.resolve", false, nil, "missing or invalid mcp context token")
-	}
-	fallbackAllowed := g.contextFallbackAllowed(actor, true, strings.TrimSpace(actor.Role), toolName, allowed)
-	if !fallbackAllowed {
-		g.logContextFallback(r, "tool.context.fallback_blocked", toolName, "token_missing", "", false, fallbackAllowed)
+	token := ContextTokenFromRequest(r)
+	if token == "" {
 		return nil, g.newRuntimeError(ErrCodeContextMissing, "tool.context.resolve", false, nil, "missing or invalid mcp context token")
 	}
-	g.logContextFallback(r, "tool.context.fallback_used", toolName, "token_missing", "", true, fallbackAllowed)
+	turn, ok := g.resolveRuntimeTurnContext(token)
+	if !ok {
+		return nil, g.newRuntimeError(ErrCodeContextNotFound, "tool.context.resolve", false, nil, "missing or invalid mcp context token")
+	}
 	ctx := r.Context()
 	if g.hooks.WithActor != nil {
-		ctx = g.hooks.WithActor(ctx, actor)
+		ctx = g.hooks.WithActor(ctx, turn.Actor)
 	}
 	if g.hooks.WithCurrentRuntimeEpoch != nil {
 		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 	}
-	ctx = g.withToolCapabilities(ctx, actor, g.catalogNames(g.toolCatalog(actor, true, strings.TrimSpace(actor.Role))), allowed)
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
+	if turn.HasInbound && g.hooks.WithInboundEvent != nil {
+		ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
+	}
+	if turn.Recorder != nil && g.hooks.WithEmittedEventsRecorder != nil {
+		ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
+	}
+	ctx = g.withToolCapabilities(ctx, turn.Actor, g.catalogNames(g.toolCatalog(turn.Actor, true)), turn.Allowed)
 	return ctx, nil
 }
 
@@ -521,18 +422,9 @@ func emitTurnDedupeKey(toolName string, arguments any) string {
 }
 
 func (g *Gateway) mcpToolsForRequest(r *http.Request) []ToolDef {
-	allowed := ParseAllowedToolsFromRequest(r)
-	role := ""
-	actor, actorOK := ActorFromRequest(r)
-	if actorOK {
-		actor = g.hydrateActor(actor)
-		role = strings.TrimSpace(actor.Role)
-	}
-	if role == "" {
-		role = headerValue(r, actorRoleHeader)
-	}
-	catalog := g.toolCatalog(actor, actorOK, role)
-	set, hasSet := g.requestToolCapabilities(actor, actorOK, role, catalog, allowed)
+	actor, allowed, actorOK := g.actorForCatalogRequest(r)
+	catalog := g.toolCatalog(actor, actorOK)
+	set, hasSet := g.requestToolCapabilities(actor, actorOK, catalog, allowed)
 
 	names := make([]string, 0, len(catalog))
 	if hasSet {
@@ -589,9 +481,12 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) []ToolDef {
 	return out
 }
 
-func (g *Gateway) toolCatalog(actor models.AgentConfig, actorOK bool, role string) map[string]llm.ToolDefinition {
+func (g *Gateway) toolCatalog(actor models.AgentConfig, actorOK bool) map[string]llm.ToolDefinition {
 	catalog := map[string]llm.ToolDefinition{}
-	if g.executor != nil && actorOK {
+	if !actorOK {
+		return catalog
+	}
+	if g.executor != nil {
 		for _, def := range g.executor.ToolDefinitionsForActor(actor) {
 			name := normalizeGatewayToolName(def.Name)
 			if name != "" {
@@ -609,7 +504,7 @@ func (g *Gateway) toolCatalog(actor models.AgentConfig, actorOK bool, role strin
 			}
 		}
 	}
-	if actorOK && g.hooks.EmitToolsForActor != nil {
+	if g.hooks.EmitToolsForActor != nil {
 		for _, def := range g.hooks.EmitToolsForActor(actor) {
 			name := normalizeGatewayToolName(def.Name)
 			if name != "" {
@@ -617,40 +512,27 @@ func (g *Gateway) toolCatalog(actor models.AgentConfig, actorOK bool, role strin
 				catalog[name] = def
 			}
 		}
-	} else if role != "" && g.hooks.EmitTools != nil {
-		for _, def := range g.hooks.EmitTools(role) {
-			name := normalizeGatewayToolName(def.Name)
-			if name != "" {
-				def.Name = name
-				catalog[name] = def
+	}
+	if g.hooks.EmitTools != nil {
+		role := strings.TrimSpace(actor.Role)
+		if role != "" {
+			for _, def := range g.hooks.EmitTools(role) {
+				name := normalizeGatewayToolName(def.Name)
+				if name != "" {
+					def.Name = name
+					catalog[name] = def
+				}
 			}
 		}
 	}
 	return catalog
 }
 
-func (g *Gateway) requestToolCapabilities(actor models.AgentConfig, actorOK bool, _ string, catalog map[string]llm.ToolDefinition, requestAllowed map[string]struct{}) (toolcapabilities.Set, bool) {
+func (g *Gateway) requestToolCapabilities(actor models.AgentConfig, actorOK bool, catalog map[string]llm.ToolDefinition, requestAllowed map[string]struct{}) (toolcapabilities.Set, bool) {
 	if g.executor == nil || !actorOK {
 		return toolcapabilities.Set{}, false
 	}
 	return g.executor.ToolCapabilitiesForActor(actor, g.catalogNames(catalog), requestAllowed), true
-}
-
-func (g *Gateway) requestToolCapability(actor models.AgentConfig, actorOK bool, role string, toolName string, requestAllowed map[string]struct{}) (toolcapabilities.Capability, bool) {
-	catalog := g.toolCatalog(actor, actorOK, role)
-	set, ok := g.requestToolCapabilities(actor, actorOK, role, catalog, requestAllowed)
-	if !ok {
-		return toolcapabilities.Capability{}, false
-	}
-	return set.Capability(toolName)
-}
-
-func (g *Gateway) contextFallbackAllowed(actor models.AgentConfig, actorOK bool, role string, toolName string, requestAllowed map[string]struct{}) bool {
-	cap, ok := g.requestToolCapability(actor, actorOK, role, toolName, requestAllowed)
-	if !ok {
-		return false
-	}
-	return cap.ContextRequirement == toolcapabilities.ContextRequirementActorContext
 }
 
 func (g *Gateway) catalogNames(catalog map[string]llm.ToolDefinition) []string {
@@ -664,7 +546,7 @@ func (g *Gateway) catalogNames(catalog map[string]llm.ToolDefinition) []string {
 
 func (g *Gateway) authorize(r *http.Request) error {
 	if strings.TrimSpace(g.authToken) == "" {
-		return nil
+		return g.newRuntimeError(ErrCodeAuthUnconfigured, "mcp.authorize", false, nil, "gateway authorization token is not configured")
 	}
 	authz := strings.TrimSpace(r.Header.Get("Authorization"))
 	if authz == "" {
@@ -679,6 +561,47 @@ func (g *Gateway) authorize(r *http.Request) error {
 		return g.newRuntimeError(ErrCodeAuthInvalidBearer, "mcp.authorize", false, nil, "invalid token")
 	}
 	return nil
+}
+
+func (g *Gateway) resolveRuntimeTurnContext(token string) (TurnContext, bool) {
+	if g == nil || g.hooks.ResolveTurnContext == nil {
+		return TurnContext{}, false
+	}
+	turn, ok := g.hooks.ResolveTurnContext(strings.TrimSpace(token))
+	if !ok {
+		return TurnContext{}, false
+	}
+	turn.Actor = g.hydrateActor(turn.Actor)
+	turn.Allowed = copyAllowedTools(turn.Allowed)
+	return turn, strings.TrimSpace(turn.Actor.ID) != ""
+}
+
+func (g *Gateway) actorForCatalogRequest(r *http.Request) (models.AgentConfig, map[string]struct{}, bool) {
+	if token := ContextTokenFromRequest(r); token != "" {
+		if turn, ok := g.resolveRuntimeTurnContext(token); ok {
+			return turn.Actor, turn.Allowed, true
+		}
+	}
+	agentID := strings.TrimSpace(requestAgentID(r))
+	if agentID == "" || g == nil || g.hooks.ResolveActorConfig == nil {
+		return models.AgentConfig{}, nil, false
+	}
+	actor, ok := g.hooks.ResolveActorConfig(agentID)
+	if !ok {
+		return models.AgentConfig{}, nil, false
+	}
+	actor = g.hydrateActor(actor)
+	if strings.TrimSpace(actor.ID) == "" {
+		return models.AgentConfig{}, nil, false
+	}
+	return actor, nil, true
+}
+
+func requestAgentID(r *http.Request) string {
+	return FirstNonEmpty(
+		headerValue(r, actorIDHeader),
+		strings.TrimSpace(r.URL.Query().Get(actorIDQuery)),
+	)
 }
 
 func (g *Gateway) AuthorizeForTest(r *http.Request) error {
