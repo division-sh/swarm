@@ -440,8 +440,9 @@ Default behavior:
 
 - one-shot mode prints the current system snapshot and exits
 - `--watch` sleeps internally and returns when the system snapshot changes
-- use `--watch` when the lead is waiting for the next event
-- after taking a lead action, restart `--watch` to wait for the next one
+- in this foreground TUI workflow, the lead should default to one-shot mode
+- use `--watch` only in a separate background or dedicated waiting session
+- after taking a lead action in the foreground TUI, rerun one-shot mode instead of blocking the session with `--watch`
 
 ## Escalation Rules
 
