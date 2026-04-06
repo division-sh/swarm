@@ -291,6 +291,7 @@ func TestParseToolListHeaderCanonicalizesAliases(t *testing.T) {
 }
 
 func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.T) {
+	registry := newTestTurnContextRegistry()
 	g := NewGateway(nil, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
 			if agentID != "campaign-coordinator" {
@@ -311,9 +312,16 @@ func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.
 				Schema:      map[string]any{"type": "object"},
 			}}
 		},
+		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
-	req := httptest.NewRequest("POST", "/mcp?agent_id=campaign-coordinator", nil)
+	putTestTurnContext(t, registry, "ctx-hydrated-role", TurnContext{
+		Actor:     models.AgentConfig{ID: "campaign-coordinator"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	req := httptest.NewRequest("POST", "/mcp?ctx_token=ctx-hydrated-role", nil)
 	tools := g.mcpToolsForRequest(req)
 	for _, tool := range tools {
 		if tool.Name == "emit_scan_requested" {
@@ -365,6 +373,7 @@ func TestGatewayMCPToolsForRequest_KeepsEmitToolsForDirectMCPContext(t *testing.
 }
 
 func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.T) {
+	registry := newTestTurnContextRegistry()
 	g := NewGateway(actorScopedToolExecutorStub{
 		defs: []llm.ToolDefinition{
 			{Name: "workflow_custom_tool", Description: "global"},
@@ -379,9 +388,16 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 				Role: "analysis",
 			}, true
 		},
+		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
-	req := httptest.NewRequest("POST", "/mcp?agent_id=analysis-agent", nil)
+	putTestTurnContext(t, registry, "ctx-actor-scoped", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	req := httptest.NewRequest("POST", "/mcp?ctx_token=ctx-actor-scoped", nil)
 	tools := g.mcpToolsForRequest(req)
 	if len(tools) != 1 {
 		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
@@ -392,6 +408,7 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 }
 
 func TestGatewayMCPToolsForRequest_IgnoresCallerAllowlist(t *testing.T) {
+	registry := newTestTurnContextRegistry()
 	g := NewGateway(actorScopedToolExecutorStub{
 		actorDefs: []llm.ToolDefinition{
 			{Name: "query_entities", Description: "actor scoped"},
@@ -401,9 +418,16 @@ func TestGatewayMCPToolsForRequest_IgnoresCallerAllowlist(t *testing.T) {
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
 			return models.AgentConfig{ID: agentID, Role: "analysis"}, true
 		},
+		ResolveTurnContext: registry.ResolveTurnContext,
 	})
 
-	req := httptest.NewRequest("POST", "/mcp?agent_id=analysis-agent&allowed_tools=Read", nil)
+	putTestTurnContext(t, registry, "ctx-ignore-allowlist", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	req := httptest.NewRequest("POST", "/mcp?ctx_token=ctx-ignore-allowlist&allowed_tools=Read", nil)
 	tools := g.mcpToolsForRequest(req)
 	if len(tools) != 2 {
 		t.Fatalf("tool count = %d, want 2 (%#v)", len(tools), tools)
@@ -416,6 +440,35 @@ func TestGatewayMCPToolsForRequest_IgnoresCallerAllowlist(t *testing.T) {
 }
 
 func TestGatewayMCPToolsForRequest_DoesNotTrustUnknownCallerAllowlist(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	g := NewGateway(actorScopedToolExecutorStub{
+		actorDefs: []llm.ToolDefinition{
+			{Name: "query_entities", Description: "actor scoped"},
+		},
+	}, "", GatewayHooks{
+		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+			return models.AgentConfig{ID: agentID, Role: "analysis"}, true
+		},
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-unknown-allowlist", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	req := httptest.NewRequest("POST", "/mcp?ctx_token=ctx-unknown-allowlist&allowed_tools=does_not_exist", nil)
+	tools := g.mcpToolsForRequest(req)
+	if len(tools) != 1 {
+		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
+	}
+	if tools[0].Name != "query_entities" {
+		t.Fatalf("tool name = %q, want query_entities", tools[0].Name)
+	}
+}
+
+func TestGatewayMCPToolsForRequest_DoesNotTrustCallerAgentIDWithoutTurnContext(t *testing.T) {
 	g := NewGateway(actorScopedToolExecutorStub{
 		actorDefs: []llm.ToolDefinition{
 			{Name: "query_entities", Description: "actor scoped"},
@@ -426,13 +479,10 @@ func TestGatewayMCPToolsForRequest_DoesNotTrustUnknownCallerAllowlist(t *testing
 		},
 	})
 
-	req := httptest.NewRequest("POST", "/mcp?agent_id=analysis-agent&allowed_tools=does_not_exist", nil)
+	req := httptest.NewRequest("POST", "/mcp?agent_id=analysis-agent", nil)
 	tools := g.mcpToolsForRequest(req)
-	if len(tools) != 1 {
-		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
-	}
-	if tools[0].Name != "query_entities" {
-		t.Fatalf("tool name = %q, want query_entities", tools[0].Name)
+	if len(tools) != 0 {
+		t.Fatalf("tool count = %d, want 0 (%#v)", len(tools), tools)
 	}
 }
 
