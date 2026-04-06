@@ -248,6 +248,7 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 }
 
 func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
+	pendingPredicate := CanonicalPendingAgentDeliveryPredicateSQL("r")
 	q := fmt.Sprintf(`
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
@@ -263,19 +264,10 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 		WHERE d.subscriber_type = 'agent'
 		  AND d.subscriber_id = $1
 		  AND e.created_at >= $2
-		  AND (
-				r.event_id IS NULL
-				OR (
-					COALESCE(r.side_effects->>'manager_status', '') = 'error'
-					AND COALESCE((r.side_effects->>'retry_count')::int, 0) <= 1
-					AND (
-						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 1 AND r.processed_at <= now() - interval '1 minute')
-					)
-				)
-			)
+		  AND %s
 		ORDER BY e.created_at ASC
 		LIMIT $3
-	`)
+	`, pendingPredicate)
 	rows, err := s.DB.QueryContext(ctx, q, agentID, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query pending events for %s: %w", agentID, err)
@@ -285,6 +277,7 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 }
 
 func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error) {
+	pendingPredicate := CanonicalPendingAgentDeliveryPredicateSQL("r")
 	q := fmt.Sprintf(`
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
@@ -311,19 +304,10 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 					  AND d_me.subscriber_id = $1
 				)
 			)
-		  AND (
-				r.event_id IS NULL
-				OR (
-					COALESCE(r.side_effects->>'manager_status', '') = 'error'
-					AND COALESCE((r.side_effects->>'retry_count')::int, 0) <= 1
-					AND (
-						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 1 AND r.processed_at <= now() - interval '1 minute')
-					)
-				)
-			)
+		  AND %s
 		ORDER BY e.created_at ASC
 		LIMIT $3
-	`)
+	`, pendingPredicate)
 	rows, err := s.DB.QueryContext(ctx, q, agentID, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query pending subscribed events for %s: %w", agentID, err)

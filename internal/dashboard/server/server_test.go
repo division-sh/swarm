@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -889,7 +890,7 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t
 	}
 }
 
-func TestSQLAgentReader_ListGenericAgents_PreservesRetryableVsTerminalDeliveryOutcome(t *testing.T) {
+func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelector(t *testing.T) {
 	dsn, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -918,9 +919,11 @@ func TestSQLAgentReader_ListGenericAgents_PreservesRetryableVsTerminalDeliveryOu
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
+	pendingEventID := uuid.NewString()
 	failedEventID := uuid.NewString()
+	inProgressNoReceiptEventID := uuid.NewString()
 	deadEventID := uuid.NewString()
-	for _, eventID := range []string{failedEventID, deadEventID} {
+	for _, eventID := range []string{pendingEventID, failedEventID, inProgressNoReceiptEventID, deadEventID} {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO events (
 				event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
@@ -935,19 +938,36 @@ func TestSQLAgentReader_ListGenericAgents_PreservesRetryableVsTerminalDeliveryOu
 		INSERT INTO event_deliveries (
 			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, last_error, delivered_at, created_at
 		) VALUES
-			($1::uuid, $2::uuid, 'agent', 'agent-1', 'failed', 1, 'retryable-failure', now() - interval '2 minutes', now() - interval '5 minutes'),
-			($1::uuid, $3::uuid, 'agent', 'agent-1', 'dead_letter', 2, 'terminal-dead-letter', now() - interval '1 minute', now() - interval '6 minutes')
-	`, runID, failedEventID, deadEventID); err != nil {
+			($1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', 0, '', NULL, now() - interval '7 minutes'),
+			($1::uuid, $3::uuid, 'agent', 'agent-1', 'failed', 1, 'retryable-failure', now() - interval '2 minutes', now() - interval '5 minutes'),
+			($1::uuid, $4::uuid, 'agent', 'agent-1', 'in_progress', 0, '', NULL, now() - interval '6 minutes'),
+			($1::uuid, $5::uuid, 'agent', 'agent-1', 'dead_letter', 2, 'terminal-dead-letter', now() - interval '1 minute', now() - interval '8 minutes')
+	`, runID, pendingEventID, failedEventID, inProgressNoReceiptEventID, deadEventID); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, outcome, side_effects, processed_at
 		) VALUES
-			($1::uuid, 'agent', 'agent-1', 'dead_letter', '{"manager_status":"error","retry_count":1,"error":"retryable-failure"}'::jsonb, now()),
+			($1::uuid, 'agent', 'agent-1', 'dead_letter', '{"manager_status":"error","retry_count":1,"error":"retryable-failure"}'::jsonb, now() - interval '2 minutes'),
 			($2::uuid, 'agent', 'agent-1', 'success', '{"manager_status":"dead_letter","retry_count":2,"error":"terminal-dead-letter"}'::jsonb, now())
 	`, failedEventID, deadEventID); err != nil {
 		t.Fatalf("seed conflicting receipts: %v", err)
+	}
+
+	pending, err := pg.ListPendingEventsForAgent(ctx, "agent-1", time.Now().Add(-time.Hour), 20)
+	if err != nil {
+		t.Fatalf("ListPendingEventsForAgent: %v", err)
+	}
+	gotPendingIDs := make([]string, 0, len(pending))
+	for _, evt := range pending {
+		gotPendingIDs = append(gotPendingIDs, evt.ID)
+	}
+	slices.Sort(gotPendingIDs)
+	wantPendingIDs := []string{failedEventID, inProgressNoReceiptEventID, pendingEventID}
+	slices.Sort(wantPendingIDs)
+	if !slices.Equal(gotPendingIDs, wantPendingIDs) {
+		t.Fatalf("pending event ids = %#v, want %#v", gotPendingIDs, wantPendingIDs)
 	}
 
 	reader := NewSQLAgentReader(db, pg, 12)
@@ -958,8 +978,8 @@ func TestSQLAgentReader_ListGenericAgents_PreservesRetryableVsTerminalDeliveryOu
 	if len(items) != 1 {
 		t.Fatalf("expected one agent, got %+v", items)
 	}
-	if items[0].PendingEvents != 1 {
-		t.Fatalf("pending_events = %d, want 1 retryable failed delivery", items[0].PendingEvents)
+	if items[0].PendingEvents != len(pending) {
+		t.Fatalf("pending_events = %d, want %d canonical pending deliveries", items[0].PendingEvents, len(pending))
 	}
 	if items[0].Failures24h != 1 {
 		t.Fatalf("failures_24h = %d, want 1 failed delivery", items[0].Failures24h)
