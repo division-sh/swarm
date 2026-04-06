@@ -815,6 +815,9 @@ func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.C
 	if !instanceIdentity.HasStoredPath {
 		return nil
 	}
+	if err := pc.workflowStore.MarkTerminated(ctx, instanceIdentity.InstancePath, time.Now().UTC()); err != nil {
+		return err
+	}
 	return pc.instanceDeactivator(ctx, FlowInstanceDeactivationRequest{
 		ContractBundle: source,
 		Instance:       instanceIdentity,

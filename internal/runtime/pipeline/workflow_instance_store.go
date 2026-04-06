@@ -28,6 +28,8 @@ type WorkflowInstance struct {
 	StorageRef        string
 	WorkflowName      string
 	WorkflowVersion   string
+	RegistryStatus    string
+	TerminatedAt      time.Time
 	CurrentState      string
 	Config            map[string]any
 	EnteredStageAt    time.Time
@@ -176,18 +178,53 @@ func (s *WorkflowInstanceStore) Delete(context.Context, string) error {
 	return fmt.Errorf("workflow instance deletion is unsupported: entity_state writes must stay on the mutation-logged upsert path")
 }
 
+func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	storageRef = strings.TrimSpace(storageRef)
+	if storageRef == "" {
+		return fmt.Errorf("workflow instance storage_ref is required")
+	}
+	if terminatedAt.IsZero() {
+		terminatedAt = time.Now().UTC()
+	} else {
+		terminatedAt = terminatedAt.UTC()
+	}
+	result, err := dbExecContext(ctx, s.db, `
+		UPDATE flow_instances
+		SET
+			status = 'terminated',
+			terminated_at = COALESCE(terminated_at, $2)
+		WHERE instance_id = $1
+	`, storageRef, terminatedAt)
+	if err != nil {
+		return fmt.Errorf("mark flow instance terminated %s: %w", storageRef, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("mark flow instance terminated %s rows affected: %w", storageRef, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("flow instance registry row not found for %s", storageRef)
+	}
+	return nil
+}
+
 func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, forUpdate bool) (WorkflowInstance, bool, error) {
 	var (
-		item         WorkflowInstance
-		gatesRaw     []byte
-		fieldsRaw    []byte
-		configRaw    []byte
-		accRaw       []byte
-		subjectID    sql.NullString
-		flowInstance string
-		entityType   string
-		slug         sql.NullString
-		name         sql.NullString
+		item           WorkflowInstance
+		gatesRaw       []byte
+		fieldsRaw      []byte
+		configRaw      []byte
+		accRaw         []byte
+		subjectID      sql.NullString
+		registryStatus sql.NullString
+		terminatedAt   sql.NullTime
+		flowInstance   string
+		entityType     string
+		slug           sql.NullString
+		name           sql.NullString
 	)
 	query := `
 		SELECT
@@ -195,6 +232,8 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 			es.subject_id::text,
 			COALESCE(fi.flow_template, ''),
 			COALESCE(fi.config->>'workflow_version', ''),
+			COALESCE(fi.status, ''),
+			fi.terminated_at,
 			es.current_state,
 			es.entered_state_at,
 			COALESCE(es.gates, '{}'::jsonb),
@@ -221,6 +260,8 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 		&subjectID,
 		&item.WorkflowName,
 		&item.WorkflowVersion,
+		&registryStatus,
+		&terminatedAt,
 		&item.CurrentState,
 		&item.EnteredStageAt,
 		&gatesRaw,
@@ -241,6 +282,10 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 		return WorkflowInstance{}, false, err
 	}
 	item.SubjectID = strings.TrimSpace(subjectID.String)
+	item.RegistryStatus = strings.TrimSpace(registryStatus.String)
+	if terminatedAt.Valid {
+		item.TerminatedAt = terminatedAt.Time.UTC()
+	}
 	if err := json.Unmarshal(accRaw, &item.StateBuckets); err != nil {
 		return WorkflowInstance{}, false, err
 	}
@@ -269,6 +314,8 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			es.subject_id::text,
 			COALESCE(fi.flow_template, ''),
 			COALESCE(fi.config->>'workflow_version', ''),
+			COALESCE(fi.status, ''),
+			fi.terminated_at,
 			es.current_state,
 			es.entered_state_at,
 			COALESCE(es.gates, '{}'::jsonb),
@@ -292,22 +339,26 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 	out := make([]WorkflowInstance, 0, 32)
 	for rows.Next() {
 		var (
-			item         WorkflowInstance
-			gatesRaw     []byte
-			fieldsRaw    []byte
-			configRaw    []byte
-			accRaw       []byte
-			subjectID    sql.NullString
-			flowInstance string
-			entityType   string
-			slug         sql.NullString
-			name         sql.NullString
+			item           WorkflowInstance
+			gatesRaw       []byte
+			fieldsRaw      []byte
+			configRaw      []byte
+			accRaw         []byte
+			subjectID      sql.NullString
+			registryStatus sql.NullString
+			terminatedAt   sql.NullTime
+			flowInstance   string
+			entityType     string
+			slug           sql.NullString
+			name           sql.NullString
 		)
 		if err := rows.Scan(
 			&item.InstanceID,
 			&subjectID,
 			&item.WorkflowName,
 			&item.WorkflowVersion,
+			&registryStatus,
+			&terminatedAt,
 			&item.CurrentState,
 			&item.EnteredStageAt,
 			&gatesRaw,
@@ -324,6 +375,10 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			return nil, err
 		}
 		item.SubjectID = strings.TrimSpace(subjectID.String)
+		item.RegistryStatus = strings.TrimSpace(registryStatus.String)
+		if terminatedAt.Valid {
+			item.TerminatedAt = terminatedAt.Time.UTC()
+		}
 		if err := json.Unmarshal(accRaw, &item.StateBuckets); err != nil {
 			return nil, err
 		}
@@ -399,7 +454,8 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 			flow_template = EXCLUDED.flow_template,
 			mode = EXCLUDED.mode,
 			config = EXCLUDED.config,
-			status = CASE WHEN flow_instances.status = 'terminated' THEN flow_instances.status ELSE 'active' END
+			status = CASE WHEN flow_instances.status = 'terminated' THEN flow_instances.status ELSE 'active' END,
+			terminated_at = CASE WHEN flow_instances.status = 'terminated' THEN flow_instances.terminated_at ELSE NULL END
 	`, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}")); err != nil {
 		return err
 	}

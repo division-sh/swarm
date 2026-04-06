@@ -296,3 +296,74 @@ func workflowEvidenceEntries(t *testing.T, instance WorkflowInstance, bucketID s
 	}
 	return out
 }
+
+func TestWorkflowInstanceStoreMarkTerminated_PersistsCanonicalRegistryState(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	store := NewWorkflowInstanceStore(db)
+	storageRef := "review/inst-1"
+	entityID := FlowInstanceEntityID(storageRef)
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		SubjectID:       "11111111-1111-1111-1111-111111111111",
+		StorageRef:      storageRef,
+		WorkflowName:    "review",
+		WorkflowVersion: "v-test",
+		CurrentState:    "pending",
+		Metadata: map[string]any{
+			"instance_id": entityID,
+			"flow_path":   storageRef,
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	terminatedAt := time.Unix(1700000000, 0).UTC()
+	if err := store.MarkTerminated(context.Background(), storageRef, terminatedAt); err != nil {
+		t.Fatalf("MarkTerminated: %v", err)
+	}
+
+	instance, ok, err := store.Load(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("load terminated workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance to exist")
+	}
+	if got := instance.RegistryStatus; got != "terminated" {
+		t.Fatalf("registry_status = %q, want terminated", got)
+	}
+	if got := instance.TerminatedAt.UTC(); !got.Equal(terminatedAt) {
+		t.Fatalf("terminated_at = %v, want %v", got, terminatedAt)
+	}
+
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		SubjectID:       "11111111-1111-1111-1111-111111111111",
+		StorageRef:      storageRef,
+		WorkflowName:    "review",
+		WorkflowVersion: "v-test",
+		CurrentState:    "done",
+		Metadata: map[string]any{
+			"instance_id": entityID,
+			"flow_path":   storageRef,
+		},
+	}); err != nil {
+		t.Fatalf("upsert after termination: %v", err)
+	}
+
+	reloaded, ok, err := store.Load(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("reload terminated workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance after reload")
+	}
+	if got := reloaded.RegistryStatus; got != "terminated" {
+		t.Fatalf("reloaded registry_status = %q, want terminated", got)
+	}
+	if got := reloaded.TerminatedAt.UTC(); !got.Equal(terminatedAt) {
+		t.Fatalf("reloaded terminated_at = %v, want %v", got, terminatedAt)
+	}
+}

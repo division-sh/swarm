@@ -228,6 +228,92 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 	}
 }
 
+func TestMaybeDeactivateTerminalFlowInstance_PersistsCanonicalTerminalRegistryBeforeTeardown(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "root",
+			FlowTerminal: map[string][]string{
+				"review": {"done"},
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"review": {Mode: "template"},
+		},
+	}
+	storageRef := "review/inst-1"
+	entityID := FlowInstanceEntityID(storageRef)
+	seenDeactivation := false
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
+		Module: &pipelineFixtureWorkflowModule{
+			source:   semanticview.Wrap(bundle),
+			workflow: NewWorkflowDefinition("root", []WorkflowStage{{Name: "pending"}, {Name: "done", Terminal: true}}, nil),
+		},
+		InstanceDeactivator: func(_ context.Context, req FlowInstanceDeactivationRequest) error {
+			seenDeactivation = true
+			if got := req.Instance.InstancePath; got != storageRef {
+				t.Fatalf("instance path = %q, want %q", got, storageRef)
+			}
+			var (
+				status       string
+				terminatedAt time.Time
+			)
+			if err := db.QueryRowContext(context.Background(), `
+				SELECT status, terminated_at
+				FROM flow_instances
+				WHERE instance_id = $1
+			`, storageRef).Scan(&status, &terminatedAt); err != nil {
+				t.Fatalf("load flow_instances terminal row: %v", err)
+			}
+			if status != "terminated" {
+				t.Fatalf("flow_instances.status = %q, want terminated", status)
+			}
+			if terminatedAt.IsZero() {
+				t.Fatal("expected flow_instances.terminated_at to be set before teardown")
+			}
+			return nil
+		},
+	})
+
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		SubjectID:       "11111111-1111-1111-1111-111111111111",
+		StorageRef:      storageRef,
+		WorkflowName:    "review",
+		WorkflowVersion: "v-test",
+		CurrentState:    "pending",
+		Metadata: map[string]any{
+			"instance_id": entityID,
+			"flow_path":   storageRef,
+		},
+	}); err != nil {
+		t.Fatalf("seed template flow instance: %v", err)
+	}
+
+	if err := pc.maybeDeactivateTerminalFlowInstance(context.Background(), entityID, "done"); err != nil {
+		t.Fatalf("maybeDeactivateTerminalFlowInstance: %v", err)
+	}
+	if !seenDeactivation {
+		t.Fatal("expected template flow deactivation to run")
+	}
+
+	instance, ok, err := pc.workflowStore.Load(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("load template flow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected template flow instance to persist")
+	}
+	if got := instance.RegistryStatus; got != "terminated" {
+		t.Fatalf("registry_status = %q, want terminated", got)
+	}
+	if instance.TerminatedAt.IsZero() {
+		t.Fatal("expected terminated_at on loaded workflow instance")
+	}
+}
+
 func TestProjectWorkflowSubjectGatesRequiresCanonicalEntityID(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := NewWorkflowInstanceStore(db)

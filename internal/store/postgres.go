@@ -123,6 +123,11 @@ ensureAgents:
 	if err := s.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
 		return err
 	}
+	if catalog.hasTable("flow_instances") && !catalog.hasColumns("flow_instances", "terminated_at") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE flow_instances ADD COLUMN IF NOT EXISTS terminated_at TIMESTAMPTZ`); err != nil {
+			return fmt.Errorf("ensure flow_instances.terminated_at column: %w", err)
+		}
+	}
 	if !catalog.hasTable("entity_state") {
 		return nil
 	}
