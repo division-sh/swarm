@@ -413,6 +413,17 @@ func TestPostgresStore_CancelActiveRunWorkByProducer_DeadLettersOldRunDeliveries
 		t.Fatalf("cancelled delivery last_error = %q", lastError)
 	}
 
+	receipt, ok, err := pg.GetEventReceipt(ctx, childEventID, "market-research-agent")
+	if err != nil {
+		t.Fatalf("GetEventReceipt(cancelled delivery): %v", err)
+	}
+	if !ok {
+		t.Fatal("expected cancelled delivery receipt to exist")
+	}
+	if receipt.Status != runtimemanager.ReceiptStatusDeadLetter || receipt.RetryCount != 0 {
+		t.Fatalf("cancelled receipt = %+v, want dead_letter retry_count=0", receipt)
+	}
+
 	var untouchedStatus string
 	if err := db.QueryRowContext(ctx, `
 		SELECT status
@@ -423,6 +434,69 @@ func TestPostgresStore_CancelActiveRunWorkByProducer_DeadLettersOldRunDeliveries
 	}
 	if untouchedStatus != "pending" {
 		t.Fatalf("untouched delivery status = %q, want pending", untouchedStatus)
+	}
+}
+
+func TestPostgresStore_GetEventReceipt_FallsBackToPersistedReceiptForNonTerminalDelivery(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	entityID := uuid.NewString()
+	seedSpecAgent(t, ctx, pg, "a1", "", "*")
+	eventID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, (events.Event{
+		ID:          eventID,
+		Type:        "system.started",
+		SourceAgent: "runtime",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now(),
+	}).WithEntityID(entityID)); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if err := pg.InsertEventDeliveries(ctx, eventID, []string{"a1"}); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET
+			status = 'in_progress',
+			reason_code = 'agent_processing',
+			active_session_id = $2::uuid
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'a1'
+	`, eventID, uuid.NewString()); err != nil {
+		t.Fatalf("set in_progress delivery: %v", err)
+	}
+
+	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(runtimemanager.ReceiptStatusDeadLetter, "retry_exhausted", 2, "boom"))
+	if err != nil {
+		t.Fatalf("marshal side effects: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, reason_code, side_effects, processed_at
+		)
+		SELECT
+			e.event_id, 'agent', 'a1', e.entity_id, e.flow_instance,
+			'dead_letter', 'retry_exhausted', $2::jsonb, now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+	`, eventID, string(sideEffects)); err != nil {
+		t.Fatalf("insert receipt: %v", err)
+	}
+
+	receipt, ok, err := pg.GetEventReceipt(ctx, eventID, "a1")
+	if err != nil {
+		t.Fatalf("GetEventReceipt(in_progress delivery): %v", err)
+	}
+	if !ok {
+		t.Fatal("expected receipt to be found")
+	}
+	if receipt.Status != runtimemanager.ReceiptStatusDeadLetter || receipt.RetryCount != 2 || receipt.Error != "boom" {
+		t.Fatalf("receipt = %+v, want dead_letter retry_count=2 error=boom", receipt)
 	}
 }
 
