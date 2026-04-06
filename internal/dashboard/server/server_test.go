@@ -33,6 +33,22 @@ type builderWSEventFrame = builderpkg.WSEventFrame
 const testBuilderAuthToken = "builder-test-token"
 const testOperatorAuthToken = "operator-secret"
 
+func canonicalEventAndConversationCaps() store.StoreSchemaCapabilities {
+	return store.StoreSchemaCapabilities{
+		Events: store.EventSchemaCapabilities{
+			Log:        store.SchemaFlavorCanonical,
+			Deliveries: store.SchemaFlavorCanonical,
+			Receipts:   store.SchemaFlavorCanonical,
+		},
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions:   store.SchemaFlavorCanonical,
+			Audits:     store.SchemaFlavorCanonical,
+			Turns:      store.SchemaFlavorCanonical,
+			TurnBlocks: true,
+		},
+	}
+}
+
 func setOperatorAuth(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+testOperatorAuthToken)
 }
@@ -654,13 +670,7 @@ func TestSQLAgentReader_ListGenericAgents_UsesCanonicalTurnSummary(t *testing.T)
 			},
 			Status: "active",
 		}},
-		caps: store.StoreSchemaCapabilities{
-			Conversations: store.ConversationSchemaCapabilities{
-				Sessions:   store.SchemaFlavorCanonical,
-				Turns:      store.SchemaFlavorCanonical,
-				TurnBlocks: true,
-			},
-		},
+		caps: canonicalEventAndConversationCaps(),
 	}, 12)
 
 	turnBlocksPayload := `[
@@ -716,13 +726,7 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalTurnSummary
 			},
 			Status: "active",
 		}},
-		caps: store.StoreSchemaCapabilities{
-			Conversations: store.ConversationSchemaCapabilities{
-				Sessions:   store.SchemaFlavorCanonical,
-				Turns:      store.SchemaFlavorCanonical,
-				TurnBlocks: true,
-			},
-		},
+		caps: canonicalEventAndConversationCaps(),
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
@@ -767,13 +771,7 @@ func TestSQLAgentReader_ListGenericAgents_FailsOnMalformedCanonicalTurnSummary(t
 			},
 			Status: "active",
 		}},
-		caps: store.StoreSchemaCapabilities{
-			Conversations: store.ConversationSchemaCapabilities{
-				Sessions:   store.SchemaFlavorCanonical,
-				Turns:      store.SchemaFlavorCanonical,
-				TurnBlocks: true,
-			},
-		},
+		caps: canonicalEventAndConversationCaps(),
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
@@ -809,13 +807,7 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 			},
 			Status: "terminated",
 		}},
-		caps: store.StoreSchemaCapabilities{
-			Conversations: store.ConversationSchemaCapabilities{
-				Sessions:   store.SchemaFlavorCanonical,
-				Turns:      store.SchemaFlavorCanonical,
-				TurnBlocks: true,
-			},
-		},
+		caps: canonicalEventAndConversationCaps(),
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
@@ -866,13 +858,7 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t
 			},
 			Status: "active",
 		}},
-		caps: store.StoreSchemaCapabilities{
-			Conversations: store.ConversationSchemaCapabilities{
-				Sessions:   store.SchemaFlavorCanonical,
-				Turns:      store.SchemaFlavorCanonical,
-				TurnBlocks: true,
-			},
-		},
+		caps: canonicalEventAndConversationCaps(),
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
@@ -887,6 +873,34 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalReceiptCapability(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	caps := canonicalEventAndConversationCaps()
+	caps.Events.Receipts = store.SchemaFlavorLegacy
+
+	reader := NewSQLAgentReader(db, stubSQLAgents{
+		rows: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{
+				ID:   "agent-1",
+				Role: "researcher",
+				Mode: "global",
+				Type: "managed",
+			},
+			Status: "active",
+		}},
+		caps: caps,
+	}, 12)
+
+	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "event_receipts schema is unsupported") {
+		t.Fatalf("expected explicit unsupported receipt capability error, got %v", err)
 	}
 }
 

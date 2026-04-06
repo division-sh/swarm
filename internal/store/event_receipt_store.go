@@ -67,17 +67,10 @@ func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID s
 	if since.IsZero() {
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
-	switch {
-	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical && caps.Events.Receipts == SchemaFlavorCanonical:
-		return s.listPendingEventsForAgentSpec(ctx, agentID, since, limit)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	case caps.Events.Receipts != SchemaFlavorCanonical:
-		return nil, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
+	if err := RequireCanonicalPendingAgentDeliveryCapabilities(caps); err != nil {
+		return nil, err
 	}
-	return nil, nil
+	return s.listPendingEventsForAgentSpec(ctx, agentID, since, limit)
 }
 
 func (s *PostgresStore) ListPendingSubscribedEvents(
@@ -100,18 +93,10 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 	if since.IsZero() {
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
-
-	switch {
-	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical && caps.Events.Receipts == SchemaFlavorCanonical:
-		return s.listPendingSubscribedEventsSpec(ctx, agentID, subscriptions, since, limit)
-	case caps.Events.Log != SchemaFlavorCanonical:
-		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
-	case caps.Events.Deliveries != SchemaFlavorCanonical:
-		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
-	case caps.Events.Receipts != SchemaFlavorCanonical:
-		return nil, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
+	if err := RequireCanonicalPendingAgentDeliveryCapabilities(caps); err != nil {
+		return nil, err
 	}
-	return nil, nil
+	return s.listPendingSubscribedEventsSpec(ctx, agentID, subscriptions, since, limit)
 }
 
 func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID string) (runtimemanager.EventReceipt, bool, error) {
