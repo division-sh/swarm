@@ -4,46 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
-	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolidentity"
 )
 
 const (
-	actorIDHeader      = "X-SWARM-Agent-Id"
-	actorRoleHeader    = "X-SWARM-Agent-Role"
-	actorModeHeader    = "X-SWARM-Agent-Mode"
-	entityIDHeader     = "X-SWARM-Entity-Id"
-	allowedToolsHeader = "X-SWARM-Allowed-Tools"
 	contextTokenHeader = "X-SWARM-Context-Token"
-
-	actorIDQuery      = "agent_id"
-	actorRoleQuery    = "agent_role"
-	actorModeQuery    = "agent_mode"
-	entityIDQuery     = "entity_id"
-	allowedToolsQuery = "allowed_tools"
-	contextTokenQuery = "ctx_token"
 )
 
 type ToolGatewayRequest struct {
-	Actor     models.AgentConfig `json:"actor"`
-	AgentID   string             `json:"agent_id"`
-	AgentRole string             `json:"agent_role"`
-	EntityID  string             `json:"entity_id"`
-	Mode      string             `json:"mode"`
-	Input     any                `json:"input"`
-}
-
-func (r ToolGatewayRequest) EffectiveEntityID() string { return strings.TrimSpace(r.EntityID) }
-
-func (r *ToolGatewayRequest) NormalizeEntityID() {
-	if r == nil {
-		return
-	}
-	entityID := r.EffectiveEntityID()
-	r.EntityID = entityID
+	Input any `json:"input"`
 }
 
 type ToolGatewayResponse struct {
@@ -77,51 +48,6 @@ type ToolDef struct {
 	InputSchema any    `json:"inputSchema"`
 }
 
-func RequireContextToken() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("SWARM_MCP_REQUIRE_CONTEXT_TOKEN")))
-	if v == "" {
-		return true
-	}
-	return v == "1" || v == "true" || v == "yes"
-}
-
-func AllowContextFallbackOnMiss() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("SWARM_MCP_CONTEXT_FALLBACK_ON_MISS")))
-	if v == "" {
-		return true
-	}
-	return v == "1" || v == "true" || v == "yes"
-}
-
-func ActorFromRequest(r *http.Request) (models.AgentConfig, bool) {
-	if r == nil {
-		return models.AgentConfig{}, false
-	}
-	actor := models.AgentConfig{
-		ID: FirstNonEmpty(
-			headerValue(r, actorIDHeader),
-			strings.TrimSpace(r.URL.Query().Get(actorIDQuery)),
-		),
-		Role: FirstNonEmpty(
-			headerValue(r, actorRoleHeader),
-			strings.TrimSpace(r.URL.Query().Get(actorRoleQuery)),
-		),
-		EntityID: FirstNonEmpty(
-			headerValue(r, entityIDHeader),
-			strings.TrimSpace(r.URL.Query().Get(entityIDQuery)),
-		),
-		Mode: FirstNonEmpty(
-			headerValue(r, actorModeHeader),
-			strings.TrimSpace(r.URL.Query().Get(actorModeQuery)),
-		),
-	}
-	actor.NormalizeEntityID()
-	if strings.TrimSpace(actor.ID) == "" {
-		return models.AgentConfig{}, false
-	}
-	return actor, true
-}
-
 func ParseToolListHeader(raw string) map[string]struct{} {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -138,19 +64,8 @@ func ParseToolListHeader(raw string) map[string]struct{} {
 	return out
 }
 
-func ParseAllowedToolsFromRequest(r *http.Request) map[string]struct{} {
-	allowed := ParseToolListHeader(headerValue(r, allowedToolsHeader))
-	if len(allowed) > 0 {
-		return allowed
-	}
-	return ParseToolListHeader(strings.TrimSpace(r.URL.Query().Get(allowedToolsQuery)))
-}
-
 func ContextTokenFromRequest(r *http.Request) string {
-	if token := headerValue(r, contextTokenHeader); token != "" {
-		return token
-	}
-	return strings.TrimSpace(r.URL.Query().Get(contextTokenQuery))
+	return headerValue(r, contextTokenHeader)
 }
 
 func ToolResultText(v any) string {
@@ -214,13 +129,4 @@ func WriteRPCError(w http.ResponseWriter, id any, code int, message string) {
 	w.Header().Set("mcp-protocol-version", "2025-03-26")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
-}
-
-func FirstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }

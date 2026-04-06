@@ -119,7 +119,6 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: "invalid json body"})
 		return
 	}
-	req.NormalizeEntityID()
 	ctx, err := g.toolExecutionContext(r, toolName)
 	if err != nil {
 		g.logMCP(r, "warn", "tool.context_error", err, map[string]any{
@@ -128,6 +127,7 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: g.formatError(err)})
 		return
 	}
+	r = r.WithContext(ctx)
 	if !toolAllowedInContext(ctx, toolName) {
 		err := g.newRuntimeError(ErrCodeToolNotAllowed, "tool.execute.authorize_tool", false, nil, "tool is not allowed for this agent: %s", toolName)
 		g.logMCP(r, "warn", "tool.execute.denied", err, map[string]any{
@@ -236,6 +236,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		r = r.WithContext(ctx)
 		if !toolAllowedInContext(ctx, toolName) {
 			err := g.newRuntimeError(ErrCodeToolNotAllowed, "mcp.tools.call.authorize_tool", false, nil, "tool is not allowed for this agent: %s", toolName)
 			g.logMCP(r, "warn", "mcp.tools.call.denied", err, map[string]any{
@@ -361,23 +362,6 @@ func toolCapabilityInContext(ctx context.Context, toolName string) (toolcapabili
 
 func normalizeGatewayToolName(name string) string {
 	return toolidentity.CanonicalName(name)
-}
-
-func (g *Gateway) logContextFallback(r *http.Request, action, toolName, reason, token string, used bool, fallbackAllowed bool) {
-	if g == nil || r == nil {
-		return
-	}
-	g.logMCP(r, "warn", action, nil, map[string]any{
-		"tool_name":         strings.TrimSpace(toolName),
-		"reason":            strings.TrimSpace(reason),
-		"context_token":     strings.TrimSpace(token),
-		"fallback_used":     used,
-		"fallback_allowed":  fallbackAllowed,
-		"require_ctx_token": RequireContextToken(),
-		"fallback_on_miss":  AllowContextFallbackOnMiss(),
-		"request_path":      strings.TrimSpace(r.URL.Path),
-		"request_method":    strings.TrimSpace(r.Method),
-	})
 }
 
 func emitTurnDedupeKey(toolName string, arguments any) string {
@@ -610,14 +594,14 @@ func (g *Gateway) logMCP(r *http.Request, level, action string, err error, detai
 	if g == nil || g.hooks.Log == nil || r == nil {
 		return
 	}
-	agentID := FirstNonEmpty(
-		headerValue(r, actorIDHeader),
-		strings.TrimSpace(r.URL.Query().Get(actorIDQuery)),
-	)
-	entityID := FirstNonEmpty(
-		headerValue(r, entityIDHeader),
-		strings.TrimSpace(r.URL.Query().Get(entityIDQuery)),
-	)
+	agentID := ""
+	entityID := ""
+	if g.hooks.ActorFromContext != nil {
+		if actor, ok := g.hooks.ActorFromContext(r.Context()); ok {
+			agentID = strings.TrimSpace(actor.ID)
+			entityID = strings.TrimSpace(actor.EntityID)
+		}
+	}
 	errText := ""
 	if err != nil {
 		errText = g.formatError(err)

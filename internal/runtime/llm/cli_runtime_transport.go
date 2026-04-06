@@ -15,19 +15,7 @@ import (
 )
 
 const (
-	mcpActorIDHeader      = "X-SWARM-Agent-Id"
-	mcpActorRoleHeader    = "X-SWARM-Agent-Role"
-	mcpActorModeHeader    = "X-SWARM-Agent-Mode"
-	mcpEntityIDHeader     = "X-SWARM-Entity-Id"
-	mcpAllowedToolsHeader = "X-SWARM-Allowed-Tools"
 	mcpContextTokenHeader = "X-SWARM-Context-Token"
-
-	mcpActorIDQuery      = "agent_id"
-	mcpActorRoleQuery    = "agent_role"
-	mcpActorModeQuery    = "agent_mode"
-	mcpEntityIDQuery     = "entity_id"
-	mcpAllowedToolsQuery = "allowed_tools"
-	mcpContextTokenQuery = "ctx_token"
 )
 
 func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, error) {
@@ -70,7 +58,6 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 	contextToken := turns.RegisterTurnContextWithAllowedTools(ctx, mcpContextTokenTTLForConfig(ctx, cfg), toolNames(s.Tools))
 	if contextToken != "" {
 		headers[mcpContextTokenHeader] = contextToken
-		serverURL = withMCPContextQuery(serverURL, contextToken)
 	}
 	return MCPHTTPBinding{
 		URL:          serverURL,
@@ -160,23 +147,6 @@ func normalizeMCPServerURL(raw string) string {
 	default:
 		// Respect explicit path when operator already targets a specific endpoint.
 	}
-	return strings.TrimSpace(u.String())
-}
-
-func withMCPContextQuery(rawURL string, contextToken string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return rawURL
-	}
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
-	}
-	q := u.Query()
-	if v := strings.TrimSpace(contextToken); v != "" {
-		q.Set(mcpContextTokenQuery, v)
-	}
-	u.RawQuery = q.Encode()
 	return strings.TrimSpace(u.String())
 }
 

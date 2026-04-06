@@ -167,32 +167,13 @@ func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t
 	if got := headers[mcpContextTokenHeader]; got != contextToken {
 		t.Fatalf("context header = %#v, want %q", got, contextToken)
 	}
-	for _, key := range []string{
-		mcpActorIDHeader,
-		mcpActorRoleHeader,
-		mcpActorModeHeader,
-		mcpEntityIDHeader,
-		mcpAllowedToolsHeader,
-	} {
-		if got := headers[key]; got != nil {
-			t.Fatalf("unexpected gateway identity header %q = %#v", key, got)
-		}
-	}
 	urlRaw := runtimeTools["url"].(string)
 	legacyTraceQuery := "trace" + "_id="
 	if strings.Contains(urlRaw, legacyTraceQuery) {
 		t.Fatalf("url %q should not propagate legacy trace query params", urlRaw)
 	}
-	for _, key := range []string{
-		mcpActorIDQuery,
-		mcpActorRoleQuery,
-		mcpActorModeQuery,
-		mcpEntityIDQuery,
-		mcpAllowedToolsQuery,
-	} {
-		if strings.Contains(urlRaw, key+"=") {
-			t.Fatalf("url %q should not propagate %s", urlRaw, key)
-		}
+	if strings.Contains(urlRaw, "ctx_token=") {
+		t.Fatalf("url %q should not propagate context token query", urlRaw)
 	}
 }
 
