@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,6 +115,164 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 	}
 	if deliveryStatus != "dead_letter" || managerStatus != "dead_letter" || deliveryRetry != 2 || reasonCode != "retry_exhausted" {
 		t.Fatalf("terminal status mismatch: delivery=%q manager=%q retry=%d reason=%q", deliveryStatus, managerStatus, deliveryRetry, reasonCode)
+	}
+}
+
+func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.concurrent_retry_upsert")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+		t.Fatalf("insert deliveries: %v", err)
+	}
+
+	lockTx, err := pg.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if _, err := lockTx.ExecContext(ctx, `
+		SELECT 1
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+		FOR UPDATE
+	`, evt.ID, agentID); err != nil {
+		t.Fatalf("lock delivery row: %v", err)
+	}
+
+	errCh := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			errCh <- pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom")
+		}()
+	}
+	time.Sleep(150 * time.Millisecond)
+	if err := lockTx.Commit(); err != nil {
+		t.Fatalf("release delivery row lock: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("concurrent upsert #%d: %v", i+1, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for concurrent receipt upserts")
+		}
+	}
+
+	var (
+		deliveryStatus string
+		deliveryRetry  int
+		managerStatus  string
+		receiptRetry   int
+	)
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(d.status, ''),
+			COALESCE(d.retry_count, 0),
+			COALESCE(r.side_effects->>'manager_status', ''),
+			COALESCE((r.side_effects->>'retry_count')::int, 0)
+		FROM event_deliveries d
+		INNER JOIN event_receipts r
+			ON r.event_id = d.event_id
+			AND r.subscriber_type = 'agent'
+			AND r.subscriber_id = d.subscriber_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'agent'
+		  AND d.subscriber_id = $2
+	`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &managerStatus, &receiptRetry); err != nil {
+		t.Fatalf("query concurrent retry state: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || deliveryRetry != 2 || managerStatus != "dead_letter" || receiptRetry != 2 {
+		t.Fatalf("concurrent retry state mismatch: delivery=%q retry=%d manager=%q receipt_retry=%d", deliveryStatus, deliveryRetry, managerStatus, receiptRetry)
+	}
+}
+
+func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.receipt_delivery_atomicity")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+		t.Fatalf("insert deliveries: %v", err)
+	}
+	var originalReasonCode string
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, evt.ID, agentID).Scan(&originalReasonCode); err != nil {
+		t.Fatalf("load original delivery reason: %v", err)
+	}
+
+	if _, err := pg.DB.ExecContext(ctx, `
+		CREATE OR REPLACE FUNCTION fail_receipt_delivery_sync()
+		RETURNS trigger
+		LANGUAGE plpgsql
+		AS $$
+		BEGIN
+			RAISE EXCEPTION 'forced delivery sync failure';
+		END;
+		$$;
+	`); err != nil {
+		t.Fatalf("create trigger function: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		CREATE TRIGGER event_deliveries_fail_sync
+		BEFORE UPDATE ON event_deliveries
+		FOR EACH ROW
+		EXECUTE FUNCTION fail_receipt_delivery_sync()
+	`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusProcessed, "")
+	if err == nil {
+		t.Fatal("expected delivery sync failure")
+	}
+	if got := err.Error(); got == "" || !strings.Contains(got, "sync event delivery") {
+		t.Fatalf("upsert receipt error = %v, want sync event delivery failure", err)
+	}
+
+	var receiptCount int
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, evt.ID, agentID).Scan(&receiptCount); err != nil {
+		t.Fatalf("count receipts after rollback: %v", err)
+	}
+	if receiptCount != 0 {
+		t.Fatalf("receipt count after rollback = %d, want 0", receiptCount)
+	}
+
+	var (
+		deliveryStatus string
+		retryCount     int
+		reasonCode     string
+	)
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(retry_count, 0), COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, evt.ID, agentID).Scan(&deliveryStatus, &retryCount, &reasonCode); err != nil {
+		t.Fatalf("load delivery after rollback: %v", err)
+	}
+	if deliveryStatus != "pending" || retryCount != 0 || reasonCode != originalReasonCode {
+		t.Fatalf("delivery after rollback = status:%q retry:%d reason:%q want reason:%q", deliveryStatus, retryCount, reasonCode, originalReasonCode)
 	}
 }
 
