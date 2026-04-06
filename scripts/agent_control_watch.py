@@ -51,11 +51,16 @@ def parse_simple_yaml(path: Path) -> dict[str, str]:
     return data
 
 
+def ack_is_false(data: dict[str, str]) -> bool:
+    return data.get("ack", "").strip().lower() == "false"
+
+
 def print_summary(path: Path) -> None:
     data = parse_simple_yaml(path)
     ordered = [
         "version",
         "agent",
+        "ack",
         "state",
         "issue",
         "pr",
@@ -88,18 +93,22 @@ def main() -> int:
             return 1
         return 0
 
-    baseline = None
     try:
-        baseline = file_hash(path)
+        baseline_hash = file_hash(path)
+        baseline_data = parse_simple_yaml(path)
     except FileNotFoundError:
-        baseline = "__missing__"
+        baseline_hash = "__missing__"
+        baseline_data = {}
 
     while True:
         try:
-            current = file_hash(path)
+            current_hash = file_hash(path)
+            current_data = parse_simple_yaml(path)
         except FileNotFoundError:
-            current = "__missing__"
-        if current != baseline:
+            current_hash = "__missing__"
+            current_data = {}
+        version_changed = current_data.get("version", "").strip() != baseline_data.get("version", "").strip()
+        if ack_is_false(current_data) or version_changed or current_hash != baseline_hash:
             print_summary(path)
             return 0
         time.sleep(max(args.interval, 1))

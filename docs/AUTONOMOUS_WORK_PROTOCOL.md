@@ -86,6 +86,7 @@ Required fields:
 ```yaml
 version: 12
 agent: A
+ack: false
 state: assigned
 issue: 184
 pr: null
@@ -108,6 +109,10 @@ Meaning of important fields:
 - `version`
   - monotonically increasing integer
   - every lead-side control change must increment it
+- `ack`
+  - `false` means the agent has not yet consumed this control version
+  - `true` means the agent has acknowledged the current control version
+  - every new lead-side control update must set `ack: false`
 - `state`
   - control state the agent should honor now
 - `action_type`
@@ -196,12 +201,15 @@ Default rule:
 
 The wake-up contract is simple:
 
-- the engineer watcher returns when `CONTROL.yaml` changes
+- the engineer watcher returns when:
+  - `CONTROL.yaml.version` changes
+  - or `CONTROL.yaml.ack` is `false`
 - the lead watcher returns when `RESPONSE.yaml` changes
 
 Recommended detection:
 
 - compare `version`
+- compare `ack`
 - or compare file content hash
 - do not parse GitHub state as the wake-up trigger
 
@@ -231,6 +239,7 @@ When assigning work:
 2. leave the structured issue comment
 3. update `CONTROL.yaml` with:
    - new `version`
+   - `ack: false`
    - `action_type: next-task`
    - `action_status: assigned`
    - `agent_mode: work`
@@ -240,6 +249,7 @@ When reviewing a PR:
 1. leave the structured PR comment
 2. update `CONTROL.yaml` with:
    - new `version`
+   - `ack: false`
    - `action_type: review-update` or `fix-requested`
    - matching review state
    - exact `next_step`
@@ -258,10 +268,11 @@ The agent loop is:
 
 1. wait for `CONTROL.yaml` change
 2. read `CONTROL.yaml`
-3. do the requested work
-4. update GitHub as needed
-5. write `RESPONSE.yaml`
-6. wait again
+3. if `ack: false`, flip it to `true` immediately
+4. do the requested work
+5. update GitHub as needed
+6. write `RESPONSE.yaml`
+7. wait again
 
 Default behaviors:
 
@@ -343,10 +354,12 @@ Hard rules:
 1. one open assigned issue per agent
 2. one active PR per agent
 3. every lead instruction must increment `CONTROL.yaml.version`
-4. every agent response must increment `RESPONSE.yaml.version`
-5. GitHub and local files must refer to the same issue/PR identifiers
-6. agents do not self-pick unassigned issues
-7. local files are structured data, not free-form chat
+4. every new lead instruction must set `CONTROL.yaml.ack: false`
+5. the agent must flip `CONTROL.yaml.ack` to `true` before starting work on that control version
+6. every agent response must increment `RESPONSE.yaml.version`
+7. GitHub and local files must refer to the same issue/PR identifiers
+8. agents do not self-pick unassigned issues
+9. local files are structured data, not free-form chat
 
 If any of these are violated:
 
