@@ -39,6 +39,7 @@ type AgentManager struct {
 
 	runMu              sync.Mutex
 	running            bool
+	shuttingDown       bool
 	authBreakerTripped bool
 	runCtx             context.Context
 	cancelRun          context.CancelFunc

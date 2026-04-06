@@ -50,6 +50,23 @@ func (am *AgentManager) RestartAgent(agentID string) error {
 }
 
 func (am *AgentManager) Shutdown() error {
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), managerShutdownTimeout)
+	defer cancelDrain()
+
+	am.runMu.Lock()
+	if am.shuttingDown {
+		am.runMu.Unlock()
+		return am.waitForRunShutdown()
+	}
+	am.shuttingDown = true
+	am.running = false
+	am.runMu.Unlock()
+
+	var shutdownErr error
+	if err := am.WaitForQuiescence(drainCtx); err != nil {
+		shutdownErr = fmt.Errorf("agent manager shutdown drain timed out after %s", managerShutdownTimeout)
+	}
+
 	am.runMu.Lock()
 	if am.cancelRun != nil {
 		am.cancelRun()
@@ -59,20 +76,17 @@ func (am *AgentManager) Shutdown() error {
 		cancel()
 		delete(am.loopCancel, id)
 	}
-	am.running = false
 	am.runMu.Unlock()
 
-	done := make(chan struct{})
-	go func() {
-		am.runWG.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-time.After(managerShutdownTimeout):
-		return fmt.Errorf("agent manager shutdown timed out after %s", managerShutdownTimeout)
+	if err := am.waitForRunShutdown(); err != nil {
+		if shutdownErr == nil {
+			shutdownErr = err
+		}
 	}
+	am.runMu.Lock()
+	am.shuttingDown = false
+	am.runMu.Unlock()
+	return shutdownErr
 }
 
 func (am *AgentManager) Count() int {
@@ -85,6 +99,29 @@ func (am *AgentManager) IsRunning() bool {
 	am.runMu.Lock()
 	defer am.runMu.Unlock()
 	return am.running
+}
+
+func (am *AgentManager) isShuttingDown() bool {
+	if am == nil {
+		return false
+	}
+	am.runMu.Lock()
+	defer am.runMu.Unlock()
+	return am.shuttingDown
+}
+
+func (am *AgentManager) waitForRunShutdown() error {
+	done := make(chan struct{})
+	go func() {
+		am.runWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(managerShutdownTimeout):
+		return fmt.Errorf("agent manager shutdown timed out after %s", managerShutdownTimeout)
+	}
 }
 
 func (am *AgentManager) GetAgentConfig(agentID string) (runtimeactors.AgentConfig, bool) {
@@ -336,6 +373,7 @@ func (am *AgentManager) Run(ctx context.Context) {
 	runRoot := runtimebus.WithRuntimeEpoch(ctx, runtimebus.CurrentRuntimeEpoch())
 	am.runCtx, am.cancelRun = context.WithCancel(runRoot)
 	am.running = true
+	am.shuttingDown = false
 	am.authBreakerTripped = false
 	am.runMu.Unlock()
 
@@ -467,6 +505,9 @@ func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
 	am.mu.RUnlock()
 
 	for _, id := range ids {
+		if am.isShuttingDown() {
+			return nil
+		}
 		if am.isAuthBreakerTripped() {
 			return nil
 		}
@@ -488,6 +529,9 @@ func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
 func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) error {
 	if am.store == nil {
 		return fmt.Errorf("manager store unavailable")
+	}
+	if am.isShuttingDown() {
+		return nil
 	}
 	if am.isAuthBreakerTripped() {
 		return nil
@@ -691,6 +735,9 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 						return
 					case evt, ok := <-ch:
 						if !ok {
+							return
+						}
+						if am.isShuttingDown() {
 							return
 						}
 						evtCtx := runtimecorrelation.WithInboundEvent(loopCtx, evt)
