@@ -9,7 +9,7 @@ import (
 func TestRuntimePayloadValidator_AllowsValidSchemaPayload(t *testing.T) {
 	t.Parallel()
 
-	validator := newRuntimePayloadValidator(nil, map[string]runtimecontracts.EventSchema{
+	validator := newRuntimePayloadValidator(nil, nil, map[string]runtimecontracts.EventSchema{
 		"task.completed": {
 			Schema: map[string]any{
 				"type": "object",
@@ -30,7 +30,7 @@ func TestRuntimePayloadValidator_AllowsValidSchemaPayload(t *testing.T) {
 func TestRuntimePayloadValidator_RejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 
-	validator := newRuntimePayloadValidator(nil, map[string]runtimecontracts.EventSchema{
+	validator := newRuntimePayloadValidator(nil, nil, map[string]runtimecontracts.EventSchema{
 		"task.completed": {
 			Schema: map[string]any{
 				"type": "object",
@@ -46,7 +46,7 @@ func TestRuntimePayloadValidator_RejectsInvalidJSON(t *testing.T) {
 func TestRuntimePayloadValidator_RejectsSchemaMismatch(t *testing.T) {
 	t.Parallel()
 
-	validator := newRuntimePayloadValidator(nil, map[string]runtimecontracts.EventSchema{
+	validator := newRuntimePayloadValidator(nil, nil, map[string]runtimecontracts.EventSchema{
 		"task.completed": {
 			Schema: map[string]any{
 				"type": "object",
@@ -67,7 +67,7 @@ func TestRuntimePayloadValidator_RejectsSchemaMismatch(t *testing.T) {
 func TestRuntimePayloadValidator_AllowsUndeclaredCanonicalContextFields(t *testing.T) {
 	t.Parallel()
 
-	validator := newRuntimePayloadValidator(nil, map[string]runtimecontracts.EventSchema{
+	validator := newRuntimePayloadValidator(nil, nil, map[string]runtimecontracts.EventSchema{
 		"task.completed": {
 			Schema: map[string]any{
 				"type": "object",
@@ -82,11 +82,71 @@ func TestRuntimePayloadValidator_AllowsUndeclaredCanonicalContextFields(t *testi
 	err := validator("task.completed", []byte(`{
 			"ok": true,
 			"entity_id": "ent-1",
+			"flow_instance": "flow/inst-1",
 			"trigger_event_type": "task.started",
-			"current_state": "running",
-			"status": "derived-context"
+			"current_state": "running"
 		}`))
 	if err != nil {
 		t.Fatalf("validator(extra canonical context): %v", err)
+	}
+}
+
+func TestRuntimePayloadValidator_AllowsTriggerSchemaFieldsOnRuntimeEmittedPayload(t *testing.T) {
+	t.Parallel()
+
+	validator := newRuntimePayloadValidator(nil, nil, map[string]runtimecontracts.EventSchema{
+		"task.started": {
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"score": map[string]any{"type": "integer"},
+				},
+				"additionalProperties": false,
+			},
+		},
+		"task.completed": {
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"ok": map[string]any{"type": "boolean"},
+				},
+				"required":             []any{"ok"},
+				"additionalProperties": false,
+			},
+		},
+	})
+
+	err := validator("task.completed", []byte(`{
+			"ok": true,
+			"score": 10,
+			"trigger_event_type": "task.started"
+		}`))
+	if err != nil {
+		t.Fatalf("validator(trigger schema context): %v", err)
+	}
+}
+
+func TestRuntimePayloadValidator_RejectsUndeclaredCallerPayloadFieldWhenAdditionalPropertiesFalse(t *testing.T) {
+	t.Parallel()
+
+	validator := newRuntimePayloadValidator(nil, nil, map[string]runtimecontracts.EventSchema{
+		"task.completed": {
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"ok": map[string]any{"type": "boolean"},
+				},
+				"required":             []any{"ok"},
+				"additionalProperties": false,
+			},
+		},
+	})
+
+	err := validator("task.completed", []byte(`{
+			"ok": true,
+			"surprise": "x"
+		}`))
+	if err == nil {
+		t.Fatal("expected undeclared caller payload field to be rejected")
 	}
 }
