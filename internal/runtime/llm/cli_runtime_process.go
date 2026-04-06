@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"swarm/internal/config"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	workspace "swarm/internal/runtime/workspace"
 )
@@ -195,7 +196,14 @@ func readStreamLines(rc io.ReadCloser, monitor MonitorTurnWriter, stderr bool) [
 }
 
 func (r *ClaudeCLIRuntime) effectiveCLITimeout(ctx context.Context) time.Duration {
-	timeout := r.cfg.LLM.ClaudeCLI.Timeout
+	return effectiveCLITimeoutForConfig(ctx, r.cfg)
+}
+
+func effectiveCLITimeoutForConfig(ctx context.Context, cfg *config.Config) time.Duration {
+	timeout := time.Duration(0)
+	if cfg != nil {
+		timeout = cfg.LLM.ClaudeCLI.Timeout
+	}
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
