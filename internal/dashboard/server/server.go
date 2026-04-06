@@ -126,6 +126,7 @@ type Options struct {
 	Conversations ConversationReader
 	Observability ObservabilityReader
 	Runtime       RuntimeController
+	AuthToken     string
 	Version       string
 	Builder       http.Handler
 }
@@ -139,6 +140,7 @@ type Handler struct {
 	conversations ConversationReader
 	observability ObservabilityReader
 	runtime       RuntimeController
+	authToken     string
 	version       string
 	builder       http.Handler
 	mux           *http.ServeMux
@@ -154,6 +156,7 @@ func NewHandler(opts Options) http.Handler {
 		conversations: opts.Conversations,
 		observability: opts.Observability,
 		runtime:       opts.Runtime,
+		authToken:     strings.TrimSpace(opts.AuthToken),
 		version:       strings.TrimSpace(opts.Version),
 	}
 	mux := http.NewServeMux()
@@ -196,7 +199,59 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if h.requiresAuthentication(r) {
+		if err := h.authorize(r); err != nil {
+			h.writeAuthError(w, err)
+			return
+		}
+	}
 	h.mux.ServeHTTP(w, r)
+}
+
+var (
+	errDashboardAuthNotConfigured = errors.New("operator authentication is not configured")
+	errDashboardAuthMissingBearer = errors.New("missing authorization bearer token")
+	errDashboardAuthInvalidBearer = errors.New("invalid authorization header")
+	errDashboardAuthInvalidToken  = errors.New("invalid token")
+)
+
+func (h *Handler) requiresAuthentication(r *http.Request) bool {
+	if r == nil || r.URL == nil {
+		return false
+	}
+	path := strings.TrimSpace(r.URL.Path)
+	switch path {
+	case "/api/rpc", "/api/ws":
+		return false
+	}
+	return path == "/api" || strings.HasPrefix(path, "/api/")
+}
+
+func (h *Handler) authorize(r *http.Request) error {
+	if strings.TrimSpace(h.authToken) == "" {
+		return errDashboardAuthNotConfigured
+	}
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authz == "" {
+		return errDashboardAuthMissingBearer
+	}
+	const prefix = "bearer "
+	if !strings.HasPrefix(strings.ToLower(authz), prefix) {
+		return errDashboardAuthInvalidBearer
+	}
+	if strings.TrimSpace(authz[len(prefix):]) != h.authToken {
+		return errDashboardAuthInvalidToken
+	}
+	return nil
+}
+
+func (h *Handler) writeAuthError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errDashboardAuthNotConfigured) {
+		writeJSONError(w, http.StatusServiceUnavailable, err)
+		return
+	}
+	w.Header().Set("WWW-Authenticate", `Bearer realm="swarm-operator"`)
+	writeJSONError(w, http.StatusUnauthorized, err)
 }
 
 type genericAgent struct {
