@@ -472,6 +472,51 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	}
 }
 
+func TestHandler_ConversationDetail_PreservesParseOKFalse(t *testing.T) {
+	now := time.Date(2026, 3, 17, 12, 0, 0, 0, time.UTC)
+	handler := NewHandler(Options{
+		AuthToken: testOperatorAuthToken,
+		Conversations: stubConversations{
+			bySession: map[string]ConversationDetail{
+				"sess-1": {
+					AgentID:   "agent-1",
+					SessionID: "sess-1",
+					UpdatedAt: now.Format(time.RFC3339),
+					Messages:  []ConversationMessage{{Role: "assistant", Content: "hi"}},
+					RuntimeState: ConversationRuntimeState{
+						Summary:  "summarized",
+						LastTurn: &ConversationRuntimeLastTurn{ParseOK: false},
+					},
+				},
+			},
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/conversations/sess-1", nil)
+	setOperatorAuth(req)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("conversation detail status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal conversation detail: %v", err)
+	}
+	runtimeState, ok := payload["runtime_state"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime_state missing or invalid: %#v", payload["runtime_state"])
+	}
+	lastTurn, ok := runtimeState["last_turn"].(map[string]any)
+	if !ok {
+		t.Fatalf("last_turn missing or invalid: %#v", runtimeState["last_turn"])
+	}
+	if got, ok := lastTurn["parse_ok"].(bool); !ok || got {
+		t.Fatalf("last_turn.parse_ok = %#v, want false", lastTurn["parse_ok"])
+	}
+}
+
 func TestHandler_DashboardRoutesRequireAuthentication(t *testing.T) {
 	handler := NewHandler(Options{
 		Health: func(context.Context) (map[string]any, error) {
