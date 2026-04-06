@@ -146,6 +146,7 @@ func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 	rt := &runtimepkg.Runtime{Bus: eb}
 	handler := builderpkg.NewHandler(builderpkg.Options{
 		CurrentRuntime: func() *runtimepkg.Runtime { return rt },
+		AuthToken:      "builder-test-token",
 	})
 
 	runID := uuid.NewString()
@@ -169,6 +170,7 @@ func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer builder-test-token")
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())

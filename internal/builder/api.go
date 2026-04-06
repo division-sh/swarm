@@ -48,6 +48,7 @@ type Options struct {
 	Instances      InstanceReader
 	Runtime        RuntimeController
 	Credentials    runtimecredentials.Store
+	AuthToken      string
 	Version        string
 	SemanticSource semanticview.Source
 	RuntimeRef     *runtimepkg.Runtime
@@ -147,6 +148,7 @@ func NewHandler(opts Options) http.Handler {
 		instances:      opts.Instances,
 		runtime:        opts.Runtime,
 		credentials:    opts.Credentials,
+		authToken:      strings.TrimSpace(opts.AuthToken),
 		version:        strings.TrimSpace(opts.Version),
 		semanticSource: opts.SemanticSource,
 		currentSource:  opts.CurrentSource,

@@ -1311,6 +1311,7 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		Instances:      runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
 		Runtime:        runtimeCtl,
 		Credentials:    credentialStore,
+		AuthToken:      strings.TrimSpace(os.Getenv("SWARM_BUILDER_AUTH_TOKEN")),
 		Version:        "swarm-dev",
 		CurrentSource:  sourceProvider,
 		CurrentRuntime: runtimeProvider,
