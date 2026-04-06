@@ -857,8 +857,13 @@ func computeValue(acc *Accumulator, payload map[string]any, spec *runtimecontrac
 	switch spec.Operation {
 	case runtimecontracts.ComputeOpWeightedAverage:
 		return computeWeightedAverage(acc, spec), nil
-	case runtimecontracts.ComputeOpWeightedSum:
-		return computeWeightedPayload(payload, spec.Tiers), nil
+	case runtimecontracts.ComputeOpPickOrAverage:
+		return aggregateAccumulatorNumbers(acc, spec.Keys, func(current, next float64, idx int) float64 {
+			if idx == 0 || next > current {
+				return next
+			}
+			return current
+		}), nil
 	case runtimecontracts.ComputeOpSum:
 		return aggregateAccumulatorNumbers(acc, spec.Keys, func(current, next float64, idx int) float64 {
 			return current + next

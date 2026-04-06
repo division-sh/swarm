@@ -436,7 +436,7 @@ func (pc *PipelineCoordinator) BackgroundNodes(bus systemNodeBus, db *sql.DB) []
 	retryBase := workflowHandlerRetryBase(pc.SemanticSource())
 	out := make([]BackgroundNode, 0, 1)
 	for _, node := range pc.WorkflowNodes() {
-		if strings.TrimSpace(node.ExecutionType) != "workflow_node" {
+		if strings.TrimSpace(node.ExecutionType) != runtimecontracts.SystemNodeExecutionType {
 			continue
 		}
 		if executor := pc.backgroundWorkflowExecutor(strings.TrimSpace(node.ID)); executor != nil {

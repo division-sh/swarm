@@ -7,30 +7,51 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestHandlerRuleEntryDecode_PreservesLegacyComputeShorthand(t *testing.T) {
+func TestHandlerRuleEntryDecode_RejectsLegacyComputeExpressionShorthand(t *testing.T) {
 	var rule HandlerRuleEntry
-	if err := yaml.Unmarshal([]byte(`
+	err := yaml.Unmarshal([]byte(`
 condition: "else"
 compute:
   output_field: composite
   expression: "weighted_average(accumulated.scores, accumulated.weights)"
+`), &rule)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}
+
+func TestHandlerRuleEntryDecode_AcceptsPickOrAverageOperation(t *testing.T) {
+	var rule HandlerRuleEntry
+	if err := yaml.Unmarshal([]byte(`
+condition: "else"
+compute:
+  operation: pick_or_average
+  store_as: entity.composite
+  keys:
+    numeric_keys: [score]
 `), &rule); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if rule.Compute == nil {
 		t.Fatal("expected rule compute to be preserved")
 	}
-	if got := rule.Compute.Operation.String(); got != "weighted_average" {
+	if got := rule.Compute.Operation.String(); got != "pick_or_average" {
 		t.Fatalf("Compute.Operation = %q", got)
 	}
-	if got := rule.Compute.StoreAs; got != "entity.composite" {
-		t.Fatalf("Compute.StoreAs = %q", got)
-	}
-	if got := rule.Compute.ValueField; got != "score" {
-		t.Fatalf("Compute.ValueField = %q", got)
-	}
-	if got := rule.Compute.WeightField; got != "weight" {
-		t.Fatalf("Compute.WeightField = %q", got)
+}
+
+func TestHandlerRuleEntryDecode_RejectsWeightedSumOperation(t *testing.T) {
+	var rule HandlerRuleEntry
+	err := yaml.Unmarshal([]byte(`
+condition: "else"
+compute:
+  operation: weighted_sum
+  store_as: entity.composite
+  keys:
+    numeric_keys: [score]
+`), &rule)
+	if err == nil || !strings.Contains(err.Error(), "unsupported compute operation") {
+		t.Fatalf("yaml.Unmarshal error = %v, want unsupported compute operation", err)
 	}
 }
 
@@ -394,5 +415,15 @@ evidence_target: validation.results
 	}
 	if got := handler.EvidenceTarget; got != "validation.results" {
 		t.Fatalf("EvidenceTarget = %q", got)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsUnsupportedActionID(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+action: increment_revision_count
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "unsupported handler action") {
+		t.Fatalf("yaml.Unmarshal error = %v, want unsupported handler action", err)
 	}
 }

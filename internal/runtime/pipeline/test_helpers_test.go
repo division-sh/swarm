@@ -86,7 +86,7 @@ item.reviewed:
 	writePipelineFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 review-node:
   id: review-node
-  execution_type: workflow_node
+  execution_type: system_node
   subscribes_to:
     - item.created
   produces:

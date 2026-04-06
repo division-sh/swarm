@@ -417,6 +417,23 @@ func TestComputeValue(t *testing.T) {
 
 	acc = &Accumulator{
 		Items: []map[string]any{
+			{"payload": map[string]any{"score": 55.0}},
+			{"payload": map[string]any{"score": 81.0}},
+			{"payload": map[string]any{"score": 74.0}},
+		},
+	}
+	value, err = computeValue(acc, nil, &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpPickOrAverage,
+		Keys: runtimecontracts.ComputeKeyConfig{
+			NumericKeys: []string{"score"},
+		},
+	})
+	if err != nil || value.(float64) != 81 {
+		t.Fatalf("computeValue pick_or_average = %#v, %v", value, err)
+	}
+
+	acc = &Accumulator{
+		Items: []map[string]any{
 			{"payload": map[string]any{"score": 80.0, "weight": 0.5}},
 			{"payload": map[string]any{"score": 90.0, "weight": 0.3}},
 			{"payload": map[string]any{"score": 70.0, "weight": 0.2}},

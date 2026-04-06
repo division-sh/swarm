@@ -1352,8 +1352,19 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 				issues = append(issues, catalogBootIssue{Severity: "error", Category: "REQUIRED-AGENT", Message: fmt.Sprintf("%s: required role '%s' not in agents.yaml", scopeLabel, role)})
 				continue
 			}
+			schemaSubscriptions := catalogBootStringSet(required["subscribes_to"])
+			agentSubscriptions := catalogBootStringSet(agent["subscriptions"])
 			schemaEmits := catalogBootStringSet(required["emits"])
 			agentEmits := catalogBootStringSet(agent["emit_events"])
+			missingSubscriptions := make([]string, 0, len(schemaSubscriptions))
+			for _, ev := range catalogSortedSetKeys(schemaSubscriptions) {
+				if !catalogSetHas(agentSubscriptions, ev) {
+					missingSubscriptions = append(missingSubscriptions, ev)
+				}
+			}
+			if len(missingSubscriptions) > 0 {
+				issues = append(issues, catalogBootIssue{Severity: "error", Category: "SUBSCRIPTION-MISMATCH", Message: fmt.Sprintf("%s/%s: schema says subscribes_to %v but agent doesn't", scopeLabel, role, missingSubscriptions)})
+			}
 			missing := make([]string, 0, len(schemaEmits))
 			for _, ev := range catalogSortedSetKeys(schemaEmits) {
 				if !catalogSetHas(agentEmits, ev) {

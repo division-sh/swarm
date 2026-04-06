@@ -63,7 +63,7 @@ type ComputeOperation uint8
 const (
 	ComputeOpUnknown ComputeOperation = iota
 	ComputeOpWeightedAverage
-	ComputeOpWeightedSum
+	ComputeOpPickOrAverage
 	ComputeOpSum
 	ComputeOpMin
 	ComputeOpMax
@@ -74,8 +74,8 @@ func ParseComputeOperation(text string) (ComputeOperation, error) {
 	switch strings.ToLower(strings.TrimSpace(text)) {
 	case "weighted_average":
 		return ComputeOpWeightedAverage, nil
-	case "weighted_sum":
-		return ComputeOpWeightedSum, nil
+	case "pick_or_average":
+		return ComputeOpPickOrAverage, nil
 	case "sum":
 		return ComputeOpSum, nil
 	case "min":
@@ -95,8 +95,8 @@ func (o ComputeOperation) String() string {
 	switch o {
 	case ComputeOpWeightedAverage:
 		return "weighted_average"
-	case ComputeOpWeightedSum:
-		return "weighted_sum"
+	case ComputeOpPickOrAverage:
+		return "pick_or_average"
 	case ComputeOpSum:
 		return "sum"
 	case ComputeOpMin:

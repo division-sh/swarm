@@ -491,13 +491,13 @@ func (r pipelineEngineActionRegistry) HasAction(id identity.ActionKey) bool {
 	if r.registry != nil && r.registry.HasAction(id) {
 		return true
 	}
-	return isSupportedWorkflowHandlerActionID(id.String())
+	return runtimecontracts.IsSupportedHandlerActionID(id.String())
 }
 func (r pipelineEngineActionRegistry) IsExecutable(id identity.ActionKey) bool {
 	if r.registry != nil && r.registry.IsExecutable(id) {
 		return true
 	}
-	return isSupportedWorkflowHandlerActionID(id.String())
+	return runtimecontracts.IsSupportedHandlerActionID(id.String())
 }
 func (r pipelineEngineActionRegistry) Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool) {
 	if r.registry != nil {
@@ -505,7 +505,7 @@ func (r pipelineEngineActionRegistry) Action(id identity.ActionKey) (runtimeregi
 			return instruction, true
 		}
 	}
-	if !isSupportedWorkflowHandlerActionID(id.String()) {
+	if !runtimecontracts.IsSupportedHandlerActionID(id.String()) {
 		return runtimeregistry.ActionInstruction{}, false
 	}
 	return runtimeregistry.ActionInstruction{
@@ -611,24 +611,11 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 	if pc == nil {
 		return false, nil
 	}
-	actionID := strings.TrimSpace(firstNonEmptyString(entry.Builtin, entry.Key.String(), action.ID))
+	actionID := runtimecontracts.NormalizeHandlerActionID(firstNonEmptyString(entry.Builtin, entry.Key.String(), action.ID))
 	if actionID == "" {
 		return false, nil
 	}
-	switch strings.TrimSpace(action.ID) {
-	case "increment_revision_count":
-		if pc.workflowStore != nil && pc.workflowStore.Enabled() {
-			_ = pc.workflowStore.Mutate(ctx, execCtx.Request.EntityID.String(), func(instance *WorkflowInstance) {
-				metadata := workflowMutableMetadata(instance)
-				metadata["revision_count"] = asInt(metadata["revision_count"]) + 1
-			})
-		}
-		return true, nil
-	case identity.ActionRecordStateChange.String(),
-		identity.ActionUpdateState.String(),
-		identity.ActionCancelStateTimers.String(),
-		identity.ActionStartStateTimers.String():
-		return true, nil
+	switch actionID {
 	case "record_evidence":
 		payload := parsePayloadMap(execCtx.Request.Event.Payload)
 		bucketID := pc.evidenceTargetForHandler(execCtx.Request.NodeID.String(), string(execCtx.Request.Event.Type))
@@ -643,7 +630,7 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		plan := handlerExecutionPlan{
 			NodeID:         execCtx.Request.NodeID.String(),
 			EventType:      strings.TrimSpace(string(execCtx.Request.Event.Type)),
-			Action:         strings.TrimSpace(action.ID),
+			Action:         actionID,
 			Template:       strings.TrimSpace(action.Template),
 			InstanceIDFrom: strings.TrimSpace(action.InstanceIDFrom),
 			InstanceIDPath: action.InstanceIDPath,

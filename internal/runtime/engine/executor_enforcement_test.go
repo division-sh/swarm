@@ -193,7 +193,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		return exec
 	}
 
-	blocked, err := newExecutor(50, false).Execute(context.Background(), ExecutionRequest{
+	rejected, err := newExecutor(50, false).Execute(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
@@ -201,16 +201,16 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "entity.score >= 75",
-				OnFail: "blocked",
+				OnFail: "reject",
 			},
 			AdvancesTo: "approved",
 		},
 	})
 	if err != nil {
-		t.Fatalf("blocked Execute error: %v", err)
+		t.Fatalf("reject Execute error: %v", err)
 	}
-	if blocked.Status != OutcomeBlocked {
-		t.Fatalf("blocked Status = %q, want %q", blocked.Status, OutcomeBlocked)
+	if rejected.Status != OutcomeRejected {
+		t.Fatalf("rejected Status = %q, want %q", rejected.Status, OutcomeRejected)
 	}
 
 	passed, err := newExecutor(80, true).Execute(context.Background(), ExecutionRequest{
@@ -221,7 +221,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "entity.score >= 75",
-				OnFail: "blocked",
+				OnFail: "reject",
 			},
 			AdvancesTo: "approved",
 		},

@@ -61,12 +61,7 @@ func isExecutableWorkflowActionEntry(entry runtimecontracts.GuardActionEntry) bo
 }
 
 func isSupportedWorkflowHandlerActionID(id string) bool {
-	switch normalizeWorkflowBuiltinActionID(id) {
-	case "create_flow_instance", "record_evidence":
-		return true
-	default:
-		return isSupportedWorkflowActionBuiltin(id)
-	}
+	return runtimecontracts.IsSupportedHandlerActionID(normalizeWorkflowBuiltinActionID(id))
 }
 
 type contractGuardRegistry struct {
@@ -181,16 +176,5 @@ func isSupportedWorkflowGuardBuiltin(id string) bool {
 }
 
 func isSupportedWorkflowActionBuiltin(id string) bool {
-	switch normalizeWorkflowBuiltinActionID(id) {
-	case "increment_revision_count",
-		"record_state_change",
-		"update_state",
-		"cancel_state_timers",
-		"start_state_timers",
-		"record_evidence",
-		"create_flow_instance":
-		return true
-	default:
-		return false
-	}
+	return runtimecontracts.IsSupportedHandlerActionID(normalizeWorkflowBuiltinActionID(id))
 }

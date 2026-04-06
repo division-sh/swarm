@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func TestCatalogRunner_GuardOnFailBlockedPreservesStateAndSuppressesEmit(t *testing.T) {
+func TestCatalogRunner_GuardOnFailRejectPreservesStateAndSuppressesEmit(t *testing.T) {
 	dir := t.TempDir()
-	writeCatalogCaseFile(t, dir, "package.yaml", "name: guard-blocked\n")
+	writeCatalogCaseFile(t, dir, "package.yaml", "name: guard-reject\n")
 	writeCatalogCaseFixture(t, dir,
 		`
 initial_state: pending
@@ -30,7 +30,7 @@ test-node:
     check.requested:
       guard:
         check: "payload.score >= policy.minimum_score"
-        on_fail: blocked
+        on_fail: reject
       advances_to: done
       emits: check.passed
 `,
@@ -45,7 +45,7 @@ trigger:
     score: 12
 
 expected:
-  handler_outcome: blocked
+  handler_outcome: reject
   entity_state: pending
   emitted_events: []
 `,

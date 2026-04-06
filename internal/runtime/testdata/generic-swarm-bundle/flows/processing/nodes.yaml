@@ -1,6 +1,6 @@
 processing-node:
   id: processing-node
-  execution_type: workflow_node
+  execution_type: system_node
   idempotency_table: processing_node_idempotency
   state_table: processing_node_state
   subscribes_to:
@@ -14,7 +14,7 @@ processing-node:
       guard:
         id: delivery_enabled
         check: policy.delivery_enabled
-        on_fail: block
+        on_fail: reject
       branch:
         - condition: payload.priority == 'urgent'
           then:
@@ -22,7 +22,7 @@ processing-node:
           else:
             emits: item.rejected
       compute:
-        operation: weighted_sum
+        operation: pick_or_average
         store_as: score
         keys:
           numeric_keys:

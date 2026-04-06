@@ -55,6 +55,39 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsMultipleAuthoritati
 	}
 }
 
+func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidExecutionType(t *testing.T) {
+	bundle := loadCurrentWorkflowBundleForTest(t)
+
+	for nodeID, node := range bundle.Nodes {
+		node.ExecutionType = "workflow_node"
+		bundle.Nodes[nodeID] = node
+		break
+	}
+
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
+	if err == nil || !contractErrorContains(err, "unsupported execution_type") {
+		t.Fatalf("unexpected load validation error: %v", err)
+	}
+}
+
+func TestValidateWorkflowContractBundleLoadConstraintsRejectsUnsupportedHandlerAction(t *testing.T) {
+	bundle := loadCurrentWorkflowBundleForTest(t)
+
+	nodeID, eventType, handler, ok := firstLoadedWorkflowHandler(bundle)
+	if !ok {
+		t.Fatal("expected workflow handler")
+	}
+	handler.Action = ActionSpec{ID: "increment_revision_count"}
+	node := bundle.Nodes[nodeID]
+	node.EventHandlers[eventType] = handler
+	bundle.Nodes[nodeID] = node
+
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
+	if err == nil || !contractErrorContains(err, "action increment_revision_count is not in platform spec") {
+		t.Fatalf("unexpected load validation error: %v", err)
+	}
+}
+
 func TestLoadWorkflowContractBundle_PreservesEvidenceTarget(t *testing.T) {
 	bundle := loadCurrentWorkflowBundleForTest(t)
 	for _, node := range bundle.Nodes {
