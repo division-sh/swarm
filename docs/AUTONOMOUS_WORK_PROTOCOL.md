@@ -120,6 +120,12 @@ Rules:
 - if status is `approved`, wait for merge
 - if the PR is merged, return to unassigned state and switch to issue polling
 
+Recommended command:
+
+```sh
+python scripts/agent_poll.py --agent A --watch
+```
+
 ### Rebase And Refresh Rule
 
 Other PRs may merge while an agent is still working.
@@ -168,6 +174,12 @@ Default rules:
   - its current PR review comments
   - or the issue carrying its agent label
 
+Recommended command:
+
+```sh
+python scripts/agent_poll.py --agent A --watch
+```
+
 ## Agent Required Responses
 
 When starting assigned work, comment on the issue:
@@ -211,6 +223,8 @@ State: idle
 Issue: none
 PR: none
 Branch: none
+Control-Target: idle
+Last-Seen-Comment-ID: none
 Last-Updated: 2026-04-05T14:20:00Z
 Next-Action: polling for assigned issue
 ```
@@ -230,6 +244,38 @@ The status file must be updated:
 - when review requests changes
 - when blocked
 - when the PR merges and the agent returns to idle
+
+The poller updates `AGENT_STATUS.md` automatically after each check.
+
+## Poller Script
+
+The first polling implementation lives at:
+
+- `scripts/agent_poll.py`
+
+Supported modes:
+
+- default one-shot mode
+  - check once
+  - update `AGENT_STATUS.md`
+  - print the current state
+- `--watch`
+  - poll every 10 minutes by default
+  - return when a new structured assignment or PR review comment appears
+
+Examples:
+
+```sh
+python scripts/agent_poll.py --agent A
+python scripts/agent_poll.py --agent A --watch
+python scripts/agent_poll.py --agent A --watch --interval 300
+```
+
+The poller uses:
+
+- the current branch to discover an open PR
+- the agent label to discover issue assignments when no PR is open
+- the latest structured top-level `[agent-action]` comment as the current instruction
 
 ## Lead Responsibilities
 
