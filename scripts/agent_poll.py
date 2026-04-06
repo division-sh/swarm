@@ -333,11 +333,11 @@ def main() -> int:
 
         if not args.watch:
             print_summary(fields, action, actionable)
-            return 0
+            return 10 if actionable else 0
 
         if actionable:
             print_summary(fields, action, actionable)
-            return 0
+            return 10
 
         if args.verbose_wait:
             print_summary(fields, action, actionable)

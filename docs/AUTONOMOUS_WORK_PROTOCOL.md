@@ -226,14 +226,22 @@ Use this pattern:
 ```sh
 while true; do
   python scripts/agent_poll.py --agent A
+  rc=$?
+  if [ "$rc" -eq 10 ]; then
+    break
+  fi
+  if [ "$rc" -ne 0 ]; then
+    exit "$rc"
+  fi
   sleep 600
 done
 ```
 
 Rules:
 
-- if the one-shot poller reports no actionable change, let the shell loop sleep and check again
-- if the one-shot poller reports an actionable change, stop the loop, do the work, and then restart the loop after the work cycle finishes
+- if the one-shot poller exits `0`, no actionable change was found; let the shell loop sleep and check again
+- if the one-shot poller exits `10`, actionable work was found; break the loop, do the work, and then restart the loop after the work cycle finishes
+- if the one-shot poller exits non-zero other than `10`, stop and escalate instead of guessing
 - if the poller reports an invalid control state, stop and escalate instead of guessing
 - do not use blocking `--watch` mode as the default TUI operating mode
 
@@ -322,6 +330,8 @@ Supported modes:
   - check once
   - update `AGENT_STATUS.md`
   - print the current state
+  - exit `0` when no actionable change is found
+  - exit `10` when actionable work is found
 - `--watch`
   - poll every 10 minutes by default
   - return when a new structured assignment or PR review comment appears
@@ -330,7 +340,7 @@ Examples:
 
 ```sh
 python scripts/agent_poll.py --agent A
-while true; do python scripts/agent_poll.py --agent A; sleep 600; done
+while true; do python scripts/agent_poll.py --agent A; rc=$?; if [ "$rc" -eq 10 ]; then break; fi; if [ "$rc" -ne 0 ]; then exit "$rc"; fi; sleep 600; done
 python scripts/agent_poll.py --agent A --watch
 ```
 
