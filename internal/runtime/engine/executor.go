@@ -693,7 +693,6 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 }
 
 func (e *Executor) stepOnComplete(frame *executionFrame) error {
-	e.ensureTopLevelDataWritesApplied(frame)
 	rules := frame.req.Handler.OnComplete
 	if len(rules) == 0 && frame.req.Handler.Accumulate != nil {
 		rules = frame.req.Handler.Accumulate.OnComplete
@@ -721,7 +720,6 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 	if frame.rule != nil {
 		return nil
 	}
-	e.ensureTopLevelDataWritesApplied(frame)
 	rule, err := e.selectRule(frame, frame.req.Handler.Rules)
 	if err != nil {
 		return err
@@ -1279,18 +1277,6 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	if id := strings.TrimSpace(rule.ID); id != "" {
 		frame.result.RuleID = id
 	}
-}
-
-func (e *Executor) ensureTopLevelDataWritesApplied(frame *executionFrame) {
-	if frame.topLevelDataWritesApplied {
-		return
-	}
-	spec := frame.topLevelDataAccumulation
-	if !spec.HasWrites() && strings.TrimSpace(spec.SourceEvent) == "" {
-		return
-	}
-	e.applyDataAccumulation(frame, spec)
-	frame.topLevelDataWritesApplied = true
 }
 
 func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecontracts.WorkflowDataAccumulation) {

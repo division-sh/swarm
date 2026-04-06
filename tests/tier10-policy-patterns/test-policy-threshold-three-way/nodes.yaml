@@ -9,10 +9,10 @@ classifier:
         writes:
           - score
       on_complete:
-        - condition: "entity.score >= policy.high_mark"
+        - condition: "payload.score >= policy.high_mark"
           advances_to: tier_a
           emits: eval.tier_a
-        - condition: "entity.score >= policy.low_mark"
+        - condition: "payload.score >= policy.low_mark"
           advances_to: tier_b
           emits: eval.tier_b
         - condition: "else"

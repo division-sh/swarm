@@ -53,6 +53,9 @@ type stubEvaluator struct {
 	bools map[string]bool
 	errs  map[string]error
 }
+type contextualBoolEvaluator struct {
+	bools map[string]func(BaseContext) (bool, error)
+}
 type stubGuardRegistry struct {
 	entries map[identity.GuardKey]runtimeregistry.GuardInstruction
 }
@@ -96,6 +99,13 @@ func (s stubEvaluator) EvalBool(expression string, _ BaseContext) (bool, error) 
 	return s.bools[expression], nil
 }
 func (s stubEvaluator) EvalValue(string, BaseContext) (any, error) { return nil, ErrNotImplemented }
+func (s contextualBoolEvaluator) EvalBool(expression string, base BaseContext) (bool, error) {
+	if fn, ok := s.bools[expression]; ok {
+		return fn(base)
+	}
+	return false, nil
+}
+func (s contextualBoolEvaluator) EvalValue(string, BaseContext) (any, error) { return nil, ErrNotImplemented }
 func (r stubGuardRegistry) HasGuard(id identity.GuardKey) bool     { _, ok := r.entries[id]; return ok }
 func (r stubGuardRegistry) IsExecutable(id identity.GuardKey) bool { _, ok := r.entries[id]; return ok }
 func (r stubGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool) {
@@ -808,6 +818,111 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 	}
 	if got := result.StateMutation.Metadata["rule_only"]; got != "applied" {
 		t.Fatalf("rule_only = %#v, want applied", got)
+	}
+}
+
+func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
+		`entity.branch_target == "handler"`: func(base BaseContext) (bool, error) {
+			return base.Entity.Raw()["branch_target"] == "handler", nil
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{{
+					TargetField: "branch_target",
+					Value:       runtimecontracts.LiteralExpression("handler"),
+				}},
+			},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "too-early",
+				Condition: `entity.branch_target == "handler"`,
+				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+					Writes: []runtimecontracts.WorkflowDataWrite{{
+						TargetField: "rule_selected",
+						Value:       runtimecontracts.LiteralExpression(true),
+					}},
+				},
+			}},
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := strings.TrimSpace(result.RuleID); got != "" {
+		t.Fatalf("rule_id = %q, want empty when branch selection cannot see top-level writes", got)
+	}
+	if _, exists := result.StateMutation.Metadata["rule_selected"]; exists {
+		t.Fatalf("rule_selected unexpectedly present after rules evaluated before top-level writes: %#v", result.StateMutation.Metadata["rule_selected"])
+	}
+	if got := result.StateMutation.Metadata["branch_target"]; got != "handler" {
+		t.Fatalf("branch_target = %#v, want handler after data_accumulation step", got)
+	}
+}
+
+func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
+		`entity.branch_target == "handler"`: func(base BaseContext) (bool, error) {
+			return base.Entity.Raw()["branch_target"] == "handler", nil
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{{
+					TargetField: "branch_target",
+					Value:       runtimecontracts.LiteralExpression("handler"),
+				}},
+			},
+			OnComplete: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "too-early",
+				Condition: `entity.branch_target == "handler"`,
+				Emits:     runtimecontracts.EventEmission{Single: "branch.selected"},
+			}},
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := strings.TrimSpace(result.RuleID); got != "" {
+		t.Fatalf("rule_id = %q, want empty when on_complete selection cannot see top-level writes", got)
+	}
+	if got := len(result.EmitIntents); got != 0 {
+		t.Fatalf("emit intents = %d, want 0 when on_complete branch is not selected early", got)
+	}
+	if got := result.StateMutation.Metadata["branch_target"]; got != "handler" {
+		t.Fatalf("branch_target = %#v, want handler after data_accumulation step", got)
 	}
 }
 
