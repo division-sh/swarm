@@ -136,6 +136,74 @@ func TestLoadRunStatusRuntimeLogs_UsesSpecShapedPayload(t *testing.T) {
 	}
 }
 
+func TestLoadRunStatusRuntimeLogs_UsesCanonicalPersistedRunID(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	targetRunID := uuid.NewString()
+	otherRunID := uuid.NewString()
+	now := time.Unix(1700000000, 0).UTC()
+
+	insertRuntimeLog := func(runID string, payloadRunID string, component string, action string, createdAt time.Time) {
+		t.Helper()
+		payload, err := json.Marshal(map[string]any{
+			"log_level": "warn",
+			"message":   action,
+			"details": map[string]any{
+				"run_id":    payloadRunID,
+				"component": component,
+				"action":    action,
+				"error":     action + "-error",
+			},
+		})
+		if err != nil {
+			t.Fatalf("marshal runtime log payload: %v", err)
+		}
+		if _, err := db.Exec(`
+			INSERT INTO runs (run_id, status)
+			VALUES ($1::uuid, 'running')
+			ON CONFLICT (run_id) DO NOTHING
+		`, runID); err != nil {
+			t.Fatalf("insert run %s: %v", runID, err)
+		}
+		if _, err := db.Exec(`
+			INSERT INTO events (
+				run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+			)
+			VALUES (
+				$1::uuid, gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb, 'test', 'agent', $3
+			)
+		`, runID, string(payload), createdAt); err != nil {
+			t.Fatalf("insert runtime log for run %s: %v", runID, err)
+		}
+	}
+
+	insertRuntimeLog(targetRunID, otherRunID, "scheduler", "canonical-owner", now)
+	insertRuntimeLog(otherRunID, targetRunID, "scheduler", "payload-only", now.Add(1*time.Minute))
+
+	var report runStatusReport
+	err := loadRunStatusRuntimeLogs(context.Background(), db, targetRunID, runStatusOptions{
+		LogsOnly:  true,
+		Component: "scheduler",
+	}, &report)
+	if err != nil {
+		t.Fatalf("loadRunStatusRuntimeLogs: %v", err)
+	}
+	if report.WarnErrorLogCount != 1 {
+		t.Fatalf("WarnErrorLogCount = %d, want 1", report.WarnErrorLogCount)
+	}
+	if len(report.RuntimeLogSummary) != 1 {
+		t.Fatalf("RuntimeLogSummary len = %d, want 1", len(report.RuntimeLogSummary))
+	}
+	if got := report.RuntimeLogSummary[0]; got.Component != "scheduler" || got.Action != "canonical-owner" || got.Count != 1 {
+		t.Fatalf("RuntimeLogSummary[0] = %#v", got)
+	}
+	if len(report.RuntimeLogs) != 1 {
+		t.Fatalf("RuntimeLogs len = %d, want 1", len(report.RuntimeLogs))
+	}
+	if got := report.RuntimeLogs[0]; got.Component != "scheduler" || got.Action != "canonical-owner" || got.Error != "canonical-owner-error" {
+		t.Fatalf("RuntimeLogs[0] = %#v", got)
+	}
+}
+
 func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}

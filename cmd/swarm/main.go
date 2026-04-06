@@ -580,7 +580,7 @@ func loadRunStatusRuntimeLogs(ctx context.Context, db *sql.DB, runID string, opt
 		SELECT COUNT(*)
 		FROM events
 		WHERE event_name = 'platform.runtime_log'
-		  AND payload->'details'->>'run_id' = $1
+		  AND run_id = $1::uuid
 		  AND payload->>'log_level' = ANY($2::text[])
 		  AND ($3 = '' OR payload->'details'->>'component' = $3)
 	`, runID, pq.Array(logLevels), componentFilter).Scan(&report.WarnErrorLogCount); err != nil {
@@ -594,7 +594,7 @@ func loadRunStatusRuntimeLogs(ctx context.Context, db *sql.DB, runID string, opt
 			COUNT(*)
 		FROM events
 		WHERE event_name = 'platform.runtime_log'
-		  AND payload->'details'->>'run_id' = $1
+		  AND run_id = $1::uuid
 		  AND payload->>'log_level' = ANY($2::text[])
 		  AND ($3 = '' OR payload->'details'->>'component' = $3)
 		GROUP BY payload->>'log_level', payload->'details'->>'component', payload->'details'->>'action'
@@ -624,7 +624,7 @@ func loadRunStatusRuntimeLogs(ctx context.Context, db *sql.DB, runID string, opt
 			created_at
 		FROM events
 		WHERE event_name = 'platform.runtime_log'
-		  AND payload->'details'->>'run_id' = $1
+		  AND run_id = $1::uuid
 		  AND payload->>'log_level' = ANY($2::text[])
 		  AND ($3 = '' OR payload->'details'->>'component' = $3)
 		ORDER BY created_at DESC
