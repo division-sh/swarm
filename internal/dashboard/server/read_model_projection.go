@@ -110,9 +110,6 @@ func normalizeProjectedTurnSummary(summary projectedTurnSummary) projectedTurnSu
 		}
 		summary.ToolResults = out
 	}
-	if summary.Outcome == "" {
-		summary.Outcome = summary.AssistantVisibleOutput
-	}
 	return summary
 }
 

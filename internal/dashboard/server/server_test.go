@@ -957,6 +957,66 @@ func TestSQLConversationReader_GetPrefersCanonicalTurnBlocks(t *testing.T) {
 	}
 }
 
+func TestSQLConversationReader_GetDoesNotInferOutcomeWithoutCanonicalField(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions:   store.SchemaFlavorCanonical,
+			Turns:      store.SchemaFlavorCanonical,
+			TurnBlocks: true,
+		},
+	}})
+	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
+	summaryState := `{"summary":"brief"}`
+	messagePayload := `[{"role":"assistant","content":"hello"}]`
+	turnBlocksPayload := `[
+		{"kind":"assistant_text","text":"stale assistant text"},
+		{"kind":"outcome","text":"stale raw outcome"},
+		{"kind":"turn_summary","data":{"assistant_visible_output":"Parking for manual review."}}
+	]`
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
+		WithArgs("sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(summaryState), []byte(messagePayload), now))
+
+	mock.ExpectQuery("SELECT\\s+turn_id::text,.*FROM agent_turns").
+		WithArgs("agent-1", "sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id", "trigger_event_id", "trigger_event_type", "task_id",
+			"available_tools", "tool_calls", "emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
+			"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms", "retry_count", "error", "created_at",
+		}).AddRow(
+			"turn-1", "agent-1", "sess-1", "task", "global", "entity-1", "evt-1", "scoring/vertical.marginal", "",
+			[]byte(`[]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`),
+			[]byte(`{"message":{"content":"dispatch"}}`), []byte(`{"result":"14-day review scheduled."}`), []byte(turnBlocksPayload), true, 92282, 0, "", now,
+		))
+
+	item, ok, err := reader.Get(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("get conversation: %v", err)
+	}
+	if !ok || len(item.Turns) != 1 {
+		t.Fatalf("unexpected detail: %+v", item)
+	}
+	if item.Turns[0].AssistantVisibleOutput != "Parking for manual review." {
+		t.Fatalf("assistant_visible_output = %q", item.Turns[0].AssistantVisibleOutput)
+	}
+	if item.Turns[0].Outcome != "" {
+		t.Fatalf("expected missing canonical outcome to fail closed, got %q", item.Turns[0].Outcome)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestSQLConversationReader_ListAndGet_TaskAudit(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -1091,6 +1151,33 @@ func TestSummarizeConversationTurnBlocks_FailsClosedOnEmptyCanonicalSummary(t *t
 	assistantText, outcome, reasoning, progress, toolResults := summarizeConversationTurnBlocks(blocks)
 	if assistantText != "" || outcome != "" {
 		t.Fatalf("expected empty canonical summary strings, got assistant=%q outcome=%q", assistantText, outcome)
+	}
+	if reasoning != nil {
+		t.Fatalf("expected nil reasoning blocks, got %#v", reasoning)
+	}
+	if progress != nil {
+		t.Fatalf("expected nil progress updates, got %#v", progress)
+	}
+	if toolResults != nil {
+		t.Fatalf("expected nil tool results, got %#v", toolResults)
+	}
+}
+
+func TestSummarizeConversationTurnBlocks_DoesNotInferOutcomeWithoutCanonicalField(t *testing.T) {
+	blocks := []any{
+		map[string]any{"kind": "assistant_text", "text": "stale fallback text"},
+		map[string]any{"kind": "outcome", "text": "stale outcome"},
+		map[string]any{"kind": "turn_summary", "data": map[string]any{
+			"assistant_visible_output": "Parking for manual review.",
+		}},
+	}
+
+	assistantText, outcome, reasoning, progress, toolResults := summarizeConversationTurnBlocks(blocks)
+	if assistantText != "Parking for manual review." {
+		t.Fatalf("assistant_visible_output = %q", assistantText)
+	}
+	if outcome != "" {
+		t.Fatalf("expected missing canonical outcome to stay empty, got %q", outcome)
 	}
 	if reasoning != nil {
 		t.Fatalf("expected nil reasoning blocks, got %#v", reasoning)
