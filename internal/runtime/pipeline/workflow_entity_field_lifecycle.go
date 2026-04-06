@@ -27,7 +27,7 @@ var workflowExpressionEntityReferencePattern = regexp.MustCompile(`entity\.([a-z
 var workflowExpressionEntityPresencePattern = regexp.MustCompile(`["']([a-zA-Z_][a-zA-Z0-9_]*)["']\s+in\s+entity\b`)
 
 func WorkflowEntityReferences(expression string) []string {
-	expression = strings.TrimSpace(expression)
+	expression = strings.TrimSpace(stripWorkflowExpressionStringLiterals(expression))
 	if expression == "" {
 		return nil
 	}
@@ -49,6 +49,54 @@ func WorkflowEntityReferences(expression string) []string {
 		out = append(out, ref)
 	}
 	return out
+}
+
+func stripWorkflowExpressionStringLiterals(expression string) string {
+	if expression == "" {
+		return ""
+	}
+	var out strings.Builder
+	out.Grow(len(expression))
+	inSingle := false
+	inDouble := false
+	escaped := false
+	for i := 0; i < len(expression); i++ {
+		ch := expression[i]
+		if escaped {
+			if inSingle || inDouble {
+				out.WriteByte(' ')
+			} else {
+				out.WriteByte(ch)
+			}
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			if inSingle || inDouble {
+				out.WriteByte(' ')
+			} else {
+				out.WriteByte(ch)
+			}
+			continue
+		}
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			out.WriteByte(' ')
+			continue
+		}
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			out.WriteByte(' ')
+			continue
+		}
+		if inSingle || inDouble {
+			out.WriteByte(' ')
+			continue
+		}
+		out.WriteByte(ch)
+	}
+	return out.String()
 }
 
 func WorkflowEntityReferenceField(ref string) string {
@@ -126,6 +174,14 @@ func workflowEntityFieldsAvailableBeforePhase(handler runtimecontracts.SystemNod
 			available[field] = struct{}{}
 		}
 	}
+	addRuleWriters := func(rule runtimecontracts.HandlerRuleEntry) {
+		for _, write := range rule.DataAccumulation.Writes {
+			addWriter(write.Target())
+		}
+		if rule.Compute != nil {
+			addWriter(rule.Compute.StoreAs)
+		}
+	}
 	var addQueryWriter func(query *runtimecontracts.QuerySpec)
 	addQueryWriter = func(query *runtimecontracts.QuerySpec) {
 		if query == nil {
@@ -165,6 +221,30 @@ func workflowEntityFieldsAvailableBeforePhase(handler runtimecontracts.SystemNod
 	if phaseAfter(phase, WorkflowEntityFieldLifecycleFanOut) {
 		if handler.FanOut != nil {
 			available["fan_out_count"] = struct{}{}
+		}
+	}
+	if phaseAfter(phase, WorkflowEntityFieldLifecycleRule) {
+		for _, rule := range handler.Rules {
+			addRuleWriters(rule)
+		}
+		for _, rule := range handler.OnComplete {
+			addRuleWriters(rule)
+		}
+		if handler.Accumulate != nil {
+			for _, rule := range handler.Accumulate.OnComplete {
+				addRuleWriters(rule)
+			}
+			if handler.Accumulate.OnTimeout != nil {
+				addRuleWriters(*handler.Accumulate.OnTimeout)
+			}
+		}
+		for _, branch := range handler.Branch {
+			if branch.Then != nil {
+				addRuleWriters(*branch.Then)
+			}
+			if branch.Else != nil {
+				addRuleWriters(*branch.Else)
+			}
 		}
 	}
 	return available
