@@ -60,6 +60,8 @@ func (s *failingConversationStore) LoadActiveConversation(context.Context, strin
 
 type captureConversationStore struct {
 	record ConversationRecord
+	load   ConversationRecord
+	loadOK bool
 }
 
 func (s *captureConversationStore) UpsertConversation(_ context.Context, rec ConversationRecord) error {
@@ -68,7 +70,7 @@ func (s *captureConversationStore) UpsertConversation(_ context.Context, rec Con
 }
 
 func (s *captureConversationStore) LoadActiveConversation(context.Context, string, string, string, string) (ConversationRecord, bool, error) {
-	return ConversationRecord{}, false, nil
+	return s.load, s.loadOK, nil
 }
 
 type failingTurnStore struct {
@@ -321,6 +323,35 @@ func TestClaudeCLIRuntime_PersistConversationIncludesSessionScope(t *testing.T) 
 
 	if store.record.SessionScope != sessions.SessionScopeEntity.String() {
 		t.Fatalf("SessionScope = %q, want %q", store.record.SessionScope, sessions.SessionScopeEntity)
+	}
+}
+
+func TestClaudeCLIRuntime_StartSessionLoadsRetryLineage(t *testing.T) {
+	store := &captureConversationStore{
+		load: ConversationRecord{
+			SessionID:            "session-previous",
+			Messages:             []Message{{Role: "assistant", Content: "hello again"}},
+			TurnCount:            2,
+			RetryReason:          "session not found",
+			RetriesFromSessionID: "session-original",
+		},
+		loadOK: true,
+	}
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, store, nil)
+	ctx := sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global")
+
+	s, err := runtime.StartSession(ctx, "agent-4", "system", nil)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if s.RetryReason != "session not found" {
+		t.Fatalf("RetryReason = %q, want session not found", s.RetryReason)
+	}
+	if s.RetriesFromSessionID != "session-original" {
+		t.Fatalf("RetriesFromSessionID = %q, want session-original", s.RetriesFromSessionID)
+	}
+	if s.TurnCount != 2 || len(s.Messages) != 1 {
+		t.Fatalf("unexpected restored session: %+v", s)
 	}
 }
 

@@ -39,12 +39,28 @@ func TestInMemorySessionRegistryRotate(t *testing.T) {
 	}
 	old := lease.SessionID
 
-	rotated, err := sr.Rotate(context.Background(), "agent-a", RuntimeModeSession, SessionScopeGlobal, "worker-a", "checkpoint", "global")
+	rotated, err := sr.Rotate(context.Background(), "agent-a", RuntimeModeSession, SessionScopeGlobal, "worker-a", RotationMetadata{
+		CheckpointSummary: "checkpoint",
+		RetryReason:       "session not found",
+	}, "global")
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
 	if rotated.SessionID == old {
 		t.Fatalf("expected new session id after rotate")
+	}
+	if rotated.RetryReason != "session not found" {
+		t.Fatalf("RetryReason = %q, want session not found", rotated.RetryReason)
+	}
+	if rotated.RetriesFromSessionID != old {
+		t.Fatalf("RetriesFromSessionID = %q, want %q", rotated.RetriesFromSessionID, old)
+	}
+	rec, ok := sr.Snapshot("agent-a")
+	if !ok {
+		t.Fatal("expected snapshot record")
+	}
+	if rec.RetryReason != "session not found" || rec.RetriesFromSessionID != old {
+		t.Fatalf("unexpected retry lineage in record: %+v", rec)
 	}
 }
 

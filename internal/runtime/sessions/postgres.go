@@ -56,6 +56,8 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID string, runtime
 		scopeKey          string
 		status            string
 		providerSessionID sql.NullString
+		retryReason       sql.NullString
+		retriesFrom       sql.NullString
 		leaseHolder       sql.NullString
 		leaseExpires      sql.NullTime
 	}
@@ -66,6 +68,8 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID string, runtime
 			scope_key,
 			status,
 			NULLIF(runtime_state->>'provider_session_id', ''),
+			NULLIF(runtime_state->>'retry_reason', ''),
+			NULLIF(runtime_state->>'retries_from_session_id', ''),
 			lease_holder,
 			lease_expires_at
 		FROM agent_sessions
@@ -80,6 +84,8 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID string, runtime
 		&r.scopeKey,
 		&r.status,
 		&r.providerSessionID,
+		&r.retryReason,
+		&r.retriesFrom,
 		&r.leaseHolder,
 		&r.leaseExpires,
 	)
@@ -111,13 +117,15 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID string, runtime
 			return nil, fmt.Errorf("commit acquire new: %w", err)
 		}
 		return &Lease{
-			SessionID:    r.sessionID,
-			AgentID:      agentID,
-			RuntimeMode:  resolved.RuntimeMode,
-			SessionScope: resolved.Scope,
-			LockOwner:    lockOwner,
-			ScopeKey:     r.scopeKey,
-			ExpiresAt:    expires,
+			SessionID:            r.sessionID,
+			AgentID:              agentID,
+			RuntimeMode:          resolved.RuntimeMode,
+			SessionScope:         resolved.Scope,
+			RetryReason:          "",
+			RetriesFromSessionID: "",
+			LockOwner:            lockOwner,
+			ScopeKey:             r.scopeKey,
+			ExpiresAt:            expires,
 		}, nil
 	}
 
@@ -149,13 +157,15 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID string, runtime
 			return nil, fmt.Errorf("commit acquire recycled: %w", err)
 		}
 		return &Lease{
-			SessionID:    r.sessionID,
-			AgentID:      agentID,
-			RuntimeMode:  resolved.RuntimeMode,
-			SessionScope: resolved.Scope,
-			LockOwner:    lockOwner,
-			ScopeKey:     r.scopeKey,
-			ExpiresAt:    expires,
+			SessionID:            r.sessionID,
+			AgentID:              agentID,
+			RuntimeMode:          resolved.RuntimeMode,
+			SessionScope:         resolved.Scope,
+			RetryReason:          "",
+			RetriesFromSessionID: "",
+			LockOwner:            lockOwner,
+			ScopeKey:             r.scopeKey,
+			ExpiresAt:            expires,
 		}, nil
 	}
 
@@ -180,14 +190,16 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID string, runtime
 	}
 
 	return &Lease{
-		SessionID:         r.sessionID,
-		ProviderSessionID: strings.TrimSpace(r.providerSessionID.String),
-		AgentID:           agentID,
-		RuntimeMode:       resolved.RuntimeMode,
-		SessionScope:      resolved.Scope,
-		LockOwner:         lockOwner,
-		ScopeKey:          resolved.ScopeKey,
-		ExpiresAt:         expires,
+		SessionID:            r.sessionID,
+		ProviderSessionID:    strings.TrimSpace(r.providerSessionID.String),
+		AgentID:              agentID,
+		RuntimeMode:          resolved.RuntimeMode,
+		SessionScope:         resolved.Scope,
+		RetryReason:          strings.TrimSpace(r.retryReason.String),
+		RetriesFromSessionID: strings.TrimSpace(r.retriesFrom.String),
+		LockOwner:            lockOwner,
+		ScopeKey:             resolved.ScopeKey,
+		ExpiresAt:            expires,
 	}, nil
 }
 
@@ -220,7 +232,7 @@ func (sr *PostgresRegistry) Release(ctx context.Context, lease *Lease) error {
 	return nil
 }
 
-func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, summary, scopeKey string) (*Lease, error) {
+func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner string, rotation RotationMetadata, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
@@ -269,6 +281,11 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 	}
 
 	newSessionID := uuid.NewString()
+	retryReason := strings.TrimSpace(rotation.RetryReason)
+	retriesFromSessionID := ""
+	if retryReason != "" {
+		retriesFromSessionID = currentSessionID
+	}
 	var expiresAt time.Time
 	if err := tx.QueryRowContext(ctx, `
 		UPDATE agent_sessions
@@ -279,14 +296,18 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 		    conversation = '[]'::jsonb,
 		    turn_count = 0,
 		    runtime_mode = $5,
-		    runtime_state = jsonb_build_object('checkpoint_summary', NULLIF($6,'')),
-		    lease_holder = $7,
-		    lease_expires_at = $8,
+		    runtime_state = jsonb_strip_nulls(jsonb_build_object(
+		    	'checkpoint_summary', NULLIF($6,''),
+		    	'retry_reason', NULLIF($7,''),
+		    	'retries_from_session_id', NULLIF($8,'')
+		    )),
+		    lease_holder = $9,
+		    lease_expires_at = $10,
 		    status = 'active',
 		    updated_at = now()
-		WHERE session_id = $9::uuid
+		WHERE session_id = $11::uuid
 		RETURNING lease_expires_at
-	`, newSessionID, resolved.EntityID, resolved.FlowInstance, resolved.Scope, resolved.RuntimeMode, summary, lockOwner, now.Add(sr.lockTTL), currentSessionID).Scan(&expiresAt); err != nil {
+	`, newSessionID, resolved.EntityID, resolved.FlowInstance, resolved.Scope, resolved.RuntimeMode, strings.TrimSpace(rotation.CheckpointSummary), retryReason, retriesFromSessionID, lockOwner, now.Add(sr.lockTTL), currentSessionID).Scan(&expiresAt); err != nil {
 		return nil, fmt.Errorf("rotate session row: %w", err)
 	}
 
@@ -295,13 +316,15 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 	}
 
 	return &Lease{
-		SessionID:    newSessionID,
-		AgentID:      agentID,
-		RuntimeMode:  resolved.RuntimeMode,
-		SessionScope: resolved.Scope,
-		LockOwner:    lockOwner,
-		ScopeKey:     resolved.ScopeKey,
-		ExpiresAt:    expiresAt,
+		SessionID:            newSessionID,
+		AgentID:              agentID,
+		RuntimeMode:          resolved.RuntimeMode,
+		SessionScope:         resolved.Scope,
+		RetryReason:          retryReason,
+		RetriesFromSessionID: retriesFromSessionID,
+		LockOwner:            lockOwner,
+		ScopeKey:             resolved.ScopeKey,
+		ExpiresAt:            expiresAt,
 	}, nil
 }
 

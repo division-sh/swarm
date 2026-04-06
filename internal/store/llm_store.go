@@ -862,9 +862,12 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 
 	const q = `
 		SELECT
+			session_id::text,
 			scope_key,
 			COALESCE(conversation, '[]'::jsonb),
 			COALESCE(runtime_state->>'summary', ''),
+			COALESCE(runtime_state->>'retry_reason', ''),
+			COALESCE(runtime_state->>'retries_from_session_id', ''),
 			COALESCE(turn_count, 0),
 			COALESCE(status, 'active')
 		FROM agent_sessions
@@ -883,9 +886,12 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 
 	var rawMessages []byte
 	err = s.DB.QueryRowContext(ctx, q, agentID, resolvedMode.String(), resolved.ScopeKey).Scan(
+		&rec.SessionID,
 		&rec.ScopeKey,
 		&rawMessages,
 		&rec.Summary,
+		&rec.RetryReason,
+		&rec.RetriesFromSessionID,
 		&rec.TurnCount,
 		&rec.Status,
 	)

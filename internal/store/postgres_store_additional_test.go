@@ -17,6 +17,7 @@ import (
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimesessions "swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/testutil"
 )
@@ -1900,6 +1901,58 @@ func TestManagerStore_ConversationPersistence_SessionPerEntityUsesActorContext(t
 	}
 	if flowInstance != "review/inst-1" {
 		t.Fatalf("flow_instance = %q, want review/inst-1", flowInstance)
+	}
+}
+
+func TestManagerStore_LoadActiveConversationIncludesRetryLineage(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	lease, err := registry.Acquire(ctx, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "worker-1", "global")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	rotated, err := registry.Rotate(ctx, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "worker-1", runtimesessions.RotationMetadata{
+		CheckpointSummary: "rotation_reason=session not found",
+		RetryReason:       "session not found",
+	}, "global")
+	if err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	if rotated.RetriesFromSessionID != lease.SessionID {
+		t.Fatalf("RetriesFromSessionID = %q, want %q", rotated.RetriesFromSessionID, lease.SessionID)
+	}
+
+	rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "global", "global")
+	if err != nil || !ok {
+		t.Fatalf("LoadActiveConversation ok=%v err=%v", ok, err)
+	}
+	if rec.SessionID != rotated.SessionID {
+		t.Fatalf("SessionID = %q, want %q", rec.SessionID, rotated.SessionID)
+	}
+	if rec.RetryReason != "session not found" {
+		t.Fatalf("RetryReason = %q, want session not found", rec.RetryReason)
+	}
+	if rec.RetriesFromSessionID != lease.SessionID {
+		t.Fatalf("RetriesFromSessionID = %q, want %q", rec.RetriesFromSessionID, lease.SessionID)
+	}
+
+	var gotReason, gotFrom string
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(runtime_state->>'retry_reason', ''),
+			COALESCE(runtime_state->>'retries_from_session_id', '')
+		FROM agent_sessions
+		WHERE agent_id = 'a1' AND scope_key = 'global' AND runtime_mode = 'session' AND status = 'active'
+	`).Scan(&gotReason, &gotFrom); err != nil {
+		t.Fatalf("load runtime_state retry lineage: %v", err)
+	}
+	if gotReason != "session not found" || gotFrom != lease.SessionID {
+		t.Fatalf("unexpected runtime_state retry lineage: reason=%q from=%q", gotReason, gotFrom)
 	}
 }
 

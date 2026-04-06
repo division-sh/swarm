@@ -342,7 +342,9 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, conversationMode, err)
 		}
 		rotationCtx := models.WithActor(am.runtimeContext(), updated)
-		rotated, err := sessionRegistry.Rotate(rotationCtx, agentID, runtimeMode, sessions.NormalizeSessionScope(updated.SessionScope), "reconfigure", "agent reconfigured", scopeKey)
+		rotated, err := sessionRegistry.Rotate(rotationCtx, agentID, runtimeMode, sessions.NormalizeSessionScope(updated.SessionScope), "reconfigure", sessions.RotationMetadata{
+			CheckpointSummary: "agent reconfigured",
+		}, scopeKey)
 		if err != nil {
 			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, conversationMode, err)
 		} else if rotated != nil {
