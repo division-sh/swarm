@@ -133,6 +133,7 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 			return nil, err
 		}
 	}
+	actor, _ := runtimeactors.ActorFromContext(ctx)
 
 	s := &Session{
 		ID: ensurePlatformSessionID(func() string {
@@ -164,7 +165,7 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 			}
 			return ""
 		}(),
-		SystemPrompt: augmentCLISystemPrompt(systemPrompt, tools),
+		SystemPrompt: augmentCLISystemPrompt(systemPrompt, actor, tools),
 		Tools:        tools,
 		Messages:     nil,
 	}
@@ -187,7 +188,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
 	scopeKey := budgetExecutionScopeKey(actor)
-	disallowedBuiltinTools := claudeDisallowedBuiltinToolsArgForActor(actor)
+	disallowedBuiltinTools := claudeDisallowedBuiltinToolsArgForActor(actor, s.Tools)
 	allowedToolsArg := claudeAllowedToolsArgForActor(actor, s.Tools)
 
 	// Spec v2.0 budget cap enforcement: at 100% (budget.emergency) we hard-stop

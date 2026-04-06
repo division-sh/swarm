@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 
@@ -185,7 +184,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 		}
 	}
 
-	input := formatEventForAgent(a.cfg, evt, a.authority)
+	input := formatEventForAgent(a.cfg, evt, a.conversation.Tools)
 	resp, err := a.conversation.Step(ctx, input)
 	if err != nil && a.shouldRetryAfterTaskScopeReset(err) {
 		a.conversation.Reset()
@@ -498,7 +497,7 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive string) (string, err
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 	beforeMessages := len(a.conversation.Messages)
-	resp, err := a.conversation.Step(ctx, formatEventForAgent(a.cfg, evt, a.authority))
+	resp, err := a.conversation.Step(ctx, formatEventForAgent(a.cfg, evt, a.conversation.Tools))
 	if err != nil {
 		return "", err
 	}
@@ -739,50 +738,28 @@ func mergeTools(in []llm.ToolDefinition, extra []llm.ToolDefinition) []llm.ToolD
 	return out
 }
 
-func formatEventForAgent(cfg models.AgentConfig, evt events.Event, authority runtimeauthority.Provider) string {
+func formatEventForAgent(cfg models.AgentConfig, evt events.Event, tools []llm.ToolDefinition) string {
 	payload := strings.TrimSpace(string(evt.Payload))
 	if payload == "" {
 		payload = "{}"
 	}
-	allowed := extractEmitEvents(cfg)
-	if len(allowed) == 0 {
-		allowed = runtimeauthority.ProviderOrNoop(authority).ProducerEventsForRole(cfg.Role)
-	}
-	emitTools := make([]string, 0, len(allowed))
-	for _, evtType := range allowed {
-		emitTools = append(emitTools, runtimetools.EmitToolName(evtType))
-	}
+	surface := llm.AgentVisibleToolSurfaceForActor(cfg, tools)
 	toolsLine := "(none declared)"
-	if len(emitTools) > 0 {
-		toolsLine = strings.Join(emitTools, ", ")
+	if len(surface.EmitToolNames) > 0 {
+		toolsLine = strings.Join(surface.EmitToolNames, ", ")
 	}
-	allowedTools, _ := extractAllowedToolSet(cfg)
-	nonEmitTools := make([]string, 0, len(allowedTools))
-	for tool := range allowedTools {
-		if strings.TrimSpace(tool) == "" || strings.HasPrefix(tool, "emit_") {
-			continue
-		}
-		nonEmitTools = append(nonEmitTools, tool)
-	}
-	slices.Sort(nonEmitTools)
 	toolSummaryLine := ""
-	if len(nonEmitTools) > 0 {
-		toolSummaryLine = "\n- Available non-emit tools from your contract: " + strings.Join(nonEmitTools, ", ")
+	if len(surface.NonEmitToolNames) > 0 {
+		toolSummaryLine = "\n- Available non-emit tools in this turn: " + strings.Join(surface.NonEmitToolNames, ", ")
 	}
-	nativeTools := extractNativeToolConfig(cfg)
-	if len(nativeTools) > 0 {
-		nativeNames := make([]string, 0, len(nativeTools))
-		for _, name := range []string{"bash", "web_search", "file_io"} {
-			if nativeTools[name] {
-				nativeNames = append(nativeNames, name)
-			}
-		}
-		if len(nativeNames) > 0 {
-			toolSummaryLine += "\n- Native capabilities from your contract: " + strings.Join(nativeNames, ", ")
-		}
+	if len(surface.NativeBuiltinTools) > 0 {
+		toolSummaryLine += "\n- Available native CLI tools in this turn: " + strings.Join(surface.NativeBuiltinTools, ", ")
+	}
+	if len(surface.ControlToolNames) > 0 {
+		toolSummaryLine += "\n- Available control tools in this turn: " + strings.Join(surface.ControlToolNames, ", ")
 	}
 	return fmt.Sprintf(
-		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools for your role: %s%s%s",
+		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools in this turn: %s%s%s",
 		cfg.ID,
 		cfg.Role,
 		cfg.Mode,
