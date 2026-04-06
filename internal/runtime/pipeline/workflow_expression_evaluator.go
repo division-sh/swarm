@@ -68,6 +68,9 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 	if normalized == "" {
 		return false, fmt.Errorf("workflow expression is empty")
 	}
+	if missing := missingEntityReferences(normalized, normalizedCtx.Entity); len(missing) > 0 {
+		return false, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
+	}
 	program, err := e.program(normalized)
 	if err != nil {
 		return false, err
@@ -88,6 +91,25 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 	default:
 		return false, fmt.Errorf("workflow expression returned non-bool %T", out)
 	}
+}
+
+func missingEntityReferences(expression string, entity map[string]any) []string {
+	refs := WorkflowEntityReferences(expression)
+	if len(refs) == 0 {
+		return nil
+	}
+	guarded := WorkflowPresenceGuardedEntityFields(expression)
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if _, ok := guarded[WorkflowEntityReferenceField(ref)]; ok {
+			continue
+		}
+		if _, ok := workflowExpressionLookupPath(entity, ref); ok {
+			continue
+		}
+		out = append(out, "entity."+ref)
+	}
+	return out
 }
 
 func (e *workflowExpressionEvaluator) program(expression string) (cel.Program, error) {

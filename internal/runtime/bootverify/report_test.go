@@ -673,10 +673,10 @@ func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 	}
 }
 
-func TestRun_SuppressesExpressionFieldReferenceWarningWhenWriterExists(t *testing.T) {
+func TestRun_ReportsExpressionFieldReferenceErrorWhenFieldIsWrittenTooLate(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Condition = "entity.missing_score >= 70"
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.missing_score >= 70"}
 	handler.DataAccumulation.Writes = append(handler.DataAccumulation.Writes, runtimecontracts.WorkflowDataWrite{
 		TargetField: "missing_score",
 		SourceField: "score",
@@ -685,7 +685,76 @@ func TestRun_SuppressesExpressionFieldReferenceWarningWhenWriterExists(t *testin
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.missing_score") {
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_score") {
+		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "before the handler lifecycle makes it available") {
+		t.Fatalf("expected lifecycle-aware expression error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsExpressionFieldReferenceErrorForFilterThatDependsOnLaterCompute(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.Filter = &runtimecontracts.FilterSpec{
+		Source:    "payload.items",
+		ItemsFrom: "payload.items",
+		Condition: "entity.filtered_score >= 70",
+		StoreAs:   "entity.filtered_items",
+	}
+	handler.Compute = &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpCount,
+		StoreAs:   "entity.filtered_score",
+	}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.filtered_score") {
+		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsExpressionFieldReferenceErrorForDataAccumulationExpressionThatDependsOnSiblingWrite(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
+		{
+			TargetField: "base_score",
+			SourceField: "score",
+		},
+		{
+			TargetField: "adjusted_score",
+			Value:       runtimecontracts.CELExpression("entity.base_score + 1"),
+		},
+	}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score") {
+		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_SuppressesExpressionFieldReferenceFindingWhenComputeMakesFieldAvailableBeforeOnComplete(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.Compute = &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpCount,
+		StoreAs:   "entity.composite_score",
+	}
+	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
+		Condition: "entity.composite_score >= 0",
+	}}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.composite_score") {
+		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.composite_score") {
 		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
 	}
 }
