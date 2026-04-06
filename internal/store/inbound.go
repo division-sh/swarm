@@ -164,6 +164,9 @@ func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEven
 	if err != nil {
 		return false, fmt.Errorf("marshal inbound event payload: %w", err)
 	}
+	if err := s.validateEventPayload("platform.inbound_recorded", payload); err != nil {
+		return false, err
+	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	insertQ := `
 		INSERT INTO events (

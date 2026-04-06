@@ -3,13 +3,13 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"strings"
 
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/diaglog"
 	"swarm/internal/runtime/semanticview"
+	runtimesharedjson "swarm/internal/runtime/sharedjson"
 	runtimetools "swarm/internal/runtime/tools"
 )
 
@@ -26,7 +26,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, sour
 	})
 }
 
-func newRuntimePayloadValidator(strict bool, logger *RuntimeLogger, schemas map[string]runtimecontracts.EventSchema) runtimebus.PayloadValidator {
+func newRuntimePayloadValidator(logger *RuntimeLogger, schemas map[string]runtimecontracts.EventSchema) runtimebus.PayloadValidator {
 	return func(eventType string, payload []byte) error {
 		eventType = strings.TrimSpace(eventType)
 		if eventType == "" {
@@ -41,36 +41,41 @@ func newRuntimePayloadValidator(strict bool, logger *RuntimeLogger, schemas map[
 		}
 		decoded := map[string]any{}
 		if err := json.Unmarshal(payload, &decoded); err != nil {
-			if strict {
-				return err
-			}
-			slog.Warn("event payload validation skipped: invalid event payload JSON",
-				"event_type", eventType,
-				"error", err.Error(),
-			)
 			if logger != nil {
 				handleRuntimeLogPersistenceError("event-bus", "payload_validation_json_invalid", logger.Warn(context.Background(), "event-bus", "payload_validation_json_invalid", map[string]any{
 					"event_type": eventType,
 				}, err))
 			}
-			return nil
+			return err
 		}
-		if err := runtimetools.ValidatePayloadAgainstSchema(schema.Schema, decoded); err != nil {
-			if strict {
-				return err
-			}
-			slog.Warn("event payload validation warning",
-				"event_type", eventType,
-				"error", err.Error(),
-			)
+		if err := runtimetools.ValidatePayloadAgainstSchema(schema.Schema, payloadForCanonicalEventValidation(decoded, schema.Schema)); err != nil {
 			if logger != nil {
-				handleRuntimeLogPersistenceError("event-bus", "payload_validation_warning", logger.Warn(context.Background(), "event-bus", "payload_validation_warning", map[string]any{
+				handleRuntimeLogPersistenceError("event-bus", "payload_validation_rejected", logger.Warn(context.Background(), "event-bus", "payload_validation_rejected", map[string]any{
 					"event_type": eventType,
 				}, err))
 			}
+			return err
 		}
 		return nil
 	}
+}
+
+func payloadForCanonicalEventValidation(payload map[string]any, schema map[string]any) map[string]any {
+	if len(payload) == 0 || schema == nil {
+		return payload
+	}
+	props := runtimesharedjson.SchemaProperties(schema["properties"])
+	if len(props) == 0 {
+		return payload
+	}
+	projected := make(map[string]any, len(props))
+	for key, value := range payload {
+		if _, ok := props[key]; !ok {
+			continue
+		}
+		projected[key] = value
+	}
+	return projected
 }
 
 type runtimeLoggerHook struct {

@@ -27,6 +27,7 @@ type catalogTriggerStep struct {
 	Event                         string         `yaml:"event"`
 	Payload                       map[string]any `yaml:"payload"`
 	AssertPersistedBeforeDelivery bool           `yaml:"assert_persisted_before_delivery"`
+	ErrorContains                 string         `yaml:"error_contains"`
 }
 
 type catalogExpectedDocument struct {
@@ -36,6 +37,7 @@ type catalogExpectedDocument struct {
 		Concurrent                    []catalogTriggerStep `yaml:"concurrent"`
 		Payload                       map[string]any       `yaml:"payload"`
 		Sequence                      []catalogTriggerStep `yaml:"sequence"`
+		ErrorContains                 string               `yaml:"error_contains"`
 		Entity                        map[string]any       `yaml:"entity"`
 		EntityStateBefore             string               `yaml:"entity_state_before"`
 		EntityFieldsBefore            map[string]any       `yaml:"entity_fields_before"`
@@ -88,6 +90,7 @@ func (d catalogExpectedDocument) triggerSequence() []catalogTriggerStep {
 		Event:                         strings.TrimSpace(d.Trigger.Event),
 		Payload:                       cloneStringAnyMap(d.Trigger.Payload),
 		AssertPersistedBeforeDelivery: d.Trigger.AssertPersistedBeforeDelivery,
+		ErrorContains:                 strings.TrimSpace(d.Trigger.ErrorContains),
 	}}
 }
 
@@ -240,8 +243,19 @@ func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Du
 	h.t.Helper()
 	payload := cloneStringAnyMap(step.Payload)
 	eventType := strings.TrimSpace(step.Event)
+	wantErr := strings.TrimSpace(step.ErrorContains)
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
 		h.seedInitialState(entityID)
+	}
+	if wantErr != "" {
+		err := h.publishRuntimeEventResult(eventType, "cataloge2e", payload, timeout, true, true)
+		if err == nil {
+			h.t.Fatalf("Publish(%s) unexpectedly succeeded, want error containing %q", eventType, wantErr)
+		}
+		if !strings.Contains(err.Error(), wantErr) {
+			h.t.Fatalf("Publish(%s) error = %v, want substring %q", eventType, err, wantErr)
+		}
+		return
 	}
 	h.publishRuntimeEvent(eventType, "cataloge2e", payload, timeout, true, true)
 	if eventType == "flow.created" {
@@ -322,11 +336,17 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 }
 
 func (h *runtimeHarness) publishRuntimeEvent(eventType, sourceAgent string, payload map[string]any, timeout time.Duration, recordOutcome bool, excludeFromEmitted bool) {
+	if err := h.publishRuntimeEventResult(eventType, sourceAgent, payload, timeout, recordOutcome, excludeFromEmitted); err != nil {
+		h.t.Fatalf("Publish(%s): %v", strings.TrimSpace(eventType), err)
+	}
+}
+
+func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string, payload map[string]any, timeout time.Duration, recordOutcome bool, excludeFromEmitted bool) error {
 	h.t.Helper()
 	payload = cloneStringAnyMap(payload)
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		h.t.Fatalf("marshal trigger payload: %v", err)
+		return err
 	}
 	evt := events.Event{
 		ID:          uuid.NewString(),
@@ -360,11 +380,12 @@ func (h *runtimeHarness) publishRuntimeEvent(eventType, sourceAgent string, payl
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()
 	if err := h.publishBusEvent(ctx, evt); err != nil {
-		h.t.Fatalf("Publish(%s): %v", strings.TrimSpace(eventType), err)
+		return err
 	}
 	if err := h.rt.WaitForQuiescence(ctx); err != nil {
-		h.t.Fatalf("WaitForQuiescence(%s): %v", strings.TrimSpace(eventType), err)
+		return err
 	}
+	return nil
 }
 
 func (h *runtimeHarness) publishBusEvent(ctx context.Context, evt events.Event) error {
