@@ -102,6 +102,9 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	if err := store.RequireCanonicalPendingAgentDeliveryCapabilities(caps); err != nil {
+		return nil, err
+	}
 	pendingPredicate := store.CanonicalPendingAgentDeliveryPredicateSQL("r")
 	latestTurnBlocksExpr := `'[]'::jsonb`
 	if caps.Conversations.TurnBlocks {
@@ -229,6 +232,11 @@ func (r *SQLAgentReader) resolveCapabilities(ctx context.Context) (store.StoreSc
 		}
 	}
 	return store.StoreSchemaCapabilities{
+		Events: store.EventSchemaCapabilities{
+			Log:        store.SchemaFlavorCanonical,
+			Deliveries: store.SchemaFlavorCanonical,
+			Receipts:   store.SchemaFlavorCanonical,
+		},
 		Conversations: store.ConversationSchemaCapabilities{
 			Sessions:   store.SchemaFlavorCanonical,
 			Audits:     store.SchemaFlavorCanonical,
