@@ -592,12 +592,12 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	}
 	summary := strings.ToValidUTF8(rec.Summary, "\uFFFD")
 	sessionID := strings.TrimSpace(rec.SessionID)
-	if sessionID == "" {
-		sessionID = uuid.NewString()
-	}
 	runID := nullUUIDString(rec.RunID)
 
 	if resolved.Stateless {
+		if sessionID == "" {
+			sessionID = uuid.NewString()
+		}
 		if err := s.ensureConversationAuditTable(ctx); err != nil {
 			return err
 		}
@@ -721,105 +721,65 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if caps.Conversations.Sessions != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
 	}
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required for live session conversation persistence")
+	}
 
 	q := `
-		INSERT INTO agent_sessions (
-			session_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
-		)
-		VALUES (
-			COALESCE(NULLIF($11,''), gen_random_uuid()::text)::uuid,
-			$1,
-			NULLIF($2,'')::uuid,
-			NULLIF($3,''),
-			$4,
-			$5,
-			$6::jsonb,
-			$7,
-			$8,
-			jsonb_build_object('summary', NULLIF($9,'')),
-					$10,
-			now(),
-			now()
-		)
-		ON CONFLICT (agent_id, scope_key) DO UPDATE SET
-			entity_id = EXCLUDED.entity_id,
-			flow_instance = EXCLUDED.flow_instance,
-			scope = EXCLUDED.scope,
-			conversation = EXCLUDED.conversation,
-			turn_count = EXCLUDED.turn_count,
-			runtime_mode = EXCLUDED.runtime_mode,
-			runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($9,'')),
-			status = EXCLUDED.status,
+		UPDATE agent_sessions
+		SET conversation = $1::jsonb,
+			turn_count = $2,
+			runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($3,'')),
 			updated_at = now()
+		WHERE session_id = $4::uuid
+		  AND agent_id = $5
+		  AND scope_key = $6
+		  AND runtime_mode = $7
+		  AND status = 'active'
 	`
 	args := []any{
-		rec.AgentID,
-		resolved.EntityID,
-		resolved.FlowInstance,
-		resolved.ScopeKey,
-		resolved.Scope.String(),
 		string(msgJSON),
 		rec.TurnCount,
-		mode.String(),
 		summary,
-		status,
 		sessionID,
+		rec.AgentID,
+		resolved.ScopeKey,
+		mode.String(),
 	}
 	if caps.Conversations.SessionRunID {
 		if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
 			return err
 		}
 		q = `
-			INSERT INTO agent_sessions (
-				session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
-				conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
-			)
-			VALUES (
-				COALESCE(NULLIF($12,''), gen_random_uuid()::text)::uuid,
-				NULLIF($11,'')::uuid,
-				$1,
-				NULLIF($2,'')::uuid,
-				NULLIF($3,''),
-				$4,
-				$5,
-				$6::jsonb,
-				$7,
-				$8,
-				jsonb_build_object('summary', NULLIF($9,'')),
-				$10,
-				now(),
-				now()
-			)
-			ON CONFLICT (agent_id, scope_key) DO UPDATE SET
-				run_id = COALESCE(EXCLUDED.run_id, agent_sessions.run_id),
-				entity_id = EXCLUDED.entity_id,
-				flow_instance = EXCLUDED.flow_instance,
-				scope = EXCLUDED.scope,
-				conversation = EXCLUDED.conversation,
-				turn_count = EXCLUDED.turn_count,
-				runtime_mode = EXCLUDED.runtime_mode,
-				runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($9,'')),
-				status = EXCLUDED.status,
+			UPDATE agent_sessions
+			SET conversation = $1::jsonb,
+				turn_count = $2,
+				runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($3,'')),
+				run_id = COALESCE(NULLIF($4,'')::uuid, run_id),
 				updated_at = now()
+			WHERE session_id = $5::uuid
+			  AND agent_id = $6
+			  AND scope_key = $7
+			  AND runtime_mode = $8
+			  AND status = 'active'
 		`
 		args = []any{
-			rec.AgentID,
-			resolved.EntityID,
-			resolved.FlowInstance,
-			resolved.ScopeKey,
-			resolved.Scope.String(),
 			string(msgJSON),
 			rec.TurnCount,
-			mode.String(),
 			summary,
-			status,
 			runID,
 			sessionID,
+			rec.AgentID,
+			resolved.ScopeKey,
+			mode.String(),
 		}
 	}
-	if _, err := s.DB.ExecContext(ctx, q, args...); err != nil {
-		return fmt.Errorf("upsert conversation: %w", err)
+	res, err := s.DB.ExecContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("update live conversation: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return fmt.Errorf("no active live session row found for agent=%s session=%s runtime=%s scope=%s", rec.AgentID, sessionID, mode.String(), resolved.ScopeKey)
 	}
 	return nil
 }

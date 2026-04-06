@@ -99,6 +99,58 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	}
 }
 
+func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalConversationSurface(t, ctx, pg)
+	seedConformanceAgent(t, ctx, pg, "agent-1")
+
+	err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    uuid.NewString(),
+		AgentID:      "agent-1",
+		Mode:         "session",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Messages:     []runtimellm.Message{{Role: "assistant", Content: "should fail"}},
+		Summary:      "should fail",
+		TurnCount:    1,
+		Status:       "active",
+	})
+	if err == nil {
+		t.Fatal("expected live conversation persistence without a live session row to fail")
+	}
+
+	taskSessionID := uuid.NewString()
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: taskSessionID,
+		AgentID:   "agent-1",
+		Mode:      "task",
+		Messages:  []runtimellm.Message{{Role: "assistant", Content: "done"}},
+		Summary:   "done",
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task): %v", err)
+	}
+
+	reader := dashboardserver.NewSQLConversationReader(db, pg)
+	if reader == nil {
+		t.Fatal("NewSQLConversationReader returned nil")
+	}
+	items, err := reader.List(ctx, 10)
+	if err != nil {
+		t.Fatalf("List conversations: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("conversation count = %d, want 1", len(items))
+	}
+	if items[0].Kind != "turn_audit" || items[0].SessionID != taskSessionID {
+		t.Fatalf("unexpected conversation summary: %+v", items[0])
+	}
+}
+
 func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
