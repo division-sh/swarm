@@ -298,7 +298,9 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 		t.Fatalf("list pending (no receipt): got %v events, want 1 (%s)", len(evts), evt.ID)
 	}
 
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 1, time.Now().Add(-30*time.Second))
+	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert retryable receipt: %v", err)
+	}
 	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
 	if err != nil {
 		t.Fatalf("list pending (retry=1 not ready): %v", err)
@@ -307,7 +309,7 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 		t.Fatalf("list pending (retry=1 not ready): got %d events, want 0", len(evts))
 	}
 
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 1, time.Now().Add(-2*time.Minute))
+	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID, agentID, time.Now().Add(-2*time.Minute))
 	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
 	if err != nil {
 		t.Fatalf("list pending (retry=1 ready): %v", err)
@@ -317,22 +319,15 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 	}
 
 	// After retries are exhausted, the event should not be pending.
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 2, time.Now().Add(-2*time.Hour))
+	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert dead_letter receipt: %v", err)
+	}
 	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
 	if err != nil {
 		t.Fatalf("list pending (retry=2 exhausted): %v", err)
 	}
 	if len(evts) != 0 {
 		t.Fatalf("list pending (retry=2 exhausted): got %d events, want 0", len(evts))
-	}
-
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "dead_letter", 2, time.Now().Add(-2*time.Hour))
-	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
-	if err != nil {
-		t.Fatalf("list pending (dead_letter): %v", err)
-	}
-	if len(evts) != 0 {
-		t.Fatalf("list pending (dead_letter): got %d events, want 0", len(evts))
 	}
 }
 
@@ -355,7 +350,10 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 		t.Fatalf("list subscribed pending (no receipt): got %v events, want 1 (%s)", len(evts), evt.ID)
 	}
 
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 1, time.Now().Add(-2*time.Minute))
+	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert retryable receipt: %v", err)
+	}
+	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID, agentID, time.Now().Add(-2*time.Minute))
 	evts, err = pg.ListPendingSubscribedEvents(ctx, agentID, subs, since, 100)
 	if err != nil {
 		t.Fatalf("list subscribed pending (retry=1 ready): %v", err)
@@ -364,7 +362,9 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 		t.Fatalf("list subscribed pending (retry=1 ready): got %v events, want 1 (%s)", len(evts), evt.ID)
 	}
 
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "dead_letter", 2, time.Now().Add(-2*time.Hour))
+	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert dead_letter receipt: %v", err)
+	}
 	evts, err = pg.ListPendingSubscribedEvents(ctx, agentID, subs, since, 100)
 	if err != nil {
 		t.Fatalf("list subscribed pending (dead_letter): %v", err)
@@ -467,42 +467,25 @@ func TestListPendingSubscribedEvents_UsesCanonicalMatcherParity(t *testing.T) {
 	}
 }
 
-func insertOrUpdateReceipt(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventID, agentID, status string, retryCount int, processedAt time.Time) {
+func rewindCanonicalDeliveryAttempt(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventID, agentID string, when time.Time) {
 	t.Helper()
-	// Upsert-style helper for tests; the production upsert also mutates retry_count which isn't what we want
-	// for time-window filtering tests.
-	const q = `
-		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, side_effects, processed_at
-		)
-		SELECT
-			e.event_id, 'agent', $2, e.entity_id, e.flow_instance, $3, $4::jsonb, $5
-		FROM events e
-		WHERE e.event_id = $1::uuid
-		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
-			processed_at = EXCLUDED.processed_at,
-			outcome = EXCLUDED.outcome,
-			side_effects = EXCLUDED.side_effects
-	`
-	sideEffects, err := json.Marshal(map[string]any{
-		"manager_status": status,
-		"retry_count":    retryCount,
-		"error":          "boom",
-	})
-	if err != nil {
-		t.Fatalf("marshal side effects: %v", err)
+	if _, err := pg.DB.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET delivered_at = $3
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, eventID, agentID, when.UTC()); err != nil {
+		t.Fatalf("rewind event_deliveries.delivered_at: %v", err)
 	}
-	outcome := "success"
-	switch status {
-	case "error", "dead_letter":
-		outcome = status
-	}
-	if outcome == "error" {
-		outcome = "dead_letter"
-	}
-	if _, err := pg.DB.ExecContext(ctx, q, eventID, agentID, outcome, string(sideEffects), processedAt); err != nil {
-		t.Fatalf("upsert receipt: %v", err)
+	if _, err := pg.DB.ExecContext(ctx, `
+		UPDATE event_receipts
+		SET processed_at = $3
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, eventID, agentID, when.UTC()); err != nil {
+		t.Fatalf("rewind event_receipts.processed_at: %v", err)
 	}
 }
 

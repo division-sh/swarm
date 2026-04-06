@@ -105,7 +105,7 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 	if err := store.RequireCanonicalPendingAgentDeliveryCapabilities(caps); err != nil {
 		return nil, err
 	}
-	pendingPredicate := store.CanonicalPendingAgentDeliveryPredicateSQL("r")
+	pendingPredicate := store.CanonicalPendingAgentDeliveryPredicateSQL("d", "r")
 	latestTurnBlocksExpr := `'[]'::jsonb`
 	if caps.Conversations.TurnBlocks {
 		latestTurnBlocksExpr = `COALESCE(turn_blocks, '[]'::jsonb)`

@@ -324,7 +324,7 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 }
 
 func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
-	pendingPredicate := CanonicalPendingAgentDeliveryPredicateSQL("r")
+	pendingPredicate := CanonicalPendingAgentDeliveryPredicateSQL("d", "r")
 	q := fmt.Sprintf(`
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
@@ -353,7 +353,7 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 }
 
 func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error) {
-	pendingPredicate := CanonicalPendingAgentDeliveryPredicateSQL("r")
+	pendingPredicate := CanonicalPendingAgentDeliveryPredicateSQL("d", "r")
 	q := fmt.Sprintf(`
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
@@ -361,6 +361,10 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 			e.payload, e.created_at,
 			COALESCE(e.source_event_id::text, '')
 		FROM events e
+		LEFT JOIN event_deliveries d
+			ON d.event_id = e.event_id
+			AND d.subscriber_type = 'agent'
+			AND d.subscriber_id = $1
 		LEFT JOIN event_receipts r
 			ON r.event_id = e.event_id
 			AND r.subscriber_type = 'agent'
