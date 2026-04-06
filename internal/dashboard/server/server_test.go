@@ -28,6 +28,11 @@ type builderRPCResponse = builderpkg.RPCResponse
 type builderWSEventFrame = builderpkg.WSEventFrame
 
 const testBuilderAuthToken = "builder-test-token"
+const testOperatorAuthToken = "operator-secret"
+
+func setOperatorAuth(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+testOperatorAuthToken)
+}
 
 type stubAgents struct {
 	rows []runtimemanager.PersistedAgent
@@ -228,6 +233,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"database": map[string]any{"ok": true}}, nil
 		},
+		AuthToken: testOperatorAuthToken,
 		Agents: stubAgents{rows: []runtimemanager.PersistedAgent{{
 			Config: runtimeactors.AgentConfig{
 				ID:            "agent-1",
@@ -311,6 +317,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/conversations", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("conversations status=%d body=%s", rec.Code, rec.Body.String())
@@ -318,6 +325,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/conversations/sess-1", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("conversation detail status=%d body=%s", rec.Code, rec.Body.String())
@@ -333,6 +341,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("events status=%d body=%s", rec.Code, rec.Body.String())
@@ -340,6 +349,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/events/evt-1", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("event detail status=%d body=%s", rec.Code, rec.Body.String())
@@ -347,6 +357,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/runtime/logs", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("runtime logs status=%d body=%s", rec.Code, rec.Body.String())
@@ -354,6 +365,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/runtime/incidents", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("runtime incidents status=%d body=%s", rec.Code, rec.Body.String())
@@ -361,6 +373,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/agents/agent-1", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("agent detail status=%d body=%s", rec.Code, rec.Body.String())
@@ -375,6 +388,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/instances/aggregate?group_by=current_state", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("instance aggregate status=%d body=%s", rec.Code, rec.Body.String())
@@ -382,6 +396,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/instances/aggregate?group_by=subject_id&subject_id=subj-1", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("instance aggregate by subject status=%d body=%s", rec.Code, rec.Body.String())
@@ -389,6 +404,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/subjects/subj-1/status", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("subject status=%d body=%s", rec.Code, rec.Body.String())
@@ -403,6 +419,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("health status=%d body=%s", rec.Code, rec.Body.String())
@@ -410,6 +427,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/restart", strings.NewReader(`{}`))
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("agent restart status=%d body=%s", rec.Code, rec.Body.String())
@@ -417,6 +435,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/directive", strings.NewReader(`{"message":"hello","kill_previous":true}`))
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("agent directive status=%d body=%s", rec.Code, rec.Body.String())
@@ -427,9 +446,101 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/runtime/actions", strings.NewReader(`{"action":"pause"}`))
+	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("runtime action status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_DashboardRoutesRequireAuthentication(t *testing.T) {
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		AuthToken: testOperatorAuthToken,
+		Agents: stubAgents{rows: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{ID: "agent-1"},
+		}}},
+		Runtime: &stubRuntimeControl{},
+	})
+
+	for _, tc := range []struct {
+		name       string
+		method     string
+		path       string
+		body       string
+		authHeader string
+		wantStatus int
+		wantError  string
+	}{
+		{
+			name:       "dashboard get missing bearer",
+			method:     http.MethodGet,
+			path:       "/api/agents",
+			wantStatus: http.StatusUnauthorized,
+			wantError:  errDashboardAuthMissingBearer.Error(),
+		},
+		{
+			name:       "dashboard get invalid bearer",
+			method:     http.MethodGet,
+			path:       "/api/runtime/logs",
+			authHeader: "Bearer wrong-token",
+			wantStatus: http.StatusUnauthorized,
+			wantError:  errDashboardAuthInvalidToken.Error(),
+		},
+		{
+			name:       "runtime control missing bearer",
+			method:     http.MethodPost,
+			path:       "/api/runtime/actions",
+			body:       `{"action":"pause"}`,
+			wantStatus: http.StatusUnauthorized,
+			wantError:  errDashboardAuthMissingBearer.Error(),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			if tc.authHeader != "" {
+				req.Header.Set("Authorization", tc.authHeader)
+			}
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("WWW-Authenticate"); got != `Bearer realm="swarm-operator"` {
+				t.Fatalf("WWW-Authenticate=%q", got)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("unmarshal denial payload: %v", err)
+			}
+			if payload["error"] != tc.wantError {
+				t.Fatalf("error=%#v, want %q", payload["error"], tc.wantError)
+			}
+		})
+	}
+}
+
+func TestHandler_DashboardRoutesFailClosedWhenAuthIsNotConfigured(t *testing.T) {
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal denial payload: %v", err)
+	}
+	if payload["error"] != errDashboardAuthNotConfigured.Error() {
+		t.Fatalf("error=%#v, want %q", payload["error"], errDashboardAuthNotConfigured.Error())
 	}
 }
 
@@ -1304,12 +1415,28 @@ func TestHandler_HealthzAliases(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "swarm-test",
+		AuthToken: testOperatorAuthToken,
+		Version:   "swarm-test",
 	})
 
-	for _, path := range []string{"/healthz", "/api/healthz"} {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/healthz status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal /healthz: %v", err)
+	}
+	if payload["ok"] != true {
+		t.Fatalf("unexpected /healthz payload: %#v", payload)
+	}
+
+	for _, path := range []string{"/api/healthz", "/api/health"} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
+		setOperatorAuth(req)
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status=%d body=%s", path, rec.Code, rec.Body.String())

@@ -1326,6 +1326,7 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		Conversations: conversations,
 		Observability: observability,
 		Runtime:       runtimeCtl,
+		AuthToken:     strings.TrimSpace(os.Getenv("SWARM_OPERATOR_AUTH_TOKEN")),
 		Version:       "swarm-dev",
 		Builder:       builderHandler,
 	}
