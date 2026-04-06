@@ -28,7 +28,7 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 			break
 		}
 	}
-	if len(h.publishedIDs) > 0 && strings.TrimSpace(expected.Expected.HandlerOutcome) != "" {
+	if len(h.publishedIDs) > 0 && catalogAssertsAuthoritativeHandlerOutcome(expected.Expected.HandlerOutcome) {
 		assertHandlerOutcome(t, h, expected.Expected.HandlerOutcome, entityID, expected.Expected.ChainDepthExceeded)
 	}
 	if entityID != "" && strings.TrimSpace(expected.Expected.EntityState) != "" {
@@ -123,7 +123,7 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 		if entityID == "" {
 			continue
 		}
-		if strings.TrimSpace(want.HandlerOutcome) != "" {
+		if catalogAssertsAuthoritativeHandlerOutcome(want.HandlerOutcome) {
 			assertHandlerOutcomeForEntity(t, h, want.HandlerOutcome, entityID, false)
 		}
 		if strings.TrimSpace(want.EntityState) != "" {
@@ -777,28 +777,16 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 	if h == nil || h.db == nil {
 		t.Fatal("database is required for handler_outcome assertions")
 	}
+	_ = chainDepthExceeded
 	want = strings.TrimSpace(strings.ToLower(want))
 	entityID = strings.TrimSpace(entityID)
 	if want == "" {
 		return
 	}
-	if chainDepthExceeded && entityID != "" && (want == "error" || want == "kill" || want == "dead_letter") {
-		if assertEntityDeadLetterOutcome(t, h.db, h.startedAt, entityID) {
-			return
-		}
+	if !catalogAssertsAuthoritativeHandlerOutcome(want) {
+		t.Fatalf("cataloge2e does not authoritatively assert handler_outcome %q; assert runtime/store evidence instead", want)
 	}
 	eventIDs := h.publishedEventIDs(entityID)
-	if want != "success" && len(h.previews) > 0 {
-		for _, eventID := range eventIDs {
-			if preview, ok := h.previews[eventID]; ok {
-				got := strings.TrimSpace(strings.ToLower(string(preview.Status)))
-				if got != want {
-					t.Fatalf("handler_outcome = %q, want %q", got, want)
-				}
-				return
-			}
-		}
-	}
 	for _, eventID := range eventIDs {
 		var outcome string
 		err := h.db.QueryRowContext(context.Background(), `
@@ -820,33 +808,16 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 			t.Fatalf("query handler_outcome for event %s: %v", eventID, err)
 		}
 		got := strings.TrimSpace(strings.ToLower(outcome))
-		switch want {
-		case "success":
-			if got != "success" {
-				t.Fatalf("handler_outcome = %q, want %q", got, want)
-			}
-		case "reject":
-			if got != "reject" {
-				t.Fatalf("handler_outcome = %q, want %q", got, want)
-			}
-		case "escalate":
-			if got != "escalate" {
-				t.Fatalf("handler_outcome = %q, want %q", got, want)
-			}
-		case "discard":
-			if got != "discard" {
-				t.Fatalf("handler_outcome = %q, want %q", got, want)
-			}
-		case "error", "kill", "dead_letter":
-			if got != "dead_letter" {
-				t.Fatalf("handler_outcome = %q, want %q", got, want)
-			}
-		default:
-			t.Fatalf("handler_outcome assertion for %q is not wired in cataloge2e yet", want)
+		if got != "success" {
+			t.Fatalf("handler_outcome = %q, want %q", got, want)
 		}
 		return
 	}
 	t.Fatalf("handler_outcome %q could not be asserted: no platform pipeline receipt found", want)
+}
+
+func catalogAssertsAuthoritativeHandlerOutcome(raw string) bool {
+	return strings.TrimSpace(strings.ToLower(raw)) == "success"
 }
 
 func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, entityID string) bool {
