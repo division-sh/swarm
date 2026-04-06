@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
@@ -187,6 +188,49 @@ func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, si
 		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
 	}
 	return s.listEventsMissingPipelineReceiptSpec(ctx, caps, since, limit)
+}
+
+func (s *PostgresStore) ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil, false, fmt.Errorf("event_id is required")
+	}
+	if caps.Events.Receipts != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
+		if caps.Events.Receipts != SchemaFlavorCanonical {
+			return nil, false, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
+		}
+		return nil, false, unsupportedSchemaCapability("events", caps.Events.Log)
+	}
+	lease, claimed, err := acquireAdvisoryLockLease(ctx, s.DB, replayClaimLockKey(eventID))
+	if err != nil || !claimed {
+		return nil, claimed, err
+	}
+	var pending bool
+	err = lease.conn.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM events e
+			LEFT JOIN event_receipts r
+				ON r.event_id = e.event_id
+				AND r.subscriber_type = 'platform'
+				AND r.subscriber_id = 'pipeline'
+			WHERE e.event_id = $1::uuid
+			  AND r.event_id IS NULL
+		)
+	`, eventID).Scan(&pending)
+	if err != nil {
+		_ = lease.Release(ctx)
+		return nil, false, fmt.Errorf("claim pipeline replay: %w", err)
+	}
+	if !pending {
+		_ = lease.Release(ctx)
+		return nil, false, nil
+	}
+	return lease, true, nil
 }
 
 func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, error) {

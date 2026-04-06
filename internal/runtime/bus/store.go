@@ -8,6 +8,7 @@ import (
 
 	"swarm/internal/events"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimeownership "swarm/internal/runtime/core/ownership"
 )
 
 type EventStore interface {
@@ -79,6 +80,10 @@ type TransactionalEventStore interface {
 
 type PipelineReceiptSweeperStore interface {
 	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error)
+}
+
+type PipelineReplayClaimStore interface {
+	ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error)
 }
 
 type EventDeliveryReader interface {

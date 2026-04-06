@@ -7,10 +7,15 @@ import (
 	"time"
 
 	"swarm/internal/events"
+	runtimeownership "swarm/internal/runtime/core/ownership"
 )
 
 type missingPipelineReceiptReader interface {
 	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error)
+}
+
+type pipelineReplayClaimer interface {
+	ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error)
 }
 
 type authoritativeDeliveryRecipientReader interface {
@@ -60,6 +65,10 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
+	claimer, ok := r.store.(pipelineReplayClaimer)
+	if !ok {
+		return fmt.Errorf("recover pipeline receipts: missing explicit replay claim owner")
+	}
 	window := r.window
 	if window <= 0 {
 		window = 15 * time.Minute
@@ -86,11 +95,22 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		if strings.TrimSpace(evt.ID) == "" {
 			continue
 		}
+		lease, claimed, err := claimer.ClaimPipelineReplay(ctx, evt.ID)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("claim replay event %s: %w", evt.ID, err)
+			}
+			continue
+		}
+		if !claimed {
+			continue
+		}
 		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
 			if recorder == nil {
 				if firstErr == nil {
 					firstErr = fmt.Errorf("mark replay event %s error receipt: missing pipeline receipt recorder", evt.ID)
 				}
+				_ = lease.Release(ctx)
 				continue
 			}
 			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID, "error", replayErr); err != nil {
@@ -98,6 +118,7 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 					firstErr = fmt.Errorf("mark replay event %s error receipt: %w", evt.ID, err)
 				}
 			}
+			_ = lease.Release(ctx)
 			continue
 		}
 		persistedRecipients, err := recipients.ListEventDeliveryRecipients(ctx, evt.ID)
@@ -105,6 +126,7 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("load persisted recipients for replay event %s: %w", evt.ID, err)
 			}
+			_ = lease.Release(ctx)
 			continue
 		}
 		if len(persistedRecipients) == 0 {
@@ -112,6 +134,7 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 				if firstErr == nil {
 					firstErr = fmt.Errorf("mark replay event %s delivered receipt: missing pipeline receipt recorder", evt.ID)
 				}
+				_ = lease.Release(ctx)
 				continue
 			}
 			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID, "processed", ""); err != nil {
@@ -119,13 +142,22 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 					firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID, err)
 				}
 			}
+			_ = lease.Release(ctx)
 			continue
 		}
 		if err := r.bus.PublishDirect(ctx, evt, persistedRecipients); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("replay event %s: %w", evt.ID, err)
 			}
+			_ = lease.Release(ctx)
+			continue
 		}
+		if recorder != nil {
+			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID, "processed", ""); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID, err)
+			}
+		}
+		_ = lease.Release(ctx)
 	}
 	return firstErr
 }

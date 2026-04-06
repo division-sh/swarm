@@ -2,11 +2,13 @@ package bus_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimeownership "swarm/internal/runtime/core/ownership"
 )
 
 type sweeperTestStore struct {
@@ -14,6 +16,10 @@ type sweeperTestStore struct {
 	deliveries  map[string][]string
 	receipts    map[string]string
 	receiptErrs map[string]string
+	claimMu     sync.Mutex
+	claimed     map[string]bool
+	releaseGate chan struct{}
+	releasing   chan struct{}
 }
 
 func (s *sweeperTestStore) AppendEvent(context.Context, events.Event) error { return nil }
@@ -36,6 +42,42 @@ func (s *sweeperTestStore) ListEventsMissingPipelineReceipt(context.Context, tim
 }
 func (s *sweeperTestStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	return append([]string(nil), s.deliveries[eventID]...), nil
+}
+func (s *sweeperTestStore) ClaimPipelineReplay(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+	if s.claimed == nil {
+		s.claimed = map[string]bool{}
+	}
+	if s.claimed[eventID] {
+		return nil, false, nil
+	}
+	s.claimed[eventID] = true
+	return sweeperClaimLease{store: s, eventID: eventID}, true, nil
+}
+
+type sweeperClaimLease struct {
+	store   *sweeperTestStore
+	eventID string
+}
+
+func (l sweeperClaimLease) Release(context.Context) error {
+	if l.store == nil {
+		return nil
+	}
+	if l.store.releasing != nil {
+		select {
+		case l.store.releasing <- struct{}{}:
+		default:
+		}
+	}
+	if l.store.releaseGate != nil {
+		<-l.store.releaseGate
+	}
+	l.store.claimMu.Lock()
+	delete(l.store.claimed, l.eventID)
+	l.store.claimMu.Unlock()
+	return nil
 }
 
 func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
@@ -159,4 +201,64 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("expected good swept delivery")
 	}
+}
+
+func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
+	store := &sweeperTestStore{
+		events: []events.PersistedReplayEvent{
+			{Event: (events.Event{
+				ID:        "evt-claim",
+				Type:      events.EventType("custom.claimed"),
+				Payload:   []byte(`{"entity_id":"ent-claim"}`),
+				CreatedAt: time.Now().UTC(),
+			}).WithEntityID("ent-claim")},
+		},
+		deliveries:  map[string][]string{"evt-claim": {"agent-claim"}},
+		releaseGate: make(chan struct{}),
+		releasing:   make(chan struct{}, 1),
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := eb.Subscribe("agent-claim")
+
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		if _, err := eb.SweepUndispatched(context.Background(), time.Hour, 10); err != nil {
+			t.Errorf("first SweepUndispatched: %v", err)
+		}
+	}()
+
+	select {
+	case <-store.releasing:
+	case <-time.After(time.Second):
+		t.Fatal("expected first sweep to reach claim release")
+	}
+
+	secondCount, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("second SweepUndispatched: %v", err)
+	}
+	if secondCount != 0 {
+		t.Fatalf("second swept count = %d, want 0 while claim is held", secondCount)
+	}
+
+	close(store.releaseGate)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first sweep to finish")
+	}
+
+	select {
+	case evt := <-ch:
+		if evt.ID != "evt-claim" {
+			t.Fatalf("delivered event id = %q, want evt-claim", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected claimed replay delivery")
+	}
+	waitForNoEvent(t, ch)
 }

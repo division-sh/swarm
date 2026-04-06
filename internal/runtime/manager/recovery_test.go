@@ -12,6 +12,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
@@ -35,6 +36,9 @@ func (b *recoveryTestBus) AppendEvent(context.Context, events.Event) error      
 func (b *recoveryTestBus) InsertEventDeliveries(context.Context, string, []string) error { return nil }
 func (*recoveryTestBus) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return []string{}, nil
+}
+func (*recoveryTestBus) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
+	return recoveryTestReplayLease{}, true, nil
 }
 func (b *recoveryTestBus) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
 	return nil, nil
@@ -167,6 +171,10 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 }
 
 type recoveryTestAgent struct{ id string }
+
+type recoveryTestReplayLease struct{}
+
+func (recoveryTestReplayLease) Release(context.Context) error { return nil }
 
 func (a recoveryTestAgent) ID() string                      { return a.id }
 func (recoveryTestAgent) Type() string                      { return "generic" }

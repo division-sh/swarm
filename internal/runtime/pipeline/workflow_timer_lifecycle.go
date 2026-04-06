@@ -378,17 +378,18 @@ func (pc *PipelineCoordinator) registerWorkflowTimerSchedule(ctx context.Context
 	if pc == nil {
 		return
 	}
-	if pc.timerScheduler != nil {
-		if err := pc.timerScheduler.Register(sc); err != nil {
-			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_register_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-				"task_id": strings.TrimSpace(sc.TaskID),
-				"mode":    strings.TrimSpace(sc.Mode),
-			}, err)
-		}
-	}
 	if pc.timerScheduleStore != nil {
 		if err := pc.timerScheduleStore.UpsertSchedule(ctx, sc); err != nil {
 			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+				"task_id": strings.TrimSpace(sc.TaskID),
+				"mode":    strings.TrimSpace(sc.Mode),
+			}, err)
+			return
+		}
+	}
+	if pc.timerScheduler != nil {
+		if _, err := ClaimAndRegisterSchedule(ctx, pc.timerScheduleStore, pc.timerScheduler, sc); err != nil {
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_register_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
 				"task_id": strings.TrimSpace(sc.TaskID),
 				"mode":    strings.TrimSpace(sc.Mode),
 			}, err)
@@ -416,6 +417,13 @@ func (pc *PipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Context, 
 			"task_id": strings.TrimSpace(sc.TaskID),
 			"mode":    strings.TrimSpace(sc.Mode),
 		}, err)
+		return
+	}
+	if err := ReleaseOwnedSchedule(ctx, pc.timerScheduleStore, sc); err != nil {
+		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_release_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+			"task_id": strings.TrimSpace(sc.TaskID),
+			"mode":    strings.TrimSpace(sc.Mode),
+		}, err)
 	}
 }
 
@@ -433,7 +441,7 @@ func (pc *PipelineCoordinator) persistWorkflowTimerSchedule(ctx context.Context,
 	}
 	if pc.timerScheduler != nil {
 		register := func() {
-			if err := pc.timerScheduler.Register(sc); err != nil {
+			if _, err := ClaimAndRegisterSchedule(ctx, pc.timerScheduleStore, pc.timerScheduler, sc); err != nil {
 				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_register_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
 					"task_id": strings.TrimSpace(sc.TaskID),
 					"mode":    strings.TrimSpace(sc.Mode),

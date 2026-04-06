@@ -79,6 +79,10 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if !ok {
 		return 0, nil
 	}
+	claimer, ok := eb.store.(PipelineReplayClaimStore)
+	if !ok {
+		return 0, errors.New("event bus store does not support explicit pipeline replay claims")
+	}
 	if limit <= 0 {
 		limit = DefaultOutboxSweeperConfig().Limit
 	}
@@ -93,13 +97,22 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	redelivered := 0
 	for _, record := range events {
 		evt := record.Event
+		lease, claimed, err := claimer.ClaimPipelineReplay(ctx, evt.ID)
+		if err != nil {
+			return redelivered, err
+		}
+		if !claimed {
+			continue
+		}
 		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
 			eb.markPipelineReceipt(ctx, evt.ID, "error", replayErr)
+			_ = lease.Release(ctx)
 			continue
 		}
 		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID)
 		if err != nil {
 			eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
+			_ = lease.Release(ctx)
 			return redelivered, err
 		}
 		intent := runtimeengine.EmitIntent{Event: evt, Recipients: recipients}
@@ -107,9 +120,11 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
 				eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
 			}
+			_ = lease.Release(ctx)
 			return redelivered, err
 		}
 		eb.markPipelineReceipt(ctx, evt.ID, "processed", "")
+		_ = lease.Release(ctx)
 		redelivered++
 	}
 	return redelivered, nil
