@@ -189,11 +189,8 @@ def build_snapshot(cwd: Path) -> tuple[list[AgentView], list[dict[str, str]], li
         issue = assigned_issue(cwd, agent)
         local = parse_status_file(cwd / WORKTREE_STATUS[agent])
         pr = pr_by_agent.get(agent)
-        local_pr_ref = local.get("PR", "none")
-        if pr is None and local_pr_ref in pr_by_number:
-            pr = pr_by_number[local_pr_ref]
         issue_ref = f"#{issue['number']}" if issue else "none"
-        open_pr_ref = pr["number"] if pr else local_pr_ref
+        open_pr_ref = pr["number"] if pr else "none"
         view = AgentView(
             agent=agent,
             assigned_issue=issue_ref,

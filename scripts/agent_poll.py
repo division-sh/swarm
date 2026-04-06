@@ -204,6 +204,18 @@ def issue_action(cwd: Path, issue_number: int, agent: str) -> Action | None:
     return action
 
 
+def control_state_changed(current: dict[str, str], fields: dict[str, str]) -> bool:
+    watched = (
+        "State",
+        "Issue",
+        "PR",
+        "Branch",
+        "Control-Target",
+        "Next-Action",
+    )
+    return any(current.get(key, "").strip() != fields.get(key, "").strip() for key in watched)
+
+
 def derive_status(
     agent: str, cwd: Path, status_path: Path
 ) -> tuple[dict[str, str], Action | None, bool]:
@@ -215,7 +227,6 @@ def derive_status(
     if pr is not None:
         action = pr_action(cwd, int(pr["number"]), agent)
         comment_id = action.comment_id if action else last_seen
-        actionable = action is not None and action.comment_id != last_seen
         review_status = action.fields.get("Status", "").strip() if action else ""
         state = "in_pr"
         if review_status == "changes-needed":
@@ -238,13 +249,13 @@ def derive_status(
             "Last-Updated": now_iso(),
             "Next-Action": next_action,
         }
+        actionable = (action is not None and action.comment_id != last_seen) or control_state_changed(current, fields)
         return fields, action, actionable
 
     issue = assigned_issue(cwd, agent)
     if issue is not None:
         action = issue_action(cwd, int(issue["number"]), agent)
         comment_id = action.comment_id if action else last_seen
-        actionable = action is not None and action.comment_id != last_seen
         next_action = (
             action.fields.get("Next-Step", "").strip()
             if action
@@ -261,6 +272,7 @@ def derive_status(
             "Last-Updated": now_iso(),
             "Next-Action": next_action,
         }
+        actionable = (action is not None and action.comment_id != last_seen) or control_state_changed(current, fields)
         return fields, action, actionable
 
     fields = {
@@ -274,7 +286,7 @@ def derive_status(
         "Last-Updated": now_iso(),
         "Next-Action": "polling for assigned issue",
     }
-    return fields, None, False
+    return fields, None, control_state_changed(current, fields)
 
 
 def print_summary(fields: dict[str, str], action: Action | None, actionable: bool) -> None:
