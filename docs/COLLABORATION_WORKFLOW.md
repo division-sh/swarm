@@ -14,6 +14,7 @@ It should be used together with:
 - [IMPLEMENTER_GUIDELINES.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_GUIDELINES.md)
 - [IMPLEMENTER_REVIEW_CHECKLIST.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_REVIEW_CHECKLIST.md)
 - [RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md](/Users/youmew/dev/swarm/docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md)
+- [AUTONOMOUS_WORK_PROTOCOL.md](/Users/youmew/dev/swarm/docs/AUTONOMOUS_WORK_PROTOCOL.md)
 
 ## Document Role
 
