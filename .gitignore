@@ -8,6 +8,7 @@
 # Local AI tool state
 .claude
 .codex
+AGENT_STATUS.md
 
 # Local shared data mount
 data/*
