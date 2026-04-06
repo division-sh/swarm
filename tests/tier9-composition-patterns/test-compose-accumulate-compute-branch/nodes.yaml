@@ -10,10 +10,10 @@ scorer:
           - source_field: value
             target_field: score
       on_complete:
-        - condition: "entity.score >= 75"
+        - condition: "payload.value >= 75"
           advances_to: high
           emits: result.high
-        - condition: "entity.score >= 50"
+        - condition: "payload.value >= 50"
           advances_to: mid
           emits: result.mid
         - condition: "else"

@@ -883,6 +883,43 @@ func TestExecuteNodeContractHandlerRuleMatchAugmentsDefaultEmit(t *testing.T) {
 	}
 }
 
+func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWritesEarly(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+	}
+
+	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "branch_target", Value: runtimecontracts.LiteralExpression("handler")},
+			},
+		},
+		OnComplete: []runtimecontracts.HandlerRuleEntry{
+			{ID: "too-early", Condition: `"branch_target" in entity && entity.branch_target == "handler"`, Emits: runtimecontracts.EventEmission{Single: "branch.selected"}},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type: events.EventType("custom.trigger"),
+		}.WithEntityID("ent-1"),
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := strings.TrimSpace(result.Outcome.RuleID); got != "" {
+		t.Fatalf("rule_id = %q, want empty when on_complete cannot see current-handler top-level writes", got)
+	}
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("published count = %d, want 0 when branch selection cannot see early top-level writes", got)
+	}
+}
+
 func TestExecuteNodeContractHandlerExecutesHandlerActionInsideEngine(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
