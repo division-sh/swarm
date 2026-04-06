@@ -29,6 +29,18 @@ func (s *recordingSchedulePersistence) LoadActiveSchedules(context.Context) ([]S
 	return nil, nil
 }
 
+func (*recordingSchedulePersistence) ClaimSchedule(context.Context, Schedule) (bool, error) {
+	return true, nil
+}
+
+func (*recordingSchedulePersistence) ReleaseSchedule(context.Context, Schedule) error {
+	return nil
+}
+
+func (*recordingSchedulePersistence) ReleaseScheduleClaims(context.Context) error {
+	return nil
+}
+
 func (s *recordingSchedulePersistence) CancelScheduleExact(_ context.Context, sc Schedule) error {
 	s.cancelExacts++
 	s.cancels = append(s.cancels, sc)

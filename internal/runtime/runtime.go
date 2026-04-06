@@ -306,6 +306,14 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 						"entity_id":  sc.EffectiveEntityID(),
 					}, err))
 				}
+			} else if strings.EqualFold(strings.TrimSpace(sc.Mode), "once") {
+				if err := stores.ScheduleStore.ReleaseSchedule(callbackCtx, sc); err != nil && rt.Logger != nil {
+					handleRuntimeLogPersistenceError("scheduler", "release_ownership_failed", rt.Logger.Error(callbackCtx, "scheduler", "release_ownership_failed", map[string]any{
+						"agent_id":   sc.AgentID,
+						"event_type": sc.EventType,
+						"entity_id":  sc.EffectiveEntityID(),
+					}, err))
+				}
 			}
 		}
 	})
@@ -584,7 +592,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			return fmt.Errorf("load schedules failed: %w", err)
 		}
 		for _, sc := range schedules {
-			if err := rt.Scheduler.Register(sc); err != nil {
+			if _, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, rt.Stores.ScheduleStore, rt.Scheduler, sc); err != nil {
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("scheduler", "restore_schedule_failed", rt.Logger.Error(ctx, "scheduler", "restore_schedule_failed", map[string]any{
 						"agent_id":   sc.AgentID,
@@ -599,7 +607,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				handleRuntimeLogPersistenceError("scheduler", "ensure_lifecycle_failed", rt.Logger.Error(ctx, "scheduler", "ensure_lifecycle_failed", nil, err))
 			}
 		}
-		if err := ensureRecurringWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Pipeline); err != nil {
+		if err := ensureRecurringWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
 			if rt.Logger != nil {
 				handleRuntimeLogPersistenceError("scheduler", "ensure_recurring_failed", rt.Logger.Error(ctx, "scheduler", "ensure_recurring_failed", nil, err))
 			}
@@ -704,6 +712,13 @@ func (rt *Runtime) Shutdown() error {
 	if rt.Scheduler != nil {
 		rt.Scheduler.Stop()
 	}
+	if rt.Stores.ScheduleStore != nil {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := rt.Stores.ScheduleStore.ReleaseScheduleClaims(releaseCtx); err != nil && shutdownErr == nil {
+			shutdownErr = err
+		}
+		cancel()
+	}
 	rt.lifecycleMu.Lock()
 	cancelStart := rt.cancelStart
 	lease := rt.ownershipLease
@@ -733,6 +748,11 @@ func (rt *Runtime) cleanupStartFailure() {
 	}
 	if rt.Scheduler != nil {
 		rt.Scheduler.Stop()
+	}
+	if rt.Stores.ScheduleStore != nil {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = rt.Stores.ScheduleStore.ReleaseScheduleClaims(releaseCtx)
+		cancel()
 	}
 	rt.lifecycleMu.Lock()
 	cancelStart := rt.cancelStart
@@ -802,7 +822,7 @@ func (rt *Runtime) verifyBootPublished(ch <-chan events.Event) error {
 	return nil
 }
 
-func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, workflow runtimepipeline.WorkflowRuntime) error {
+func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, scheduler *runtimepipeline.Scheduler, workflow runtimepipeline.WorkflowRuntime) error {
 	if store == nil || workflow == nil {
 		return nil
 	}
@@ -831,13 +851,17 @@ func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline
 		if !ok {
 			continue
 		}
-		if err := store.UpsertSchedule(ctx, runtimepipeline.Schedule{
+		sc := runtimepipeline.Schedule{
 			AgentID:   owner,
 			EventType: eventType,
 			Mode:      "cron",
 			Cron:      cron,
 			Payload:   recurringWorkflowTimerPayload(timer),
-		}); err != nil {
+		}
+		if err := store.UpsertSchedule(ctx, sc); err != nil {
+			return err
+		}
+		if _, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, store, scheduler, sc); err != nil {
 			return err
 		}
 	}
@@ -897,7 +921,7 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 				return err
 			}
 			if scheduler != nil {
-				if err := scheduler.Register(sc); err != nil {
+				if _, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, store, scheduler, sc); err != nil {
 					log.Printf("rehydrate lifecycle schedule failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 				}
 			}

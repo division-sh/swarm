@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1564,6 +1565,143 @@ func TestSchedules_MarkScheduleFiredExact_PreservesRecurringReplayAndFiresOnceSc
 	}
 	if onceFound {
 		t.Fatal("expected once exact schedule to be absent from active schedule restore after firing")
+	}
+}
+
+func TestSchedules_ClaimSchedule_IsExclusiveAcrossStores(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	pg1 := &PostgresStore{DB: db}
+	pg2 := &PostgresStore{DB: db}
+
+	sc := runtimepipeline.Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "cron",
+		Cron:         "@every 30m",
+		At:           time.Now().Add(30 * time.Minute).UTC(),
+		EntityID:     uuid.NewString(),
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-recurring",
+		Payload:      []byte(`{"timer_id":"timer-recurring"}`),
+	}
+	if err := pg1.UpsertSchedule(ctx, sc); err != nil {
+		t.Fatalf("UpsertSchedule: %v", err)
+	}
+
+	claimed1, err := pg1.ClaimSchedule(ctx, sc)
+	if err != nil {
+		t.Fatalf("ClaimSchedule(pg1): %v", err)
+	}
+	if !claimed1 {
+		t.Fatal("expected first store to claim schedule ownership")
+	}
+
+	claimed2, err := pg2.ClaimSchedule(ctx, sc)
+	if err != nil {
+		t.Fatalf("ClaimSchedule(pg2): %v", err)
+	}
+	if claimed2 {
+		t.Fatal("expected second store to be denied overlapping schedule ownership")
+	}
+
+	if err := pg1.ReleaseSchedule(ctx, sc); err != nil {
+		t.Fatalf("ReleaseSchedule(pg1): %v", err)
+	}
+	claimed2, err = pg2.ClaimSchedule(ctx, sc)
+	if err != nil {
+		t.Fatalf("ClaimSchedule(pg2 after release): %v", err)
+	}
+	if !claimed2 {
+		t.Fatal("expected second store to claim after first owner released")
+	}
+}
+
+func TestSchedules_ClaimedOwnerIsOnlyRestoredTimerThatFires(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	pg1 := &PostgresStore{DB: db}
+	pg2 := &PostgresStore{DB: db}
+
+	sc := runtimepipeline.Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		At:           time.Now().Add(50 * time.Millisecond).UTC(),
+		EntityID:     uuid.NewString(),
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-once",
+		Payload:      []byte(`{"timer_id":"timer-once"}`),
+	}
+	if err := pg1.UpsertSchedule(ctx, sc); err != nil {
+		t.Fatalf("UpsertSchedule: %v", err)
+	}
+
+	active1, err := pg1.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules(pg1): %v", err)
+	}
+	active2, err := pg2.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules(pg2): %v", err)
+	}
+	if len(active1) != 1 || len(active2) != 1 {
+		t.Fatalf("restored schedules lens = (%d,%d), want (1,1)", len(active1), len(active2))
+	}
+
+	var fired1, fired2 atomic.Int32
+	scheduler1 := runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
+		fired1.Add(1)
+		if err := pg1.MarkScheduleFiredExact(context.Background(), sc); err != nil {
+			t.Errorf("MarkScheduleFiredExact(pg1): %v", err)
+		}
+		if err := pg1.ReleaseSchedule(context.Background(), sc); err != nil {
+			t.Errorf("ReleaseSchedule(pg1): %v", err)
+		}
+	})
+	scheduler2 := runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
+		fired2.Add(1)
+		if err := pg2.MarkScheduleFiredExact(context.Background(), sc); err != nil {
+			t.Errorf("MarkScheduleFiredExact(pg2): %v", err)
+		}
+		if err := pg2.ReleaseSchedule(context.Background(), sc); err != nil {
+			t.Errorf("ReleaseSchedule(pg2): %v", err)
+		}
+	})
+	t.Cleanup(scheduler1.Stop)
+	t.Cleanup(scheduler2.Stop)
+
+	claimed1, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, pg1, scheduler1, active1[0])
+	if err != nil {
+		t.Fatalf("ClaimAndRegisterSchedule(pg1): %v", err)
+	}
+	claimed2, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, pg2, scheduler2, active2[0])
+	if err != nil {
+		t.Fatalf("ClaimAndRegisterSchedule(pg2): %v", err)
+	}
+	if claimed1 == claimed2 {
+		t.Fatalf("claimed owners = (%v,%v), want exactly one owner", claimed1, claimed2)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for fired1.Load()+fired2.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for claimed restored timer to fire")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := fired1.Load() + fired2.Load(); got != 1 {
+		t.Fatalf("restored timer fire count = %d, want 1", got)
+	}
+
+	activeAfter, err := pg1.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules(after fire): %v", err)
+	}
+	if len(activeAfter) != 0 {
+		t.Fatalf("active schedules after claimed once fire = %d, want 0", len(activeAfter))
 	}
 }
 

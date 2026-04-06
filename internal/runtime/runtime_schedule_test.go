@@ -120,6 +120,18 @@ func (s *recordingRuntimeScheduleStore) LoadActiveSchedules(context.Context) ([]
 	return append([]runtimepipeline.Schedule(nil), s.active...), nil
 }
 
+func (*recordingRuntimeScheduleStore) ClaimSchedule(context.Context, runtimepipeline.Schedule) (bool, error) {
+	return true, nil
+}
+
+func (*recordingRuntimeScheduleStore) ReleaseSchedule(context.Context, runtimepipeline.Schedule) error {
+	return nil
+}
+
+func (*recordingRuntimeScheduleStore) ReleaseScheduleClaims(context.Context) error {
+	return nil
+}
+
 func (s *recordingRuntimeScheduleStore) MarkScheduleFiredExact(_ context.Context, sc runtimepipeline.Schedule) error {
 	s.firedExact.Add(1)
 	if s.fired != nil {
@@ -168,7 +180,7 @@ func TestEnsureRecurringWorkflowSchedulesSkipsLifecycleScopedRecurringTimers(t *
 		t.Fatalf("load bundle: %v", err)
 	}
 	store := &recordingRuntimeScheduleStore{}
-	err = ensureRecurringWorkflowSchedules(context.Background(), store, semanticOnlyWorkflowRuntime{
+	err = ensureRecurringWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	})
 	if err != nil {
@@ -193,7 +205,7 @@ func TestEnsureRecurringWorkflowSchedulesRegistersBootRecurringTimers(t *testing
 			}},
 		},
 	}
-	err := ensureRecurringWorkflowSchedules(context.Background(), store, semanticOnlyWorkflowRuntime{
+	err := ensureRecurringWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	})
 	if err != nil {

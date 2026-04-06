@@ -22,6 +22,10 @@ type PostgresStore struct {
 	schemaCapsBound bool
 
 	eventPayloadValidator EventPayloadValidator
+
+	scheduleClaimMu   sync.Mutex
+	scheduleClaimConn *sql.Conn
+	scheduleClaimKeys map[string]struct{}
 }
 
 type EventPayloadValidator func(eventType string, payload []byte) error

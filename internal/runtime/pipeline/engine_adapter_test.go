@@ -937,6 +937,11 @@ func (s *recordingScheduleStore) CancelSchedule(context.Context, string, string)
 func (s *recordingScheduleStore) LoadActiveSchedules(context.Context) ([]Schedule, error) {
 	return nil, nil
 }
+func (*recordingScheduleStore) ClaimSchedule(context.Context, Schedule) (bool, error) {
+	return true, nil
+}
+func (*recordingScheduleStore) ReleaseSchedule(context.Context, Schedule) error     { return nil }
+func (*recordingScheduleStore) ReleaseScheduleClaims(context.Context) error         { return nil }
 func (s *recordingScheduleStore) MarkScheduleFired(context.Context, Schedule) error { return nil }
 func (s *recordingScheduleStore) CancelScheduleExact(_ context.Context, sc Schedule) error {
 	s.cancels = append(s.cancels, sc)

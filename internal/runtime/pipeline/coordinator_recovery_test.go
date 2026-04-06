@@ -2,6 +2,8 @@ package pipeline_test
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +29,23 @@ func (p *recoveryCapturePublisher) Publish(ctx context.Context, evt events.Event
 func (p *recoveryCapturePublisher) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error {
 	p.direct = append(p.direct, evt)
 	return p.inner.PublishDirect(ctx, evt, recipients)
+}
+
+type blockingRecoveryPublisher struct {
+	mu      sync.Mutex
+	started chan struct{}
+	release chan struct{}
+	count   atomic.Int32
+}
+
+func (*blockingRecoveryPublisher) Publish(context.Context, events.Event) error { return nil }
+
+func (p *blockingRecoveryPublisher) PublishDirect(context.Context, events.Event, []string) error {
+	if p.count.Add(1) == 1 {
+		close(p.started)
+		<-p.release
+	}
+	return nil
 }
 
 func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
@@ -276,6 +295,96 @@ func TestRecoveryManager_QuarantinesMissingRunIDSchemaCapability(t *testing.T) {
 	}
 	if reason != "pipeline_error" {
 		t.Fatalf("receipt reason = %q, want pipeline_error", reason)
+	}
+}
+
+func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg1 := &store.PostgresStore{DB: db}
+	pg2 := &store.PostgresStore{DB: db}
+
+	runID := uuid.NewString()
+	parentID := uuid.NewString()
+	childID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := pg1.AppendEvent(ctx, events.Event{
+		ID:          parentID,
+		Type:        events.EventType("system.parent"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"ok":true}`),
+		RunID:       runID,
+		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(parent): %v", err)
+	}
+	if err := pg1.AppendEvent(ctx, events.Event{
+		ID:            childID,
+		Type:          events.EventType("system.recover"),
+		SourceAgent:   "runtime",
+		Payload:       []byte(`{"ok":true}`),
+		RunID:         runID,
+		ParentEventID: parentID,
+		CreatedAt:     time.Now().Add(-time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(child): %v", err)
+	}
+	if err := pg1.InsertEventDeliveries(ctx, childID, []string{"agent-recovery"}); err != nil {
+		t.Fatalf("InsertEventDeliveries(child): %v", err)
+	}
+	if err := pg1.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
+	}
+
+	publisher := &blockingRecoveryPublisher{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	rm1 := runtimepipeline.NewRecoveryManagerWith(pg1, publisher)
+	rm2 := runtimepipeline.NewRecoveryManagerWith(pg2, publisher)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- rm1.Recover(ctx)
+	}()
+
+	select {
+	case <-publisher.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first recovery replay to start")
+	}
+
+	if err := rm2.Recover(ctx); err != nil {
+		t.Fatalf("second Recover: %v", err)
+	}
+	if got := publisher.count.Load(); got != 1 {
+		t.Fatalf("replay publish count during overlap = %d, want 1", got)
+	}
+
+	close(publisher.release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first Recover: %v", err)
+	}
+	if got := publisher.count.Load(); got != 1 {
+		t.Fatalf("replay publish count after overlap = %d, want 1", got)
+	}
+
+	var receiptStatus string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, childID).Scan(&receiptStatus); err != nil {
+		t.Fatalf("load pipeline receipt: %v", err)
+	}
+	if receiptStatus != "success" {
+		t.Fatalf("pipeline receipt outcome = %q, want success", receiptStatus)
 	}
 }
 
