@@ -28,6 +28,7 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 			break
 		}
 	}
+	assertCatalogRecognizedHandlerOutcome(t, expected.Expected.HandlerOutcome)
 	if len(h.publishedIDs) > 0 && catalogAssertsAuthoritativeHandlerOutcome(expected.Expected.HandlerOutcome) {
 		assertHandlerOutcome(t, h, expected.Expected.HandlerOutcome, entityID, expected.Expected.ChainDepthExceeded)
 	}
@@ -123,6 +124,7 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 		if entityID == "" {
 			continue
 		}
+		assertCatalogRecognizedHandlerOutcome(t, want.HandlerOutcome)
 		if catalogAssertsAuthoritativeHandlerOutcome(want.HandlerOutcome) {
 			assertHandlerOutcomeForEntity(t, h, want.HandlerOutcome, entityID, false)
 		}
@@ -818,6 +820,22 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 
 func catalogAssertsAuthoritativeHandlerOutcome(raw string) bool {
 	return strings.TrimSpace(strings.ToLower(raw)) == "success"
+}
+
+func assertCatalogRecognizedHandlerOutcome(t testing.TB, raw string) {
+	t.Helper()
+	if !catalogRecognizesHandlerOutcome(raw) {
+		t.Fatalf("cataloge2e does not recognize handler_outcome %q; supported values are success or explicit local-only non-success outcomes", strings.TrimSpace(raw))
+	}
+}
+
+func catalogRecognizesHandlerOutcome(raw string) bool {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "", "success", "reject", "discard", "escalate", "kill", "dead_letter", "error", "terminal_reject", "blocked":
+		return true
+	default:
+		return false
+	}
 }
 
 func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, entityID string) bool {
