@@ -464,6 +464,13 @@ func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Cont
 				"task_id": strings.TrimSpace(sc.TaskID),
 				"mode":    strings.TrimSpace(sc.Mode),
 			}, err)
+			return
+		}
+		if err := ReleaseOwnedSchedule(ctx, pc.timerScheduleStore, sc); err != nil {
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_release_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+				"task_id": strings.TrimSpace(sc.TaskID),
+				"mode":    strings.TrimSpace(sc.Mode),
+			}, err)
 		}
 	}
 	if pc.timerScheduler != nil {

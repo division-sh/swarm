@@ -17,6 +17,7 @@ import (
 type recordingSchedulePersistence struct {
 	schedules    []Schedule
 	cancels      []Schedule
+	releases     []Schedule
 	cancelExacts int
 }
 
@@ -33,7 +34,8 @@ func (*recordingSchedulePersistence) ClaimSchedule(context.Context, Schedule) (b
 	return true, nil
 }
 
-func (*recordingSchedulePersistence) ReleaseSchedule(context.Context, Schedule) error {
+func (s *recordingSchedulePersistence) ReleaseSchedule(_ context.Context, sc Schedule) error {
+	s.releases = append(s.releases, sc)
 	return nil
 }
 
@@ -178,6 +180,33 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	}
 	if got := store.schedules[0].EventType; got != "timer.check" {
 		t.Fatalf("scheduled event = %q, want timer.check", got)
+	}
+}
+
+func TestPersistWorkflowTimerCancellation_ReleasesClaimAfterCanonicalCancel(t *testing.T) {
+	store := &recordingSchedulePersistence{}
+	pc := &PipelineCoordinator{
+		timerScheduleStore: store,
+	}
+	sc := Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		EntityID:     "ent-001",
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-a",
+	}
+
+	pc.persistWorkflowTimerCancellation(context.Background(), sc)
+
+	if got := store.cancelExacts; got != 1 {
+		t.Fatalf("cancel exact calls = %d, want 1", got)
+	}
+	if len(store.releases) != 1 {
+		t.Fatalf("released schedules = %d, want 1", len(store.releases))
+	}
+	if store.releases[0].TaskID != sc.TaskID {
+		t.Fatalf("released task_id = %q, want %q", store.releases[0].TaskID, sc.TaskID)
 	}
 }
 
