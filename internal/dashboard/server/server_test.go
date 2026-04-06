@@ -667,9 +667,9 @@ func TestSQLAgentReader_ListGenericAgents_UsesCanonicalTurnSummary(t *testing.T)
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
+			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
 			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(turnBlocksPayload)))
+		}).AddRow("agent-1", "active", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(turnBlocksPayload)))
 
 	items, err := reader.ListGenericAgents(context.Background())
 	if err != nil {
@@ -725,9 +725,9 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalTurnSummary
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
+			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
 			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(`[{"kind":"assistant_text","text":"stale fallback text"}]`)))
+		}).AddRow("agent-1", "active", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(`[{"kind":"assistant_text","text":"stale fallback text"}]`)))
 
 	items, err := reader.ListGenericAgents(context.Background())
 	if err != nil {
@@ -776,14 +776,112 @@ func TestSQLAgentReader_ListGenericAgents_FailsOnMalformedCanonicalTurnSummary(t
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
+			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
 			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(`[{"kind":"turn_summary","data":{"tool_results":"bad"}}]`)))
+		}).AddRow("agent-1", "active", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(`[{"kind":"turn_summary","data":{"tool_results":"bad"}}]`)))
 
 	if _, err := reader.ListGenericAgents(context.Background()); err == nil {
 		t.Fatal("expected malformed canonical turn summary to fail")
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLAgentReader(db, stubSQLAgents{
+		rows: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{
+				ID:   "agent-1",
+				Role: "researcher",
+				Mode: "global",
+				Type: "managed",
+			},
+			Status: "terminated",
+		}},
+		caps: store.StoreSchemaCapabilities{
+			Conversations: store.ConversationSchemaCapabilities{
+				Sessions:   store.SchemaFlavorCanonical,
+				Turns:      store.SchemaFlavorCanonical,
+				TurnBlocks: true,
+			},
+		},
+	}, 12)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", 7, "lease-owner", time.Now().Add(time.Minute), 2, 45, 0, 0, 0, "task-7", false, []byte(`[]`)))
+
+	items, err := reader.ListGenericAgents(context.Background())
+	if err != nil {
+		t.Fatalf("ListGenericAgents: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one agent, got %+v", items)
+	}
+	if items[0].Status != "active" {
+		t.Fatalf("status = %q, want active from operator projection", items[0].Status)
+	}
+	if items[0].State != "running" {
+		t.Fatalf("state = %q, want running from operator projection", items[0].State)
+	}
+	if items[0].PendingEvents != 2 {
+		t.Fatalf("pending_events = %d, want 2", items[0].PendingEvents)
+	}
+	if items[0].CurrentTaskID != "task-7" {
+		t.Fatalf("current_task_id = %q, want task-7", items[0].CurrentTaskID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLAgentReader(db, stubSQLAgents{
+		rows: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{
+				ID:   "agent-1",
+				Role: "researcher",
+				Mode: "global",
+				Type: "managed",
+			},
+			Status: "active",
+		}},
+		caps: store.StoreSchemaCapabilities{
+			Conversations: store.ConversationSchemaCapabilities{
+				Sessions:   store.SchemaFlavorCanonical,
+				Turns:      store.SchemaFlavorCanonical,
+				TurnBlocks: true,
+			},
+		},
+	}, 12)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
+		}))
+
+	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "missing agent operator projection") {
+		t.Fatalf("expected missing agent operator projection error, got %v", err)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
 	}
