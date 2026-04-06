@@ -26,6 +26,13 @@ func authorizeGatewayRequest(req *http.Request) {
 	}
 }
 
+func withContextToken(req *http.Request, token string) *http.Request {
+	if req != nil {
+		req.Header.Set(contextTokenHeader, strings.TrimSpace(token))
+	}
+	return req
+}
+
 func mustMCPToolsForRequest(t *testing.T, g *Gateway, req *http.Request) []ToolDef {
 	t.Helper()
 	tools, err := g.mcpToolsForRequest(req)
@@ -330,7 +337,7 @@ func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
 
-	req := httptest.NewRequest("POST", "/mcp?ctx_token=ctx-hydrated-role", nil)
+	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-hydrated-role")
 	tools := mustMCPToolsForRequest(t, g, req)
 	for _, tool := range tools {
 		if tool.Name == "emit_scan_requested" {
@@ -371,7 +378,7 @@ func TestGatewayMCPToolsForRequest_KeepsEmitToolsForDirectMCPContext(t *testing.
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
 
-	req := httptest.NewRequest("POST", "/mcp?agent_id=campaign-coordinator&ctx_token=ctx-1", nil)
+	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-1")
 	tools := mustMCPToolsForRequest(t, g, req)
 	for _, tool := range tools {
 		if tool.Name == "emit_scan_requested" {
@@ -406,7 +413,7 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
 
-	req := httptest.NewRequest("POST", "/mcp?ctx_token=ctx-actor-scoped", nil)
+	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-actor-scoped")
 	tools := mustMCPToolsForRequest(t, g, req)
 	if len(tools) != 1 {
 		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
@@ -436,7 +443,7 @@ func TestGatewayMCPToolsForRequest_IgnoresCallerAllowlist(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
 
-	req := httptest.NewRequest("POST", "/mcp?ctx_token=ctx-ignore-allowlist&allowed_tools=Read", nil)
+	req := withContextToken(httptest.NewRequest("POST", "/mcp?allowed_tools=Read", nil), "ctx-ignore-allowlist")
 	tools := mustMCPToolsForRequest(t, g, req)
 	if len(tools) != 2 {
 		t.Fatalf("tool count = %d, want 2 (%#v)", len(tools), tools)
@@ -467,7 +474,7 @@ func TestGatewayMCPToolsForRequest_DoesNotTrustUnknownCallerAllowlist(t *testing
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	})
 
-	req := httptest.NewRequest("POST", "/mcp?ctx_token=ctx-unknown-allowlist&allowed_tools=does_not_exist", nil)
+	req := withContextToken(httptest.NewRequest("POST", "/mcp?allowed_tools=does_not_exist", nil), "ctx-unknown-allowlist")
 	tools := mustMCPToolsForRequest(t, g, req)
 	if len(tools) != 1 {
 		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
@@ -540,7 +547,7 @@ func TestGatewayHandleMCP_ToolsListUsesResolvedTurnContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-list", strings.NewReader(string(body)))
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-list")
 	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
@@ -634,7 +641,7 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal request: %v", err)
 		}
-		req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-emit-gateway", strings.NewReader(string(body)))
+		req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-emit-gateway")
 		authorizeGatewayRequest(req)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -687,7 +694,7 @@ func TestGatewayHandleMCP_AllowsPrefixedToolNameFromRuntimeOwnedTurnContext(t *t
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-prefixed-emit&allowed_tools=query_entities", strings.NewReader(string(body)))
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp?allowed_tools=query_entities", strings.NewReader(string(body))), "ctx-prefixed-emit")
 	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
@@ -735,7 +742,7 @@ func TestGatewayHandleMCP_DoesNotLetCallerAllowlistGrantToolAccess(t *testing.T)
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-denied-allowlist&allowed_tools=emit_score_dimension_complete", strings.NewReader(string(body)))
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp?allowed_tools=emit_score_dimension_complete", strings.NewReader(string(body))), "ctx-denied-allowlist")
 	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
@@ -775,7 +782,7 @@ func TestGatewayHandleMCP_RejectsToolWhenContextTokenMisses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPost, "/mcp?agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
 	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
@@ -793,7 +800,7 @@ func TestGatewayHandleMCP_RejectsToolWhenContextTokenMisses(t *testing.T) {
 
 func TestGatewayMCPExecutionContext_RejectsPrefixedMutatingToolOnContextMiss(t *testing.T) {
 	g := NewGateway(nil, "", GatewayHooks{})
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", nil)
+	req := httptest.NewRequest(http.MethodPost, "/mcp?agent_id=analysis-agent&agent_role=analysis", nil)
 	if _, err := g.mcpExecutionContext(req, "mcp__runtime-tools__emit_score_dimension_complete"); err == nil {
 		t.Fatal("expected context miss error for prefixed mutating tool")
 	}
@@ -821,7 +828,7 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 		ExpiresAt:  time.Now().UTC().Add(time.Hour),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-trace", nil)
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-trace")
 	ctx, err := g.mcpExecutionContext(req, "get_entity")
 	if err != nil {
 		t.Fatalf("mcpExecutionContext: %v", err)
@@ -849,7 +856,7 @@ func TestGatewayMCPExecutionContext_KeepsOtherRegistryTokensValidAfterGlobalEpoc
 	runtimebus.EnterRuntimeResetMode()
 	runtimebus.ExitRuntimeResetMode()
 
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-b", nil)
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-b")
 	ctx, err := gatewayB.mcpExecutionContext(req, "query_entities")
 	if err != nil {
 		t.Fatalf("mcpExecutionContext after unrelated reset: %v", err)
@@ -905,7 +912,7 @@ func TestGatewayHandleMCP_RejectsReadOnlyToolWhenContextTokenMisses(t *testing.T
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPost, "/mcp?agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
 	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
@@ -929,7 +936,6 @@ func TestGatewayHandleTool_RejectsMutatingToolWithoutContextToken(t *testing.T) 
 	}), testGatewayToken, GatewayHooks{})
 
 	body, err := json.Marshal(ToolGatewayRequest{
-		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		Input: map[string]any{"dimension": "build_complexity", "score": 72},
 	})
 	if err != nil {
@@ -959,7 +965,6 @@ func TestGatewayHandleTool_RejectsReadOnlyToolWithoutContextToken(t *testing.T) 
 	}), testGatewayToken, GatewayHooks{})
 
 	body, err := json.Marshal(ToolGatewayRequest{
-		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		Input: map[string]any{"query": "kind = 'vertical'"},
 	})
 	if err != nil {
@@ -995,19 +1000,12 @@ func TestGatewayHandleTool_IgnoresCallerSuppliedPrivilegeFields(t *testing.T) {
 	})
 
 	body, err := json.Marshal(ToolGatewayRequest{
-		Actor: models.AgentConfig{
-			ID:          "analysis-agent",
-			Role:        "campaign_coordinator",
-			Tools:       []string{"emit_score_dimension_complete"},
-			Permissions: []string{"schedule"},
-			EmitEvents:  []string{"score_dimension.complete"},
-		},
 		Input: map[string]any{"dimension": "build_complexity", "score": 72},
 	})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/tools/emit_score_dimension_complete?ctx_token=ctx-analysis", strings.NewReader(string(body)))
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/tools/emit_score_dimension_complete", strings.NewReader(string(body))), "ctx-analysis")
 	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
@@ -1042,7 +1040,7 @@ func TestGatewayHandleTool_AllowsLegitimateRuntimeOwnedActorContext(t *testing.T
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/tools/emit_score_dimension_complete?ctx_token=ctx-coordinator", strings.NewReader(string(body)))
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/tools/emit_score_dimension_complete", strings.NewReader(string(body))), "ctx-coordinator")
 	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
@@ -1073,19 +1071,72 @@ func TestGatewayTransports_AlignReadOnlyToolContextTokenFailures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal mcp request: %v", err)
 	}
-	mcpReq := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(mcpBody)))
+	mcpReq := httptest.NewRequest(http.MethodPost, "/mcp?agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(mcpBody)))
 	authorizeGatewayRequest(mcpReq)
 	mcpRec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(mcpRec, mcpReq)
 
 	toolBody, err := json.Marshal(ToolGatewayRequest{
-		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		Input: map[string]any{"query": "kind = 'vertical'"},
 	})
 	if err != nil {
 		t.Fatalf("marshal tool request: %v", err)
 	}
-	toolReq := httptest.NewRequest(http.MethodPost, "/tools/query_entities?ctx_token=missing", strings.NewReader(string(toolBody)))
+	toolReq := httptest.NewRequest(http.MethodPost, "/tools/query_entities", strings.NewReader(string(toolBody)))
+	authorizeGatewayRequest(toolReq)
+	toolRec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(toolRec, toolReq)
+
+	if callCount != 0 {
+		t.Fatalf("executor call count = %d, want 0", callCount)
+	}
+	if !strings.Contains(mcpRec.Body.String(), "missing or invalid mcp context token") {
+		t.Fatalf("mcp body = %s", mcpRec.Body.String())
+	}
+	if !strings.Contains(toolRec.Body.String(), "missing or invalid mcp context token") {
+		t.Fatalf("tool body = %s", toolRec.Body.String())
+	}
+}
+
+func TestGatewayTransports_RejectLegacyQueryContextTokenCarrier(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	callCount := 0
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		callCount++
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-query-only", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	mcpBody, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "query_entities",
+			"arguments": map[string]any{"query": "kind = 'vertical'"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal mcp request: %v", err)
+	}
+	mcpReq := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-query-only", strings.NewReader(string(mcpBody)))
+	authorizeGatewayRequest(mcpReq)
+	mcpRec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(mcpRec, mcpReq)
+
+	toolBody, err := json.Marshal(ToolGatewayRequest{
+		Input: map[string]any{"query": "kind = 'vertical'"},
+	})
+	if err != nil {
+		t.Fatalf("marshal tool request: %v", err)
+	}
+	toolReq := httptest.NewRequest(http.MethodPost, "/tools/query_entities?ctx_token=ctx-query-only", strings.NewReader(string(toolBody)))
 	authorizeGatewayRequest(toolReq)
 	toolRec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(toolRec, toolReq)
@@ -1128,7 +1179,7 @@ func TestGatewayTransports_AlignReadOnlyToolSuccessWithResolvedTurnContext(t *te
 	if err != nil {
 		t.Fatalf("marshal mcp request: %v", err)
 	}
-	mcpReq := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-query", strings.NewReader(string(mcpBody)))
+	mcpReq := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(mcpBody))), "ctx-query")
 	authorizeGatewayRequest(mcpReq)
 	mcpRec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(mcpRec, mcpReq)
@@ -1139,7 +1190,7 @@ func TestGatewayTransports_AlignReadOnlyToolSuccessWithResolvedTurnContext(t *te
 	if err != nil {
 		t.Fatalf("marshal tool request: %v", err)
 	}
-	toolReq := httptest.NewRequest(http.MethodPost, "/tools/query_entities?ctx_token=ctx-query", strings.NewReader(string(toolBody)))
+	toolReq := withContextToken(httptest.NewRequest(http.MethodPost, "/tools/query_entities", strings.NewReader(string(toolBody))), "ctx-query")
 	authorizeGatewayRequest(toolReq)
 	toolRec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(toolRec, toolReq)
@@ -1182,7 +1233,7 @@ func TestGatewayHandleMCP_DoesNotLogFallbackUsedReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPost, "/mcp?agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
 	authorizeGatewayRequest(req)
 	rec := httptest.NewRecorder()
 	g.Handler().ServeHTTP(rec, req)
@@ -1206,7 +1257,6 @@ func TestGatewayHandleTool_DoesNotLogFallbackBlockedReason(t *testing.T) {
 	})
 
 	body, err := json.Marshal(ToolGatewayRequest{
-		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
 		Input: map[string]any{"dimension": "build_complexity", "score": 72},
 	})
 	if err != nil {
