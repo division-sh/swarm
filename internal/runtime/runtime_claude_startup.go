@@ -325,16 +325,31 @@ func startupProbeMCPToolsCall(ctx context.Context, client *http.Client, binding 
 	if isError, _ := result["isError"].(bool); !isError {
 		return nil
 	}
-	message := strings.ToLower(strings.TrimSpace(startupMCPErrorText(result)))
-	switch {
-	case strings.Contains(message, "tool is not allowed"),
-		strings.Contains(message, "tool executor unavailable"),
-		strings.Contains(message, "tool name is required"),
-		strings.Contains(message, "missing actor context"),
-		strings.Contains(message, "missing authorization"):
-		return fmt.Errorf(strings.TrimSpace(startupMCPErrorText(result)))
-	default:
+	message := strings.TrimSpace(startupMCPErrorText(result))
+	if message == "" {
+		return fmt.Errorf("tools/call returned error without content")
+	}
+	if startupProbeAllowsValidationError(message) {
 		return nil
+	}
+	return fmt.Errorf(message)
+}
+
+func startupProbeAllowsValidationError(message string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case strings.Contains(lowered, "runtime tool input validation failed"):
+		return true
+	case strings.Contains(lowered, "invalid_tool_input"):
+		return true
+	case strings.Contains(lowered, "schema validation failed"):
+		return true
+	case strings.Contains(lowered, " is required"):
+		return true
+	case strings.Contains(lowered, " must be "):
+		return true
+	default:
+		return false
 	}
 }
 
