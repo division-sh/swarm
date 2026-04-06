@@ -82,6 +82,31 @@ func TestFormatEventForAgent_UsesCanonicalNativeBuiltinNames(t *testing.T) {
 	}
 }
 
+func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
+	cfg := models.AgentConfig{
+		ID:   "agent-1",
+		Role: "operator",
+		Mode: "task",
+	}
+	evt := (events.Event{
+		ID:          "evt-1",
+		Type:        "item.created",
+		SourceAgent: "runtime",
+		TaskID:      "task-1",
+		Payload:     []byte(`{"item_id":"x"}`),
+	}).WithEntityID("entity-1")
+
+	formatted := formatEventForAgent(cfg, evt, []llm.ToolDefinition{
+		{Name: "query_entities"},
+	})
+	if strings.Contains(formatted, "ExitPlanMode") {
+		t.Fatalf("expected non-CLI event formatting to omit CLI-only control tools, got %q", formatted)
+	}
+	if strings.Contains(formatted, "Available control tools in this turn") {
+		t.Fatalf("expected non-CLI event formatting to omit control tool summary, got %q", formatted)
+	}
+}
+
 func TestFilterTools_RetainsUniversalEntityToolsWhenConstrained(t *testing.T) {
 	allowed, constrained := extractAllowedToolSet(models.AgentConfig{
 		Tools: []string{"emit_example"},

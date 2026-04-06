@@ -230,12 +230,10 @@ var claudeProviderBuiltinToolNames = []string{
 }
 
 type AgentVisibleToolSurface struct {
-	RuntimeToolNames    []string
-	EmitToolNames       []string
-	NonEmitToolNames    []string
-	NativeBuiltinTools  []string
-	ControlToolNames    []string
-	AllowedCLIToolNames []string
+	RuntimeToolNames   []string
+	EmitToolNames      []string
+	NonEmitToolNames   []string
+	NativeBuiltinTools []string
 }
 
 func AgentVisibleToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefinition) AgentVisibleToolSurface {
@@ -277,9 +275,22 @@ func AgentVisibleToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefin
 	}
 	slices.Sort(nativeBuiltins)
 
-	controlTools := []string{"ExitPlanMode"}
-	allowedCLI := make([]string, 0, len(runtimeNames)+len(nativeBuiltins)+len(controlTools))
-	seen := make(map[string]struct{}, cap(allowedCLI))
+	return AgentVisibleToolSurface{
+		RuntimeToolNames:   runtimeNames,
+		EmitToolNames:      emitNames,
+		NonEmitToolNames:   nonEmitNames,
+		NativeBuiltinTools: nativeBuiltins,
+	}
+}
+
+func claudeControlToolNames() []string {
+	return []string{"ExitPlanMode"}
+}
+
+func claudeAllowedToolNamesForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
+	surface := AgentVisibleToolSurfaceForActor(actor, tools)
+	allowed := make([]string, 0, len(surface.RuntimeToolNames)+len(surface.NativeBuiltinTools)+len(claudeControlToolNames()))
+	seen := make(map[string]struct{}, cap(allowed))
 	addAllowed := func(name string) {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -289,36 +300,25 @@ func AgentVisibleToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefin
 			return
 		}
 		seen[name] = struct{}{}
-		allowedCLI = append(allowedCLI, name)
+		allowed = append(allowed, name)
 	}
-	for _, name := range runtimeNames {
+	for _, name := range surface.RuntimeToolNames {
 		addAllowed(name)
 	}
-	for _, name := range nativeBuiltins {
+	for _, name := range surface.NativeBuiltinTools {
 		addAllowed(name)
 	}
-	for _, name := range controlTools {
+	for _, name := range claudeControlToolNames() {
 		addAllowed(name)
 	}
-	slices.Sort(allowedCLI)
-
-	return AgentVisibleToolSurface{
-		RuntimeToolNames:    runtimeNames,
-		EmitToolNames:       emitNames,
-		NonEmitToolNames:    nonEmitNames,
-		NativeBuiltinTools:  nativeBuiltins,
-		ControlToolNames:    controlTools,
-		AllowedCLIToolNames: allowedCLI,
-	}
+	slices.Sort(allowed)
+	return allowed
 }
 
 func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig, tools []ToolDefinition) string {
 	surface := AgentVisibleToolSurfaceForActor(actor, tools)
-	allowed := make(map[string]struct{}, len(surface.NativeBuiltinTools)+len(surface.ControlToolNames))
+	allowed := make(map[string]struct{}, len(surface.NativeBuiltinTools))
 	for _, name := range surface.NativeBuiltinTools {
-		allowed[name] = struct{}{}
-	}
-	for _, name := range surface.ControlToolNames {
 		allowed[name] = struct{}{}
 	}
 	names := make([]string, 0, len(claudeProviderBuiltinToolNames))
@@ -333,11 +333,11 @@ func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig, tools []T
 }
 
 func claudeAllowedToolsArgForActor(actor models.AgentConfig, tools []ToolDefinition) string {
-	surface := AgentVisibleToolSurfaceForActor(actor, tools)
-	if len(surface.AllowedCLIToolNames) == 0 {
+	allowed := claudeAllowedToolNamesForActor(actor, tools)
+	if len(allowed) == 0 {
 		return ""
 	}
-	return strings.Join(surface.AllowedCLIToolNames, ",")
+	return strings.Join(allowed, ",")
 }
 
 const cliToolInvocationMarker = "## Swarm Tool Invocation"
@@ -351,7 +351,8 @@ func augmentCLISystemPrompt(systemPrompt string, actor models.AgentConfig, tools
 		return systemPrompt
 	}
 	surface := AgentVisibleToolSurfaceForActor(actor, tools)
-	if len(surface.RuntimeToolNames) == 0 && len(surface.NativeBuiltinTools) == 0 && len(surface.ControlToolNames) == 0 {
+	controlTools := claudeControlToolNames()
+	if len(surface.RuntimeToolNames) == 0 && len(surface.NativeBuiltinTools) == 0 && len(controlTools) == 0 {
 		return systemPrompt
 	}
 	var b strings.Builder
@@ -373,9 +374,9 @@ func augmentCLISystemPrompt(systemPrompt string, actor models.AgentConfig, tools
 		b.WriteString(strings.Join(surface.NativeBuiltinTools, ", "))
 		b.WriteString(".\n")
 	}
-	if len(surface.ControlToolNames) > 0 {
+	if len(controlTools) > 0 {
 		b.WriteString("Claude CLI control tools available in this turn: ")
-		b.WriteString(strings.Join(surface.ControlToolNames, ", "))
+		b.WriteString(strings.Join(controlTools, ", "))
 		b.WriteString(".\n")
 	}
 	if hasToolPrefix(surface.RuntimeToolNames, "emit_") {
