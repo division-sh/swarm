@@ -344,10 +344,6 @@ func startupProbeAllowsValidationError(message string) bool {
 		return true
 	case strings.Contains(lowered, "schema validation failed"):
 		return true
-	case strings.Contains(lowered, " is required"):
-		return true
-	case strings.Contains(lowered, " must be "):
-		return true
 	default:
 		return false
 	}
