@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -280,6 +281,53 @@ func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T
 	}, []string{"agent-a"})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
+	}
+}
+
+func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+	eb, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	err = eb.PublishDirect(ctx, (events.Event{
+		ID:        eventID,
+		Type:      events.EventType("custom.direct"),
+		Payload:   []byte(`{"entity_id":"` + entityID + `"}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID(entityID), []string{"agent-a"})
+	if err == nil || !strings.Contains(err.Error(), "authoritative delivery incomplete") {
+		t.Fatalf("PublishDirect missing recipient error = %v, want authoritative delivery incomplete", err)
+	}
+
+	var eventCount, deliveryCount, receiptCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&eventCount); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, eventID).Scan(&deliveryCount); err != nil {
+		t.Fatalf("count deliveries: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&receiptCount); err != nil {
+		t.Fatalf("count pipeline receipts: %v", err)
+	}
+	if eventCount != 1 || deliveryCount != 1 {
+		t.Fatalf("persisted rows = events:%d deliveries:%d, want 1 each", eventCount, deliveryCount)
+	}
+	if receiptCount != 0 {
+		t.Fatalf("pipeline receipt count = %d, want 0 before real fan-out", receiptCount)
 	}
 }
 
@@ -672,7 +720,9 @@ func TestEventBusPublish_LogsRoutedAndSubscribedRecipientsSeparately(t *testing.
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	eb.Subscribe("direct-agent", events.EventType("producer/scan.requested"))
+	eb.Subscribe("scan-orchestrator")
 	defer eb.Unsubscribe("direct-agent")
+	defer eb.Unsubscribe("scan-orchestrator")
 
 	if err := eb.Publish(context.Background(), events.Event{
 		Type: events.EventType("producer/scan.requested"),
@@ -774,6 +824,8 @@ func TestEventBusPublish_RecordsPublishDiagnosticsInTurnRecorder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	eb.Subscribe("scan-orchestrator")
+	defer eb.Unsubscribe("scan-orchestrator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
 	if err := eb.Publish(ctx, (events.Event{
@@ -1162,6 +1214,8 @@ func TestEventBusPublish_RecordsNestedDescendantLocalizedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	eb.Subscribe("child-aggregator")
+	defer eb.Unsubscribe("child-aggregator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
 	if err := eb.Publish(ctx, (events.Event{
@@ -1219,6 +1273,8 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	if err := eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
+	eb.Subscribe("worker-inst-1")
+	defer eb.Unsubscribe("worker-inst-1")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
 	if err := eb.Publish(ctx, (events.Event{

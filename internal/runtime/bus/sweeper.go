@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -96,14 +97,16 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			eb.markPipelineReceipt(ctx, evt.ID, "error", replayErr)
 			continue
 		}
-		recipients, err := eb.sweeperRecipients(ctx, evt.ID)
+		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID)
 		if err != nil {
 			eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
 			return redelivered, err
 		}
 		intent := runtimeengine.EmitIntent{Event: evt, Recipients: recipients}
 		if err := dispatcher.dispatchIntent(ctx, intent); err != nil {
-			eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
+			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
+				eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
+			}
 			return redelivered, err
 		}
 		eb.markPipelineReceipt(ctx, evt.ID, "processed", "")
@@ -112,10 +115,10 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	return redelivered, nil
 }
 
-func (eb *EventBus) sweeperRecipients(ctx context.Context, eventID string) ([]string, error) {
+func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, eventID string) ([]string, error) {
 	reader, ok := eb.store.(EventDeliveryReader)
 	if !ok {
-		return nil, nil
+		return nil, errors.New("event bus store does not support authoritative delivery recipient reads")
 	}
 	recipients, err := reader.ListEventDeliveryRecipients(ctx, eventID)
 	if err != nil {
@@ -123,6 +126,9 @@ func (eb *EventBus) sweeperRecipients(ctx context.Context, eventID string) ([]st
 	}
 	for i := range recipients {
 		recipients[i] = strings.TrimSpace(recipients[i])
+	}
+	if recipients == nil {
+		return []string{}, nil
 	}
 	return uniqueStrings(recipients), nil
 }

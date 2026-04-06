@@ -76,7 +76,7 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 	}
 }
 
-func TestSweepUndispatchedFallsBackToSubscribedRouting(t *testing.T) {
+func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{Event: (events.Event{
@@ -104,14 +104,7 @@ func TestSweepUndispatchedFallsBackToSubscribedRouting(t *testing.T) {
 	if got := store.receipts["evt-2"]; got != "processed" {
 		t.Fatalf("receipt status = %q, want processed", got)
 	}
-	select {
-	case evt := <-ch:
-		if evt.ID != "evt-2" {
-			t.Fatalf("delivered event id = %q, want evt-2", evt.ID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected subscribed swept delivery")
-	}
+	waitForNoEvent(t, ch)
 }
 
 func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {

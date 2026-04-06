@@ -19,6 +19,23 @@ type pipelineTransitionSchemaCapabilityProvider interface {
 	CanonicalEventReceiptsCapability(context.Context) (bool, error)
 }
 
+func shouldPersistPipelineReceipt(persisted bool, publishErr error) bool {
+	if !persisted {
+		return false
+	}
+	return !errors.Is(publishErr, errAuthoritativeDeliveryIncomplete)
+}
+
+func pipelineReceiptStatus(ctx context.Context, publishErr error) (string, string) {
+	if publishErr != nil {
+		return "error", publishErr.Error()
+	}
+	if overrideStatus, overrideErr, ok := runtimepipeline.PipelineReceiptOverrideFromContext(ctx); ok {
+		return overrideStatus, overrideErr
+	}
+	return "processed", ""
+}
+
 func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
@@ -60,18 +77,10 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	passthrough := true
 	deferred := []events.Event{}
 	defer func() {
-		if !persisted {
+		if !shouldPersistPipelineReceipt(persisted, err) {
 			return
 		}
-		status := "processed"
-		errText := ""
-		if err != nil {
-			status = "error"
-			errText = err.Error()
-		} else if overrideStatus, overrideErr, ok := runtimepipeline.PipelineReceiptOverrideFromContext(ictx); ok {
-			status = overrideStatus
-			errText = overrideErr
-		}
+		status, errText := pipelineReceiptStatus(ictx, err)
 		eb.markPipelineReceipt(ictx, evt.ID, status, errText)
 	}()
 
@@ -162,20 +171,10 @@ func (eb *EventBus) publishTransactional(
 	if err != nil {
 		return err
 	}
-	receiptStatus := "processed"
-	receiptErr := ""
-	if overrideStatus, overrideErr, ok := runtimepipeline.PipelineReceiptOverrideFromContext(txctx); ok {
-		receiptStatus = overrideStatus
-		receiptErr = overrideErr
-	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit publish tx: %w", err)
 	}
 	committed = true
-	if err := txStore.UpsertPipelineReceiptTx(ctx, nil, evt.ID, receiptStatus, receiptErr); err != nil {
-		return fmt.Errorf("persist pipeline receipt: %w", err)
-	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	if deferredTransitions != nil {
 		runtimepipeline.FlushDeferredPipelineTransitions(ctx, *deferredTransitions)
@@ -183,7 +182,9 @@ func (eb *EventBus) publishTransactional(
 
 	if passthrough {
 		if len(inboundPlan.Recipients) > 0 {
-			eb.deliverToAgents(ctx, evt, inboundPlan.Recipients)
+			if err := eb.deliverToAgents(ctx, evt, inboundPlan.PersistedRecipients); err != nil {
+				return err
+			}
 			eb.logDelivery(ctx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
 		}
 		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
@@ -201,6 +202,10 @@ func (eb *EventBus) publishTransactional(
 		if err := eb.publishDeferred(ctx, d); err != nil {
 			return err
 		}
+	}
+	status, errText := pipelineReceiptStatus(txctx, nil)
+	if err := txStore.UpsertPipelineReceiptTx(ctx, nil, evt.ID, status, errText); err != nil {
+		return fmt.Errorf("persist pipeline receipt: %w", err)
 	}
 	return nil
 }
@@ -281,18 +286,10 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	}
 	persisted := false
 	defer func() {
-		if !persisted {
+		if !shouldPersistPipelineReceipt(persisted, err) {
 			return
 		}
-		status := "processed"
-		errText := ""
-		if err != nil {
-			status = "error"
-			errText = err.Error()
-		} else if overrideStatus, overrideErr, ok := runtimepipeline.PipelineReceiptOverrideFromContext(ctx); ok {
-			status = overrideStatus
-			errText = overrideErr
-		}
+		status, errText := pipelineReceiptStatus(ctx, err)
 		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 	}()
 	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
@@ -310,7 +307,9 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	}
 	if passthrough {
 		if len(plan.Recipients) > 0 {
-			eb.deliverToAgents(ctx, evt, plan.Recipients)
+			if err := eb.deliverToAgents(ctx, evt, plan.PersistedRecipients); err != nil {
+				return err
+			}
 			eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
 		}
 		if plan.BlockedByCycle && plan.CycleEscalation != nil {
@@ -357,18 +356,10 @@ func (eb *EventBus) publishDeferredNoIntercept(ctx context.Context, evt events.E
 	}
 	persisted := false
 	defer func() {
-		if !persisted {
+		if !shouldPersistPipelineReceipt(persisted, err) {
 			return
 		}
-		status := "processed"
-		errText := ""
-		if err != nil {
-			status = "error"
-			errText = err.Error()
-		} else if overrideStatus, overrideErr, ok := runtimepipeline.PipelineReceiptOverrideFromContext(ctx); ok {
-			status = overrideStatus
-			errText = overrideErr
-		}
+		status, errText := pipelineReceiptStatus(ctx, err)
 		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 	}()
 	if err := eb.routeAndDeliver(ctx, evt); err != nil {
@@ -397,7 +388,9 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 		return err
 	}
 	if len(plan.Recipients) > 0 {
-		eb.deliverToAgents(ctx, evt, plan.Recipients)
+		if err := eb.deliverToAgents(ctx, evt, plan.PersistedRecipients); err != nil {
+			return err
+		}
 		eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
 	}
 	if plan.BlockedByCycle && plan.CycleEscalation != nil {
@@ -571,15 +564,10 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	start := time.Now()
 	persisted := false
 	defer func() {
-		if !persisted {
+		if !shouldPersistPipelineReceipt(persisted, err) {
 			return
 		}
-		status := "processed"
-		errText := ""
-		if err != nil {
-			status = "error"
-			errText = err.Error()
-		}
+		status, errText := pipelineReceiptStatus(ctx, err)
 		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 	}()
 	recipients = uniqueStrings(recipients)
@@ -608,7 +596,9 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		return err
 	}
 	persisted = true
-	eb.deliverToAgents(ctx, evt, recipients)
+	if err := eb.deliverToAgents(ctx, evt, recipients); err != nil {
+		return err
+	}
 	eb.logRuntime(ctx, "debug", "Event was delivered directly to recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
 		"direct":           true,
 		"recipients_count": len(recipients),
