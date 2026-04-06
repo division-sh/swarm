@@ -109,6 +109,18 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 		ConversationMode: resolved.RuntimeMode.String(),
 		SessionScope:     resolved.Scope.String(),
 		ScopeKey:         resolved.ScopeKey,
+		RetryReason: func() string {
+			if lease != nil {
+				return lease.RetryReason
+			}
+			return ""
+		}(),
+		RetriesFromSessionID: func() string {
+			if lease != nil {
+				return lease.RetriesFromSessionID
+			}
+			return ""
+		}(),
 		ProviderSessionID: func() string {
 			if lease != nil {
 				return lease.ProviderSessionID
@@ -123,6 +135,8 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, resolved.RuntimeMode.String(), resolved.Scope.String(), resolved.ScopeKey); err == nil && ok {
 			s.Messages = rec.Messages
 			s.TurnCount = rec.TurnCount
+			s.RetryReason = strings.TrimSpace(rec.RetryReason)
+			s.RetriesFromSessionID = strings.TrimSpace(rec.RetriesFromSessionID)
 		}
 	}
 	publishAgentStarted(ctx, r.events, s, events.EventType("platform.agent_started"))

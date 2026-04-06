@@ -559,7 +559,7 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 		},
 	}})
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
-	summaryState := `{"summary":"brief","last_turn":{"parse_ok":true},"provider_session_id":"sess-1"}`
+	summaryState := `{"summary":"brief","last_turn":{"parse_ok":true},"provider_session_id":"sess-1","retry_reason":"session not found","retries_from_session_id":"sess-0"}`
 	messagePayload := `[{"role":"assistant","content":"hello"}]`
 	toolCallsPayload := `[{"name":"schedule","arguments":{"delay_seconds":1209600}}]`
 	responsePayload := `{"result":"14-day review scheduled.","raw":"{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"status\\\":\\\"scheduled\\\"}\"}]}]}}\n{\"type\":\"result\",\"result\":\"14-day review scheduled.\"}"}`
@@ -582,6 +582,9 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	}
 	if items[0].Metadata["provider_session_id"] != "sess-1" {
 		t.Fatalf("expected metadata to retain provider_session_id: %+v", items[0].Metadata)
+	}
+	if items[0].Metadata["retry_reason"] != "session not found" || items[0].Metadata["retries_from_session_id"] != "sess-0" {
+		t.Fatalf("expected retry lineage metadata, got %+v", items[0].Metadata)
 	}
 
 	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
@@ -618,6 +621,9 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	lastTurn, ok := item.RuntimeState["last_turn"].(map[string]any)
 	if !ok || lastTurn["parse_ok"] != true {
 		t.Fatalf("expected runtime_state.last_turn parse_ok=true, got %+v", item.RuntimeState)
+	}
+	if item.RuntimeState["retry_reason"] != "session not found" || item.RuntimeState["retries_from_session_id"] != "sess-0" {
+		t.Fatalf("expected retry lineage in runtime_state, got %+v", item.RuntimeState)
 	}
 	if item.Turns[0].AssistantVisibleOutput != "" || item.Turns[0].Outcome != "" || len(item.Turns[0].ToolResults) != 0 {
 		t.Fatalf("expected missing canonical summary to fail closed, got %+v", item.Turns[0])

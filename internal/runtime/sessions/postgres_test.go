@@ -40,8 +40,8 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT\\s+session_id::text,\\s+scope_key,\\s+status,\\s+NULLIF\\(runtime_state->>'provider_session_id'").
 		WithArgs("a1", "global", RuntimeModeSession).
-		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "status", "provider_session_id", "lease_holder", "lease_expires_at"}).
-			AddRow("sess-1", "global", "active", nil, "owner-1", fixedNow.Add(30*time.Second)))
+		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "status", "provider_session_id", "retry_reason", "retries_from_session_id", "lease_holder", "lease_expires_at"}).
+			AddRow("sess-1", "global", "active", nil, "session not found", "sess-0", "owner-1", fixedNow.Add(30*time.Second)))
 	mock.ExpectQuery("UPDATE agent_sessions\\s+SET lease_holder = \\$1,").
 		WithArgs("owner-1", fixedNow.Add(30*time.Second), "sess-1").
 		WillReturnRows(sqlmock.NewRows([]string{"lease_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
@@ -53,6 +53,9 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 	}
 	if lease2.SessionID != "sess-1" || lease2.ScopeKey != "global" {
 		t.Fatalf("unexpected session lease: %+v", lease2)
+	}
+	if lease2.RetryReason != "session not found" || lease2.RetriesFromSessionID != "sess-0" {
+		t.Fatalf("unexpected retry lineage: %+v", lease2)
 	}
 
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET lease_holder = NULL").
@@ -87,8 +90,8 @@ func TestPostgresSessionRegistry_AcquireLeasedByOtherReturnsErrLeased(t *testing
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT\\s+session_id::text,\\s+scope_key,\\s+status,\\s+NULLIF\\(runtime_state->>'provider_session_id'").
 		WithArgs("a1", "global", RuntimeModeSession).
-		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "status", "provider_session_id", "lease_holder", "lease_expires_at"}).
-			AddRow("sess-1", "global", "active", nil, "someone-else", fixedNow.Add(10*time.Second)))
+		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "status", "provider_session_id", "retry_reason", "retries_from_session_id", "lease_holder", "lease_expires_at"}).
+			AddRow("sess-1", "global", "active", nil, nil, nil, "someone-else", fixedNow.Add(10*time.Second)))
 
 	_, err = sr.Acquire(context.Background(), "a1", RuntimeModeSession, SessionScopeGlobal, "owner-1", "global")
 	if err != ErrSessionLeased {
@@ -117,16 +120,22 @@ func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"session_id", "lease_holder", "lease_expires_at"}).
 			AddRow("sess-1", "owner-1", fixedNow.Add(10*time.Second)))
 	mock.ExpectQuery("UPDATE agent_sessions\\s+SET session_id = \\$1::uuid,").
-		WithArgs(sqlmock.AnyArg(), "", "", "global", RuntimeModeSession, "sum", "owner-1", fixedNow.Add(30*time.Second), "sess-1").
+		WithArgs(sqlmock.AnyArg(), "", "", "global", RuntimeModeSession, "sum", "session not found", "sess-1", "owner-1", fixedNow.Add(30*time.Second), "sess-1").
 		WillReturnRows(sqlmock.NewRows([]string{"lease_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
 	mock.ExpectCommit()
 
-	lease, err := sr.Rotate(context.Background(), "a1", RuntimeModeSession, SessionScopeGlobal, "owner-1", "sum", "global")
+	lease, err := sr.Rotate(context.Background(), "a1", RuntimeModeSession, SessionScopeGlobal, "owner-1", RotationMetadata{
+		CheckpointSummary: "sum",
+		RetryReason:       "session not found",
+	}, "global")
 	if err != nil {
 		t.Fatalf("Rotate: %v", err)
 	}
 	if lease.SessionID == "" || lease.AgentID != "a1" || lease.ScopeKey != "global" {
 		t.Fatalf("unexpected lease: %+v", lease)
+	}
+	if lease.RetryReason != "session not found" || lease.RetriesFromSessionID != "sess-1" {
+		t.Fatalf("unexpected retry lineage: %+v", lease)
 	}
 
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET turn_count = turn_count \\+ 1").

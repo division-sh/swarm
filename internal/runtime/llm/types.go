@@ -28,18 +28,20 @@ type Response struct {
 }
 
 type Session struct {
-	ID                string
-	ProviderSessionID string
-	AgentID           string
-	RuntimeMode       string
-	ConversationMode  string
-	SessionScope      string
-	ScopeKey          string
-	TurnCount         int
-	ParseFailures     int
-	SystemPrompt      string
-	Tools             []ToolDefinition
-	Messages          []Message
+	ID                   string
+	ProviderSessionID    string
+	AgentID              string
+	RuntimeMode          string
+	ConversationMode     string
+	SessionScope         string
+	ScopeKey             string
+	RetryReason          string
+	RetriesFromSessionID string
+	TurnCount            int
+	ParseFailures        int
+	SystemPrompt         string
+	Tools                []ToolDefinition
+	Messages             []Message
 }
 
 type UsageTokens struct {

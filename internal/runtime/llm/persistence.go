@@ -138,17 +138,19 @@ func mcpListedToolsForSession(tools []ToolDefinition) []string {
 const runtimeToolsMCPPrefix = "mcp__runtime-tools__"
 
 type ConversationRecord struct {
-	SessionID    string
-	AgentID      string
-	SessionScope string
-	ScopeKey     string
-	RunID        string
-	TaskID       string
-	Mode         string
-	Messages     []Message
-	Summary      string
-	TurnCount    int
-	Status       string
+	SessionID            string
+	AgentID              string
+	SessionScope         string
+	ScopeKey             string
+	RetryReason          string
+	RetriesFromSessionID string
+	RunID                string
+	TaskID               string
+	Mode                 string
+	Messages             []Message
+	Summary              string
+	TurnCount            int
+	Status               string
 }
 
 type ConversationPersistence interface {

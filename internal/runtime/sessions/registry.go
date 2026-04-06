@@ -14,7 +14,7 @@ import (
 type Registry interface {
 	Acquire(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, scopeKey string) (*Lease, error)
 	Release(ctx context.Context, lease *Lease) error
-	Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, summary, scopeKey string) (*Lease, error)
+	Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner string, rotation RotationMetadata, scopeKey string) (*Lease, error)
 	IncrementTurn(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, sessionID, scopeKey string) error
 }
 
@@ -23,28 +23,37 @@ type Resetter interface {
 }
 
 type Lease struct {
-	SessionID         string
-	ProviderSessionID string
-	AgentID           string
-	RuntimeMode       RuntimeMode
-	SessionScope      SessionScope
-	LockOwner         string
-	ScopeKey          string
-	ExpiresAt         time.Time
+	SessionID            string
+	ProviderSessionID    string
+	AgentID              string
+	RuntimeMode          RuntimeMode
+	SessionScope         SessionScope
+	RetryReason          string
+	RetriesFromSessionID string
+	LockOwner            string
+	ScopeKey             string
+	ExpiresAt            time.Time
+}
+
+type RotationMetadata struct {
+	CheckpointSummary string
+	RetryReason       string
 }
 
 type Record struct {
-	SessionID         string
-	ProviderSessionID string
-	AgentID           string
-	RuntimeMode       RuntimeMode
-	ScopeKey          string
-	Status            string
-	TurnCount         int
-	CheckpointSummary string
-	LockOwner         string
-	LockExpiresAt     time.Time
-	LastUsedAt        time.Time
+	SessionID            string
+	ProviderSessionID    string
+	AgentID              string
+	RuntimeMode          RuntimeMode
+	ScopeKey             string
+	Status               string
+	TurnCount            int
+	CheckpointSummary    string
+	RetryReason          string
+	RetriesFromSessionID string
+	LockOwner            string
+	LockExpiresAt        time.Time
+	LastUsedAt           time.Time
 }
 
 // InMemoryRegistry is the process-local bootstrap implementation.
@@ -111,14 +120,16 @@ func (sr *InMemoryRegistry) Acquire(ctx context.Context, agentID string, runtime
 	rec.LastUsedAt = now
 
 	return &Lease{
-		SessionID:         rec.SessionID,
-		ProviderSessionID: rec.ProviderSessionID,
-		AgentID:           rec.AgentID,
-		RuntimeMode:       rec.RuntimeMode,
-		SessionScope:      resolved.Scope,
-		LockOwner:         rec.LockOwner,
-		ScopeKey:          rec.ScopeKey,
-		ExpiresAt:         rec.LockExpiresAt,
+		SessionID:            rec.SessionID,
+		ProviderSessionID:    rec.ProviderSessionID,
+		AgentID:              rec.AgentID,
+		RuntimeMode:          rec.RuntimeMode,
+		SessionScope:         resolved.Scope,
+		RetryReason:          rec.RetryReason,
+		RetriesFromSessionID: rec.RetriesFromSessionID,
+		LockOwner:            rec.LockOwner,
+		ScopeKey:             rec.ScopeKey,
+		ExpiresAt:            rec.LockExpiresAt,
 	}, nil
 }
 
@@ -145,7 +156,7 @@ func (sr *InMemoryRegistry) Release(_ context.Context, lease *Lease) error {
 	return nil
 }
 
-func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner, summary, scopeKey string) (*Lease, error) {
+func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID string, runtimeMode RuntimeMode, sessionScope SessionScope, lockOwner string, rotation RotationMetadata, scopeKey string) (*Lease, error) {
 	resolved, err := ResolveScope(ctx, runtimeMode, sessionScope, scopeKey)
 	if err != nil {
 		return nil, err
@@ -168,8 +179,15 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 		return nil, fmt.Errorf("cannot rotate: leased by %s", rec.LockOwner)
 	}
 
+	retryReason := strings.TrimSpace(rotation.RetryReason)
+	retriesFromSessionID := ""
+	if retryReason != "" {
+		retriesFromSessionID = rec.SessionID
+	}
 	rec.Status = "rotating"
-	rec.CheckpointSummary = summary
+	rec.CheckpointSummary = strings.TrimSpace(rotation.CheckpointSummary)
+	rec.RetryReason = retryReason
+	rec.RetriesFromSessionID = retriesFromSessionID
 	rec.SessionID = uuid.NewString()
 	rec.ProviderSessionID = ""
 	rec.Status = "active"
@@ -179,14 +197,16 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 	rec.LastUsedAt = now
 
 	return &Lease{
-		SessionID:         rec.SessionID,
-		ProviderSessionID: rec.ProviderSessionID,
-		AgentID:           rec.AgentID,
-		RuntimeMode:       rec.RuntimeMode,
-		SessionScope:      resolved.Scope,
-		LockOwner:         rec.LockOwner,
-		ScopeKey:          rec.ScopeKey,
-		ExpiresAt:         rec.LockExpiresAt,
+		SessionID:            rec.SessionID,
+		ProviderSessionID:    rec.ProviderSessionID,
+		AgentID:              rec.AgentID,
+		RuntimeMode:          rec.RuntimeMode,
+		SessionScope:         resolved.Scope,
+		RetryReason:          rec.RetryReason,
+		RetriesFromSessionID: rec.RetriesFromSessionID,
+		LockOwner:            rec.LockOwner,
+		ScopeKey:             rec.ScopeKey,
+		ExpiresAt:            rec.LockExpiresAt,
 	}, nil
 }
 
