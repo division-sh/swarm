@@ -247,6 +247,9 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 	if err := authorizeManage(e.authority, actor, in.Config, manager); err != nil {
 		return nil, err
 	}
+	if err := authorizeDelegableAgentConfig(actor, models.AgentConfig{}, in.Config, e.authority, e.emitRegistry); err != nil {
+		return nil, err
+	}
 	if err := manager.SpawnAgentForEntity(in.Config.EffectiveEntityID(), in.Config); err != nil {
 		return nil, err
 	}
@@ -306,6 +309,9 @@ func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (an
 		return nil, fmt.Errorf("target agent not found: %s", in.AgentID)
 	}
 	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
+		return nil, err
+	}
+	if err := authorizeDelegableAgentConfig(actor, targetCfg, mergeDelegablePrivilegeConfig(targetCfg, in.Config), e.authority, e.emitRegistry); err != nil {
 		return nil, err
 	}
 	if err := manager.ReconfigureAgent(in.AgentID, in.Config); err != nil {
