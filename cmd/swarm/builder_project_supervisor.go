@@ -24,6 +24,8 @@ type runtimeProjectSupervisor struct {
 	cfg              *config.Config
 	stores           storeBundle
 	ready            *atomic.Bool
+	startRuntime     func(context.Context, *runtime.Runtime) error
+	shutdownRuntime  func(context.Context, *runtime.Runtime) error
 
 	mu            sync.RWMutex
 	currentRoot   string
@@ -49,10 +51,16 @@ func newRuntimeProjectSupervisor(
 		cfg:              cfg,
 		stores:           stores,
 		ready:            ready,
-		currentRoot:      strings.TrimSpace(initialRoot),
-		currentSource:    initialSource,
-		currentBundle:    initialBundle,
-		currentRT:        initialRT,
+		startRuntime: func(ctx context.Context, rt *runtime.Runtime) error {
+			return rt.Start(ctx)
+		},
+		shutdownRuntime: func(_ context.Context, rt *runtime.Runtime) error {
+			return rt.Shutdown()
+		},
+		currentRoot:   strings.TrimSpace(initialRoot),
+		currentSource: initialSource,
+		currentBundle: initialBundle,
+		currentRT:     initialRT,
 	}
 }
 
@@ -92,19 +100,10 @@ func (s *runtimeProjectSupervisor) ReloadProject(ctx context.Context, projectDir
 }
 
 func (s *runtimeProjectSupervisor) CloseProject(context.Context) (builderpkg.ProjectStatus, error) {
-	s.mu.Lock()
-	oldRT := s.currentRT
-	s.currentRoot = ""
-	s.currentSource = nil
-	s.currentBundle = nil
-	s.currentRT = nil
-	if s.ready != nil {
-		s.ready.Store(false)
-	}
-	s.mu.Unlock()
+	oldRT := s.detachCurrentRuntime()
 
 	if oldRT != nil {
-		if err := oldRT.Shutdown(); err != nil {
+		if err := s.shutdownCurrentRuntime(context.Background(), oldRT); err != nil {
 			return builderpkg.ProjectStatus{}, err
 		}
 	}
@@ -152,16 +151,38 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, err
 	}
 
-	s.mu.RLock()
-	oldRT := s.currentRT
-	s.mu.RUnlock()
+	status, err := s.replaceCurrentRuntime(ctx, resolvedRoot, source, bundle, newRT)
+	if err != nil {
+		return builderpkg.ProjectStatus{}, err
+	}
+	slog.Info("builder project loaded", "project_dir", filepath.Clean(resolvedRoot), "workflow", strings.TrimSpace(status.WorkflowName))
+	return status, nil
+}
+
+func (s *runtimeProjectSupervisor) replaceCurrentRuntime(
+	ctx context.Context,
+	resolvedRoot string,
+	source semanticview.Source,
+	bundle *runtimecontracts.WorkflowContractBundle,
+	newRT *runtime.Runtime,
+) (builderpkg.ProjectStatus, error) {
+	oldRT := s.detachCurrentRuntime()
 	if oldRT != nil {
-		if err := oldRT.Shutdown(); err != nil {
+		if err := s.shutdownCurrentRuntime(ctx, oldRT); err != nil {
 			return builderpkg.ProjectStatus{}, err
 		}
 	}
+	if err := s.startCurrentRuntime(ctx, newRT); err != nil {
+		_ = s.shutdownCurrentRuntime(context.Background(), newRT)
+		return builderpkg.ProjectStatus{}, err
+	}
+	return s.attachCurrentRuntime(resolvedRoot, source, bundle, newRT), nil
+}
 
+func (s *runtimeProjectSupervisor) detachCurrentRuntime() *runtime.Runtime {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	oldRT := s.currentRT
 	s.currentRoot = ""
 	s.currentSource = nil
 	s.currentBundle = nil
@@ -169,25 +190,45 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if s.ready != nil {
 		s.ready.Store(false)
 	}
-	s.mu.Unlock()
+	return oldRT
+}
 
-	if err := newRT.Start(ctx); err != nil {
-		_ = newRT.Shutdown()
-		return builderpkg.ProjectStatus{}, err
-	}
-
+func (s *runtimeProjectSupervisor) attachCurrentRuntime(
+	resolvedRoot string,
+	source semanticview.Source,
+	bundle *runtimecontracts.WorkflowContractBundle,
+	newRT *runtime.Runtime,
+) builderpkg.ProjectStatus {
 	s.mu.Lock()
-	s.currentRoot = resolvedRoot
+	defer s.mu.Unlock()
+	s.currentRoot = strings.TrimSpace(resolvedRoot)
 	s.currentSource = source
 	s.currentBundle = bundle
 	s.currentRT = newRT
 	if s.ready != nil {
 		s.ready.Store(true)
 	}
-	status := s.projectStatusLocked()
-	s.mu.Unlock()
-	slog.Info("builder project loaded", "project_dir", filepath.Clean(resolvedRoot), "workflow", strings.TrimSpace(status.WorkflowName))
-	return status, nil
+	return s.projectStatusLocked()
+}
+
+func (s *runtimeProjectSupervisor) startCurrentRuntime(ctx context.Context, rt *runtime.Runtime) error {
+	if s == nil || rt == nil {
+		return nil
+	}
+	if s.startRuntime != nil {
+		return s.startRuntime(ctx, rt)
+	}
+	return rt.Start(ctx)
+}
+
+func (s *runtimeProjectSupervisor) shutdownCurrentRuntime(ctx context.Context, rt *runtime.Runtime) error {
+	if s == nil || rt == nil {
+		return nil
+	}
+	if s.shutdownRuntime != nil {
+		return s.shutdownRuntime(ctx, rt)
+	}
+	return rt.Shutdown()
 }
 
 func (s *runtimeProjectSupervisor) projectStatusLocked() builderpkg.ProjectStatus {
