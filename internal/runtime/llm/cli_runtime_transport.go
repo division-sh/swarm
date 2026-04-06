@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"swarm/internal/config"
 	models "swarm/internal/runtime/core/actors"
 	workspace "swarm/internal/runtime/workspace"
 )
@@ -38,45 +39,62 @@ func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, 
 	return r.runWithInput(ctx, runArgs, target, "", meta)
 }
 
-func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (configJSON string, contextToken string, enabled bool, err error) {
+type MCPHTTPBinding struct {
+	URL          string
+	Headers      map[string]string
+	ContextToken string
+}
+
+func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnContextStore, s *Session, gatewayURL string, gatewayToken string) (binding MCPHTTPBinding, enabled bool, err error) {
 	if !shouldUseMCPBridge() || s == nil || len(s.Tools) == 0 {
-		return "", "", false, nil
+		return MCPHTTPBinding{}, false, nil
 	}
 	actor, _ := models.ActorFromContext(ctx)
 	if strings.TrimSpace(actor.ID) == "" {
 		actor.ID = strings.TrimSpace(s.AgentID)
 	}
 	if strings.TrimSpace(actor.ID) == "" {
-		return "", "", false, nil
+		return MCPHTTPBinding{}, false, nil
 	}
-	if r.mcpTurns == nil {
-		return "", "", false, errors.New("mcp turn context store is required for MCP bridge")
+	if turns == nil {
+		return MCPHTTPBinding{}, false, errors.New("mcp turn context store is required for MCP bridge")
 	}
+	serverURL := normalizeMCPServerURL(gatewayURL)
+	if serverURL == "" {
+		return MCPHTTPBinding{}, false, nil
+	}
+	headers := map[string]string{}
+	if token := strings.TrimSpace(gatewayToken); token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+	contextToken := turns.RegisterTurnContextWithAllowedTools(ctx, mcpContextTokenTTLForConfig(ctx, cfg), toolNames(s.Tools))
+	if contextToken != "" {
+		headers[mcpContextTokenHeader] = contextToken
+		serverURL = withMCPContextQuery(serverURL, contextToken)
+	}
+	return MCPHTTPBinding{
+		URL:          serverURL,
+		Headers:      headers,
+		ContextToken: contextToken,
+	}, true, nil
+}
 
+func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (configJSON string, contextToken string, enabled bool, err error) {
 	gatewayURL := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
 	if gatewayURL == "" {
 		gatewayURL = "http://orchestrator:8090"
 	}
-	serverURL := normalizeMCPServerURL(gatewayURL)
-	if serverURL == "" {
-		return "", "", false, nil
+	binding, enabled, err := BuildMCPHTTPBinding(ctx, r.cfg, r.mcpTurns, s, gatewayURL, strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")))
+	if err != nil || !enabled {
+		return "", "", enabled, err
 	}
-	allowedTools := toolNames(s.Tools)
-	headers := map[string]string{}
-	if token := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); token != "" {
-		headers["Authorization"] = "Bearer " + token
-	}
-	contextToken = r.mcpTurns.RegisterTurnContextWithAllowedTools(ctx, r.mcpContextTokenTTL(ctx), allowedTools)
-	if contextToken != "" {
-		headers[mcpContextTokenHeader] = contextToken
-	}
-	serverURL = withMCPContextQuery(serverURL, contextToken)
+	contextToken = binding.ContextToken
 	cfg := map[string]any{
 		"mcpServers": map[string]any{
 			"runtime-tools": map[string]any{
 				"type":    "http",
-				"url":     serverURL,
-				"headers": headers,
+				"url":     binding.URL,
+				"headers": binding.Headers,
 			},
 		},
 	}
@@ -92,7 +110,11 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 }
 
 func (r *ClaudeCLIRuntime) mcpContextTokenTTL(ctx context.Context) time.Duration {
-	timeout := r.effectiveCLITimeout(ctx)
+	return mcpContextTokenTTLForConfig(ctx, r.cfg)
+}
+
+func mcpContextTokenTTLForConfig(ctx context.Context, cfg *config.Config) time.Duration {
+	timeout := effectiveCLITimeoutForConfig(ctx, cfg)
 	if timeout <= 0 {
 		timeout = 15 * time.Minute
 	}

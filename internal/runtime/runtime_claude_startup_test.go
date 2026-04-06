@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -95,53 +97,95 @@ func TestValidateClaudeManagedAgentWorkspaces_AcceptsContainerTargets(t *testing
 	}
 }
 
-type startupProbeToolExecutor struct{}
-
-func (startupProbeToolExecutor) Execute(context.Context, string, any) (any, error) {
-	return map[string]any{"ok": true}, nil
-}
-func (startupProbeToolExecutor) ToolDefinitions() []llm.ToolDefinition {
-	return []llm.ToolDefinition{{Name: "query_entities"}}
+type startupProbeToolExecutor struct {
+	defs     []llm.ToolDefinition
+	caps     map[string]toolcapabilities.Capability
+	executed []string
 }
 
-func (startupProbeToolExecutor) ToolDefinitionsForActor(runtimeactors.AgentConfig) []llm.ToolDefinition {
-	return []llm.ToolDefinition{{Name: "query_entities"}}
+func (s *startupProbeToolExecutor) Execute(_ context.Context, name string, _ any) (any, error) {
+	s.executed = append(s.executed, strings.TrimSpace(name))
+	return map[string]any{"ok": true, "tool": strings.TrimSpace(name)}, nil
 }
 
-func (startupProbeToolExecutor) ToolCapabilitiesForActor(_ runtimeactors.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+func (s *startupProbeToolExecutor) ToolDefinitions() []llm.ToolDefinition {
+	return append([]llm.ToolDefinition(nil), s.defs...)
+}
+
+func (s *startupProbeToolExecutor) ToolDefinitionsForActor(runtimeactors.AgentConfig) []llm.ToolDefinition {
+	return append([]llm.ToolDefinition(nil), s.defs...)
+}
+
+func (s *startupProbeToolExecutor) ToolCapabilitiesForActor(_ runtimeactors.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	for _, name := range names {
-		caps = append(caps, toolcapabilities.Capability{
-			Name:               name,
+		capability, ok := s.caps[strings.TrimSpace(name)]
+		if !ok {
+			capability = toolcapabilities.Capability{
+				Name:               strings.TrimSpace(name),
+				Visible:            true,
+				Callable:           true,
+				ContextRequirement: toolcapabilities.ContextRequirementActorContext,
+			}
+		}
+		caps = append(caps, capability)
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
+func startupProbeDefs() []llm.ToolDefinition {
+	return []llm.ToolDefinition{
+		{
+			Name:        "hidden_tool",
+			Description: "Hidden from filtered MCP catalog",
+			Schema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"query": map[string]any{"type": "string"}},
+				"required":   []any{"query"},
+			},
+		},
+		{
+			Name:        "query_entities",
+			Description: "Query entities",
+			Schema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"query": map[string]any{"type": "string"}},
+				"required":   []any{"query"},
+			},
+		},
+	}
+}
+
+func startupProbeCaps() map[string]toolcapabilities.Capability {
+	return map[string]toolcapabilities.Capability{
+		"hidden_tool": {
+			Name:               "hidden_tool",
+			Visible:            false,
+			Callable:           true,
+			ContextRequirement: toolcapabilities.ContextRequirementActorContext,
+		},
+		"query_entities": {
+			Name:               "query_entities",
 			Visible:            true,
 			Callable:           true,
 			ContextRequirement: toolcapabilities.ContextRequirementActorContext,
-		})
+		},
 	}
-	return toolcapabilities.NewSet(caps)
 }
 
-type emptyStartupProbeToolExecutor struct{}
-
-func (emptyStartupProbeToolExecutor) Execute(context.Context, string, any) (any, error) {
-	return map[string]any{"ok": true}, nil
+func setupStartupProbeTransport(t *testing.T, manager *runtimemanager.AgentManager, exec *startupProbeToolExecutor, gatewayToken string) *runtimemcp.TurnContextRegistry {
+	t.Helper()
+	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
+	gateway := runtimemcp.NewGateway(exec, gatewayToken, RuntimeMCPGatewayHooks(nil, manager.GetAgentConfig, nil, turns))
+	server := httptest.NewServer(gateway.Handler())
+	t.Cleanup(server.Close)
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", server.URL)
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", gatewayToken)
+	return turns
 }
 
-func (emptyStartupProbeToolExecutor) ToolDefinitions() []llm.ToolDefinition { return nil }
-
-func (emptyStartupProbeToolExecutor) ToolDefinitionsForActor(runtimeactors.AgentConfig) []llm.ToolDefinition {
-	return nil
-}
-
-func (emptyStartupProbeToolExecutor) ToolCapabilitiesForActor(_ runtimeactors.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
-	caps := make([]toolcapabilities.Capability, 0, len(names))
-	for _, name := range names {
-		caps = append(caps, toolcapabilities.Capability{Name: name})
-	}
-	return toolcapabilities.NewSet(caps)
-}
-
-func TestValidateClaudeMCPToolsForManagedAgents_AcceptsVisibleTools(t *testing.T) {
+func TestValidateClaudeMCPToolsForManagedAgents_UsesRealFilteredTransport(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.RuntimeMode = "cli_test"
 	manager := runtimemanager.NewAgentManager(nil, nil)
@@ -152,43 +196,68 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsVisibleTools(t *testing.T
 	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	gateway := runtimemcp.NewGateway(startupProbeToolExecutor{}, "gateway-token", RuntimeMCPGatewayHooks(nil, manager.GetAgentConfig, nil, nil))
+	exec := &startupProbeToolExecutor{
+		defs: startupProbeDefs(),
+		caps: startupProbeCaps(),
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 
-	if err := validateClaudeMCPToolsForManagedAgents(cfg, gateway, "gateway-token", manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if !slices.Equal(exec.executed, []string{"query_entities"}) {
+		t.Fatalf("executed = %#v, want query_entities tools/call smoke", exec.executed)
 	}
 }
 
-func TestValidateClaudeMCPToolsForManagedAgents_FailsWhenRequiredEmitToolsMissing(t *testing.T) {
+func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnConfiguredGatewayTokenMismatch(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.RuntimeMode = "cli_test"
 	manager := runtimemanager.NewAgentManager(nil, nil)
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
-		ID:         "market-research-agent",
-		Role:       "market_research",
-		EmitEvents: []string{"discovery/category.assessed", "discovery/market_research.scan_complete"},
+		ID:   "market-research-agent",
+		Role: "market_research",
 	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	gateway := runtimemcp.NewGateway(startupProbeToolExecutor{}, "gateway-token", RuntimeMCPGatewayHooks(nil, manager.GetAgentConfig, nil, nil))
+	exec := &startupProbeToolExecutor{
+		defs: startupProbeDefs(),
+		caps: startupProbeCaps(),
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "wrong-token")
 
-	err := validateClaudeMCPToolsForManagedAgents(cfg, gateway, "gateway-token", manager)
-	if err == nil || !strings.Contains(err.Error(), "missing required emit tools") {
-		t.Fatalf("expected missing emit tools error, got %v", err)
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager)
+	if err == nil || !strings.Contains(err.Error(), "invalid token") {
+		t.Fatalf("expected invalid token error, got %v", err)
 	}
 }
 
-func TestValidateClaudeMCPToolsForManagedAgents_FailsOnEmptyToolList(t *testing.T) {
+func TestValidateClaudeMCPToolsForManagedAgents_FailsOnEmptyVisibleToolSurface(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.RuntimeMode = "cli_test"
 	manager := runtimemanager.NewAgentManager(nil, nil)
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	gateway := runtimemcp.NewGateway(emptyStartupProbeToolExecutor{}, "gateway-token", runtimemcp.GatewayHooks{})
+	exec := &startupProbeToolExecutor{
+		defs: []llm.ToolDefinition{{
+			Name:   "query_entities",
+			Schema: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []any{"query"}},
+		}},
+		caps: map[string]toolcapabilities.Capability{
+			"query_entities": {
+				Name:               "query_entities",
+				Visible:            false,
+				Callable:           true,
+				ContextRequirement: toolcapabilities.ContextRequirementActorContext,
+			},
+		},
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 
-	err := validateClaudeMCPToolsForManagedAgents(cfg, gateway, "gateway-token", manager)
-	if err == nil || !strings.Contains(err.Error(), "returned no tools") {
-		t.Fatalf("expected empty tools error, got %v", err)
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager)
+	if err == nil || !strings.Contains(err.Error(), "found no visible tools") {
+		t.Fatalf("expected empty visible tools error, got %v", err)
 	}
 }
