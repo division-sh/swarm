@@ -366,14 +366,13 @@ func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string)
 
 func (am *AgentManager) Run(ctx context.Context) {
 	am.runMu.Lock()
-	if am.running {
+	if am.running || am.shuttingDown {
 		am.runMu.Unlock()
 		return
 	}
 	runRoot := runtimebus.WithRuntimeEpoch(ctx, runtimebus.CurrentRuntimeEpoch())
 	am.runCtx, am.cancelRun = context.WithCancel(runRoot)
 	am.running = true
-	am.shuttingDown = false
 	am.authBreakerTripped = false
 	am.runMu.Unlock()
 
