@@ -21,7 +21,7 @@ import (
 	runtimetools "swarm/internal/runtime/tools"
 )
 
-func TestFormatEventForAgent_UsesConfiguredToolSummary(t *testing.T) {
+func TestFormatEventForAgent_UsesPostCompositionToolSurface(t *testing.T) {
 	cfg := models.AgentConfig{
 		ID:    "agent-1",
 		Role:  "operator",
@@ -36,9 +36,49 @@ func TestFormatEventForAgent_UsesConfiguredToolSummary(t *testing.T) {
 		Payload:     []byte(`{"item_id":"x"}`),
 	}).WithEntityID("entity-1")
 
-	formatted := formatEventForAgent(cfg, evt, nil)
-	if !strings.Contains(formatted, "Available non-emit tools from your contract: get_entity, schedule") {
-		t.Fatalf("expected configured tool summary, got %q", formatted)
+	formatted := formatEventForAgent(cfg, evt, []llm.ToolDefinition{
+		{Name: "get_entity"},
+		{Name: "emit_example"},
+		{Name: "read_file"},
+	})
+	if !strings.Contains(formatted, "Available non-emit tools in this turn: get_entity, read_file") {
+		t.Fatalf("expected post-composition non-emit summary, got %q", formatted)
+	}
+	if strings.Contains(formatted, "schedule") {
+		t.Fatalf("expected raw contract-only tool to stay out of event summary, got %q", formatted)
+	}
+	if !strings.Contains(formatted, "Available emit tools in this turn: emit_example") {
+		t.Fatalf("expected emit tool summary, got %q", formatted)
+	}
+}
+
+func TestFormatEventForAgent_UsesCanonicalNativeBuiltinNames(t *testing.T) {
+	cfg := models.AgentConfig{
+		ID:   "agent-1",
+		Role: "operator",
+		Mode: "task",
+		NativeTools: models.NativeToolConfig{
+			FileIO: true,
+			Bash:   true,
+		},
+	}
+	evt := (events.Event{
+		ID:          "evt-1",
+		Type:        "item.created",
+		SourceAgent: "runtime",
+		TaskID:      "task-1",
+		Payload:     []byte(`{"item_id":"x"}`),
+	}).WithEntityID("entity-1")
+
+	formatted := formatEventForAgent(cfg, evt, []llm.ToolDefinition{
+		{Name: "query_entities"},
+		{Name: "emit_example"},
+	})
+	if !strings.Contains(formatted, "Available native CLI tools in this turn: Bash, Edit, Read, Write") {
+		t.Fatalf("expected canonical native builtin summary, got %q", formatted)
+	}
+	if strings.Contains(formatted, "file_io") {
+		t.Fatalf("expected raw native contract flag to stay out of event summary, got %q", formatted)
 	}
 }
 

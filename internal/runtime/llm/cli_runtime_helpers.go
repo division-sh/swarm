@@ -229,18 +229,97 @@ var claudeProviderBuiltinToolNames = []string{
 	"Write",
 }
 
-func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig) string {
-	allowed := map[string]struct{}{}
+type AgentVisibleToolSurface struct {
+	RuntimeToolNames    []string
+	EmitToolNames       []string
+	NonEmitToolNames    []string
+	NativeBuiltinTools  []string
+	ControlToolNames    []string
+	AllowedCLIToolNames []string
+}
+
+func AgentVisibleToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefinition) AgentVisibleToolSurface {
+	runtimeNames := toolNames(tools)
+	slices.Sort(runtimeNames)
+
+	runtimeSet := make(map[string]struct{}, len(runtimeNames))
+	for _, name := range runtimeNames {
+		runtimeSet[name] = struct{}{}
+	}
+
+	emitNames := make([]string, 0, len(runtimeNames))
+	nonEmitNames := make([]string, 0, len(runtimeNames))
+	for _, name := range runtimeNames {
+		if strings.HasPrefix(strings.TrimSpace(name), "emit_") {
+			emitNames = append(emitNames, name)
+			continue
+		}
+		nonEmitNames = append(nonEmitNames, name)
+	}
+
+	nativeBuiltins := make([]string, 0, 5)
 	if actor.NativeTools.Bash {
-		allowed["Bash"] = struct{}{}
+		if _, ok := runtimeSet["bash"]; !ok {
+			nativeBuiltins = append(nativeBuiltins, "Bash")
+		}
 	}
 	if actor.NativeTools.WebSearch {
-		allowed["WebSearch"] = struct{}{}
+		if _, ok := runtimeSet["web_search"]; !ok {
+			nativeBuiltins = append(nativeBuiltins, "WebSearch")
+		}
 	}
 	if actor.NativeTools.FileIO {
-		allowed["Read"] = struct{}{}
-		allowed["Write"] = struct{}{}
-		allowed["Edit"] = struct{}{}
+		_, hasReadFallback := runtimeSet["read_file"]
+		_, hasWriteFallback := runtimeSet["write_file"]
+		if !hasReadFallback && !hasWriteFallback {
+			nativeBuiltins = append(nativeBuiltins, "Read", "Write", "Edit")
+		}
+	}
+	slices.Sort(nativeBuiltins)
+
+	controlTools := []string{"ExitPlanMode"}
+	allowedCLI := make([]string, 0, len(runtimeNames)+len(nativeBuiltins)+len(controlTools))
+	seen := make(map[string]struct{}, cap(allowedCLI))
+	addAllowed := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		allowedCLI = append(allowedCLI, name)
+	}
+	for _, name := range runtimeNames {
+		addAllowed(name)
+	}
+	for _, name := range nativeBuiltins {
+		addAllowed(name)
+	}
+	for _, name := range controlTools {
+		addAllowed(name)
+	}
+	slices.Sort(allowedCLI)
+
+	return AgentVisibleToolSurface{
+		RuntimeToolNames:    runtimeNames,
+		EmitToolNames:       emitNames,
+		NonEmitToolNames:    nonEmitNames,
+		NativeBuiltinTools:  nativeBuiltins,
+		ControlToolNames:    controlTools,
+		AllowedCLIToolNames: allowedCLI,
+	}
+}
+
+func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig, tools []ToolDefinition) string {
+	surface := AgentVisibleToolSurfaceForActor(actor, tools)
+	allowed := make(map[string]struct{}, len(surface.NativeBuiltinTools)+len(surface.ControlToolNames))
+	for _, name := range surface.NativeBuiltinTools {
+		allowed[name] = struct{}{}
+	}
+	for _, name := range surface.ControlToolNames {
+		allowed[name] = struct{}{}
 	}
 	names := make([]string, 0, len(claudeProviderBuiltinToolNames))
 	for _, name := range claudeProviderBuiltinToolNames {
@@ -254,44 +333,16 @@ func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig) string {
 }
 
 func claudeAllowedToolsArgForActor(actor models.AgentConfig, tools []ToolDefinition) string {
-	allowed := make([]string, 0, len(tools)+4)
-	seen := make(map[string]struct{}, len(tools)+4)
-	add := func(name string) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return
-		}
-		if _, ok := seen[name]; ok {
-			return
-		}
-		seen[name] = struct{}{}
-		allowed = append(allowed, name)
-	}
-	for _, tool := range tools {
-		add(tool.Name)
-	}
-	add("ExitPlanMode")
-	if actor.NativeTools.Bash {
-		add("Bash")
-	}
-	if actor.NativeTools.WebSearch {
-		add("WebSearch")
-	}
-	if actor.NativeTools.FileIO {
-		add("Read")
-		add("Write")
-		add("Edit")
-	}
-	if len(allowed) == 0 {
+	surface := AgentVisibleToolSurfaceForActor(actor, tools)
+	if len(surface.AllowedCLIToolNames) == 0 {
 		return ""
 	}
-	slices.Sort(allowed)
-	return strings.Join(allowed, ",")
+	return strings.Join(surface.AllowedCLIToolNames, ",")
 }
 
 const cliToolInvocationMarker = "## Swarm Tool Invocation"
 
-func augmentCLISystemPrompt(systemPrompt string, tools []ToolDefinition) string {
+func augmentCLISystemPrompt(systemPrompt string, actor models.AgentConfig, tools []ToolDefinition) string {
 	systemPrompt = strings.TrimSpace(systemPrompt)
 	if systemPrompt == "" {
 		return systemPrompt
@@ -299,31 +350,35 @@ func augmentCLISystemPrompt(systemPrompt string, tools []ToolDefinition) string 
 	if strings.Contains(systemPrompt, cliToolInvocationMarker) {
 		return systemPrompt
 	}
-	names := make([]string, 0, len(tools))
-	for _, tool := range tools {
-		name := strings.TrimSpace(tool.Name)
-		if name == "" {
-			continue
-		}
-		names = append(names, name)
-	}
-	if len(names) == 0 {
+	surface := AgentVisibleToolSurfaceForActor(actor, tools)
+	if len(surface.RuntimeToolNames) == 0 && len(surface.NativeBuiltinTools) == 0 && len(surface.ControlToolNames) == 0 {
 		return systemPrompt
 	}
-	slices.Sort(names)
 	var b strings.Builder
 	b.WriteString(systemPrompt)
 	b.WriteString("\n\n")
 	b.WriteString(cliToolInvocationMarker)
 	b.WriteString("\n")
-	b.WriteString("Call Swarm tools by these exact names when you need them:\n")
-	for _, name := range names {
-		b.WriteString("- ")
-		b.WriteString(name)
-		b.WriteString("\n")
+	if len(surface.RuntimeToolNames) > 0 {
+		b.WriteString("Call Swarm runtime tools by these exact names when you need them:\n")
+		for _, name := range surface.RuntimeToolNames {
+			b.WriteString("- ")
+			b.WriteString(name)
+			b.WriteString("\n")
+		}
+		b.WriteString("If Claude CLI also shows MCP-prefixed variants like `mcp__runtime-tools__...`, they map to the same Swarm runtime tools.\n")
 	}
-	b.WriteString("If Claude CLI also shows MCP-prefixed variants like `mcp__runtime-tools__...`, they map to the same Swarm runtime tools.\n")
-	if hasToolPrefix(names, "emit_") {
+	if len(surface.NativeBuiltinTools) > 0 {
+		b.WriteString("Claude CLI native tools available in this turn: ")
+		b.WriteString(strings.Join(surface.NativeBuiltinTools, ", "))
+		b.WriteString(".\n")
+	}
+	if len(surface.ControlToolNames) > 0 {
+		b.WriteString("Claude CLI control tools available in this turn: ")
+		b.WriteString(strings.Join(surface.ControlToolNames, ", "))
+		b.WriteString(".\n")
+	}
+	if hasToolPrefix(surface.RuntimeToolNames, "emit_") {
 		b.WriteString("When you need to publish an event, call the matching `emit_*` tool directly. Emit tools may not appear as MCP-prefixed variants in Claude CLI; Swarm will execute the exact `emit_*` call locally. Do not write JSON files under `/workspace/events` as a substitute for emission.\n")
 	}
 	return strings.TrimSpace(b.String())

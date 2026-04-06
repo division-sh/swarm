@@ -51,7 +51,7 @@ func TestShouldUseMCPBridge_CanDisable(t *testing.T) {
 }
 
 func TestClaudeDisallowedBuiltinToolsArgForActor_DefaultsToAllKnownBuiltins(t *testing.T) {
-	got := claudeDisallowedBuiltinToolsArgForActor(models.AgentConfig{})
+	got := claudeDisallowedBuiltinToolsArgForActor(models.AgentConfig{}, nil)
 	if got == "" {
 		t.Fatal("expected builtin tools to be blocked by default")
 	}
@@ -70,7 +70,7 @@ func TestClaudeDisallowedBuiltinToolsArgForActor_MapsNativeCapabilities(t *testi
 			WebSearch: true,
 			FileIO:    true,
 		},
-	})
+	}, nil)
 	gotNames := strings.Split(got, ",")
 	for _, name := range []string{"Bash", "Read", "Write", "Edit", "WebSearch"} {
 		if slices.Contains(gotNames, name) {
@@ -84,7 +84,7 @@ func TestClaudeDisallowedBuiltinToolsArgForActor_MapsNativeCapabilities(t *testi
 	}
 }
 
-func TestClaudeAllowedToolsArgForActor_IncludesContractAndNativeTools(t *testing.T) {
+func TestClaudeAllowedToolsArgForActor_IncludesPostCompositionAndNativeTools(t *testing.T) {
 	got := claudeAllowedToolsArgForActor(models.AgentConfig{
 		NativeTools: models.NativeToolConfig{FileIO: true},
 	}, []ToolDefinition{
@@ -110,6 +110,53 @@ func TestClaudeAllowedToolsArgForActor_IncludesContractAndNativeTools(t *testing
 		if slices.Contains(gotNames, name) {
 			t.Fatalf("did not expect %q in allowed tools %q", name, got)
 		}
+	}
+}
+
+func TestClaudeToolSurface_PrefersFallbackRuntimeToolsOverNativeBuiltins(t *testing.T) {
+	actor := models.AgentConfig{
+		NativeTools: models.NativeToolConfig{
+			FileIO: true,
+			Bash:   true,
+		},
+	}
+	tools := []ToolDefinition{
+		{Name: "read_file"},
+		{Name: "write_file"},
+		{Name: "bash"},
+		{Name: "emit_category_assessed"},
+	}
+
+	allowed := claudeAllowedToolsArgForActor(actor, tools)
+	allowedNames := strings.Split(allowed, ",")
+	for _, name := range []string{"read_file", "write_file", "bash", "emit_category_assessed", "ExitPlanMode"} {
+		if !slices.Contains(allowedNames, name) {
+			t.Fatalf("expected %q in allowed tools %q", name, allowed)
+		}
+	}
+	for _, name := range []string{"Read", "Write", "Edit", "Bash"} {
+		if slices.Contains(allowedNames, name) {
+			t.Fatalf("did not expect native builtin %q in allowed tools %q", name, allowed)
+		}
+	}
+
+	disallowed := claudeDisallowedBuiltinToolsArgForActor(actor, tools)
+	disallowedNames := strings.Split(disallowed, ",")
+	for _, name := range []string{"Read", "Write", "Edit", "Bash"} {
+		if !slices.Contains(disallowedNames, name) {
+			t.Fatalf("expected fallback-backed builtin %q in disallowed tools %q", name, disallowed)
+		}
+	}
+
+	prompt := augmentCLISystemPrompt("You are here.", actor, tools)
+	if !strings.Contains(prompt, "Call Swarm runtime tools by these exact names") {
+		t.Fatalf("expected runtime tool prompt section, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "read_file") || !strings.Contains(prompt, "write_file") || !strings.Contains(prompt, "bash") {
+		t.Fatalf("expected fallback runtime tools in prompt, got %q", prompt)
+	}
+	if strings.Contains(prompt, "Claude CLI native tools available in this turn") {
+		t.Fatalf("did not expect native builtin prompt section when fallback runtime tools own the surface, got %q", prompt)
 	}
 }
 
