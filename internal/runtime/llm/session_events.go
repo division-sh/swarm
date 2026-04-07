@@ -17,9 +17,10 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	if publisher == nil || session == nil || strings.TrimSpace(session.AgentID) == "" {
 		return
 	}
-	if err := publisher.MarkDeliveryInProgress(ctx, session.AgentID, session.ID); err != nil {
+	marked, err := publisher.MarkDeliveryInProgress(ctx, session.AgentID, session.ID)
+	if err != nil {
 		logPublisherRuntime(ctx, publisher, "error", "mark_delivery_in_progress_failed", "Marking the agent delivery in progress failed", session.AgentID, session.ID, "", nil, err)
-	} else {
+	} else if marked {
 		logPublisherRuntime(ctx, publisher, "debug", "delivery_lifecycle_transition", "Delivery entered active state", session.AgentID, session.ID, "", map[string]any{
 			"delivery_state":          string(runtimedelivery.StateActive),
 			"delivery_transition":     string(runtimedelivery.StateActive),

@@ -374,13 +374,15 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID strin
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			retryCtx, cancel := context.WithTimeout(context.WithoutCancel(writeCtx), receiptWriteTimeout)
 			retryErr := am.store.UpsertEventReceipt(retryCtx, eventID, agentID, status, errText)
-			cancel()
 			if retryErr == nil {
+				am.logDeliveryLifecycle(retryCtx, eventID, agentID, status, errText)
+				cancel()
 				if status == ReceiptStatusError {
 					am.maybeEscalateDeadLetter(context.WithoutCancel(writeCtx), eventID, agentID)
 				}
 				return
 			}
+			cancel()
 			err = retryErr
 		}
 		if am.bus != nil {

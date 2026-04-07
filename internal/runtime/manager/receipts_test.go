@@ -39,8 +39,10 @@ func (b *recordingReceiptBus) LogRuntime(_ context.Context, entry runtimepipelin
 }
 
 type receiptReaderStub struct {
-	receipt EventReceipt
-	found   bool
+	receipt      EventReceipt
+	found        bool
+	upsertErrs   []error
+	upsertCalls  int
 }
 
 func (*receiptReaderStub) UpsertAgent(context.Context, PersistedAgent) error { return nil }
@@ -49,8 +51,14 @@ func (*receiptReaderStub) LoadAgents(context.Context) ([]PersistedAgent, error) 
 }
 func (*receiptReaderStub) MarkAgentTerminated(context.Context, string) error { return nil }
 func (*receiptReaderStub) EnsureEntitySchema(context.Context, string) error  { return nil }
-func (*receiptReaderStub) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
-	return nil
+func (s *receiptReaderStub) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
+	s.upsertCalls++
+	if len(s.upsertErrs) == 0 {
+		return nil
+	}
+	err := s.upsertErrs[0]
+	s.upsertErrs = s.upsertErrs[1:]
+	return err
 }
 func (*receiptReaderStub) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
 	return nil, nil
@@ -360,5 +368,33 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 				t.Fatalf("delivery_terminal_outcome = %#v, want %q", got, tc.wantTerminal)
 			}
 		})
+	}
+}
+
+func TestWriteReceipt_RetryAfterContextCancellationStillLogsLifecycleTransition(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	store := &deliveryLifecycleStoreStub{}
+	store.receipt = EventReceipt{
+		EventID:    "evt-1",
+		AgentID:    "agent-a",
+		Status:     ReceiptStatusError,
+		RetryCount: 1,
+		Error:      "boom",
+	}
+	store.found = true
+	store.upsertErrs = []error{context.Canceled, nil}
+	am := NewAgentManager(bus, nil, store)
+
+	am.writeReceipt(context.Background(), "evt-1", "agent-a", ReceiptStatusError, "boom")
+
+	if store.upsertCalls != 2 {
+		t.Fatalf("upsert calls = %d, want 2", store.upsertCalls)
+	}
+	if len(bus.runtimeLogs) != 1 {
+		t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
+	}
+	detail := bus.runtimeLogs[0].Detail.(map[string]any)
+	if detail["delivery_state"] != "retrying" || detail["delivery_reason"] != "boom" {
+		t.Fatalf("retry lifecycle detail = %#v", detail)
 	}
 }

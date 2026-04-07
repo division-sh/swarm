@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"swarm/internal/events"
+	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 )
 
 type chatTestAgent struct {
@@ -29,7 +30,7 @@ func (a *chatTestAgent) BoardStep(_ context.Context, directive string) (string, 
 type chatTestStore struct {
 	cancelCalls int
 	cancelFor   string
-	agents      []string
+	transitions []runtimedelivery.Transition
 }
 
 func (s *chatTestStore) UpsertAgent(context.Context, PersistedAgent) error { return nil }
@@ -47,10 +48,10 @@ func (s *chatTestStore) ListPendingEventsForAgent(context.Context, string, time.
 func (s *chatTestStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
 	return nil, nil
 }
-func (s *chatTestStore) CancelActiveRunWorkByProducer(_ context.Context, producerID string) ([]string, error) {
+func (s *chatTestStore) CancelActiveRunWorkByProducer(_ context.Context, producerID string) ([]runtimedelivery.Transition, error) {
 	s.cancelCalls++
 	s.cancelFor = producerID
-	return append([]string(nil), s.agents...), nil
+	return append([]runtimedelivery.Transition(nil), s.transitions...), nil
 }
 
 func TestAgentManager_ChatWithAgent_KillPreviousCancelsBeforeBoardStep(t *testing.T) {
@@ -85,5 +86,46 @@ func TestAgentManager_ChatWithAgent_WithoutKillPreviousSkipsCancellation(t *test
 	}
 	if store.cancelCalls != 0 {
 		t.Fatalf("cancel previous calls = %d, want 0", store.cancelCalls)
+	}
+}
+
+func TestAgentManager_ChatWithAgent_KillPreviousLogsForcedTerminalLifecycle(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	store := &chatTestStore{
+		transitions: []runtimedelivery.Transition{{
+			EventID:         "evt-1",
+			AgentID:         "market-research-agent",
+			EntityID:        "entity-1",
+			State:           runtimedelivery.StateExhausted,
+			PreviousState:   runtimedelivery.StateActive,
+			Reason:          "cancelled_by_kill_previous",
+			TerminalOutcome: "cancelled_by_kill_previous",
+			Error:           "cancelled by --kill-previous",
+		}},
+	}
+	agent := &chatTestAgent{id: "campaign-coordinator"}
+	am := NewAgentManager(bus, nil, store)
+	am.agents[agent.id] = agent
+	am.agents["market-research-agent"] = &chatTestAgent{id: "market-research-agent"}
+
+	if _, err := am.ChatWithAgent(context.Background(), agent.id, "run corpus", true); err != nil {
+		t.Fatalf("ChatWithAgent: %v", err)
+	}
+	if len(bus.runtimeLogs) != 1 {
+		t.Fatalf("runtime log count = %d, want 1", len(bus.runtimeLogs))
+	}
+	entry := bus.runtimeLogs[0]
+	if entry.Action != "delivery_lifecycle_transition" {
+		t.Fatalf("action = %q, want delivery_lifecycle_transition", entry.Action)
+	}
+	detail, ok := entry.Detail.(map[string]any)
+	if !ok {
+		t.Fatalf("detail = %#v", entry.Detail)
+	}
+	if detail["delivery_state"] != "exhausted" || detail["delivery_previous_state"] != "active" {
+		t.Fatalf("delivery lifecycle detail = %#v", detail)
+	}
+	if detail["delivery_reason"] != "cancelled_by_kill_previous" || detail["delivery_terminal_outcome"] != "cancelled_by_kill_previous" {
+		t.Fatalf("terminal detail = %#v", detail)
 	}
 }

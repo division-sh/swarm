@@ -212,18 +212,22 @@ func TestSQLObservabilityReader_ListRuntimeLogs_ProjectsDeliveryLifecycleFields(
 
 	insertRuntimeLog("evt-retry", "retrying", "active", "boom", "", 1, time.Unix(1700000100, 0).UTC())
 	insertRuntimeLog("evt-dead", "exhausted", "retrying", "boom", "retry_exhausted", 2, time.Unix(1700000200, 0).UTC())
+	insertRuntimeLog("evt-cancel", "exhausted", "active", "cancelled_by_kill_previous", "cancelled_by_kill_previous", 0, time.Unix(1700000300, 0).UTC())
 
 	rows, err := reader.ListRuntimeLogs(ctx, RuntimeLogFilter{Component: "agent-manager"}, 10)
 	if err != nil {
 		t.Fatalf("ListRuntimeLogs: %v", err)
 	}
-	if len(rows) != 2 {
-		t.Fatalf("rows len = %d, want 2", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("rows len = %d, want 3", len(rows))
 	}
-	if rows[0].DeliveryState != "exhausted" || rows[0].PreviousState != "retrying" || rows[0].Terminal != "retry_exhausted" || rows[0].RetryCount != 2 {
-		t.Fatalf("terminal runtime log = %#v", rows[0])
+	if rows[0].DeliveryState != "exhausted" || rows[0].PreviousState != "active" || rows[0].Reason != "cancelled_by_kill_previous" || rows[0].Terminal != "cancelled_by_kill_previous" || rows[0].RetryCount != 0 {
+		t.Fatalf("cancel runtime log = %#v", rows[0])
 	}
-	if rows[1].DeliveryState != "retrying" || rows[1].PreviousState != "active" || rows[1].Reason != "boom" || rows[1].RetryCount != 1 {
-		t.Fatalf("retry runtime log = %#v", rows[1])
+	if rows[1].DeliveryState != "exhausted" || rows[1].PreviousState != "retrying" || rows[1].Terminal != "retry_exhausted" || rows[1].RetryCount != 2 {
+		t.Fatalf("terminal runtime log = %#v", rows[1])
+	}
+	if rows[2].DeliveryState != "retrying" || rows[2].PreviousState != "active" || rows[2].Reason != "boom" || rows[2].RetryCount != 1 {
+		t.Fatalf("retry runtime log = %#v", rows[2])
 	}
 }

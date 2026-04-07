@@ -387,12 +387,18 @@ func TestPostgresStore_CancelActiveRunWorkByProducer_DeadLettersOldRunDeliveries
 		t.Fatalf("seed deliveries: %v", err)
 	}
 
-	agents, err := pg.CancelActiveRunWorkByProducer(ctx, "campaign-coordinator")
+	transitions, err := pg.CancelActiveRunWorkByProducer(ctx, "campaign-coordinator")
 	if err != nil {
 		t.Fatalf("CancelActiveRunWorkByProducer: %v", err)
 	}
-	if len(agents) != 1 || agents[0] != "market-research-agent" {
-		t.Fatalf("affected agents = %#v", agents)
+	if len(transitions) != 1 {
+		t.Fatalf("cancelled transitions = %#v", transitions)
+	}
+	if transitions[0].AgentID != "market-research-agent" || transitions[0].EventID != childEventID {
+		t.Fatalf("transition = %#v", transitions[0])
+	}
+	if transitions[0].Reason != "cancelled_by_kill_previous" || transitions[0].TerminalOutcome != "cancelled_by_kill_previous" {
+		t.Fatalf("transition terminal outcome = %#v", transitions[0])
 	}
 
 	var (

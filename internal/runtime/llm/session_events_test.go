@@ -24,6 +24,7 @@ type eventPublisherStub struct {
 	runtimeLogs []runtimepipeline.RuntimeLogEntry
 	publishErr  error
 	markErr     error
+	markChanged bool
 }
 
 func (s *eventPublisherStub) Publish(_ context.Context, evt events.Event) error {
@@ -34,12 +35,12 @@ func (s *eventPublisherStub) Publish(_ context.Context, evt events.Event) error 
 	return nil
 }
 
-func (s *eventPublisherStub) MarkDeliveryInProgress(_ context.Context, agentID, sessionID string) error {
+func (s *eventPublisherStub) MarkDeliveryInProgress(_ context.Context, agentID, sessionID string) (bool, error) {
 	if s.markErr != nil {
-		return s.markErr
+		return false, s.markErr
 	}
 	s.marks = append(s.marks, strings.TrimSpace(agentID)+"|"+strings.TrimSpace(sessionID))
-	return nil
+	return s.markChanged, nil
 }
 
 func (s *eventPublisherStub) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
@@ -104,15 +105,8 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if len(publisher.marks) != 1 {
 		t.Fatalf("expected 1 delivery mark, got %d", len(publisher.marks))
 	}
-	if len(publisher.runtimeLogs) != 1 {
-		t.Fatalf("expected 1 runtime log, got %d", len(publisher.runtimeLogs))
-	}
-	if publisher.runtimeLogs[0].Action != "delivery_lifecycle_transition" {
-		t.Fatalf("runtime log action = %q, want delivery_lifecycle_transition", publisher.runtimeLogs[0].Action)
-	}
-	detail := publisher.runtimeLogs[0].Detail.(map[string]any)
-	if detail["delivery_state"] != "active" || detail["delivery_previous_state"] != "launching" || detail["delivery_reason"] != "session_started" {
-		t.Fatalf("active delivery detail = %#v", detail)
+	if len(publisher.runtimeLogs) != 0 {
+		t.Fatalf("expected no delivery lifecycle log without a real delivery mark, got %d", len(publisher.runtimeLogs))
 	}
 	evt := publisher.events[0]
 	if evt.Type != events.EventType("platform.agent_started") {
@@ -157,11 +151,8 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if len(publisher.marks) != 1 {
 		t.Fatalf("expected 1 delivery mark, got %d", len(publisher.marks))
 	}
-	if len(publisher.runtimeLogs) != 1 {
-		t.Fatalf("expected 1 runtime log, got %d", len(publisher.runtimeLogs))
-	}
-	if publisher.runtimeLogs[0].Action != "delivery_lifecycle_transition" {
-		t.Fatalf("runtime log action = %q, want delivery_lifecycle_transition", publisher.runtimeLogs[0].Action)
+	if len(publisher.runtimeLogs) != 0 {
+		t.Fatalf("expected no delivery lifecycle log without a real delivery mark, got %d", len(publisher.runtimeLogs))
 	}
 	evt := publisher.events[0]
 	if evt.Type != events.EventType("platform.agent_started") {
@@ -207,6 +198,35 @@ func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *test
 	}
 	if !strings.Contains(s.SystemPrompt, "Do not write JSON files under `/workspace/events`") {
 		t.Fatalf("expected emit workaround warning in system prompt, got %q", s.SystemPrompt)
+	}
+}
+
+func TestPublishAgentStarted_LogsActiveTransitionOnlyAfterRealDeliveryMark(t *testing.T) {
+	publisher := &eventPublisherStub{markChanged: true}
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID:       "agent-1",
+		EntityID: "entity-1",
+	})
+
+	publishAgentStarted(ctx, publisher, &Session{
+		ID:               "session-1",
+		AgentID:          "agent-1",
+		ConversationMode: sessions.RuntimeModeTask.String(),
+		RuntimeMode:      sessions.RuntimeModeTask.String(),
+	}, events.EventType("platform.agent_started"))
+
+	if len(publisher.runtimeLogs) != 1 {
+		t.Fatalf("expected 1 runtime log, got %d", len(publisher.runtimeLogs))
+	}
+	if publisher.runtimeLogs[0].Action != "delivery_lifecycle_transition" {
+		t.Fatalf("runtime log action = %q, want delivery_lifecycle_transition", publisher.runtimeLogs[0].Action)
+	}
+	detail, ok := publisher.runtimeLogs[0].Detail.(map[string]any)
+	if !ok {
+		t.Fatalf("runtime log detail = %#v", publisher.runtimeLogs[0].Detail)
+	}
+	if detail["delivery_state"] != "active" || detail["delivery_previous_state"] != "launching" || detail["delivery_reason"] != "session_started" {
+		t.Fatalf("active delivery detail = %#v", detail)
 	}
 }
 
