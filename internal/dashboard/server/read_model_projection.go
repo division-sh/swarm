@@ -5,45 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"swarm/internal/store"
 )
 
-type projectedConversationRuntimeState struct {
-	Summary              string
-	LastTurn             *projectedConversationLastTurn
-	ProviderSessionID    string
-	RetryReason          string
-	RetriesFromSessionID string
-}
-
-type projectedConversationLastTurn struct {
-	TaskID  string `json:"task_id,omitempty"`
-	ParseOK bool   `json:"parse_ok,omitempty"`
-}
-
-func decodeConversationRuntimeStateProjection(raw []byte) (projectedConversationRuntimeState, error) {
-	if len(raw) == 0 {
-		return projectedConversationRuntimeState{}, nil
-	}
-	var typed struct {
-		Summary              string                         `json:"summary"`
-		LastTurn             *projectedConversationLastTurn `json:"last_turn,omitempty"`
-		ProviderSessionID    string                         `json:"provider_session_id,omitempty"`
-		RetryReason          string                         `json:"retry_reason,omitempty"`
-		RetriesFromSessionID string                         `json:"retries_from_session_id,omitempty"`
-	}
-	if err := json.Unmarshal(raw, &typed); err != nil {
-		return projectedConversationRuntimeState{}, err
-	}
-	return projectedConversationRuntimeState{
-		Summary:              strings.TrimSpace(typed.Summary),
-		LastTurn:             typed.LastTurn,
-		ProviderSessionID:    strings.TrimSpace(typed.ProviderSessionID),
-		RetryReason:          strings.TrimSpace(typed.RetryReason),
-		RetriesFromSessionID: strings.TrimSpace(typed.RetriesFromSessionID),
-	}, nil
-}
-
-func (p projectedConversationRuntimeState) metadata() ConversationSummaryMetadata {
+func projectConversationSummaryMetadata(p store.ConversationRuntimeStateDescriptor) ConversationSummaryMetadata {
 	return ConversationSummaryMetadata{
 		ProviderSessionID:    p.ProviderSessionID,
 		RetryReason:          p.RetryReason,
@@ -51,7 +17,7 @@ func (p projectedConversationRuntimeState) metadata() ConversationSummaryMetadat
 	}
 }
 
-func (p projectedConversationRuntimeState) runtimeState() ConversationRuntimeState {
+func projectConversationRuntimeState(p store.ConversationRuntimeStateDescriptor) ConversationRuntimeState {
 	state := ConversationRuntimeState{
 		Summary:              p.Summary,
 		ProviderSessionID:    p.ProviderSessionID,
@@ -60,7 +26,7 @@ func (p projectedConversationRuntimeState) runtimeState() ConversationRuntimeSta
 	}
 	if p.LastTurn != nil {
 		state.LastTurn = &ConversationRuntimeLastTurn{
-			TaskID:  strings.TrimSpace(p.LastTurn.TaskID),
+			TaskID:  p.LastTurn.TaskID,
 			ParseOK: p.LastTurn.ParseOK,
 		}
 	}

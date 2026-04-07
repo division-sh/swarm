@@ -158,12 +158,12 @@ func scanConversationSummary(scanner rowScanner) (ConversationSummary, error) {
 	); err != nil {
 		return ConversationSummary{}, err
 	}
-	runtimeState, err := decodeConversationRuntimeStateProjection(runtimeStateRaw)
+	runtimeState, err := store.DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
 	if err != nil {
 		return ConversationSummary{}, fmt.Errorf("decode conversation runtime_state: %w", err)
 	}
 	item.Summary = runtimeState.Summary
-	item.Metadata = runtimeState.metadata()
+	item.Metadata = projectConversationSummaryMetadata(runtimeState)
 	return item, nil
 }
 
@@ -188,12 +188,12 @@ func scanConversationDetail(scanner rowScanner) (ConversationDetail, error) {
 	); err != nil {
 		return ConversationDetail{}, err
 	}
-	runtimeState, err := decodeConversationRuntimeStateProjection(runtimeStateRaw)
+	runtimeState, err := store.DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
 	if err != nil {
 		return ConversationDetail{}, fmt.Errorf("decode conversation runtime_state: %w", err)
 	}
 	item.Summary = runtimeState.Summary
-	item.RuntimeState = runtimeState.runtimeState()
+	item.RuntimeState = projectConversationRuntimeState(runtimeState)
 	item.Messages, err = decodeJSONArray[ConversationMessage](messagesRaw)
 	if err != nil {
 		return ConversationDetail{}, fmt.Errorf("decode conversation messages: %w", err)

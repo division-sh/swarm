@@ -2339,6 +2339,29 @@ func TestManagerStore_LoadActiveConversationIncludesRetryLineage(t *testing.T) {
 	}
 }
 
+func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalRuntimeState(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
+
+	if _, err := db.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET runtime_state = '{"summary":123}'::jsonb
+		WHERE session_id = $1::uuid
+	`, sessionID); err != nil {
+		t.Fatalf("seed malformed runtime_state: %v", err)
+	}
+
+	if _, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "global", "global"); err == nil || ok {
+		t.Fatalf("expected malformed canonical runtime_state to fail, ok=%v err=%v", ok, err)
+	} else if !strings.Contains(err.Error(), "decode conversation runtime_state") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestManagerStore_Conversations_AndAgentTurns_PersistRunIDWhenColumnsExist(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

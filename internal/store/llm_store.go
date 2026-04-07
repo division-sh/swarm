@@ -914,9 +914,7 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 			session_id::text,
 			scope_key,
 			COALESCE(conversation, '[]'::jsonb),
-			COALESCE(runtime_state->>'summary', ''),
-			COALESCE(runtime_state->>'retry_reason', ''),
-			COALESCE(runtime_state->>'retries_from_session_id', ''),
+			COALESCE(runtime_state, '{}'::jsonb),
 			COALESCE(turn_count, 0),
 			COALESCE(status, 'active')
 		FROM agent_sessions
@@ -933,14 +931,12 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 	rec.Mode = resolvedMode.String()
 	rec.SessionScope = resolved.Scope.String()
 
-	var rawMessages []byte
+	var rawMessages, runtimeStateRaw []byte
 	err = s.DB.QueryRowContext(ctx, q, agentID, resolvedMode.String(), resolved.ScopeKey).Scan(
 		&rec.SessionID,
 		&rec.ScopeKey,
 		&rawMessages,
-		&rec.Summary,
-		&rec.RetryReason,
-		&rec.RetriesFromSessionID,
+		&runtimeStateRaw,
 		&rec.TurnCount,
 		&rec.Status,
 	)
@@ -950,6 +946,13 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 		}
 		return runtimellm.ConversationRecord{}, false, fmt.Errorf("load active conversation: %w", err)
 	}
+	runtimeState, err := DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
+	if err != nil {
+		return runtimellm.ConversationRecord{}, false, fmt.Errorf("decode conversation runtime_state: %w", err)
+	}
+	rec.Summary = runtimeState.Summary
+	rec.RetryReason = runtimeState.RetryReason
+	rec.RetriesFromSessionID = runtimeState.RetriesFromSessionID
 	if len(rawMessages) > 0 {
 		var msgs []runtimellm.Message
 		if json.Unmarshal(rawMessages, &msgs) == nil {
