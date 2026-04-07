@@ -803,6 +803,28 @@ func TestRun_AllowsExpressionFieldReferenceForSelfTargetEntityUpdate(t *testing.
 	}
 }
 
+func TestRun_PreservesSiblingWriteErrorWhenSelfTargetUpdateExistsInSameHandler(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
+		{
+			TargetField: "base_score",
+			Value:       runtimecontracts.CELExpression("entity.base_score + 1"),
+		},
+		{
+			TargetField: "adjusted_score",
+			Value:       runtimecontracts.CELExpression("entity.base_score + 1"),
+		},
+	}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score") {
+		t.Fatalf("expected mixed-case sibling-write error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsTopLevelDataAccumulationExpressionToReadRuleProducedField(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)

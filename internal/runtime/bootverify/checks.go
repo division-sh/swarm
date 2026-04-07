@@ -504,7 +504,6 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						if _, ok := seen[key]; ok {
 							continue
 						}
-						seen[key] = struct{}{}
 						if _, ok := available[field]; ok {
 							continue
 						}
@@ -512,6 +511,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 							continue
 						}
 						if _, ok := handlerWriters[field]; ok {
+							seen[key] = struct{}{}
 							c.entityRefFindings = append(c.entityRefFindings, Finding{
 								CheckID:  "expression_field_reference_validation",
 								Severity: "error",
@@ -523,6 +523,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						if _, ok := writers[field]; ok {
 							continue
 						}
+						seen[key] = struct{}{}
 						c.entityRefFindings = append(c.entityRefFindings, Finding{
 							CheckID:  "expression_field_reference_validation",
 							Severity: "warning",
