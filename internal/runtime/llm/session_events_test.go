@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -183,10 +184,68 @@ func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *test
 		t.Fatalf("expected emit tool name in system prompt, got %q", s.SystemPrompt)
 	}
 	if !strings.Contains(s.SystemPrompt, "read_file") {
-		t.Fatalf("expected native fallback tool name in system prompt, got %q", s.SystemPrompt)
+		t.Fatalf("expected runtime tool name in system prompt, got %q", s.SystemPrompt)
+	}
+	if strings.Contains(s.SystemPrompt, "Claude CLI native tools available in this turn") {
+		t.Fatalf("did not expect native builtin prompt section, got %q", s.SystemPrompt)
 	}
 	if !strings.Contains(s.SystemPrompt, "Do not write JSON files under `/workspace/events`") {
 		t.Fatalf("expected emit workaround warning in system prompt, got %q", s.SystemPrompt)
+	}
+}
+
+func TestEnrichTurnRecord_UsesCanonicalVisibleToolsForNativeCapabilities(t *testing.T) {
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID: "analysis-agent",
+		NativeTools: runtimeactors.NativeToolConfig{
+			FileIO: true,
+			Bash:   true,
+		},
+	})
+	rec := enrichTurnRecord(ctx, &Session{
+		ID: "session-1",
+		Tools: []ToolDefinition{
+			{Name: "emit_category_assessed"},
+		},
+	}, AgentTurnRecord{
+		AgentID:     "analysis-agent",
+		RuntimeMode: sessions.RuntimeModeTask.String(),
+		SessionID:   "session-1",
+	}, nil)
+
+	if len(rec.AvailableTools) != 4 {
+		t.Fatalf("available_tools = %#v", rec.AvailableTools)
+	}
+	if !slices.Equal(rec.AvailableTools, []string{"bash", "emit_category_assessed", "read_file", "write_file"}) {
+		t.Fatalf("available_tools = %#v", rec.AvailableTools)
+	}
+}
+
+func TestClaudeCLIRuntimePrompt_HidesNativeCapabilityFallbackToolsFromPostamble(t *testing.T) {
+	actor := runtimeactors.AgentConfig{
+		ID: "analysis-agent",
+		NativeTools: runtimeactors.NativeToolConfig{
+			FileIO: true,
+			Bash:   true,
+		},
+	}
+	prompt := augmentCLISystemPrompt("base prompt", actor, []ToolDefinition{
+		{Name: "emit_market_research_scan_complete"},
+		{Name: "read_file"},
+		{Name: "write_file"},
+		{Name: "bash"},
+	})
+
+	if !strings.Contains(prompt, "emit_market_research_scan_complete") {
+		t.Fatalf("expected non-native runtime tool in prompt, got %q", prompt)
+	}
+	for _, name := range []string{"read_file", "write_file", "bash"} {
+		if strings.Contains(prompt, name) {
+			t.Fatalf("did not expect native capability tool %q in prompt, got %q", name, prompt)
+		}
+	}
+	if strings.Contains(prompt, "Claude CLI native tools available in this turn") {
+		t.Fatalf("did not expect native builtin prompt section, got %q", prompt)
 	}
 }
 

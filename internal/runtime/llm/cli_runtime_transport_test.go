@@ -152,11 +152,37 @@ func TestClaudeToolSurface_PrefersFallbackRuntimeToolsOverNativeBuiltins(t *test
 	if !strings.Contains(prompt, "Call Swarm runtime tools by these exact names") {
 		t.Fatalf("expected runtime tool prompt section, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "read_file") || !strings.Contains(prompt, "write_file") || !strings.Contains(prompt, "bash") {
-		t.Fatalf("expected fallback runtime tools in prompt, got %q", prompt)
+	if !strings.Contains(prompt, "emit_category_assessed") {
+		t.Fatalf("expected non-native runtime tools in prompt, got %q", prompt)
+	}
+	for _, name := range []string{"read_file", "write_file", "bash"} {
+		if strings.Contains(prompt, name) {
+			t.Fatalf("did not expect native capability tool %q in prompt, got %q", name, prompt)
+		}
 	}
 	if strings.Contains(prompt, "Claude CLI native tools available in this turn") {
 		t.Fatalf("did not expect native builtin prompt section when fallback runtime tools own the surface, got %q", prompt)
+	}
+}
+
+func TestCLIExecutionToolSurface_CanonicalizesProviderBuiltins(t *testing.T) {
+	surface := cliExecutionToolSurfaceForActor(models.AgentConfig{
+		NativeTools: models.NativeToolConfig{
+			FileIO:    true,
+			WebSearch: true,
+		},
+	}, []ToolDefinition{
+		{Name: "emit_category_assessed"},
+	})
+
+	if !slices.Equal(surface.CanonicalVisibleTools, []string{"emit_category_assessed", "read_file", "web_search", "write_file"}) {
+		t.Fatalf("canonical visible tools = %#v", surface.CanonicalVisibleTools)
+	}
+	if !slices.Equal(surface.ProviderBuiltinTools, []string{"Edit", "Read", "WebSearch", "Write"}) {
+		t.Fatalf("provider builtin tools = %#v", surface.ProviderBuiltinTools)
+	}
+	if !slices.Equal(surface.PromptRuntimeTools, []string{"emit_category_assessed"}) {
+		t.Fatalf("prompt runtime tools = %#v", surface.PromptRuntimeTools)
 	}
 }
 
