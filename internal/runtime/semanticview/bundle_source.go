@@ -1,7 +1,6 @@
 package semanticview
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -133,27 +132,55 @@ func owningFlowIDForProjectView(bundle *runtimecontracts.WorkflowContractBundle,
 	if bundle == nil {
 		return ""
 	}
-	projectDir := filepath.Clean(strings.TrimSpace(view.Paths.Dir))
-	if projectDir == "" || projectDir == "." {
+	return owningFlowIDForPackage(bundle, strings.TrimSpace(view.Paths.Key))
+}
+
+func owningFlowIDForPackage(bundle *runtimecontracts.WorkflowContractBundle, packageKey string) string {
+	packageKey = strings.TrimSpace(packageKey)
+	if bundle == nil || packageKey == "" {
 		return ""
 	}
-	bestFlowID := ""
-	bestDirLen := -1
-	for _, flow := range bundle.Paths.Flows {
-		flowID := strings.TrimSpace(flow.ID)
-		flowDir := filepath.Clean(strings.TrimSpace(flow.Dir))
-		if flowID == "" || flowDir == "" || flowDir == "." {
-			continue
-		}
-		if projectDir != flowDir && !strings.HasPrefix(projectDir, flowDir+string(os.PathSeparator)) {
-			continue
-		}
-		if len(flowDir) > bestDirLen {
-			bestFlowID = flowID
-			bestDirLen = len(flowDir)
+	pkg, ok := bundlePackageByKey(bundle, packageKey)
+	if !ok || strings.TrimSpace(pkg.ParentKey) == "" {
+		return ""
+	}
+	parent, ok := bundlePackageByKey(bundle, pkg.ParentKey)
+	if !ok {
+		return ""
+	}
+	if flowID := packageParentFlowID(parent, pkg); flowID != "" {
+		return flowID
+	}
+	return owningFlowIDForPackage(bundle, parent.Key)
+}
+
+func bundlePackageByKey(bundle *runtimecontracts.WorkflowContractBundle, packageKey string) (runtimecontracts.LoadedProjectPackage, bool) {
+	for _, pkg := range bundle.PackageTree {
+		if strings.TrimSpace(pkg.Key) == packageKey {
+			return pkg, true
 		}
 	}
-	return bestFlowID
+	return runtimecontracts.LoadedProjectPackage{}, false
+}
+
+func packageParentFlowID(parent, child runtimecontracts.LoadedProjectPackage) string {
+	childDir := filepath.Clean(strings.TrimSpace(child.Paths.Dir))
+	if childDir != "" && childDir != "." {
+		for _, flow := range parent.Paths.Flows {
+			flowID := strings.TrimSpace(flow.ID)
+			flowDir := filepath.Clean(strings.TrimSpace(flow.Dir))
+			if flowID == "" || flowDir == "" || flowDir == "." {
+				continue
+			}
+			if childDir == flowDir || strings.HasPrefix(childDir, flowDir+string(filepath.Separator)) {
+				return flowID
+			}
+		}
+	}
+	if len(parent.Paths.Flows) == 1 {
+		return strings.TrimSpace(parent.Paths.Flows[0].ID)
+	}
+	return ""
 }
 
 func (s bundleSource) FlowScopes() []FlowScope {
