@@ -306,7 +306,13 @@ func (a *cliStreamAccumulator) appendVisibleTool(name string) {
 		return
 	}
 	name = strings.TrimSpace(name)
+	if isCLIControlToolName(name) {
+		return
+	}
 	if canonical := toolidentity.CanonicalName(name); canonical != "" {
+		if isCLIControlToolName(canonical) {
+			return
+		}
 		found := false
 		for _, existing := range a.visibleTools {
 			if existing == canonical {

@@ -143,3 +143,13 @@ func TestCLIStreamAccumulator_IgnoresNestedToolArgumentListsForVisibility(t *tes
 		t.Fatalf("visible tools = %#v", resp.VisibleTools)
 	}
 }
+
+func TestCLIStreamAccumulator_IgnoresCLIControlToolsForVisibility(t *testing.T) {
+	acc := newCLIStreamAccumulator()
+	acc.AddLine([]byte(`{"type":"system","subtype":"init","session_id":"sess-control","tools":["Read","ExitPlanMode","mcp__runtime-tools__emit_category_assessed"]}`))
+
+	resp := acc.Response()
+	if len(resp.VisibleTools) != 2 || resp.VisibleTools[0] != "emit_category_assessed" || resp.VisibleTools[1] != "read_file" {
+		t.Fatalf("visible tools = %#v", resp.VisibleTools)
+	}
+}

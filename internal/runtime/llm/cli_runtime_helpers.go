@@ -363,6 +363,51 @@ func claudeControlToolNames() []string {
 	return []string{"ExitPlanMode"}
 }
 
+func isCLIControlToolName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, control := range claudeControlToolNames() {
+		if name == control {
+			return true
+		}
+	}
+	return false
+}
+
+func filterCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition, observed []string) []string {
+	if len(observed) == 0 {
+		return nil
+	}
+	surface := cliExecutionToolSurfaceForActor(actor, tools)
+	if len(surface.CanonicalVisibleTools) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(surface.CanonicalVisibleTools))
+	for _, name := range surface.CanonicalVisibleTools {
+		allowed[strings.TrimSpace(name)] = struct{}{}
+	}
+	filtered := make([]string, 0, len(observed))
+	seen := make(map[string]struct{}, len(observed))
+	for _, name := range observed {
+		name = toolidentity.CanonicalName(name)
+		if name == "" || isCLIControlToolName(name) {
+			continue
+		}
+		if _, ok := allowed[name]; !ok {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		filtered = append(filtered, name)
+	}
+	slices.Sort(filtered)
+	return filtered
+}
+
 func claudeAllowedToolNamesForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
 	surface := cliExecutionToolSurfaceForActor(actor, tools)
 	allowed := make([]string, 0, len(surface.RuntimeToolNames)+len(surface.ProviderBuiltinTools)+len(claudeControlToolNames()))
