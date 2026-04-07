@@ -303,6 +303,10 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		exec = tmpExec
 		node = runtimeengine.NewDeclarativeNode(strings.TrimSpace(e.nodeID), exec)
 	}
+	stateSnapshot, err := handlerExecutionStateSnapshot(handler, entityID, currentState)
+	if err != nil {
+		return nil, err
+	}
 	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
 		EntityID:   identity.NormalizeEntityID(entityID),
 		NodeID:     identity.NormalizeNodeID(e.nodeID),
@@ -310,7 +314,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		Event:      evt,
 		ChainDepth: evt.ChainDepth,
 		Handler:    handler,
-		State:      handlerExecutionStateSnapshot(handler, entityID, currentState),
+		State:      stateSnapshot,
 	})
 	if err != nil {
 		return nil, err
@@ -389,7 +393,7 @@ func handlerMaterializesEntity(source semanticview.Source, handler SystemNodeEve
 	return false
 }
 
-func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID string, state WorkflowState) runtimeengine.StateSnapshot {
+func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID string, state WorkflowState) (runtimeengine.StateSnapshot, error) {
 	snapshot := runtimeengine.StateSnapshot{
 		EntityID: identity.NormalizeEntityID(entityID),
 		StateCarrier: runtimeengine.NewStateCarrier(
@@ -403,15 +407,17 @@ func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID stri
 		if snapshot.StateCarrier.Metadata == nil {
 			snapshot.StateCarrier.Metadata = map[string]any{}
 		}
-		return snapshot
+		return snapshot, nil
 	}
 	snapshot.CurrentState = strings.TrimSpace(string(state.Stage))
 	snapshot.StateCarrier.Metadata = cloneStringAnyMap(state.Metadata)
-	if gates, err := runtimeengine.StateCarrierFromPersisted(snapshot.StateCarrier.Metadata, nil); err == nil {
-		snapshot.StateCarrier.Gates = gates.Gates
-		delete(snapshot.StateCarrier.Metadata, "gates")
+	carrier, err := runtimeengine.StateCarrierFromPersisted(snapshot.StateCarrier.Metadata, nil)
+	if err != nil {
+		return runtimeengine.StateSnapshot{}, fmt.Errorf("workflow state metadata.gates: %w", err)
 	}
-	return snapshot
+	snapshot.StateCarrier.Metadata = carrier.Metadata
+	snapshot.StateCarrier.Gates = carrier.Gates
+	return snapshot, nil
 }
 
 func workflowDataWritesEntityFields(spec runtimecontracts.WorkflowDataAccumulation, allowedFields map[string]struct{}) bool {

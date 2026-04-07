@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"swarm/internal/events"
@@ -33,6 +34,20 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 	}
 	if got := string(bus.publishedEvent(0).Type); got != "custom.emitted" {
 		t.Fatalf("published event type = %q, want custom.emitted", got)
+	}
+}
+
+func TestHandlerExecutionStateSnapshotRejectsMalformedPersistedGateShape(t *testing.T) {
+	_, err := handlerExecutionStateSnapshot(runtimecontracts.SystemNodeEventHandler{}, "ent-1", WorkflowState{
+		EntityID: "ent-1",
+		Stage:    WorkflowStateID("queued"),
+		Metadata: map[string]any{"gates": "invalid"},
+	})
+	if err == nil {
+		t.Fatal("expected malformed persisted gates to fail closed")
+	}
+	if !strings.Contains(err.Error(), "metadata.gates") {
+		t.Fatalf("error = %v, want metadata.gates context", err)
 	}
 }
 
