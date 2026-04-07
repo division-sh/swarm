@@ -7,19 +7,21 @@ import (
 )
 
 type ProjectScope struct {
-	Key        string
-	Depth      int
-	Manifest   runtimecontracts.ProjectPackageDocument
-	PromptsDir string
-	Nodes      map[string]runtimecontracts.SystemNodeContract
-	Events     map[string]runtimecontracts.EventCatalogEntry
-	Agents     map[string]runtimecontracts.AgentRegistryEntry
-	Tools      map[string]runtimecontracts.ToolSchemaEntry
-	Policy     runtimecontracts.PolicyDocument
+	Key          string
+	OwningFlowID string
+	Depth        int
+	Manifest     runtimecontracts.ProjectPackageDocument
+	PromptsDir   string
+	Nodes        map[string]runtimecontracts.SystemNodeContract
+	Events       map[string]runtimecontracts.EventCatalogEntry
+	Agents       map[string]runtimecontracts.AgentRegistryEntry
+	Tools        map[string]runtimecontracts.ToolSchemaEntry
+	Policy       runtimecontracts.PolicyDocument
 }
 
 type FlowScope struct {
 	ID            string
+	OwningFlowID  string
 	Path          string
 	PackageKey    string
 	Mode          string
@@ -63,9 +65,25 @@ func flowModeFromView(view runtimecontracts.FlowContractView) string {
 	return strings.TrimSpace(view.Paths.Mode)
 }
 
+func owningFlowIDFromView(view *runtimecontracts.FlowContractView) string {
+	if view == nil {
+		return ""
+	}
+	if flowID := strings.TrimSpace(view.Paths.ID); flowID != "" {
+		return flowID
+	}
+	for parent := view.Parent; parent != nil; parent = parent.Parent {
+		if flowID := strings.TrimSpace(parent.Paths.ID); flowID != "" {
+			return flowID
+		}
+	}
+	return ""
+}
+
 func flowScopeFromView(view runtimecontracts.FlowContractView) FlowScope {
 	return FlowScope{
 		ID:            strings.TrimSpace(view.Paths.ID),
+		OwningFlowID:  owningFlowIDFromView(&view),
 		Path:          strings.Trim(strings.TrimSpace(view.Path), "/"),
 		PackageKey:    strings.TrimSpace(view.Paths.PackageKey),
 		Mode:          flowModeFromView(view),

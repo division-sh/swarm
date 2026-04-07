@@ -525,6 +525,60 @@ entity-agent:
 	}
 }
 
+func TestRun_AcceptsPackageBackedFlowSessionScopeDeclarations(t *testing.T) {
+	root := writePackageBackedSessionScopeValidationFixture(t, `
+name: support
+initial_state: waiting
+states:
+  - waiting
+  - done
+`, `
+flow-agent:
+  id: flow-agent
+  model_tier: sonnet
+  conversation_mode: session
+  session_scope: flow
+  subscriptions:
+    - support/item.created
+entity-agent:
+  id: entity-agent
+  model_tier: sonnet
+  conversation_mode: session_per_entity
+  session_scope: entity
+  subscriptions:
+    - support/item.created
+`)
+
+	source := loadSessionScopeValidationFixture(t, root)
+	report := Run(context.Background(), source, Options{})
+
+	for _, finding := range report.Errors() {
+		if finding.CheckID == "invalid_field_detection" && strings.Contains(finding.Message, "session_scope") {
+			t.Fatalf("unexpected package-backed session_scope error: %#v", report.Errors())
+		}
+	}
+}
+
+func TestRun_RejectsPackageBackedEntitySessionScopeInStatelessFlow(t *testing.T) {
+	root := writePackageBackedSessionScopeValidationFixture(t, `
+name: support
+`, `
+entity-agent:
+  id: entity-agent
+  model_tier: sonnet
+  conversation_mode: session_per_entity
+  session_scope: entity
+  subscriptions:
+    - support/item.created
+`)
+
+	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+
+	if !reportContains(report.Errors(), "invalid_field_detection", "session_scope entity requires stateful flow support") {
+		t.Fatalf("expected stateful flow session_scope error for package-backed flow, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsHandlerFieldComplianceToNamedError(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-success")
 	nodeID, eventType, handler, ok := firstBundleHandler(bundle)
@@ -1135,6 +1189,55 @@ support/item.created:
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), flowAgents)
 	}
+	return root
+}
+
+func writePackageBackedSessionScopeValidationFixture(t *testing.T, flowSchema, packageAgents string) string {
+	t.Helper()
+	root := t.TempDir()
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: session-scope-validation
+version: "1.0.0"
+platform_version: ">=1.0.0"
+entity_schema:
+  groups:
+    - name: item
+      fields:
+        - name: item_id
+          type: string
+          primary: true
+flows:
+  - id: support
+    flow: support
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
+item.created:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
+name: support
+version: "1.0.0"
+flows: []
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), flowSchema)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+support/item.created:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), packageAgents)
 	return root
 }
 

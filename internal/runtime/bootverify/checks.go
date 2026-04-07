@@ -1664,7 +1664,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					Location: agentLabel,
 				})
 			}
-			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, "", agentID, agent)
+			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, scope.OwningFlowID, agentID, agent)
 			if len(agent.Subscriptions) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
@@ -1775,7 +1775,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					Location: agentLabel,
 				})
 			}
-			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, scope.ID, agentID, agent)
+			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, scope.OwningFlowID, agentID, agent)
 			if len(agent.Subscriptions) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
