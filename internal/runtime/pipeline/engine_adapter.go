@@ -124,12 +124,14 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
 	state := r.coordinator.currentWorkflowState(ctx, entityID.String())
+	carrier, err := runtimeengine.StateCarrierFromPersisted(state.Metadata, nil)
+	if err != nil {
+		return runtimeengine.StateSnapshot{}, false, err
+	}
 	out := runtimeengine.StateSnapshot{
 		EntityID:     entityID,
 		CurrentState: strings.TrimSpace(string(state.Stage)),
-		Metadata:     cloneStringAnyMap(state.Metadata),
-		Gates:        workflowStateGatesAsBools(state.Metadata),
-		StateBuckets: map[string]any{},
+		StateCarrier: carrier,
 	}
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.Enabled() {
 		instance, ok, err := r.coordinator.workflowStore.Load(ctx, entityID.String())
@@ -139,20 +141,20 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 		if ok {
 			out.WorkflowName = strings.TrimSpace(instance.WorkflowName)
 			out.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
-			out.Metadata = cloneStringAnyMap(instance.Metadata)
-			if out.Metadata == nil {
-				out.Metadata = map[string]any{}
+			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+			if err != nil {
+				return runtimeengine.StateSnapshot{}, false, err
 			}
+			out.StateCarrier = carrier
 			if strings.TrimSpace(instance.SubjectID) != "" {
-				out.Metadata["subject_id"] = strings.TrimSpace(instance.SubjectID)
+				out.StateCarrier.Metadata["subject_id"] = strings.TrimSpace(instance.SubjectID)
 			}
 			out.CurrentState = strings.TrimSpace(instance.CurrentState)
-			out.Gates = workflowStateGatesForScope(
+			out.StateCarrier.Gates = workflowStateGatesForScope(
 				r.coordinator.SemanticSource(),
 				pipelineFlowScope(ctx),
-				out.Metadata,
+				out.StateCarrier.PersistedMetadata(),
 			)
-			out.StateBuckets = cloneStringAnyMap(instance.StateBuckets)
 			out.TimerState = make([]runtimeengine.TimerState, 0, len(instance.TimerState))
 			for _, timer := range instance.TimerState {
 				out.TimerState = append(out.TimerState, runtimeengine.TimerState{
@@ -188,7 +190,7 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		}); err != nil {
 			return err
 		}
-		if len(mutation.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
+		if len(mutation.StateCarrier.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
 			if err := r.coordinator.projectWorkflowSubjectGates(ctx, entityID.String()); err != nil {
 				return err
 			}
@@ -232,7 +234,7 @@ func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, enti
 			missingExpected = append(missingExpected, field)
 			continue
 		}
-		actual, ok := workflowMetadataValue(persisted.Metadata, field)
+		actual, ok := workflowMetadataValue(persisted.StateCarrier.Metadata, field)
 		if !ok {
 			missingPersisted = append(missingPersisted, field)
 			continue
@@ -793,12 +795,14 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if instance.EnteredStageAt.IsZero() {
 		instance.EnteredStageAt = time.Now().UTC()
 	}
-	if len(mutation.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
-		if mutation.Metadata == nil {
-			mutation.Metadata = cloneStringAnyMap(instance.Metadata)
+	existingGates := workflowStateGatesAsBools(instance.Metadata)
+	if len(mutation.StateCarrier.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
+		if mutation.StateCarrier.Metadata == nil {
+			mutation.StateCarrier.Metadata = cloneStringAnyMap(instance.Metadata)
+			delete(mutation.StateCarrier.Metadata, "gates")
 		}
-		gates := workflowStateGatesAsBools(instance.Metadata)
-		for key, value := range mutation.Gates {
+		gates := workflowCloneBoolMap(existingGates)
+		for key, value := range mutation.StateCarrier.Gates {
 			key = workflowScopedGateKey(source, flowID, key)
 			if key != "" {
 				gates[key] = value
@@ -813,16 +817,19 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		if gate := workflowScopedGateKey(source, flowID, mutation.SetGate); gate != "" {
 			gates[gate] = true
 		}
-		mutation.Metadata["gates"] = workflowBoolGatesAsMap(gates)
+		mutation.StateCarrier.Gates = gates
 	}
-	if mutation.Metadata != nil {
-		instance.Metadata = cloneStringAnyMap(mutation.Metadata)
+	if mutation.StateCarrier.Metadata != nil && len(mutation.StateCarrier.Gates) == 0 && len(existingGates) > 0 {
+		mutation.StateCarrier.Gates = workflowCloneBoolMap(existingGates)
+	}
+	if mutation.StateCarrier.Metadata != nil || len(mutation.StateCarrier.Gates) > 0 {
+		instance.Metadata = mutation.StateCarrier.PersistedMetadata()
 	}
 	if instance.Metadata != nil && strings.TrimSpace(instance.SubjectID) == "" {
 		instance.SubjectID = workflowInstanceIdentity(source, *instance).SubjectID
 	}
-	if mutation.StateBuckets != nil {
-		instance.StateBuckets = cloneStringAnyMap(mutation.StateBuckets)
+	if mutation.StateCarrier.StateBuckets != nil {
+		instance.StateBuckets = mutation.StateCarrier.PersistedStateBuckets()
 	}
 	if len(allowedFields) == 0 {
 		return
@@ -918,7 +925,7 @@ func workflowStateFromEngine(snapshot runtimeengine.StateSnapshot) *WorkflowStat
 	state := &WorkflowState{
 		EntityID: snapshot.EntityID.String(),
 		Stage:    NormalizeWorkflowStateID(snapshot.CurrentState),
-		Metadata: cloneStringAnyMap(snapshot.Metadata),
+		Metadata: snapshot.StateCarrier.PersistedMetadata(),
 	}
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
@@ -1042,7 +1049,7 @@ func engineTriggerContext(req runtimeengine.ExecutionRequest) workflowTriggerCon
 		State: WorkflowState{
 			EntityID: req.EntityID.String(),
 			Stage:    NormalizeWorkflowStateID(req.State.CurrentState),
-			Metadata: cloneStringAnyMap(req.State.Metadata),
+			Metadata: req.State.StateCarrier.PersistedMetadata(),
 		},
 	}
 }

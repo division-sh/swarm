@@ -22,11 +22,10 @@ type ContextBuilderInput struct {
 }
 
 func BuildBaseContext(input ContextBuilderInput) BaseContext {
-	normalizeSnapshotGates(&input.State)
 	base := values.NewContext()
 	base.Entity = values.Wrap(input.State.EntityContext())
-	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.Metadata))
-	base.Gates = values.Wrap(boolMapToAnyMap(input.State.Gates))
+	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.StateCarrier.Metadata))
+	base.Gates = values.Wrap(boolMapToAnyMap(input.State.StateCarrier.Gates))
 	base.Payload = values.Wrap(cloneStringAnyMap(input.Payload))
 	if input.Source != nil {
 		base.Policy = values.Wrap(policyDocumentToMap(input.Source.ResolvedPolicyForFlow(input.FlowID)))

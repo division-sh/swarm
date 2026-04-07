@@ -15,8 +15,7 @@ func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
 			WorkflowName:    "wf",
 			WorkflowVersion: "v1",
 			CurrentState:    "researching",
-			Metadata:        map[string]any{"k": "v"},
-			Gates:           map[string]bool{"review": true},
+			StateCarrier:    NewStateCarrier(map[string]any{"k": "v"}, map[string]bool{"review": true}, nil),
 		},
 		Payload: map[string]any{"p": "x"},
 	}
@@ -36,7 +35,7 @@ func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
 		t.Fatalf("gates bucket missing review: %#v", base.Gates.Raw())
 	}
 	input.Payload["p"] = "changed"
-	input.State.Metadata["k"] = "changed"
+	input.State.StateCarrier.Metadata["k"] = "changed"
 	if got := base.Payload.Raw()["p"]; got != "x" {
 		t.Fatalf("payload clone lost isolation: %#v", got)
 	}
@@ -101,11 +100,11 @@ func TestStateSnapshotBucketHelpers(t *testing.T) {
 	if got := snapshot.MetadataBucket().String("status"); got != "ready" {
 		t.Fatalf("metadata string = %q", got)
 	}
-	if !snapshot.Gates["review"] {
-		t.Fatalf("snapshot gates missing: %#v", snapshot.Gates)
+	if !snapshot.StateCarrier.Gates["review"] {
+		t.Fatalf("snapshot gates missing: %#v", snapshot.StateCarrier.Gates)
 	}
-	if gates, ok := snapshot.MetadataBucket().Map("gates"); !ok || !gates.Bool("review") {
-		t.Fatalf("metadata gates missing: %#v, %v", gates.Raw(), ok)
+	if !snapshot.GatesBucket().Bool("review") {
+		t.Fatalf("typed gates missing: %#v", snapshot.GatesBucket().Raw())
 	}
 }
 
@@ -113,16 +112,16 @@ func TestStateMutationAndResultBucketHelpers(t *testing.T) {
 	var mutation StateMutation
 	mutation.SetMetadata("status", "ready")
 	mutation.SetGateValue("review", false)
-	mutation.SetStateBuckets(map[string]any{"node-1": map[string]any{"count": 2}})
+	mutation.SetStateBuckets(map[string]map[string]any{"node-1": {"count": 2}})
 
 	if got := mutation.MetadataBucket().String("status"); got != "ready" {
 		t.Fatalf("mutation metadata string = %q", got)
 	}
-	if mutation.Gates["review"] {
-		t.Fatalf("mutation gates wrong: %#v", mutation.Gates)
+	if mutation.StateCarrier.Gates["review"] {
+		t.Fatalf("mutation gates wrong: %#v", mutation.StateCarrier.Gates)
 	}
-	if gates, ok := mutation.MetadataBucket().Map("gates"); !ok || gates.Bool("review") {
-		t.Fatalf("mutation gates wrong: %#v, %v", gates.Raw(), ok)
+	if mutation.GatesBucket().Bool("review") {
+		t.Fatalf("mutation gates wrong: %#v", mutation.GatesBucket().Raw())
 	}
 	if bucket, ok := mutation.StateBucketsBucket().Map("node-1"); !ok || bucket.Int("count") != 2 {
 		t.Fatalf("state buckets wrong: %#v, %v", bucket.Raw(), ok)

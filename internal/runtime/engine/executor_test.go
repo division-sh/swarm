@@ -76,7 +76,7 @@ func (r lockOrderStateRepo) LoadState(context.Context, identity.EntityID) (State
 	if r.order != nil {
 		*r.order = append(*r.order, "load")
 	}
-	return StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}}, true, nil
+	return testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}), true, nil
 }
 func (lockOrderStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error {
 	return nil
@@ -142,6 +142,13 @@ func (s *recordingPayloadShaper) ShapeEmitPayload(_ context.Context, req Executi
 type stubTx struct{ ctx context.Context }
 
 func (s stubTx) Context() context.Context { return s.ctx }
+
+func testStateSnapshot(currentState string, metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) StateSnapshot {
+	return StateSnapshot{
+		CurrentState: currentState,
+		StateCarrier: NewStateCarrier(metadata, gates, buckets),
+	}
+}
 
 func TestNewExecutor_DefaultsMaxChainDepth(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -304,10 +311,7 @@ func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 			Type:      events.EventType("test.event"),
 			CreatedAt: time.Now().UTC(),
 		}.WithEntityID("11111111-1111-1111-1111-111111111111"),
-		State: StateSnapshot{
-			Metadata:     map[string]any{},
-			StateBuckets: map[string]any{},
-		},
+		State: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{})},
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -370,10 +374,9 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 		State: StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 			CurrentState: "discovered",
-			Metadata: map[string]any{
+			StateCarrier: NewStateCarrier(map[string]any{
 				"composite_score": 0,
-			},
-			StateBuckets: map[string]any{},
+			}, nil, map[string]map[string]any{}),
 		},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Compute: &runtimecontracts.ComputeSpec{
@@ -405,7 +408,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	if len(result.EmitIntents) != 1 {
 		t.Fatalf("emit intents = %d, want 1", len(result.EmitIntents))
 	}
-	if got := shaper.lastReq.State.Metadata["composite_score"]; got != 80.0 && got != 80 {
+	if got := shaper.lastReq.State.StateCarrier.Metadata["composite_score"]; got != 80.0 && got != 80 {
 		t.Fatalf("payload shaper saw composite_score = %#v, want 80", got)
 	}
 }
@@ -416,7 +419,7 @@ type orderedStateRepo struct {
 }
 
 func (r *orderedStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
-	return StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}}, true, nil
+	return testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}), true, nil
 }
 
 func (r *orderedStateRepo) SaveState(_ context.Context, _ identity.EntityID, mutation StateMutation) error {
@@ -484,7 +487,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 			Emits:      runtimecontracts.EventEmission{Single: "task.recorded"},
 			Action:     runtimecontracts.ActionSpec{ID: "record"},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -532,10 +535,9 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	}
 	initial := StateSnapshot{
 		CurrentState: "pending",
-		Metadata: map[string]any{
+		StateCarrier: NewStateCarrier(map[string]any{
 			"dedup_key": "dup-1",
-		},
-		StateBuckets: map[string]any{},
+		}, nil, map[string]map[string]any{}),
 	}
 	storeAccumulator(&initial, "node-1", "items.submitted", &Accumulator{
 		StartedAt:     "2026-03-14T00:00:00Z",
@@ -590,7 +592,7 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	if _, ok := repo.mutation.Metadata["dedup_key"]; ok {
 		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", repo.mutation.Metadata)
 	}
-	if nodeBucket, ok := repo.mutation.StateBuckets["node-1"].(map[string]any); ok {
+	if nodeBucket, ok := repo.mutation.StateBuckets["node-1"]; ok {
 		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
 			t.Fatalf("expected accumulator state to be cleared, state_buckets=%#v", repo.mutation.StateBuckets)
 		}
@@ -628,7 +630,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 				StoreAs: "entity.grouped",
 			},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -678,8 +680,7 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 			},
 		},
 		State: StateSnapshot{
-			Metadata:     map[string]any{"allowed": true},
-			StateBuckets: map[string]any{},
+			StateCarrier: NewStateCarrier(map[string]any{"allowed": true}, nil, map[string]map[string]any{}),
 		},
 	})
 	if err != nil {
@@ -716,7 +717,7 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 				{ID: "rule-2", Condition: "else", AdvancesTo: "rejected"},
 			},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -757,7 +758,7 @@ func TestExecutor_RuleEmitsAugmentHandlerEmits(t *testing.T) {
 				Emits:     runtimecontracts.EventEmission{Single: "rule.emitted"},
 			}},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -810,7 +811,7 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 				},
 			}},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -862,7 +863,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 				},
 			}},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -912,7 +913,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 				Emits:     runtimecontracts.EventEmission{Single: "branch.selected"},
 			}},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -951,7 +952,7 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 			AdvancesTo: "done",
 			Emits:      runtimecontracts.EventEmission{Single: "task.followup"},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1002,7 +1003,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 			AdvancesTo: "processing",
 			Action:     runtimecontracts.ActionSpec{ID: "should_not_run"},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1083,7 +1084,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 			},
 			Emits: runtimecontracts.EventEmission{Single: "scoring.requested"},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1143,7 +1144,7 @@ func TestExecutor_PayloadTransformCELFailureReturnsError(t *testing.T) {
 			},
 			Emits: runtimecontracts.EventEmission{Single: "scoring.requested"},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err == nil {
 		t.Fatal("expected payload transform CEL failure to return an error")
@@ -1177,7 +1178,7 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 			},
 			AdvancesTo: "scanning",
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1223,7 +1224,7 @@ func TestExecutor_FanOutStructuredEmitMappingSelectsEventByKeyField(t *testing.T
 				},
 			},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1267,7 +1268,7 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 			AdvancesTo: "done",
 			Emits:      runtimecontracts.EventEmission{Single: "check.passed"},
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1308,7 +1309,7 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 			},
 			AdvancesTo: "done",
 		},
-		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1348,8 +1349,7 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 			ClearGates: []string{"*"},
 		},
 		State: StateSnapshot{
-			Metadata: map[string]any{"note": "keep"},
-			Gates:    map[string]bool{"gate_a": true, "gate_b": true},
+			StateCarrier: NewStateCarrier(map[string]any{"note": "keep"}, map[string]bool{"gate_a": true, "gate_b": true}, nil),
 		},
 	})
 	if err != nil {
@@ -1361,9 +1361,8 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 	if result.StateMutation.Gates["gate_a"] != false || result.StateMutation.Gates["gate_b"] != false {
 		t.Fatalf("typed gates not cleared: %#v", result.StateMutation.Gates)
 	}
-	gates, _ := result.StateMutation.Metadata["gates"].(map[string]any)
-	if gates["gate_a"] != false || gates["gate_b"] != false {
-		t.Fatalf("gate metadata not cleared: %#v", result.StateMutation.Metadata)
+	if result.StateMutation.Gates["gate_a"] != false || result.StateMutation.Gates["gate_b"] != false {
+		t.Fatalf("typed gate state not cleared: %#v", result.StateMutation.Gates)
 	}
 	if result.StateMutation.Metadata["note"] != "keep" {
 		t.Fatalf("non-gate metadata changed: %#v", result.StateMutation.Metadata)
@@ -1395,9 +1394,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 				Check: "entity.gates.review == false",
 			},
 		},
-		State: StateSnapshot{
-			Gates: map[string]bool{"review": true},
-		},
+		State: StateSnapshot{StateCarrier: NewStateCarrier(nil, map[string]bool{"review": true}, nil)},
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1436,7 +1433,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "notify"},
 		},
-		State: StateSnapshot{Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1480,7 +1477,7 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 				OnFail: "escalate:guard.failed",
 			},
 		},
-		State: StateSnapshot{Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+		State: testStateSnapshot("", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)

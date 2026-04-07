@@ -36,10 +36,12 @@ func (r *persistentStateRepo) LoadState(context.Context, identity.EntityID) (Sta
 	return StateSnapshot{
 		EntityID:     r.snapshot.EntityID,
 		CurrentState: r.snapshot.CurrentState,
-		Metadata:     cloneStringAnyMap(r.snapshot.Metadata),
-		Gates:        cloneBoolMap(r.snapshot.Gates),
-		StateBuckets: cloneStringAnyMap(r.snapshot.StateBuckets),
-		TimerState:   append([]TimerState(nil), r.snapshot.TimerState...),
+		StateCarrier: NewStateCarrier(
+			r.snapshot.StateCarrier.Metadata,
+			r.snapshot.StateCarrier.Gates,
+			r.snapshot.StateCarrier.StateBuckets,
+		),
+		TimerState: append([]TimerState(nil), r.snapshot.TimerState...),
 	}, true, nil
 }
 
@@ -48,9 +50,7 @@ func (r *persistentStateRepo) SaveState(_ context.Context, entityID identity.Ent
 		r.found = true
 		r.snapshot = StateSnapshot{
 			EntityID:     entityID,
-			Metadata:     map[string]any{},
-			Gates:        map[string]bool{},
-			StateBuckets: map[string]any{},
+			StateCarrier: NewStateCarrier(map[string]any{}, map[string]bool{}, map[string]map[string]any{}),
 		}
 	}
 	if !entityID.IsZero() {
@@ -59,14 +59,14 @@ func (r *persistentStateRepo) SaveState(_ context.Context, entityID identity.Ent
 	if next := mutation.NextState; next != "" {
 		r.snapshot.CurrentState = next
 	}
-	if mutation.Metadata != nil {
-		r.snapshot.Metadata = cloneStringAnyMap(mutation.Metadata)
+	if mutation.StateCarrier.Metadata != nil {
+		r.snapshot.StateCarrier.Metadata = cloneStringAnyMap(mutation.StateCarrier.Metadata)
 	}
-	if mutation.StateBuckets != nil {
-		r.snapshot.StateBuckets = cloneStringAnyMap(mutation.StateBuckets)
+	if mutation.StateCarrier.StateBuckets != nil {
+		r.snapshot.StateCarrier.StateBuckets = cloneStateBucketSet(mutation.StateCarrier.StateBuckets)
 	}
-	if mutation.Gates != nil {
-		r.snapshot.Gates = cloneBoolMap(mutation.Gates)
+	if mutation.StateCarrier.Gates != nil {
+		r.snapshot.StateCarrier.Gates = cloneBoolMap(mutation.StateCarrier.Gates)
 	}
 	return nil
 }
@@ -88,8 +88,7 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 		found: true,
 		snapshot: StateSnapshot{
 			CurrentState: "pending",
-			Metadata:     map[string]any{},
-			StateBuckets: map[string]any{},
+			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -130,8 +129,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		found: true,
 		snapshot: StateSnapshot{
 			CurrentState: "done",
-			Metadata:     map[string]any{},
-			StateBuckets: map[string]any{},
+			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -178,7 +176,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 	newExecutor := func(score int, allowed bool) *Executor {
 		exec, err := NewExecutor(RuntimeDependencies{
 			Source:       stubSource(),
-			StateRepo:    &persistentStateRepo{found: true, snapshot: StateSnapshot{Metadata: map[string]any{"score": score}, StateBuckets: map[string]any{}}},
+			StateRepo:    &persistentStateRepo{found: true, snapshot: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{"score": score}, nil, map[string]map[string]any{})}},
 			TxRunner:     stubRunner{},
 			Locker:       stubLocker{},
 			Outbox:       stubOutbox{},
@@ -243,8 +241,7 @@ func TestExecutor_AccumulateOnTimeoutAppliesRule(t *testing.T) {
 		snapshot: StateSnapshot{
 			EntityID:     "entity-1",
 			CurrentState: "collecting",
-			Metadata:     map[string]any{},
-			StateBuckets: map[string]any{},
+			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
 		},
 	}
 	acc := &Accumulator{
@@ -326,8 +323,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 		found: true,
 		snapshot: StateSnapshot{
 			CurrentState: "pending",
-			Metadata:     map[string]any{},
-			StateBuckets: map[string]any{},
+			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -368,7 +364,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 		State: StateSnapshot{
 			EntityID:     "ent-1",
 			CurrentState: "pending",
-			StateBuckets: map[string]any{},
+			StateCarrier: NewStateCarrier(nil, nil, map[string]map[string]any{}),
 		},
 	})
 	if err != nil {
@@ -381,9 +377,9 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadState = %v, ok=%v", err, ok)
 	}
-	got, ok := state.Metadata["composite"].(float64)
+	got, ok := state.StateCarrier.Metadata["composite"].(float64)
 	if !ok {
-		t.Fatalf("composite type = %T, want float64", state.Metadata["composite"])
+		t.Fatalf("composite type = %T, want float64", state.StateCarrier.Metadata["composite"])
 	}
 	if got != 0 {
 		t.Fatalf("composite = %v, want 0 for empty accumulator compute", got)
@@ -394,8 +390,7 @@ func TestExecutor_AccumulationDeduplicatesRepeatedEvent(t *testing.T) {
 	repo := &persistentStateRepo{
 		found: true,
 		snapshot: StateSnapshot{
-			Metadata:     map[string]any{},
-			StateBuckets: map[string]any{},
+			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{

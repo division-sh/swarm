@@ -391,18 +391,26 @@ func handlerMaterializesEntity(source semanticview.Source, handler SystemNodeEve
 
 func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID string, state WorkflowState) runtimeengine.StateSnapshot {
 	snapshot := runtimeengine.StateSnapshot{
-		EntityID:     identity.NormalizeEntityID(entityID),
-		StateBuckets: map[string]any{},
+		EntityID: identity.NormalizeEntityID(entityID),
+		StateCarrier: runtimeengine.NewStateCarrier(
+			nil,
+			nil,
+			map[string]map[string]any{},
+		),
 	}
 	if handler.CreateEntity {
-		snapshot.Metadata = cloneStringAnyMap(state.Metadata)
-		if snapshot.Metadata == nil {
-			snapshot.Metadata = map[string]any{}
+		snapshot.StateCarrier.Metadata = cloneStringAnyMap(state.Metadata)
+		if snapshot.StateCarrier.Metadata == nil {
+			snapshot.StateCarrier.Metadata = map[string]any{}
 		}
 		return snapshot
 	}
 	snapshot.CurrentState = strings.TrimSpace(string(state.Stage))
-	snapshot.Metadata = cloneStringAnyMap(state.Metadata)
+	snapshot.StateCarrier.Metadata = cloneStringAnyMap(state.Metadata)
+	if gates, err := runtimeengine.StateCarrierFromPersisted(snapshot.StateCarrier.Metadata, nil); err == nil {
+		snapshot.StateCarrier.Gates = gates.Gates
+		delete(snapshot.StateCarrier.Metadata, "gates")
+	}
 	return snapshot
 }
 
