@@ -9,22 +9,34 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/testutil"
 )
 
+type flowActivationRouteStore interface {
+	UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error
+	DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error
+}
+
 type flowActivationTestBus struct {
 	addedPaths   []string
 	removedPairs []string
 	published    []events.Event
+	routeStore   flowActivationRouteStore
+}
+
+type flowActivationTestRouteStore struct {
+	statusByPath map[string]string
 }
 
 type flowActivationTestInstanceStore struct {
 	upserts          []runtimepipeline.WorkflowInstance
 	terminatedPaths  []string
 	terminatedAtSeen []time.Time
+	byStorageRef     map[string]runtimepipeline.WorkflowInstance
 }
 
 type flowActivationTestStore struct {
@@ -37,15 +49,54 @@ func newFlowActivationManager(bus Bus, instances flowInstancePersistence, stores
 	}, stores...)
 }
 
+func (s *flowActivationTestRouteStore) UpsertFlowInstanceRoute(_ context.Context, route runtimebus.FlowInstanceRouteRecord) error {
+	if s.statusByPath == nil {
+		s.statusByPath = map[string]string{}
+	}
+	s.statusByPath[strings.TrimSpace(route.Identity.InstancePath)] = "active"
+	return nil
+}
+
+func (s *flowActivationTestRouteStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+	if s.statusByPath == nil {
+		s.statusByPath = map[string]string{}
+	}
+	s.statusByPath[strings.TrimSpace(identity.InstancePath)] = "inactive"
+	return nil
+}
+
 func (s *flowActivationTestInstanceStore) Upsert(_ context.Context, instance runtimepipeline.WorkflowInstance) error {
 	s.upserts = append(s.upserts, instance)
+	if s.byStorageRef == nil {
+		s.byStorageRef = map[string]runtimepipeline.WorkflowInstance{}
+	}
+	stored := instance
+	stored.StorageRef = strings.TrimSpace(stored.StorageRef)
+	if stored.StorageRef != "" {
+		stored.Status = "active"
+		s.byStorageRef[stored.StorageRef] = stored
+	}
 	return nil
 }
 
 func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, storageRef string, terminatedAt time.Time) error {
 	s.terminatedPaths = append(s.terminatedPaths, strings.TrimSpace(storageRef))
 	s.terminatedAtSeen = append(s.terminatedAtSeen, terminatedAt)
+	if s.byStorageRef != nil {
+		instance := s.byStorageRef[strings.TrimSpace(storageRef)]
+		instance.Status = "terminated"
+		instance.TerminatedAt = terminatedAt
+		s.byStorageRef[strings.TrimSpace(storageRef)] = instance
+	}
 	return nil
+}
+
+func (s *flowActivationTestInstanceStore) Load(_ context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error) {
+	if s.byStorageRef == nil {
+		return runtimepipeline.WorkflowInstance{}, false, nil
+	}
+	instance, ok := s.byStorageRef[strings.TrimSpace(instanceID)]
+	return instance, ok, nil
 }
 
 func (s *flowActivationTestStore) UpsertAgent(_ context.Context, rec PersistedAgent) error {
@@ -88,12 +139,33 @@ func (*flowActivationTestBus) LogRuntime(context.Context, runtimepipeline.Runtim
 
 func (b *flowActivationTestBus) AddFlowInstanceRoute(_ runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
 	b.addedPaths = append(b.addedPaths, identity.InstancePath)
+	if b.routeStore != nil {
+		return b.routeStore.UpsertFlowInstanceRoute(context.Background(), runtimebus.FlowInstanceRouteRecord{
+			Identity:       identity,
+			EventPattern:   identity.InstancePath + "/task.started",
+			SubscriberType: "agent",
+			SubscriberID:   "reviewer-" + identity.InstanceID,
+			SourceFlow:     identity.ScopeKey,
+		})
+	}
 	return nil
 }
 
 func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
 	b.removedPairs = append(b.removedPairs, identity.ScopeKey+"/"+identity.InstanceID)
+	if b.routeStore != nil {
+		return b.routeStore.DeleteFlowInstanceRoute(context.Background(), identity)
+	}
 	return nil
+}
+
+type flowActivationStubAgent struct{ id string }
+
+func (a flowActivationStubAgent) ID() string                      { return a.id }
+func (flowActivationStubAgent) Type() string                      { return "generic" }
+func (flowActivationStubAgent) Subscriptions() []events.EventType { return nil }
+func (flowActivationStubAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
+	return nil, nil
 }
 
 func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
@@ -465,7 +537,8 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	bus := &flowActivationTestBus{}
+	routeStore := &flowActivationTestRouteStore{}
+	bus := &flowActivationTestBus{routeStore: routeStore}
 	store := runtimepipeline.NewWorkflowInstanceStore(db)
 	am := newFlowActivationManager(bus, store)
 	bundle := testFlowBundle("")
@@ -480,6 +553,14 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	}); err != nil {
 		t.Fatalf("Mutate: %v", err)
 	}
+	am.mu.Lock()
+	am.agents["shared-subject-agent"] = flowActivationStubAgent{id: "shared-subject-agent"}
+	am.agentCfg["shared-subject-agent"] = models.AgentConfig{
+		ID:       "shared-subject-agent",
+		EntityID: req.Instance.EntityID,
+		FlowPath: "review/other-inst",
+	}
+	am.mu.Unlock()
 
 	if err := am.DeactivateFlowInstanceModel(context.Background(), runtimepipeline.FlowInstanceDeactivationRequest{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -506,6 +587,10 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	if terminatedAt.IsZero() {
 		t.Fatal("flow_instances.terminated_at is zero")
 	}
+	routeStatus := routeStore.statusByPath["review/inst-1"]
+	if strings.TrimSpace(routeStatus) != "inactive" {
+		t.Fatalf("routing_rules.status = %q, want inactive", routeStatus)
+	}
 
 	instance, ok, err := store.Load(context.Background(), req.Instance.EntityID)
 	if err != nil {
@@ -516,6 +601,18 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	}
 	if got := strings.TrimSpace(instance.CurrentState); got != "completed" {
 		t.Fatalf("current_state = %q, want completed", got)
+	}
+	if strings.TrimSpace(instance.Status) != "terminated" {
+		t.Fatalf("loaded workflow instance status = %q, want terminated", instance.Status)
+	}
+	if instance.TerminatedAt.IsZero() {
+		t.Fatal("loaded workflow instance terminated_at is zero")
+	}
+	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+		t.Fatal("expected flow-scoped agent teardown")
+	}
+	if _, ok := am.GetAgentConfig("shared-subject-agent"); !ok {
+		t.Fatal("expected unrelated flow agent to remain active")
 	}
 }
 

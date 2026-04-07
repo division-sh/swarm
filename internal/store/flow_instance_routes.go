@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -89,6 +91,21 @@ func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity ru
 	if !identity.Valid() {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
+	var status string
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT status
+		FROM flow_instances
+		WHERE instance_id = $1
+	`, identity.InstancePath).Scan(&status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("flow instance not found for route removal: %s", identity.InstancePath)
+		}
+		return fmt.Errorf("load flow instance for route removal %s: %w", identity.InstancePath, err)
+	}
+	if strings.TrimSpace(status) != "terminated" {
+		return fmt.Errorf("flow instance route removal requires terminal flow_instances status for %s", identity.InstancePath)
+	}
 	if _, err := s.DB.ExecContext(ctx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
@@ -110,8 +127,10 @@ func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimefl
 				COALESCE(NULLIF(source_flow, ''), ''),
 				flow_instance
 			FROM routing_rules
+			JOIN flow_instances fi ON fi.instance_id = routing_rules.flow_instance
 			WHERE is_materialized = true
-			  AND status = 'active'
+			  AND routing_rules.status = 'active'
+			  AND fi.status = 'active'
 			  AND flow_instance IS NOT NULL
 			GROUP BY flow_instance, source_flow
 			ORDER BY flow_instance ASC
