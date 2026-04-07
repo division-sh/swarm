@@ -18,6 +18,7 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - Did this avoid adding another compatibility branch when a clean migration would work?
 - Did this avoid branch-heavy decision trees for core semantics?
 - Did this avoid duplicating logic that already exists elsewhere?
+- Did this preserve the repo policy of fail-fast and zero legacy behavior?
 
 ## Architecture Purity
 
@@ -49,7 +50,9 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - Did we avoid "try one meaning, then reinterpret as another" behavior?
 - Did we avoid string-prefix or naming-convention guessing for core semantics?
 - Did we avoid per-call schema probing or runtime compatibility guessing in hot paths?
-- If any fallback remains, is there a concrete current operational reason and explicit documentation for it?
+- Did we remove legacy behavior instead of preserving it behind a compatibility seam?
+- If any fallback or compatibility path remains, did the lead explicitly approve that exact seam in writing and mark it as temporary?
+- Do unknown startup/validation/probe failures fail closed instead of being treated as acceptable?
 
 ## Tests
 
@@ -57,6 +60,7 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - If there is an end-to-end regression risk, did we also add or update a broader regression test?
 - If getting tests green was unexpectedly difficult, did we treat that as an architectural smell and record it?
 - If this PR changes a canonical owner or trust boundary, do tests cover the production migration seams and not only the primary path?
+- If this PR changes a derived selector, projection, validation filter, or summary surface, did we compare it against the adjacent canonical writer/store/runtime owner and add a counterexample test for selector drift?
 
 ## Observability
 
@@ -73,12 +77,20 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   - an explicit issue link:
     - `Closes #...` for full completion
     - or `Part of #...` for partial work
+  - either:
+    - exact governing spec references for the touched seam
+    - or an explicit statement that this PR is non-semantic maintenance and why no platform spec section governs it
   - what changed
   - why this is needed
   - scope boundaries
   - exact tests run
   - residual risk
   - follow-up or explicitly not-in-scope items
+- If the issue or PR does not cite an exact spec section, did it explicitly state that the seam is a spec gap / ambiguity instead of presenting local issue wording as authoritative?
+- Before implementation, did the implementer re-read the cited spec section(s) rather than relying on issue prose or memory?
+- If the PR cites spec references, did the reviewer compare the implementation against the cited spec section(s), not just against the issue summary?
+- If the PR claims non-semantic maintenance, did the reviewer verify that no semantic/runtime contract behavior is being changed under that label?
+- If implementation uncovered existing off-spec behavior outside the issue's stated scope, did the implementer stop and escalate instead of silently widening the change?
 - If the PR description lists follow-up work, did the reviewer check whether any follow-up item is narrow enough to be absorbed into the current PR instead of becoming another tiny issue?
 - If a follow-up item is left out of the PR, is there a clear reason it should remain separate:
   - meaningful additional scope
@@ -101,10 +113,18 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   - what old producer / reader / writer path is now invalid?
   - which production paths were checked for surviving old behavior?
   - is the migration complete?
+- For any compatibility or migration seam left in place:
+  - was it explicitly approved by the lead?
+  - is it time-bounded and isolated to one boundary?
+  - is there a concrete removal follow-up rather than an indefinite shim?
 - For any persisted read-model or canonical surface touched here:
   - is there one canonical write-time owner?
   - is the consuming reader explicit?
   - what bypass or drift path remains, if any?
+- For any derived reader/projection/selector touched here:
+  - which adjacent canonical owner already defines the same semantic boundary?
+  - did the reviewer compare the two directly instead of reviewing the new query in isolation?
+  - what counterexample state would reveal drift between them?
 - For any external side effect claimed in review or close-out:
   - was the authoritative external system re-checked after the action?
   - is the completion claim based on verified state rather than narration?
@@ -137,6 +157,16 @@ The goal is to force explicit rule-based review after each real review pass, not
 Recommended PR description shape:
 
 ```text
+Spec references:
+
+- docs/specs/swarm-platform/platform/contracts/platform-spec.yaml: <section/path>
+- governing rule: <short plain-language statement>
+
+or
+
+- none; this PR is non-semantic maintenance
+- justification: <why no platform spec section governs this change>
+
 ## Human Summary
 
 Short plain-language explanation of what this PR changes, why it matters, and which larger goal it supports.

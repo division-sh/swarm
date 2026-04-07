@@ -20,6 +20,14 @@ The default bias of this codebase should be:
 - core/runtime generality over product-specific leakage
 - platform/spec authority over local implementer interpretation
 
+Operational policy:
+
+- fail fast when a semantic/runtime issue appears
+- prefer boot/runtime failure over permissive fallback
+- aggressively migrate forward to the canonical shape
+- preserve zero legacy behavior by default
+- do not add compatibility seams unless the lead explicitly approves that exact seam in writing
+
 ## Platform Spec Authority
 
 The platform spec is the authoritative source for platform/runtime semantics.
@@ -79,10 +87,14 @@ Rule:
 
 Exception standard:
 
-- if a temporary deviation from the spec is unavoidable, it must be documented explicitly in:
-  - code
-  - tests
-  - and the relevant issue/plan/watchlist documents
+- temporary deviation from the spec is not an implementer choice
+- if a deviation is believed unavoidable, stop and escalate to the lead/spec writer
+- do not merge a speculative local deviation just because it seems operationally convenient
+- any approved deviation must be:
+  - explicitly approved in writing
+  - documented in code
+  - documented in tests
+  - documented in the relevant issue/plan/watchlist documents
 
 ## Rules
 
@@ -93,6 +105,8 @@ The system is still early.
 Default rule:
 
 - prefer removing legacy schema paths, legacy data shapes, legacy compatibility branches, and stale migration shims instead of preserving them indefinitely
+- default to zero legacy behavior
+- if a clean forward migration exists, take it and delete the old path
 
 Why:
 
@@ -105,10 +119,10 @@ Practical implication:
 
 - if a schema or data shape is obsolete, remove it
 - if a migration can rewrite data forward cleanly, do that instead of carrying dual semantics
-- do not add new fallback branches unless there is a clearly justified operational need
-- do not add backward-compatibility read-path or write-path shims by default
+- do not add new fallback branches
+- do not add backward-compatibility read-path or write-path shims
 - do not preserve older persisted shapes with new fallback matching just because it is locally convenient
-- if old data would stop working under the new canonical shape, that is usually acceptable in this project unless the issue explicitly requires rollout or migration compatibility
+- if old data would stop working under the new canonical shape, that is acceptable unless the lead explicitly requires a temporary migration seam
 - when choosing between:
   - a clean migration plus code deletion
   - preserving legacy runtime behavior
@@ -117,17 +131,17 @@ Practical implication:
 Bias:
 
 - optimize for present correctness and architectural simplicity
-- do not optimize for hypothetical long-tail backwards compatibility unless explicitly required
+- do not optimize for backwards compatibility
+- do not preserve old behavior because it was once accepted or because some old data might still exist
 
 Exception standard:
 
-- only preserve a legacy path when there is a concrete, current operational dependency
-- if that dependency exists, document it explicitly near the code and in the relevant planning/watchlist document
-- a compatibility shim requires explicit justification in the issue or PR
-- if compatibility is intentionally required, keep it:
+- compatibility is banned by default
+- if the lead explicitly requires a temporary migration seam, keep it:
   - narrow
   - time-bounded
   - isolated to one explicit boundary
+  - documented as temporary removal work, not normal architecture
 - otherwise, prefer canonical-only behavior and fail closed semantics
 
 ### 2. Do not use heuristic fallback for core semantics
@@ -160,6 +174,11 @@ Practical implication:
   - “if the path looks like X, treat it as Y”
   - “if metadata exists, assume this is a child-flow context”
 - if the model cannot represent the case cleanly, improve the model
+
+Absolute rule:
+
+- do not add compatibility heuristics for core semantics
+- do not keep an old interpretation alive “just in case”
 
 ### 3. Centralize semantics; do not re-implement them in multiple layers
 
@@ -195,7 +214,8 @@ Silent normalization is often worse than explicit failure.
 
 Default rule:
 
-- invalid mode, invalid identity, ambiguous routing, or conflicting ownership should fail explicitly unless there is a deliberate, documented reason not to
+- invalid mode, invalid identity, ambiguous routing, conflicting ownership, or unexpected startup probe results should fail explicitly
+- do not downgrade semantic uncertainty into a warning, fallback, or best-effort pass
 
 Practical implication:
 
@@ -209,6 +229,7 @@ Anti-patterns to avoid:
 - “try one meaning, then reinterpret as another”
 - ambiguous normalization that changes runtime behavior without surfacing an error
 - complicated branching trees where semantics depend on which path happened to match first
+- startup or validation checks that pass on unknown errors instead of failing closed
 
 ### 5. Prefer typed runtime descriptors over opaque JSON for control-plane semantics
 
@@ -238,6 +259,39 @@ Practical implication:
 ### 6. Do not let product-specific behavior leak into core runtime layers
 
 Core/runtime layers should stay generic unless a product-specific rule is explicitly part of the runtime contract.
+
+### 7. When changing a derived surface, check the adjacent canonical invariant
+
+Read models, operator projections, validation filters, and “summary” surfaces often sit next to a more canonical writer/store/runtime owner.
+
+Default rule:
+
+- do not change a derived selector, projection, or reader in isolation
+- explicitly compare it against the adjacent canonical owner that already defines the same semantic boundary
+
+Common examples:
+
+- operator backlog selector vs canonical pending-work selector
+- dashboard/read-model lifecycle state vs canonical persisted delivery/session/flow state
+- validation filter vs canonical schema/trust-boundary rule
+- summary/read surface vs canonical write-time owner
+
+Practical implication:
+
+- ask which existing writer/store/runtime selector already defines this meaning
+- prove the touched derived surface stays aligned with it
+- if the two differ, either:
+  - make them share one owner rule
+  - or document the intentional difference explicitly in code, tests, and the PR
+
+Test expectation:
+
+- include at least one counterexample that would pass if the derived surface drifted from the canonical owner
+- do not rely only on happy-path tests for the newly emphasized states
+
+Anti-pattern:
+
+- fixing the local issue wording while silently drifting from the broader canonical invariant in the adjacent seam
 
 Core/runtime layers include:
 
@@ -521,3 +575,91 @@ Default expectation:
   - a heuristic fallback
   - a second interpretation of a core concept
 - stop and redesign before merging
+
+## Implementer Assignment Completion Standard
+
+A coding assignment is not complete when code only exists locally.
+
+Default rule:
+
+- assignment completion requires:
+  - code in the implementer's worktree
+  - focused tests for the touched seam
+  - a commit with an intentional message
+  - a pushed branch
+  - an open PR against `master`
+
+PR expectations:
+
+- include `Closes #...` in the PR body
+- include either:
+  - exact governing spec references for the touched seam
+  - or an explicit statement that the PR is non-semantic maintenance and why no platform spec section governs it
+- include a short human summary
+- include tests run
+- include residual risk
+- include any required spec escalation or follow-up issue
+
+Issue and PR spec-reference rule:
+
+- every implementation issue should cite the exact governing spec section(s) for the touched semantic seam
+- every implementation PR should repeat those exact spec references in the PR body
+- if the change is non-semantic maintenance, the PR may explicitly say that no platform spec section governs it and justify that claim
+- if a semantic/runtime seam has no exact spec section, the issue and PR must say so explicitly and treat the work as a spec-gap / ambiguity escalation rather than normal implementation
+- if implementation reveals that the current code already violates the cited spec and that drift is not already captured in the issue, stop and escalate instead of silently absorbing the mismatch into the current change
+- do not rely on issue prose alone when the platform spec already defines the semantics
+
+Pre-implementation rule:
+
+- before writing code, re-read the exact spec section(s) cited in the issue
+- treat those cited sections as the binding semantic contract for the work
+- if the current code, tests, or issue wording disagree with the cited spec, stop and escalate before implementation
+- do not rely on memory of the spec or on the issue summary alone for semantic changes
+
+Minimum spec-reference block:
+
+```text
+Spec references:
+- docs/specs/swarm-platform/platform/contracts/platform-spec.yaml: <section/path>
+- governing rule: <short plain-language statement>
+
+or
+
+Spec references:
+- none; this PR is non-semantic maintenance
+- justification: <why no platform spec section governs this change>
+
+If no exact spec reference exists:
+- explicit ambiguity / gap:
+- escalation owner:
+```
+
+Default lead prompt shape:
+
+```text
+Pick up issue `#NNN`.
+
+Scope:
+- ...
+
+Important steering:
+- spec is the source of truth; do not change the spec directly
+- fail fast, fail closed, aggressive migration, zero legacy behavior
+- no compatibility shims, no fallback logic, no preserving old behavior "just in case"
+- keep one canonical owner for the touched seam
+- stop and escalate immediately on any spec gap, ambiguity, or contradiction
+- stop and escalate immediately if current implementation is already off-spec in a way the issue did not capture
+- do not silently widen the issue by fixing undisclosed spec drift without review
+
+Required workflow:
+- implement the change in your worktree
+- run focused tests for the touched seam
+- commit the work with a clear message
+- push your branch
+- open a PR against `master`
+- include `Closes #NNN` in the PR body
+- include either the exact governing spec reference(s) or an explicit non-semantic-maintenance justification in the PR body
+- report back with the PR number
+
+Deliverable is not complete until the PR is open.
+```
