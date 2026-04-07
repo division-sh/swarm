@@ -68,110 +68,76 @@ func (s *PostgresStore) CancelActiveRunWorkByProducer(ctx context.Context, produ
 		return nil, nil
 	}
 
-	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects("dead_letter", "cancelled_by_kill_previous", 0, "cancelled by --kill-previous"))
-	if err != nil {
-		return nil, fmt.Errorf("marshal kill_previous receipt side effects: %w", err)
-	}
-
 	rows, err := tx.QueryContext(ctx, `
-		WITH targeted AS (
-			SELECT
-				d.delivery_id,
-				d.event_id,
-				d.subscriber_type,
-				d.subscriber_id,
-				d.status,
-				COALESCE(d.active_session_id::text, '') AS active_session_id,
-				e.entity_id,
-				e.flow_instance
-			FROM event_deliveries d
-			JOIN events e ON e.event_id = d.event_id
-			WHERE e.run_id::text = ANY($1::text[])
-			  AND d.status IN ('pending', 'in_progress')
-			FOR UPDATE OF d
-		),
-		updated AS (
-			UPDATE event_deliveries d
-			SET
-				status = 'dead_letter',
-				reason_code = 'cancelled_by_kill_previous',
-				last_error = 'cancelled by --kill-previous',
-				active_session_id = NULL,
-				delivered_at = now()
-			FROM targeted t
-			WHERE d.delivery_id = t.delivery_id
-			RETURNING t.event_id, t.subscriber_type, t.subscriber_id, t.status, t.active_session_id, t.entity_id, t.flow_instance
-		)
-		, receipts AS (
-			INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, processed_at
-			)
-			SELECT
-				u.event_id,
-				u.subscriber_type,
-				u.subscriber_id,
-				u.entity_id,
-				u.flow_instance,
-				'dead_letter',
-				'cancelled_by_kill_previous',
-				$2::jsonb,
-				now()
-			FROM updated u
-			ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
-				entity_id = EXCLUDED.entity_id,
-				flow_instance = EXCLUDED.flow_instance,
-				outcome = EXCLUDED.outcome,
-				reason_code = EXCLUDED.reason_code,
-				side_effects = EXCLUDED.side_effects,
-				processed_at = now()
-			RETURNING event_id, subscriber_id
-		)
 		SELECT
-			u.event_id::text,
-			u.subscriber_id,
-			COALESCE(u.status, ''),
-			COALESCE(u.active_session_id, ''),
-			COALESCE(u.entity_id::text, ''),
-			COALESCE(u.flow_instance, '')
-		FROM updated u
-		JOIN receipts r ON r.event_id = u.event_id AND r.subscriber_id = u.subscriber_id
-		ORDER BY u.subscriber_id ASC, u.event_id::text ASC
-	`, pq.Array(runIDs), string(sideEffects))
+			d.event_id::text,
+			d.subscriber_id
+		FROM event_deliveries d
+		JOIN events e ON e.event_id = d.event_id
+		WHERE e.run_id::text = ANY($1::text[])
+		  AND d.subscriber_type = 'agent'
+		  AND d.status IN ('pending', 'in_progress')
+		ORDER BY d.event_id::text ASC, d.subscriber_id ASC
+	`, pq.Array(runIDs))
 	if err != nil {
-		return nil, fmt.Errorf("cancel kill_previous deliveries/receipts: %w", err)
+		return nil, fmt.Errorf("query kill_previous delivery targets: %w", err)
 	}
 	defer rows.Close()
 
-	transitions := make([]runtimedelivery.Transition, 0, 16)
+	type cancelTarget struct {
+		eventID string
+		agentID string
+	}
+	targets := make([]cancelTarget, 0, 16)
 	for rows.Next() {
 		var (
-			eventID         string
-			agentID         string
-			prevStatus      string
-			activeSessionID string
-			entityID        string
-			flowInstance    string
+			eventID string
+			agentID string
 		)
-		if err := rows.Scan(&eventID, &agentID, &prevStatus, &activeSessionID, &entityID, &flowInstance); err != nil {
-			return nil, fmt.Errorf("scan cancelled delivery transition: %w", err)
+		if err := rows.Scan(&eventID, &agentID); err != nil {
+			return nil, fmt.Errorf("scan kill_previous delivery target: %w", err)
 		}
-		prevState, _ := runtimedelivery.StateFromDelivery(prevStatus, activeSessionID)
-		_ = flowInstance
+		targets = append(targets, cancelTarget{
+			eventID: strings.TrimSpace(eventID),
+			agentID: strings.TrimSpace(agentID),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read kill_previous delivery targets: %w", err)
+	}
+
+	transitions := make([]runtimedelivery.Transition, 0, len(targets))
+	for _, target := range targets {
+		delivery, err := s.lockAgentDeliveryTx(ctx, tx, target.eventID, target.agentID)
+		if err != nil {
+			return nil, err
+		}
+		if !delivery.found {
+			continue
+		}
+		prevState, ok := runtimedelivery.StateFromDelivery(delivery.status, delivery.activeSessionID)
+		if !ok || (prevState != runtimedelivery.StateQueued && prevState != runtimedelivery.StateLaunching && prevState != runtimedelivery.StateActive) {
+			continue
+		}
+		receipt, err := s.applyDeliveryBackedTerminalTransitionTx(ctx, tx, target.eventID, target.agentID, delivery, deliveryBackedTerminalTransitionRequest{
+			reasonCode:   "cancelled_by_kill_previous",
+			errorText:    "cancelled by --kill-previous",
+			retryAdvance: 0,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("cancel kill_previous deliveries/receipts: %w", err)
+		}
 		transitions = append(transitions, runtimedelivery.Transition{
-			EventID:         strings.TrimSpace(eventID),
-			AgentID:         strings.TrimSpace(agentID),
-			EntityID:        strings.TrimSpace(entityID),
+			EventID:         target.eventID,
+			AgentID:         target.agentID,
+			EntityID:        delivery.entityID,
 			State:           runtimedelivery.StateExhausted,
 			PreviousState:   prevState,
 			Reason:          "cancelled_by_kill_previous",
 			TerminalOutcome: "cancelled_by_kill_previous",
-			Error:           "cancelled by --kill-previous",
-			RetryCount:      0,
+			Error:           receipt.Error,
+			RetryCount:      receipt.RetryCount,
 		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read cancelled delivery transitions: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {

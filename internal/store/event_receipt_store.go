@@ -126,6 +126,21 @@ type agentReceiptWriteState struct {
 	deliveryCode string
 }
 
+type lockedAgentDelivery struct {
+	retryCount      int
+	status          string
+	activeSessionID string
+	entityID        string
+	flowInstance    string
+	found           bool
+}
+
+type deliveryBackedTerminalTransitionRequest struct {
+	reasonCode   string
+	errorText    string
+	retryAdvance int
+}
+
 func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
 	return withEventStoreRetry(ctx, nil, func() error {
 		tx, err := s.DB.BeginTx(ctx, nil)
@@ -134,12 +149,37 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, age
 		}
 		defer func() { _ = tx.Rollback() }()
 
-		state, err := s.prepareAgentReceiptWriteStateTx(ctx, tx, eventID, agentID, status, errText)
+		delivery, err := s.lockAgentDeliveryTx(ctx, tx, eventID, agentID)
 		if err != nil {
 			return err
 		}
-		if err := s.upsertAgentReceiptRowTx(ctx, tx, eventID, agentID, state); err != nil {
-			return err
+		if delivery.found {
+			state := buildAgentReceiptWriteState(delivery.retryCount, true, status, errText)
+			if state.finalStatus == runtimemanager.ReceiptStatusDeadLetter {
+				if _, err := s.applyDeliveryBackedTerminalTransitionTx(ctx, tx, eventID, agentID, delivery, deliveryBackedTerminalTransitionRequest{
+					reasonCode:   state.reasonCode,
+					errorText:    state.errorText,
+					retryAdvance: state.retryCount - delivery.retryCount,
+				}); err != nil {
+					return err
+				}
+			} else {
+				if err := s.updateAgentDeliveryRowTx(ctx, tx, eventID, agentID, state); err != nil {
+					return err
+				}
+				if err := s.upsertAgentReceiptRowTx(ctx, tx, eventID, agentID, state); err != nil {
+					return err
+				}
+			}
+		} else {
+			retryCount, err := s.lockAgentReceiptRetryCountTx(ctx, tx, eventID, agentID)
+			if err != nil {
+				return err
+			}
+			state := buildAgentReceiptWriteState(retryCount, false, status, errText)
+			if err := s.upsertAgentReceiptRowTx(ctx, tx, eventID, agentID, state); err != nil {
+				return err
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit event receipt tx: %w", err)
@@ -148,27 +188,18 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, age
 	})
 }
 
-func (s *PostgresStore) prepareAgentReceiptWriteStateTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	eventID, agentID string,
+func buildAgentReceiptWriteState(
+	baseRetryCount int,
+	hasDelivery bool,
 	status runtimemanager.ReceiptStatus,
 	errText string,
-) (agentReceiptWriteState, error) {
+) agentReceiptWriteState {
 	state := agentReceiptWriteState{
 		finalStatus: status,
 		errorText:   strings.TrimSpace(errText),
+		hasDelivery: hasDelivery,
 	}
-	retryCount, hasDelivery, err := s.lockAgentDeliveryRetryCountTx(ctx, tx, eventID, agentID)
-	if err != nil {
-		return state, err
-	}
-	if !hasDelivery {
-		retryCount, err = s.lockAgentReceiptRetryCountTx(ctx, tx, eventID, agentID)
-		if err != nil {
-			return state, err
-		}
-	}
+	retryCount := baseRetryCount
 	if status == runtimemanager.ReceiptStatusError {
 		retryCount++
 	}
@@ -176,11 +207,9 @@ func (s *PostgresStore) prepareAgentReceiptWriteStateTx(
 	if status == runtimemanager.ReceiptStatusError && retryCount >= 2 {
 		finalStatus = runtimemanager.ReceiptStatusDeadLetter
 	}
-	reasonCode := managerReceiptReasonCode(finalStatus, state.errorText)
 	state.finalStatus = finalStatus
 	state.retryCount = retryCount
-	state.reasonCode = reasonCode
-	state.hasDelivery = hasDelivery
+	state.reasonCode = managerReceiptReasonCode(finalStatus, state.errorText)
 	state.deliveryCode = "delivered"
 	switch status {
 	case runtimemanager.ReceiptStatusError:
@@ -191,33 +220,78 @@ func (s *PostgresStore) prepareAgentReceiptWriteStateTx(
 	if state.finalStatus == runtimemanager.ReceiptStatusDeadLetter {
 		state.deliveryCode = "dead_letter"
 	}
-	if !hasDelivery {
-		return state, nil
-	}
-	if err := s.updateAgentDeliveryRowTx(ctx, tx, eventID, agentID, state); err != nil {
-		return state, err
-	}
-	return state, nil
+	return state
 }
 
-func (s *PostgresStore) lockAgentDeliveryRetryCountTx(ctx context.Context, tx *sql.Tx, eventID, agentID string) (int, bool, error) {
-	var retryCount int
+func (s *PostgresStore) lockAgentDeliveryTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	eventID, agentID string,
+) (lockedAgentDelivery, error) {
+	var delivery lockedAgentDelivery
 	err := tx.QueryRowContext(ctx, `
-		SELECT retry_count
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $2
+		SELECT
+			d.retry_count,
+			COALESCE(d.status, ''),
+			COALESCE(d.active_session_id::text, ''),
+			COALESCE(e.entity_id::text, ''),
+			COALESCE(e.flow_instance, '')
+		FROM event_deliveries d
+		INNER JOIN events e ON e.event_id = d.event_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'agent'
+		  AND d.subscriber_id = $2
 		FOR UPDATE
-	`, eventID, agentID).Scan(&retryCount)
+	`, eventID, agentID).Scan(&delivery.retryCount, &delivery.status, &delivery.activeSessionID, &delivery.entityID, &delivery.flowInstance)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return 0, false, nil
+		return lockedAgentDelivery{}, nil
 	case err != nil:
-		return 0, false, fmt.Errorf("lock event delivery retry_count: %w", err)
+		return lockedAgentDelivery{}, fmt.Errorf("lock event delivery row: %w", err)
 	default:
-		return retryCount, true, nil
+		delivery.found = true
+		return delivery, nil
 	}
+}
+
+func (s *PostgresStore) applyDeliveryBackedTerminalTransitionTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	eventID, agentID string,
+	delivery lockedAgentDelivery,
+	req deliveryBackedTerminalTransitionRequest,
+) (runtimemanager.EventReceipt, error) {
+	if !delivery.found {
+		return runtimemanager.EventReceipt{}, fmt.Errorf("apply delivery-backed terminal transition: delivery row required")
+	}
+	reasonCode := strings.TrimSpace(req.reasonCode)
+	if reasonCode == "" {
+		return runtimemanager.EventReceipt{}, fmt.Errorf("apply delivery-backed terminal transition: reason_code required")
+	}
+	if req.retryAdvance < 0 {
+		return runtimemanager.EventReceipt{}, fmt.Errorf("apply delivery-backed terminal transition: retry advance must be non-negative")
+	}
+	state := agentReceiptWriteState{
+		finalStatus:  runtimemanager.ReceiptStatusDeadLetter,
+		retryCount:   delivery.retryCount + req.retryAdvance,
+		reasonCode:   reasonCode,
+		errorText:    strings.TrimSpace(req.errorText),
+		hasDelivery:  true,
+		deliveryCode: "dead_letter",
+	}
+	if err := s.updateAgentDeliveryRowTx(ctx, tx, eventID, agentID, state); err != nil {
+		return runtimemanager.EventReceipt{}, err
+	}
+	if err := s.upsertAgentReceiptRowTx(ctx, tx, eventID, agentID, state); err != nil {
+		return runtimemanager.EventReceipt{}, err
+	}
+	return runtimemanager.EventReceipt{
+		EventID:    strings.TrimSpace(eventID),
+		AgentID:    strings.TrimSpace(agentID),
+		Status:     runtimemanager.ReceiptStatusDeadLetter,
+		RetryCount: state.retryCount,
+		Error:      state.errorText,
+	}, nil
 }
 
 func (s *PostgresStore) lockAgentReceiptRetryCountTx(ctx context.Context, tx *sql.Tx, eventID, agentID string) (int, error) {
