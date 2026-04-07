@@ -15,7 +15,7 @@ import (
 )
 
 type recordingReceiptBus struct {
-	published    []events.Event
+	published   []events.Event
 	runtimeLogs []runtimepipeline.RuntimeLogEntry
 }
 
@@ -39,10 +39,10 @@ func (b *recordingReceiptBus) LogRuntime(_ context.Context, entry runtimepipelin
 }
 
 type receiptReaderStub struct {
-	receipt      EventReceipt
-	found        bool
-	upsertErrs   []error
-	upsertCalls  int
+	receipt     EventReceipt
+	found       bool
+	upsertErrs  []error
+	upsertCalls int
 }
 
 func (*receiptReaderStub) UpsertAgent(context.Context, PersistedAgent) error { return nil }
