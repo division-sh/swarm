@@ -12,6 +12,7 @@ import (
 	"swarm/internal/events"
 	"swarm/internal/runtime/core/eventidentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
@@ -182,6 +183,7 @@ func (eb *EventBus) publishTransactional(
 
 	if passthrough {
 		if len(inboundPlan.Recipients) > 0 {
+			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
 			if err := eb.deliverToAgents(ctx, evt, inboundPlan.PersistedRecipients); err != nil {
 				return err
 			}
@@ -301,6 +303,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		return err
 	}
 	persisted = true
+	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "matched_agent_subscription", plan.ExtraDetail)
 	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
 	if err != nil {
 		return err
@@ -387,6 +390,7 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients); err != nil {
 		return err
 	}
+	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "matched_agent_subscription", plan.ExtraDetail)
 	if len(plan.Recipients) > 0 {
 		if err := eb.deliverToAgents(ctx, evt, plan.PersistedRecipients); err != nil {
 			return err
@@ -433,6 +437,28 @@ func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipient
 		detail[k] = v
 	}
 	eb.logRuntime(ctx, "debug", "Event was delivered to recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, detail, "", 0)
+}
+
+func (eb *EventBus) logQueuedDeliveries(ctx context.Context, evt events.Event, recipients []string, reason string, extra map[string]any) {
+	recipients = uniqueStrings(recipients)
+	if len(recipients) == 0 {
+		return
+	}
+	for _, recipient := range recipients {
+		detail := map[string]any{
+			"delivery_state":          string(runtimedelivery.StateQueued),
+			"delivery_transition":     string(runtimedelivery.StateQueued),
+			"delivery_previous_state": "",
+			"delivery_reason":         strings.TrimSpace(reason),
+			"subscriber_type":         "agent",
+			"subscriber_id":           strings.TrimSpace(recipient),
+			"parent_event_id":         strings.TrimSpace(evt.ParentEventID),
+		}
+		for k, v := range extra {
+			detail[k] = v
+		}
+		eb.logRuntime(ctx, "debug", "Delivery entered queued state", "eventbus", "delivery_lifecycle_transition", evt.ID, string(evt.Type), strings.TrimSpace(recipient), evt.EntityID(), "", nil, detail, "", 0)
+	}
 }
 
 func subscriberIDs(in []Subscriber) []string {
@@ -596,6 +622,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		return err
 	}
 	persisted = true
+	eb.logQueuedDeliveries(ctx, evt, recipients, "direct_publish", map[string]any{"direct": true})
 	if err := eb.deliverToAgents(ctx, evt, recipients); err != nil {
 		return err
 	}

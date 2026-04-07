@@ -104,6 +104,16 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if len(publisher.marks) != 1 {
 		t.Fatalf("expected 1 delivery mark, got %d", len(publisher.marks))
 	}
+	if len(publisher.runtimeLogs) != 1 {
+		t.Fatalf("expected 1 runtime log, got %d", len(publisher.runtimeLogs))
+	}
+	if publisher.runtimeLogs[0].Action != "delivery_lifecycle_transition" {
+		t.Fatalf("runtime log action = %q, want delivery_lifecycle_transition", publisher.runtimeLogs[0].Action)
+	}
+	detail := publisher.runtimeLogs[0].Detail.(map[string]any)
+	if detail["delivery_state"] != "active" || detail["delivery_previous_state"] != "launching" || detail["delivery_reason"] != "session_started" {
+		t.Fatalf("active delivery detail = %#v", detail)
+	}
 	evt := publisher.events[0]
 	if evt.Type != events.EventType("platform.agent_started") {
 		t.Fatalf("event type = %s, want platform.agent_started", evt.Type)
@@ -146,6 +156,12 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	}
 	if len(publisher.marks) != 1 {
 		t.Fatalf("expected 1 delivery mark, got %d", len(publisher.marks))
+	}
+	if len(publisher.runtimeLogs) != 1 {
+		t.Fatalf("expected 1 runtime log, got %d", len(publisher.runtimeLogs))
+	}
+	if publisher.runtimeLogs[0].Action != "delivery_lifecycle_transition" {
+		t.Fatalf("runtime log action = %q, want delivery_lifecycle_transition", publisher.runtimeLogs[0].Action)
 	}
 	evt := publisher.events[0]
 	if evt.Type != events.EventType("platform.agent_started") {

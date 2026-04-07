@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -18,6 +19,15 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	}
 	if err := publisher.MarkDeliveryInProgress(ctx, session.AgentID, session.ID); err != nil {
 		logPublisherRuntime(ctx, publisher, "error", "mark_delivery_in_progress_failed", "Marking the agent delivery in progress failed", session.AgentID, session.ID, "", nil, err)
+	} else {
+		logPublisherRuntime(ctx, publisher, "debug", "delivery_lifecycle_transition", "Delivery entered active state", session.AgentID, session.ID, "", map[string]any{
+			"delivery_state":          string(runtimedelivery.StateActive),
+			"delivery_transition":     string(runtimedelivery.StateActive),
+			"delivery_previous_state": string(runtimedelivery.StateLaunching),
+			"delivery_reason":         "session_started",
+			"subscriber_type":         "agent",
+			"subscriber_id":           strings.TrimSpace(session.AgentID),
+		}, nil)
 	}
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	payload := map[string]any{

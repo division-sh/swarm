@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,7 +15,8 @@ import (
 )
 
 type recordingReceiptBus struct {
-	published []events.Event
+	published    []events.Event
+	runtimeLogs []runtimepipeline.RuntimeLogEntry
 }
 
 func (b *recordingReceiptBus) Publish(_ context.Context, evt events.Event) error {
@@ -31,7 +33,8 @@ func (*recordingReceiptBus) Subscribe(string, ...events.EventType) <-chan events
 func (*recordingReceiptBus) Unsubscribe(string)           {}
 func (*recordingReceiptBus) Store() runtimebus.EventStore { return runtimebus.InMemoryEventStore{} }
 func (*recordingReceiptBus) ResetInMemoryState() error    { return nil }
-func (*recordingReceiptBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+func (b *recordingReceiptBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	b.runtimeLogs = append(b.runtimeLogs, entry)
 	return nil
 }
 
@@ -260,5 +263,102 @@ func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 	}
 	if agent.parent != "evt-123" {
 		t.Fatalf("parent event = %q, want evt-123", agent.parent)
+	}
+}
+
+type deliveryLifecycleStoreStub struct {
+	receiptReaderStub
+	markCalls []string
+}
+
+func (s *deliveryLifecycleStoreStub) MarkEventDeliveryInProgress(_ context.Context, eventID, agentID, sessionID string) error {
+	s.markCalls = append(s.markCalls, strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)+"|"+strings.TrimSpace(sessionID))
+	return nil
+}
+
+func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	store := &deliveryLifecycleStoreStub{}
+	am := NewAgentManager(bus, nil, store)
+	evt := events.Event{ID: "evt-1", Type: events.EventType("task.started")}
+	agent := traceRecordingAgent{parent: ""}
+
+	if err := am.processEvent(context.Background(), &agent, evt); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if len(store.markCalls) != 1 {
+		t.Fatalf("mark calls = %d, want 1", len(store.markCalls))
+	}
+	if len(bus.runtimeLogs) == 0 {
+		t.Fatal("expected runtime logs")
+	}
+	entry := bus.runtimeLogs[0]
+	if entry.Action != "delivery_lifecycle_transition" {
+		t.Fatalf("action = %q, want delivery_lifecycle_transition", entry.Action)
+	}
+	detail := entry.Detail.(map[string]any)
+	if detail["delivery_state"] != "launching" || detail["delivery_previous_state"] != "queued" || detail["delivery_reason"] != "agent_processing" {
+		t.Fatalf("launching detail = %#v", detail)
+	}
+}
+
+func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *testing.T) {
+	cases := []struct {
+		name          string
+		receipt       EventReceipt
+		wantState     string
+		wantTerminal  string
+		wantRetry     int
+		wantReasonRaw string
+	}{
+		{
+			name:          "retrying",
+			receipt:       EventReceipt{EventID: "evt-1", AgentID: "agent-a", Status: ReceiptStatusError, RetryCount: 1, Error: "boom"},
+			wantState:     "retrying",
+			wantTerminal:  "",
+			wantRetry:     1,
+			wantReasonRaw: "boom",
+		},
+		{
+			name:          "exhausted",
+			receipt:       EventReceipt{EventID: "evt-1", AgentID: "agent-a", Status: ReceiptStatusDeadLetter, RetryCount: 2, Error: "boom"},
+			wantState:     "exhausted",
+			wantTerminal:  "retry_exhausted",
+			wantRetry:     2,
+			wantReasonRaw: "boom",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bus := &recordingReceiptBus{}
+			store := &deliveryLifecycleStoreStub{}
+			store.receipt = tc.receipt
+			store.found = true
+			am := NewAgentManager(bus, nil, store)
+
+			am.writeReceipt(context.Background(), "evt-1", "agent-a", ReceiptStatusError, "boom")
+
+			if len(bus.runtimeLogs) != 1 {
+				t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
+			}
+			entry := bus.runtimeLogs[0]
+			if entry.Action != "delivery_lifecycle_transition" {
+				t.Fatalf("action = %q, want delivery_lifecycle_transition", entry.Action)
+			}
+			detail := entry.Detail.(map[string]any)
+			if detail["delivery_state"] != tc.wantState {
+				t.Fatalf("delivery_state = %#v, want %q", detail["delivery_state"], tc.wantState)
+			}
+			if detail["retry_count"] != tc.wantRetry {
+				t.Fatalf("retry_count = %#v, want %d", detail["retry_count"], tc.wantRetry)
+			}
+			if detail["delivery_reason"] != tc.wantReasonRaw {
+				t.Fatalf("delivery_reason = %#v, want %q", detail["delivery_reason"], tc.wantReasonRaw)
+			}
+			if got := detail["delivery_terminal_outcome"]; got != tc.wantTerminal && !(got == nil && tc.wantTerminal == "") {
+				t.Fatalf("delivery_terminal_outcome = %#v, want %q", got, tc.wantTerminal)
+			}
+		})
 	}
 }

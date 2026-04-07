@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -172,5 +173,57 @@ func TestHandler_EventDetailIncludesDeliveryLifecycle(t *testing.T) {
 	}
 	if lifecycle["pending"] != float64(1) || lifecycle["in_progress"] != float64(2) || lifecycle["delivered"] != float64(3) {
 		t.Fatalf("delivery_lifecycle = %#v", lifecycle)
+	}
+}
+
+func TestSQLObservabilityReader_ListRuntimeLogs_ProjectsDeliveryLifecycleFields(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	reader := NewSQLObservabilityReader(db)
+	ctx := context.Background()
+
+	insertRuntimeLog := func(eventID, state, prev, reason, terminal string, retryCount int, createdAt time.Time) {
+		t.Helper()
+		payload := `{
+			"log_level":"debug",
+			"message":"delivery lifecycle",
+			"details":{
+				"component":"agent-manager",
+				"action":"delivery_lifecycle_transition",
+				"event_id":"` + eventID + `",
+				"agent_id":"agent-1",
+				"delivery_state":"` + state + `",
+				"delivery_previous_state":"` + prev + `",
+				"delivery_transition":"` + state + `",
+				"delivery_reason":"` + reason + `",
+				"delivery_terminal_outcome":"` + terminal + `",
+				"retry_count":` + fmt.Sprintf("%d", retryCount) + `
+			}
+		}`
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', $2
+			)
+		`, payload, createdAt); err != nil {
+			t.Fatalf("insert runtime_log: %v", err)
+		}
+	}
+
+	insertRuntimeLog("evt-retry", "retrying", "active", "boom", "", 1, time.Unix(1700000100, 0).UTC())
+	insertRuntimeLog("evt-dead", "exhausted", "retrying", "boom", "retry_exhausted", 2, time.Unix(1700000200, 0).UTC())
+
+	rows, err := reader.ListRuntimeLogs(ctx, RuntimeLogFilter{Component: "agent-manager"}, 10)
+	if err != nil {
+		t.Fatalf("ListRuntimeLogs: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows len = %d, want 2", len(rows))
+	}
+	if rows[0].DeliveryState != "exhausted" || rows[0].PreviousState != "retrying" || rows[0].Terminal != "retry_exhausted" || rows[0].RetryCount != 2 {
+		t.Fatalf("terminal runtime log = %#v", rows[0])
+	}
+	if rows[1].DeliveryState != "retrying" || rows[1].PreviousState != "active" || rows[1].Reason != "boom" || rows[1].RetryCount != 1 {
+		t.Fatalf("retry runtime log = %#v", rows[1])
 	}
 }

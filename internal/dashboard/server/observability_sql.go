@@ -104,6 +104,12 @@ type runtimeLogRecord struct {
 	DurationUS    int    `json:"duration_us,omitempty"`
 	Source        string `json:"source,omitempty"`
 	Message       string `json:"message,omitempty"`
+	DeliveryState string `json:"delivery_state,omitempty"`
+	PreviousState string `json:"delivery_previous_state,omitempty"`
+	Transition    string `json:"delivery_transition,omitempty"`
+	Reason        string `json:"delivery_reason,omitempty"`
+	Terminal      string `json:"delivery_terminal_outcome,omitempty"`
+	RetryCount    int    `json:"delivery_retry_count,omitempty"`
 	Detail        any    `json:"detail,omitempty"`
 	Correlation   any    `json:"correlation,omitempty"`
 }
@@ -347,6 +353,12 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 			COALESCE(e.payload->'details'->>'entity_id', ''),
 			COALESCE(e.payload->'details'->>'session_id', ''),
 			COALESCE(NULLIF(e.payload->'details'->>'duration_us', ''), '0')::int,
+			COALESCE(e.payload->'details'->>'delivery_state', ''),
+			COALESCE(e.payload->'details'->>'delivery_previous_state', ''),
+			COALESCE(e.payload->'details'->>'delivery_transition', ''),
+			COALESCE(e.payload->'details'->>'delivery_reason', ''),
+			COALESCE(e.payload->'details'->>'delivery_terminal_outcome', ''),
+			COALESCE(NULLIF(e.payload->'details'->>'retry_count', ''), '0')::int,
 			COALESCE(e.payload->'details', '{}'::jsonb),
 			COALESCE(e.payload->'details'->'correlation', '{}'::jsonb),
 			COALESCE(e.payload->>'message', '')
@@ -384,7 +396,7 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 			detailRaw      []byte
 			correlationRaw []byte
 		)
-		if err := rows.Scan(&item.ID, &item.EventID, &item.TS, &item.Level, &item.Component, &item.Action, &item.EventType, &item.ParentEventID, &item.HandlerID, &item.Error, &item.ErrorCode, &item.AgentID, &item.Source, &item.EntityID, &item.SessionID, &item.DurationUS, &detailRaw, &correlationRaw, &item.Message); err != nil {
+		if err := rows.Scan(&item.ID, &item.EventID, &item.TS, &item.Level, &item.Component, &item.Action, &item.EventType, &item.ParentEventID, &item.HandlerID, &item.Error, &item.ErrorCode, &item.AgentID, &item.Source, &item.EntityID, &item.SessionID, &item.DurationUS, &item.DeliveryState, &item.PreviousState, &item.Transition, &item.Reason, &item.Terminal, &item.RetryCount, &detailRaw, &correlationRaw, &item.Message); err != nil {
 			return nil, fmt.Errorf("scan runtime log: %w", err)
 		}
 		detailMap, err := decodeJSONMap(detailRaw)

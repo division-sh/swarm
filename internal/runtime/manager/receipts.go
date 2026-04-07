@@ -11,6 +11,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
+	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimerterr "swarm/internal/runtime/rterrors"
 )
@@ -59,6 +60,24 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 					Error:     strings.TrimSpace(err.Error()),
 				})
 			}
+		} else if am.bus != nil {
+			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+				Level:     "debug",
+				Component: "agent-manager",
+				Action:    "delivery_lifecycle_transition",
+				EventID:   strings.TrimSpace(evt.ID),
+				EventType: strings.TrimSpace(string(evt.Type)),
+				AgentID:   agent.ID(),
+				EntityID:  strings.TrimSpace(evt.EntityID()),
+				Detail: map[string]any{
+					"delivery_state":          string(runtimedelivery.StateLaunching),
+					"delivery_transition":     string(runtimedelivery.StateLaunching),
+					"delivery_previous_state": string(runtimedelivery.StateQueued),
+					"delivery_reason":         "agent_processing",
+					"subscriber_type":         "agent",
+					"subscriber_id":           agent.ID(),
+				},
+			})
 		}
 	}
 	out, err := agent.OnEvent(ctx, evt)
@@ -379,12 +398,71 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID strin
 		}
 		return
 	}
+	am.logDeliveryLifecycle(writeCtx, eventID, agentID, status, errText)
 
 	// Spec v2.0: dead-letter events are escalated to the agent's manager. The manager
 	// decides whether to retry, skip, or escalate further.
 	if status == ReceiptStatusError {
 		am.maybeEscalateDeadLetter(ctx, eventID, agentID)
 	}
+}
+
+func (am *AgentManager) logDeliveryLifecycle(ctx context.Context, eventID, agentID string, requestedStatus ReceiptStatus, errText string) {
+	if am == nil || am.bus == nil || am.store == nil {
+		return
+	}
+	reader, ok := am.store.(eventReceiptReader)
+	if !ok || reader == nil {
+		return
+	}
+	receipt, found, err := reader.GetEventReceipt(ctx, eventID, agentID)
+	if err != nil || !found {
+		return
+	}
+	detail := map[string]any{
+		"subscriber_type": "agent",
+		"subscriber_id":   strings.TrimSpace(agentID),
+		"retry_count":     receipt.RetryCount,
+	}
+	entry := runtimepipeline.RuntimeLogEntry{
+		Level:     "debug",
+		Component: "agent-manager",
+		Action:    "delivery_lifecycle_transition",
+		EventID:   strings.TrimSpace(eventID),
+		AgentID:   strings.TrimSpace(agentID),
+		Detail:    detail,
+	}
+	switch receipt.Status {
+	case ReceiptStatusProcessed:
+		detail["delivery_state"] = string(runtimedelivery.StateDelivered)
+		detail["delivery_transition"] = string(runtimedelivery.StateDelivered)
+		detail["delivery_previous_state"] = string(runtimedelivery.StateActive)
+		detail["delivery_reason"] = "agent_processed"
+		entry.Message = "Delivery entered delivered state"
+	case ReceiptStatusError:
+		detail["delivery_state"] = string(runtimedelivery.StateRetrying)
+		detail["delivery_transition"] = string(runtimedelivery.StateRetrying)
+		detail["delivery_previous_state"] = string(runtimedelivery.StateActive)
+		detail["delivery_reason"] = strings.TrimSpace(errText)
+		entry.Message = "Delivery entered retrying state"
+		if strings.TrimSpace(receipt.Error) != "" {
+			entry.Error = strings.TrimSpace(receipt.Error)
+		}
+	case ReceiptStatusDeadLetter:
+		detail["delivery_state"] = string(runtimedelivery.StateExhausted)
+		detail["delivery_transition"] = string(runtimedelivery.StateExhausted)
+		detail["delivery_previous_state"] = string(runtimedelivery.StateRetrying)
+		detail["delivery_reason"] = strings.TrimSpace(errText)
+		detail["delivery_terminal_outcome"] = "retry_exhausted"
+		entry.Message = "Delivery entered exhausted state"
+		if strings.TrimSpace(receipt.Error) != "" {
+			entry.Error = strings.TrimSpace(receipt.Error)
+		}
+	default:
+		return
+	}
+	_ = requestedStatus
+	_ = am.bus.LogRuntime(ctx, entry)
 }
 
 func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, agentID string) {
