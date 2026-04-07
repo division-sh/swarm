@@ -1464,6 +1464,35 @@ func TestSQLConversationReader_ListFailsOnMalformedCanonicalRuntimeState(t *test
 	}
 }
 
+func TestSQLConversationReader_GetFailsOnMalformedCanonicalRuntimeState(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions: store.SchemaFlavorCanonical,
+			Turns:    store.SchemaFlavorCanonical,
+		},
+	}})
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
+		WithArgs("sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(`{"summary":123}`), []byte(`[]`), time.Now().UTC()))
+
+	if _, _, err := reader.Get(context.Background(), "sess-1"); err == nil {
+		t.Fatal("expected malformed canonical runtime_state to fail")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestSQLConversationReader_GetFailsOnMalformedCanonicalTurnSummary(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
