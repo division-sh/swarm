@@ -13,6 +13,18 @@ const (
 	StateExhausted State = "exhausted"
 )
 
+type Transition struct {
+	EventID         string
+	AgentID         string
+	EntityID        string
+	State           State
+	PreviousState   State
+	Reason          string
+	TerminalOutcome string
+	Error           string
+	RetryCount      int
+}
+
 func StateFromDelivery(status, activeSessionID string) (State, bool) {
 	switch strings.TrimSpace(strings.ToLower(status)) {
 	case "pending":

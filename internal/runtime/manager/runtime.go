@@ -16,6 +16,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
@@ -23,7 +24,7 @@ import (
 )
 
 type runCanceller interface {
-	CancelActiveRunWorkByProducer(ctx context.Context, producerID string) ([]string, error)
+	CancelActiveRunWorkByProducer(ctx context.Context, producerID string) ([]runtimedelivery.Transition, error)
 }
 
 func (am *AgentManager) RestartAgent(agentID string) error {
@@ -312,16 +313,46 @@ func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string)
 		return nil
 	}
 	var (
-		affectedAgents []string
-		err            error
+		transitions []runtimedelivery.Transition
+		err         error
 	)
 	if canceller, ok := am.store.(runCanceller); ok && canceller != nil {
-		affectedAgents, err = canceller.CancelActiveRunWorkByProducer(ctx, producerID)
+		transitions, err = canceller.CancelActiveRunWorkByProducer(ctx, producerID)
 		if err != nil {
 			return fmt.Errorf("cancel previous runs for %s: %w", producerID, err)
 		}
 	} else {
 		return nil
+	}
+	affectedAgents := make([]string, 0, len(transitions))
+	for _, transition := range transitions {
+		affectedAgents = append(affectedAgents, transition.AgentID)
+		if am.bus == nil {
+			continue
+		}
+		detail := map[string]any{
+			"delivery_state":          string(transition.State),
+			"delivery_transition":     string(transition.State),
+			"delivery_previous_state": string(transition.PreviousState),
+			"delivery_reason":         strings.TrimSpace(transition.Reason),
+			"subscriber_type":         "agent",
+			"subscriber_id":           strings.TrimSpace(transition.AgentID),
+			"retry_count":             transition.RetryCount,
+		}
+		if strings.TrimSpace(transition.TerminalOutcome) != "" {
+			detail["delivery_terminal_outcome"] = strings.TrimSpace(transition.TerminalOutcome)
+		}
+		_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+			Level:     "debug",
+			Component: "agent-manager",
+			Action:    "delivery_lifecycle_transition",
+			Message:   "Delivery entered exhausted state",
+			EventID:   strings.TrimSpace(transition.EventID),
+			AgentID:   strings.TrimSpace(transition.AgentID),
+			EntityID:  strings.TrimSpace(transition.EntityID),
+			Error:     strings.TrimSpace(transition.Error),
+			Detail:    detail,
+		})
 	}
 	if killer, ok := am.workspaces.(workspace.OrphanKiller); ok && killer != nil {
 		if err := killer.KillOrphanProcesses(am.runtimeContext()); err != nil {

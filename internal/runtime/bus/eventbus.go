@@ -111,22 +111,25 @@ func (eb *EventBus) Store() EventStore {
 	return eb.store
 }
 
-func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, sessionID string) error {
+func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, sessionID string) (bool, error) {
 	if eb == nil || eb.store == nil {
-		return nil
+		return false, nil
 	}
 	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
 	if !ok || strings.TrimSpace(inbound.ID) == "" || strings.TrimSpace(agentID) == "" {
-		return nil
+		return false, nil
 	}
 	type deliveryProgressWriter interface {
 		MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error
 	}
 	writer, ok := eb.store.(deliveryProgressWriter)
 	if !ok || writer == nil {
-		return nil
+		return false, nil
 	}
-	return writer.MarkEventDeliveryInProgress(ctx, inbound.ID, agentID, sessionID)
+	if err := writer.MarkEventDeliveryInProgress(ctx, inbound.ID, agentID, sessionID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (eb *EventBus) RouteTable() *RouteTable {

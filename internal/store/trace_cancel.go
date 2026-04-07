@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	"github.com/lib/pq"
+	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 )
 
-func (s *PostgresStore) CancelActiveRunWorkByProducer(ctx context.Context, producerID string) ([]string, error) {
+func (s *PostgresStore) CancelActiveRunWorkByProducer(ctx context.Context, producerID string) ([]runtimedelivery.Transition, error) {
 	producerID = strings.TrimSpace(producerID)
 	if producerID == "" {
 		return nil, nil
@@ -67,47 +68,20 @@ func (s *PostgresStore) CancelActiveRunWorkByProducer(ctx context.Context, produ
 		return nil, nil
 	}
 
-	agentRows, err := tx.QueryContext(ctx, `
-		SELECT DISTINCT d.subscriber_id
-		FROM event_deliveries d
-		JOIN events e ON e.event_id = d.event_id
-		WHERE e.run_id::text = ANY($1::text[])
-		  AND d.subscriber_type = 'agent'
-		  AND d.status IN ('pending', 'in_progress')
-		ORDER BY d.subscriber_id ASC
-	`, pq.Array(runIDs))
-	if err != nil {
-		return nil, fmt.Errorf("query affected agents for runs: %w", err)
-	}
-	defer agentRows.Close()
-
-	affectedAgents := make([]string, 0, 16)
-	for agentRows.Next() {
-		var agentID string
-		if err := agentRows.Scan(&agentID); err != nil {
-			return nil, fmt.Errorf("scan affected agent: %w", err)
-		}
-		agentID = strings.TrimSpace(agentID)
-		if agentID != "" {
-			affectedAgents = append(affectedAgents, agentID)
-		}
-	}
-	if err := agentRows.Err(); err != nil {
-		return nil, fmt.Errorf("read affected agents: %w", err)
-	}
-
 	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects("dead_letter", "cancelled_by_kill_previous", 0, "cancelled by --kill-previous"))
 	if err != nil {
 		return nil, fmt.Errorf("marshal kill_previous receipt side effects: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
+	rows, err := tx.QueryContext(ctx, `
 		WITH targeted AS (
 			SELECT
 				d.delivery_id,
 				d.event_id,
 				d.subscriber_type,
 				d.subscriber_id,
+				d.status,
+				COALESCE(d.active_session_id::text, '') AS active_session_id,
 				e.entity_id,
 				e.flow_instance
 			FROM event_deliveries d
@@ -126,37 +100,83 @@ func (s *PostgresStore) CancelActiveRunWorkByProducer(ctx context.Context, produ
 				delivered_at = now()
 			FROM targeted t
 			WHERE d.delivery_id = t.delivery_id
-			RETURNING t.event_id, t.subscriber_type, t.subscriber_id, t.entity_id, t.flow_instance
+			RETURNING t.event_id, t.subscriber_type, t.subscriber_id, t.status, t.active_session_id, t.entity_id, t.flow_instance
 		)
-		INSERT INTO event_receipts (
+		, receipts AS (
+			INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
 			outcome, reason_code, side_effects, processed_at
+			)
+			SELECT
+				u.event_id,
+				u.subscriber_type,
+				u.subscriber_id,
+				u.entity_id,
+				u.flow_instance,
+				'dead_letter',
+				'cancelled_by_kill_previous',
+				$2::jsonb,
+				now()
+			FROM updated u
+			ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+				entity_id = EXCLUDED.entity_id,
+				flow_instance = EXCLUDED.flow_instance,
+				outcome = EXCLUDED.outcome,
+				reason_code = EXCLUDED.reason_code,
+				side_effects = EXCLUDED.side_effects,
+				processed_at = now()
+			RETURNING event_id, subscriber_id
 		)
 		SELECT
-			u.event_id,
-			u.subscriber_type,
+			u.event_id::text,
 			u.subscriber_id,
-			u.entity_id,
-			u.flow_instance,
-			'dead_letter',
-			'cancelled_by_kill_previous',
-			$2::jsonb,
-			now()
+			COALESCE(u.status, ''),
+			COALESCE(u.active_session_id, ''),
+			COALESCE(u.entity_id::text, ''),
+			COALESCE(u.flow_instance, '')
 		FROM updated u
-		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
-			entity_id = EXCLUDED.entity_id,
-			flow_instance = EXCLUDED.flow_instance,
-			outcome = EXCLUDED.outcome,
-			reason_code = EXCLUDED.reason_code,
-			side_effects = EXCLUDED.side_effects,
-			processed_at = now()
-	`, pq.Array(runIDs), string(sideEffects)); err != nil {
+		JOIN receipts r ON r.event_id = u.event_id AND r.subscriber_id = u.subscriber_id
+		ORDER BY u.subscriber_id ASC, u.event_id::text ASC
+	`, pq.Array(runIDs), string(sideEffects))
+	if err != nil {
 		return nil, fmt.Errorf("cancel kill_previous deliveries/receipts: %w", err)
+	}
+	defer rows.Close()
+
+	transitions := make([]runtimedelivery.Transition, 0, 16)
+	for rows.Next() {
+		var (
+			eventID         string
+			agentID         string
+			prevStatus      string
+			activeSessionID string
+			entityID        string
+			flowInstance    string
+		)
+		if err := rows.Scan(&eventID, &agentID, &prevStatus, &activeSessionID, &entityID, &flowInstance); err != nil {
+			return nil, fmt.Errorf("scan cancelled delivery transition: %w", err)
+		}
+		prevState, _ := runtimedelivery.StateFromDelivery(prevStatus, activeSessionID)
+		_ = flowInstance
+		transitions = append(transitions, runtimedelivery.Transition{
+			EventID:         strings.TrimSpace(eventID),
+			AgentID:         strings.TrimSpace(agentID),
+			EntityID:        strings.TrimSpace(entityID),
+			State:           runtimedelivery.StateExhausted,
+			PreviousState:   prevState,
+			Reason:          "cancelled_by_kill_previous",
+			TerminalOutcome: "cancelled_by_kill_previous",
+			Error:           "cancelled by --kill-previous",
+			RetryCount:      0,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read cancelled delivery transitions: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit cancel runs tx: %w", err)
 	}
 	committed = true
-	return affectedAgents, nil
+	return transitions, nil
 }
