@@ -282,24 +282,31 @@ func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefin
 	}
 
 	if actor.NativeTools.Bash {
-		addNativeCapabilityTool("bash")
 		if _, ok := runtimeSet["bash"]; !ok {
 			providerBuiltins = append(providerBuiltins, "Bash")
 		}
+		addNativeCapabilityTool("bash")
 	}
 	if actor.NativeTools.WebSearch {
-		addNativeCapabilityTool("web_search")
 		if _, ok := runtimeSet["web_search"]; !ok {
 			providerBuiltins = append(providerBuiltins, "WebSearch")
 		}
+		addNativeCapabilityTool("web_search")
 	}
 	if actor.NativeTools.FileIO {
-		addNativeCapabilityTool("read_file")
-		addNativeCapabilityTool("write_file")
 		_, hasReadFallback := runtimeSet["read_file"]
 		_, hasWriteFallback := runtimeSet["write_file"]
-		if !hasReadFallback && !hasWriteFallback {
-			providerBuiltins = append(providerBuiltins, "Read", "Write", "Edit")
+		if hasReadFallback {
+			addNativeCapabilityTool("read_file")
+		} else {
+			providerBuiltins = append(providerBuiltins, "Read")
+			addNativeCapabilityTool("read_file")
+		}
+		if hasWriteFallback {
+			addNativeCapabilityTool("write_file")
+		} else {
+			providerBuiltins = append(providerBuiltins, "Write", "Edit")
+			addNativeCapabilityTool("write_file")
 		}
 	}
 

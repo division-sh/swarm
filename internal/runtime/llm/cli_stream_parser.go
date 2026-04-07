@@ -201,39 +201,20 @@ func (a *cliStreamAccumulator) captureDiagnostics(obj map[string]any) {
 	if a == nil || len(obj) == 0 {
 		return
 	}
-	walkCLIVisibilityPayload(obj, func(key string, value any) {
-		switch key {
-		case "mcp_servers":
-			for name, status := range parseMCPServers(value) {
-				if a.mcpServers == nil {
-					a.mcpServers = map[string]string{}
-				}
-				a.mcpServers[name] = status
+	if value, ok := obj["mcp_servers"]; ok {
+		for name, status := range parseMCPServers(value) {
+			if a.mcpServers == nil {
+				a.mcpServers = map[string]string{}
 			}
-		case "tools":
-			for _, name := range parseVisibleToolNames(value) {
-				a.appendVisibleTool(name)
-			}
-			for _, name := range parseMCPVisibleToolNames(value) {
-				a.appendVisibleTool(name)
-			}
+			a.mcpServers[name] = status
 		}
-	})
-}
-
-func walkCLIVisibilityPayload(value any, visit func(key string, value any)) {
-	switch typed := value.(type) {
-	case map[string]any:
-		for rawKey, nested := range typed {
-			key := strings.TrimSpace(strings.ToLower(rawKey))
-			if key != "" {
-				visit(key, nested)
-			}
-			walkCLIVisibilityPayload(nested, visit)
+	}
+	if value, ok := obj["tools"]; ok {
+		for _, name := range parseVisibleToolNames(value) {
+			a.appendVisibleTool(name)
 		}
-	case []any:
-		for _, nested := range typed {
-			walkCLIVisibilityPayload(nested, visit)
+		for _, name := range parseMCPVisibleToolNames(value) {
+			a.appendVisibleTool(name)
 		}
 	}
 }

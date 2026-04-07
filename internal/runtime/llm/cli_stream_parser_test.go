@@ -132,3 +132,14 @@ func TestParseCLIResponse_NormalizesBuiltinToolCallNames(t *testing.T) {
 		t.Fatalf("second tool call = %#v", resp.ToolCalls[1])
 	}
 }
+
+func TestCLIStreamAccumulator_IgnoresNestedToolArgumentListsForVisibility(t *testing.T) {
+	acc := newCLIStreamAccumulator()
+	acc.AddLine([]byte(`{"type":"system","subtype":"init","session_id":"sess-nested","tools":["Read"]}`))
+	acc.AddLine([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"agent_hire","input":{"tools":["bash","web_search"]}}]}}`))
+
+	resp := acc.Response()
+	if len(resp.VisibleTools) != 1 || resp.VisibleTools[0] != "read_file" {
+		t.Fatalf("visible tools = %#v", resp.VisibleTools)
+	}
+}

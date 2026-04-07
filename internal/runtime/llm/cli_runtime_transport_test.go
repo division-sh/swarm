@@ -186,6 +186,24 @@ func TestCLIExecutionToolSurface_CanonicalizesProviderBuiltins(t *testing.T) {
 	}
 }
 
+func TestCLIExecutionToolSurface_FileIOMixedFallbacksStayExecutable(t *testing.T) {
+	surface := cliExecutionToolSurfaceForActor(models.AgentConfig{
+		NativeTools: models.NativeToolConfig{
+			FileIO: true,
+		},
+	}, []ToolDefinition{
+		{Name: "read_file"},
+		{Name: "emit_category_assessed"},
+	})
+
+	if !slices.Equal(surface.CanonicalVisibleTools, []string{"emit_category_assessed", "read_file", "write_file"}) {
+		t.Fatalf("canonical visible tools = %#v", surface.CanonicalVisibleTools)
+	}
+	if !slices.Equal(surface.ProviderBuiltinTools, []string{"Edit", "Write"}) {
+		t.Fatalf("provider builtin tools = %#v", surface.ProviderBuiltinTools)
+	}
+}
+
 func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:18082")
