@@ -636,11 +636,14 @@ func TestResolveHandlerEntityIDForFlowCreateEntityKeepsInboundReferenceAndClears
 }
 
 func TestHandlerExecutionStateSnapshotCreateEntityStartsClean(t *testing.T) {
-	snapshot := handlerExecutionStateSnapshot(runtimecontracts.SystemNodeEventHandler{CreateEntity: true}, "ent-child", WorkflowState{
+	snapshot, err := handlerExecutionStateSnapshot(runtimecontracts.SystemNodeEventHandler{CreateEntity: true}, "ent-child", WorkflowState{
 		EntityID: "ent-parent",
 		Stage:    WorkflowStateID("queued"),
 		Metadata: map[string]any{"subject_id": "ent-parent"},
 	})
+	if err != nil {
+		t.Fatalf("handlerExecutionStateSnapshot: %v", err)
+	}
 
 	if got := snapshot.EntityID.String(); got != "ent-child" {
 		t.Fatalf("snapshot entity_id = %q, want ent-child", got)
@@ -653,6 +656,28 @@ func TestHandlerExecutionStateSnapshotCreateEntityStartsClean(t *testing.T) {
 	}
 	if got := strings.TrimSpace(asString(snapshot.Metadata["subject_id"])); got != "ent-parent" {
 		t.Fatalf("snapshot subject_id = %q, want ent-parent", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerRejectsMalformedPersistedGateShape(t *testing.T) {
+	pc := &PipelineCoordinator{
+		bus:            &recordingPipelineBus{},
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+	}
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
+		Event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"),
+		State: WorkflowState{
+			Stage:    WorkflowStateID("queued"),
+			Metadata: map[string]any{"gates": "invalid"},
+		},
+	}, false)
+	if err == nil {
+		t.Fatal("expected malformed persisted gates to fail closed")
+	}
+	if !strings.Contains(err.Error(), "metadata.gates") {
+		t.Fatalf("error = %v, want metadata.gates context", err)
 	}
 }
 

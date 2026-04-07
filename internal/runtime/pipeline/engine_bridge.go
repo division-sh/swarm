@@ -193,6 +193,10 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, fmt.Errorf("build runtime engine: %w", err)
 	}
+	stateSnapshot, err := handlerExecutionStateSnapshot(handler, entityID, triggerCtx.State)
+	if err != nil {
+		return contractHandlerExecutionResult{}, err
+	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
 		EntityID:   identity.NormalizeEntityID(entityID),
 		NodeID:     identity.NormalizeNodeID(nodeID),
@@ -201,7 +205,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		ChainDepth: triggerCtx.Event.ChainDepth,
 		Handler:    handler,
 		Preview:    preview,
-		State:      handlerExecutionStateSnapshot(handler, entityID, triggerCtx.State),
+		State:      stateSnapshot,
 	})
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
