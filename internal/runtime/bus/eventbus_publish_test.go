@@ -225,6 +225,48 @@ func assertSortedStringsEqual(t *testing.T, got, want []string) {
 	}
 }
 
+func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
+	logger := &recordingLoggerHook{}
+	bus, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{Logger: logger})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	ch := bus.Subscribe("agent-1", events.EventType("task.requested"))
+
+	evt := events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("task.requested"),
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}.WithEntityID("ent-1")
+	if err := bus.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for delivered event")
+	}
+
+	var found bool
+	for _, entry := range logger.entries {
+		if entry.Action != "delivery_lifecycle_transition" {
+			continue
+		}
+		detail, ok := entry.Detail.(map[string]any)
+		if !ok {
+			t.Fatalf("detail type = %T", entry.Detail)
+		}
+		if detail["delivery_state"] == "queued" && detail["subscriber_id"] == "agent-1" && detail["delivery_reason"] == "matched_agent_subscription" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("queued delivery lifecycle transition not found in logs: %#v", logger.entries)
+	}
+}
+
 func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {
 	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
 		PayloadValidator: func(eventType string, payload []byte) error {
