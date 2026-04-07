@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -12,6 +13,10 @@ import (
 )
 
 var syntheticRunNamespace = uuid.MustParse("7e7e89e6-0d4f-4eeb-a8a0-99a3e8ec2ef1")
+
+func ErrInvalidMutationLogWriter(message string) error {
+	return fmt.Errorf("mutation log completeness violation: %s", strings.TrimSpace(message))
+}
 
 type DBTX interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -42,14 +47,14 @@ type EntityStateProjection struct {
 
 func Insert(ctx context.Context, db DBTX, rec Record) error {
 	if db == nil {
-		return nil
+		return ErrInvalidMutationLogWriter("mutation log DB is required")
 	}
 	entityID := strings.TrimSpace(rec.EntityID)
 	field := strings.TrimSpace(rec.Field)
 	writerType := strings.TrimSpace(rec.WriterType)
 	writerID := strings.TrimSpace(rec.WriterID)
 	if entityID == "" || field == "" || writerType == "" || writerID == "" {
-		return nil
+		return ErrInvalidMutationLogWriter("entity_id, field, writer_type, and writer_id are required")
 	}
 
 	runID := normalizeRunID(runtimecorrelation.RunIDFromContext(ctx))
@@ -90,42 +95,61 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	return err
 }
 
-func InsertEntityStateDiff(ctx context.Context, db DBTX, entityID string, before, after EntityStateProjection, writer Writer) error {
+func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProjection, writer Writer) ([]Record, error) {
 	entityID = strings.TrimSpace(entityID)
-	if db == nil || entityID == "" {
-		return nil
+	if entityID == "" {
+		return nil, ErrInvalidMutationLogWriter("entity_id is required")
 	}
 	writerType := strings.TrimSpace(writer.Type)
 	writerID := strings.TrimSpace(writer.ID)
 	if writerType == "" || writerID == "" {
-		return nil
+		return nil, ErrInvalidMutationLogWriter("writer_type and writer_id are required")
 	}
+	handlerStep := strings.TrimSpace(writer.HandlerStep)
+	records := make([]Record, 0, 8)
 	if strings.TrimSpace(before.CurrentState) != strings.TrimSpace(after.CurrentState) {
-		if err := Insert(ctx, db, Record{
+		records = append(records, Record{
 			EntityID:    entityID,
 			Field:       "current_state",
 			OldValue:    stringOrNil(before.CurrentState),
 			NewValue:    stringOrNil(after.CurrentState),
 			WriterType:  writerType,
 			WriterID:    writerID,
-			HandlerStep: strings.TrimSpace(writer.HandlerStep),
-		}); err != nil {
+			HandlerStep: handlerStep,
+		})
+	}
+	fieldRecords, err := diffMapRecords(entityID, "", before.Fields, after.Fields, writerType, writerID, handlerStep)
+	if err != nil {
+		return nil, err
+	}
+	records = append(records, fieldRecords...)
+	gateRecords, err := diffMapRecords(entityID, "gates.", before.Gates, after.Gates, writerType, writerID, handlerStep)
+	if err != nil {
+		return nil, err
+	}
+	records = append(records, gateRecords...)
+	accRecords, err := diffMapRecords(entityID, "accumulator.", before.Accumulator, after.Accumulator, writerType, writerID, handlerStep)
+	if err != nil {
+		return nil, err
+	}
+	records = append(records, accRecords...)
+	return records, nil
+}
+
+func InsertEntityStateDiff(ctx context.Context, db DBTX, entityID string, before, after EntityStateProjection, writer Writer) error {
+	records, err := BuildEntityStateDiffRecords(entityID, before, after, writer)
+	if err != nil {
+		return err
+	}
+	for _, rec := range records {
+		if err := Insert(ctx, db, rec); err != nil {
 			return err
 		}
-	}
-	if err := insertMapDiff(ctx, db, entityID, "", before.Fields, after.Fields, writer); err != nil {
-		return err
-	}
-	if err := insertMapDiff(ctx, db, entityID, "gates.", before.Gates, after.Gates, writer); err != nil {
-		return err
-	}
-	if err := insertMapDiff(ctx, db, entityID, "accumulator.", before.Accumulator, after.Accumulator, writer); err != nil {
-		return err
 	}
 	return nil
 }
 
-func insertMapDiff(ctx context.Context, db DBTX, entityID, prefix string, before, after map[string]any, writer Writer) error {
+func diffMapRecords(entityID, prefix string, before, after map[string]any, writerType, writerID, handlerStep string) ([]Record, error) {
 	keys := make([]string, 0, len(before)+len(after))
 	seen := map[string]struct{}{}
 	for key := range before {
@@ -151,6 +175,7 @@ func insertMapDiff(ctx context.Context, db DBTX, entityID, prefix string, before
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	records := make([]Record, 0, len(keys))
 	for _, key := range keys {
 		oldValue, oldOK := before[key]
 		newValue, newOK := after[key]
@@ -162,24 +187,22 @@ func insertMapDiff(ctx context.Context, db DBTX, entityID, prefix string, before
 		}
 		same, err := jsonValuesEqual(oldValue, newValue)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if same {
 			continue
 		}
-		if err := Insert(ctx, db, Record{
+		records = append(records, Record{
 			EntityID:    entityID,
 			Field:       strings.TrimSpace(prefix + key),
 			OldValue:    oldValue,
 			NewValue:    newValue,
-			WriterType:  strings.TrimSpace(writer.Type),
-			WriterID:    strings.TrimSpace(writer.ID),
-			HandlerStep: strings.TrimSpace(writer.HandlerStep),
-		}); err != nil {
-			return err
-		}
+			WriterType:  writerType,
+			WriterID:    writerID,
+			HandlerStep: handlerStep,
+		})
 	}
-	return nil
+	return records, nil
 }
 
 func jsonValuesEqual(left, right any) (bool, error) {

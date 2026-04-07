@@ -140,6 +140,165 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 	assertMutationLogMatchesTrackedEntityState(t, db, entityID)
 }
 
+func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	entityID := uuid.NewString()
+	pc := testMutationLoggingCoordinator(db)
+	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
+
+	if err := pc.applyWorkflowGateMutation(context.Background(), entityID, "workflow.ready", "g_ready", false); err != nil {
+		t.Fatalf("applyWorkflowGateMutation: %v", err)
+	}
+
+	fields := mutationFieldsForEntity(t, db, entityID)
+	if !containsMutationField(fields, "gates.g_ready") {
+		t.Fatalf("mutation fields missing gates.g_ready: %v", fields)
+	}
+	assertMutationLogMatchesTrackedEntityState(t, db, entityID)
+}
+
+func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	entityID := uuid.NewString()
+	pc := testMutationLoggingCoordinator(db)
+	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
+
+	if err := pc.recordWorkflowEvidence(context.Background(), entityID, "research", map[string]any{"summary": "done"}); err != nil {
+		t.Fatalf("recordWorkflowEvidence: %v", err)
+	}
+
+	fields := mutationFieldsForEntity(t, db, entityID)
+	if !containsMutationField(fields, "accumulator.evidence") {
+		t.Fatalf("mutation fields missing accumulator.evidence: %v", fields)
+	}
+	assertMutationLogMatchesTrackedEntityState(t, db, entityID)
+}
+
+func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *testing.T) {
+	t.Run("state transition", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		entityID := uuid.NewString()
+		pc := testMutationLoggingCoordinator(db)
+		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
+		dropEntityMutationsTable(t, db)
+
+		err := pc.updateEntityState(context.Background(), entityID, "done", "flow.transitioned")
+		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
+			t.Fatalf("updateEntityState err = %v, want entity_mutations failure", err)
+		}
+		assertCurrentState(t, db, entityID, "queued")
+	})
+
+	t.Run("gate mutation", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		entityID := uuid.NewString()
+		pc := testMutationLoggingCoordinator(db)
+		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
+		dropEntityMutationsTable(t, db)
+
+		err := pc.applyWorkflowGateMutation(context.Background(), entityID, "workflow.ready", "g_ready", false)
+		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
+			t.Fatalf("applyWorkflowGateMutation err = %v, want entity_mutations failure", err)
+		}
+		assertEntityGates(t, db, entityID, map[string]any{})
+	})
+
+	t.Run("evidence write", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		entityID := uuid.NewString()
+		pc := testMutationLoggingCoordinator(db)
+		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
+		dropEntityMutationsTable(t, db)
+
+		err := pc.recordWorkflowEvidence(context.Background(), entityID, "research", map[string]any{"summary": "done"})
+		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
+			t.Fatalf("recordWorkflowEvidence err = %v, want entity_mutations failure", err)
+		}
+		assertAccumulatorBucketMissing(t, db, entityID, "evidence")
+	})
+}
+
+func testMutationLoggingCoordinator(db *sql.DB) *PipelineCoordinator {
+	return &PipelineCoordinator{
+		workflowStore: NewWorkflowInstanceStore(db),
+		module: &previewWorkflowModule{
+			bundle: &runtimecontracts.WorkflowContractBundle{
+				Semantics: runtimecontracts.WorkflowSemanticView{
+					Name:    "mutation-flow",
+					Version: "1.0.0",
+				},
+			},
+		},
+	}
+}
+
+func seedMutationLoggingInstance(t *testing.T, store *WorkflowInstanceStore, entityID string) {
+	t.Helper()
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "mutation-flow",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "queued",
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+}
+
+func dropEntityMutationsTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `DROP TABLE entity_mutations`); err != nil {
+		t.Fatalf("drop entity_mutations: %v", err)
+	}
+}
+
+func assertCurrentState(t *testing.T, db *sql.DB, entityID, want string) {
+	t.Helper()
+	var currentState string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(current_state, '')
+		FROM entity_state
+		WHERE entity_id = $1::uuid
+	`, entityID).Scan(&currentState); err != nil {
+		t.Fatalf("load current_state: %v", err)
+	}
+	if got := strings.TrimSpace(currentState); got != want {
+		t.Fatalf("current_state = %q, want %q", got, want)
+	}
+}
+
+func assertEntityGates(t *testing.T, db *sql.DB, entityID string, want map[string]any) {
+	t.Helper()
+	var gatesRaw []byte
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(gates, '{}'::jsonb)
+		FROM entity_state
+		WHERE entity_id = $1::uuid
+	`, entityID).Scan(&gatesRaw); err != nil {
+		t.Fatalf("load gates: %v", err)
+	}
+	got := decodeJSONMap(t, gatesRaw)
+	if mustCanonicalJSON(t, got) != mustCanonicalJSON(t, want) {
+		t.Fatalf("gates = %s, want %s", mustCanonicalJSON(t, got), mustCanonicalJSON(t, want))
+	}
+}
+
+func assertAccumulatorBucketMissing(t *testing.T, db *sql.DB, entityID, bucket string) {
+	t.Helper()
+	var accRaw []byte
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(accumulator, '{}'::jsonb)
+		FROM entity_state
+		WHERE entity_id = $1::uuid
+	`, entityID).Scan(&accRaw); err != nil {
+		t.Fatalf("load accumulator: %v", err)
+	}
+	acc := decodeJSONMap(t, accRaw)
+	if _, ok := acc[strings.TrimSpace(bucket)]; ok {
+		t.Fatalf("accumulator = %s, expected bucket %q to be absent", mustCanonicalJSON(t, acc), bucket)
+	}
+}
+
 func mutationFieldsForEntity(t *testing.T, db *sql.DB, entityID string) []string {
 	t.Helper()
 	rows, err := db.QueryContext(context.Background(), `
