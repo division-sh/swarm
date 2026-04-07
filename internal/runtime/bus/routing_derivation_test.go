@@ -36,7 +36,11 @@ func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 }
 
 type routePersistenceTestStore struct {
-	routes map[string]runtimebus.FlowInstanceRouteRecord
+	routes           map[string]runtimebus.FlowInstanceRouteRecord
+	upsertErr        error
+	deleteErr        error
+	rollbackCalls    []string
+	upsertAfterWrite bool
 }
 
 func (*routePersistenceTestStore) AppendEvent(context.Context, events.Event) error { return nil }
@@ -49,10 +53,26 @@ func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, r
 		s.routes = map[string]runtimebus.FlowInstanceRouteRecord{}
 	}
 	s.routes[route.Identity.ScopeKey+"/"+route.Identity.InstanceID] = route
+	if s.upsertAfterWrite && s.upsertErr != nil {
+		return s.upsertErr
+	}
+	if s.upsertErr != nil {
+		delete(s.routes, route.Identity.ScopeKey+"/"+route.Identity.InstanceID)
+		return s.upsertErr
+	}
+	return nil
+}
+
+func (s *routePersistenceTestStore) RollbackFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+	s.rollbackCalls = append(s.rollbackCalls, identity.ScopeKey+"/"+identity.InstanceID)
+	delete(s.routes, identity.ScopeKey+"/"+identity.InstanceID)
 	return nil
 }
 
 func (s *routePersistenceTestStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	delete(s.routes, identity.ScopeKey+"/"+identity.InstanceID)
 	return nil
 }
@@ -86,6 +106,35 @@ func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
 	}
 	if len(store.routes) != 0 {
 		t.Fatalf("persisted routes after remove = %#v, want none", store.routes)
+	}
+}
+
+func TestEventBusAddFlowInstanceRouteRollsBackPersistedRouteOnActiveInstallFailure(t *testing.T) {
+	store := &routePersistenceTestStore{
+		upsertErr:        context.DeadlineExceeded,
+		upsertAfterWrite: true,
+		deleteErr:        context.Canceled,
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	err = eb.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{
+		ID:           "reviewer-{instance_id}",
+		Produces:     []string{"task.started"},
+		SubscribesTo: []string{"task.started"},
+	}, runtimeflowidentity.DeriveRoute("review", "inst-1"))
+	if err == nil {
+		t.Fatal("expected AddFlowInstanceRoute to fail")
+	}
+	if len(store.routes) != 0 {
+		t.Fatalf("persisted routes after rollback = %#v, want none", store.routes)
+	}
+	if len(store.rollbackCalls) != 1 || store.rollbackCalls[0] != "review/inst-1" {
+		t.Fatalf("rollback calls = %#v, want [review/inst-1]", store.rollbackCalls)
+	}
+	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 0 {
+		t.Fatalf("resolved subscribers after failed add = %#v, want none", got)
 	}
 }
 

@@ -161,7 +161,9 @@ func (eb *EventBus) AddFlowInstanceRoute(template runtimecontracts.SystemNodeCon
 	}
 	for _, route := range routes {
 		if err := persister.UpsertFlowInstanceRoute(context.Background(), route); err != nil {
-			_ = persister.DeleteFlowInstanceRoute(context.Background(), route.Identity)
+			if rollback, ok := eb.store.(FlowInstanceRouteRollbackPersistence); ok && rollback != nil {
+				_ = rollback.RollbackFlowInstanceRoute(context.Background(), route.Identity)
+			}
 			table.RemoveFlowInstanceRoute(route.Identity)
 			return err
 		}
