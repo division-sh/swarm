@@ -22,6 +22,7 @@ import (
 type flowInstancePersistence interface {
 	Upsert(ctx context.Context, instance runtimepipeline.WorkflowInstance) error
 	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
+	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
 }
 
 type flowInstanceRouteInstaller interface {
@@ -257,18 +258,31 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	if templateID == "" || instanceID == "" || flowPath == "" || entityID == "" {
 		return fmt.Errorf("template_id, instance_id, flow_path, and entity_id are required")
 	}
-	flowEntityID := entityID
-	routeIdentity := instance.Route()
-	if !routeIdentity.Valid() {
-		return fmt.Errorf("derive route identity for flow path %s", flowPath)
-	}
 	if err := am.workflowInstances.MarkTerminated(ctx, flowPath, time.Now().UTC()); err != nil {
 		return fmt.Errorf("persist flow instance terminal state %s: %w", flowPath, err)
+	}
+	canonicalInstance, ok, err := am.workflowInstances.Load(ctx, flowPath)
+	if err != nil {
+		return fmt.Errorf("load canonical terminal flow instance %s: %w", flowPath, err)
+	}
+	if !ok {
+		return fmt.Errorf("load canonical terminal flow instance %s: not found", flowPath)
+	}
+	if strings.TrimSpace(canonicalInstance.Status) != "terminated" || canonicalInstance.TerminatedAt.IsZero() {
+		return fmt.Errorf("canonical terminal flow instance %s not persisted", flowPath)
+	}
+	canonicalFlowPath := strings.TrimSpace(canonicalInstance.StorageRef)
+	if canonicalFlowPath == "" {
+		return fmt.Errorf("canonical terminal flow instance %s missing storage_ref", flowPath)
+	}
+	canonicalRoute := runtimeflowidentity.StoredRoute("", "", canonicalFlowPath)
+	if !canonicalRoute.Valid() {
+		return fmt.Errorf("derive canonical route identity for flow path %s", canonicalFlowPath)
 	}
 	am.mu.RLock()
 	agentIDs := make([]string, 0, len(am.agentCfg))
 	for agentID, cfg := range am.agentCfg {
-		if strings.TrimSpace(cfg.EntityID) != flowEntityID {
+		if cfg.CanonicalFlowPath() != canonicalFlowPath {
 			continue
 		}
 		agentIDs = append(agentIDs, agentID)
@@ -281,9 +295,9 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 		}
 	}
 	if remover, ok := am.bus.(flowInstanceRouteRemover); ok && remover != nil {
-		return remover.RemoveFlowInstanceRoute(routeIdentity)
+		return remover.RemoveFlowInstanceRoute(canonicalRoute)
 	}
-	return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", flowPath)
+	return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", canonicalFlowPath)
 }
 
 func buildFlowAgentConfig(

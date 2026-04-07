@@ -31,6 +31,8 @@ type WorkflowInstance struct {
 	StorageRef        string
 	WorkflowName      string
 	WorkflowVersion   string
+	Status            string
+	TerminatedAt      time.Time
 	CurrentState      string
 	Config            map[string]any
 	EnteredStageAt    time.Time
@@ -263,6 +265,8 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 		entityType   string
 		slug         sql.NullString
 		name         sql.NullString
+		status       sql.NullString
+		terminatedAt sql.NullTime
 	)
 	query := `
 		SELECT
@@ -270,6 +274,8 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 			es.subject_id::text,
 			COALESCE(fi.flow_template, ''),
 			COALESCE(fi.config->>'workflow_version', ''),
+			COALESCE(fi.status, ''),
+			fi.terminated_at,
 			es.current_state,
 			es.entered_state_at,
 			COALESCE(es.gates, '{}'::jsonb),
@@ -296,6 +302,8 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 		&subjectID,
 		&item.WorkflowName,
 		&item.WorkflowVersion,
+		&status,
+		&terminatedAt,
 		&item.CurrentState,
 		&item.EnteredStageAt,
 		&gatesRaw,
@@ -316,6 +324,10 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 		return WorkflowInstance{}, false, err
 	}
 	item.SubjectID = strings.TrimSpace(subjectID.String)
+	item.Status = strings.TrimSpace(status.String)
+	if terminatedAt.Valid {
+		item.TerminatedAt = terminatedAt.Time
+	}
 	projection, err := decodeWorkflowInstancePersistedProjection(fieldsRaw, gatesRaw, accRaw, configRaw, workflowInstancePersistedControl{
 		SubjectID:  item.SubjectID,
 		StorageRef: strings.TrimSpace(flowInstance),
@@ -353,6 +365,8 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			es.subject_id::text,
 			COALESCE(fi.flow_template, ''),
 			COALESCE(fi.config->>'workflow_version', ''),
+			COALESCE(fi.status, ''),
+			fi.terminated_at,
 			es.current_state,
 			es.entered_state_at,
 			COALESCE(es.gates, '{}'::jsonb),
@@ -386,12 +400,16 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			entityType   string
 			slug         sql.NullString
 			name         sql.NullString
+			status       sql.NullString
+			terminatedAt sql.NullTime
 		)
 		if err := rows.Scan(
 			&item.InstanceID,
 			&subjectID,
 			&item.WorkflowName,
 			&item.WorkflowVersion,
+			&status,
+			&terminatedAt,
 			&item.CurrentState,
 			&item.EnteredStageAt,
 			&gatesRaw,
@@ -408,6 +426,10 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			return nil, err
 		}
 		item.SubjectID = strings.TrimSpace(subjectID.String)
+		item.Status = strings.TrimSpace(status.String)
+		if terminatedAt.Valid {
+			item.TerminatedAt = terminatedAt.Time
+		}
 		projection, err := decodeWorkflowInstancePersistedProjection(fieldsRaw, gatesRaw, accRaw, configRaw, workflowInstancePersistedControl{
 			SubjectID:  item.SubjectID,
 			StorageRef: strings.TrimSpace(flowInstance),
