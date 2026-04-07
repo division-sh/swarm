@@ -508,6 +508,9 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						if _, ok := available[field]; ok {
 							continue
 						}
+						if expr.SelfTargetField == field {
+							continue
+						}
 						if _, ok := handlerWriters[field]; ok {
 							c.entityRefFindings = append(c.entityRefFindings, Finding{
 								CheckID:  "expression_field_reference_validation",
@@ -2748,9 +2751,10 @@ var bootverifyPayloadReferencePattern = regexp.MustCompile(`payload\.([a-zA-Z_][
 var bootverifyEntityReferencePattern = regexp.MustCompile(`entity\.([a-zA-Z_][a-zA-Z0-9_]*)`)
 
 type expressionReference struct {
-	Kind       string
-	Expression string
-	Phase      runtimepipeline.WorkflowEntityFieldLifecyclePhase
+	Kind            string
+	Expression      string
+	Phase           runtimepipeline.WorkflowEntityFieldLifecyclePhase
+	SelfTargetField string
 }
 
 type handlerCondition struct {
@@ -2839,7 +2843,13 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 	appendWriteExpressions := func(kind string, writes []runtimecontracts.WorkflowDataWrite) {
 		for _, write := range writes {
 			if expr := strings.TrimSpace(write.Value.CEL); expr != "" {
-				out = append(out, expressionReference{Kind: kind, Expression: expr, Phase: runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation})
+				selfTarget, _ := runtimepipeline.WorkflowEntityFieldNameFromTarget(write.Target())
+				out = append(out, expressionReference{
+					Kind:            kind,
+					Expression:      expr,
+					Phase:           runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation,
+					SelfTargetField: selfTarget,
+				})
 			}
 		}
 	}
