@@ -328,8 +328,15 @@ type genericAgent struct {
 	TotalTokens24h      int            `json:"total_tokens_24h,omitempty"`
 	NearBreaker         bool           `json:"near_breaker,omitempty"`
 	CurrentTaskID       string         `json:"current_task_id,omitempty"`
-	LastTool            map[string]any `json:"last_tool,omitempty"`
+	LastTool            *AgentLastTool `json:"last_tool,omitempty"`
 	StartedAt           string         `json:"started_at,omitempty"`
+}
+
+type AgentLastTool struct {
+	Name      string          `json:"name"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	OK        bool            `json:"ok"`
+	Result    json.RawMessage `json:"result,omitempty"`
 }
 
 type instanceAggregateGroup struct {

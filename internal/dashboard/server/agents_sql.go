@@ -94,7 +94,7 @@ type agentOperatorProjection struct {
 	TurnCount           int
 	Turns24h            int
 	CurrentTaskID       string
-	LastTool            map[string]any
+	LastTool            *AgentLastTool
 }
 
 func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[string]agentOperatorProjection, error) {
@@ -294,7 +294,10 @@ func enrichAgentOperatorProjectionFromLatestTurn(projection *agentOperatorProjec
 		return fmt.Errorf("decode latest agent turn turn_summary: %w", err)
 	}
 	if ok {
-		projection.LastTool = summary.lastToolMap(parseOK)
+		projection.LastTool, err = summary.lastToolTransport(parseOK)
+		if err != nil {
+			return fmt.Errorf("decode latest agent turn last_tool: %w", err)
+		}
 	}
 	return nil
 }
