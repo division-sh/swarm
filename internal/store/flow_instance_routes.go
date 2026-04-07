@@ -118,6 +118,26 @@ func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity ru
 	return nil
 }
 
+func (s *PostgresStore) RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("postgres store is required for flow instance routes")
+	}
+	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
+	if !identity.Valid() {
+		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+			UPDATE routing_rules
+			SET status = 'inactive'
+			WHERE flow_instance = $1
+			  AND is_materialized = true
+			  AND status = 'active'
+		`, identity.InstancePath); err != nil {
+		return fmt.Errorf("rollback flow instance route %s/%s: %w", identity.ScopeKey, identity.InstanceID, err)
+	}
+	return nil
+}
+
 func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required for flow instance routes")

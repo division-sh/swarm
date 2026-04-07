@@ -30,6 +30,10 @@ type FlowInstanceRoutePersistence interface {
 	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.Route, error)
 }
 
+type FlowInstanceRouteRollbackPersistence interface {
+	RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.Route) error
+}
+
 type ActiveAgentDescriptor struct {
 	AgentID      string
 	EntityID     string
