@@ -790,6 +790,19 @@ func TestRun_ReportsExpressionFieldReferenceErrorForDataAccumulationExpressionTh
 	}
 }
 
+func TestRun_AllowsExpressionFieldReferenceForSelfTargetEntityUpdate(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier9-composition-patterns", "test-compose-guard-counter-escalate"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.retry_count") {
+		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.retry_count") {
+		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_AllowsTopLevelDataAccumulationExpressionToReadRuleProducedField(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
