@@ -337,8 +337,7 @@ func loadAccumulatorForBucket(state StateSnapshot, bucketRef timeridentity.Accum
 	if !bucketRef.Valid() {
 		return nil, false
 	}
-	root := state.EnsureStateBucketsBucket()
-	bucket, ok := root.Map(bucketRef.NodeID)
+	bucket, ok := state.StateBucket(bucketRef.NodeID)
 	if !ok {
 		return nil, false
 	}
@@ -378,8 +377,7 @@ func storeAccumulatorForBucket(state *StateSnapshot, bucketRef timeridentity.Acc
 	if state == nil || acc == nil || !bucketRef.Valid() {
 		return
 	}
-	root := state.EnsureStateBucketsBucket()
-	bucket := root.EnsureMap(bucketRef.NodeID)
+	bucket := state.EnsureStateBucket(bucketRef.NodeID)
 	accumulators := bucket.EnsureMap(handlerAccumulatorBucketKey)
 	received := map[string]any{}
 	keys := make([]string, 0, len(acc.Received))

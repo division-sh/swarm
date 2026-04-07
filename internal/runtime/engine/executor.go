@@ -241,7 +241,6 @@ func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSn
 	if state.EntityID.IsZero() {
 		state.EntityID = req.EntityID
 	}
-	normalizeSnapshotGates(&state)
 	if req.EntityID.IsZero() {
 		return state, nil
 	}
@@ -257,12 +256,11 @@ func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSn
 
 func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame {
 	state := req.State
-	if state.Metadata == nil {
-		state.Metadata = map[string]any{}
+	if state.StateCarrier.Metadata == nil {
+		state.StateCarrier.Metadata = map[string]any{}
 	}
-	normalizeSnapshotGates(&state)
-	if state.StateBuckets == nil {
-		state.StateBuckets = map[string]any{}
+	if state.StateCarrier.StateBuckets == nil {
+		state.StateCarrier.StateBuckets = map[string]map[string]any{}
 	}
 	payload := decodePayload(req.Event.Payload)
 	if len(payload) == 0 {
@@ -433,12 +431,12 @@ func (e *Executor) stepClearGates(frame *executionFrame) error {
 	}
 	frame.result.ClearGates = normalizeStrings(e.resolveClearGates(frame))
 	frame.result.StateMutation.ClearGates = append([]string{}, frame.result.ClearGates...)
-	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	for _, gate := range frame.result.ClearGates {
 		frame.state.State.SetGate(gate, false)
 		frame.result.StateMutation.SetGateValue(gate, false)
 	}
-	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	return nil
 }
 
@@ -512,7 +510,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	acc.LastSource = strings.TrimSpace(frame.req.Event.SourceAgent)
 	acc.LastReceivedAt = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
 	storeAccumulatorForBucket(&frame.state.State, bucketRef, acc)
-	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateBuckets)
+	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
 	frame.state.Accumulated = accumulatorExpressionValue(acc)
 	if isAccumulationTimeoutEvent(frame.req.Event.Type) && spec.OnTimeout != nil {
 		frame.rule = spec.OnTimeout
@@ -615,7 +613,7 @@ func (e *Executor) stepCompute(frame *executionFrame) error {
 	frame.state.SetComputed(field, value)
 	frame.result.SetComputed(field, value)
 	frame.state.State.SetMetadata(field, value)
-	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	frame.result.StateMutation.SetMetadata(field, value)
 	return nil
 }
@@ -785,10 +783,10 @@ func (e *Executor) stepSetsGate(frame *executionFrame) error {
 	}
 	frame.result.SetsGate = name
 	frame.result.StateMutation.SetGate = name
-	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	frame.state.State.SetGate(name, true)
 	frame.result.StateMutation.SetGateValue(name, true)
-	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	return nil
 }
 
@@ -894,24 +892,23 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 		switch target {
 		case "accumulator_state":
 			if !frame.req.NodeID.IsZero() {
-				root := frame.state.State.EnsureStateBucketsBucket()
-				if bucket, ok := root.Map(frame.req.NodeID.String()); ok {
+				if bucket, ok := frame.state.State.StateBucket(frame.req.NodeID.String()); ok {
 					delete(bucket.Raw(), handlerAccumulatorBucketKey)
 				}
 			}
-			delete(frame.state.State.Metadata, "accumulated_count")
-			delete(frame.state.State.Metadata, "accumulated_total")
-			delete(frame.state.State.Metadata, "received_items")
+			delete(frame.state.State.StateCarrier.Metadata, "accumulated_count")
+			delete(frame.state.State.StateCarrier.Metadata, "accumulated_total")
+			delete(frame.state.State.StateCarrier.Metadata, "received_items")
 		case "cycle_counters":
-			delete(frame.state.State.Metadata, "cycle_index")
+			delete(frame.state.State.StateCarrier.Metadata, "cycle_index")
 		case "pending_dedup":
-			delete(frame.state.State.Metadata, "dedup_key")
+			delete(frame.state.State.StateCarrier.Metadata, "dedup_key")
 		default:
 			e.clearStepValue(frame, target)
 		}
 	}
-	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
-	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateBuckets)
+	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
 	return nil
 }
 
@@ -938,11 +935,11 @@ func (e *Executor) buildTimerIntents(frame *executionFrame) []TimerIntent {
 }
 
 func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
-	if frame.result.StateMutation.Metadata == nil {
-		frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	if frame.result.StateMutation.StateCarrier.Metadata == nil {
+		frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	}
-	if frame.result.StateMutation.StateBuckets == nil {
-		frame.result.StateMutation.SetStateBuckets(frame.state.State.StateBuckets)
+	if frame.result.StateMutation.StateCarrier.StateBuckets == nil {
+		frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
 	}
 	if err := e.deps.StateRepo.SaveState(ctx, frame.req.EntityID, frame.result.StateMutation); err != nil {
 		return err
@@ -981,7 +978,7 @@ func (e *Executor) emitPersistencePrerequisites(frame executionFrame) EmitPersis
 			return
 		}
 		prerequisite := EmitPersistenceFieldPrerequisite{Field: field}
-		if expected, ok := lookupParsedPath(frame.state.State.Metadata, path); ok {
+		if expected, ok := lookupParsedPath(frame.state.State.StateCarrier.Metadata, path); ok {
 			prerequisite.Expected = expected
 			prerequisite.HasExpected = true
 		}
@@ -1091,19 +1088,18 @@ func mergeStateSnapshots(base, loaded StateSnapshot) StateSnapshot {
 	if out.EnteredStateAt.IsZero() {
 		out.EnteredStateAt = base.EnteredStateAt
 	}
-	if len(out.Metadata) == 0 {
-		out.Metadata = cloneStringAnyMap(base.Metadata)
+	if len(out.StateCarrier.Metadata) == 0 {
+		out.StateCarrier.Metadata = cloneStringAnyMap(base.StateCarrier.Metadata)
 	}
-	if len(out.Gates) == 0 && len(base.Gates) > 0 {
-		out.Gates = mapsClone(base.Gates)
+	if len(out.StateCarrier.Gates) == 0 && len(base.StateCarrier.Gates) > 0 {
+		out.StateCarrier.Gates = mapsClone(base.StateCarrier.Gates)
 	}
-	if len(out.StateBuckets) == 0 {
-		out.StateBuckets = cloneStringAnyMap(base.StateBuckets)
+	if len(out.StateCarrier.StateBuckets) == 0 {
+		out.StateCarrier.StateBuckets = cloneStateBucketSet(base.StateCarrier.StateBuckets)
 	}
 	if len(out.TimerState) == 0 && len(base.TimerState) > 0 {
 		out.TimerState = append([]TimerState(nil), base.TimerState...)
 	}
-	normalizeSnapshotGates(&out)
 	return out
 }
 
@@ -1111,8 +1107,8 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx := WithPayload(frame.base, frame.payload)
 	ctx = WithAccumulated(ctx, frame.state.Accumulated)
 	ctx = WithFanOutItem(ctx, frame.state.FanOut)
-	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.Metadata))
-	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.Gates))
+	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Metadata))
+	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
 	ctx.Computed = values.Wrap(cloneStringAnyMap(frame.state.Computed))
 	return ctx
@@ -1133,18 +1129,18 @@ func (e *Executor) writeStepValue(frame *executionFrame, target string, value an
 	case paths.RootFanOut:
 		frame.state.SetFanOut(strings.Join(parsed.Segments, "."), value)
 	default:
-		if frame.state.State.Metadata == nil {
-			frame.state.State.Metadata = map[string]any{}
+		if frame.state.State.StateCarrier.Metadata == nil {
+			frame.state.State.StateCarrier.Metadata = map[string]any{}
 		}
 		switch {
 		case parsed.Root == paths.RootEntity || parsed.Root == paths.RootMetadata:
-			setParsedValuePath(frame.state.State.Metadata, paths.Path{Segments: parsed.Segments}, value)
+			setParsedValuePath(frame.state.State.StateCarrier.Metadata, paths.Path{Segments: parsed.Segments}, value)
 		case parsed.HasExplicitRoot():
-			setParsedValuePath(frame.state.State.Metadata, paths.Path{Segments: parsed.Segments}, value)
+			setParsedValuePath(frame.state.State.StateCarrier.Metadata, paths.Path{Segments: parsed.Segments}, value)
 		default:
-			setParsedValuePath(frame.state.State.Metadata, parsed, value)
+			setParsedValuePath(frame.state.State.StateCarrier.Metadata, parsed, value)
 		}
-		frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+		frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	}
 }
 
@@ -1155,7 +1151,7 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) {
 	}
 	parsed := paths.Parse(target)
 	if !parsed.HasExplicitRoot() {
-		executionDeletePath(frame.state.State.Metadata, strings.Split(target, "."))
+		executionDeletePath(frame.state.State.StateCarrier.Metadata, strings.Split(target, "."))
 		return
 	}
 	switch parsed.Root {
@@ -1167,9 +1163,9 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) {
 	case paths.RootFanOut:
 		delete(frame.state.FanOut, strings.Join(parsed.Segments, "."))
 	case paths.RootEntity, paths.RootMetadata:
-		executionDeletePath(frame.state.State.Metadata, parsed.Segments)
+		executionDeletePath(frame.state.State.StateCarrier.Metadata, parsed.Segments)
 	default:
-		delete(frame.state.State.Metadata, target)
+		delete(frame.state.State.StateCarrier.Metadata, target)
 	}
 }
 
@@ -1282,7 +1278,7 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecontracts.WorkflowDataAccumulation) {
 	applyDataAccumulationToState(e.currentContext(frame), frame.state, &frame.state.State, spec)
 	frame.state.State.SetMetadata("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type)))
-	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	frame.result.StateMutation.DataAccumulation = spec
 }
 
@@ -1425,10 +1421,10 @@ func (e *Executor) resolveClearGates(frame *executionFrame) []string {
 	if !slices.Contains(frame.req.Handler.ClearGates, "*") {
 		return frame.req.Handler.ClearGates
 	}
-	if len(frame.state.State.Gates) == 0 {
+	if len(frame.state.State.StateCarrier.Gates) == 0 {
 		return nil
 	}
-	return normalizeStrings(stringSliceFromAny(mapsKeys(boolMapToAnyMap(frame.state.State.Gates))))
+	return normalizeStrings(stringSliceFromAny(mapsKeys(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))))
 }
 
 func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error {

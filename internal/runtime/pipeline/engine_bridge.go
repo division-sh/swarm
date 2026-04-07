@@ -209,7 +209,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if !preview {
 		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result))
 	}
-	if err := pc.reconcileAccumulationTimeoutSchedule(ctx, entityID, nodeID, handler, triggerCtx.Event, result.StateMutation.StateBuckets, result.Status == runtimeengine.OutcomeWaiting); err != nil {
+	if err := pc.reconcileAccumulationTimeoutSchedule(ctx, entityID, nodeID, handler, triggerCtx.Event, result.StateMutation.StateCarrier.PersistedStateBuckets(), result.Status == runtimeengine.OutcomeWaiting); err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
 	if collectLocally {

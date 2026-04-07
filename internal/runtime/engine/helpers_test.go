@@ -150,7 +150,7 @@ func TestPayloadTransform_NormalizesWholeNumberJSONInputs(t *testing.T) {
 }
 
 func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
-	state := &StateSnapshot{Metadata: map[string]any{}}
+	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
 	payload := map[string]any{
 		"score":  4,
 		"nested": map[string]any{"value": "ok"},
@@ -168,19 +168,19 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 
 	applyDataAccumulationToState(base, ExecutionState{FanOut: map[string]any{"count": 3}}, state, spec)
 
-	if got := state.Metadata["score"]; got != 4 {
+	if got := state.StateCarrier.Metadata["score"]; got != 4 {
 		t.Fatalf("score = %#v", got)
 	}
-	if got := state.Metadata["status"]; got != "ok" {
+	if got := state.StateCarrier.Metadata["status"]; got != "ok" {
 		t.Fatalf("status = %#v", got)
 	}
-	if got := state.Metadata["literal"]; got != "fixed" {
+	if got := state.StateCarrier.Metadata["literal"]; got != "fixed" {
 		t.Fatalf("literal = %#v", got)
 	}
-	if got := state.Metadata["dispatch_count"]; got != 3 {
+	if got := state.StateCarrier.Metadata["dispatch_count"]; got != 3 {
 		t.Fatalf("dispatch_count = %#v", got)
 	}
-	if got := state.Metadata["last_data_accumulation_source"]; got != "task.completed" {
+	if got := state.StateCarrier.Metadata["last_data_accumulation_source"]; got != "task.completed" {
 		t.Fatalf("source event = %#v", got)
 	}
 }
@@ -197,9 +197,9 @@ func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T
 
 	storeAccumulator(state, "node-1", events.EventType("task.completed"), acc)
 
-	nodeBucket, ok := state.StateBuckets["node-1"].(map[string]any)
+	nodeBucket, ok := state.StateCarrier.StateBuckets["node-1"]
 	if !ok {
-		t.Fatalf("node bucket missing: %#v", state.StateBuckets)
+		t.Fatalf("node bucket missing: %#v", state.StateCarrier.StateBuckets)
 	}
 	accBuckets, ok := nodeBucket[handlerAccumulatorBucketKey].(map[string]any)
 	if !ok {
@@ -219,7 +219,7 @@ func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T
 }
 
 func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) {
-	state := &StateSnapshot{Metadata: map[string]any{}}
+	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
 	base := BaseContext{
 		Entity: values.Wrap(map[string]any{
 			"mode": "corpus",
@@ -246,17 +246,17 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 
 	applyDataAccumulationToState(base, ExecutionState{}, state, spec)
 
-	dimensions, ok := state.Metadata["dimensions_requested"].([]any)
+	dimensions, ok := state.StateCarrier.Metadata["dimensions_requested"].([]any)
 	if !ok || len(dimensions) != 2 || dimensions[0] != "build_complexity" || dimensions[1] != "automation_completeness" {
-		t.Fatalf("dimensions_requested = %#v", state.Metadata["dimensions_requested"])
+		t.Fatalf("dimensions_requested = %#v", state.StateCarrier.Metadata["dimensions_requested"])
 	}
-	if got := state.Metadata["scoring_rubric"]; got != "corpus_rubric" {
+	if got := state.StateCarrier.Metadata["scoring_rubric"]; got != "corpus_rubric" {
 		t.Fatalf("scoring_rubric = %#v", got)
 	}
 }
 
 func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testing.T) {
-	state := &StateSnapshot{Metadata: map[string]any{}}
+	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
 	base := BaseContext{
 		Entity: values.Wrap(map[string]any{
 			"revision_count": 0,
@@ -273,7 +273,7 @@ func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testi
 
 	applyDataAccumulationToState(base, ExecutionState{}, state, spec)
 
-	if got := state.Metadata["revision_count"]; got != 1.0 && got != 1 {
+	if got := state.StateCarrier.Metadata["revision_count"]; got != 1.0 && got != 1 {
 		t.Fatalf("revision_count = %#v, want 1", got)
 	}
 }

@@ -17,21 +17,31 @@ import (
 	"swarm/internal/testutil"
 )
 
+func testEngineStateMutation(metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) runtimeengine.StateMutation {
+	return runtimeengine.StateMutation{
+		StateCarrier: runtimeengine.NewStateCarrier(metadata, gates, buckets),
+	}
+}
+
+func testEngineStateSnapshot(metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) runtimeengine.StateSnapshot {
+	return runtimeengine.StateSnapshot{
+		StateCarrier: runtimeengine.NewStateCarrier(metadata, gates, buckets),
+	}
+}
+
 func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *testing.T) {
 	instance := &WorkflowInstance{
 		Metadata:     map[string]any{"research_context": map[string]any{"summary": "done"}},
 		StateBuckets: map[string]any{},
 	}
-	mutation := runtimeengine.StateMutation{
-		Metadata: map[string]any{
-			"research_context":              map[string]any{"summary": "done"},
-			"last_data_accumulation_event":  "research.completed",
-			"last_data_accumulation_source": "research.completed",
-		},
-		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "research_context", SourceField: "research_context"},
-			},
+	mutation := testEngineStateMutation(map[string]any{
+		"research_context":              map[string]any{"summary": "done"},
+		"last_data_accumulation_event":  "research.completed",
+		"last_data_accumulation_source": "research.completed",
+	}, nil, nil)
+	mutation.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{
+		Writes: []runtimecontracts.WorkflowDataWrite{
+			{TargetField: "research_context", SourceField: "research_context"},
 		},
 	}
 	applyEngineStateMutation(instance, mutation, map[string]struct{}{"research_context": {}}, nil, "")
@@ -55,12 +65,8 @@ func TestApplyEngineStateMutationMergesGateDeltasIntoExistingMetadata(t *testing
 			},
 		},
 	}
-	mutation := runtimeengine.StateMutation{
-		SetGate: "g_c",
-		Gates: map[string]bool{
-			"g_c": true,
-		},
-	}
+	mutation := testEngineStateMutation(nil, map[string]bool{"g_c": true}, nil)
+	mutation.SetGate = "g_c"
 
 	applyEngineStateMutation(instance, mutation, nil, nil, "")
 
@@ -88,12 +94,8 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 	instance := &WorkflowInstance{
 		Metadata: map[string]any{},
 	}
-	mutation := runtimeengine.StateMutation{
-		SetGate: "g_validated",
-		Gates: map[string]bool{
-			"g_validated": true,
-		},
-	}
+	mutation := testEngineStateMutation(nil, map[string]bool{"g_validated": true}, nil)
+	mutation.SetGate = "g_validated"
 
 	applyEngineStateMutation(instance, mutation, nil, source, "child")
 
@@ -103,6 +105,26 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 	}
 	if gates["g_validated"] {
 		t.Fatalf("raw unscoped child gate leaked into metadata: %#v", gates)
+	}
+}
+
+func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *testing.T) {
+	instance := &WorkflowInstance{
+		SubjectID: "11111111-1111-1111-1111-111111111111",
+		Metadata: map[string]any{
+			"flow_path": "child/inst-1",
+		},
+	}
+	mutation := testEngineStateMutation(nil, map[string]bool{"g_ready": true}, nil)
+	mutation.SetGate = "g_ready"
+
+	applyEngineStateMutation(instance, mutation, nil, nil, "")
+
+	if got := strings.TrimSpace(instance.SubjectID); got != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("SubjectID = %#v, want preserved canonical subject owner", got)
+	}
+	if !workflowStateGatesAsBools(instance.Metadata)["g_ready"] {
+		t.Fatalf("gates = %#v, want g_ready=true", instance.Metadata["gates"])
 	}
 }
 
@@ -564,14 +586,12 @@ func TestApplyEngineStateMutationInitializesWorkflowInstanceDefaults(t *testing.
 		},
 	})
 	instance := &WorkflowInstance{}
-	mutation := runtimeengine.StateMutation{
-		Metadata: map[string]any{
-			"name": "Test Vertical",
-		},
-		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Test Vertical")},
-			},
+	mutation := testEngineStateMutation(map[string]any{
+		"name": "Test Vertical",
+	}, nil, nil)
+	mutation.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{
+		Writes: []runtimecontracts.WorkflowDataWrite{
+			{TargetField: "name", Value: runtimecontracts.LiteralExpression("Test Vertical")},
 		},
 	}
 
@@ -612,15 +632,16 @@ func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumula
 	instance := &WorkflowInstance{
 		Metadata: map[string]any{
 			"composite_score": 0,
+			"gates": map[string]any{
+				"g_ready": true,
+			},
 		},
 		StateBuckets: map[string]any{},
 	}
-	mutation := runtimeengine.StateMutation{
-		Metadata: map[string]any{
-			"composite_score": 71,
-			"scoring_rubric":  "corpus_rubric",
-		},
-	}
+	mutation := testEngineStateMutation(map[string]any{
+		"composite_score": 71,
+		"scoring_rubric":  "corpus_rubric",
+	}, nil, nil)
 
 	applyEngineStateMutation(instance, mutation, map[string]struct{}{
 		"composite_score": {},
@@ -634,15 +655,16 @@ func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumula
 	if got := entityProjection["scoring_rubric"]; got != "corpus_rubric" {
 		t.Fatalf("entity_projection scoring_rubric = %#v", got)
 	}
+	if !workflowStateGatesAsBools(instance.Metadata)["g_ready"] {
+		t.Fatalf("metadata-only mutation dropped existing gates: %#v", instance.Metadata["gates"])
+	}
 }
 
 func TestApplyEngineStateMutationCapturesSubjectIDFromMetadata(t *testing.T) {
 	instance := &WorkflowInstance{}
-	mutation := runtimeengine.StateMutation{
-		Metadata: map[string]any{
-			"subject_id": "11111111-1111-1111-1111-111111111111",
-		},
-	}
+	mutation := testEngineStateMutation(map[string]any{
+		"subject_id": "11111111-1111-1111-1111-111111111111",
+	}, nil, nil)
 
 	applyEngineStateMutation(instance, mutation, nil, nil, "")
 
@@ -708,12 +730,85 @@ func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
 		},
 	}
 	ctx := withPipelineFlowScope(context.Background(), "flow-b")
-	err := repo.SaveState(ctx, identity.NormalizeEntityID(entityID), runtimeengine.StateMutation{
-		Metadata: map[string]any{"note": "bad write"},
-	})
+	err := repo.SaveState(ctx, identity.NormalizeEntityID(entityID), testEngineStateMutation(map[string]any{"note": "bad write"}, nil, nil))
 	if err == nil || !strings.Contains(err.Error(), "cross_flow_write_forbidden") {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
 	}
+}
+
+func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	store := NewWorkflowInstanceStore(db)
+	repo := pipelineEngineStateRepo{
+		coordinator: &PipelineCoordinator{
+			workflowStore: store,
+		},
+	}
+	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID.String(),
+		StorageRef:      entityID.String(),
+		WorkflowName:    "root",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "pending",
+		Metadata:        map[string]any{},
+		StateBuckets:    map[string]any{},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	mutation := testEngineStateMutation(
+		map[string]any{"score": 91, "subject_id": "11111111-1111-1111-1111-111111111111"},
+		map[string]bool{"ready": true},
+		map[string]map[string]any{"evidence": {"count": 2}},
+	)
+
+	if err := repo.SaveState(context.Background(), entityID, mutation); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+	loaded, ok, err := repo.LoadState(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected saved state to load")
+	}
+	if got := loaded.Metadata["score"]; got != 91 && got != 91.0 {
+		t.Fatalf("loaded metadata score = %#v, want 91", got)
+	}
+	if !loaded.Gates["ready"] {
+		t.Fatalf("loaded gates = %#v, want ready=true", loaded.Gates)
+	}
+	if got := loaded.StateBuckets["evidence"]["count"]; got != 2 && got != 2.0 {
+		t.Fatalf("loaded state bucket evidence.count = %#v, want 2", got)
+	}
+}
+
+func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	t.Run("state_buckets", func(t *testing.T) {
+		store := NewWorkflowInstanceStore(db)
+		if err := store.Upsert(context.Background(), WorkflowInstance{
+			InstanceID:      "22222222-2222-2222-2222-222222222222",
+			StorageRef:      "22222222-2222-2222-2222-222222222222",
+			WorkflowName:    "root",
+			WorkflowVersion: "1.0.0",
+			CurrentState:    "pending",
+			StateBuckets: map[string]any{
+				"evidence": "bad",
+			},
+		}); err != nil {
+			t.Fatalf("upsert malformed state bucket instance: %v", err)
+		}
+		repo := pipelineEngineStateRepo{coordinator: &PipelineCoordinator{workflowStore: store}}
+		_, _, err := repo.LoadState(context.Background(), identity.NormalizeEntityID("22222222-2222-2222-2222-222222222222"))
+		if err == nil || !strings.Contains(err.Error(), "invalid workflow state bucket") {
+			t.Fatalf("LoadState error = %v, want invalid workflow state bucket", err)
+		}
+	})
 }
 
 func TestRecordWorkflowEvidence_ReturnsWorkflowStoreMutationError(t *testing.T) {
@@ -842,12 +937,8 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 			Payload: json.RawMessage(`{"entity_id":"ent-child","step":"done"}`),
 		}.WithEntityID("ent-child"),
 		State: runtimeengine.StateSnapshot{
-			EntityID: identity.NormalizeEntityID("ent-child"),
-			Metadata: map[string]any{
-				"flow_path":        "child/inst-1",
-				"subject_id":       "ent-parent",
-				"parent_entity_id": "ent-parent",
-			},
+			EntityID:     identity.NormalizeEntityID("ent-child"),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
 		},
 	}
 
@@ -896,12 +987,8 @@ func TestPipelineEnginePayloadShaper_TrimsUndeclaredFieldsAcrossCrossFlowOutputR
 			Payload: json.RawMessage(`{"entity_id":"ent-child"}`),
 		}.WithEntityID("ent-child"),
 		State: runtimeengine.StateSnapshot{
-			EntityID: identity.NormalizeEntityID("ent-child"),
-			Metadata: map[string]any{
-				"flow_path":        "child/inst-1",
-				"subject_id":       "ent-parent",
-				"parent_entity_id": "ent-parent",
-			},
+			EntityID:     identity.NormalizeEntityID("ent-child"),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
 		},
 	}
 
