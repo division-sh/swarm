@@ -738,15 +738,21 @@ func TestSQLAgentReader_ListGenericAgents_UsesCanonicalTurnSummary(t *testing.T)
 	if items[0].CurrentTaskID != "task-1" {
 		t.Fatalf("current_task_id = %q", items[0].CurrentTaskID)
 	}
-	if items[0].LastTool["name"] != "schedule" {
+	if items[0].LastTool == nil || items[0].LastTool.Name != "schedule" {
 		t.Fatalf("last_tool = %#v", items[0].LastTool)
 	}
-	if items[0].LastTool["ok"] != true {
-		t.Fatalf("last_tool.ok = %#v", items[0].LastTool["ok"])
+	if items[0].LastTool.ToolUseID != "toolu_1" {
+		t.Fatalf("last_tool.tool_use_id = %#v", items[0].LastTool)
 	}
-	result, _ := items[0].LastTool["result"].(map[string]any)
+	if items[0].LastTool.OK != true {
+		t.Fatalf("last_tool.ok = %#v", items[0].LastTool.OK)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(items[0].LastTool.Result, &result); err != nil {
+		t.Fatalf("unmarshal last_tool.result: %v", err)
+	}
 	if result["status"] != "scheduled" {
-		t.Fatalf("last_tool.result = %#v", items[0].LastTool["result"])
+		t.Fatalf("last_tool.result = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
@@ -827,6 +833,42 @@ func TestSQLAgentReader_ListGenericAgents_FailsOnMalformedCanonicalTurnSummary(t
 
 	if _, err := reader.ListGenericAgents(context.Background()); err == nil {
 		t.Fatal("expected malformed canonical turn summary to fail")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLAgentReader_ListGenericAgents_FailsOnMalformedCanonicalLastToolResult(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLAgentReader(db, stubSQLAgents{
+		rows: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{
+				ID:   "agent-1",
+				Role: "researcher",
+				Mode: "global",
+				Type: "managed",
+			},
+			Status: "active",
+		}},
+		caps: canonicalEventAndConversationCaps(),
+	}, 12)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_name":"","tool_use_id":"toolu_1","output":{"status":"scheduled"}}]}}]`)))
+
+	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "latest canonical tool_result is missing tool_name") {
+		t.Fatalf("expected malformed canonical last_tool result error, got %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

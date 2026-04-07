@@ -166,25 +166,32 @@ func (p projectedTurnSummary) toolResultsTransport() []ConversationToolResult {
 	return out
 }
 
-func (p projectedTurnSummary) lastToolMap(parseOK bool) map[string]any {
+func (p projectedTurnSummary) lastToolTransport(parseOK bool) (*AgentLastTool, error) {
 	if len(p.ToolResults) == 0 {
-		return nil
+		return nil, nil
 	}
 	last := p.ToolResults[len(p.ToolResults)-1]
 	if last.ToolName == "" {
-		return nil
+		return nil, fmt.Errorf("latest canonical tool_result is missing tool_name")
 	}
-	out := map[string]any{
-		"name": last.ToolName,
-		"ok":   parseOK,
+	out := &AgentLastTool{
+		Name: last.ToolName,
+		OK:   parseOK,
+	}
+	if last.ToolUseID != "" {
+		out.ToolUseID = last.ToolUseID
 	}
 	if last.Output != nil {
-		var value any
-		if err := json.Unmarshal(last.Output, &value); err == nil {
-			out["result"] = value
+		trimmed := bytes.TrimSpace(last.Output)
+		if len(trimmed) == 0 {
+			return nil, fmt.Errorf("latest canonical tool_result output is empty")
 		}
+		if !json.Valid(trimmed) {
+			return nil, fmt.Errorf("latest canonical tool_result output is invalid JSON")
+		}
+		out.Result = append(json.RawMessage(nil), trimmed...)
 	}
-	return out
+	return out, nil
 }
 
 func trimStringSlice(in []string) []string {
