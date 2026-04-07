@@ -221,6 +221,31 @@ func TestEnrichTurnRecord_UsesCanonicalVisibleToolsForNativeCapabilities(t *test
 	}
 }
 
+func TestEnrichTurnRecord_FiltersCLIControlToolsFromObservedVisibleTools(t *testing.T) {
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID: "analysis-agent",
+		NativeTools: runtimeactors.NativeToolConfig{
+			FileIO: true,
+		},
+	})
+	rec := enrichTurnRecord(ctx, &Session{
+		ID: "session-1",
+		Tools: []ToolDefinition{
+			{Name: "emit_category_assessed"},
+		},
+	}, AgentTurnRecord{
+		AgentID:     "analysis-agent",
+		RuntimeMode: sessions.RuntimeModeTask.String(),
+		SessionID:   "session-1",
+	}, &Response{
+		VisibleTools: []string{"ExitPlanMode", "emit_category_assessed", "read_file", "write_file"},
+	})
+
+	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed", "read_file", "write_file"}) {
+		t.Fatalf("available_tools = %#v", rec.AvailableTools)
+	}
+}
+
 func TestClaudeCLIRuntimePrompt_HidesNativeCapabilityFallbackToolsFromPostamble(t *testing.T) {
 	actor := runtimeactors.AgentConfig{
 		ID: "analysis-agent",
