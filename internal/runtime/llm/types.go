@@ -23,6 +23,7 @@ type Response struct {
 	ToolCalls       []ToolCall        `json:"tool_calls,omitempty"`
 	SessionID       string            `json:"session_id,omitempty"`
 	Raw             []byte            `json:"raw,omitempty"`
+	VisibleTools    []string          `json:"visible_tools,omitempty"`
 	MCPServers      map[string]string `json:"mcp_servers,omitempty"`
 	MCPVisibleTools []string          `json:"mcp_visible_tools,omitempty"`
 }

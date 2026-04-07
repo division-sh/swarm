@@ -56,11 +56,14 @@ func TestCLIStreamAccumulator_ReconstructsStreamedToolInput(t *testing.T) {
 	if got := args["score"]; got != float64(65) {
 		t.Fatalf("unexpected score: %#v", got)
 	}
-	if resp.ToolCalls[1].Name != "mcp__runtime-tools__emit_category_assessed" {
+	if resp.ToolCalls[1].Name != "emit_category_assessed" {
 		t.Fatalf("unexpected second tool name: %+v", resp.ToolCalls[1])
 	}
 	if got := resp.MCPServers["runtime-tools"]; got != "connected" {
 		t.Fatalf("mcp servers = %#v", resp.MCPServers)
+	}
+	if len(resp.VisibleTools) != 3 || resp.VisibleTools[0] != "emit_category_assessed" || resp.VisibleTools[1] != "query_metrics" || resp.VisibleTools[2] != "read_file" {
+		t.Fatalf("visible tools = %#v", resp.VisibleTools)
 	}
 	if len(resp.MCPVisibleTools) != 2 || resp.MCPVisibleTools[0] != "mcp__runtime-tools__emit_category_assessed" || resp.MCPVisibleTools[1] != "mcp__runtime-tools__query_metrics" {
 		t.Fatalf("mcp visible tools = %#v", resp.MCPVisibleTools)
@@ -111,5 +114,21 @@ func TestSummarizeMonitorEventLine_Assistant(t *testing.T) {
 	want := "assistant: working tools=emit_event"
 	if got != want {
 		t.Fatalf("unexpected monitor summary: got=%q want=%q", got, want)
+	}
+}
+
+func TestParseCLIResponse_NormalizesBuiltinToolCallNames(t *testing.T) {
+	resp := parseCLIResponse([]byte(`{"content":[{"type":"tool_use","name":"Read","input":{"path":"/tmp/a.txt"}},{"type":"tool_use","name":"Edit","input":{"path":"/tmp/a.txt","content":"x"}}]}`))
+	if resp == nil {
+		t.Fatal("expected response")
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("tool calls = %#v", resp.ToolCalls)
+	}
+	if resp.ToolCalls[0].Name != "read_file" {
+		t.Fatalf("first tool call = %#v", resp.ToolCalls[0])
+	}
+	if resp.ToolCalls[1].Name != "write_file" {
+		t.Fatalf("second tool call = %#v", resp.ToolCalls[1])
 	}
 }

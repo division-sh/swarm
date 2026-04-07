@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+
+	"swarm/internal/runtime/core/toolidentity"
 )
 
 type cliStreamAccumulator struct {
@@ -17,6 +19,7 @@ type cliStreamAccumulator struct {
 	pending          map[int]*cliPendingToolCall
 	completedToolIDs map[string]struct{}
 	mcpServers       map[string]string
+	visibleTools     []string
 	mcpVisibleTools  []string
 }
 
@@ -186,7 +189,7 @@ func (a *cliStreamAccumulator) mergeStreamEvent(obj map[string]any) {
 			a.streamedCalls = append(a.streamedCalls, cliRecordedToolCall{
 				ID: strings.TrimSpace(call.ID),
 				Call: ToolCall{
-					Name:      call.Name,
+					Name:      toolidentity.CanonicalName(call.Name),
 					Arguments: args,
 				},
 			})
@@ -209,6 +212,9 @@ func (a *cliStreamAccumulator) captureDiagnostics(obj map[string]any) {
 			}
 		case "tools":
 			for _, name := range parseVisibleToolNames(value) {
+				a.appendVisibleTool(name)
+			}
+			for _, name := range parseMCPVisibleToolNames(value) {
 				a.appendVisibleTool(name)
 			}
 		}
@@ -262,6 +268,37 @@ func parseVisibleToolNames(value any) []string {
 	for _, item := range list {
 		switch typed := item.(type) {
 		case string:
+			name := toolidentity.CanonicalName(typed)
+			if name != "" {
+				if _, ok := seen[name]; !ok {
+					seen[name] = struct{}{}
+					out = append(out, name)
+				}
+			}
+		case map[string]any:
+			name := toolidentity.CanonicalName(asString(typed["name"]))
+			if name != "" {
+				if _, ok := seen[name]; !ok {
+					seen[name] = struct{}{}
+					out = append(out, name)
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func parseMCPVisibleToolNames(value any) []string {
+	list, ok := value.([]any)
+	if !ok || len(list) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		switch typed := item.(type) {
+		case string:
 			name := strings.TrimSpace(typed)
 			if strings.HasPrefix(name, runtimeToolsMCPPrefix) {
 				if _, ok := seen[name]; !ok {
@@ -279,6 +316,7 @@ func parseVisibleToolNames(value any) []string {
 			}
 		}
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -287,6 +325,19 @@ func (a *cliStreamAccumulator) appendVisibleTool(name string) {
 		return
 	}
 	name = strings.TrimSpace(name)
+	if canonical := toolidentity.CanonicalName(name); canonical != "" {
+		found := false
+		for _, existing := range a.visibleTools {
+			if existing == canonical {
+				found = true
+				break
+			}
+		}
+		if !found {
+			a.visibleTools = append(a.visibleTools, canonical)
+			sort.Strings(a.visibleTools)
+		}
+	}
 	if !strings.HasPrefix(name, runtimeToolsMCPPrefix) {
 		return
 	}
@@ -334,6 +385,7 @@ func (a *cliStreamAccumulator) Response() *Response {
 		ToolCalls:       dedupeToolCalls(toolCalls),
 		SessionID:       strings.TrimSpace(a.sessionID),
 		Raw:             bytes.TrimSpace(a.raw.Bytes()),
+		VisibleTools:    append([]string(nil), a.visibleTools...),
 		MCPServers:      a.mcpServers,
 		MCPVisibleTools: append([]string(nil), a.mcpVisibleTools...),
 	}

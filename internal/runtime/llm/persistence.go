@@ -6,6 +6,7 @@ import (
 	"time"
 
 	runtimebus "swarm/internal/runtime/bus"
+	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
@@ -47,15 +48,6 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		if strings.TrimSpace(rec.ScopeKey) == "" {
 			rec.ScopeKey = strings.TrimSpace(s.ScopeKey)
 		}
-		if len(rec.AvailableTools) == 0 && len(s.Tools) > 0 {
-			rec.AvailableTools = make([]string, 0, len(s.Tools))
-			for _, tool := range s.Tools {
-				name := strings.TrimSpace(tool.Name)
-				if name != "" {
-					rec.AvailableTools = append(rec.AvailableTools, name)
-				}
-			}
-		}
 		if len(rec.MCPToolsListed) == 0 {
 			rec.MCPToolsListed = mcpListedToolsForSession(s.Tools)
 		}
@@ -76,6 +68,9 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 	}
 	if resp != nil && len(rec.ToolCalls) == 0 {
 		rec.ToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
+	}
+	if resp != nil && len(rec.AvailableTools) == 0 && len(resp.VisibleTools) > 0 {
+		rec.AvailableTools = append([]string(nil), resp.VisibleTools...)
 	}
 	if resp != nil && len(rec.MCPToolsVisible) == 0 {
 		rec.MCPToolsVisible = append([]string(nil), resp.MCPVisibleTools...)
@@ -110,6 +105,10 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		if eventRec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && eventRec != nil {
 			rec.FlightRecorder = append([]runtimebus.FlightRecorderEntry(nil), eventRec.SnapshotFlightRecorder()...)
 		}
+	}
+	if len(rec.AvailableTools) == 0 && s != nil {
+		actor, _ := runtimeactors.ActorFromContext(ctx)
+		rec.AvailableTools = append([]string(nil), cliExecutionToolSurfaceForActor(actor, s.Tools).CanonicalVisibleTools...)
 	}
 	return rec
 }
