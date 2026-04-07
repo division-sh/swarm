@@ -1,6 +1,8 @@
 package semanticview
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -112,19 +114,48 @@ func (s bundleSource) ProjectScopes() []ProjectScope {
 	out := make([]ProjectScope, 0, len(views))
 	for _, view := range views {
 		out = append(out, ProjectScope{
-			Key:        strings.TrimSpace(view.Paths.Key),
-			Depth:      view.Paths.Depth,
-			Manifest:   view.Manifest,
-			PromptsDir: strings.TrimSpace(view.Paths.ProjectPromptsDir),
-			Nodes:      view.Nodes,
-			Events:     view.Events,
-			Agents:     view.Agents,
-			Tools:      view.Tools,
-			Policy:     view.Policy,
+			Key:          strings.TrimSpace(view.Paths.Key),
+			OwningFlowID: owningFlowIDForProjectView(s.bundle, view),
+			Depth:        view.Paths.Depth,
+			Manifest:     view.Manifest,
+			PromptsDir:   strings.TrimSpace(view.Paths.ProjectPromptsDir),
+			Nodes:        view.Nodes,
+			Events:       view.Events,
+			Agents:       view.Agents,
+			Tools:        view.Tools,
+			Policy:       view.Policy,
 		})
 	}
 	return out
 }
+
+func owningFlowIDForProjectView(bundle *runtimecontracts.WorkflowContractBundle, view runtimecontracts.ProjectContractView) string {
+	if bundle == nil {
+		return ""
+	}
+	projectDir := filepath.Clean(strings.TrimSpace(view.Paths.Dir))
+	if projectDir == "" || projectDir == "." {
+		return ""
+	}
+	bestFlowID := ""
+	bestDirLen := -1
+	for _, flow := range bundle.Paths.Flows {
+		flowID := strings.TrimSpace(flow.ID)
+		flowDir := filepath.Clean(strings.TrimSpace(flow.Dir))
+		if flowID == "" || flowDir == "" || flowDir == "." {
+			continue
+		}
+		if projectDir != flowDir && !strings.HasPrefix(projectDir, flowDir+string(os.PathSeparator)) {
+			continue
+		}
+		if len(flowDir) > bestDirLen {
+			bestFlowID = flowID
+			bestDirLen = len(flowDir)
+		}
+	}
+	return bestFlowID
+}
+
 func (s bundleSource) FlowScopes() []FlowScope {
 	if s.bundle == nil {
 		return nil
