@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	runtimebus "swarm/internal/runtime/bus"
@@ -168,4 +169,105 @@ func (b TurnBlock) ToolLinkData() (TurnBlockToolLinkData, bool, error) {
 	var data TurnBlockToolLinkData
 	ok, err := b.decodeData(&data)
 	return data, ok, err
+}
+
+func DecodeCanonicalTurnSummaryBlocks(blocks []TurnBlock) (TurnSummaryTurnBlockData, bool, error) {
+	var (
+		summary      TurnSummaryTurnBlockData
+		foundSummary bool
+	)
+	for _, block := range blocks {
+		if strings.TrimSpace(block.Kind) != turnSummaryBlockKind {
+			continue
+		}
+		if foundSummary {
+			return TurnSummaryTurnBlockData{}, false, fmt.Errorf("multiple canonical turn_summary blocks")
+		}
+		decoded, ok, err := block.TurnSummaryData()
+		if err != nil {
+			return TurnSummaryTurnBlockData{}, false, fmt.Errorf("decode canonical turn_summary: %w", err)
+		}
+		if !ok {
+			return TurnSummaryTurnBlockData{}, false, fmt.Errorf("canonical turn_summary block is empty")
+		}
+		summary = normalizeTurnSummaryTurnBlockData(decoded)
+		if turnSummaryTurnBlockDataIsZero(summary) {
+			return TurnSummaryTurnBlockData{}, false, fmt.Errorf("canonical turn_summary block is empty")
+		}
+		foundSummary = true
+	}
+	if !foundSummary {
+		if turnBlocksRequireCanonicalSummary(blocks) {
+			return TurnSummaryTurnBlockData{}, false, fmt.Errorf("missing canonical turn_summary for summary-bearing turn blocks")
+		}
+		return TurnSummaryTurnBlockData{}, false, nil
+	}
+	return summary, true, nil
+}
+
+func DecodeCanonicalTurnSummaryJSON(raw []byte) (TurnSummaryTurnBlockData, bool, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return TurnSummaryTurnBlockData{}, false, nil
+	}
+	var blocks []TurnBlock
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return TurnSummaryTurnBlockData{}, false, err
+	}
+	return DecodeCanonicalTurnSummaryBlocks(blocks)
+}
+
+func normalizeTurnSummaryTurnBlockData(summary TurnSummaryTurnBlockData) TurnSummaryTurnBlockData {
+	summary.AssistantVisibleOutput = strings.TrimSpace(summary.AssistantVisibleOutput)
+	summary.Outcome = strings.TrimSpace(summary.Outcome)
+	summary.ReasoningBlocks = trimSummaryStringSlice(summary.ReasoningBlocks)
+	summary.ProgressUpdates = trimSummaryStringSlice(summary.ProgressUpdates)
+	if len(summary.ToolResults) == 0 {
+		summary.ToolResults = nil
+	} else {
+		out := make([]TurnSummaryToolResult, 0, len(summary.ToolResults))
+		for _, item := range summary.ToolResults {
+			item.ToolName = strings.TrimSpace(item.ToolName)
+			item.ToolUseID = strings.TrimSpace(item.ToolUseID)
+			out = append(out, item)
+		}
+		summary.ToolResults = out
+	}
+	return summary
+}
+
+func turnSummaryTurnBlockDataIsZero(summary TurnSummaryTurnBlockData) bool {
+	return summary.AssistantVisibleOutput == "" &&
+		summary.Outcome == "" &&
+		len(summary.ReasoningBlocks) == 0 &&
+		len(summary.ProgressUpdates) == 0 &&
+		len(summary.ToolResults) == 0
+}
+
+func turnBlocksRequireCanonicalSummary(blocks []TurnBlock) bool {
+	for _, block := range blocks {
+		switch strings.TrimSpace(block.Kind) {
+		case "assistant_text", "outcome", "reasoning", "progress", "tool_result":
+			return true
+		}
+	}
+	return false
+}
+
+func trimSummaryStringSlice(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

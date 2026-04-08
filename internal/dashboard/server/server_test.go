@@ -666,30 +666,11 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 		}).AddRow(
 			"turn-1", "agent-1", "sess-1", "task", "global", "entity-1", "evt-1", "scoring/vertical.marginal", "",
 			[]byte(`["schedule"]`), []byte(toolCallsPayload), []byte(`["vertical.marginal_review_due"]`), []byte(`{"runtime-tools":"ok"}`), []byte(`["mcp__runtime-tools__schedule"]`), []byte(`["mcp__runtime-tools__schedule"]`),
-			[]byte(`{"message":{"content":"dispatch"}}`), []byte(responsePayload), []byte(`[]`), true, 92282, 0, "", now,
+			[]byte(`{"message":{"content":"dispatch"}}`), []byte(responsePayload), []byte(`[{"kind":"assistant_text","text":"stale fallback text"},{"kind":"outcome","text":"stale raw outcome"}]`), true, 92282, 0, "", now,
 		))
 
-	item, ok, err := reader.Get(context.Background(), "sess-1")
-	if err != nil {
-		t.Fatalf("get conversation: %v", err)
-	}
-	if !ok {
-		t.Fatalf("expected conversation to exist")
-	}
-	if item.AgentID != "agent-1" || item.SessionID != "sess-1" || len(item.Messages) != 1 || len(item.Turns) != 1 {
-		t.Fatalf("unexpected detail: %+v", item)
-	}
-	if item.Kind != "live_session" {
-		t.Fatalf("expected live_session detail kind, got %+v", item)
-	}
-	if item.RuntimeState.LastTurn == nil || !item.RuntimeState.LastTurn.ParseOK {
-		t.Fatalf("expected runtime_state.last_turn parse_ok=true, got %+v", item.RuntimeState)
-	}
-	if item.RuntimeState.RetryReason != "session not found" || item.RuntimeState.RetriesFromSessionID != "sess-0" {
-		t.Fatalf("expected retry lineage in runtime_state, got %+v", item.RuntimeState)
-	}
-	if item.Turns[0].AssistantVisibleOutput != "" || item.Turns[0].Outcome != "" || len(item.Turns[0].ToolResults) != 0 {
-		t.Fatalf("expected missing canonical summary to fail closed, got %+v", item.Turns[0])
+	if _, _, err := reader.Get(context.Background(), "sess-1"); err == nil || !strings.Contains(err.Error(), "missing canonical turn_summary for summary-bearing turn blocks") {
+		t.Fatalf("expected missing canonical summary to fail closed, got %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -786,18 +767,8 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalTurnSummary
 			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
 		}).AddRow("agent-1", "active", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(`[{"kind":"assistant_text","text":"stale fallback text"}]`)))
 
-	items, err := reader.ListGenericAgents(context.Background())
-	if err != nil {
-		t.Fatalf("ListGenericAgents: %v", err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("expected one agent, got %+v", items)
-	}
-	if items[0].CurrentTaskID != "task-1" {
-		t.Fatalf("current_task_id = %q", items[0].CurrentTaskID)
-	}
-	if items[0].LastTool != nil {
-		t.Fatalf("expected missing canonical summary to fail closed, got last_tool=%#v", items[0].LastTool)
+	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "missing canonical turn_summary for summary-bearing turn blocks") {
+		t.Fatalf("expected missing canonical summary to fail closed, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
@@ -1396,18 +1367,8 @@ func TestSummarizeConversationTurnBlocks_FailsClosedOnEmptyCanonicalSummary(t *t
 		{Kind: "turn_summary", Data: json.RawMessage(`{}`)},
 	}
 
-	assistantText, outcome, reasoning, progress, toolResults := summarizeConversationTurnBlocks(blocks)
-	if assistantText != "" || outcome != "" {
-		t.Fatalf("expected empty canonical summary strings, got assistant=%q outcome=%q", assistantText, outcome)
-	}
-	if reasoning != nil {
-		t.Fatalf("expected nil reasoning blocks, got %#v", reasoning)
-	}
-	if progress != nil {
-		t.Fatalf("expected nil progress updates, got %#v", progress)
-	}
-	if toolResults != nil {
-		t.Fatalf("expected nil tool results, got %#v", toolResults)
+	if _, _, _, _, _, err := summarizeConversationTurnBlocks(blocks); err == nil || !strings.Contains(err.Error(), "canonical turn_summary block is empty") {
+		t.Fatalf("expected empty canonical summary to fail, got %v", err)
 	}
 }
 
@@ -1418,7 +1379,10 @@ func TestSummarizeConversationTurnBlocks_DoesNotInferOutcomeWithoutCanonicalFiel
 		{Kind: "turn_summary", Data: json.RawMessage(`{"assistant_visible_output":"Parking for manual review."}`)},
 	}
 
-	assistantText, outcome, reasoning, progress, toolResults := summarizeConversationTurnBlocks(blocks)
+	assistantText, outcome, reasoning, progress, toolResults, err := summarizeConversationTurnBlocks(blocks)
+	if err != nil {
+		t.Fatalf("summarizeConversationTurnBlocks: %v", err)
+	}
 	if assistantText != "Parking for manual review." {
 		t.Fatalf("assistant_visible_output = %q", assistantText)
 	}

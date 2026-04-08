@@ -338,7 +338,10 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 		if err != nil {
 			return nil, err
 		}
-		assistantText, outcome, reasoning, progress, toolResults := summarizeConversationTurnBlocks(item.TurnBlocks)
+		assistantText, outcome, reasoning, progress, toolResults, err := summarizeConversationTurnBlocks(item.TurnBlocks)
+		if err != nil {
+			return nil, fmt.Errorf("summarize conversation turn blocks: %w", err)
+		}
 		item.AssistantVisibleOutput = assistantText
 		item.Outcome = outcome
 		item.ReasoningBlocks = reasoning
@@ -489,16 +492,20 @@ func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {
 	return item, nil
 }
 
-func summarizeConversationTurnBlocks(blocks []ConversationTurnBlock) (string, string, []string, []string, []ConversationToolResult) {
+func summarizeConversationTurnBlocks(blocks []ConversationTurnBlock) (string, string, []string, []string, []ConversationToolResult, error) {
 	raw, err := json.Marshal(blocks)
 	if err != nil {
-		return "", "", nil, nil, nil
+		return "", "", nil, nil, nil, err
 	}
 	summary, ok, err := decodeTurnSummaryProjection(raw)
-	if err != nil || !ok {
-		return "", "", nil, nil, nil
+	if err != nil {
+		return "", "", nil, nil, nil, err
 	}
-	return projectedTurnSummaryConversationFields(summary)
+	if !ok {
+		return "", "", nil, nil, nil, nil
+	}
+	assistant, outcome, reasoning, progress, toolResults := projectedTurnSummaryConversationFields(summary)
+	return assistant, outcome, reasoning, progress, toolResults, nil
 }
 
 func readString(value any) string {
