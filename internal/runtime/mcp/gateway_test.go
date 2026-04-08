@@ -16,6 +16,7 @@ import (
 	"swarm/internal/runtime/core/toolcapabilities"
 	"swarm/internal/runtime/core/toolidentity"
 	llm "swarm/internal/runtime/llm"
+	runtimerterr "swarm/internal/runtime/rterrors"
 )
 
 const testGatewayToken = "gateway-token"
@@ -31,6 +32,15 @@ func withContextToken(req *http.Request, token string) *http.Request {
 		req.Header.Set(contextTokenHeader, strings.TrimSpace(token))
 	}
 	return req
+}
+
+func mustRPCResponse(t *testing.T, rec *httptest.ResponseRecorder) RPCResponse {
+	t.Helper()
+	var resp RPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	return resp
 }
 
 func mustMCPToolsForRequest(t *testing.T, g *Gateway, req *http.Request) []ToolDef {
@@ -761,6 +771,62 @@ func TestGatewayHandleMCP_DoesNotLetCallerAllowlistGrantToolAccess(t *testing.T)
 	}
 	if denialLayer != "gateway" {
 		t.Fatalf("denial_layer = %q, want gateway", denialLayer)
+	}
+}
+
+func TestGatewayHandleMCP_ToolsCallIncludesStructuredRuntimeErrorPayload(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	g := NewGateway(testToolExecutor(func(_ context.Context, _ string, _ any) (any, error) {
+		return nil, runtimerterr.WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.filter", false, nil, "query is required")
+	}), testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-runtime-error", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "query_entities",
+			"arguments": map[string]any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-runtime-error")
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	resp := mustRPCResponse(t, rec)
+	if resp.Error != nil {
+		t.Fatalf("rpc error = %#v", resp.Error)
+	}
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", resp.Result)
+	}
+	if isError, _ := result["isError"].(bool); !isError {
+		t.Fatalf("isError = %#v, want true", result["isError"])
+	}
+	runtimeErr, err := DecodeRuntimeErrorPayload(result["runtimeError"])
+	if err != nil {
+		t.Fatalf("DecodeRuntimeErrorPayload: %v", err)
+	}
+	if runtimeErr.Code != ErrCodeToolExecFailed {
+		t.Fatalf("runtimeError.code = %q, want %q", runtimeErr.Code, ErrCodeToolExecFailed)
+	}
+	if runtimeErr.Cause == nil || runtimeErr.Cause.Code != "invalid_tool_input" {
+		t.Fatalf("runtimeError.cause = %#v, want invalid_tool_input", runtimeErr.Cause)
 	}
 }
 

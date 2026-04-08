@@ -325,28 +325,31 @@ func startupProbeMCPToolsCall(ctx context.Context, client *http.Client, binding 
 	if isError, _ := result["isError"].(bool); !isError {
 		return nil
 	}
-	message := strings.TrimSpace(startupMCPErrorText(result))
-	if message == "" {
-		return fmt.Errorf("tools/call returned error without content")
+	runtimeErr, err := runtimemcp.DecodeRuntimeErrorPayload(result["runtimeError"])
+	if err != nil {
+		return fmt.Errorf("tools/call returned invalid runtimeError payload: %w", err)
 	}
-	if startupProbeAllowsValidationError(message) {
+	if startupProbeAcceptsRuntimeValidation(runtimeErr) {
 		return nil
 	}
-	return fmt.Errorf(message)
+	message := strings.TrimSpace(startupMCPErrorText(result))
+	if message != "" {
+		return fmt.Errorf(message)
+	}
+	return fmt.Errorf("tools/call returned runtime error code=%s", strings.TrimSpace(runtimeErr.Code))
 }
 
-func startupProbeAllowsValidationError(message string) bool {
-	lowered := strings.ToLower(strings.TrimSpace(message))
-	switch {
-	case strings.Contains(lowered, "runtime tool input validation failed"):
-		return true
-	case strings.Contains(lowered, "invalid_tool_input"):
-		return true
-	case strings.Contains(lowered, "schema validation failed"):
-		return true
-	default:
+func startupProbeAcceptsRuntimeValidation(runtimeErr *runtimemcp.RuntimeErrorPayload) bool {
+	if runtimeErr == nil {
 		return false
 	}
+	if strings.TrimSpace(runtimeErr.Code) != runtimemcp.ErrCodeToolExecFailed {
+		return false
+	}
+	if runtimeErr.Cause == nil {
+		return false
+	}
+	return strings.TrimSpace(runtimeErr.Cause.Code) == "invalid_tool_input"
 }
 
 func startupMCPErrorText(result map[string]any) string {
