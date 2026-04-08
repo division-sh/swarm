@@ -65,6 +65,7 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 		ConversationStore: s.ConversationStore,
 		ManagerStore:      s.ManagerStore,
 		ScheduleStore:     s.ScheduleStore,
+		StartupOwnership:  s.Postgres,
 		TurnStore:         s.TurnStore,
 	}
 }

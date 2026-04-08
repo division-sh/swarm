@@ -2,21 +2,48 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"swarm/internal/config"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
-	"swarm/internal/testutil"
+	runtimestartupownership "swarm/internal/runtime/startupownership"
 )
 
+type fakeRuntimeStartupOwnershipStore struct {
+	acquire func(context.Context, string) (runtimestartupownership.Lease, error)
+}
+
+func (f fakeRuntimeStartupOwnershipStore) AcquireRuntimeStartupOwnership(ctx context.Context, ownerID string) (runtimestartupownership.Lease, error) {
+	if f.acquire == nil {
+		return nil, nil
+	}
+	return f.acquire(ctx, ownerID)
+}
+
+type fakeRuntimeStartupOwnershipLease struct {
+	released atomic.Int32
+}
+
+func (f *fakeRuntimeStartupOwnershipLease) Release(context.Context) error {
+	f.released.Add(1)
+	return nil
+}
+
 func TestRuntimeStart_FailsWhenSharedStoreOwnershipAlreadyHeld(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
-	rt1, err := NewRuntime(context.Background(), &config.Config{}, Stores{SQLDB: db}, RuntimeOptions{
+	rt1, err := NewRuntime(context.Background(), &config.Config{}, Stores{
+		StartupOwnership: fakeRuntimeStartupOwnershipStore{
+			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
+				return &fakeRuntimeStartupOwnershipLease{}, nil
+			},
+		},
+	}, RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
@@ -29,7 +56,13 @@ func TestRuntimeStart_FailsWhenSharedStoreOwnershipAlreadyHeld(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = rt1.Shutdown() })
 
-	rt2, err := NewRuntime(context.Background(), &config.Config{}, Stores{SQLDB: db}, RuntimeOptions{
+	rt2, err := NewRuntime(context.Background(), &config.Config{}, Stores{
+		StartupOwnership: fakeRuntimeStartupOwnershipStore{
+			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
+				return nil, fmt.Errorf("shared runtime store already owned by another runtime instance")
+			},
+		},
+	}, RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
@@ -47,10 +80,16 @@ func TestRuntimeStart_FailsWhenSharedStoreOwnershipAlreadyHeld(t *testing.T) {
 }
 
 func TestRuntimeShutdown_ReleasesSharedStoreOwnership(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	lease := &fakeRuntimeStartupOwnershipLease{}
 
-	rt1, err := NewRuntime(context.Background(), &config.Config{}, Stores{SQLDB: db}, RuntimeOptions{
+	rt1, err := NewRuntime(context.Background(), &config.Config{}, Stores{
+		StartupOwnership: fakeRuntimeStartupOwnershipStore{
+			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
+				return lease, nil
+			},
+		},
+	}, RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
@@ -64,8 +103,17 @@ func TestRuntimeShutdown_ReleasesSharedStoreOwnership(t *testing.T) {
 	if err := rt1.Shutdown(); err != nil {
 		t.Fatalf("Shutdown(rt1): %v", err)
 	}
+	if got := lease.released.Load(); got != 1 {
+		t.Fatalf("startup ownership lease release count = %d, want 1", got)
+	}
 
-	rt2, err := NewRuntime(context.Background(), &config.Config{}, Stores{SQLDB: db}, RuntimeOptions{
+	rt2, err := NewRuntime(context.Background(), &config.Config{}, Stores{
+		StartupOwnership: fakeRuntimeStartupOwnershipStore{
+			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
+				return &fakeRuntimeStartupOwnershipLease{}, nil
+			},
+		},
+	}, RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
