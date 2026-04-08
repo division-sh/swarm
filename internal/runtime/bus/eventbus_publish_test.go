@@ -187,6 +187,10 @@ func (s *descriptorAwareEventStore) InsertEventDeliveries(_ context.Context, _ s
 	return nil
 }
 
+func (s *descriptorAwareEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return s.persistedDeliveries(), nil
+}
+
 func (s *descriptorAwareEventStore) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
 	if s.listErr != nil {
 		return nil, s.listErr

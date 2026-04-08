@@ -14,6 +14,7 @@ import (
 type EventStore interface {
 	AppendEvent(ctx context.Context, evt events.Event) error
 	InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error
+	runtimereplayclaim.RecipientReader
 }
 
 type FlowInstanceRouteRecord struct {
@@ -86,12 +87,13 @@ type PipelineReceiptSweeperStore = runtimereplayclaim.Lister
 
 type PipelineReplayClaimStore = runtimereplayclaim.Owner
 
-type EventDeliveryReader = runtimereplayclaim.RecipientReader
-
 type InMemoryEventStore struct{}
 
 func (InMemoryEventStore) AppendEvent(_ context.Context, _ events.Event) error { return nil }
 func (InMemoryEventStore) InsertEventDeliveries(_ context.Context, _ string, _ []string) error {
 	return nil
+}
+func (InMemoryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return []string{}, nil
 }
 func (InMemoryEventStore) SupportsPersistedReplay() bool { return false }

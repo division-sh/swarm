@@ -10,9 +10,8 @@ import (
 )
 
 var (
-	ErrMissingReplayEventReader            = errors.New("store does not support replay-eligible event reads")
-	ErrMissingReplayClaimOwner             = errors.New("store does not support explicit pipeline replay claims")
-	ErrMissingAuthoritativeRecipientReader = errors.New("store does not support authoritative delivery recipient reads")
+	ErrMissingReplayEventReader = errors.New("store does not support replay-eligible event reads")
+	ErrMissingReplayClaimOwner  = errors.New("store does not support explicit pipeline replay claims")
 )
 
 type Participation interface {
@@ -65,12 +64,4 @@ func RequireStore(store any) (Store, bool, error) {
 		Lister: lister,
 		Owner:  owner,
 	}, true, nil
-}
-
-func RequireRecipientReader(store any) (RecipientReader, error) {
-	reader, ok := store.(RecipientReader)
-	if !ok {
-		return nil, ErrMissingAuthoritativeRecipientReader
-	}
-	return reader, nil
 }

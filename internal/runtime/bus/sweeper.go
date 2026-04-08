@@ -83,10 +83,6 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if !participates {
 		return 0, nil
 	}
-	recipientReader, err := runtimereplayclaim.RequireRecipientReader(eb.store)
-	if err != nil {
-		return 0, err
-	}
 	if limit <= 0 {
 		limit = DefaultOutboxSweeperConfig().Limit
 	}
@@ -113,7 +109,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			_ = lease.Release(ctx)
 			continue
 		}
-		recipients, err := eb.authoritativeRecipientsForEvent(ctx, recipientReader, evt.ID)
+		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID)
 		if err != nil {
 			eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
 			_ = lease.Release(ctx)
@@ -134,8 +130,8 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	return redelivered, nil
 }
 
-func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, reader EventDeliveryReader, eventID string) ([]string, error) {
-	recipients, err := reader.ListEventDeliveryRecipients(ctx, eventID)
+func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, eventID string) ([]string, error) {
+	recipients, err := eb.store.ListEventDeliveryRecipients(ctx, eventID)
 	if err != nil {
 		return nil, err
 	}

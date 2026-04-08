@@ -17,6 +17,7 @@ type pipelineReceiptRecorder interface {
 type EventStore interface {
 	AppendEvent(ctx context.Context, evt events.Event) error
 	InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error
+	runtimereplayclaim.RecipientReader
 }
 
 type Publisher interface {
@@ -69,10 +70,6 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		return err
 	}
 	recorder, _ := r.store.(pipelineReceiptRecorder)
-	recipients, err := runtimereplayclaim.RequireRecipientReader(r.store)
-	if err != nil {
-		return fmt.Errorf("recover pipeline receipts: %w", err)
-	}
 	var firstErr error
 	for _, record := range eventsToReplay {
 		evt := record.Event
@@ -108,7 +105,7 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			_ = lease.Release(ctx)
 			continue
 		}
-		persistedRecipients, err := recipients.ListEventDeliveryRecipients(ctx, evt.ID)
+		persistedRecipients, err := r.store.ListEventDeliveryRecipients(ctx, evt.ID)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("load persisted recipients for replay event %s: %w", evt.ID, err)

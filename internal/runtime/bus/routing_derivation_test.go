@@ -47,6 +47,9 @@ func (*routePersistenceTestStore) AppendEvent(context.Context, events.Event) err
 func (*routePersistenceTestStore) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil
 }
+func (*routePersistenceTestStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return []string{}, nil
+}
 
 func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, route runtimebus.FlowInstanceRouteRecord) error {
 	if s.routes == nil {
