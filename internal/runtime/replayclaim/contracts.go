@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	ErrMissingReplayEventReader = errors.New("store does not support replay-eligible event reads")
-	ErrMissingReplayClaimOwner  = errors.New("store does not support explicit pipeline replay claims")
+	ErrMissingReplayEventReader                  = errors.New("store does not support replay-eligible event reads")
+	ErrMissingReplayClaimOwner                   = errors.New("store does not support explicit pipeline replay claims")
+	ErrAuthoritativeRecipientManifestUnavailable = errors.New("authoritative delivery recipient manifest is unavailable for non-persistent event stores")
 )
 
 type Participation interface {

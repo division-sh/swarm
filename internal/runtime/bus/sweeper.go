@@ -131,6 +131,9 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 }
 
 func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, eventID string) ([]string, error) {
+	if !runtimereplayclaim.SupportsPersistedReplay(eb.store) {
+		return nil, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable
+	}
 	recipients, err := eb.store.ListEventDeliveryRecipients(ctx, eventID)
 	if err != nil {
 		return nil, err

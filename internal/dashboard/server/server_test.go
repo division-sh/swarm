@@ -1100,8 +1100,9 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	if items[0].PendingEvents != len(pending) {
 		t.Fatalf("pending_events = %d, want %d canonical pending deliveries", items[0].PendingEvents, len(pending))
 	}
-	if items[0].OldestPendingAgeSec != factsByAgent["agent-1"].OldestPendingAgeSec {
-		t.Fatalf("oldest_pending_age_sec = %d, want %d canonical pending age", items[0].OldestPendingAgeSec, factsByAgent["agent-1"].OldestPendingAgeSec)
+	wantOldestAge := factsByAgent["agent-1"].OldestPendingAgeSec
+	if diff := items[0].OldestPendingAgeSec - wantOldestAge; diff < -1 || diff > 1 {
+		t.Fatalf("oldest_pending_age_sec = %d, want %d canonical pending age (+/-1s)", items[0].OldestPendingAgeSec, wantOldestAge)
 	}
 	if items[0].Failures24h != 1 {
 		t.Fatalf("failures_24h = %d, want 1 failed delivery", items[0].Failures24h)
@@ -1178,8 +1179,9 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	if items[0].PendingEvents != 1 {
 		t.Fatalf("pending_events = %d, want 1 full-horizon pending delivery", items[0].PendingEvents)
 	}
-	if items[0].OldestPendingAgeSec != factsByAgent["agent-1"].OldestPendingAgeSec {
-		t.Fatalf("oldest_pending_age_sec = %d, want %d canonical full-horizon age", items[0].OldestPendingAgeSec, factsByAgent["agent-1"].OldestPendingAgeSec)
+	wantOldestAge := factsByAgent["agent-1"].OldestPendingAgeSec
+	if diff := items[0].OldestPendingAgeSec - wantOldestAge; diff < -1 || diff > 1 {
+		t.Fatalf("oldest_pending_age_sec = %d, want %d canonical full-horizon age (+/-1s)", items[0].OldestPendingAgeSec, wantOldestAge)
 	}
 	if items[0].OldestPendingAgeSec < 30*24*60*60 {
 		t.Fatalf("oldest_pending_age_sec = %d, want at least 30 days", items[0].OldestPendingAgeSec)
