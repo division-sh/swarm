@@ -21,6 +21,12 @@ type recoveryCapturePublisher struct {
 	direct    []events.Event
 }
 
+type recoveryMissingClaimStore struct {
+	events      []events.PersistedReplayEvent
+	deliveries  map[string][]string
+	receiptByID map[string]string
+}
+
 func (p *recoveryCapturePublisher) Publish(ctx context.Context, evt events.Event) error {
 	p.published = append(p.published, evt)
 	return p.inner.Publish(ctx, evt)
@@ -29,6 +35,24 @@ func (p *recoveryCapturePublisher) Publish(ctx context.Context, evt events.Event
 func (p *recoveryCapturePublisher) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error {
 	p.direct = append(p.direct, evt)
 	return p.inner.PublishDirect(ctx, evt, recipients)
+}
+
+func (s *recoveryMissingClaimStore) AppendEvent(context.Context, events.Event) error { return nil }
+func (s *recoveryMissingClaimStore) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+func (s *recoveryMissingClaimStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
+	return append([]events.PersistedReplayEvent(nil), s.events...), nil
+}
+func (s *recoveryMissingClaimStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
+	return append([]string(nil), s.deliveries[eventID]...), nil
+}
+func (s *recoveryMissingClaimStore) UpsertPipelineReceipt(_ context.Context, eventID, status, _ string) error {
+	if s.receiptByID == nil {
+		s.receiptByID = map[string]string{}
+	}
+	s.receiptByID[eventID] = status
+	return nil
 }
 
 type blockingRecoveryPublisher struct {
@@ -470,5 +494,28 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 	}
 	if receiptStatus != "success" {
 		t.Fatalf("child receipt outcome = %q, want success", receiptStatus)
+	}
+}
+
+func TestRecoveryManager_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
+	store := &recoveryMissingClaimStore{
+		events: []events.PersistedReplayEvent{
+			{Event: events.Event{
+				ID:        "evt-missing-claim",
+				Type:      events.EventType("system.recover"),
+				Payload:   []byte(`{"ok":true}`),
+				CreatedAt: time.Now().UTC(),
+			}},
+		},
+		deliveries: map[string][]string{"evt-missing-claim": {"agent-a"}},
+	}
+	rm := runtimepipeline.NewRecoveryManagerWith(store, &recoveryCapturePublisher{})
+
+	err := rm.Recover(context.Background())
+	if err == nil {
+		t.Fatal("expected Recover to fail without replay claim owner")
+	}
+	if got := err.Error(); got != "recover pipeline receipts: store does not support explicit pipeline replay claims" {
+		t.Fatalf("Recover error = %q, want explicit replay claim owner failure", got)
 	}
 }

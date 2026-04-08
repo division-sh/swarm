@@ -7,20 +7,8 @@ import (
 	"time"
 
 	"swarm/internal/events"
-	runtimeownership "swarm/internal/runtime/core/ownership"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
-
-type missingPipelineReceiptReader interface {
-	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error)
-}
-
-type pipelineReplayClaimer interface {
-	ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error)
-}
-
-type authoritativeDeliveryRecipientReader interface {
-	ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error)
-}
 
 type pipelineReceiptRecorder interface {
 	UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error
@@ -61,13 +49,9 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	if r == nil || r.store == nil || r.bus == nil {
 		return nil
 	}
-	reader, ok := r.store.(missingPipelineReceiptReader)
-	if !ok {
-		return nil
-	}
-	claimer, ok := r.store.(pipelineReplayClaimer)
-	if !ok {
-		return fmt.Errorf("recover pipeline receipts: missing explicit replay claim owner")
+	replayStore, err := runtimereplayclaim.RequireStore(r.store)
+	if err != nil {
+		return fmt.Errorf("recover pipeline receipts: %w", err)
 	}
 	window := r.window
 	if window <= 0 {
@@ -77,14 +61,14 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	if limit <= 0 {
 		limit = 500
 	}
-	eventsToReplay, err := reader.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-window), limit)
+	eventsToReplay, err := replayStore.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-window), limit)
 	if err != nil {
 		return err
 	}
 	recorder, _ := r.store.(pipelineReceiptRecorder)
-	recipients, ok := r.store.(authoritativeDeliveryRecipientReader)
-	if !ok {
-		return fmt.Errorf("recover pipeline receipts: missing authoritative delivery recipient reader")
+	recipients, err := runtimereplayclaim.RequireRecipientReader(r.store)
+	if err != nil {
+		return fmt.Errorf("recover pipeline receipts: %w", err)
 	}
 	var firstErr error
 	for _, record := range eventsToReplay {
@@ -95,7 +79,7 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 		if strings.TrimSpace(evt.ID) == "" {
 			continue
 		}
-		lease, claimed, err := claimer.ClaimPipelineReplay(ctx, evt.ID)
+		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("claim replay event %s: %w", evt.ID, err)

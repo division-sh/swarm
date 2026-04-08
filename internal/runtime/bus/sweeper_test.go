@@ -22,6 +22,11 @@ type sweeperTestStore struct {
 	releasing   chan struct{}
 }
 
+type sweeperMissingClaimStore struct {
+	events     []events.PersistedReplayEvent
+	deliveries map[string][]string
+}
+
 func (s *sweeperTestStore) AppendEvent(context.Context, events.Event) error { return nil }
 func (s *sweeperTestStore) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil
@@ -54,6 +59,17 @@ func (s *sweeperTestStore) ClaimPipelineReplay(_ context.Context, eventID string
 	}
 	s.claimed[eventID] = true
 	return sweeperClaimLease{store: s, eventID: eventID}, true, nil
+}
+
+func (s *sweeperMissingClaimStore) AppendEvent(context.Context, events.Event) error { return nil }
+func (s *sweeperMissingClaimStore) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+func (s *sweeperMissingClaimStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
+	return append([]events.PersistedReplayEvent(nil), s.events...), nil
+}
+func (s *sweeperMissingClaimStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
+	return append([]string(nil), s.deliveries[eventID]...), nil
 }
 
 type sweeperClaimLease struct {
@@ -261,4 +277,30 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 		t.Fatal("expected claimed replay delivery")
 	}
 	waitForNoEvent(t, ch)
+}
+
+func TestSweepUndispatched_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
+	store := &sweeperMissingClaimStore{
+		events: []events.PersistedReplayEvent{
+			{Event: events.Event{
+				ID:        "evt-claim-missing",
+				Type:      events.EventType("custom.claimed"),
+				Payload:   []byte(`{"entity_id":"ent-claim"}`),
+				CreatedAt: time.Now().UTC(),
+			}},
+		},
+		deliveries: map[string][]string{"evt-claim-missing": {"agent-a"}},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	_, err = eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err == nil {
+		t.Fatal("expected SweepUndispatched to fail without replay claim owner")
+	}
+	if got := err.Error(); got != "store does not support explicit pipeline replay claims" {
+		t.Fatalf("SweepUndispatched error = %q, want explicit replay claim owner failure", got)
+	}
 }

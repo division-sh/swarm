@@ -8,7 +8,7 @@ import (
 
 	"swarm/internal/events"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
-	runtimeownership "swarm/internal/runtime/core/ownership"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 type EventStore interface {
@@ -82,17 +82,11 @@ type TransactionalEventStore interface {
 	UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error
 }
 
-type PipelineReceiptSweeperStore interface {
-	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error)
-}
+type PipelineReceiptSweeperStore = runtimereplayclaim.Lister
 
-type PipelineReplayClaimStore interface {
-	ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error)
-}
+type PipelineReplayClaimStore = runtimereplayclaim.Owner
 
-type EventDeliveryReader interface {
-	ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error)
-}
+type EventDeliveryReader = runtimereplayclaim.RecipientReader
 
 type InMemoryEventStore struct{}
 
