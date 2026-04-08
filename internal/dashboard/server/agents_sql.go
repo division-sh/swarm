@@ -97,6 +97,10 @@ type agentOperatorProjection struct {
 	LastTool            *AgentLastTool
 }
 
+type pendingAgentDeliveryFactSource interface {
+	ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]store.PendingAgentDeliveryFacts, error)
+}
+
 func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[string]agentOperatorProjection, error) {
 	caps, err := r.resolveCapabilities(ctx)
 	if err != nil {
@@ -105,7 +109,6 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 	if err := store.RequireCanonicalPendingAgentDeliveryCapabilities(caps); err != nil {
 		return nil, err
 	}
-	pendingPredicate := store.CanonicalPendingAgentDeliveryPredicateSQL("d", "r")
 	latestTurnBlocksExpr := `'[]'::jsonb`
 	if caps.Conversations.TurnBlocks {
 		latestTurnBlocksExpr = `COALESCE(turn_blocks, '[]'::jsonb)`
@@ -117,8 +120,8 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 			COALESCE(sess.turn_count, 0),
 			COALESCE(sess.lease_holder, ''),
 			sess.lease_expires_at,
-			COALESCE(p.pending_count, 0),
-			COALESCE(p.oldest_pending_age_sec, 0),
+			0,
+			0,
 			COALESCE(f.failures_24h, 0),
 			COALESCE(f.dead_letters_24h, 0),
 			0,
@@ -150,22 +153,6 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 		) latest_turn ON true
 		LEFT JOIN LATERAL (
 			SELECT
-				COUNT(*) FILTER (WHERE %s)::int AS pending_count,
-				COALESCE(MAX(CASE
-					WHEN %s THEN EXTRACT(EPOCH FROM now() - e.created_at)
-					ELSE NULL
-				END)::int, 0) AS oldest_pending_age_sec
-			FROM event_deliveries d
-			INNER JOIN events e ON e.event_id = d.event_id
-			LEFT JOIN event_receipts r
-				ON r.event_id = d.event_id
-				AND r.subscriber_type = 'agent'
-				AND r.subscriber_id = d.subscriber_id
-			WHERE d.subscriber_type = 'agent'
-			  AND d.subscriber_id = a.agent_id
-		) p ON true
-		LEFT JOIN LATERAL (
-			SELECT
 				COUNT(*) FILTER (WHERE status = 'failed')::int AS failures_24h,
 				COUNT(*) FILTER (WHERE status = 'dead_letter')::int AS dead_letters_24h
 			FROM event_deliveries
@@ -175,13 +162,14 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 		) f ON true
 		WHERE a.status NOT IN ('terminated', 'ephemeral')
 		ORDER BY a.created_at ASC, a.agent_id ASC
-	`, latestTurnBlocksExpr, pendingPredicate, pendingPredicate), runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
+	`, latestTurnBlocksExpr), runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
 	if err != nil {
 		return nil, fmt.Errorf("query agent operator projections: %w", err)
 	}
 	defer rows.Close()
 
 	out := map[string]agentOperatorProjection{}
+	agentIDs := make([]string, 0)
 	for rows.Next() {
 		var (
 			id            string
@@ -217,10 +205,26 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 		if err := enrichAgentOperatorProjectionFromLatestTurn(&projection, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
 			return nil, err
 		}
-		out[strings.TrimSpace(id)] = projection
+		id = strings.TrimSpace(id)
+		out[id] = projection
+		agentIDs = append(agentIDs, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read agent operator projection rows: %w", err)
+	}
+	factSource, ok := r.base.(pendingAgentDeliveryFactSource)
+	if !ok || factSource == nil {
+		return nil, fmt.Errorf("missing pending agent delivery fact source")
+	}
+	factsByAgent, err := factSource.ListPendingAgentDeliveryFacts(ctx, agentIDs, time.Now().Add(-30*24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
+	for agentID, facts := range factsByAgent {
+		projection := out[strings.TrimSpace(agentID)]
+		projection.PendingEvents = facts.PendingCount
+		projection.OldestPendingAgeSec = facts.OldestPendingAgeSec
+		out[strings.TrimSpace(agentID)] = projection
 	}
 	return out, nil
 }
