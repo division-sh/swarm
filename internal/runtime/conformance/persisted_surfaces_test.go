@@ -323,6 +323,85 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	}
 }
 
+func TestCanonicalRuntimeLogTurnBlockSurface_RoundTripsThroughConversationReader(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalConversationSurface(t, ctx, pg)
+	seedConformanceAgent(t, ctx, pg, "agent-1")
+
+	sessionID := uuid.NewString()
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "agent-1",
+		Mode:      "task",
+		Messages: []runtimellm.Message{
+			{Role: "assistant", Content: "done"},
+		},
+		Summary:   "done",
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task): %v", err)
+	}
+
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:     "agent-1",
+		RuntimeMode: "task",
+		SessionID:   sessionID,
+		TurnBlocks: []runtimellm.TurnBlock{
+			{
+				Kind:  "runtime_log",
+				Title: "Tool execution was denied for save_entity_field",
+				Data: json.RawMessage(`{
+					"log_level":"warn",
+					"message":"Tool execution was denied for save_entity_field",
+					"details":{
+						"component":"tool-executor",
+						"action":"tool_execution_denied",
+						"tool_name":"save_entity_field"
+					}
+				}`),
+			},
+		},
+		ParseOK: true,
+		Latency: 5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn(task runtime_log block): %v", err)
+	}
+
+	reader := dashboardserver.NewSQLConversationReader(db, pg)
+	if reader == nil {
+		t.Fatal("NewSQLConversationReader returned nil")
+	}
+	item, ok, err := reader.Get(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("Get conversation: %v", err)
+	}
+	if !ok {
+		t.Fatalf("conversation %s not found", sessionID)
+	}
+	if len(item.Turns) != 1 {
+		t.Fatalf("conversation turns = %d, want 1", len(item.Turns))
+	}
+	blocks := item.Turns[0].TurnBlocks
+	if len(blocks) != 1 || blocks[0].Kind != "runtime_log" {
+		t.Fatalf("runtime_log turn blocks = %#v", blocks)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(blocks[0].Data, &data); err != nil {
+		t.Fatalf("decode runtime_log turn block data: %v", err)
+	}
+	if readString(data["log_level"]) != "warn" || readString(data["message"]) != "Tool execution was denied for save_entity_field" {
+		t.Fatalf("runtime_log turn block data = %#v", data)
+	}
+	details, _ := data["details"].(map[string]any)
+	if readString(details["component"]) != "tool-executor" || readString(details["action"]) != "tool_execution_denied" {
+		t.Fatalf("runtime_log turn block details = %#v", details)
+	}
+}
+
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)

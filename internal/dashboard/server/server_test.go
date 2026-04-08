@@ -1615,6 +1615,51 @@ func TestSQLConversationReader_GetFailsOnMalformedCanonicalTurnSummary(t *testin
 	}
 }
 
+func TestSQLConversationReader_GetFailsOnMalformedCanonicalRuntimeLogTurnBlock(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions:   store.SchemaFlavorCanonical,
+			Turns:      store.SchemaFlavorCanonical,
+			TurnBlocks: true,
+		},
+	}})
+	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
+	summaryState := `{"summary":"brief"}`
+	messagePayload := `[{"role":"assistant","content":"hello"}]`
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
+		WithArgs("sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 1, []byte(summaryState), []byte(messagePayload), now))
+
+	mock.ExpectQuery("SELECT\\s+turn_id::text,.*FROM agent_turns").
+		WithArgs("agent-1", "sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id", "trigger_event_id", "trigger_event_type", "task_id",
+			"available_tools", "tool_calls", "emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
+			"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms", "retry_count", "error", "created_at",
+		}).AddRow(
+			"turn-1", "agent-1", "sess-1", "task", "global", "entity-1", "evt-1", "task.run", "",
+			[]byte(`[]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`),
+			[]byte(`{"message":{"content":"dispatch"}}`), []byte(`{"result":"done"}`), []byte(`[{"kind":"runtime_log","title":"runtime log","data":{"log_level":"warn","message":"runtime log","details":{"action":"tool_execution_denied"}}}]`), true, 25, 0, "", now,
+		))
+
+	if _, _, err := reader.Get(context.Background(), "sess-1"); err == nil || !strings.Contains(err.Error(), "canonical runtime_log block details.component is required") {
+		t.Fatalf("expected malformed canonical runtime_log turn block to fail, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestSQLConversationReader_GetUsesSessionIDNotAgentID(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
