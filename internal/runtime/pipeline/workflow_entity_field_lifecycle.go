@@ -163,6 +163,19 @@ func WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler runtimecontract
 	return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleDataAccumulation)
 }
 
+func WorkflowEntityReadsPersistedStateBeforeHandlerWrites(phase WorkflowEntityFieldLifecyclePhase) bool {
+	switch phase {
+	case WorkflowEntityFieldLifecycleGuard,
+		WorkflowEntityFieldLifecycleFilter,
+		WorkflowEntityFieldLifecycleCount,
+		WorkflowEntityFieldLifecycleOnComplete,
+		WorkflowEntityFieldLifecycleRule:
+		return true
+	default:
+		return false
+	}
+}
+
 func WorkflowEntityFieldNameFromTarget(target string) (string, bool) {
 	return workflowEntityFieldNameFromTarget(target)
 }

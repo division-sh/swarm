@@ -780,7 +780,7 @@ func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 	}
 }
 
-func TestRun_ReportsExpressionFieldReferenceErrorWhenFieldIsWrittenTooLate(t *testing.T) {
+func TestRun_AllowsGuardReferenceToPersistedFieldEvenWhenSameHandlerWritesFieldLater(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.missing_score >= 70"}
@@ -792,15 +792,15 @@ func TestRun_ReportsExpressionFieldReferenceErrorWhenFieldIsWrittenTooLate(t *te
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_score") {
-		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_score") {
+		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
 	}
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "before the handler lifecycle makes it available") {
-		t.Fatalf("expected lifecycle-aware expression error, got %#v", report.Errors())
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.missing_score") {
+		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
 	}
 }
 
-func TestRun_ReportsExpressionFieldReferenceErrorForFilterThatDependsOnLaterCompute(t *testing.T) {
+func TestRun_AllowsFilterReferenceToPersistedFieldEvenWhenSameHandlerComputesFieldLater(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.Filter = &runtimecontracts.FilterSpec{
@@ -817,8 +817,11 @@ func TestRun_ReportsExpressionFieldReferenceErrorForFilterThatDependsOnLaterComp
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.filtered_score") {
-		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.filtered_score") {
+		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.filtered_score") {
+		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
 	}
 }
 
@@ -857,6 +860,49 @@ func TestRun_AllowsExpressionFieldReferenceForSelfTargetEntityUpdate(t *testing.
 	}
 }
 
+func TestRun_AllowsGuardReferenceToPersistedFieldEvenWhenHandlerWritesFieldLater(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.retry_count < 3"}
+	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{
+		TargetField: "retry_count",
+		Value:       runtimecontracts.CELExpression("entity.retry_count + 1"),
+	}}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.retry_count") {
+		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.retry_count") {
+		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_AllowsOnCompleteReferenceToPersistedFieldEvenWhenHandlerWritesFieldLater(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{
+		TargetField: "revision_count",
+		Value:       runtimecontracts.CELExpression("entity.revision_count + 1"),
+	}}
+	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
+		ID:        "retry",
+		Condition: "entity.revision_count < 3",
+	}}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.revision_count") {
+		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_PreservesSiblingWriteErrorWhenSelfTargetUpdateExistsInSameHandler(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
@@ -876,6 +922,40 @@ func TestRun_PreservesSiblingWriteErrorWhenSelfTargetUpdateExistsInSameHandler(t
 
 	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score") {
 		t.Fatalf("expected mixed-case sibling-write error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_PreservesSiblingWriteErrorWhenGuardAlsoReadsPersistedField(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.retry_count < 3"}
+	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
+		{
+			TargetField: "retry_count",
+			Value:       runtimecontracts.CELExpression("entity.retry_count + 1"),
+		},
+		{
+			TargetField: "adjusted_score",
+			Value:       runtimecontracts.CELExpression("entity.retry_count + entity.base_score"),
+		},
+		{
+			TargetField: "base_score",
+			SourceField: "score",
+		},
+	}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	for _, item := range report.Errors() {
+		if item.CheckID == "expression_field_reference_validation" &&
+			strings.Contains(item.Message, "entity.retry_count") &&
+			strings.Contains(item.Message, "in guard") {
+			t.Fatalf("unexpected guard expression_field_reference_validation error, got %#v", report.Errors())
+		}
+	}
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score") {
+		t.Fatalf("expected sibling-write dependency error, got %#v", report.Errors())
 	}
 }
 
