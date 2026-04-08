@@ -124,10 +124,13 @@ func (am *AgentManager) shutdownAdmissionClosedLocked() bool {
 	if am == nil {
 		return false
 	}
+	if am.shuttingDown {
+		return true
+	}
 	if am.runtimeShutdownAdmissionClosed != nil {
 		return am.runtimeShutdownAdmissionClosed()
 	}
-	return am.shuttingDown
+	return false
 }
 
 func (am *AgentManager) waitForRunShutdown() error {
