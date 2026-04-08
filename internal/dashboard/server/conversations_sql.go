@@ -484,7 +484,7 @@ func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {
 		}
 	}
 	if hasSummary {
-		item.AssistantVisibleOutput, item.Outcome, item.ReasoningBlocks, item.ProgressUpdates, item.ToolResults = summary.conversationFields()
+		item.AssistantVisibleOutput, item.Outcome, item.ReasoningBlocks, item.ProgressUpdates, item.ToolResults = projectedTurnSummaryConversationFields(summary)
 	}
 	return item, nil
 }
@@ -498,7 +498,7 @@ func summarizeConversationTurnBlocks(blocks []ConversationTurnBlock) (string, st
 	if err != nil || !ok {
 		return "", "", nil, nil, nil
 	}
-	return summary.conversationFields()
+	return projectedTurnSummaryConversationFields(summary)
 }
 
 func readString(value any) string {

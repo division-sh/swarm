@@ -294,7 +294,7 @@ func enrichAgentOperatorProjectionFromLatestTurn(projection *agentOperatorProjec
 		return fmt.Errorf("decode latest agent turn turn_summary: %w", err)
 	}
 	if ok {
-		projection.LastTool, err = summary.lastToolTransport(parseOK)
+		projection.LastTool, err = projectedTurnSummaryLastToolTransport(summary, parseOK)
 		if err != nil {
 			return fmt.Errorf("decode latest agent turn last_tool: %w", err)
 		}
