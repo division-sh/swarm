@@ -458,7 +458,9 @@ func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Cont
 				"task_id": strings.TrimSpace(sc.TaskID),
 				"mode":    strings.TrimSpace(sc.Mode),
 			}, err)
-			return
+			if !TerminalTransitionApplied(err) {
+				return
+			}
 		}
 	}
 	if pc.timerScheduler != nil {
