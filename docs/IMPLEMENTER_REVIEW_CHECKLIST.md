@@ -176,12 +176,56 @@ Review the work against this process, in order:
   - what broader semantic rule this symptom belongs to
   - what sibling contexts use that same rule
   - whether the PR proves the failure class rather than only the first example
-- For semantic/runtime/spec-governed work, did the implementer post a self-audit comment that explicitly states:
+- For semantic/runtime/spec-governed work, did the implementer post the required `Pre-Implementation Coverage Audit` comment on the GitHub issue before coding began?
+- Did that issue-level pre-audit explicitly state:
+  - the exact semantic concept or concepts being changed
+  - every relevant canonical owner for those concepts
+  - the touched consumers of each owner
+  - an exhaustive systematic-consumption audit for every currently known sibling seam that should consume each owner, with each seam marked as:
+    - already consumes the canonical owner
+    - moved to the canonical owner in this work
+    - still bypasses the canonical owner and is explicitly split / escalated
+  - the old non-authoritative producers/readers/interpreters that become invalid or removal candidates for each owner?
+- Did that issue-level pre-audit explicitly list every currently known manifestation from the issue body, issue thread, triage/reproducer notes, and prior review context?
+- For each listed manifestation, did the pre-audit classify it as exactly one of:
+  - direct reproducer and fix
+  - execution proof through the same corrected path
+  - split / escalate as a separate class
+- Did the pre-audit avoid unsupported closure claims such as:
+  - “same seam”
+  - “same validator”
+  - “shared owner should cover it”
+  unless it also named the exact execution proof that would demonstrate coverage?
+- If this is a surface-parity issue, did the pre-audit name the supported surface(s) that must be exercised before closure?
+- If the issue has multiple currently known manifestations and the pre-audit is missing, incomplete, or hand-wavy, did the reviewer stop there and mark the PR as not review-ready?
+- For semantic/runtime/spec-governed work, did the implementer post a post-implementation proof audit comment on the PR that explicitly states:
+  - the exact semantic concept or concepts being changed
+  - every relevant canonical owner for those concepts after the change
+  - the touched callers/readers/validators/selectors that now consume each owner
+  - an exhaustive systematic-consumption audit for every currently known sibling seam that should consume each owner, with each seam marked as:
+    - already consumes the canonical owner
+    - moved to the canonical owner in this PR
+    - still bypasses the canonical owner and is explicitly split / escalated
+  - which old producers/readers/interpreters are now invalid, non-authoritative, or still surviving for each owner
   - the broader failure class
   - whether the issue was symptom-shaped
   - the sibling contexts checked
   - the generic failing proof used or created
+- For failure-class issues, did the PR audit include a manifestation coverage table rather than only a narrative summary?
+- Does that coverage table include one row for every currently known manifestation and mark each row as exactly one of:
+  - reproduced and fixed
+  - execution-proven through the same corrected path
+  - split / escalated as separate class
+- For each manifestation row, did the audit name the exact proof used and any required supported-surface or end-to-end proof?
 - If no generic reproducer existed before implementation, did the reviewer verify that the PR now creates one?
+- If the implementer could not identify every relevant canonical owner for the touched semantic concept or concepts, did the reviewer stop the review and mark the PR as not review-ready?
+- If the audits did not state exhaustively who already consumes each named canonical owner and who still bypasses each one, did the reviewer stop the review and mark the PR as not review-ready?
+- If a sibling seam still bypasses the canonical owner, did the PR either absorb it now or explicitly prove why full closure was not feasible in the same PR?
+- If the PR leaves dual semantic ownership in place, did the reviewer verify that this is a lead-approved temporary seam rather than a migration excuse?
+- If any currently known manifestation lacks an explicit final status or proof line, did the reviewer stop the review and mark the PR as not review-ready?
+- If the audit relies on “shared owner introduced”, “same seam”, or “cleaner architecture” without manifestation-level proof, did the reviewer reject that as insufficient closure evidence?
+- For verify-vs-boot, boot-vs-runtime, reader-vs-writer, or other surface-parity issues, did the reviewer require proof at each relevant surface rather than accepting only synthetic agreement tests?
+- If the issue was discovered through a supported helper or supported boot/runtime surface, did the reviewer require supported-surface closure evidence before saying the failure class is unlikely to reproduce?
 - If the PR claims non-semantic maintenance, did the reviewer verify that no semantic/runtime contract behavior is being changed under that label?
 - If implementation uncovered existing off-spec behavior outside the issue's stated scope, did the implementer stop and escalate instead of silently widening the change?
 - If the issue appears narrower than the actual failure class, did the reviewer require the issue/PR framing or tests to be widened before calling the work complete?

@@ -11,7 +11,6 @@ Operational companion:
 - apply [IMPLEMENTER_REVIEW_CHECKLIST.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_REVIEW_CHECKLIST.md) before merging non-trivial changes
 - apply [SEMANTIC_DRIFT.md](/Users/youmew/dev/swarm/docs/SEMANTIC_DRIFT.md) when a change touches semantic ownership, identity, validation, lifecycle, or cross-surface parity
 - use [PROMPT_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROMPT_TEMPLATES.md) for the default implementer and reviewer prompt shapes
-- use [PROCESS_CHECKLIST_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROCESS_CHECKLIST_TEMPLATES.md) when you need short copy-paste templates for pre-audits, gate decisions, follow-up decisions, or parent-state updates
 
 The default bias of this codebase should be:
 
@@ -877,26 +876,196 @@ Symptom vs failure-class rule:
 - if the issue appears narrower than the actual failure class, stop and escalate or update the issue before treating the work as complete
 - do not stop at fixing the first symptom if adjacent logic is governed by the same semantic rule
 
+Pre-Implementation Coverage Audit rule:
+
+- for semantic/runtime/spec-governed work, implementation must not begin until the implementer posts a `Pre-Implementation Coverage Audit` comment on the GitHub issue
+- this is mandatory when:
+  - the issue is about a failure class rather than one isolated bug
+  - the issue names more than one manifestation
+  - the reproducer or triage record names more than one manifestation
+  - the issue concerns parity between surfaces such as verify vs boot, boot vs runtime, or reader vs writer
+- the purpose of this audit is to make failure-class coverage reviewable before coding starts, not after the patch already exists
+
+Required issue-comment format:
+
+- `Concept`
+  - state the exact semantic concept or concepts being changed
+- `Canonical owner(s)`
+  - identify every relevant canonical owner for the issue's semantic model
+  - if the issue spans multiple coupled concepts, name each owner separately
+- `Consumers of each owner`
+  - for each named owner, list the main touched callers, readers, validators, selectors, or runtime surfaces that should consume it
+- `Systematic consumption audit`
+  - for each named owner, exhaustively list every currently known sibling seam that should consume it
+  - for each seam, classify it as exactly one of:
+    - already consumes the canonical owner
+    - moved to the canonical owner in this work
+    - still bypasses the canonical owner and is explicitly split / escalated
+- `Old non-authoritative paths`
+  - for each named owner, list any old helpers, readers, writers, or interpreters that become invalid, non-canonical, or removal candidates
+- `Failure class`
+  - state the broader generic failure class, not just the first symptom
+- `Currently known manifestations in scope`
+  - list every currently known manifestation from:
+    - the issue body
+    - the issue thread
+    - triage / reproducer notes
+    - prior review comments if they already exist
+- for each manifestation, provide exactly one planned coverage status:
+  - direct reproducer and fix
+  - execution proof through the same corrected path
+  - split / escalate as a separate class
+- for each manifestation, also state:
+  - why it is believed to be the same seam or a separate seam
+  - the exact proof that will be used
+  - whether that proof is:
+    - focused unit/integration proof
+    - generic reproducer
+    - supported-surface / end-to-end proof
+- `Required closure proof`
+  - list the focused proof required
+  - list the supported-surface or end-to-end proof required
+  - if this is a parity issue, name each surface that must be exercised before closure
+- `Unsafe assumptions you are NOT making`
+  - explicitly name anything that might look “probably covered” but is not yet proven
+  - do not say “same seam” without naming the execution proof that will show it
+- `Blocking ambiguities or split conditions`
+  - list any reason the issue may need to split before implementation
+  - if none, say none
+
+Absolute rules:
+
+- do not begin implementation if the audit cannot identify every relevant canonical owner for the touched semantic concept or concepts
+- do not begin implementation if the audit does not include an exhaustive systematic-consumption audit for the currently known sibling seams of each named owner
+- do not begin implementation if any currently known manifestation is missing from the audit
+- do not classify a manifestation as “same seam” without naming the execution proof that will show it flows through the corrected path
+- do not use “shared owner introduced”, “same validator”, “same helper”, or “same architecture seam” as sufficient coverage by themselves
+- if a manifestation is not directly reproduced, the audit must explain exactly how it will be execution-proven through the same corrected path
+- if that proof cannot be named before coding starts, mark the manifestation as split / escalate instead
+- for parity issues, supported-surface proof is mandatory; synthetic agreement tests alone are not enough if the issue was discovered through a supported surface
+
+Broad-refactor escalation rule:
+
+- this step happens after the `Pre-Implementation Coverage Audit` and before implementation
+- if the pre-audit and systematic-consumption audit show that the named canonical owner is not used systematically across the relevant sibling seams, the implementer must decide whether the issue can still be solved honestly as a first slice
+- if not, implementation must pause and the implementer must post a `Broad Refactor Escalation` comment on the issue or PR before writing code
+
+Required escalation content:
+
+- the exact semantic concept
+- the named canonical owner
+- the sibling seams currently bypassing that owner
+- why a narrow fix would be insufficient or dishonest
+- the proposed broader refactor scope
+- what would move now
+- what would remain out of scope
+- the main migration, behavior, test-surface, and coordination risks
+
+Lead decision:
+
+- the lead must respond explicitly with exactly one of:
+  - `approved as broad refactor`
+  - `denied; keep first-slice scope`
+  - `split: do first slice now, open canonicalization follow-up`
+
+Absolute rules:
+
+- do not silently widen a first-slice issue into a broad refactor without an explicit lead decision
+- if the pre-audit shows that failure-class elimination would require systematic adoption of the canonical owner across multiple sibling seams, do not begin implementation until the lead has approved or denied the broad-refactor escalation
+
+Close-the-gap rule:
+
+- if a semantic gap can be closed cleanly in the current PR, close it in the current PR
+- do not leave a sibling bypass seam, duplicate owner, or non-authoritative interpreter in place just because staging feels safer
+- the default expectation is full semantic closure in the touched seam, not managed coexistence
+
+Migration rule:
+
+- migration exists to move persisted state, schema, or deployment ordering safely to the canonical model
+- migration does not justify dual semantic ownership
+- migrate data or state forward, then delete the old semantic path
+- keep one canonical owner unless the lead explicitly approves a temporary seam in writing
+
+Temporary coexistence exception:
+
+- temporary coexistence of two semantic owners is banned by default
+- it may exist only when all of the following are true:
+  - atomic closure is operationally impossible
+  - the remaining seam is narrowly isolated
+  - the authoritative owner is explicitly named
+  - the non-authoritative seam is explicitly marked temporary
+  - a concrete tracked removal follow-up exists
+  - the lead explicitly approves that seam in writing
+
+Absolute rules:
+
+- if the implementer proposes leaving the old semantic path in place, they must prove why full closure is not feasible in the same PR
+- “smaller patch”, “easier rollout”, “less risky by default”, or “follow-up is easy” are not sufficient reasons by themselves
+- if a first-slice issue knowingly leaves the same concept duplicated inside the same effective boundary, the implementer must escalate instead of calling the work complete
+- without the temporary-coexistence exception above, close the semantic gap in the PR
+
+Invalid pre-audit example:
+
+- tool drift: direct reproducer and fix
+- event-schema drift: same local class, should be covered by shared validator refactor
+
+Why invalid:
+
+- it does not name the execution proof for the event-schema manifestation
+- it assumes an architecture change is enough proof by itself
+- it does not require supported-surface proof before closure
+
 Narrow patch vs broad semantic proof rule:
 
 - for semantic/runtime/spec-governed work, keep the implementation patch narrow but do not keep the semantic assessment narrow
 - after reading the cited spec, assess the full rule family in the touched seam, not only the first failing example
+- after identifying the failure class, explicitly determine whether the touched seam has multiple currently known manifestations
+- if yes, design proof for each manifestation before treating the patch as complete
+- do not let a narrow patch implicitly redefine the issue as narrower than the tracked failure class
 - inspect adjacent logic that is governed by the same semantic rule
 - design tests to cover the rule in that area, including adjacent valid, invalid, mixed-case, malformed, rollback, or fail-closed paths where relevant
 - do not treat a narrow code diff as sufficient proof if the touched semantic rule spans a broader area
 
-Generic proof and self-audit rule:
+Post-Implementation Proof Audit rule:
 
-- for semantic/runtime/spec-governed work, a PR is not review-ready until the implementer posts a self-audit comment on the PR
-- that self-audit must explicitly include:
+- for semantic/runtime/spec-governed work, a PR is not review-ready until the implementer posts a post-implementation proof audit comment on the PR
+- for failure-class issues, that audit must include a failure-class coverage table, not only a narrative summary
+- the PR audit must explicitly include:
+  - the exact semantic concept or concepts being changed
+  - every relevant canonical owner for those concepts after the change
+  - which touched callers, readers, validators, selectors, or runtime surfaces now consume each owner
+  - an exhaustive systematic-consumption audit for the currently known sibling seams that should consume each owner, with each seam marked as exactly one of:
+    - already consumes the canonical owner
+    - moved to the canonical owner in this PR
+    - still bypasses the canonical owner and is explicitly split / escalated
+  - which old producers, readers, or interpreters are now invalid, non-authoritative, or still surviving for each owner
   - the broader failure class the issue belongs to
   - whether the issue described the full class or only the first visible symptom
   - which sibling contexts in the touched seam were checked
   - the generic reproducer, fixture, or focused failing proof used to capture the failure class
   - or, if none existed, the generic proof created as part of the work
+- for issues with multiple currently known manifestations, include one row per manifestation with exactly one final status:
+  - reproduced and fixed
+  - execution-proven through the same corrected path
+  - split / escalated as separate class
+- for each manifestation row, also name:
+  - the exact proof used
+  - any mandatory end-to-end or supported-surface proof used for closure
+  - any manifestation that remains unproven
 - do not rely on “tests pass” as sufficient proof without naming the generic failing proof that the fix resolves
+- do not rely on “shared owner introduced”, “same seam”, or “architecture now looks cleaner” as substitutes for manifestation-level proof
+- if the implementer cannot identify every relevant canonical owner for the touched semantic concept or concepts, the PR is not review-ready
+- if the PR does not state exhaustively who still bypasses each named canonical owner, the PR is not review-ready
+- if any currently known manifestation lacks one of the required statuses above, the PR is not review-ready
 - if no generic reproducer exists yet for a semantic/runtime failure class, deriving one is part of the implementation task
 - if the implementer cannot derive a clean generic proof for the failure class, stop and escalate before treating the work as complete
+
+Surface-parity closure rule:
+
+- for verify-vs-boot, boot-vs-runtime, reader-vs-writer, or other surface-parity issues, closure requires at least one proof at each relevant surface
+- targeted verify proof alone is never sufficient for a verify-vs-boot issue
+- synthetic unit agreement tests are useful but do not replace a supported end-to-end or supported-surface smoke when the issue was discovered through a supported surface
+- if the issue names multiple semantic classes or manifestations in scope, each one must have explicit closure evidence
 
 Minimum spec-reference block:
 
@@ -967,10 +1136,7 @@ Required workflow:
 - commit
 - push
 - open PR against `master`
-- include the correct non-stale issue link in the PR body:
-  - `Closes #NNN` only if this PR actually finishes issue `#NNN`
-  - otherwise use `Part of #NNN` or `Related to #NNN`
-- include spec refs in the PR body
+- include `Closes #NNN` and spec refs in the PR body
 - report back with the PR number
 
 Deliverable is not complete until the PR is open and both audit artifacts exist.
