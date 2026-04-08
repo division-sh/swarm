@@ -118,6 +118,35 @@ func TestStoredCoordinates_SeparateScopeFromConcretePath(t *testing.T) {
 	}
 }
 
+func TestStoredPersisted_KeepsStorageRefSeparateFromSemanticIdentity(t *testing.T) {
+	got, err := StoredPersisted(nil, "child", "11111111-1111-1111-1111-111111111111", "", "11111111-1111-1111-1111-111111111111", "", "", "")
+	if err != nil {
+		t.Fatalf("StoredPersisted(static): %v", err)
+	}
+	if got.StorageRef != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("StorageRef = %q, want preserved uuid storage ref", got.StorageRef)
+	}
+	if got.ScopeKey != "child" {
+		t.Fatalf("ScopeKey = %q, want child", got.ScopeKey)
+	}
+	if got.InstancePath != "child" {
+		t.Fatalf("InstancePath = %q, want child", got.InstancePath)
+	}
+	if got.InstanceID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("InstanceID = %q, want preserved logical id", got.InstanceID)
+	}
+}
+
+func TestStoredPersisted_RejectsInstanceIDThatDisagreesWithConcretePath(t *testing.T) {
+	_, err := StoredPersisted(nil, "grandchild", "child/grandchild/inst-1", "child/grandchild/inst-1", "inst-2", "", "", "")
+	if err == nil {
+		t.Fatal("expected StoredPersisted to reject mismatched instance id")
+	}
+	if !strings.Contains(err.Error(), "disagrees with flow_instance_path") {
+		t.Fatalf("StoredPersisted error = %v, want disagreement message", err)
+	}
+}
+
 func TestStoredRoute_CanonicalizesScopeInstanceAndPath(t *testing.T) {
 	route := StoredRoute("", "", "child/grandchild/inst-1")
 	if !route.Valid() {

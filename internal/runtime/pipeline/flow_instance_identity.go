@@ -41,6 +41,28 @@ func workflowInstanceIdentity(source semanticview.Source, instance WorkflowInsta
 	return StoredFlowInstance(source, instance)
 }
 
+func workflowInstancePersistedIdentity(source semanticview.Source, instance WorkflowInstance) (runtimeflowidentity.Persisted, error) {
+	flowPath := strings.TrimSpace(asString(instance.Metadata["flow_path"]))
+	instanceID := strings.TrimSpace(asString(instance.Metadata["instance_id"]))
+	if instanceID == "" && flowPath == "" {
+		instanceID = strings.TrimSpace(instance.InstanceID)
+	}
+	entityID := strings.TrimSpace(asString(instance.Metadata["entity_id"]))
+	if entityID == "" && flowPath == "" {
+		entityID = strings.TrimSpace(firstNonEmptyString(instance.StorageRef, asString(instance.Metadata["storage_ref"]), instance.InstanceID))
+	}
+	return runtimeflowidentity.StoredPersisted(
+		source,
+		strings.TrimSpace(instance.WorkflowName),
+		strings.TrimSpace(firstNonEmptyString(instance.StorageRef, asString(instance.Metadata["storage_ref"]))),
+		flowPath,
+		instanceID,
+		entityID,
+		strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"]))),
+		asString(instance.Metadata["parent_entity_id"]),
+	)
+}
+
 func workflowInstanceScopeKey(source semanticview.Source, instance WorkflowInstance) string {
 	return workflowInstanceIdentity(source, instance).ScopeKey
 }

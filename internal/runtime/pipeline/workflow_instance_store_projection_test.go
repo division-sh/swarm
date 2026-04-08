@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/testutil"
 )
 
@@ -90,6 +91,9 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	if got := strings.TrimSpace(asString(loaded.Metadata["flow_path"])); got != "review/inst-1" {
 		t.Fatalf("Metadata flow_path = %#v, want review/inst-1", loaded.Metadata["flow_path"])
 	}
+	if got := strings.TrimSpace(asString(loaded.Metadata["storage_ref"])); got != storageRef {
+		t.Fatalf("Metadata storage_ref = %#v, want %q", loaded.Metadata["storage_ref"], storageRef)
+	}
 	if got := strings.TrimSpace(asString(loaded.Metadata["subject_id"])); got != subjectID {
 		t.Fatalf("Metadata subject_id = %#v, want %q", loaded.Metadata["subject_id"], subjectID)
 	}
@@ -106,6 +110,25 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	wantEvidence := `{"audit":[{"kind":"note","score":1}]}`
 	if got := mustCanonicalJSONString(t, gotEvidence); got != wantEvidence {
 		t.Fatalf("evidence = %s, want %s", got, wantEvidence)
+	}
+	identity, err := workflowInstancePersistedIdentity(nil, loaded)
+	if err != nil {
+		t.Fatalf("workflowInstancePersistedIdentity(loaded): %v", err)
+	}
+	if identity.StorageRef != storageRef {
+		t.Fatalf("identity.StorageRef = %q, want %q", identity.StorageRef, storageRef)
+	}
+	if identity.ScopeKey != "review" {
+		t.Fatalf("identity.ScopeKey = %q, want review", identity.ScopeKey)
+	}
+	if identity.InstancePath != "review/inst-1" {
+		t.Fatalf("identity.InstancePath = %q, want review/inst-1", identity.InstancePath)
+	}
+	if identity.InstanceID != "inst-1" {
+		t.Fatalf("identity.InstanceID = %q, want inst-1", identity.InstanceID)
+	}
+	if identity.EntityID != runtimeflowidentity.EntityID("review/inst-1") {
+		t.Fatalf("identity.EntityID = %q, want canonical id for review/inst-1", identity.EntityID)
 	}
 }
 
@@ -144,6 +167,13 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			mutateKey:    "storage",
 			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","transition_history":"bad"}`,
 			wantContains: "flow_instances.config transition_history must be an array of workflow transition records",
+		},
+		{
+			name:         "instance id disagrees with flow path",
+			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
+			mutateKey:    "storage",
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"storage-ref","flow_path":"review/inst-1"}`,
+			wantContains: "disagrees with flow_instance_path",
 		},
 	}
 
