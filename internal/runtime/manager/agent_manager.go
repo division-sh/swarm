@@ -18,24 +18,25 @@ import (
 )
 
 type AgentManager struct {
-	mu                       sync.RWMutex
-	agents                   map[string]Agent
-	agentCfg                 map[string]models.AgentConfig
-	agentUpAt                map[string]time.Time
-	workspaces               workspace.Lifecycle
-	bus                      Bus
-	factory                  AgentFactory
-	store                    ManagerPersistence
-	sessions                 sessions.Registry
-	semanticSource           semanticview.Source
-	promptResolver           runtimecontracts.PromptResolver
-	budget                   BudgetGuard
-	resetRuntimeOwnedState   func()
-	runtimeMode              string
-	throttleSuppressPrefixes []string
-	inFlightMu               sync.Mutex
-	inFlight                 map[string]struct{}
-	workflowInstances        flowInstancePersistence
+	mu                             sync.RWMutex
+	agents                         map[string]Agent
+	agentCfg                       map[string]models.AgentConfig
+	agentUpAt                      map[string]time.Time
+	workspaces                     workspace.Lifecycle
+	bus                            Bus
+	factory                        AgentFactory
+	store                          ManagerPersistence
+	sessions                       sessions.Registry
+	semanticSource                 semanticview.Source
+	promptResolver                 runtimecontracts.PromptResolver
+	budget                         BudgetGuard
+	resetRuntimeOwnedState         func()
+	runtimeShutdownAdmissionClosed func() bool
+	runtimeMode                    string
+	throttleSuppressPrefixes       []string
+	inFlightMu                     sync.Mutex
+	inFlight                       map[string]struct{}
+	workflowInstances              flowInstancePersistence
 
 	runMu              sync.Mutex
 	running            bool
@@ -92,28 +93,29 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		}
 	}
 	return &AgentManager{
-		agents:                   make(map[string]Agent),
-		agentCfg:                 make(map[string]models.AgentConfig),
-		agentUpAt:                make(map[string]time.Time),
-		bus:                      bus,
-		factory:                  factory,
-		store:                    store,
-		workspaces:               opts.Workspaces,
-		sessions:                 opts.Sessions,
-		semanticSource:           opts.SemanticSource,
-		promptResolver:           opts.PromptResolver,
-		workflowInstances:        opts.WorkflowInstances,
-		runtimeMode:              strings.TrimSpace(opts.RuntimeMode),
-		budget:                   opts.Budget,
-		resetRuntimeOwnedState:   opts.ResetRuntimeOwnedState,
-		throttleSuppressPrefixes: throttleSuppressPrefixes,
-		inFlight:                 make(map[string]struct{}),
-		loopCancel:               make(map[string]context.CancelFunc),
-		poisonPanicCounts:        make(map[string]int),
-		poisonEventEntities:      make(map[string]map[string]struct{}),
-		poisonEventEmitted:       make(map[string]bool),
-		deadLetterWindows:        make(map[string][]deadLetterEscalationSample),
-		deadLetterLastRaised:     make(map[string]time.Time),
+		agents:                         make(map[string]Agent),
+		agentCfg:                       make(map[string]models.AgentConfig),
+		agentUpAt:                      make(map[string]time.Time),
+		bus:                            bus,
+		factory:                        factory,
+		store:                          store,
+		workspaces:                     opts.Workspaces,
+		sessions:                       opts.Sessions,
+		semanticSource:                 opts.SemanticSource,
+		promptResolver:                 opts.PromptResolver,
+		workflowInstances:              opts.WorkflowInstances,
+		runtimeMode:                    strings.TrimSpace(opts.RuntimeMode),
+		budget:                         opts.Budget,
+		resetRuntimeOwnedState:         opts.ResetRuntimeOwnedState,
+		runtimeShutdownAdmissionClosed: opts.RuntimeShutdownAdmissionClosed,
+		throttleSuppressPrefixes:       throttleSuppressPrefixes,
+		inFlight:                       make(map[string]struct{}),
+		loopCancel:                     make(map[string]context.CancelFunc),
+		poisonPanicCounts:              make(map[string]int),
+		poisonEventEntities:            make(map[string]map[string]struct{}),
+		poisonEventEmitted:             make(map[string]bool),
+		deadLetterWindows:              make(map[string][]deadLetterEscalationSample),
+		deadLetterLastRaised:           make(map[string]time.Time),
 	}
 }
 

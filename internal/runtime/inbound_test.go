@@ -52,7 +52,7 @@ func TestInboundGateway_Returns503AndRollsBackMarkerWhenPublishFails(t *testing.
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &rollbackTrackingInboundStore{}
-	g := NewInboundGateway(bus, nil, store)
+	g := NewInboundGateway(bus, nil, nil, store)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/github", strings.NewReader(`{"id":"evt-1","type":"push"}`))
 	rec := httptest.NewRecorder()
@@ -66,5 +66,28 @@ func TestInboundGateway_Returns503AndRollsBackMarkerWhenPublishFails(t *testing.
 	}
 	if !store.rolled {
 		t.Fatal("expected inbound event marker rollback on publish failure")
+	}
+}
+
+func TestInboundGateway_Returns503WhenRuntimeShutdownAdmissionClosed(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &rollbackTrackingInboundStore{}
+	g := NewInboundGateway(bus, nil, func() bool { return true }, store)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/github", strings.NewReader(`{"id":"evt-1","type":"push"}`))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "runtime shutting down") {
+		t.Fatalf("body = %q, want runtime shutting down", rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("did not expect inbound event recording after shutdown admission closed")
 	}
 }

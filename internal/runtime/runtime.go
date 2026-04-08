@@ -71,6 +71,7 @@ type Runtime struct {
 	cancelStart    context.CancelFunc
 	ownershipLease runtimestartupownership.Lease
 	ownerID        string
+	shutdownGate   shutdownAdmission
 
 	Config         *config.Config
 	Stores         Stores
@@ -92,6 +93,13 @@ type Runtime struct {
 	Authority      runtimeauthority.Provider
 	EmitRegistry   *runtimetools.EmitRegistry
 	PromptResolver runtimecontracts.PromptResolver
+}
+
+func (rt *Runtime) shutdownAdmissionClosed() bool {
+	if rt == nil {
+		return false
+	}
+	return rt.shutdownGate.Closed()
 }
 
 const runtimeQuiescenceStableChecks = 3
@@ -403,13 +411,14 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 				rt.MCPTurns.Reset()
 			}
 		},
-		ThrottleSuppressPrefixes: runtimeThrottleSuppressPrefixes(source),
-		DisableSpinupControl:     true,
+		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+		ThrottleSuppressPrefixes:       runtimeThrottleSuppressPrefixes(source),
+		DisableSpinupControl:           true,
 	}, stores.ManagerStore)
 	managerRef = rt.Manager
 
 	if stores.InboundStore != nil {
-		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, stores.InboundStore)
+		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, stores.InboundStore)
 	}
 	if opts.EnableToolGateway {
 		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, strings.TrimSpace(opts.ToolGatewayToken), RuntimeMCPGatewayHooks(rt.Logger, func(agentID string) (runtimeactors.AgentConfig, bool) {
@@ -504,6 +513,9 @@ func scheduledEvent(sc runtimepipeline.Schedule) events.Event {
 func (rt *Runtime) Start(ctx context.Context) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
+	}
+	if rt.shutdownAdmissionClosed() {
+		return fmt.Errorf("runtime shutdown already started")
 	}
 	rt.lifecycleMu.Lock()
 	if rt.cancelStart != nil || rt.ownershipLease != nil {
@@ -659,6 +671,7 @@ func (rt *Runtime) Shutdown() error {
 	if rt == nil {
 		return nil
 	}
+	rt.shutdownGate.Close()
 	var shutdownErr error
 	if rt.Manager != nil {
 		if err := rt.Manager.Shutdown(); err != nil && shutdownErr == nil {

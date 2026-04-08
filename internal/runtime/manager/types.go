@@ -124,15 +124,16 @@ type BudgetGuard interface {
 type StrategicContext = json.RawMessage
 
 type AgentManagerOptions struct {
-	Workspaces                workspace.Lifecycle
-	Sessions                  sessions.Registry
-	SemanticSource            semanticview.Source
-	PromptResolver            runtimecontracts.PromptResolver
-	WorkflowInstances         flowInstancePersistence
-	RuntimeMode               string
-	Budget                    BudgetGuard
-	ResetRuntimeOwnedState    func()
-	ThrottleSuppressPrefixes  []string
-	DisableSpinupControl      bool
-	EnableLegacySpinupControl bool
+	Workspaces                     workspace.Lifecycle
+	Sessions                       sessions.Registry
+	SemanticSource                 semanticview.Source
+	PromptResolver                 runtimecontracts.PromptResolver
+	WorkflowInstances              flowInstancePersistence
+	RuntimeMode                    string
+	Budget                         BudgetGuard
+	ResetRuntimeOwnedState         func()
+	RuntimeShutdownAdmissionClosed func() bool
+	ThrottleSuppressPrefixes       []string
+	DisableSpinupControl           bool
+	EnableLegacySpinupControl      bool
 }
