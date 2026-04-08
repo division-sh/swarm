@@ -354,7 +354,7 @@ func platformSpecPath() (string, error) {
 
 var (
 	testutilCreateTableName = regexp.MustCompile(`(?is)^create\s+table(?:\s+if\s+not\s+exists)?\s+"?([a-z_][a-z0-9_]*)"?`)
-	testutilInlineIndexLine = regexp.MustCompile(`(?i)^index\s+([a-z_][a-z0-9_]*)\s*\((.+?)\)\s*(where\s+.+)?$`)
+	testutilInlineIndexLine = regexp.MustCompile(`(?i)^(unique\s+)?index\s+([a-z_][a-z0-9_]*)\s*\((.+?)\)\s*(where\s+.+)?$`)
 )
 
 func bootstrapPlatformTableStatements(spec runtimecontracts.PlatformSpecDocument) ([]string, error) {
@@ -412,6 +412,8 @@ func bootstrapNormalizePlatformDDL(rawDDL string) ([]string, error) {
 			statements = append(statements, indexStatements...)
 		case strings.HasPrefix(strings.ToUpper(statement), "CREATE INDEX "):
 			statements = append(statements, bootstrapEnsureIfNotExists(statement, "CREATE INDEX"))
+		case strings.HasPrefix(strings.ToUpper(statement), "CREATE UNIQUE INDEX "):
+			statements = append(statements, bootstrapEnsureIfNotExists(statement, "CREATE UNIQUE INDEX"))
 		default:
 			return nil, fmt.Errorf("unsupported platform ddl statement %q", statement)
 		}
@@ -443,13 +445,17 @@ func bootstrapNormalizeCreateTable(statement string) (string, []string, error) {
 			continue
 		}
 		if matches := testutilInlineIndexLine.FindStringSubmatch(trimmed); len(matches) >= 3 {
-			indexName := strings.TrimSpace(matches[1])
-			indexCols := strings.TrimSpace(matches[2])
+			uniquePrefix := strings.TrimSpace(matches[1])
+			indexName := strings.TrimSpace(matches[2])
+			indexCols := strings.TrimSpace(matches[3])
 			whereClause := ""
-			if len(matches) >= 4 {
-				whereClause = strings.TrimSpace(matches[3])
+			if len(matches) >= 5 {
+				whereClause = strings.TrimSpace(matches[4])
 			}
 			indexStmt := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", quoteIdent(indexName), quoteIdent(tableName), indexCols)
+			if uniquePrefix != "" {
+				indexStmt = fmt.Sprintf("CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s(%s)", quoteIdent(indexName), quoteIdent(tableName), indexCols)
+			}
 			if whereClause != "" {
 				indexStmt += " " + whereClause
 			}

@@ -62,6 +62,16 @@ func TestInMemorySessionRegistryRotate(t *testing.T) {
 	if rec.RetryReason != "session not found" || rec.RetriesFromSessionID != old {
 		t.Fatalf("unexpected retry lineage in record: %+v", rec)
 	}
+	history := sr.History("agent-a")
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	if history[0].Status != "terminated" || history[0].TerminationReason != TerminationReasonContaminated.String() {
+		t.Fatalf("terminated history = %+v", history[0])
+	}
+	if history[0].SuccessorSessionID != rotated.SessionID {
+		t.Fatalf("SuccessorSessionID = %q, want %q", history[0].SuccessorSessionID, rotated.SessionID)
+	}
 }
 
 func TestInMemorySessionRegistryAdoptSessionID(t *testing.T) {
@@ -96,5 +106,19 @@ func TestInMemorySessionRegistry_SessionScopeRequiresExplicitDeclaration(t *test
 	sr := NewInMemoryRegistry(0)
 	if _, err := sr.Acquire(context.Background(), "agent-a", RuntimeModeSession, "", "worker-a", ""); err == nil {
 		t.Fatal("expected session acquire without explicit scope to fail closed")
+	}
+}
+
+func TestInMemorySessionRegistry_AcquireSuspendedReturnsErrSessionSuspended(t *testing.T) {
+	sr := NewInMemoryRegistry(0)
+	sr.byKey[registryKey("agent-a", RuntimeModeSession, "global")] = &Record{
+		SessionID:   "sess-1",
+		AgentID:     "agent-a",
+		RuntimeMode: RuntimeModeSession,
+		ScopeKey:    "global",
+		Status:      "suspended",
+	}
+	if _, err := sr.Acquire(context.Background(), "agent-a", RuntimeModeSession, SessionScopeGlobal, "worker-a", "global"); err != ErrSessionSuspended {
+		t.Fatalf("expected ErrSessionSuspended, got %v", err)
 	}
 }

@@ -1129,6 +1129,51 @@ engine:
       runtime_state.provider_session_id — in agent_sessions for session/session_per_entity modes, in
       agent_conversation_audits for task mode. NOT in session_id or audit_id. Those are platform-owned
       UUID primary keys. The provider ID is an implementation detail that may change if the provider is swapped.'
+    session_termination_metadata:
+      description: 'Structured termination metadata for live reusable sessions. Stale live-session meanings
+        such as orphaned, contaminated, and superseded are NOT status values. status remains one of
+        active, suspended, terminated. termination_reason explains why the session was terminated.
+        successor_session_id links a terminated session to its replacement when one exists.'
+      uniqueness_model:
+        description: 'The database uniqueness model for agent_sessions applies only to non-terminated rows.
+          Terminated rows are historical lineage and may coexist for the same scope.'
+        old_constraint: UNIQUE (agent_id, scope_key)
+        new_constraint: 'UNIQUE INDEX agent_sessions_nonterminated_unique ON agent_sessions(agent_id, scope_key)
+          WHERE status <> ''terminated'''
+        live_owner_query: 'Live runtime ownership queries MUST filter status = ''active''.'
+        resumable_owner_query: 'Resumable-owner queries MUST filter status IN (''active'', ''suspended'').'
+      fields:
+        termination_reason:
+          values:
+          - normal
+          - cancelled
+          - failed
+          - orphaned
+          - contaminated
+          - legacy
+          semantics: 'legacy is reserved for migration backfill only. The runtime MUST NOT set legacy on new terminations.'
+        termination_detail: Optional human-readable detail for diagnostics/operator UI.
+        successor_session_id: 'UUID link to the successor session in the same agent/scope/scope_key lineage. A session is
+          superseded iff successor_session_id IS NOT NULL.'
+        terminated_at: Timestamp set when status transitions to terminated.
+      invariants:
+      - 'status IN (active, suspended) → termination_reason, termination_detail, successor_session_id, terminated_at are NULL.'
+      - 'status = terminated → termination_reason and terminated_at are required.'
+      - 'successor_session_id IS NOT NULL → status = terminated.'
+      - 'successor_session_id must reference a different session_id with the same agent_id, scope, and scope_key.'
+      - 'successor_session_id lineage must be acyclic.'
+      - 'terminated sessions are never resurrected to active or suspended.'
+      transitions:
+      - 'active → suspended'
+      - 'suspended → active'
+      - 'active → terminated'
+      - 'suspended → terminated'
+      - 'terminated rows may receive successor_session_id later, but status and termination_reason do not change.'
+      migration:
+      - 'Add nullable termination_reason, termination_detail, successor_session_id, terminated_at columns.'
+      - 'Replace old UNIQUE (agent_id, scope_key) with the partial non-terminated unique index.'
+      - 'Backfill legacy terminated rows to termination_reason = legacy and terminated_at = COALESCE(updated_at, created_at).'
+      - 'Enable invariant enforcement only after the legacy backfill.'
     conversation_mode_values:
       task: 'Stateless between invocations. No agent_sessions row. Audit snapshot persisted to
         agent_conversation_audits (write-only). Per-turn history in agent_turns. Never reloaded.
@@ -2465,7 +2510,9 @@ platform_tables:
         agent_conversation_audits instead. Supports three scopes: entity (one session per agent × entity),
         flow (one session per agent × flow instance), global (one session per agent, shared across all
         entities). scope directly reflects the declared session_scope. scope_key is the lookup key.
-        lease_holder/lease_expires_at for distributed session locking.'
+        lease_holder/lease_expires_at for distributed session locking. Termination metadata captures WHY
+        a row is terminated and WHETHER it was replaced; stale session meanings are not encoded as extra
+        status values.'
       ddl: "CREATE TABLE agent_sessions (\n    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
         \            UUID REFERENCES runs(run_id),\n    agent_id          TEXT NOT NULL REFERENCES agents(agent_id),\n\
         \    entity_id         UUID,\n    flow_instance     TEXT,\n    scope_key         TEXT NOT NULL,\n    scope         \
@@ -2473,20 +2520,27 @@ platform_tables:
         \ NULL DEFAULT '[]',\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    runtime_mode      TEXT NOT NULL\
         \ CHECK (runtime_mode IN ('session', 'session_per_entity')),\n    runtime_state     JSONB NOT NULL\
         \ DEFAULT '{}',\n    lease_holder      TEXT,\n    lease_expires_at  TIMESTAMPTZ,\n    status            TEXT NOT\
-        \ NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),\n    created_at        TIMESTAMPTZ\
-        \ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key),\n\
-        \    INDEX idx_sessions_run (run_id) WHERE run_id IS NOT NULL,\n    INDEX idx_sessions_agent (agent_id, status),\n\
+        \ NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),\n    termination_reason TEXT\
+        \ CHECK (termination_reason IS NULL OR termination_reason IN ('normal', 'cancelled', 'failed', 'orphaned', 'contaminated', 'legacy')),\n\
+        \    termination_detail TEXT,\n    successor_session_id UUID REFERENCES agent_sessions(session_id),\n    terminated_at TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ\
+        \ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status IN ('active', 'suspended') AND termination_reason IS NULL AND termination_detail IS NULL AND successor_session_id IS NULL AND terminated_at IS NULL) OR (status = 'terminated' AND termination_reason IS NOT NULL AND terminated_at IS NOT NULL)),\n    CHECK (termination_detail IS NULL OR termination_reason IS NOT NULL),\n    CHECK (successor_session_id IS NULL OR status = 'terminated'),\n    CHECK (successor_session_id IS NULL OR successor_session_id <> session_id),\n\
+        \    UNIQUE INDEX agent_sessions_nonterminated_unique (agent_id, scope_key) WHERE status <> 'terminated',\n    INDEX idx_sessions_run (run_id) WHERE run_id IS NOT NULL,\n    INDEX idx_sessions_agent (agent_id, status),\n\
         \    INDEX idx_sessions_entity (entity_id) WHERE entity_id IS NOT NULL,\n    INDEX idx_sessions_scope (scope, status),\n\
-        \    INDEX idx_sessions_lease (lease_expires_at) WHERE lease_holder IS NOT NULL\n);"
+        \    INDEX idx_sessions_lease (lease_expires_at) WHERE lease_holder IS NOT NULL,\n    INDEX idx_sessions_terminated_reason (termination_reason, terminated_at) WHERE status = 'terminated'\n);"
       scope_rules:
         entity: entity_id NOT NULL, flow_instance NOT NULL, scope_key = entity_id. One session per agent per entity.
         flow: entity_id NULL, flow_instance NOT NULL, scope_key = flow_instance. One session per agent per flow instance.
         global: entity_id NULL, flow_instance NULL, scope_key = "global". One session per agent across the entire system.
-      lookup_pattern: 'Runtime acquires sessions via (agent_id, scope_key). The scope_key is derived from
-        conversation_mode: task → no session lookup, no agent_sessions row (audit goes to
-        agent_conversation_audits). session_per_entity + session_scope entity → scope_key = entity_id.
-        session + session_scope flow → scope_key = flow_instance. session + session_scope global →
-        scope_key = "global". No actor-shape inference.'
+      lookup_pattern: 'Runtime acquires sessions via (agent_id, scope_key) with explicit status filtering.
+        The scope_key is derived from conversation_mode: task → no session lookup, no agent_sessions row
+        (audit goes to agent_conversation_audits). session_per_entity + session_scope entity → scope_key =
+        entity_id. session + session_scope flow → scope_key = flow_instance. session + session_scope global
+        → scope_key = "global". No actor-shape inference.'
+      live_owner_query: 'Live session ownership MUST query status = ''active'' only.'
+      resumable_owner_query: 'Resume/supersession ownership MUST query status IN (''active'', ''suspended'').'
+      status_lifecycle: 'status remains active, suspended, terminated. orphaned and contaminated are
+        termination reasons. superseded is represented by successor_session_id IS NOT NULL. Terminated
+        rows are historical lineage and are never resurrected into live ownership.'
     agent_turns:
       description: 'Append-only per-turn agent execution audit log. Records the triggering event context, visible tools,
         attempted tool calls, emitted event names, canonical per-turn turn_blocks, and sanitized request/response payloads.

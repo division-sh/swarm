@@ -38,6 +38,7 @@ type Lease struct {
 type RotationMetadata struct {
 	CheckpointSummary string
 	RetryReason       string
+	TerminationReason TerminationReason
 }
 
 type Record struct {
@@ -54,6 +55,10 @@ type Record struct {
 	LockOwner            string
 	LockExpiresAt        time.Time
 	LastUsedAt           time.Time
+	TerminationReason    string
+	TerminationDetail    string
+	SuccessorSessionID   string
+	TerminatedAt         time.Time
 }
 
 // InMemoryRegistry is the process-local bootstrap implementation.
@@ -61,6 +66,7 @@ type Record struct {
 type InMemoryRegistry struct {
 	mu      sync.Mutex
 	byKey   map[string]*Record
+	history map[string][]*Record
 	lockTTL time.Duration
 }
 
@@ -70,9 +76,12 @@ func NewInMemoryRegistry(lockTTL time.Duration) *InMemoryRegistry {
 	}
 	return &InMemoryRegistry{
 		byKey:   make(map[string]*Record),
+		history: make(map[string][]*Record),
 		lockTTL: lockTTL,
 	}
 }
+
+var ErrSessionSuspended = errors.New("session exists in suspended state and cannot own live execution")
 
 func NewRegistry(lockTTL time.Duration) Registry {
 	return NewInMemoryRegistry(lockTTL)
@@ -100,7 +109,10 @@ func (sr *InMemoryRegistry) Acquire(ctx context.Context, agentID string, runtime
 	now := time.Now()
 	key := registryKey(agentID, resolved.RuntimeMode, resolved.ScopeKey)
 	rec, ok := sr.byKey[key]
-	if !ok || rec.Status != "active" {
+	if ok && rec != nil && rec.Status == "suspended" {
+		return nil, ErrSessionSuspended
+	}
+	if !ok || rec.Status == "" {
 		rec = &Record{
 			SessionID:   uuid.NewString(),
 			AgentID:     agentID,
@@ -180,21 +192,43 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 	}
 
 	retryReason := strings.TrimSpace(rotation.RetryReason)
-	retriesFromSessionID := ""
-	if retryReason != "" {
-		retriesFromSessionID = rec.SessionID
+	terminationReason := rotation.TerminationReason
+	if terminationReason == "" {
+		mappedReason, _, err := rotationTermination(retryReason)
+		if err != nil {
+			return nil, err
+		}
+		terminationReason = mappedReason
 	}
-	rec.Status = "rotating"
-	rec.CheckpointSummary = strings.TrimSpace(rotation.CheckpointSummary)
-	rec.RetryReason = retryReason
-	rec.RetriesFromSessionID = retriesFromSessionID
-	rec.SessionID = uuid.NewString()
+	if err := validateRuntimeTerminationReason(terminationReason); err != nil {
+		return nil, err
+	}
+	oldSessionID := rec.SessionID
+	terminated := *rec
+	terminated.Status = "terminated"
+	terminated.LockOwner = ""
+	terminated.LockExpiresAt = time.Time{}
+	terminated.TerminationReason = terminationReason.String()
+	terminated.TerminationDetail = retryReason
+	terminated.SuccessorSessionID = uuid.NewString()
+	terminated.TerminatedAt = now
+	terminated.LastUsedAt = now
+	sr.history[key] = append(sr.history[key], &terminated)
+
+	rec.SessionID = terminated.SuccessorSessionID
 	rec.ProviderSessionID = ""
 	rec.Status = "active"
+	rec.CheckpointSummary = strings.TrimSpace(rotation.CheckpointSummary)
+	rec.RetryReason = retryReason
+	rec.RetriesFromSessionID = oldSessionID
 	rec.TurnCount = 0
 	rec.LockOwner = lockOwner
 	rec.LockExpiresAt = now.Add(sr.lockTTL)
 	rec.LastUsedAt = now
+	rec.TerminationReason = ""
+	rec.TerminationDetail = ""
+	rec.SuccessorSessionID = ""
+	rec.TerminatedAt = time.Time{}
 
 	return &Lease{
 		SessionID:            rec.SessionID,
@@ -302,22 +336,60 @@ func (sr *InMemoryRegistry) Snapshot(agentID string) (*Record, bool) {
 	return nil, false
 }
 
+func (sr *InMemoryRegistry) History(agentID string) []Record {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	out := make([]Record, 0)
+	for _, entries := range sr.history {
+		for _, rec := range entries {
+			if rec == nil || rec.AgentID != agentID {
+				continue
+			}
+			out = append(out, *rec)
+		}
+	}
+	return out
+}
+
 func (sr *InMemoryRegistry) ResetAll(runtimeMode RuntimeMode) error {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	if runtimeMode == "" {
+		now := time.Now()
+		for key, rec := range sr.byKey {
+			if rec == nil {
+				continue
+			}
+			terminated := *rec
+			terminated.Status = "terminated"
+			terminated.TerminationReason = TerminationReasonOrphaned.String()
+			terminated.TerminatedAt = now
+			terminated.LockOwner = ""
+			terminated.LockExpiresAt = time.Time{}
+			terminated.SuccessorSessionID = ""
+			sr.history[key] = append(sr.history[key], &terminated)
+		}
 		sr.byKey = make(map[string]*Record)
 		return nil
 	}
 	if runtimeMode == RuntimeModeTask {
 		return nil
 	}
+	now := time.Now()
 	for key, rec := range sr.byKey {
 		if rec == nil {
 			delete(sr.byKey, key)
 			continue
 		}
 		if rec.RuntimeMode == runtimeMode {
+			terminated := *rec
+			terminated.Status = "terminated"
+			terminated.TerminationReason = TerminationReasonOrphaned.String()
+			terminated.TerminatedAt = now
+			terminated.LockOwner = ""
+			terminated.LockExpiresAt = time.Time{}
+			terminated.SuccessorSessionID = ""
+			sr.history[key] = append(sr.history[key], &terminated)
 			delete(sr.byKey, key)
 		}
 	}

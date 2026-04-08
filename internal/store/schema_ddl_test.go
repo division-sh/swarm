@@ -88,6 +88,29 @@ func TestGeneratePlatformTableDDLs(t *testing.T) {
 	}
 }
 
+func TestGeneratePlatformTableDDLs_ExtractsInlineUniquePartialIndex(t *testing.T) {
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agent_sessions": {
+			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY,\n    agent_id TEXT NOT NULL,\n    scope_key TEXT NOT NULL,\n    status TEXT NOT NULL,\n    UNIQUE INDEX agent_sessions_nonterminated_unique (agent_id, scope_key) WHERE status <> 'terminated'\n);",
+		},
+	}
+
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	if len(plans) != 1 || len(plans[0].Statements) != 2 {
+		t.Fatalf("plans = %#v", plans)
+	}
+	if got := plans[0].Statements[1]; !strings.Contains(got, `CREATE UNIQUE INDEX IF NOT EXISTS "agent_sessions_nonterminated_unique" ON "agent_sessions"(agent_id, scope_key) WHERE status <> 'terminated'`) {
+		t.Fatalf("unexpected unique partial index statement: %q", got)
+	}
+}
+
 func TestGeneratePlatformTableDDLs_OrdersRunsBeforeEvents(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
 	spec.PlatformTables.Tables = map[string]struct {

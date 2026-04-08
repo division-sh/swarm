@@ -65,6 +65,247 @@ func acquireLiveTestSession(t *testing.T, ctx context.Context, db *sql.DB, agent
 	return lease.SessionID
 }
 
+func TestPostgresStore_AgentSessionTerminationMetadataMigrationBackfillsLegacyRows(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE`); err != nil {
+		t.Fatalf("drop agent_sessions: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agent_sessions (
+			session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			agent_id TEXT NOT NULL,
+			entity_id UUID,
+			flow_instance TEXT,
+			scope_key TEXT NOT NULL,
+			scope TEXT NOT NULL DEFAULT 'entity',
+			conversation JSONB NOT NULL DEFAULT '[]'::jsonb,
+			turn_count INTEGER NOT NULL DEFAULT 0,
+			runtime_mode TEXT NOT NULL DEFAULT 'session',
+			runtime_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+			lease_holder TEXT,
+			lease_expires_at TIMESTAMPTZ,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (agent_id, scope_key)
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agent_sessions: %v", err)
+	}
+	sessionID := uuid.NewString()
+	createdAt := time.Now().UTC().Add(-2 * time.Hour).Round(time.Second)
+	updatedAt := createdAt.Add(30 * time.Minute)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at
+		) VALUES ($1::uuid, 'a1', 'global', 'global', 'session', 'terminated', $2, $3)
+	`, sessionID, createdAt, updatedAt); err != nil {
+		t.Fatalf("insert legacy terminated session: %v", err)
+	}
+
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agent_sessions": {
+			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'session',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(agent_sessions): %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables(agent_sessions): %v", err)
+	}
+
+	var reason string
+	var terminatedAt time.Time
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(termination_reason, ''), terminated_at
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&reason, &terminatedAt); err != nil {
+		t.Fatalf("load migrated terminated row: %v", err)
+	}
+	if reason != "legacy" {
+		t.Fatalf("termination_reason = %q, want legacy", reason)
+	}
+	if !terminatedAt.Equal(updatedAt) {
+		t.Fatalf("terminated_at = %s, want %s", terminatedAt, updatedAt)
+	}
+}
+
+func TestPostgresStore_AgentSessionsPartialUniquenessAllowsTerminatedHistoryButRejectsSecondLiveOwner(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+
+	sessionA := uuid.NewString()
+	sessionB := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status,
+			termination_reason, terminated_at, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'a1', 'global', 'global', 'session', 'terminated',
+			'failed', now(), now(), now()
+		)
+	`, sessionA); err != nil {
+		t.Fatalf("insert terminated row: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'a1', 'global', 'global', 'session', 'active', now(), now()
+		)
+	`, sessionB); err != nil {
+		t.Fatalf("insert active row after terminated history: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'a1', 'global', 'global', 'session', 'suspended', now(), now()
+		)
+	`, uuid.NewString()); err == nil {
+		t.Fatal("expected second non-terminated owner insert to fail")
+	}
+}
+
+func TestPostgresRegistry_AcquireFailsClosedOnSuspendedResumableOwner(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'a1', 'global', 'global', 'session', 'suspended', now(), now()
+		)
+	`, uuid.NewString()); err != nil {
+		t.Fatalf("insert suspended session: %v", err)
+	}
+
+	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	if _, err := registry.Acquire(ctx, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "worker-1", "global"); err != runtimesessions.ErrSessionSuspended {
+		t.Fatalf("Acquire error = %v, want ErrSessionSuspended", err)
+	}
+}
+
+func TestPostgresRegistry_ResetAllMarksActiveSessionsOrphaned(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
+	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	if err := registry.ResetAll(runtimesessions.RuntimeModeSession); err != nil {
+		t.Fatalf("ResetAll: %v", err)
+	}
+
+	var (
+		status       string
+		reason       string
+		terminatedAt time.Time
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(termination_reason, ''), terminated_at
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&status, &reason, &terminatedAt); err != nil {
+		t.Fatalf("load reset session row: %v", err)
+	}
+	if status != "terminated" {
+		t.Fatalf("status = %q, want terminated", status)
+	}
+	if reason != "orphaned" {
+		t.Fatalf("termination_reason = %q, want orphaned", reason)
+	}
+	if terminatedAt.IsZero() {
+		t.Fatal("terminated_at is zero")
+	}
+}
+
+func TestPostgresStore_AgentSessionSuccessorInvariantsRejectCrossScopeAndLegacyWrites(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+
+	oldID := uuid.NewString()
+	goodSuccessorID := uuid.NewString()
+	badSuccessorID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status,
+			termination_reason, terminated_at, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'a1', 'global', 'global', 'session', 'terminated',
+			'failed', now(), now(), now()
+		)
+	`, oldID); err != nil {
+		t.Fatalf("insert terminated session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'a1', 'global', 'global', 'session', 'active', now(), now()
+		)
+	`, goodSuccessorID); err != nil {
+		t.Fatalf("insert active successor candidate: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status,
+			termination_reason, terminated_at, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'a1', 'flow-1', 'flow', 'session', 'terminated',
+			'failed', now(), now(), now()
+		)
+	`, badSuccessorID); err != nil {
+		t.Fatalf("insert terminated cross-scope candidate: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET successor_session_id = $2::uuid
+		WHERE session_id = $1::uuid
+	`, oldID, badSuccessorID); err == nil {
+		t.Fatal("expected cross-scope successor assignment to fail")
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status,
+			termination_reason, terminated_at, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'a1', 'legacy-new', 'global', 'session', 'terminated',
+			'legacy', now(), now(), now()
+		)
+	`, uuid.NewString()); err == nil {
+		t.Fatal("expected new legacy termination write to fail")
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET successor_session_id = $2::uuid
+		WHERE session_id = $1::uuid
+	`, oldID, goodSuccessorID); err != nil {
+		t.Fatalf("set valid successor_session_id: %v", err)
+	}
+}
+
 func seedSpecEntityState(t *testing.T, ctx context.Context, db execer, entityID, flowInstance, slug, name, state string) {
 	t.Helper()
 	if strings.TrimSpace(flowInstance) == "" {
@@ -2535,6 +2776,53 @@ func TestManagerStore_LoadActiveConversationIncludesRetryLineage(t *testing.T) {
 	if gotReason != "session not found" || gotFrom != lease.SessionID {
 		t.Fatalf("unexpected runtime_state retry lineage: reason=%q from=%q", gotReason, gotFrom)
 	}
+
+	var (
+		oldStatus            string
+		oldTerminationReason string
+		oldSuccessorID       string
+		oldTerminatedAt      time.Time
+		sameAgent            bool
+		sameScope            bool
+		sameScopeKey         bool
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(status, ''),
+			COALESCE(termination_reason, ''),
+			COALESCE(successor_session_id::text, ''),
+			terminated_at
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, lease.SessionID).Scan(&oldStatus, &oldTerminationReason, &oldSuccessorID, &oldTerminatedAt); err != nil {
+		t.Fatalf("load rotated predecessor metadata: %v", err)
+	}
+	if oldStatus != "terminated" {
+		t.Fatalf("predecessor status = %q, want terminated", oldStatus)
+	}
+	if oldTerminationReason != "contaminated" {
+		t.Fatalf("predecessor termination_reason = %q, want contaminated", oldTerminationReason)
+	}
+	if oldSuccessorID != rotated.SessionID {
+		t.Fatalf("predecessor successor_session_id = %q, want %q", oldSuccessorID, rotated.SessionID)
+	}
+	if oldTerminatedAt.IsZero() {
+		t.Fatal("predecessor terminated_at is zero")
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			old.agent_id = new.agent_id,
+			old.scope = new.scope,
+			old.scope_key = new.scope_key
+		FROM agent_sessions old
+		JOIN agent_sessions new ON new.session_id = $2::uuid
+		WHERE old.session_id = $1::uuid
+	`, lease.SessionID, rotated.SessionID).Scan(&sameAgent, &sameScope, &sameScopeKey); err != nil {
+		t.Fatalf("compare rotated lineage scope: %v", err)
+	}
+	if !sameAgent || !sameScope || !sameScopeKey {
+		t.Fatalf("rotated lineage mismatch: sameAgent=%v sameScope=%v sameScopeKey=%v", sameAgent, sameScope, sameScopeKey)
+	}
 }
 
 func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalRuntimeState(t *testing.T) {
@@ -3728,14 +4016,22 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	}
 
 	var (
-		agentStatus string
-		sessStatus  string
-		auditStatus string
+		agentStatus      string
+		sessStatus       string
+		sessReason       string
+		sessTerminatedAt time.Time
+		auditStatus      string
 	)
 	if err := db.QueryRowContext(ctx, `SELECT status FROM agents WHERE agent_id = $1`, "agent-cleanup-1").Scan(&agentStatus); err != nil {
 		t.Fatalf("read agent status: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT status FROM agent_sessions WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1`, "agent-cleanup-1").Scan(&sessStatus); err != nil {
+	if err := db.QueryRowContext(ctx, `
+		SELECT status, COALESCE(termination_reason, ''), terminated_at
+		FROM agent_sessions
+		WHERE agent_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, "agent-cleanup-1").Scan(&sessStatus, &sessReason, &sessTerminatedAt); err != nil {
 		t.Fatalf("read session status: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT status FROM agent_conversation_audits WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1`, "agent-cleanup-1").Scan(&auditStatus); err != nil {
@@ -3746,6 +4042,12 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	}
 	if sessStatus != "terminated" {
 		t.Fatalf("expected terminated session status, got %q", sessStatus)
+	}
+	if sessReason != "cancelled" {
+		t.Fatalf("expected cancelled session termination_reason, got %q", sessReason)
+	}
+	if sessTerminatedAt.IsZero() {
+		t.Fatal("expected non-zero session terminated_at")
 	}
 	if auditStatus != "terminated" {
 		t.Fatalf("expected terminated audit status, got %q", auditStatus)

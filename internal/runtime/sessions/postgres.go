@@ -76,7 +76,8 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID string, runtime
 		WHERE agent_id = $1
 		  AND scope_key = $2
 		  AND runtime_mode = $3
-		ORDER BY created_at DESC
+		  AND status IN ('active', 'suspended')
+		ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, created_at DESC
 		LIMIT 1
 		FOR UPDATE
 	`, agentID, resolved.ScopeKey, resolved.RuntimeMode).Scan(
@@ -129,44 +130,8 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID string, runtime
 		}, nil
 	}
 
-	if strings.TrimSpace(r.status) != "active" {
-		sessionID := uuid.NewString()
-		var expires time.Time
-		if err := tx.QueryRowContext(ctx, `
-			UPDATE agent_sessions
-			SET session_id = $1::uuid,
-			    entity_id = NULLIF($2,'')::uuid,
-			    flow_instance = NULLIF($3,''),
-			    scope = $4,
-			    conversation = '[]'::jsonb,
-			    turn_count = 0,
-			    runtime_mode = $5,
-			    runtime_state = '{}'::jsonb,
-			    lease_holder = $6,
-			    lease_expires_at = $7,
-			    status = 'active',
-			    updated_at = now()
-			WHERE agent_id = $8
-			  AND scope_key = $9
-			  AND runtime_mode = $10
-			RETURNING session_id::text, scope_key, lease_expires_at
-		`, sessionID, resolved.EntityID, resolved.FlowInstance, resolved.Scope, resolved.RuntimeMode, lockOwner, now.Add(sr.lockTTL), agentID, resolved.ScopeKey, resolved.RuntimeMode).Scan(&r.sessionID, &r.scopeKey, &expires); err != nil {
-			return nil, fmt.Errorf("reactivate session row: %w", err)
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit acquire recycled: %w", err)
-		}
-		return &Lease{
-			SessionID:            r.sessionID,
-			AgentID:              agentID,
-			RuntimeMode:          resolved.RuntimeMode,
-			SessionScope:         resolved.Scope,
-			RetryReason:          "",
-			RetriesFromSessionID: "",
-			LockOwner:            lockOwner,
-			ScopeKey:             r.scopeKey,
-			ExpiresAt:            expires,
-		}, nil
+	if strings.TrimSpace(r.status) == "suspended" {
+		return nil, ErrSessionSuspended
 	}
 
 	if r.leaseHolder.Valid && r.leaseExpires.Valid && r.leaseExpires.Time.After(now) && r.leaseHolder.String != lockOwner {
@@ -282,33 +247,65 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 
 	newSessionID := uuid.NewString()
 	retryReason := strings.TrimSpace(rotation.RetryReason)
-	retriesFromSessionID := ""
-	if retryReason != "" {
-		retriesFromSessionID = currentSessionID
+	terminationReason := rotation.TerminationReason
+	if terminationReason == "" {
+		mappedReason, _, err := rotationTermination(retryReason)
+		if err != nil {
+			return nil, err
+		}
+		terminationReason = mappedReason
+	}
+	if err := validateRuntimeTerminationReason(terminationReason); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET status = 'terminated',
+		    termination_reason = $1,
+		    termination_detail = NULLIF($2, ''),
+		    terminated_at = COALESCE(terminated_at, $3),
+		    successor_session_id = NULL,
+		    lease_holder = NULL,
+		    lease_expires_at = NULL,
+		    updated_at = now()
+		WHERE session_id = $4::uuid
+		  AND status = 'active'
+	`, terminationReason, retryReason, now, currentSessionID); err != nil {
+		return nil, fmt.Errorf("terminate rotated session row: %w", err)
 	}
 	var expiresAt time.Time
 	if err := tx.QueryRowContext(ctx, `
-		UPDATE agent_sessions
-		SET session_id = $1::uuid,
-		    entity_id = NULLIF($2,'')::uuid,
-		    flow_instance = NULLIF($3,''),
-		    scope = $4,
-		    conversation = '[]'::jsonb,
-		    turn_count = 0,
-		    runtime_mode = $5,
-		    runtime_state = jsonb_strip_nulls(jsonb_build_object(
-		    	'checkpoint_summary', NULLIF($6,''),
-		    	'retry_reason', NULLIF($7,''),
-		    	'retries_from_session_id', NULLIF($8,'')
-		    )),
-		    lease_holder = $9,
-		    lease_expires_at = $10,
-		    status = 'active',
-		    updated_at = now()
-		WHERE session_id = $11::uuid
+		INSERT INTO agent_sessions (
+			session_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			conversation, turn_count, runtime_mode, runtime_state,
+			lease_holder, lease_expires_at, status,
+			termination_reason, termination_detail, successor_session_id, terminated_at,
+			created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6,
+			'[]'::jsonb, 0, $7,
+			jsonb_strip_nulls(jsonb_build_object(
+				'summary', NULLIF($8,''),
+				'retry_reason', NULLIF($9,''),
+				'retries_from_session_id', NULLIF($10,'')
+			)),
+			$11, $12, 'active',
+			NULL, NULL, NULL, NULL,
+			now(), now()
+		)
 		RETURNING lease_expires_at
-	`, newSessionID, resolved.EntityID, resolved.FlowInstance, resolved.Scope, resolved.RuntimeMode, strings.TrimSpace(rotation.CheckpointSummary), retryReason, retriesFromSessionID, lockOwner, now.Add(sr.lockTTL), currentSessionID).Scan(&expiresAt); err != nil {
-		return nil, fmt.Errorf("rotate session row: %w", err)
+	`, newSessionID, agentID, resolved.EntityID, resolved.FlowInstance, resolved.ScopeKey, resolved.Scope, resolved.RuntimeMode, strings.TrimSpace(rotation.CheckpointSummary), retryReason, currentSessionID, lockOwner, now.Add(sr.lockTTL)).Scan(&expiresAt); err != nil {
+		return nil, fmt.Errorf("insert rotated successor session row: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET successor_session_id = $1::uuid,
+		    updated_at = now()
+		WHERE session_id = $2::uuid
+		  AND status = 'terminated'
+	`, newSessionID, currentSessionID); err != nil {
+		return nil, fmt.Errorf("link rotated successor session row: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -321,7 +318,7 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID string, runtimeM
 		RuntimeMode:          resolved.RuntimeMode,
 		SessionScope:         resolved.Scope,
 		RetryReason:          retryReason,
-		RetriesFromSessionID: retriesFromSessionID,
+		RetriesFromSessionID: currentSessionID,
 		LockOwner:            lockOwner,
 		ScopeKey:             resolved.ScopeKey,
 		ExpiresAt:            expiresAt,
@@ -441,14 +438,16 @@ func (sr *PostgresRegistry) ScopeKeyEnabledForTest() bool {
 func (sr *PostgresRegistry) ResetAll(runtimeMode RuntimeMode) error {
 	if runtimeMode == "" {
 		_, err := sr.db.Exec(`
-			UPDATE agent_sessions
-			SET status = 'terminated',
-			    lease_holder = NULL,
-			    lease_expires_at = NULL,
-			    updated_at = now()
-			WHERE status = 'active'
-			  AND runtime_mode IN ('session', 'session_per_entity')
-		`)
+		UPDATE agent_sessions
+		SET status = 'terminated',
+		    termination_reason = 'orphaned',
+		    terminated_at = COALESCE(terminated_at, now()),
+		    lease_holder = NULL,
+		    lease_expires_at = NULL,
+		    updated_at = now()
+		WHERE status IN ('active', 'suspended')
+		  AND runtime_mode IN ('session', 'session_per_entity')
+	`)
 		if err != nil {
 			return fmt.Errorf("reset all sessions: %w", err)
 		}
@@ -460,10 +459,12 @@ func (sr *PostgresRegistry) ResetAll(runtimeMode RuntimeMode) error {
 	_, err := sr.db.Exec(`
 		UPDATE agent_sessions
 		SET status = 'terminated',
+		    termination_reason = 'orphaned',
+		    terminated_at = COALESCE(terminated_at, now()),
 		    lease_holder = NULL,
 		    lease_expires_at = NULL,
 		    updated_at = now()
-		WHERE status = 'active' AND runtime_mode = $1
+		WHERE status IN ('active', 'suspended') AND runtime_mode = $1
 	`, runtimeMode)
 	if err != nil {
 		return fmt.Errorf("reset sessions runtime=%s: %w", runtimeMode.String(), err)

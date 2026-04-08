@@ -103,6 +103,33 @@ func TestPostgresSessionRegistry_AcquireLeasedByOtherReturnsErrLeased(t *testing
 	}
 }
 
+func TestPostgresSessionRegistry_AcquireSuspendedReturnsErrSessionSuspended(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	sr := NewPostgresRegistry(db, 30*time.Second)
+	fixedNow := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	sr.SetNowFnForTest(func() time.Time { return fixedNow })
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT\\s+session_id::text,\\s+scope_key,\\s+status,\\s+NULLIF\\(runtime_state->>'provider_session_id'").
+		WithArgs("a1", "global", RuntimeModeSession).
+		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "status", "provider_session_id", "retry_reason", "retries_from_session_id", "lease_holder", "lease_expires_at"}).
+			AddRow("sess-suspended", "global", "suspended", nil, nil, nil, nil, nil))
+
+	_, err = sr.Acquire(context.Background(), "a1", RuntimeModeSession, SessionScopeGlobal, "owner-1", "global")
+	if err != ErrSessionSuspended {
+		t.Fatalf("expected ErrSessionSuspended, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -119,9 +146,15 @@ func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 		WithArgs("a1", "global", RuntimeModeSession).
 		WillReturnRows(sqlmock.NewRows([]string{"session_id", "lease_holder", "lease_expires_at"}).
 			AddRow("sess-1", "owner-1", fixedNow.Add(10*time.Second)))
-	mock.ExpectQuery("UPDATE agent_sessions\\s+SET session_id = \\$1::uuid,").
-		WithArgs(sqlmock.AnyArg(), "", "", "global", RuntimeModeSession, "sum", "session not found", "sess-1", "owner-1", fixedNow.Add(30*time.Second), "sess-1").
+	mock.ExpectExec("UPDATE agent_sessions\\s+SET status = 'terminated',").
+		WithArgs(TerminationReasonContaminated, "session not found", fixedNow, "sess-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("INSERT INTO agent_sessions").
+		WithArgs(sqlmock.AnyArg(), "a1", "", "", "global", "global", RuntimeModeSession, "sum", "session not found", "sess-1", "owner-1", fixedNow.Add(30*time.Second)).
 		WillReturnRows(sqlmock.NewRows([]string{"lease_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
+	mock.ExpectExec("UPDATE agent_sessions\\s+SET successor_session_id = \\$1::uuid,").
+		WithArgs(sqlmock.AnyArg(), "sess-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	lease, err := sr.Rotate(context.Background(), "a1", RuntimeModeSession, SessionScopeGlobal, "owner-1", RotationMetadata{
