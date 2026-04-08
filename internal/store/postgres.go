@@ -118,21 +118,19 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	if err != nil {
 		return err
 	}
-	if !catalog.hasTable("agent_turns") {
-		goto ensureAgents
-	}
-	if !catalog.hasColumns("agent_turns", "turn_blocks") {
-		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS turn_blocks JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
-			return fmt.Errorf("ensure agent_turns.turn_blocks column: %w", err)
+	if catalog.hasTable("agent_turns") {
+		if !catalog.hasColumns("agent_turns", "turn_blocks") {
+			if _, err := s.DB.ExecContext(ctx, `ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS turn_blocks JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
+				return fmt.Errorf("ensure agent_turns.turn_blocks column: %w", err)
+			}
 		}
-	}
-	if err := s.ensureConversationAuditTable(ctx); err != nil {
-		return err
+		if err := s.ensureConversationAuditTable(ctx); err != nil {
+			return err
+		}
 	}
 	if err := s.ensureAgentSessionTerminationMetadata(ctx); err != nil {
 		return err
 	}
-ensureAgents:
 	if err := s.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
 		return err
 	}
