@@ -53,22 +53,24 @@ func (t *InboundTarget) NormalizeEntity() {
 }
 
 type InboundGateway struct {
-	mux    *http.ServeMux
-	bus    *runtimebus.EventBus
-	store  InboundPersistence
-	logger *RuntimeLogger
+	mux                     *http.ServeMux
+	bus                     *runtimebus.EventBus
+	store                   InboundPersistence
+	logger                  *RuntimeLogger
+	shutdownAdmissionClosed func() bool
 }
 
-func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, stores ...InboundPersistence) *InboundGateway {
+func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
 	var store InboundPersistence
 	if len(stores) > 0 {
 		store = stores[0]
 	}
 	g := &InboundGateway{
-		mux:    http.NewServeMux(),
-		bus:    bus,
-		store:  store,
-		logger: logger,
+		mux:                     http.NewServeMux(),
+		bus:                     bus,
+		store:                   store,
+		logger:                  logger,
+		shutdownAdmissionClosed: shutdownAdmissionClosed,
 	}
 	g.mux.HandleFunc("/webhooks/", g.handleWebhook)
 	return g
@@ -79,6 +81,10 @@ func (g *InboundGateway) Handler() http.Handler {
 }
 
 func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	if g.shutdownAdmissionClosed != nil && g.shutdownAdmissionClosed() {
+		http.Error(w, "runtime shutting down", http.StatusServiceUnavailable)
+		return
+	}
 	if runtimebus.RuntimeIngressPaused() {
 		http.Error(w, "runtime reset in progress", http.StatusServiceUnavailable)
 		return

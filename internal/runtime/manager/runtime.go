@@ -111,6 +111,25 @@ func (am *AgentManager) isShuttingDown() bool {
 	return am.shuttingDown
 }
 
+func (am *AgentManager) shutdownAdmissionClosed() bool {
+	if am == nil {
+		return false
+	}
+	am.runMu.Lock()
+	defer am.runMu.Unlock()
+	return am.shutdownAdmissionClosedLocked()
+}
+
+func (am *AgentManager) shutdownAdmissionClosedLocked() bool {
+	if am == nil {
+		return false
+	}
+	if am.runtimeShutdownAdmissionClosed != nil {
+		return am.runtimeShutdownAdmissionClosed()
+	}
+	return am.shuttingDown
+}
+
 func (am *AgentManager) waitForRunShutdown() error {
 	done := make(chan struct{})
 	go func() {
@@ -397,7 +416,7 @@ func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string)
 
 func (am *AgentManager) Run(ctx context.Context) {
 	am.runMu.Lock()
-	if am.running || am.shuttingDown {
+	if am.running || am.shutdownAdmissionClosedLocked() {
 		am.runMu.Unlock()
 		return
 	}
@@ -535,7 +554,7 @@ func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
 	am.mu.RUnlock()
 
 	for _, id := range ids {
-		if am.isShuttingDown() {
+		if am.shutdownAdmissionClosed() {
 			return nil
 		}
 		if am.isAuthBreakerTripped() {
@@ -557,11 +576,11 @@ func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
 }
 
 func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) error {
+	if am.shutdownAdmissionClosed() {
+		return nil
+	}
 	if am.store == nil {
 		return fmt.Errorf("manager store unavailable")
-	}
-	if am.isShuttingDown() {
-		return nil
 	}
 	if am.isAuthBreakerTripped() {
 		return nil
@@ -767,7 +786,7 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 						if !ok {
 							return
 						}
-						if am.isShuttingDown() {
+						if am.shutdownAdmissionClosed() {
 							return
 						}
 						evtCtx := runtimecorrelation.WithInboundEvent(loopCtx, evt)
