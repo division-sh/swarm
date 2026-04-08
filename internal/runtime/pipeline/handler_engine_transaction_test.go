@@ -975,6 +975,102 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBefore
 	}
 }
 
+func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bus := &recordingPipelineBus{}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:         "validation",
+			Version:      "v-test",
+			InitialStage: "queued",
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "validation_phase",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "revision_count", Type: "integer", Initial: 0},
+					},
+				}},
+			},
+		},
+	}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		db:             db,
+		workflowStore:  NewWorkflowInstanceStore(db),
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module: &previewWorkflowModule{
+			bundle: bundle,
+			workflow: NewWorkflowDefinition("validation", []WorkflowStage{
+				{Name: "queued"},
+			}, nil),
+		},
+	}
+
+	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		Clear:        &runtimecontracts.ClearSpec{Target: "entity.revision_count"},
+		Emits:        runtimecontracts.EventEmission{Single: "entity.created"},
+	}, workflowTriggerContext{
+		Event: events.Event{Type: events.EventType("candidate.discovered")},
+		State: WorkflowState{},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	entityID := bus.publishedEvent(0).EntityID()
+	if entityID == "" {
+		t.Fatal("expected emitted event to carry created entity id")
+	}
+
+	instance, ok, err := pc.workflowStore.Load(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected created entity to persist")
+	}
+	if _, ok := instance.Metadata["revision_count"]; ok {
+		t.Fatalf("persisted revision_count = %#v, want field cleared", instance.Metadata["revision_count"])
+	}
+
+	rows, err := db.QueryContext(context.Background(), `
+		SELECT field, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
+		FROM entity_mutations
+		WHERE entity_id = $1::uuid AND field = 'revision_count'
+		ORDER BY created_at
+	`, entityID)
+	if err != nil {
+		t.Fatalf("query entity_mutations: %v", err)
+	}
+	defer rows.Close()
+
+	var sawInitial bool
+	for rows.Next() {
+		var field, writerType, writerID, handlerStep string
+		if err := rows.Scan(&field, &writerType, &writerID, &handlerStep); err != nil {
+			t.Fatalf("scan entity_mutations: %v", err)
+		}
+		if writerType == "platform" && writerID == "entity_initial_value" && handlerStep == "create_entity" {
+			sawInitial = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	if !sawInitial {
+		t.Fatal("expected initial-value mutation for revision_count before later clear")
+	}
+}
+
 func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{

@@ -140,6 +140,29 @@ func TestWorkflowExpressionEvaluator_EvalBoolIgnoresEntityRefsInsideStringLitera
 	}
 }
 
+func TestWorkflowExpressionEvaluator_EvalBoolIgnoresNullPresencePatternsInsideStringLiterals(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	for _, tc := range []struct {
+		expression string
+		label      string
+	}{
+		{expression: `payload.label == "entity.kill_reason == null"`, label: "entity.kill_reason == null"},
+		{expression: `payload.label == "entity.kill_reason != null"`, label: "entity.kill_reason != null"},
+	} {
+		ok, err := eval.EvalBool(tc.expression, workflowExpressionContext{
+			Entity:  map[string]any{},
+			Payload: map[string]any{"label": tc.label},
+			Policy:  map[string]any{},
+		})
+		if err != nil {
+			t.Fatalf("EvalBool(%q) error = %v", tc.expression, err)
+		}
+		if !ok {
+			t.Fatalf("expected quoted null-presence text to stay literal for %q", tc.expression)
+		}
+	}
+}
+
 func TestParseWorkflowEntityQueryPredicate_ResolvesPayloadReference(t *testing.T) {
 	predicate, err := parseWorkflowEntityQueryPredicate(
 		`name == payload.name`,
