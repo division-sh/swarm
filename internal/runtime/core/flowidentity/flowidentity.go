@@ -1,6 +1,7 @@
 package flowidentity
 
 import (
+	"fmt"
 	"path"
 	"strings"
 
@@ -19,6 +20,11 @@ type Instance struct {
 	SubjectID      string
 	ParentEntityID string
 	HasStoredPath  bool
+}
+
+type Persisted struct {
+	Instance
+	StorageRef string
 }
 
 type Route struct {
@@ -210,6 +216,49 @@ func Stored(
 		ParentEntityID: strings.TrimSpace(parentEntityID),
 		HasStoredPath:  materializedPath != "",
 	}
+}
+
+func StoredPersisted(
+	source semanticview.Source,
+	workflowName,
+	storageRef,
+	instancePath,
+	instanceID,
+	entityID,
+	subjectID,
+	parentEntityID string,
+) (Persisted, error) {
+	instance := Stored(source, workflowName, instancePath, instanceID, entityID, subjectID, parentEntityID)
+	storageRef = normalizeRef(storageRef)
+	if instance.InstancePath != "" {
+		if logical := LogicalInstanceID(instance.InstancePath); logical != "" && SemanticScopeFromInstancePath(instance.InstancePath) != "" {
+			if strings.TrimSpace(instance.InstanceID) != "" && strings.TrimSpace(instance.InstanceID) != logical {
+				return Persisted{}, fmt.Errorf("flow identity instance_id %q disagrees with flow_instance_path %q", instance.InstanceID, instance.InstancePath)
+			}
+		}
+	}
+	if storageRef == "" {
+		switch {
+		case instance.HasStoredPath && instance.InstancePath != "":
+			storageRef = instance.InstancePath
+		case strings.TrimSpace(entityID) != "":
+			storageRef = strings.TrimSpace(entityID)
+		default:
+			storageRef = strings.TrimSpace(instance.InstanceID)
+		}
+	}
+	return Persisted{
+		Instance:   instance,
+		StorageRef: storageRef,
+	}, nil
+}
+
+func (p Persisted) RowID() string {
+	return EntityID(p.StorageRef)
+}
+
+func (p Persisted) LookupKeys() []string {
+	return LookupKeys(p.StorageRef)
 }
 
 func IsDescendant(scopeKey, instancePath string) bool {

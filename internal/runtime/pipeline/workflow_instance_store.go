@@ -145,19 +145,27 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	}
 	instance.StorageRef = strings.TrimSpace(instance.StorageRef)
 	instance.SubjectID = strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"])))
-	storageRef := workflowInstanceStorageRef(instance)
-	if storageRef == "" {
+	identity, err := workflowInstancePersistedIdentity(nil, instance)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(identity.StorageRef) == "" {
 		return nil
 	}
-	rowID := workflowInstanceRowID(storageRef)
-	if rowID == "" {
+	if strings.TrimSpace(identity.RowID()) == "" {
 		return nil
 	}
-	if strings.TrimSpace(asString(instance.Metadata["instance_id"])) == "" {
-		instance.Metadata["instance_id"] = instance.InstanceID
+	if instance.Metadata == nil {
+		instance.Metadata = map[string]any{}
 	}
-	instance.Metadata["storage_ref"] = storageRef
-	return s.upsertSpec(ctx, rowID, storageRef, instance)
+	instance.StorageRef = identity.StorageRef
+	instance.InstanceID = identity.InstanceID
+	instance.Metadata["storage_ref"] = identity.StorageRef
+	instance.Metadata["instance_id"] = identity.InstanceID
+	if identity.InstancePath != "" {
+		instance.Metadata["flow_path"] = identity.InstancePath
+	}
+	return s.upsertSpec(ctx, identity.RowID(), identity.StorageRef, instance)
 }
 
 func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
@@ -341,8 +349,18 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 	item.StateBuckets = projection.Accumulator
 	item.Config = projection.Config
 	item.Metadata = projection.Metadata()
-	item.StorageRef = projection.Control.StorageRef
-	item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
+	persistedIdentity, err := workflowInstancePersistedIdentity(nil, WorkflowInstance{
+		InstanceID:   item.InstanceID,
+		StorageRef:   projection.Control.StorageRef,
+		WorkflowName: item.WorkflowName,
+		Metadata:     item.Metadata,
+		SubjectID:    item.SubjectID,
+	})
+	if err != nil {
+		return WorkflowInstance{}, false, err
+	}
+	item.StorageRef = persistedIdentity.StorageRef
+	item.InstanceID = persistedIdentity.InstanceID
 	timers, err := s.loadWorkflowTimersSpec(ctx, keys[0])
 	if err != nil {
 		return WorkflowInstance{}, false, err
@@ -443,10 +461,20 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 		item.StateBuckets = projection.Accumulator
 		item.Config = projection.Config
 		item.Metadata = projection.Metadata()
-		item.StorageRef = projection.Control.StorageRef
-		item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
+		persistedIdentity, err := workflowInstancePersistedIdentity(nil, WorkflowInstance{
+			InstanceID:   item.InstanceID,
+			StorageRef:   projection.Control.StorageRef,
+			WorkflowName: item.WorkflowName,
+			Metadata:     item.Metadata,
+			SubjectID:    item.SubjectID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		item.StorageRef = persistedIdentity.StorageRef
+		item.InstanceID = persistedIdentity.InstanceID
 		item.TransitionHistory = append([]WorkflowTransitionRecord{}, projection.Control.TransitionHistory...)
-		timers, err := s.loadWorkflowTimersSpec(ctx, runtimeflowidentity.EntityID(item.StorageRef))
+		timers, err := s.loadWorkflowTimersSpec(ctx, persistedIdentity.RowID())
 		if err != nil {
 			return nil, err
 		}
@@ -757,14 +785,21 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		return workflowInstancePersistedProjection{}, err
 	}
 	delete(metadata, "gates")
+	persistedIdentity, err := workflowInstancePersistedIdentity(nil, instance)
+	if err != nil {
+		return workflowInstancePersistedProjection{}, err
+	}
+	if strings.TrimSpace(storageRef) != "" && strings.TrimSpace(persistedIdentity.StorageRef) != "" && strings.TrimSpace(storageRef) != strings.TrimSpace(persistedIdentity.StorageRef) {
+		return workflowInstancePersistedProjection{}, fmt.Errorf("workflow instance storage_ref %q disagrees with canonical storage_ref %q", storageRef, persistedIdentity.StorageRef)
+	}
 	control := workflowInstancePersistedControl{
 		SubjectID:         strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"]))),
-		StorageRef:        strings.TrimSpace(storageRef),
+		StorageRef:        strings.TrimSpace(persistedIdentity.StorageRef),
 		Slug:              strings.TrimSpace(asString(instance.Metadata["slug"])),
 		Name:              strings.TrimSpace(asString(instance.Metadata["name"])),
 		EntityType:        strings.TrimSpace(asString(instance.Metadata["entity_type"])),
-		InstanceID:        strings.TrimSpace(firstNonEmptyString(asString(instance.Metadata["instance_id"]), instance.InstanceID)),
-		FlowPath:          strings.TrimSpace(asString(instance.Metadata["flow_path"])),
+		InstanceID:        strings.TrimSpace(persistedIdentity.InstanceID),
+		FlowPath:          strings.TrimSpace(persistedIdentity.InstancePath),
 		InstanceKind:      strings.TrimSpace(asString(instance.Metadata["instance_kind"])),
 		TemplateVersion:   strings.TrimSpace(asString(instance.Metadata["template_version"])),
 		LastSourceEvent:   strings.TrimSpace(asString(instance.Metadata["last_source_event"])),
@@ -1057,35 +1092,6 @@ func shouldFallbackLegacyWorkflowInstanceSchema(err error) bool {
 		}
 	}
 	return false
-}
-
-func workflowInstanceStorageRef(instance WorkflowInstance) string {
-	if storageRef := strings.TrimSpace(instance.StorageRef); storageRef != "" {
-		return storageRef
-	}
-	if flowPath := strings.TrimSpace(asString(instance.Metadata["flow_path"])); flowPath != "" {
-		return flowPath
-	}
-	if storageRef := strings.TrimSpace(asString(instance.Metadata["storage_ref"])); storageRef != "" {
-		return storageRef
-	}
-	return strings.TrimSpace(instance.InstanceID)
-}
-
-func workflowInstanceLogicalID(fallback string, metadata map[string]any) string {
-	if logicalID := strings.TrimSpace(asString(metadata["instance_id"])); logicalID != "" {
-		return logicalID
-	}
-	if flowPath := strings.TrimSpace(asString(metadata["flow_path"])); flowPath != "" {
-		return runtimeflowidentity.LogicalInstanceID(flowPath)
-	}
-	if storageRef := strings.TrimSpace(asString(metadata["storage_ref"])); storageRef != "" {
-		if strings.Contains(storageRef, "/") {
-			return runtimeflowidentity.LogicalInstanceID(storageRef)
-		}
-		return storageRef
-	}
-	return strings.TrimSpace(fallback)
 }
 
 func workflowInstanceLookupKeys(ref string) []string {
