@@ -129,6 +129,31 @@ func TestRuntimeShutdown_ReleasesSharedStoreOwnership(t *testing.T) {
 	}
 }
 
+func TestRuntimeCleanupStartFailure_ReleasesSharedStoreOwnership(t *testing.T) {
+	lease := &fakeRuntimeStartupOwnershipLease{}
+	ctx, cancel := context.WithCancel(context.Background())
+	rt := &Runtime{
+		startCtx:       ctx,
+		cancelStart:    cancel,
+		ownershipLease: lease,
+	}
+
+	rt.cleanupStartFailure()
+
+	if got := lease.released.Load(); got != 1 {
+		t.Fatalf("startup ownership lease release count = %d, want 1", got)
+	}
+	if rt.cancelStart != nil {
+		t.Fatal("cancelStart was not cleared")
+	}
+	if rt.startCtx != nil {
+		t.Fatal("startCtx was not cleared")
+	}
+	if rt.ownershipLease != nil {
+		t.Fatal("ownershipLease was not cleared")
+	}
+}
+
 func loadRuntimeOwnershipWorkflowModule(t *testing.T) semanticOnlyWorkflowRuntime {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
