@@ -368,10 +368,14 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 		items = executionItems(entityValue)
 	}
 	if filter := strings.TrimSpace(spec.Filter); filter != "" {
+		compiled, err := compileExecutionCondition(filter)
+		if err != nil {
+			return err
+		}
 		filtered := make([]any, 0, len(items))
 		for _, item := range items {
 			scope := newExecutionScope(item, frame.payload, frame.state.State.EntityContext(), current.Policy.Raw())
-			passed, err := executionEvalCondition(filter, scope)
+			passed, err := compiled.Eval(scope)
 			if err != nil {
 				return err
 			}
@@ -545,10 +549,14 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 	current := e.currentContext(frame)
 	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
 	items := executionItems(sourceValue)
+	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition))
+	if err != nil {
+		return err
+	}
 	filtered := make([]any, 0, len(items))
 	for _, item := range items {
 		scope := newExecutionScope(item, frame.payload, frame.state.State.EntityContext(), current.Policy.Raw())
-		passed, err := executionEvalCondition(strings.TrimSpace(spec.Condition), scope)
+		passed, err := compiled.Eval(scope)
 		if err != nil {
 			return err
 		}
@@ -581,14 +589,18 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 	current := e.currentContext(frame)
 	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
 	items := executionItems(sourceValue)
+	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition))
+	if err != nil {
+		return err
+	}
 	count := 0
 	for _, item := range items {
-		if strings.TrimSpace(spec.Condition) == "" {
+		if compiled == nil {
 			count++
 			continue
 		}
 		scope := newExecutionScope(item, frame.payload, frame.state.State.EntityContext(), current.Policy.Raw())
-		passed, err := executionEvalCondition(strings.TrimSpace(spec.Condition), scope)
+		passed, err := compiled.Eval(scope)
 		if err != nil {
 			return err
 		}

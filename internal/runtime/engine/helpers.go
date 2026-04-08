@@ -555,6 +555,11 @@ const (
 	executionOperandDefaultItem executionOperandDefaultScope = "item"
 )
 
+type compiledExecutionCondition struct {
+	expression string
+	program    cel.Program
+}
+
 func newExecutionScope(item any, payload, entity, policy map[string]any) executionScope {
 	return executionScope{
 		Item:    normalizeCELValue(item),
@@ -585,31 +590,52 @@ func executionConditionEnv() (*cel.Env, error) {
 	return executionConditionEnvRef, executionConditionEnvErr
 }
 
-func executionEvalCondition(expr string, scope executionScope) (bool, error) {
+func compileExecutionCondition(expr string) (*compiledExecutionCondition, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
-		return true, nil
+		return nil, nil
 	}
 	env, err := executionConditionEnv()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	ast, issues := env.Compile(expr)
 	if issues != nil && issues.Err() != nil {
-		return false, issues.Err()
+		return nil, issues.Err()
 	}
 	program, err := env.Program(ast)
 	if err != nil {
+		return nil, err
+	}
+	return &compiledExecutionCondition{
+		expression: expr,
+		program:    program,
+	}, nil
+}
+
+func executionEvalCondition(expr string, scope executionScope) (bool, error) {
+	compiled, err := compileExecutionCondition(expr)
+	if err != nil {
 		return false, err
 	}
-	out, _, err := program.Eval(scope.activation())
+	if compiled == nil {
+		return true, nil
+	}
+	return compiled.Eval(scope)
+}
+
+func (c *compiledExecutionCondition) Eval(scope executionScope) (bool, error) {
+	if c == nil {
+		return true, nil
+	}
+	out, _, err := c.program.Eval(scope.activation())
 	if err != nil {
 		return false, err
 	}
 	value := normalizeCELValue(out)
 	boolean, ok := value.(bool)
 	if !ok {
-		return false, fmt.Errorf("condition %q did not evaluate to bool", expr)
+		return false, fmt.Errorf("condition %q did not evaluate to bool", c.expression)
 	}
 	return boolean, nil
 }
