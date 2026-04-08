@@ -302,6 +302,9 @@ func TestSQLObservabilityReader_ListIncidents_UsesCanonicalRuntimeLogPayloads(t 
 	if rows[0].Code != "retry_exhausted" || rows[0].Count != 2 || rows[0].Component != "mcp-gateway" || rows[0].Level != "error" {
 		t.Fatalf("incident row = %#v", rows[0])
 	}
+	if rows[0].RootCause != "boom" {
+		t.Fatalf("incident root_cause = %#v, want boom", rows[0].RootCause)
+	}
 	if len(rows[0].Agents) != 2 || rows[0].Agents[0] != "agent-a" || rows[0].Agents[1] != "agent-b" {
 		t.Fatalf("incident agents = %#v", rows[0].Agents)
 	}
@@ -337,5 +340,84 @@ func TestSQLObservabilityReader_ListIncidents_FailsClosedOnMissingCanonicalCompo
 	_, err := reader.ListIncidents(ctx, IncidentFilter{SinceHours: 24})
 	if err == nil || !strings.Contains(err.Error(), "runtime log component is required") {
 		t.Fatalf("ListIncidents() error = %v, want missing canonical component failure", err)
+	}
+}
+
+func TestSQLObservabilityReader_ListIncidents_UsesMessageWhenCanonicalErrorIsEmpty(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	reader := NewSQLObservabilityReader(db)
+	ctx := context.Background()
+
+	payload := `{
+		"log_level":"error",
+		"message":"message fallback",
+		"details":{
+			"component":"diagnostics",
+			"action":"fallback_case",
+			"error_code":"retry_exhausted"
+		}
+	}`
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', now()
+		)
+	`, payload); err != nil {
+		t.Fatalf("insert runtime_log: %v", err)
+	}
+
+	rows, err := reader.ListIncidents(ctx, IncidentFilter{SinceHours: 24})
+	if err != nil {
+		t.Fatalf("ListIncidents: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("incident rows = %d, want 1: %#v", len(rows), rows)
+	}
+	if rows[0].RootCause != "message fallback" {
+		t.Fatalf("incident root_cause = %#v, want message fallback", rows[0].RootCause)
+	}
+}
+
+func TestSQLObservabilityReader_ListIncidents_SortsByRawLastSeenBeforeLimit(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	reader := NewSQLObservabilityReader(db)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	insertRuntimeLog := func(code, message string, createdAt time.Time) {
+		t.Helper()
+		payload := `{
+			"log_level":"error",
+			"message":"` + message + `",
+			"details":{
+				"component":"diagnostics",
+				"action":"same_second_order",
+				"error_code":"` + code + `"
+			}
+		}`
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', $2
+			)
+		`, payload, createdAt); err != nil {
+			t.Fatalf("insert runtime_log: %v", err)
+		}
+	}
+
+	insertRuntimeLog("older_code", "older", base.Add(100*time.Millisecond))
+	insertRuntimeLog("newer_code", "newer", base.Add(900*time.Millisecond))
+
+	rows, err := reader.ListIncidents(ctx, IncidentFilter{SinceHours: 24, Limit: 1})
+	if err != nil {
+		t.Fatalf("ListIncidents: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("incident rows = %d, want 1: %#v", len(rows), rows)
+	}
+	if rows[0].Code != "newer_code" {
+		t.Fatalf("incident code = %#v, want newer_code", rows[0].Code)
 	}
 }
