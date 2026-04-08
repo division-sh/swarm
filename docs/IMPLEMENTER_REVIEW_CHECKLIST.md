@@ -95,6 +95,15 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   - what sibling contexts use that same rule
   - whether the PR proves the failure class rather than only the first example
 - For semantic/runtime/spec-governed work, did the implementer post the required `Pre-Implementation Coverage Audit` comment on the GitHub issue before coding began?
+- Did that issue-level pre-audit explicitly state:
+  - the exact semantic concept or concepts being changed
+  - every relevant canonical owner for those concepts
+  - the touched consumers of each owner
+  - an exhaustive systematic-consumption audit for every currently known sibling seam that should consume each owner, with each seam marked as:
+    - already consumes the canonical owner
+    - moved to the canonical owner in this work
+    - still bypasses the canonical owner and is explicitly split / escalated
+  - the old non-authoritative producers/readers/interpreters that become invalid or removal candidates for each owner?
 - Did that issue-level pre-audit explicitly list every currently known manifestation from the issue body, issue thread, triage/reproducer notes, and prior review context?
 - For each listed manifestation, did the pre-audit classify it as exactly one of:
   - direct reproducer and fix
@@ -108,6 +117,14 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - If this is a surface-parity issue, did the pre-audit name the supported surface(s) that must be exercised before closure?
 - If the issue has multiple currently known manifestations and the pre-audit is missing, incomplete, or hand-wavy, did the reviewer stop there and mark the PR as not review-ready?
 - For semantic/runtime/spec-governed work, did the implementer post a post-implementation proof audit comment on the PR that explicitly states:
+  - the exact semantic concept or concepts being changed
+  - every relevant canonical owner for those concepts after the change
+  - the touched callers/readers/validators/selectors that now consume each owner
+  - an exhaustive systematic-consumption audit for every currently known sibling seam that should consume each owner, with each seam marked as:
+    - already consumes the canonical owner
+    - moved to the canonical owner in this PR
+    - still bypasses the canonical owner and is explicitly split / escalated
+  - which old producers/readers/interpreters are now invalid, non-authoritative, or still surviving for each owner
   - the broader failure class
   - whether the issue was symptom-shaped
   - the sibling contexts checked
@@ -119,6 +136,10 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   - split / escalated as separate class
 - For each manifestation row, did the audit name the exact proof used and any required supported-surface or end-to-end proof?
 - If no generic reproducer existed before implementation, did the reviewer verify that the PR now creates one?
+- If the implementer could not identify every relevant canonical owner for the touched semantic concept or concepts, did the reviewer stop the review and mark the PR as not review-ready?
+- If the audits did not state exhaustively who already consumes each named canonical owner and who still bypasses each one, did the reviewer stop the review and mark the PR as not review-ready?
+- If a sibling seam still bypasses the canonical owner, did the PR either absorb it now or explicitly prove why full closure was not feasible in the same PR?
+- If the PR leaves dual semantic ownership in place, did the reviewer verify that this is a lead-approved temporary seam rather than a migration excuse?
 - If any currently known manifestation lacks an explicit final status or proof line, did the reviewer stop the review and mark the PR as not review-ready?
 - If the audit relies on “shared owner introduced”, “same seam”, or “cleaner architecture” without manifestation-level proof, did the reviewer reject that as insufficient closure evidence?
 - For verify-vs-boot, boot-vs-runtime, reader-vs-writer, or other surface-parity issues, did the reviewer require proof at each relevant surface rather than accepting only synthetic agreement tests?
@@ -152,6 +173,9 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   - was it explicitly approved by the lead?
   - is it time-bounded and isolated to one boundary?
   - is there a concrete removal follow-up rather than an indefinite shim?
+- For any claimed migration:
+  - is it moving state/schema/deployment ordering to one canonical model rather than preserving dual semantic ownership?
+  - if dual semantic ownership remains, was that treated as an exception rather than a default migration choice?
 - For any persisted read-model or canonical surface touched here:
   - is there one canonical write-time owner?
   - is the consuming reader explicit?

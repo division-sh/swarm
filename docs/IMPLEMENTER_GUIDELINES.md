@@ -9,6 +9,8 @@ They are especially important when multiple implementers are working in parallel
 Operational companion:
 
 - apply [IMPLEMENTER_REVIEW_CHECKLIST.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_REVIEW_CHECKLIST.md) before merging non-trivial changes
+- apply [SEMANTIC_DRIFT.md](/Users/youmew/dev/swarm/docs/SEMANTIC_DRIFT.md) when a change touches semantic ownership, identity, validation, lifecycle, or cross-surface parity
+- use [PROMPT_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROMPT_TEMPLATES.md) for the default implementer and reviewer prompt shapes
 
 The default bias of this codebase should be:
 
@@ -71,6 +73,25 @@ For in-flight semantic changes:
 - do not update the authoritative `platform-spec.yaml` on `main` before the matching implementation exists
 - if a workstream needs a proposed semantic change, use a review-spec draft file first
 - only update the authoritative `platform-spec.yaml` in the same branch that makes the semantic change true in code/tests
+
+Spec-update workflow when implementation is blocked by a spec gap:
+
+- stop implementation immediately when the issue depends on semantics the current spec does not define clearly enough
+- draft the proposed semantic change first in a review-spec file under:
+  - `docs/specs/swarm-platform/platform/contracts/review/`
+- review that draft as a spec decision before resuming implementation
+- once the draft is approved, copy the approved draft into the implementer's worktree before handoff
+- the implementation PR must then do both in the same branch:
+  - promote the approved draft into the authoritative `platform-spec.yaml`
+  - implement the matching runtime/store/code change
+- do not implement against a draft spec without promoting it in the same PR
+- do not promote the draft into the authoritative spec without the matching implementation in the same PR
+- the implementer should claim touched-seam compliance with the newly promoted authoritative spec, not total platform compliance
+
+Rule:
+
+- approved review-spec drafts are not optional background reading
+- when a draft is the basis for implementation, that exact approved draft must be the source promoted into the authoritative spec on the implementation branch
 
 Default review-spec convention:
 
@@ -645,6 +666,21 @@ Pre-Implementation Coverage Audit rule:
 
 Required issue-comment format:
 
+- `Concept`
+  - state the exact semantic concept or concepts being changed
+- `Canonical owner(s)`
+  - identify every relevant canonical owner for the issue's semantic model
+  - if the issue spans multiple coupled concepts, name each owner separately
+- `Consumers of each owner`
+  - for each named owner, list the main touched callers, readers, validators, selectors, or runtime surfaces that should consume it
+- `Systematic consumption audit`
+  - for each named owner, exhaustively list every currently known sibling seam that should consume it
+  - for each seam, classify it as exactly one of:
+    - already consumes the canonical owner
+    - moved to the canonical owner in this work
+    - still bypasses the canonical owner and is explicitly split / escalated
+- `Old non-authoritative paths`
+  - for each named owner, list any old helpers, readers, writers, or interpreters that become invalid, non-canonical, or removal candidates
 - `Failure class`
   - state the broader generic failure class, not just the first symptom
 - `Currently known manifestations in scope`
@@ -677,12 +713,74 @@ Required issue-comment format:
 
 Absolute rules:
 
+- do not begin implementation if the audit cannot identify every relevant canonical owner for the touched semantic concept or concepts
+- do not begin implementation if the audit does not include an exhaustive systematic-consumption audit for the currently known sibling seams of each named owner
 - do not begin implementation if any currently known manifestation is missing from the audit
 - do not classify a manifestation as “same seam” without naming the execution proof that will show it flows through the corrected path
 - do not use “shared owner introduced”, “same validator”, “same helper”, or “same architecture seam” as sufficient coverage by themselves
 - if a manifestation is not directly reproduced, the audit must explain exactly how it will be execution-proven through the same corrected path
 - if that proof cannot be named before coding starts, mark the manifestation as split / escalate instead
 - for parity issues, supported-surface proof is mandatory; synthetic agreement tests alone are not enough if the issue was discovered through a supported surface
+
+Broad-refactor escalation rule:
+
+- this step happens after the `Pre-Implementation Coverage Audit` and before implementation
+- if the pre-audit and systematic-consumption audit show that the named canonical owner is not used systematically across the relevant sibling seams, the implementer must decide whether the issue can still be solved honestly as a first slice
+- if not, implementation must pause and the implementer must post a `Broad Refactor Escalation` comment on the issue or PR before writing code
+
+Required escalation content:
+
+- the exact semantic concept
+- the named canonical owner
+- the sibling seams currently bypassing that owner
+- why a narrow fix would be insufficient or dishonest
+- the proposed broader refactor scope
+- what would move now
+- what would remain out of scope
+- the main migration, behavior, test-surface, and coordination risks
+
+Lead decision:
+
+- the lead must respond explicitly with exactly one of:
+  - `approved as broad refactor`
+  - `denied; keep first-slice scope`
+  - `split: do first slice now, open canonicalization follow-up`
+
+Absolute rules:
+
+- do not silently widen a first-slice issue into a broad refactor without an explicit lead decision
+- if the pre-audit shows that failure-class elimination would require systematic adoption of the canonical owner across multiple sibling seams, do not begin implementation until the lead has approved or denied the broad-refactor escalation
+
+Close-the-gap rule:
+
+- if a semantic gap can be closed cleanly in the current PR, close it in the current PR
+- do not leave a sibling bypass seam, duplicate owner, or non-authoritative interpreter in place just because staging feels safer
+- the default expectation is full semantic closure in the touched seam, not managed coexistence
+
+Migration rule:
+
+- migration exists to move persisted state, schema, or deployment ordering safely to the canonical model
+- migration does not justify dual semantic ownership
+- migrate data or state forward, then delete the old semantic path
+- keep one canonical owner unless the lead explicitly approves a temporary seam in writing
+
+Temporary coexistence exception:
+
+- temporary coexistence of two semantic owners is banned by default
+- it may exist only when all of the following are true:
+  - atomic closure is operationally impossible
+  - the remaining seam is narrowly isolated
+  - the authoritative owner is explicitly named
+  - the non-authoritative seam is explicitly marked temporary
+  - a concrete tracked removal follow-up exists
+  - the lead explicitly approves that seam in writing
+
+Absolute rules:
+
+- if the implementer proposes leaving the old semantic path in place, they must prove why full closure is not feasible in the same PR
+- “smaller patch”, “easier rollout”, “less risky by default”, or “follow-up is easy” are not sufficient reasons by themselves
+- if a first-slice issue knowingly leaves the same concept duplicated inside the same effective boundary, the implementer must escalate instead of calling the work complete
+- without the temporary-coexistence exception above, close the semantic gap in the PR
 
 Invalid pre-audit example:
 
@@ -711,6 +809,14 @@ Post-Implementation Proof Audit rule:
 - for semantic/runtime/spec-governed work, a PR is not review-ready until the implementer posts a post-implementation proof audit comment on the PR
 - for failure-class issues, that audit must include a failure-class coverage table, not only a narrative summary
 - the PR audit must explicitly include:
+  - the exact semantic concept or concepts being changed
+  - every relevant canonical owner for those concepts after the change
+  - which touched callers, readers, validators, selectors, or runtime surfaces now consume each owner
+  - an exhaustive systematic-consumption audit for the currently known sibling seams that should consume each owner, with each seam marked as exactly one of:
+    - already consumes the canonical owner
+    - moved to the canonical owner in this PR
+    - still bypasses the canonical owner and is explicitly split / escalated
+  - which old producers, readers, or interpreters are now invalid, non-authoritative, or still surviving for each owner
   - the broader failure class the issue belongs to
   - whether the issue described the full class or only the first visible symptom
   - which sibling contexts in the touched seam were checked
@@ -726,6 +832,8 @@ Post-Implementation Proof Audit rule:
   - any manifestation that remains unproven
 - do not rely on “tests pass” as sufficient proof without naming the generic failing proof that the fix resolves
 - do not rely on “shared owner introduced”, “same seam”, or “architecture now looks cleaner” as substitutes for manifestation-level proof
+- if the implementer cannot identify every relevant canonical owner for the touched semantic concept or concepts, the PR is not review-ready
+- if the PR does not state exhaustively who still bypasses each named canonical owner, the PR is not review-ready
 - if any currently known manifestation lacks one of the required statuses above, the PR is not review-ready
 - if no generic reproducer exists yet for a semantic/runtime failure class, deriving one is part of the implementation task
 - if the implementer cannot derive a clean generic proof for the failure class, stop and escalate before treating the work as complete
@@ -760,27 +868,54 @@ Default lead prompt shape:
 ```text
 Pick up issue `#NNN`.
 
-Scope:
-- ...
+Before coding:
+- read the full issue body/thread
+- re-read the exact cited spec section(s) and treat them as binding
+- if the issue says there are no exact spec refs, treat the issue body/thread as binding context
+- follow:
+  - `docs/IMPLEMENTER_GUIDELINES.md`
+  - `docs/SEMANTIC_DRIFT.md`
 
 Important steering:
-- spec is the source of truth; do not change the spec directly
+- spec is the source of truth
 - fail fast, fail closed, aggressive migration, zero legacy behavior
-- no compatibility shims, no fallback logic, no preserving old behavior "just in case"
-- keep one canonical owner for the touched seam
-- stop and escalate immediately on any spec gap, ambiguity, or contradiction
-- stop and escalate immediately if current implementation is already off-spec in a way the issue did not capture
-- do not silently widen the issue by fixing undisclosed spec drift without review
+- no heuristics, no compatibility shims, no preserving old behavior “just in case”
+- close the semantic gap in the PR if it can be closed cleanly
+- do not treat migration as a reason to preserve dual semantic ownership
+- do not treat “shared owner introduced” or “same seam” as proof by themselves
+- stop and escalate on any spec gap, ambiguity, contradiction, or uncaptured off-spec behavior
+
+Mandatory before implementation:
+- post a `Pre-Implementation Coverage Audit` comment on the GitHub issue
+
+That issue comment must state:
+- the exact semantic concept or concepts being changed
+- every relevant canonical owner for those concepts
+- the touched consumers of each owner
+- an exhaustive systematic-consumption audit for every currently known sibling seam that should consume each owner
+- the broader failure class
+- every currently known manifestation in scope
+- the exact proof planned for each manifestation
+- required supported-surface / end-to-end proof if this is a parity issue
+- any blocking ambiguity or split condition
+
+If the pre-audit shows broad duplication and a narrow fix would be dishonest:
+- pause
+- post a `Broad Refactor Escalation`
+- wait for explicit lead response
+
+Mandatory before review:
+- post a `Post-Implementation Proof Audit` comment on the PR
 
 Required workflow:
-- implement the change in your worktree
-- run focused tests for the touched seam
-- commit the work with a clear message
-- push your branch
-- open a PR against `master`
-- include `Closes #NNN` in the PR body
-- include either the exact governing spec reference(s) or an explicit non-semantic-maintenance justification in the PR body
+- implement in your worktree
+- run focused tests
+- run required supported-surface proof for parity issues
+- commit
+- push
+- open PR against `master`
+- include `Closes #NNN` and spec refs in the PR body
 - report back with the PR number
 
-Deliverable is not complete until the PR is open.
+Deliverable is not complete until the PR is open and both audit artifacts exist.
 ```
