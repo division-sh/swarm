@@ -71,43 +71,6 @@ body:
       required: true
 
   - type: textarea
-    id: parent_failure_class
-    attributes:
-      label: Parent Failure Class
-      description: If this issue is likely a child slice of a broader parent failure class, name that parent. Otherwise write `none known yet`.
-      placeholder: |
-        Example:
-        typed persisted operator reads should never infer missing schema capabilities locally
-    validations:
-      required: true
-
-  - type: dropdown
-    id: process_status
-    attributes:
-      label: Process Status
-      description: Is this issue directly assignable, or is it mainly an umbrella/watchpoint that should not be assigned as-is?
-      options:
-        - direct-assignable
-        - umbrella / watchpoint
-        - blocked on prerequisite
-        - unknown yet
-    validations:
-      required: true
-
-  - type: textarea
-    id: known_manifestations
-    attributes:
-      label: Known Manifestations
-      description: List the known manifestations as extensively as the currently available evidence supports. Prefer over-enumeration to collapsing multiple manifestations into one prose sentence.
-      placeholder: |
-        - manifestation 1:
-        - manifestation 2:
-        - manifestation 3:
-        - if only one is known so far, say that explicitly
-    validations:
-      required: true
-
-  - type: textarea
     id: why_now
     attributes:
       label: Why This Matters

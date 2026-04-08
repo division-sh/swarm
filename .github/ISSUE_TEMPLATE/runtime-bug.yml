@@ -57,43 +57,6 @@ body:
       required: true
 
   - type: textarea
-    id: parent_failure_class
-    attributes:
-      label: Parent Failure Class
-      description: If this issue is likely a child slice of a broader parent failure class, name that parent. Otherwise write `none known yet`.
-      placeholder: |
-        Example:
-        cross-surface flow-owned session-scope proof drift across verify, boot, and runtime startup
-    validations:
-      required: true
-
-  - type: dropdown
-    id: process_status
-    attributes:
-      label: Process Status
-      description: Is this issue directly assignable, or is it mainly an umbrella/watchpoint that should not be assigned as-is?
-      options:
-        - direct-assignable
-        - umbrella / watchpoint
-        - blocked on prerequisite
-        - unknown yet
-    validations:
-      required: true
-
-  - type: textarea
-    id: known_manifestations
-    attributes:
-      label: Known Manifestations
-      description: List the known manifestations as extensively as the currently available evidence supports. Prefer over-enumeration to collapsing multiple manifestations into one prose sentence.
-      placeholder: |
-        - manifestation 1:
-        - manifestation 2:
-        - manifestation 3:
-        - if only one is known so far, say that explicitly
-    validations:
-      required: true
-
-  - type: textarea
     id: impact
     attributes:
       label: Impact
@@ -126,58 +89,6 @@ body:
         Example:
         - generic reproducer: focused bootverify fixture with package-backed flow agent outside flow dir
         - if missing: implementer must derive this as part of the fix
-    validations:
-      required: true
-
-  - type: dropdown
-    id: suggested_pre_audit_gate
-    attributes:
-      label: Suggested Pre-Audit Gate
-      description: Suggest whether independent pre-audit review should be required before coding. Lead/triage makes the final call.
-      options:
-        - required
-        - likely required
-        - maybe
-        - not expected
-    validations:
-      required: true
-
-  - type: dropdown
-    id: intended_closure_level
-    attributes:
-      label: Intended Closure Level
-      description: What is the honest target if this issue is solved as written?
-      options:
-        - local symptom fixed
-        - touched seam canonicalized
-        - failure class eliminated
-        - unknown yet
-    validations:
-      required: true
-
-  - type: textarea
-    id: watchlist_mapping
-    attributes:
-      label: Watchlist Mapping
-      description: Name the existing watchlist node this issue belongs to, or write `needs node/refinement`.
-      placeholder: |
-        Example:
-        semantic-correctness.yaml -> flow_owned_session_scope_proof
-    validations:
-      required: true
-
-  - type: textarea
-    id: likely_parent_action
-    attributes:
-      label: Likely Parent-Class Action After Pre-Audit
-      description: If a broader parent class exists, what is the most likely action after pre-audit?
-      placeholder: |
-        One of:
-        - absorb parent now
-        - keep first-slice scope
-        - open or update dedicated follow-up stream
-        - leave parent explicitly open as still unproven
-        - none known yet
     validations:
       required: true
 
