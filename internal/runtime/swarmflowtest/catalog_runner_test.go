@@ -1,6 +1,7 @@
 package swarmflowtest
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,9 +15,12 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/core/timeridentity"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 )
 
 type catalogTriggerStep struct {
@@ -129,6 +133,7 @@ type catalogBootBundle struct {
 	AllAgents map[string]any
 	AllPolicy map[string]any
 	AllTools  map[string]any
+	Source    semanticview.Source
 }
 
 type catalogNodeContract struct {
@@ -1075,6 +1080,27 @@ func catalogLoadBootBundle(t testing.TB, dir string) catalogBootBundle {
 		AllPolicy: cloneStringAnyMapCatalog(root.Policy),
 		AllTools:  cloneStringAnyMapCatalog(root.Tools),
 	}
+	if bundle.AllNodes == nil {
+		bundle.AllNodes = map[string]any{}
+	}
+	if bundle.AllEvents == nil {
+		bundle.AllEvents = map[string]any{}
+	}
+	if bundle.AllAgents == nil {
+		bundle.AllAgents = map[string]any{}
+	}
+	if bundle.AllPolicy == nil {
+		bundle.AllPolicy = map[string]any{}
+	}
+	if bundle.AllTools == nil {
+		bundle.AllTools = map[string]any{}
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	semanticBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, dir, platformSpec)
+	if err == nil {
+		bundle.Source = semanticview.Wrap(semanticBundle)
+	}
 	entries, err := os.ReadDir(filepath.Join(dir, "flows"))
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatalf("read boot flow fixtures: %v", err)
@@ -1121,79 +1147,27 @@ func catalogLoadBootBundle(t testing.TB, dir string) catalogBootBundle {
 
 func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 	issues := make([]catalogBootIssue, 0, 16)
-	eventDefined := map[string]struct{}{}
-	for _, key := range catalogSortedKeys(bundle.AllEvents) {
-		if len(catalogMap(bundle.AllEvents[key])) > 0 {
-			eventDefined[key] = struct{}{}
-		}
-	}
-	eventsEmitted := map[string]struct{}{}
-	eventsSubscribed := map[string]struct{}{}
-	fanOutEvents := map[string]struct{}{}
 	eventGraph := map[string]map[string]struct{}{}
 	allScopes := append([]catalogBootScope{bundle.Root}, bundle.Flows...)
 	for _, scope := range allScopes {
-		if eventName := catalogAutoEmitEvent(scope.Schema); eventName != "" {
-			eventsEmitted[eventName] = struct{}{}
-		}
 		for _, nodeID := range catalogSortedKeys(scope.Nodes) {
 			node := catalogMap(scope.Nodes[nodeID])
-			for _, ev := range catalogStringSlice(node["subscribes_to"]) {
-				evClean := catalogNormalizeSubscribedEvent(ev)
-				if evClean != "" && !strings.Contains(evClean, "*") {
-					eventsSubscribed[evClean] = struct{}{}
-				}
-			}
 			for _, eventType := range catalogSortedKeys(catalogMap(node["event_handlers"])) {
-				eventsSubscribed[eventType] = struct{}{}
 				handler := catalogMap(catalogMap(node["event_handlers"])[eventType])
 				emits := catalogCollectHandlerEmits(handler)
 				for _, emitted := range emits {
 					if emitted == "" {
 						continue
 					}
-					eventsEmitted[emitted] = struct{}{}
 					if eventGraph[eventType] == nil {
 						eventGraph[eventType] = map[string]struct{}{}
 					}
 					eventGraph[eventType][emitted] = struct{}{}
 				}
-				fanOut := catalogMap(handler["fan_out"])
-				if emit := catalogBootText(fanOut["emit_per_item"]); emit != "" {
-					fanOutEvents[emit] = struct{}{}
-				}
-			}
-		}
-		for _, agentID := range catalogSortedKeys(scope.Agents) {
-			agent := catalogMap(scope.Agents[agentID])
-			for _, ev := range catalogStringSlice(agent["emit_events"]) {
-				if ev != "" {
-					eventsEmitted[ev] = struct{}{}
-				}
-			}
-			for _, ev := range append(catalogStringSlice(agent["subscriptions"]), catalogStringSlice(agent["subscribes_to"])...) {
-				evClean := catalogNormalizeSubscribedEvent(ev)
-				if evClean != "" && !strings.Contains(evClean, "*") {
-					eventsSubscribed[evClean] = struct{}{}
-				}
 			}
 		}
 	}
-	for _, ev := range catalogSortedSetKeys(eventsEmitted) {
-		if _, ok := eventDefined[ev]; !ok && !strings.HasPrefix(ev, "timer.") && !strings.HasPrefix(ev, "*.") {
-			issues = append(issues, catalogBootIssue{Severity: "warning", Category: "EVENT-NO-SCHEMA", Message: fmt.Sprintf("'%s' emitted but no schema in events.yaml", ev)})
-		}
-	}
-	for _, ev := range catalogSortedSetKeys(eventsEmitted) {
-		if _, ok := eventDefined[ev]; ok && !catalogSetHas(eventsSubscribed, ev) && !strings.HasPrefix(ev, "pipeline.") && !catalogIsSuppressedEvent(bundle.AllEvents, ev) {
-			issues = append(issues, catalogBootIssue{Severity: "warning", Category: "EVENT-NO-CONSUMER", Message: fmt.Sprintf("'%s' emitted but nobody subscribes", ev)})
-		}
-	}
-	for _, ev := range catalogSortedSetKeys(eventsSubscribed) {
-		if _, ok := eventDefined[ev]; ok && !catalogSetHas(eventsEmitted, ev) && !catalogSetHas(fanOutEvents, ev) && !strings.HasPrefix(ev, "timer.") && !catalogIsSuppressedEvent(bundle.AllEvents, ev) {
-			issues = append(issues, catalogBootIssue{Severity: "warning", Category: "EVENT-NO-PRODUCER", Message: fmt.Sprintf("'%s' subscribed but nobody emits", ev)})
-		}
-	}
+	issues = append(issues, catalogSemanticEventWarningIssues(bundle.Source)...)
 	for _, scope := range allScopes {
 		scopeLabel := catalogBootScopeLabel(scope)
 		mergedPolicy := cloneStringAnyMapCatalog(bundle.AllPolicy)
@@ -1437,6 +1411,33 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 	}
 	for _, cycle := range catalogFindEventCycles(eventGraph) {
 		issues = append(issues, catalogBootIssue{Severity: "error", Category: "EVENT-CYCLE", Message: fmt.Sprintf("Node handler emit cycle: %s", strings.Join(cycle, " -> "))})
+	}
+	return issues
+}
+
+func catalogSemanticEventWarningIssues(source semanticview.Source) []catalogBootIssue {
+	if source == nil {
+		return nil
+	}
+	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	issues := make([]catalogBootIssue, 0, len(report.Warnings()))
+	for _, warning := range report.Warnings() {
+		category := ""
+		switch strings.TrimSpace(warning.CheckID) {
+		case "event_chain_integrity":
+			category = "EVENT-NO-SCHEMA"
+		case "event_consumer_exists":
+			category = "EVENT-NO-CONSUMER"
+		case "event_producer_exists":
+			category = "EVENT-NO-PRODUCER"
+		default:
+			continue
+		}
+		issues = append(issues, catalogBootIssue{
+			Severity: strings.TrimSpace(warning.Severity),
+			Category: category,
+			Message:  strings.TrimSpace(warning.Message),
+		})
 	}
 	return issues
 }

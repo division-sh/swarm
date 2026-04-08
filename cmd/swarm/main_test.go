@@ -18,6 +18,7 @@ import (
 	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
@@ -340,6 +341,18 @@ func testWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	return bundle
 }
 
+func loadWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	fixtureRoot := filepath.Join(repoRoot, relativeRoot)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
+	}
+	return bundle
+}
+
 func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
@@ -414,5 +427,32 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 				t.Fatalf("BootReport warnings = %#v, want tool_resolution warning", warnings)
 			}
 		})
+	}
+}
+
+func TestVerifyBundle_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(t *testing.T) {
+	source := semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-local-events")))
+
+	err := verifyBundle(context.Background(), source)
+	if err == nil {
+		t.Fatal("verifyBundle error = nil, want warning-only failure from unrelated fixture warnings")
+	}
+	if strings.Contains(err.Error(), "'child/child.internal' emitted but no schema in events.yaml") {
+		t.Fatalf("unexpected flow-local no-schema warning: %v", err)
+	}
+	if strings.Contains(err.Error(), "'child/child.done' emitted but no schema in events.yaml") {
+		t.Fatalf("unexpected flow-local no-schema warning: %v", err)
+	}
+}
+
+func TestVerifyBundle_DoesNotWarnForFlowOwnedAgentOutputEvents(t *testing.T) {
+	source := semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-required-agents-child")))
+
+	err := verifyBundle(context.Background(), source)
+	if err == nil {
+		t.Fatal("verifyBundle error = nil, want warning-only failure from unrelated fixture warnings")
+	}
+	if strings.Contains(err.Error(), "'analysis.done' emitted but nobody subscribes") {
+		t.Fatalf("unexpected flow-owned agent output warning: %v", err)
 	}
 }

@@ -799,6 +799,29 @@ func TestRun_DoesNotWarnForLocalizedCrossFlowEventRouting(t *testing.T) {
 	}
 }
 
+func TestRun_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-local-events"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "event_chain_integrity", "child/child.internal") {
+		t.Fatalf("unexpected event_chain_integrity warning for child/child.internal, got %#v", report.Warnings())
+	}
+	if reportContains(report.Warnings(), "event_chain_integrity", "child/child.done") {
+		t.Fatalf("unexpected event_chain_integrity warning for child/child.done, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-required-agents-child"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "event_consumer_exists", "analysis.done") {
+		t.Fatalf("unexpected event_consumer_exists warning for analysis.done flow output, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
