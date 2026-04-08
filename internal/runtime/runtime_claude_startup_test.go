@@ -181,7 +181,7 @@ func startupProbeCaps() map[string]toolcapabilities.Capability {
 func setupStartupProbeTransport(t *testing.T, manager *runtimemanager.AgentManager, exec *startupProbeToolExecutor, gatewayToken string) *runtimemcp.TurnContextRegistry {
 	t.Helper()
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	gateway := runtimemcp.NewGateway(exec, gatewayToken, RuntimeMCPGatewayHooks(nil, manager.GetAgentConfig, nil, turns))
+	gateway := runtimemcp.NewGateway(exec, gatewayToken, RuntimeMCPGatewayHooks(nil, manager.GetAgentConfig, nil, nil, turns))
 	server := httptest.NewServer(gateway.Handler())
 	t.Cleanup(server.Close)
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
