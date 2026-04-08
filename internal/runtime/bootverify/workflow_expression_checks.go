@@ -451,6 +451,9 @@ func handlerEntityFieldWriters(handler runtimecontracts.SystemNodeEventHandler) 
 		}
 	}
 	addQueryWriters(handler.Query)
+	if gateNameLocal(handler.SetsGate) != "" {
+		out["gates"] = struct{}{}
+	}
 	for _, write := range handler.DataAccumulation.Writes {
 		addWriter(write.Target())
 	}
@@ -468,6 +471,12 @@ func handlerEntityFieldWriters(handler runtimecontracts.SystemNodeEventHandler) 
 	}
 	if handler.Count != nil {
 		addWriter(handler.Count.StoreAs)
+	}
+	if handler.Clear != nil {
+		addWriter(handler.Clear.Target)
+		for _, target := range handler.Clear.Targets {
+			addWriter(target)
+		}
 	}
 	for _, rule := range handler.Rules {
 		addRuleWriters(rule)
