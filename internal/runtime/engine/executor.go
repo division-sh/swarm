@@ -370,12 +370,12 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 	if filter := strings.TrimSpace(spec.Filter); filter != "" {
 		filtered := make([]any, 0, len(items))
 		for _, item := range items {
-			if executionEvalCondition(filter, map[string]any{
-				"item":    item,
-				"payload": frame.payload,
-				"entity":  frame.state.State.EntityContext(),
-				"policy":  current.Policy.Raw(),
-			}) {
+			scope := newExecutionScope(item, frame.payload, frame.state.State.EntityContext(), current.Policy.Raw())
+			passed, err := executionEvalCondition(filter, scope)
+			if err != nil {
+				return err
+			}
+			if passed {
 				filtered = append(filtered, item)
 			}
 		}
@@ -386,12 +386,12 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 	case strings.TrimSpace(spec.GroupBy) != "":
 		grouped := map[string]any{}
 		for _, item := range items {
-			key := strings.TrimSpace(asString(executionResolveOperand(strings.TrimSpace(spec.GroupBy), map[string]any{
-				"item":    item,
-				"payload": frame.payload,
-				"entity":  frame.state.State.EntityContext(),
-				"policy":  current.Policy.Raw(),
-			})))
+			scope := newExecutionScope(item, frame.payload, frame.state.State.EntityContext(), current.Policy.Raw())
+			resolved, err := scope.resolveOperand(strings.TrimSpace(spec.GroupBy), executionOperandDefaultItem)
+			if err != nil {
+				return err
+			}
+			key := strings.TrimSpace(asString(resolved))
 			if key == "" {
 				key = "unknown"
 			}
@@ -547,12 +547,12 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 	items := executionItems(sourceValue)
 	filtered := make([]any, 0, len(items))
 	for _, item := range items {
-		if executionEvalCondition(strings.TrimSpace(spec.Condition), map[string]any{
-			"item":    item,
-			"payload": frame.payload,
-			"entity":  frame.state.State.EntityContext(),
-			"policy":  current.Policy.Raw(),
-		}) {
+		scope := newExecutionScope(item, frame.payload, frame.state.State.EntityContext(), current.Policy.Raw())
+		passed, err := executionEvalCondition(strings.TrimSpace(spec.Condition), scope)
+		if err != nil {
+			return err
+		}
+		if passed {
 			filtered = append(filtered, item)
 		}
 	}
@@ -583,12 +583,16 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 	items := executionItems(sourceValue)
 	count := 0
 	for _, item := range items {
-		if strings.TrimSpace(spec.Condition) == "" || executionEvalCondition(strings.TrimSpace(spec.Condition), map[string]any{
-			"item":    item,
-			"payload": frame.payload,
-			"entity":  frame.state.State.EntityContext(),
-			"policy":  current.Policy.Raw(),
-		}) {
+		if strings.TrimSpace(spec.Condition) == "" {
+			count++
+			continue
+		}
+		scope := newExecutionScope(item, frame.payload, frame.state.State.EntityContext(), current.Policy.Raw())
+		passed, err := executionEvalCondition(strings.TrimSpace(spec.Condition), scope)
+		if err != nil {
+			return err
+		}
+		if passed {
 			count++
 		}
 	}
@@ -674,12 +678,12 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 	current := e.currentContext(frame)
 	grouped := make(map[string]any)
 	for _, item := range items {
-		key := strings.TrimSpace(asString(executionResolveOperand(strings.TrimSpace(spec.Key), map[string]any{
-			"item":    item,
-			"payload": frame.payload,
-			"entity":  frame.state.State.EntityContext(),
-			"policy":  current.Policy.Raw(),
-		})))
+		scope := newExecutionScope(item, frame.payload, frame.state.State.EntityContext(), current.Policy.Raw())
+		resolved, err := scope.resolveOperand(strings.TrimSpace(spec.Key), executionOperandDefaultItem)
+		if err != nil {
+			return err
+		}
+		key := strings.TrimSpace(asString(resolved))
 		if key == "" {
 			key = "unknown"
 		}

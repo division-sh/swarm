@@ -19,6 +19,14 @@ func stubSource() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 }
 
+func sourceWithPolicy(values map[string]any) semanticview.Source {
+	policy := runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{}}
+	for key, value := range values {
+		policy.Values[key] = runtimecontracts.PolicyValue{Value: value}
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: policy})
+}
+
 func sourceWithKilledState() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -641,6 +649,76 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	}
 	if grouped["queued"] != 2 || grouped["done"] != 1 {
 		t.Fatalf("grouped counts = %#v", grouped)
+	}
+}
+
+func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     sourceWithPolicy(map[string]any{"score": 6}),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-2", Type: "digest.requested", Payload: json.RawMessage(`{"score":5,"items":[{"score":7},{"score":5}]}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Query: &runtimecontracts.QuerySpec{
+				Source:  "payload.items",
+				Filter:  "item.score > payload.score && item.score > entity.score && item.score > policy.score",
+				StoreAs: "entity.query_rows",
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{"score": 4}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	rows, ok := result.StateMutation.Metadata["query_rows"].([]any)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("query_rows = %#v", result.StateMutation.Metadata["query_rows"])
+	}
+	item, _ := rows[0].(map[string]any)
+	if item["score"] != 7.0 {
+		t.Fatalf("query_rows[0] = %#v", item)
+	}
+}
+
+func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     sourceWithPolicy(map[string]any{"score": 1}),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "items.submitted", Payload: json.RawMessage(`{"score":5,"items":[{"score":7}]}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Filter: &runtimecontracts.FilterSpec{
+				ItemsFrom: "payload.items",
+				Condition: "score > 5",
+				StoreAs:   "entity.filtered",
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{"score": 4}, nil, map[string]map[string]any{}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "undeclared reference") {
+		t.Fatalf("Execute error = %v, want undeclared reference", err)
 	}
 }
 
@@ -1325,6 +1403,56 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 	}
 	if result.NextState != "done" {
 		t.Fatalf("NextState = %q", result.NextState)
+	}
+}
+
+func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     sourceWithPolicy(map[string]any{"category": "policy"}),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "items.submitted", Payload: json.RawMessage(`{"category":"payload","items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			GroupBy: &runtimecontracts.GroupBySpec{
+				ItemsFrom: "payload.items",
+				Key:       "category",
+				StoreAs:   "entity.grouped",
+			},
+			AdvancesTo: "done",
+		},
+		State: testStateSnapshot("pending", map[string]any{"category": "entity"}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	grouped, ok := result.StateMutation.Metadata["grouped"].(map[string]any)
+	if !ok {
+		t.Fatalf("grouped metadata = %#v", result.StateMutation.Metadata["grouped"])
+	}
+	xItems, _ := grouped["x"].([]any)
+	yItems, _ := grouped["y"].([]any)
+	if len(xItems) != 2 || len(yItems) != 1 {
+		t.Fatalf("grouped metadata = %#v", grouped)
+	}
+	if _, ok := grouped["payload"]; ok {
+		t.Fatalf("grouped metadata unexpectedly used payload scope: %#v", grouped)
+	}
+	if _, ok := grouped["entity"]; ok {
+		t.Fatalf("grouped metadata unexpectedly used entity scope: %#v", grouped)
+	}
+	if _, ok := grouped["policy"]; ok {
+		t.Fatalf("grouped metadata unexpectedly used policy scope: %#v", grouped)
 	}
 }
 
