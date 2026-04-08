@@ -361,6 +361,18 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 			wantErr: false,
 		},
 		{
+			name: "missing emitted event schema warning",
+			bundle: func() *runtimecontracts.WorkflowContractBundle {
+				bundle := testWorkflowValidationBundle()
+				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+					"agent-1": {ID: "agent-1", EmitEvents: []string{"missing.event"}},
+				}
+				return bundle
+			}(),
+			errContains: "'missing.event' emitted but no schema in events.yaml",
+			wantErr:     true,
+		},
+		{
 			name: "tool implementation warning",
 			bundle: func() *runtimecontracts.WorkflowContractBundle {
 				bundle := testWorkflowValidationBundle()
@@ -372,18 +384,6 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 				return bundle
 			}(),
 			errContains: "tool implementation warnings",
-			wantErr:     true,
-		},
-		{
-			name: "missing emit schema",
-			bundle: func() *runtimecontracts.WorkflowContractBundle {
-				bundle := testWorkflowValidationBundle()
-				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-					"agent-1": {ID: "agent-1", EmitEvents: []string{"missing.event"}},
-				}
-				return bundle
-			}(),
-			errContains: "emit schema strict mode enabled",
 			wantErr:     true,
 		},
 	}

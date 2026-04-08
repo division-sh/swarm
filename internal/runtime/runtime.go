@@ -18,7 +18,6 @@ import (
 	"swarm/internal/events"
 	runtimeagents "swarm/internal/runtime/agents"
 	runtimeauthority "swarm/internal/runtime/authority"
-	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
@@ -179,43 +178,12 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	if err != nil {
 		return err
 	}
-	if !bootWarningsFatal() {
-		return nil
-	}
-	warnings := bootWarningsExcludingCheckIDs(result.BootReport.Warnings(), "tool_resolution")
-	if len(warnings) == 0 {
-		return nil
-	}
-	lines := make([]string, 0, len(warnings))
-	for _, finding := range warnings {
-		lines = append(lines, strings.TrimSpace(finding.Message))
-	}
-	return fmt.Errorf(strings.Join(lines, "\n"))
+	_ = result
+	return nil
 }
 
 func bootWarningsFatal() bool {
 	return runtimeEnvBool("SWARM_BOOT_WARNINGS_FATAL", true)
-}
-
-func bootWarningsExcludingCheckIDs(findings []runtimebootverify.Finding, checkIDs ...string) []runtimebootverify.Finding {
-	if len(findings) == 0 {
-		return nil
-	}
-	skip := make(map[string]struct{}, len(checkIDs))
-	for _, checkID := range checkIDs {
-		checkID = strings.TrimSpace(checkID)
-		if checkID != "" {
-			skip[checkID] = struct{}{}
-		}
-	}
-	out := make([]runtimebootverify.Finding, 0, len(findings))
-	for _, finding := range findings {
-		if _, excluded := skip[strings.TrimSpace(finding.CheckID)]; excluded {
-			continue
-		}
-		out = append(out, finding)
-	}
-	return out
 }
 
 func newRuntimePromptResolver(source semanticview.Source) (runtimecontracts.PromptResolver, error) {

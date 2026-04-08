@@ -37,6 +37,18 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 			wantErr: false,
 		},
 		{
+			name: "missing emitted event schema warning",
+			source: func() semanticview.Source {
+				bundle := testRuntimeWorkflowValidationBundle()
+				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+					"agent-1": {ID: "agent-1", EmitEvents: []string{"missing.event"}},
+				}
+				return semanticview.Wrap(bundle)
+			}(),
+			errContains: "'missing.event' emitted but no schema in events.yaml",
+			wantErr:     true,
+		},
+		{
 			name: "tool implementation warning",
 			source: func() semanticview.Source {
 				bundle := testRuntimeWorkflowValidationBundle()
@@ -48,18 +60,6 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 				return semanticview.Wrap(bundle)
 			}(),
 			errContains: "tool implementation warnings",
-			wantErr:     true,
-		},
-		{
-			name: "missing emit schema",
-			source: func() semanticview.Source {
-				bundle := testRuntimeWorkflowValidationBundle()
-				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-					"agent-1": {ID: "agent-1", EmitEvents: []string{"missing.event"}},
-				}
-				return semanticview.Wrap(bundle)
-			}(),
-			errContains: "emit schema strict mode enabled",
 			wantErr:     true,
 		},
 	}
@@ -82,9 +82,11 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 
 func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 		"agent-1": {ID: "agent-1", EmitEvents: []string{"ready.event"}},
+		"agent-2": {ID: "agent-2", Subscriptions: []string{"ready.event"}},
 	}
 	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
 		"ready.event": {
@@ -103,6 +105,9 @@ func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T
 	}
 	if len(result.MissingEmitSchemaEventTypes) != 0 {
 		t.Fatalf("MissingEmitSchemaEventTypes = %#v, want none", result.MissingEmitSchemaEventTypes)
+	}
+	if len(result.BootReport.Warnings()) != 0 {
+		t.Fatalf("BootReport warnings = %#v, want none", result.BootReport.Warnings())
 	}
 }
 
