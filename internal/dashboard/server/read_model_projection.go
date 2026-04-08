@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	runtimellm "swarm/internal/runtime/llm"
 	"swarm/internal/store"
 )
 
@@ -33,55 +34,35 @@ func projectConversationRuntimeState(p store.ConversationRuntimeStateDescriptor)
 	return state
 }
 
-type projectedTurnSummary struct {
-	AssistantVisibleOutput string                         `json:"assistant_visible_output,omitempty"`
-	Outcome                string                         `json:"outcome,omitempty"`
-	ReasoningBlocks        []string                       `json:"reasoning_blocks,omitempty"`
-	ProgressUpdates        []string                       `json:"progress_updates,omitempty"`
-	ToolResults            []projectedTurnSummaryToolItem `json:"tool_results,omitempty"`
-}
-
-type projectedTurnSummaryToolItem struct {
-	ToolName  string          `json:"tool_name,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Output    json.RawMessage `json:"output,omitempty"`
-}
-
-type projectedTurnBlockEnvelope struct {
-	Kind string          `json:"kind"`
-	Data json.RawMessage `json:"data,omitempty"`
-}
-
-func decodeTurnSummaryProjection(raw []byte) (projectedTurnSummary, bool, error) {
+func decodeTurnSummaryProjection(raw []byte) (runtimellm.TurnSummaryTurnBlockData, bool, error) {
 	if len(raw) == 0 {
-		return projectedTurnSummary{}, false, nil
+		return runtimellm.TurnSummaryTurnBlockData{}, false, nil
 	}
-	var blocks []projectedTurnBlockEnvelope
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return projectedTurnSummary{}, false, err
+	var blocks []runtimellm.TurnBlock
+	if err := decodeJSONArrayInto(raw, &blocks); err != nil {
+		return runtimellm.TurnSummaryTurnBlockData{}, false, err
 	}
 	for _, block := range blocks {
 		if strings.TrimSpace(block.Kind) != "turn_summary" {
 			continue
 		}
-		data := bytes.TrimSpace(block.Data)
-		if len(data) == 0 || bytes.Equal(data, []byte("null")) || bytes.Equal(data, []byte("{}")) {
-			return projectedTurnSummary{}, false, nil
+		summary, ok, err := block.TurnSummaryData()
+		if err != nil {
+			return runtimellm.TurnSummaryTurnBlockData{}, false, fmt.Errorf("decode canonical turn_summary: %w", err)
 		}
-		var summary projectedTurnSummary
-		if err := json.Unmarshal(data, &summary); err != nil {
-			return projectedTurnSummary{}, false, fmt.Errorf("decode canonical turn_summary: %w", err)
+		if !ok {
+			return runtimellm.TurnSummaryTurnBlockData{}, false, nil
 		}
 		summary = normalizeProjectedTurnSummary(summary)
-		if summary.isZero() {
-			return projectedTurnSummary{}, false, nil
+		if projectedTurnSummaryIsZero(summary) {
+			return runtimellm.TurnSummaryTurnBlockData{}, false, nil
 		}
 		return summary, true, nil
 	}
-	return projectedTurnSummary{}, false, nil
+	return runtimellm.TurnSummaryTurnBlockData{}, false, nil
 }
 
-func normalizeProjectedTurnSummary(summary projectedTurnSummary) projectedTurnSummary {
+func normalizeProjectedTurnSummary(summary runtimellm.TurnSummaryTurnBlockData) runtimellm.TurnSummaryTurnBlockData {
 	summary.AssistantVisibleOutput = strings.TrimSpace(summary.AssistantVisibleOutput)
 	summary.Outcome = strings.TrimSpace(summary.Outcome)
 	summary.ReasoningBlocks = trimStringSlice(summary.ReasoningBlocks)
@@ -89,7 +70,7 @@ func normalizeProjectedTurnSummary(summary projectedTurnSummary) projectedTurnSu
 	if len(summary.ToolResults) == 0 {
 		summary.ToolResults = nil
 	} else {
-		out := make([]projectedTurnSummaryToolItem, 0, len(summary.ToolResults))
+		out := make([]runtimellm.TurnSummaryToolResult, 0, len(summary.ToolResults))
 		for _, item := range summary.ToolResults {
 			item.ToolName = strings.TrimSpace(item.ToolName)
 			item.ToolUseID = strings.TrimSpace(item.ToolUseID)
@@ -100,7 +81,7 @@ func normalizeProjectedTurnSummary(summary projectedTurnSummary) projectedTurnSu
 	return summary
 }
 
-func (p projectedTurnSummary) isZero() bool {
+func projectedTurnSummaryIsZero(p runtimellm.TurnSummaryTurnBlockData) bool {
 	return p.AssistantVisibleOutput == "" &&
 		p.Outcome == "" &&
 		len(p.ReasoningBlocks) == 0 &&
@@ -108,11 +89,11 @@ func (p projectedTurnSummary) isZero() bool {
 		len(p.ToolResults) == 0
 }
 
-func (p projectedTurnSummary) conversationFields() (string, string, []string, []string, []ConversationToolResult) {
-	return p.AssistantVisibleOutput, p.Outcome, cloneStringSlice(p.ReasoningBlocks), cloneStringSlice(p.ProgressUpdates), p.toolResultsTransport()
+func projectedTurnSummaryConversationFields(p runtimellm.TurnSummaryTurnBlockData) (string, string, []string, []string, []ConversationToolResult) {
+	return p.AssistantVisibleOutput, p.Outcome, cloneStringSlice(p.ReasoningBlocks), cloneStringSlice(p.ProgressUpdates), projectedTurnSummaryToolResultsTransport(p)
 }
 
-func (p projectedTurnSummary) toolResultsTransport() []ConversationToolResult {
+func projectedTurnSummaryToolResultsTransport(p runtimellm.TurnSummaryTurnBlockData) []ConversationToolResult {
 	if len(p.ToolResults) == 0 {
 		return nil
 	}
@@ -132,7 +113,7 @@ func (p projectedTurnSummary) toolResultsTransport() []ConversationToolResult {
 	return out
 }
 
-func (p projectedTurnSummary) lastToolTransport(parseOK bool) (*AgentLastTool, error) {
+func projectedTurnSummaryLastToolTransport(p runtimellm.TurnSummaryTurnBlockData, parseOK bool) (*AgentLastTool, error) {
 	if len(p.ToolResults) == 0 {
 		return nil, nil
 	}
@@ -158,6 +139,15 @@ func (p projectedTurnSummary) lastToolTransport(parseOK bool) (*AgentLastTool, e
 		out.Result = append(json.RawMessage(nil), trimmed...)
 	}
 	return out, nil
+}
+
+func decodeJSONArrayInto[T any](raw []byte, target *[]T) error {
+	data := bytes.TrimSpace(raw)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		*target = nil
+		return nil
+	}
+	return json.Unmarshal(data, target)
 }
 
 func trimStringSlice(in []string) []string {
