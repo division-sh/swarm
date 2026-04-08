@@ -91,19 +91,26 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - Before implementation, did the implementer re-read the cited spec section(s) rather than relying on issue prose or memory?
 - If the PR cites spec references, did the reviewer compare the implementation against the cited spec section(s), not just against the issue summary?
 - For semantic/runtime/spec-governed work, did the reviewer explicitly ask:
+  - what is the broadest plausible semantic concept, not just the local failing seam
   - what broader semantic rule this symptom belongs to
-  - what sibling contexts use that same rule
+  - whether the PR and pre-audit started broad and only narrowed by proof
+  - what repo-wide consumers use that same concept
   - whether the PR proves the failure class rather than only the first example
+- Did the reviewer independently verify the broad-first framing rather than accepting the PR's chosen seam boundary at face value?
 - For semantic/runtime/spec-governed work, did the implementer post the required `Pre-Implementation Coverage Audit` comment on the GitHub issue before coding began?
 - Did that issue-level pre-audit explicitly state:
   - the exact semantic concept or concepts being changed
   - every relevant canonical owner for those concepts
   - the touched consumers of each owner
-  - an exhaustive systematic-consumption audit for every currently known sibling seam that should consume each owner, with each seam marked as:
+  - an exhaustive repo-wide consumer sweep for every currently known seam that should consume each owner, with each seam marked as:
     - already consumes the canonical owner
     - moved to the canonical owner in this work
+    - different semantic concept, with proof
+    - broad-refactor blocker
     - still bypasses the canonical owner and is explicitly split / escalated
   - the old non-authoritative producers/readers/interpreters that become invalid or removal candidates for each owner?
+- Did the reviewer verify that the pre-audit started from the broadest plausible concept and did not narrow seams out of scope without explicit proof that they are a different concept?
+- Did the reviewer independently check that the repo-wide consumer sweep is credible rather than just local to nearby files?
 - Did that issue-level pre-audit explicitly list every currently known manifestation from the issue body, issue thread, triage/reproducer notes, and prior review context?
 - For each listed manifestation, did the pre-audit classify it as exactly one of:
   - direct reproducer and fix
@@ -116,13 +123,19 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   unless it also named the exact execution proof that would demonstrate coverage?
 - If this is a surface-parity issue, did the pre-audit name the supported surface(s) that must be exercised before closure?
 - If the issue has multiple currently known manifestations and the pre-audit is missing, incomplete, or hand-wavy, did the reviewer stop there and mark the PR as not review-ready?
+- If the repo-wide consumer sweep showed multiple live interpreters of the same concept, did the reviewer verify that the implementer either:
+  - refactored those seams in this PR
+  - proved some seams consume a different concept
+  - or obtained an explicit lead-approved staged broad-refactor plan before coding?
 - For semantic/runtime/spec-governed work, did the implementer post a post-implementation proof audit comment on the PR that explicitly states:
   - the exact semantic concept or concepts being changed
   - every relevant canonical owner for those concepts after the change
   - the touched callers/readers/validators/selectors that now consume each owner
-  - an exhaustive systematic-consumption audit for every currently known sibling seam that should consume each owner, with each seam marked as:
+  - an exhaustive repo-wide consumer accounting for every currently known seam that should consume each owner, with each seam marked as:
     - already consumes the canonical owner
     - moved to the canonical owner in this PR
+    - different semantic concept, with proof
+    - broad-refactor blocker
     - still bypasses the canonical owner and is explicitly split / escalated
   - which old producers/readers/interpreters are now invalid, non-authoritative, or still surviving for each owner
   - the broader failure class
@@ -137,11 +150,16 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - For each manifestation row, did the audit name the exact proof used and any required supported-surface or end-to-end proof?
 - If no generic reproducer existed before implementation, did the reviewer verify that the PR now creates one?
 - If the implementer could not identify every relevant canonical owner for the touched semantic concept or concepts, did the reviewer stop the review and mark the PR as not review-ready?
-- If the audits did not state exhaustively who already consumes each named canonical owner and who still bypasses each one, did the reviewer stop the review and mark the PR as not review-ready?
-- If a sibling seam still bypasses the canonical owner, did the PR either absorb it now or explicitly prove why full closure was not feasible in the same PR?
+- If the audits did not state exhaustively who already consumes each named canonical owner, who still bypasses each one, and which seams were narrowed out as a different concept with proof, did the reviewer stop the review and mark the PR as not review-ready?
+- If any currently known live seam still interprets the same concept independently after the PR, did the reviewer block approval unless:
+  - that seam was proven to be a different concept
+  - or it was covered by an explicit lead-approved staged broad-refactor plan?
+- If a sibling seam still bypasses the canonical owner, did the PR either absorb it now or explicitly prove why full concept closure was not feasible in the same PR?
 - If the PR leaves dual semantic ownership in place, did the reviewer verify that this is a lead-approved temporary seam rather than a migration excuse?
 - If any currently known manifestation lacks an explicit final status or proof line, did the reviewer stop the review and mark the PR as not review-ready?
 - If the audit relies on “shared owner introduced”, “same seam”, or “cleaner architecture” without manifestation-level proof, did the reviewer reject that as insufficient closure evidence?
+- Did the reviewer judge whether the implementation materially reduced semantic drift for the concept in scope rather than only improving the touched seam?
+- Did the reviewer avoid approval language such as “good scoped fix” when multiple live interpreters of the same concept still remain?
 - For verify-vs-boot, boot-vs-runtime, reader-vs-writer, or other surface-parity issues, did the reviewer require proof at each relevant surface rather than accepting only synthetic agreement tests?
 - If the issue was discovered through a supported helper or supported boot/runtime surface, did the reviewer require supported-surface closure evidence before saying the failure class is unlikely to reproduce?
 - If the PR claims non-semantic maintenance, did the reviewer verify that no semantic/runtime contract behavior is being changed under that label?
@@ -169,6 +187,10 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   - what old producer / reader / writer path is now invalid?
   - which production paths were checked for surviving old behavior?
   - is the migration complete?
+- For any semantic refactor or canonicalization claim:
+  - did the PR reduce the number of live interpreters of the concept in scope?
+  - after the PR, do multiple conflicting codepaths still interpret the same concept?
+  - if yes, was approval blocked unless the remaining seams were proven different or explicitly covered by a lead-approved staged plan?
 - For any compatibility or migration seam left in place:
   - was it explicitly approved by the lead?
   - is it time-bounded and isolated to one boundary?
@@ -191,6 +213,11 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - Would this change still make sense if two more implementers touched the same subsystem next week?
 - Did this patch make the codebase more elegant, more unified, and easier to reason about?
 - If not, should this be reframed as an architecture task instead of merged as-is?
+
+Reviewer completion rule:
+
+- do not approve semantic work merely because the touched seam is better
+- approve only if the PR materially reduces semantic drift for the concept in scope and does not leave currently known conflicting interpreters alive without explicit approval
 
 Recommended PR comment shape:
 

@@ -114,23 +114,25 @@ Required process:
 4. Read the linked issue, the issue thread, and the exact spec section(s) cited in the issue/PR before judging the code.
 5. If the PR is semantic/runtime work and it does not cite exact governing spec section(s), treat the review as incomplete and say so.
 6. Do a lead-level framing check:
-   - what exact semantic concept or concepts are in play?
+   - what is the broadest plausible semantic concept or concepts in play?
    - what broader failure class does the issue belong to?
-   - what sibling contexts or manifestations use that same rule?
+   - what repo-wide consumers or sibling contexts use that same concept?
    - does the issue describe the full class or only the first visible symptom?
+   - did the implementer narrow scope only by proof, or merely by local code proximity?
 7. Verify the issue-level `Pre-Implementation Coverage Audit` exists when required.
 8. In that pre-audit, verify:
    - every relevant canonical owner is named
    - the touched consumers of each owner are named
-   - the systematic-consumption audit is exhaustive for each owner
+   - the repo-wide consumer sweep and systematic-consumption audit are exhaustive and credible for each owner
    - every known manifestation is listed
+   - seams narrowed out as “different concept” are supported by explicit proof
    - each manifestation is classified as exactly one of:
      - direct reproducer and fix
      - execution proof through the same corrected path
      - split / escalate as separate class
    - the audit does not rely on “same seam”, “same validator”, or “shared owner” without named execution proof
    - for parity issues, supported surface(s) required for closure are named
-9. If the pre-audit shows broad duplication that would require a broader refactor, verify there is an explicit lead decision before implementation proceeded.
+9. If the pre-audit shows multiple live interpreters of the same concept that are not all being moved now, verify there is an explicit lead-approved staged broad-refactor plan before implementation proceeded.
 10. Review the code and tests against:
    - the cited spec section(s)
    - `docs/IMPLEMENTER_GUIDELINES.md`
@@ -143,6 +145,7 @@ Required process:
 15. In that PR audit, verify:
    - every relevant canonical owner after the change is named
    - the owner-consumption audit is exhaustive for each owner
+   - every currently known seam still consuming the concept is classified
    - every known manifestation has a row
    - every row is marked as exactly one of:
      - reproduced and fixed
@@ -153,20 +156,23 @@ Required process:
 16. Stop review and mark the PR not review-ready if:
    - either audit is missing
    - any relevant canonical owner is missing
-   - the owner-consumption audit is not exhaustive
+   - the owner-consumption audit is not exhaustive or not credible repo-wide
+   - any narrowed-out seam lacks proof that it is a different concept
    - any known manifestation lacks explicit proof
+   - multiple currently known live codepaths still interpret the same concept without explicit lead-approved staged handling
    - the PR leaves dual semantic ownership in place without explicit lead-approved temporary-seam justification
 17. Do not accept “shared owner introduced”, “same seam”, “same validator”, or “cleaner architecture” as closure evidence by themselves.
 18. For parity issues, require proof at each relevant surface.
 19. If the issue was discovered through a supported helper or supported boot/runtime surface, require supported-surface closure evidence before saying the failure class is unlikely to reproduce.
-20. After every review pass, leave both required GitHub artifacts on the PR:
+20. Do not approve semantic work merely because the touched seam is better; approve only if the PR materially reduces semantic drift for the concept in scope.
+21. After every review pass, leave both required GitHub artifacts on the PR:
    - one human-readable substantive review comment
    - one short checklist-style PR comment with guideline checks, residual risk, risk level, and merge recommendation
-21. If review reveals worthwhile follow-up work, do not leave it as chat-only commentary.
-22. On approval, explicitly state:
+22. If review reveals worthwhile follow-up work, do not leave it as chat-only commentary.
+23. On approval, explicitly state:
    - spec compliance assessment
    - failure-class coverage assessment
-   - whether all relevant canonical owners are now systematically consumed in the touched seam
+   - whether all currently known live consumers of the concept are now moved, proven different, or explicitly covered by an approved staged plan
    - whether no worthwhile follow-up remains or where it is already tracked
 
 Output to me:

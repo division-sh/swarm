@@ -661,8 +661,23 @@ Pre-Implementation Coverage Audit rule:
   - the issue is about a failure class rather than one isolated bug
   - the issue names more than one manifestation
   - the reproducer or triage record names more than one manifestation
-  - the issue concerns parity between surfaces such as verify vs boot, boot vs runtime, or reader vs writer
+- the issue concerns parity between surfaces such as verify vs boot, boot vs runtime, or reader vs writer
 - the purpose of this audit is to make failure-class coverage reviewable before coding starts, not after the patch already exists
+
+Broad-first pre-audit rule:
+
+- the pre-audit must start from the broadest plausible semantic concept, not the first local bug site, helper, file, or failing warning
+- the implementer must assume the concept is broader until narrower scope is proven
+- narrowing is allowed only by explicit proof that a seam consumes a different semantic concept
+- “nearby files checked” is not sufficient
+- the purpose of the pre-audit is to discover every currently known consumer of the concept before code shape narrows the thinking
+
+Repo-wide consumer sweep rule:
+
+- before implementation, the implementer must perform an exhaustive repo-wide sweep for currently known consumers of each relevant semantic concept / canonical owner
+- this sweep must include runtime, store, validation, diagnostics, harness, conformance, and operator/read-model consumers where relevant
+- the pre-audit must name every currently known consuming seam discovered by that sweep
+- if the implementer cannot complete a credible repo-wide sweep, implementation must not begin
 
 Required issue-comment format:
 
@@ -674,10 +689,12 @@ Required issue-comment format:
 - `Consumers of each owner`
   - for each named owner, list the main touched callers, readers, validators, selectors, or runtime surfaces that should consume it
 - `Systematic consumption audit`
-  - for each named owner, exhaustively list every currently known sibling seam that should consume it
+  - for each named owner, exhaustively list every currently known seam found by the repo-wide consumer sweep that should consume it
   - for each seam, classify it as exactly one of:
     - already consumes the canonical owner
     - moved to the canonical owner in this work
+    - different semantic concept, with explicit proof
+    - broad-refactor blocker
     - still bypasses the canonical owner and is explicitly split / escalated
 - `Old non-authoritative paths`
   - for each named owner, list any old helpers, readers, writers, or interpreters that become invalid, non-canonical, or removal candidates
@@ -714,7 +731,11 @@ Required issue-comment format:
 Absolute rules:
 
 - do not begin implementation if the audit cannot identify every relevant canonical owner for the touched semantic concept or concepts
+- do not begin implementation if the broad semantic concept is not stated
+- do not begin implementation if the repo-wide consumer sweep is missing, shallow, or not credible
 - do not begin implementation if the audit does not include an exhaustive systematic-consumption audit for the currently known sibling seams of each named owner
+- do not begin implementation if any currently known consuming seam is unclassified
+- do not narrow a seam out of scope without explicit proof that it consumes a different semantic concept
 - do not begin implementation if any currently known manifestation is missing from the audit
 - do not classify a manifestation as “same seam” without naming the execution proof that will show it flows through the corrected path
 - do not use “shared owner introduced”, “same validator”, “same helper”, or “same architecture seam” as sufficient coverage by themselves
@@ -725,7 +746,8 @@ Absolute rules:
 Broad-refactor escalation rule:
 
 - this step happens after the `Pre-Implementation Coverage Audit` and before implementation
-- if the pre-audit and systematic-consumption audit show that the named canonical owner is not used systematically across the relevant sibling seams, the implementer must decide whether the issue can still be solved honestly as a first slice
+- if the pre-audit and systematic-consumption audit show that the named canonical owner is not used systematically across the relevant seams, the implementer must decide whether the issue can still be solved honestly as a first slice
+- if the repo-wide sweep shows multiple live consumers still interpreting the same concept independently, the default assumption is that refactoring is required
 - if not, implementation must pause and the implementer must post a `Broad Refactor Escalation` comment on the issue or PR before writing code
 
 Required escalation content:
@@ -750,12 +772,23 @@ Absolute rules:
 
 - do not silently widen a first-slice issue into a broad refactor without an explicit lead decision
 - if the pre-audit shows that failure-class elimination would require systematic adoption of the canonical owner across multiple sibling seams, do not begin implementation until the lead has approved or denied the broad-refactor escalation
+- if the repo-wide sweep shows multiple conflicting interpreters of the same concept, the implementer must either refactor them in this PR or obtain an explicit lead-approved staged plan before coding
+
+Implementation obligation to reduce semantic drift:
+
+- the implementer is required to refactor the concept in scope enough to materially reduce semantic drift
+- fixing the first bug site is not sufficient if multiple currently known codepaths still interpret the same semantic concept independently
+- a good implementation must reduce the number of live interpreters for the concept in scope and move consumers to the canonical owner
+- if the pre-audit shows multiple currently known consumers of the same concept, the implementer must refactor those paths in the PR unless the lead explicitly approves a staged broad-refactor plan
+- “good local fix”, “good slice”, or “improves one seam” are not sufficient completion arguments by themselves
+- if conflicting live interpreters remain for the same concept after the PR, the work is incomplete unless those seams are proven to be a different concept or are covered by explicit lead-approved staged refactor plan
 
 Close-the-gap rule:
 
 - if a semantic gap can be closed cleanly in the current PR, close it in the current PR
 - do not leave a sibling bypass seam, duplicate owner, or non-authoritative interpreter in place just because staging feels safer
-- the default expectation is full semantic closure in the touched seam, not managed coexistence
+- the default expectation is full semantic closure for the concept in scope, not just the first touched file or helper
+- if the concept in scope still has multiple conflicting live codepaths after the PR, the semantic gap is not closed
 
 Migration rule:
 
@@ -780,6 +813,7 @@ Absolute rules:
 - if the implementer proposes leaving the old semantic path in place, they must prove why full closure is not feasible in the same PR
 - “smaller patch”, “easier rollout”, “less risky by default”, or “follow-up is easy” are not sufficient reasons by themselves
 - if a first-slice issue knowingly leaves the same concept duplicated inside the same effective boundary, the implementer must escalate instead of calling the work complete
+- if the repo-wide sweep shows the same concept is still interpreted by multiple live codepaths after the proposed change, do not call the work complete
 - without the temporary-coexistence exception above, close the semantic gap in the PR
 
 Invalid pre-audit example:
