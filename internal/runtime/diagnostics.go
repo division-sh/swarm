@@ -231,6 +231,9 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 	if err != nil {
 		return err
 	}
+	if _, err := DecodeCanonicalRuntimeLogPayload(encoded); err != nil {
+		return err
+	}
 	if hasRunID {
 		if err := ensureRuntimeLogRunRow(ctx, db, runID); err != nil {
 			return err

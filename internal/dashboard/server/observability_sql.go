@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
+
+	runtimepkg "swarm/internal/runtime"
 )
 
 type EventFilter struct {
@@ -338,51 +341,15 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 	query := fmt.Sprintf(`
 		SELECT
 			e.event_id::text,
-			COALESCE(e.payload->'details'->>'event_id', ''),
 			e.created_at,
-			COALESCE(e.payload->>'log_level', ''),
-			COALESCE(e.payload->'details'->>'component', ''),
-			COALESCE(e.payload->'details'->>'action', ''),
-			COALESCE(e.payload->'details'->>'event_name', COALESCE(e.payload->'details'->>'event_type', '')),
-			COALESCE(e.payload->'details'->>'parent_event_id', ''),
-			COALESCE(e.payload->'details'->>'handler_id', ''),
-			COALESCE(e.payload->'details'->>'error', ''),
-			COALESCE(e.payload->'details'->>'error_code', ''),
-			COALESCE(e.payload->'details'->>'agent_id', ''),
-			COALESCE(e.payload->'details'->>'agent_id', ''),
-			COALESCE(e.payload->'details'->>'entity_id', ''),
-			COALESCE(e.payload->'details'->>'session_id', ''),
-			COALESCE(NULLIF(e.payload->'details'->>'duration_us', ''), '0')::int,
-			COALESCE(e.payload->'details'->>'delivery_state', ''),
-			COALESCE(e.payload->'details'->>'delivery_previous_state', ''),
-			COALESCE(e.payload->'details'->>'delivery_transition', ''),
-			COALESCE(e.payload->'details'->>'delivery_reason', ''),
-			COALESCE(e.payload->'details'->>'delivery_terminal_outcome', ''),
-			COALESCE(NULLIF(e.payload->'details'->>'retry_count', ''), '0')::int,
-			COALESCE(e.payload->'details', '{}'::jsonb),
-			COALESCE(e.payload->'details'->'correlation', '{}'::jsonb),
-			COALESCE(e.payload->>'message', '')
+			COALESCE(e.payload, '{}'::jsonb)
 		FROM events e
 		WHERE e.event_name = 'platform.runtime_log'
-		  AND ($1 = '' OR COALESCE(e.payload->'details'->>'event_name', COALESCE(e.payload->'details'->>'event_type', '')) = $1 OR COALESCE(e.payload->'details'->>'action', '') = $1)
-		  AND ($2 = '' OR COALESCE(e.payload->'details'->>'agent_id', '') = $2)
-		  AND ($3 = '' OR COALESCE(e.payload->'details'->>'entity_id', '') = $3)
-		  AND ($4 = '' OR COALESCE(e.payload->'details'->>'component', '') = $4)
-		  AND ($5 = '' OR COALESCE(e.payload->>'log_level', '') = $5)
-		  AND ($6 = '' OR COALESCE(e.payload->'details'->>'error_code', '') = $6)
-		  AND ($7::timestamptz IS NULL OR e.created_at > $7)
+		  AND ($1::timestamptz IS NULL OR e.created_at > $1)
 		ORDER BY e.created_at %s
-		LIMIT $8
 	`, order)
 	rows, err := r.db.QueryContext(ctx, query,
-		strings.TrimSpace(filter.Type),
-		strings.TrimSpace(filter.Source),
-		strings.TrimSpace(filter.EntityID),
-		strings.TrimSpace(filter.Component),
-		strings.TrimSpace(filter.Level),
-		strings.TrimSpace(filter.ErrorCode),
 		nullableTime(filter.After),
-		limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list runtime logs: %w", err)
@@ -391,25 +358,25 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 
 	out := make([]runtimeLogRecord, 0, limit)
 	for rows.Next() {
-		var item runtimeLogRecord
 		var (
-			detailRaw      []byte
-			correlationRaw []byte
+			eventID    string
+			createdAt  time.Time
+			payloadRaw []byte
 		)
-		if err := rows.Scan(&item.ID, &item.EventID, &item.TS, &item.Level, &item.Component, &item.Action, &item.EventType, &item.ParentEventID, &item.HandlerID, &item.Error, &item.ErrorCode, &item.AgentID, &item.Source, &item.EntityID, &item.SessionID, &item.DurationUS, &item.DeliveryState, &item.PreviousState, &item.Transition, &item.Reason, &item.Terminal, &item.RetryCount, &detailRaw, &correlationRaw, &item.Message); err != nil {
+		if err := rows.Scan(&eventID, &createdAt, &payloadRaw); err != nil {
 			return nil, fmt.Errorf("scan runtime log: %w", err)
 		}
-		detailMap, err := decodeJSONMap(detailRaw)
+		item, err := decodeRuntimeLogRecord(eventID, createdAt, payloadRaw)
 		if err != nil {
-			return nil, fmt.Errorf("decode runtime log detail: %w", err)
+			return nil, err
 		}
-		correlationMap, err := decodeJSONMap(correlationRaw)
-		if err != nil {
-			return nil, fmt.Errorf("decode runtime log correlation: %w", err)
+		if !matchesRuntimeLogFilter(item, filter) {
+			continue
 		}
-		item.Detail = detailMap
-		item.Correlation = correlationMap
 		out = append(out, item)
+		if len(out) >= limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("runtime log rows: %w", err)
@@ -430,118 +397,112 @@ func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter Incid
 		sinceHours = 24
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		WITH logs AS (
-			SELECT
-				COALESCE(e.payload->'details'->>'error_code', '') AS code,
-				COALESCE(e.payload->'details'->>'component', '') AS component,
-				COALESCE(e.payload->>'log_level', '') AS level,
-				COALESCE(e.payload->'details'->>'agent_id', '') AS agent_id,
-				COALESCE(e.payload->'details'->>'action', '') AS action,
-				COALESCE(e.payload->'details'->>'error', COALESCE(e.payload->>'message', '')) AS error,
-				e.created_at
-			FROM events e
-			WHERE e.event_name = 'platform.runtime_log'
-			  AND e.created_at >= now() - make_interval(hours => $1)
-			  AND COALESCE(e.payload->'details'->>'error_code', '') <> ''
-			  AND ($2 = '' OR COALESCE(e.payload->>'log_level', '') = $2)
-			  AND ($3 = '' OR COALESCE(e.payload->'details'->>'component', '') = $3)
-			  AND ($4 = FALSE OR COALESCE(e.payload->'details'->>'component', '') LIKE 'mcp%%')
-		)
 		SELECT
-			code,
-			COUNT(*)::int,
-			MIN(created_at),
-			MAX(created_at),
-			COALESCE(NULLIF(MAX(error), ''), ''),
-			COALESCE(NULLIF(MAX(component), ''), ''),
-			COALESCE(NULLIF(MAX(level), ''), ''),
-			COALESCE(array_remove(array_agg(DISTINCT NULLIF(agent_id, '')), NULL), ARRAY[]::text[]),
-			COALESCE(array_remove(array_agg(DISTINCT NULLIF(component, '')), NULL), ARRAY[]::text[]),
-			COALESCE(array_remove(array_agg(DISTINCT NULLIF(action, '')), NULL), ARRAY[]::text[])
-		FROM logs
-		GROUP BY code
-		ORDER BY MAX(created_at) DESC, code ASC
-		LIMIT $5
-	`, sinceHours, strings.TrimSpace(filter.Level), strings.TrimSpace(filter.Component), filter.MCPOnly, limit)
+			e.event_id::text,
+			e.created_at,
+			COALESCE(e.payload, '{}'::jsonb)
+		FROM events e
+		WHERE e.event_name = 'platform.runtime_log'
+		  AND e.created_at >= now() - make_interval(hours => $1)
+		ORDER BY e.created_at DESC
+	`, sinceHours)
 	if err != nil {
 		return nil, fmt.Errorf("list incidents: %w", err)
 	}
 	defer rows.Close()
 
-	out := make([]incidentRecord, 0, limit)
+	type incidentAggregate struct {
+		record        incidentRecord
+		firstSeen     time.Time
+		lastSeen      time.Time
+		agentsSet     map[string]struct{}
+		componentsSet map[string]struct{}
+		actionsSet    map[string]struct{}
+	}
+
+	aggregates := map[string]*incidentAggregate{}
 	for rows.Next() {
 		var (
-			item       incidentRecord
-			firstSeen  time.Time
-			lastSeen   time.Time
-			agents     []string
-			components []string
-			actions    []string
+			eventID    string
+			createdAt  time.Time
+			payloadRaw []byte
 		)
-		if err := rows.Scan(&item.Code, &item.Count, &firstSeen, &lastSeen, &item.RootCause, &item.Component, &item.Level, pqArray(&agents), pqArray(&components), pqArray(&actions)); err != nil {
-			return nil, fmt.Errorf("scan incident: %w", err)
+		if err := rows.Scan(&eventID, &createdAt, &payloadRaw); err != nil {
+			return nil, fmt.Errorf("scan runtime log for incidents: %w", err)
 		}
-		item.Agents = agents
-		item.Components = components
-		item.Actions = actions
-		item.FirstSeen = formatTime(firstSeen)
-		item.LastSeen = formatTime(lastSeen)
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("incident rows: %w", err)
-	}
-	return out, nil
-}
-
-type textArrayScanner struct {
-	target *[]string
-}
-
-func pqArray(target *[]string) textArrayScanner {
-	return textArrayScanner{target: target}
-}
-
-func (s textArrayScanner) Scan(src any) error {
-	if s.target == nil {
-		return nil
-	}
-	switch typed := src.(type) {
-	case nil:
-		*s.target = nil
-		return nil
-	case []byte:
-		return parsePGTextArray(string(typed), s.target)
-	case string:
-		return parsePGTextArray(typed, s.target)
-	default:
-		return fmt.Errorf("unsupported text array source %T", src)
-	}
-}
-
-func parsePGTextArray(raw string, target *[]string) error {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "{}" {
-		*target = []string{}
-		return nil
-	}
-	raw = strings.TrimPrefix(raw, "{")
-	raw = strings.TrimSuffix(raw, "}")
-	if strings.TrimSpace(raw) == "" {
-		*target = []string{}
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.Trim(strings.TrimSpace(part), `"`)
-		if part == "" {
+		logRecord, err := decodeRuntimeLogRecord(eventID, createdAt, payloadRaw)
+		if err != nil {
+			return nil, err
+		}
+		if !matchesIncidentFilter(logRecord, filter) {
 			continue
 		}
-		out = append(out, part)
+		if strings.TrimSpace(logRecord.ErrorCode) == "" {
+			continue
+		}
+		agg := aggregates[logRecord.ErrorCode]
+		if agg == nil {
+			agg = &incidentAggregate{
+				record: incidentRecord{
+					Code: logRecord.ErrorCode,
+				},
+				firstSeen:     createdAt,
+				lastSeen:      createdAt,
+				agentsSet:     map[string]struct{}{},
+				componentsSet: map[string]struct{}{},
+				actionsSet:    map[string]struct{}{},
+			}
+			aggregates[logRecord.ErrorCode] = agg
+		}
+		agg.record.Count++
+		if createdAt.Before(agg.firstSeen) {
+			agg.firstSeen = createdAt
+		}
+		if createdAt.After(agg.lastSeen) {
+			agg.lastSeen = createdAt
+		}
+		if strings.TrimSpace(logRecord.Error) > strings.TrimSpace(agg.record.RootCause) {
+			agg.record.RootCause = strings.TrimSpace(logRecord.Error)
+		}
+		if strings.TrimSpace(logRecord.Component) > strings.TrimSpace(agg.record.Component) {
+			agg.record.Component = strings.TrimSpace(logRecord.Component)
+		}
+		if strings.TrimSpace(logRecord.Level) > strings.TrimSpace(agg.record.Level) {
+			agg.record.Level = strings.TrimSpace(logRecord.Level)
+		}
+		if v := strings.TrimSpace(logRecord.AgentID); v != "" {
+			agg.agentsSet[v] = struct{}{}
+		}
+		if v := strings.TrimSpace(logRecord.Component); v != "" {
+			agg.componentsSet[v] = struct{}{}
+		}
+		if v := strings.TrimSpace(logRecord.Action); v != "" {
+			agg.actionsSet[v] = struct{}{}
+		}
 	}
-	*target = out
-	return nil
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("incident runtime log rows: %w", err)
+	}
+
+	out := make([]incidentRecord, 0, len(aggregates))
+	for _, agg := range aggregates {
+		agg.record.Agents = sortedStringSet(agg.agentsSet)
+		agg.record.Components = sortedStringSet(agg.componentsSet)
+		agg.record.Actions = sortedStringSet(agg.actionsSet)
+		agg.record.FirstSeen = formatTime(agg.firstSeen)
+		agg.record.LastSeen = formatTime(agg.lastSeen)
+		out = append(out, agg.record)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LastSeen != out[j].LastSeen {
+			return out[i].LastSeen > out[j].LastSeen
+		}
+		return out[i].Code < out[j].Code
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func nullableTime(ts time.Time) any {
@@ -569,4 +530,97 @@ func decodeJSONAny(raw []byte) (any, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func decodeRuntimeLogRecord(rowID string, createdAt time.Time, payloadRaw []byte) (runtimeLogRecord, error) {
+	payload, err := runtimepkg.DecodeCanonicalRuntimeLogPayload(payloadRaw)
+	if err != nil {
+		return runtimeLogRecord{}, fmt.Errorf("decode canonical runtime log payload: %w", err)
+	}
+	record := runtimeLogRecord{
+		ID:            strings.TrimSpace(rowID),
+		EventID:       payload.EventID,
+		TS:            formatTime(createdAt),
+		Level:         payload.LogLevel,
+		Component:     payload.Component,
+		Action:        payload.Action,
+		EventType:     payload.EventType,
+		ParentEventID: payload.ParentEventID,
+		HandlerID:     payload.HandlerID,
+		Error:         payload.Error,
+		ErrorCode:     payload.ErrorCode,
+		AgentID:       payload.AgentID,
+		EntityID:      payload.EntityID,
+		SessionID:     payload.SessionID,
+		DurationUS:    payload.DurationUS,
+		Source:        payload.AgentID,
+		Message:       payload.Message,
+		DeliveryState: payload.DeliveryState,
+		PreviousState: payload.PreviousState,
+		Transition:    payload.Transition,
+		Reason:        payload.Reason,
+		Terminal:      payload.Terminal,
+		RetryCount:    payload.RetryCount,
+		Detail:        payload.Detail,
+		Correlation:   payload.Correlation,
+	}
+	return record, nil
+}
+
+func matchesRuntimeLogFilter(item runtimeLogRecord, filter RuntimeLogFilter) bool {
+	typeFilter := strings.TrimSpace(filter.Type)
+	if typeFilter != "" && strings.TrimSpace(item.EventType) != typeFilter && strings.TrimSpace(item.Action) != typeFilter {
+		return false
+	}
+	sourceFilter := strings.TrimSpace(filter.Source)
+	if sourceFilter != "" && strings.TrimSpace(item.Source) != sourceFilter {
+		return false
+	}
+	entityFilter := strings.TrimSpace(filter.EntityID)
+	if entityFilter != "" && strings.TrimSpace(item.EntityID) != entityFilter {
+		return false
+	}
+	componentFilter := strings.TrimSpace(filter.Component)
+	if componentFilter != "" && strings.TrimSpace(item.Component) != componentFilter {
+		return false
+	}
+	levelFilter := strings.TrimSpace(filter.Level)
+	if levelFilter != "" && strings.TrimSpace(item.Level) != levelFilter {
+		return false
+	}
+	errorCodeFilter := strings.TrimSpace(filter.ErrorCode)
+	if errorCodeFilter != "" && strings.TrimSpace(item.ErrorCode) != errorCodeFilter {
+		return false
+	}
+	return true
+}
+
+func matchesIncidentFilter(item runtimeLogRecord, filter IncidentFilter) bool {
+	levelFilter := strings.TrimSpace(filter.Level)
+	if levelFilter != "" && strings.TrimSpace(item.Level) != levelFilter {
+		return false
+	}
+	componentFilter := strings.TrimSpace(filter.Component)
+	if componentFilter != "" && strings.TrimSpace(item.Component) != componentFilter {
+		return false
+	}
+	if filter.MCPOnly && !strings.HasPrefix(strings.TrimSpace(item.Component), "mcp") {
+		return false
+	}
+	return true
+}
+
+func sortedStringSet(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(values))
+	for value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

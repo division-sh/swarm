@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -229,5 +230,112 @@ func TestSQLObservabilityReader_ListRuntimeLogs_ProjectsDeliveryLifecycleFields(
 	}
 	if rows[2].DeliveryState != "retrying" || rows[2].PreviousState != "active" || rows[2].Reason != "boom" || rows[2].RetryCount != 1 {
 		t.Fatalf("retry runtime log = %#v", rows[2])
+	}
+}
+
+func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedOnMalformedCanonicalPayload(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	reader := NewSQLObservabilityReader(db)
+	ctx := context.Background()
+
+	payload := `{
+		"log_level":"error",
+		"message":"malformed runtime log",
+		"details":"not-an-object"
+	}`
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', now()
+		)
+	`, payload); err != nil {
+		t.Fatalf("insert malformed runtime_log: %v", err)
+	}
+
+	_, err := reader.ListRuntimeLogs(ctx, RuntimeLogFilter{}, 10)
+	if err == nil || !strings.Contains(err.Error(), "runtime log details must be an object") {
+		t.Fatalf("ListRuntimeLogs() error = %v, want malformed canonical payload failure", err)
+	}
+}
+
+func TestSQLObservabilityReader_ListIncidents_UsesCanonicalRuntimeLogPayloads(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	reader := NewSQLObservabilityReader(db)
+	ctx := context.Background()
+
+	insertRuntimeLog := func(component, action, agentID string, createdAt time.Time) {
+		t.Helper()
+		payload := `{
+			"log_level":"error",
+			"message":"runtime incident",
+			"details":{
+				"component":"` + component + `",
+				"action":"` + action + `",
+				"agent_id":"` + agentID + `",
+				"error":"boom",
+				"error_code":"retry_exhausted"
+			}
+		}`
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', $2
+			)
+		`, payload, createdAt); err != nil {
+			t.Fatalf("insert runtime_log: %v", err)
+		}
+	}
+
+	now := time.Now().UTC()
+	insertRuntimeLog("mcp-gateway", "request_failed", "agent-a", now.Add(-2*time.Minute))
+	insertRuntimeLog("mcp-gateway", "request_failed", "agent-b", now.Add(-1*time.Minute))
+
+	rows, err := reader.ListIncidents(ctx, IncidentFilter{SinceHours: 24, MCPOnly: true})
+	if err != nil {
+		t.Fatalf("ListIncidents: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("incident rows = %d, want 1: %#v", len(rows), rows)
+	}
+	if rows[0].Code != "retry_exhausted" || rows[0].Count != 2 || rows[0].Component != "mcp-gateway" || rows[0].Level != "error" {
+		t.Fatalf("incident row = %#v", rows[0])
+	}
+	if len(rows[0].Agents) != 2 || rows[0].Agents[0] != "agent-a" || rows[0].Agents[1] != "agent-b" {
+		t.Fatalf("incident agents = %#v", rows[0].Agents)
+	}
+	if len(rows[0].Actions) != 1 || rows[0].Actions[0] != "request_failed" {
+		t.Fatalf("incident actions = %#v", rows[0].Actions)
+	}
+}
+
+func TestSQLObservabilityReader_ListIncidents_FailsClosedOnMissingCanonicalComponent(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	reader := NewSQLObservabilityReader(db)
+	ctx := context.Background()
+
+	payload := `{
+		"log_level":"error",
+		"message":"incomplete runtime incident",
+		"details":{
+			"action":"request_failed",
+			"error":"boom",
+			"error_code":"retry_exhausted"
+		}
+	}`
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			gen_random_uuid(), 'platform.runtime_log', 'global', $1::jsonb, 'runtime', 'platform', now()
+		)
+	`, payload); err != nil {
+		t.Fatalf("insert malformed runtime_log: %v", err)
+	}
+
+	_, err := reader.ListIncidents(ctx, IncidentFilter{SinceHours: 24})
+	if err == nil || !strings.Contains(err.Error(), "runtime log component is required") {
+		t.Fatalf("ListIncidents() error = %v, want missing canonical component failure", err)
 	}
 }

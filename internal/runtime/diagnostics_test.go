@@ -199,6 +199,28 @@ func TestRuntimeLogger_Log_ReturnsPersistenceFailure(t *testing.T) {
 	}
 }
 
+func TestRuntimeLogger_Log_FailsClosedOnMissingCanonicalMessage(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	err = logger.Log(context.Background(), RuntimeLogEntry{
+		Level:     "error",
+		Message:   "",
+		Component: "diagnostics",
+		Action:    "missing_message",
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime log message is required") {
+		t.Fatalf("logger.Log() error = %v, want missing canonical message failure", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet() error = %v", err)
+	}
+}
+
 func TestRuntimeLogger_Log_FailsClosedWithoutCanonicalCapability(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
