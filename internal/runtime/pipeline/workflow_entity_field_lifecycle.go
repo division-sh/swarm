@@ -71,34 +71,44 @@ func WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler runtimecontract
 }
 
 func WorkflowEntityFieldsAvailableBeforePayloadTransform(handler runtimecontracts.SystemNodeEventHandler) map[string]struct{} {
-	available := workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecyclePayloadTransform)
-	removeRuleWriters := func(rule runtimecontracts.HandlerRuleEntry) {
-		for _, write := range rule.DataAccumulation.Writes {
-			if field, ok := workflowEntityFieldNameFromTarget(write.Target()); ok {
-				delete(available, field)
-			}
+	available := workflowBuiltinEntityFields()
+	addWriter := func(target string) {
+		if field, ok := workflowEntityFieldNameFromTarget(target); ok {
+			available[field] = struct{}{}
 		}
 	}
-	for _, rule := range handler.Rules {
-		removeRuleWriters(rule)
-	}
-	for _, rule := range handler.OnComplete {
-		removeRuleWriters(rule)
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			removeRuleWriters(rule)
+	var addQueryWriter func(query *runtimecontracts.QuerySpec)
+	addQueryWriter = func(query *runtimecontracts.QuerySpec) {
+		if query == nil {
+			return
 		}
-		if handler.Accumulate.OnTimeout != nil {
-			removeRuleWriters(*handler.Accumulate.OnTimeout)
+		addWriter(query.StoreAs)
+		for i := range query.Queries {
+			addQueryWriter(&query.Queries[i])
 		}
 	}
-	for _, branch := range handler.Branch {
-		if branch.Then != nil {
-			removeRuleWriters(*branch.Then)
-		}
-		if branch.Else != nil {
-			removeRuleWriters(*branch.Else)
+	addQueryWriter(handler.Query)
+	if handler.Filter != nil {
+		addWriter(handler.Filter.StoreAs)
+	}
+	if handler.GroupBy != nil {
+		addWriter(handler.GroupBy.StoreAs)
+	}
+	if handler.Reduce != nil {
+		addWriter(handler.Reduce.StoreAs)
+	}
+	if handler.Count != nil {
+		addWriter(handler.Count.StoreAs)
+	}
+	if handler.Compute != nil {
+		addWriter(handler.Compute.StoreAs)
+	}
+	if handler.FanOut != nil {
+		available["fan_out_count"] = struct{}{}
+	}
+	if handler.CreateEntity {
+		for _, write := range handler.DataAccumulation.Writes {
+			addWriter(write.Target())
 		}
 	}
 	return available

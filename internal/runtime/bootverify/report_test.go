@@ -1160,6 +1160,78 @@ func TestRun_RejectsCreateEntityPayloadTransformReadOfRuleOnlyWrite(t *testing.T
 	}
 }
 
+func TestRun_RejectsCreateEntityPayloadTransformReadOfRuleOnlyComputeOutput(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
+		Groups: []runtimecontracts.EntitySchemaGroup{{
+			Name: "tracking",
+			Fields: []runtimecontracts.EntitySchemaField{
+				{Name: "revision_count", Type: "integer"},
+			},
+		}},
+	}
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.CreateEntity = true
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+		Condition: "entity.entity_id != null",
+		Compute: &runtimecontracts.ComputeSpec{
+			Operation: runtimecontracts.ComputeOpCount,
+			StoreAs:   "entity.revision_count",
+		},
+	}}
+	handler.PayloadTransform = &runtimecontracts.PayloadTransformSpec{
+		Fields: map[string]string{
+			"revision_count": "entity.revision_count",
+		},
+	}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsCreateEntityPayloadTransformReadWhenRuleAlsoWritesUnconditionallyAvailableField(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
+		Groups: []runtimecontracts.EntitySchemaGroup{{
+			Name: "tracking",
+			Fields: []runtimecontracts.EntitySchemaField{
+				{Name: "revision_count", Type: "integer"},
+			},
+		}},
+	}
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.CreateEntity = true
+	handler.Compute = &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpCount,
+		StoreAs:   "entity.revision_count",
+	}
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+		Condition: "entity.entity_id != null",
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{{
+				TargetField: "revision_count",
+				Value:       runtimecontracts.LiteralExpression(0),
+			}},
+		},
+	}}
+	handler.PayloadTransform = &runtimecontracts.PayloadTransformSpec{
+		Fields: map[string]string{
+			"revision_count": "entity.revision_count",
+		},
+	}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_PreservesSiblingWriteErrorWhenSelfTargetUpdateExistsInSameHandler(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
