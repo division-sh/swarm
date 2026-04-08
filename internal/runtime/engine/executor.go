@@ -793,10 +793,14 @@ func (e *Executor) stepSetsGate(frame *executionFrame) error {
 func (e *Executor) stepDataWrites(frame *executionFrame) error {
 	ruleHasWrites := frame.rule != nil && (frame.rule.DataAccumulation.HasWrites() || strings.TrimSpace(frame.rule.DataAccumulation.SourceEvent) != "")
 	if ruleHasWrites {
-		e.applyDataAccumulation(frame, frame.rule.DataAccumulation)
+		if err := e.applyDataAccumulation(frame, frame.rule.DataAccumulation); err != nil {
+			return err
+		}
 	}
 	if (frame.topLevelDataAccumulation.HasWrites() || strings.TrimSpace(frame.topLevelDataAccumulation.SourceEvent) != "") && (!frame.topLevelDataWritesApplied || ruleHasWrites) {
-		e.applyDataAccumulation(frame, frame.topLevelDataAccumulation)
+		if err := e.applyDataAccumulation(frame, frame.topLevelDataAccumulation); err != nil {
+			return err
+		}
 		frame.topLevelDataWritesApplied = true
 	}
 	return nil
@@ -1275,11 +1279,14 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	}
 }
 
-func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecontracts.WorkflowDataAccumulation) {
-	applyDataAccumulationToState(e.currentContext(frame), frame.state, &frame.state.State, spec)
+func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecontracts.WorkflowDataAccumulation) error {
+	if err := applyDataAccumulationToState(e.currentContext(frame), frame.state, &frame.state.State, spec); err != nil {
+		return err
+	}
 	frame.state.State.SetMetadata("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type)))
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	frame.result.StateMutation.DataAccumulation = spec
+	return nil
 }
 
 func (e *Executor) selectedCompute(frame *executionFrame) *runtimecontracts.ComputeSpec {

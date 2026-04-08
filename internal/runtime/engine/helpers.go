@@ -180,9 +180,9 @@ func normalizeStateField(field string) string {
 	}
 }
 
-func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapshot *StateSnapshot, spec runtimecontracts.WorkflowDataAccumulation) {
+func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapshot *StateSnapshot, spec runtimecontracts.WorkflowDataAccumulation) error {
 	if snapshot == nil || len(spec.Writes) == 0 {
-		return
+		return nil
 	}
 	for _, write := range spec.Writes {
 		target := normalizeStateField(write.Target())
@@ -195,7 +195,7 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 		case write.Value.HasCELValue():
 			value, err := evalDataAccumulationExpression(base, state, write.Value.CEL)
 			if err != nil {
-				continue
+				return fmt.Errorf("data_accumulation target %s: %w", strings.TrimSpace(write.Target()), err)
 			}
 			snapshot.SetMetadata(target, value)
 		default:
@@ -211,6 +211,7 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 	if sourceEvent := strings.TrimSpace(spec.SourceEvent); sourceEvent != "" {
 		snapshot.SetMetadata("last_data_accumulation_source", sourceEvent)
 	}
+	return nil
 }
 
 func evalDataAccumulationExpression(base BaseContext, state ExecutionState, expression string) (any, error) {
