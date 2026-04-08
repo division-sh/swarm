@@ -16,6 +16,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimeownership "swarm/internal/runtime/core/ownership"
 	"swarm/internal/runtime/core/toolcapabilities"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
@@ -439,6 +440,15 @@ func (*conformanceRecoveryBus) AppendEvent(context.Context, events.Event) error 
 func (*conformanceRecoveryBus) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil
 }
+func (*conformanceRecoveryBus) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return []string{}, nil
+}
+func (*conformanceRecoveryBus) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
+	return conformanceRecoveryReplayLease{}, true, nil
+}
+func (*conformanceRecoveryBus) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
+	return nil, nil
+}
 
 type conformanceRecoveryStore struct {
 	agents []runtimemanager.PersistedAgent
@@ -461,3 +471,9 @@ func (*conformanceRecoveryStore) ListPendingEventsForAgent(context.Context, stri
 func (*conformanceRecoveryStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
 	return nil, nil
 }
+
+type conformanceRecoveryReplayLease struct{}
+
+func (conformanceRecoveryReplayLease) Key() string                   { return "conformance-replay" }
+func (conformanceRecoveryReplayLease) Refresh(context.Context) error { return nil }
+func (conformanceRecoveryReplayLease) Release(context.Context) error { return nil }

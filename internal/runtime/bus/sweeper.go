@@ -7,6 +7,7 @@ import (
 	"time"
 
 	runtimeengine "swarm/internal/runtime/engine"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 type OutboxSweeperConfig struct {
@@ -75,13 +76,13 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if eb == nil || eb.store == nil {
 		return 0, nil
 	}
-	reader, ok := eb.store.(PipelineReceiptSweeperStore)
-	if !ok {
-		return 0, nil
+	replayStore, err := runtimereplayclaim.RequireStore(eb.store)
+	if err != nil {
+		return 0, err
 	}
-	claimer, ok := eb.store.(PipelineReplayClaimStore)
-	if !ok {
-		return 0, errors.New("event bus store does not support explicit pipeline replay claims")
+	recipientReader, err := runtimereplayclaim.RequireRecipientReader(eb.store)
+	if err != nil {
+		return 0, err
 	}
 	if limit <= 0 {
 		limit = DefaultOutboxSweeperConfig().Limit
@@ -89,7 +90,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if lookback <= 0 {
 		lookback = DefaultOutboxSweeperConfig().Lookback
 	}
-	events, err := reader.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-lookback), limit)
+	events, err := replayStore.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-lookback), limit)
 	if err != nil {
 		return 0, err
 	}
@@ -97,7 +98,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	redelivered := 0
 	for _, record := range events {
 		evt := record.Event
-		lease, claimed, err := claimer.ClaimPipelineReplay(ctx, evt.ID)
+		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID)
 		if err != nil {
 			return redelivered, err
 		}
@@ -109,7 +110,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			_ = lease.Release(ctx)
 			continue
 		}
-		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID)
+		recipients, err := eb.authoritativeRecipientsForEvent(ctx, recipientReader, evt.ID)
 		if err != nil {
 			eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
 			_ = lease.Release(ctx)
@@ -130,11 +131,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	return redelivered, nil
 }
 
-func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, eventID string) ([]string, error) {
-	reader, ok := eb.store.(EventDeliveryReader)
-	if !ok {
-		return nil, errors.New("event bus store does not support authoritative delivery recipient reads")
-	}
+func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, reader EventDeliveryReader, eventID string) ([]string, error) {
 	recipients, err := reader.ListEventDeliveryRecipients(ctx, eventID)
 	if err != nil {
 		return nil, err
