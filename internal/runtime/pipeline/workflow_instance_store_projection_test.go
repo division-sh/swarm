@@ -132,6 +132,53 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	}
 }
 
+func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPathOnRoundTrip(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	store := NewWorkflowInstanceStore(db)
+	storageRef := uuid.NewString()
+	instance := WorkflowInstance{
+		InstanceID:      storageRef,
+		StorageRef:      storageRef,
+		WorkflowName:    "static-flow",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "queued",
+		Metadata: map[string]any{
+			"instance_id": storageRef,
+		},
+		StateBuckets: map[string]any{},
+	}
+
+	if err := store.Upsert(context.Background(), instance); err != nil {
+		t.Fatalf("upsert static workflow instance: %v", err)
+	}
+
+	loaded, ok, err := store.Load(context.Background(), storageRef)
+	if err != nil {
+		t.Fatalf("load static workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected static workflow instance to persist")
+	}
+	if got := strings.TrimSpace(asString(loaded.Metadata["flow_path"])); got != "" {
+		t.Fatalf("Metadata flow_path = %#v, want empty for static row", loaded.Metadata["flow_path"])
+	}
+	identity, err := workflowInstancePersistedIdentity(nil, loaded)
+	if err != nil {
+		t.Fatalf("workflowInstancePersistedIdentity(static): %v", err)
+	}
+	if identity.HasStoredPath {
+		t.Fatalf("identity.HasStoredPath = true, want false for static row")
+	}
+	if identity.ScopeKey != "static-flow" {
+		t.Fatalf("identity.ScopeKey = %q, want static-flow", identity.ScopeKey)
+	}
+	if identity.InstancePath != "static-flow" {
+		t.Fatalf("identity.InstancePath = %q, want canonical static path", identity.InstancePath)
+	}
+}
+
 func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -175,6 +222,13 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"storage-ref","flow_path":"review/inst-1"}`,
 			wantContains: "disagrees with flow_instance_path",
 		},
+		{
+			name:         "slash-only flow path normalizes before fallback",
+			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
+			mutateKey:    "storage",
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","flow_path":"/"}`,
+			wantContains: "",
+		},
 	}
 
 	for _, tc := range cases {
@@ -206,7 +260,19 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 				t.Fatalf("mutate malformed persisted shape: %v", err)
 			}
 
-			_, _, err := store.Load(context.Background(), storageRef)
+			loaded, ok, err := store.Load(context.Background(), storageRef)
+			if tc.wantContains == "" {
+				if err != nil {
+					t.Fatalf("load with slash-only flow_path: %v", err)
+				}
+				if !ok {
+					t.Fatal("expected slash-only flow_path row to load")
+				}
+				if got := strings.TrimSpace(asString(loaded.Metadata["instance_id"])); got != "inst-1" {
+					t.Fatalf("loaded Metadata instance_id = %#v, want inst-1", loaded.Metadata["instance_id"])
+				}
+				return
+			}
 			if err == nil {
 				t.Fatal("expected load to fail on malformed persisted shape")
 			}
