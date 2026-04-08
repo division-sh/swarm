@@ -71,7 +71,37 @@ func WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler runtimecontract
 }
 
 func WorkflowEntityFieldsAvailableBeforePayloadTransform(handler runtimecontracts.SystemNodeEventHandler) map[string]struct{} {
-	return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecyclePayloadTransform)
+	available := workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecyclePayloadTransform)
+	removeRuleWriters := func(rule runtimecontracts.HandlerRuleEntry) {
+		for _, write := range rule.DataAccumulation.Writes {
+			if field, ok := workflowEntityFieldNameFromTarget(write.Target()); ok {
+				delete(available, field)
+			}
+		}
+	}
+	for _, rule := range handler.Rules {
+		removeRuleWriters(rule)
+	}
+	for _, rule := range handler.OnComplete {
+		removeRuleWriters(rule)
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			removeRuleWriters(rule)
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			removeRuleWriters(*handler.Accumulate.OnTimeout)
+		}
+	}
+	for _, branch := range handler.Branch {
+		if branch.Then != nil {
+			removeRuleWriters(*branch.Then)
+		}
+		if branch.Else != nil {
+			removeRuleWriters(*branch.Else)
+		}
+	}
+	return available
 }
 
 func WorkflowEntityReadsPersistedStateBeforeHandlerWrites(phase WorkflowEntityFieldLifecyclePhase) bool {
@@ -169,6 +199,11 @@ func workflowEntityFieldsAvailableBeforePhase(handler runtimecontracts.SystemNod
 			if branch.Else != nil {
 				addRuleWriters(*branch.Else)
 			}
+		}
+	}
+	if handler.CreateEntity && phaseAfter(phase, WorkflowEntityFieldLifecycleDataAccumulation) {
+		for _, write := range handler.DataAccumulation.Writes {
+			addWriter(write.Target())
 		}
 	}
 	return available

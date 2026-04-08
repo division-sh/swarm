@@ -57,6 +57,56 @@ func TestWorkflowEntityFieldsAvailableBeforeDataAccumulation_IncludesEarlierComp
 	}
 }
 
+func TestWorkflowEntityFieldsAvailableBeforePayloadTransform_IncludesCreateEntityTopLevelWrites(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "revision_count", Value: runtimecontracts.LiteralExpression(0)},
+			},
+		},
+	}
+
+	available := WorkflowEntityFieldsAvailableBeforePayloadTransform(handler)
+	if _, ok := available["revision_count"]; !ok {
+		t.Fatalf("revision_count missing from payload_transform availability: %#v", available)
+	}
+}
+
+func TestWorkflowEntityFieldsAvailableBeforePayloadTransform_ExcludesRuleOnlyWrites(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Rules: []runtimecontracts.HandlerRuleEntry{{
+			Condition: "entity.entity_id != null",
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{
+					{TargetField: "revision_count", Value: runtimecontracts.LiteralExpression(0)},
+				},
+			},
+		}},
+	}
+
+	available := WorkflowEntityFieldsAvailableBeforePayloadTransform(handler)
+	if _, ok := available["revision_count"]; ok {
+		t.Fatalf("revision_count unexpectedly available before payload_transform: %#v", available)
+	}
+}
+
+func TestWorkflowEntityFieldsAvailableBeforeCondition_StillExcludesCreateEntityTopLevelWrites(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "revision_count", Value: runtimecontracts.LiteralExpression(0)},
+			},
+		},
+	}
+
+	available := WorkflowEntityFieldsAvailableBeforeCondition(handler, WorkflowConditionContextRule)
+	if _, ok := available["revision_count"]; ok {
+		t.Fatalf("revision_count unexpectedly available before rule selection: %#v", available)
+	}
+}
+
 func TestWorkflowEntityReadsPersistedStateBeforeHandlerWrites(t *testing.T) {
 	tests := []struct {
 		name  string
