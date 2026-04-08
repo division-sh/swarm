@@ -1957,13 +1957,16 @@ func (c *checkerContext) eventCycleDetection() []Finding {
 			if eventType == "" {
 				continue
 			}
-			trigger := c.source.ResolveFlowEventReference(flowID, eventType)
+			trigger := semanticview.ResolveFlowEventProof(c.source, flowID, eventType).EventKey()
+			if trigger == "" {
+				continue
+			}
 			handler, ok := c.source.NodeEventHandler(nodeID, eventType)
 			if !ok {
 				continue
 			}
 			for _, emitted := range handlerEmits(handler) {
-				emitted = strings.TrimSpace(emitted)
+				emitted = semanticview.ResolveFlowEventProof(c.source, flowID, emitted).EventKey()
 				if emitted == "" || emitted != trigger {
 					continue
 				}
@@ -2514,18 +2517,23 @@ func (c *checkerContext) singleNodePerEvent() []Finding {
 			if eventType == "" || strings.Contains(eventType, "*") {
 				continue
 			}
+			proof := semanticview.ResolveFlowEventProof(c.source, flowID, eventType)
+			eventKey := proof.EventKey()
+			if eventKey == "" {
+				continue
+			}
 			subscriptions = append(subscriptions, subscriptionOwner{
 				NodeID: strings.TrimSpace(nodeID),
 				FlowID: flowID,
-				Event:  eventType,
+				Event:  eventKey,
 			})
-			eventNames[c.source.ResolveFlowEventReference(flowID, eventType)] = struct{}{}
+			eventNames[eventKey] = struct{}{}
 		}
 	}
 	for _, eventType := range sortedSetKeysLocal(eventNames) {
 		nodeIDs := make([]string, 0)
 		for _, subscription := range subscriptions {
-			if c.source.FlowEventMatches(subscription.FlowID, subscription.Event, eventType) {
+			if subscription.Event == eventType {
 				nodeIDs = append(nodeIDs, subscription.NodeID)
 			}
 		}
@@ -3841,13 +3849,16 @@ func detectEventCyclesSemanticModel(source semanticview.Source) error {
 			if eventType == "" || strings.Contains(eventType, "*") {
 				continue
 			}
-			trigger := source.ResolveFlowEventReference(flowID, eventType)
+			trigger := semanticview.ResolveFlowEventProof(source, flowID, eventType).EventKey()
+			if trigger == "" {
+				continue
+			}
 			handler, ok := source.NodeEventHandler(nodeID, eventType)
 			if !ok {
 				continue
 			}
 			for _, emitted := range handlerEmits(handler) {
-				emitted = strings.TrimSpace(emitted)
+				emitted = semanticview.ResolveFlowEventProof(source, flowID, emitted).EventKey()
 				if emitted == "" || strings.Contains(emitted, "*") || emitted == trigger {
 					continue
 				}

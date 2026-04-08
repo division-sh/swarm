@@ -205,7 +205,7 @@ func workflowEmitTargetsParentEntity(source semanticview.Source, flowID, eventTy
 	if source == nil || flowID == "" {
 		return false
 	}
-	return source.FlowHasOutputEvent(flowID, eventType)
+	return semanticview.ResolveFlowEventProof(source, flowID, eventType).CrossesDeclaredOutputBoundary(source)
 }
 
 func workflowEntityMetadataPayload(source semanticview.Source, metadata map[string]any) map[string]any {

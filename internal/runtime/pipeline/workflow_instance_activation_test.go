@@ -87,13 +87,22 @@ func TestWorkflowEmitTargetsParentEntity_OutputPin(t *testing.T) {
 	if !workflowEmitTargetsParentEntity(source, "child", "child/child.done") {
 		t.Fatal("expected child/child.done to target the parent entity")
 	}
+	if !workflowEmitTargetsParentEntity(source, "child", "child.done") {
+		t.Fatal("expected local child.done to target the parent entity through the same canonical proof")
+	}
 	if workflowEmitTargetsParentEntity(source, "child", "child/child.internal") {
 		t.Fatal("did not expect child/child.internal to target the parent entity")
+	}
+	if workflowEmitTargetsParentEntity(source, "child", "child.internal") {
+		t.Fatal("did not expect local child.internal to target the parent entity")
 	}
 
 	pinSource := loadWorkflowFixtureSource(t, "test-child-flow-pin-wiring")
 	if !workflowEmitTargetsParentEntity(pinSource, "child", "child/work.completed") {
 		t.Fatal("expected child/work.completed to target the parent entity")
+	}
+	if !workflowEmitTargetsParentEntity(pinSource, "child", "work.completed") {
+		t.Fatal("expected local work.completed to target the parent entity through the same canonical proof")
 	}
 }
 

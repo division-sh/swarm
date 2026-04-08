@@ -10,7 +10,6 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimeeventidentity "swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
@@ -719,45 +718,15 @@ func pipelineEmitPayloadProperties(source semanticview.Source, flowID, eventType
 	if source == nil {
 		return nil
 	}
-	candidates := make([]string, 0, 4)
-	eventType = strings.TrimSpace(eventType)
-	flowID = strings.TrimSpace(flowID)
-	if eventType != "" {
-		candidates = append(candidates, eventType)
+	proof := semanticview.ResolveFlowEventProof(source, strings.TrimSpace(flowID), strings.TrimSpace(eventType))
+	if !proof.HasSchema {
+		return nil
 	}
-	if flowID != "" && eventType != "" {
-		candidates = append(candidates, source.ResolveFlowEventReference(flowID, eventType))
+	allowed := eventPayloadProperties(proof.Entry)
+	if len(allowed) > 0 {
+		return allowed
 	}
-	if leaf := runtimeeventidentity.LeafName(eventType); leaf != "" && leaf != eventType {
-		candidates = append(candidates, leaf)
-		if flowID != "" {
-			candidates = append(candidates, source.ResolveFlowEventReference(flowID, leaf))
-		}
-	}
-	seen := map[string]struct{}{}
-	for _, candidate := range candidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if _, ok := seen[candidate]; ok {
-			continue
-		}
-		seen[candidate] = struct{}{}
-		entry, ok := source.EventEntry(candidate)
-		if !ok {
-			entry, _, ok = source.ResolveFlowEventCatalogEntry(flowID, candidate)
-		}
-		if !ok {
-			continue
-		}
-		allowed := eventPayloadProperties(entry)
-		if len(allowed) > 0 {
-			return allowed
-		}
-		return map[string]struct{}{}
-	}
-	return nil
+	return map[string]struct{}{}
 }
 
 func eventPayloadProperties(entry runtimecontracts.EventCatalogEntry) map[string]struct{} {

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1008,6 +1009,29 @@ func TestPipelineEnginePayloadShaper_TrimsUndeclaredFieldsAcrossCrossFlowOutputR
 	}
 	if _, ok := output["result"]; ok {
 		t.Fatalf("output emit result should be trimmed to the target event schema: %#v", output["result"])
+	}
+}
+
+func TestPipelineEmitPayloadProperties_UsesCanonicalFlowEventProofForLocalAndCanonicalRefs(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
+
+	canonical := pipelineEmitPayloadProperties(source, "child", "child/child.internal")
+	local := pipelineEmitPayloadProperties(source, "child", "child.internal")
+
+	if len(canonical) == 0 {
+		t.Fatalf("expected canonical child event schema properties, got %#v", canonical)
+	}
+	if len(local) == 0 {
+		t.Fatalf("expected local child event schema properties, got %#v", local)
+	}
+	if !reflect.DeepEqual(canonical, local) {
+		t.Fatalf("local/canonical payload properties drifted: canonical=%#v local=%#v", canonical, local)
+	}
+	if _, ok := canonical["entity_id"]; !ok {
+		t.Fatalf("expected entity_id in canonical payload properties: %#v", canonical)
+	}
+	if _, ok := canonical["step"]; !ok {
+		t.Fatalf("expected step in canonical payload properties: %#v", canonical)
 	}
 }
 
