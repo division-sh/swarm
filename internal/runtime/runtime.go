@@ -30,6 +30,7 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
+	runtimestartupownership "swarm/internal/runtime/startupownership"
 	runtimetools "swarm/internal/runtime/tools"
 	workspace "swarm/internal/runtime/workspace"
 )
@@ -41,6 +42,7 @@ type Stores struct {
 	ConversationStore llm.ConversationPersistence
 	ManagerStore      runtimemanager.ManagerPersistence
 	ScheduleStore     runtimepipeline.SchedulePersistence
+	StartupOwnership  runtimestartupownership.Store
 	MailboxStore      runtimetools.MailboxPersistence
 	InboundStore      InboundPersistence
 	TurnStore         llm.TurnPersistence
@@ -68,7 +70,7 @@ type Runtime struct {
 	lifecycleMu    sync.Mutex
 	startCtx       context.Context
 	cancelStart    context.CancelFunc
-	ownershipLease runtimeStoreOwnershipLease
+	ownershipLease runtimestartupownership.Lease
 	ownerID        string
 
 	Config         *config.Config
@@ -541,11 +543,15 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		return fmt.Errorf("runtime already started")
 	}
 	startCtx, cancelStart := context.WithCancel(ctx)
-	lease, err := acquireRuntimeStoreOwnership(ctx, rt.Stores.SQLDB, rt.ownerID)
-	if err != nil {
-		cancelStart()
-		rt.lifecycleMu.Unlock()
-		return err
+	var lease runtimestartupownership.Lease
+	if rt.Stores.StartupOwnership != nil {
+		var err error
+		lease, err = rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, rt.ownerID)
+		if err != nil {
+			cancelStart()
+			rt.lifecycleMu.Unlock()
+			return err
+		}
 	}
 	rt.startCtx = startCtx
 	rt.cancelStart = cancelStart

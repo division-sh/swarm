@@ -174,6 +174,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		SessionRegistry:   sessions.NewPostgresRegistry(db, cfg.LLM.Session.LockTTL),
 		ManagerStore:      pg,
 		ScheduleStore:     pg,
+		StartupOwnership:  pg,
 		MailboxStore:      pg,
 		ConversationStore: nil,
 		TurnStore:         nil,
