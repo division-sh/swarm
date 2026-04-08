@@ -368,6 +368,143 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 	}
 }
 
+func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
+			Semantics: runtimecontracts.WorkflowSemanticView{
+				Name:    "validation",
+				Version: "v-test",
+				EntitySchema: runtimecontracts.EntitySchema{
+					Groups: []runtimecontracts.EntitySchemaGroup{
+						{
+							Name: "tracking",
+							Fields: []runtimecontracts.EntitySchemaField{
+								{Name: "revision_count", Type: "integer"},
+							},
+						},
+					},
+				},
+			},
+		}},
+	})
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "validation",
+		WorkflowVersion: "v-test",
+		CurrentState:    "queued",
+		Metadata: map[string]any{
+			"subject_id":     entityID,
+			"revision_count": 0,
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1")},
+			},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{Type: events.EventType("validation.spec_requested")}.WithEntityID(entityID),
+		State: pc.currentWorkflowState(context.Background(), entityID),
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+
+	instance, ok, err := pc.workflowStore.Load(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("workflow instance missing after declarative write")
+	}
+	switch got := instance.Metadata["revision_count"].(type) {
+	case int:
+		if got != 1 {
+			t.Fatalf("revision_count = %d, want 1", got)
+		}
+	case float64:
+		if got != 1 {
+			t.Fatalf("revision_count = %v, want 1", got)
+		}
+	default:
+		t.Fatalf("revision_count = %#v (%T), want 1", instance.Metadata["revision_count"], instance.Metadata["revision_count"])
+	}
+}
+
+func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
+			Semantics: runtimecontracts.WorkflowSemanticView{
+				Name:    "validation",
+				Version: "v-test",
+				EntitySchema: runtimecontracts.EntitySchema{
+					Groups: []runtimecontracts.EntitySchemaGroup{
+						{
+							Name: "tracking",
+							Fields: []runtimecontracts.EntitySchemaField{
+								{Name: "revision_count", Type: "integer"},
+							},
+						},
+					},
+				},
+			},
+		}},
+	})
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "validation",
+		WorkflowVersion: "v-test",
+		CurrentState:    "queued",
+		Metadata: map[string]any{
+			"subject_id": entityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1")},
+			},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{Type: events.EventType("validation.spec_requested")}.WithEntityID(entityID),
+		State: pc.currentWorkflowState(context.Background(), entityID),
+	}, false)
+	if err == nil {
+		t.Fatal("expected executeNodeContractHandler to fail on data accumulation CEL runtime error")
+	}
+	if !strings.Contains(err.Error(), "data_accumulation target revision_count") && !strings.Contains(err.Error(), "data_accumulation target entity.revision_count") {
+		t.Fatalf("error = %v, want data_accumulation target context", err)
+	}
+
+	instance, ok, loadErr := pc.workflowStore.Load(context.Background(), entityID)
+	if loadErr != nil {
+		t.Fatalf("load workflow instance: %v", loadErr)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance to remain available")
+	}
+	if _, exists := instance.Metadata["revision_count"]; exists {
+		t.Fatalf("revision_count unexpectedly persisted after CEL runtime error: %#v", instance.Metadata["revision_count"])
+	}
+}
+
 func TestResolveHandlerEntityIDForFlowKeepsSameFlowEntity(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{

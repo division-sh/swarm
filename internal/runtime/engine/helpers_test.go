@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"strings"
 	"testing"
 
 	"swarm/internal/events"
@@ -166,7 +167,9 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 		},
 	}
 
-	applyDataAccumulationToState(base, ExecutionState{FanOut: map[string]any{"count": 3}}, state, spec)
+	if err := applyDataAccumulationToState(base, ExecutionState{FanOut: map[string]any{"count": 3}}, state, spec); err != nil {
+		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
+	}
 
 	if got := state.StateCarrier.Metadata["score"]; got != 4 {
 		t.Fatalf("score = %#v", got)
@@ -244,7 +247,9 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 		},
 	}
 
-	applyDataAccumulationToState(base, ExecutionState{}, state, spec)
+	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec); err != nil {
+		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
+	}
 
 	dimensions, ok := state.StateCarrier.Metadata["dimensions_requested"].([]any)
 	if !ok || len(dimensions) != 2 || dimensions[0] != "build_complexity" || dimensions[1] != "automation_completeness" {
@@ -271,10 +276,38 @@ func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testi
 		},
 	}
 
-	applyDataAccumulationToState(base, ExecutionState{}, state, spec)
+	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec); err != nil {
+		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
+	}
 
 	if got := state.StateCarrier.Metadata["revision_count"]; got != 1.0 && got != 1 {
 		t.Fatalf("revision_count = %#v, want 1", got)
+	}
+}
+
+func TestApplyDataAccumulationToState_FailsClosedOnCELRuntimeError(t *testing.T) {
+	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
+	base := BaseContext{
+		Entity: values.Wrap(map[string]any{}),
+	}
+	spec := runtimecontracts.WorkflowDataAccumulation{
+		Writes: []runtimecontracts.WorkflowDataWrite{
+			{
+				TargetField: "entity.revision_count",
+				Value:       runtimecontracts.CELExpression("entity.revision_count + 1"),
+			},
+		},
+	}
+
+	err := applyDataAccumulationToState(base, ExecutionState{}, state, spec)
+	if err == nil {
+		t.Fatal("expected data accumulation CEL runtime error")
+	}
+	if !strings.Contains(err.Error(), "data_accumulation target entity.revision_count") {
+		t.Fatalf("error = %v, want data_accumulation target context", err)
+	}
+	if _, exists := state.StateCarrier.Metadata["revision_count"]; exists {
+		t.Fatalf("revision_count unexpectedly persisted after CEL runtime error: %#v", state.StateCarrier.Metadata["revision_count"])
 	}
 }
 
