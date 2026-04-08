@@ -2688,7 +2688,7 @@ func TestManagerStore_AppendAgentTurn_PersistsTurnBlocksWhenColumnExists(t *test
 	}
 }
 
-func TestManagerStore_AppendAgentTurn_AtomicallyPersistsSessionLastTurnAndTurnRow(t *testing.T) {
+func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwnershipAndPersistsTurnRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -2729,8 +2729,8 @@ func TestManagerStore_AppendAgentTurn_AtomicallyPersistsSessionLastTurnAndTurnRo
 	`, sessionID).Scan(&parseOK); err != nil {
 		t.Fatalf("load session runtime_state: %v", err)
 	}
-	if !parseOK {
-		t.Fatal("expected session last_turn telemetry to be persisted")
+	if parseOK {
+		t.Fatal("did not expect live session row to persist last_turn telemetry")
 	}
 
 	var turnCount int
@@ -2743,6 +2743,54 @@ func TestManagerStore_AppendAgentTurn_AtomicallyPersistsSessionLastTurnAndTurnRo
 	}
 	if turnCount != 1 {
 		t.Fatalf("expected one session-mode agent_turn row, got %d", turnCount)
+	}
+}
+
+func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeState(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
+
+	if _, err := db.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET runtime_state = jsonb_build_object(
+			'provider_session_id', 'provider-1',
+			'retry_reason', 'session not found',
+			'retries_from_session_id', 'session-old'
+		)
+		WHERE session_id = $1::uuid
+	`, sessionID); err != nil {
+		t.Fatalf("seed live runtime_state: %v", err)
+	}
+
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "session",
+		SessionID:      sessionID,
+		RequestPayload: []byte(`{"kind":"session"}`),
+		ResponseRaw:    []byte(`{"result":"done"}`),
+		ParseOK:        true,
+		Latency:        10 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn: %v", err)
+	}
+
+	var providerID, retryReason, retriesFrom string
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(runtime_state->>'provider_session_id', ''),
+			COALESCE(runtime_state->>'retry_reason', ''),
+			COALESCE(runtime_state->>'retries_from_session_id', '')
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&providerID, &retryReason, &retriesFrom); err != nil {
+		t.Fatalf("load live runtime_state lineage: %v", err)
+	}
+	if providerID != "provider-1" || retryReason != "session not found" || retriesFrom != "session-old" {
+		t.Fatalf("unexpected live runtime_state after append: provider=%q reason=%q from=%q", providerID, retryReason, retriesFrom)
 	}
 }
 
