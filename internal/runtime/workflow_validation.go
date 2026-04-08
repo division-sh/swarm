@@ -18,6 +18,8 @@ type WorkflowContractValidationOptions struct {
 	CheckMCPReachable              bool
 	StrictEmitSchemas              bool
 	FatalToolImplementationWarning bool
+	FatalBootWarnings              bool
+	ExcludedFatalBootWarningChecks []string
 }
 
 type WorkflowContractValidationResult struct {
@@ -32,6 +34,8 @@ func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Sto
 		CheckMCPReachable:              true,
 		StrictEmitSchemas:              runtimeEnvBool("SWARM_EMIT_SCHEMA_STRICT", true),
 		FatalToolImplementationWarning: bootWarningsFatal(),
+		FatalBootWarnings:              bootWarningsFatal(),
+		ExcludedFatalBootWarningChecks: []string{"tool_resolution"},
 	}
 }
 
@@ -54,6 +58,12 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	})
 	if result.BootReport.HasErrors() {
 		return result, fmt.Errorf("boot verification failed:\n%s", formatWorkflowValidationFindings(result.BootReport.Errors()))
+	}
+	if opts.FatalBootWarnings {
+		warnings := filterWorkflowValidationFindings(result.BootReport.Warnings(), opts.ExcludedFatalBootWarningChecks...)
+		if len(warnings) > 0 {
+			return result, fmt.Errorf("boot verification warnings:\n%s", formatWorkflowValidationFindings(warnings))
+		}
 	}
 
 	warnings, err := runtimetools.ValidateToolImplementations(source)
@@ -95,4 +105,25 @@ func formatValidationErrors(errs []error) string {
 		lines = append(lines, strings.TrimSpace(err.Error()))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func filterWorkflowValidationFindings(findings []runtimebootverify.Finding, excludedCheckIDs ...string) []runtimebootverify.Finding {
+	if len(findings) == 0 {
+		return nil
+	}
+	excluded := make(map[string]struct{}, len(excludedCheckIDs))
+	for _, checkID := range excludedCheckIDs {
+		checkID = strings.TrimSpace(checkID)
+		if checkID != "" {
+			excluded[checkID] = struct{}{}
+		}
+	}
+	out := make([]runtimebootverify.Finding, 0, len(findings))
+	for _, finding := range findings {
+		if _, skip := excluded[strings.TrimSpace(finding.CheckID)]; skip {
+			continue
+		}
+		out = append(out, finding)
+	}
+	return out
 }
