@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -178,5 +179,29 @@ func TestEngineDispatcherRunsInterceptorsForPersistedEmitIntents(t *testing.T) {
 	got := store.eventTypes()
 	if len(got) == 0 || got[0] != "custom.followup" {
 		t.Fatalf("persisted event types = %v, want first event custom.followup", got)
+	}
+}
+
+func TestEngineDispatcher_FailsClosedWithoutAuthoritativeRecipientManifestOnInMemoryBus(t *testing.T) {
+	eb, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	intent := runtimeengine.EmitIntent{
+		Event: events.Event{
+			ID:        "evt-missing-manifest",
+			Type:      events.EventType("custom.emitted"),
+			Payload:   []byte(`{"entity_id":"ent-1"}`),
+			CreatedAt: time.Now().UTC(),
+		}.WithEntityID("ent-1"),
+	}
+
+	err = eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent})
+	if err == nil {
+		t.Fatal("expected DispatchPostCommit to fail without authoritative recipient manifest")
+	}
+	if got := err.Error(); !strings.Contains(got, "authoritative delivery recipient manifest is unavailable") {
+		t.Fatalf("DispatchPostCommit error = %q, want missing authoritative manifest failure", got)
 	}
 }

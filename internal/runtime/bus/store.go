@@ -94,6 +94,6 @@ func (InMemoryEventStore) InsertEventDeliveries(_ context.Context, _ string, _ [
 	return nil
 }
 func (InMemoryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
-	return []string{}, nil
+	return nil, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable
 }
 func (InMemoryEventStore) SupportsPersistedReplay() bool { return false }
