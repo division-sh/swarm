@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 
 	"swarm/internal/events"
 )
@@ -97,6 +98,51 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (eventDeliv
 	plan.SubscribedRecipients = routing.SubscribedRecipients
 	plan.ExtraDetail = routing.ExtraDetail
 	return plan, nil
+}
+
+func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recipients []string) (eventDeliveryPlan, error) {
+	plan := eventDeliveryPlan{Event: evt}
+	if evt.Type == events.EventType("platform.runtime_log") {
+		return plan, nil
+	}
+	requested := uniqueStrings(recipients)
+	if len(requested) == 0 {
+		return eventDeliveryPlan{}, errors.New("direct delivery recipients are required")
+	}
+	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, requested)
+	if err != nil {
+		return eventDeliveryPlan{}, err
+	}
+	plan.Recipients = manifest.Recipients
+	plan.PersistedRecipients = manifest.PersistedRecipients
+	plan.ExtraDetail = map[string]any{
+		"direct":                     true,
+		"requested_recipients":       append([]string(nil), requested...),
+		"requested_recipients_count": len(requested),
+	}
+	if filtered := filteredRecipients(requested, manifest.Recipients); len(filtered) > 0 {
+		plan.ExtraDetail["filtered_out_recipients"] = filtered
+		plan.ExtraDetail["filtered_out_recipients_count"] = len(filtered)
+	}
+	return plan, nil
+}
+
+func filteredRecipients(requested, allowed []string) []string {
+	if len(requested) == 0 {
+		return nil
+	}
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, recipient := range allowed {
+		allowedSet[recipient] = struct{}{}
+	}
+	out := make([]string, 0, len(requested))
+	for _, recipient := range requested {
+		if _, ok := allowedSet[recipient]; ok {
+			continue
+		}
+		out = append(out, recipient)
+	}
+	return out
 }
 
 func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {

@@ -27,6 +27,9 @@ func (b *recordingReceiptBus) Publish(_ context.Context, evt events.Event) error
 func (*recordingReceiptBus) PublishDirect(context.Context, events.Event, []string) error {
 	return nil
 }
+func (*recordingReceiptBus) PublishPersistedRecipients(context.Context, events.Event, []string) error {
+	return nil
+}
 func (*recordingReceiptBus) Subscribe(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }

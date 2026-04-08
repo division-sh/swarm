@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"sync"
 	"testing"
@@ -13,12 +14,18 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeengine "swarm/internal/runtime/engine"
 	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/store"
 )
 
 type recordingEventStore struct {
 	mu     sync.Mutex
 	events []events.Event
+}
+
+type directRecipientTransactionalStore struct {
+	mu          sync.Mutex
+	descriptors []runtimebus.ActiveAgentDescriptor
+	events      []events.Event
+	deliveries  map[string][]string
 }
 
 func (s *recordingEventStore) AppendEvent(_ context.Context, evt events.Event) error {
@@ -44,6 +51,49 @@ func (s *recordingEventStore) eventTypes() []string {
 		out = append(out, string(evt.Type))
 	}
 	return out
+}
+
+func (s *directRecipientTransactionalStore) AppendEvent(context.Context, events.Event) error {
+	return nil
+}
+
+func (s *directRecipientTransactionalStore) InsertEventDeliveries(_ context.Context, eventID string, agentIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deliveries == nil {
+		s.deliveries = map[string][]string{}
+	}
+	s.deliveries[eventID] = append([]string(nil), agentIDs...)
+	return nil
+}
+
+func (s *directRecipientTransactionalStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.deliveries[eventID]...), nil
+}
+
+func (s *directRecipientTransactionalStore) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+	return append([]runtimebus.ActiveAgentDescriptor(nil), s.descriptors...), nil
+}
+
+func (*directRecipientTransactionalStore) BeginEventTx(context.Context) (*sql.Tx, error) {
+	return nil, nil
+}
+
+func (s *directRecipientTransactionalStore) AppendEventTx(_ context.Context, _ *sql.Tx, evt events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, evt)
+	return nil
+}
+
+func (s *directRecipientTransactionalStore) InsertEventDeliveriesTx(ctx context.Context, _ *sql.Tx, eventID string, agentIDs []string) error {
+	return s.InsertEventDeliveries(ctx, eventID, agentIDs)
+}
+
+func (*directRecipientTransactionalStore) UpsertPipelineReceiptTx(context.Context, *sql.Tx, string, string, string) error {
+	return nil
 }
 
 type interceptingTestHandler struct{}
@@ -95,44 +145,18 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 
 	entityID := uuid.NewString()
 	mock.ExpectBegin()
-	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(
-		sqlmock.NewRows([]string{"table_name", "column_name"}).
-			AddRow("events", "event_id").
-			AddRow("events", "event_name").
-			AddRow("events", "entity_id").
-			AddRow("events", "flow_instance").
-			AddRow("events", "scope").
-			AddRow("events", "payload").
-			AddRow("events", "chain_depth").
-			AddRow("events", "produced_by").
-			AddRow("events", "produced_by_type").
-			AddRow("events", "source_event_id").
-			AddRow("events", "created_at").
-			AddRow("event_deliveries", "event_id").
-			AddRow("event_deliveries", "subscriber_type").
-			AddRow("event_deliveries", "subscriber_id").
-			AddRow("event_deliveries", "status").
-			AddRow("event_deliveries", "retry_count").
-			AddRow("event_deliveries", "reason_code").
-			AddRow("event_deliveries", "last_error").
-			AddRow("event_deliveries", "active_session_id").
-			AddRow("event_deliveries", "started_at").
-			AddRow("event_deliveries", "delivered_at").
-			AddRow("event_deliveries", "created_at"),
-	)
-	mock.ExpectExec("INSERT INTO events").
-		WithArgs("evt-1", "custom.emitted", entityID, "", "entity", sqlmock.AnyArg(), 0, "", "platform", "", sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("INSERT INTO event_deliveries").
-		WithArgs("evt-1", "reviewer").
-		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	eb, err := runtimebus.NewEventBus(&store.PostgresStore{DB: db})
+	recordingStore := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "reviewer", EntityID: entityID},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(recordingStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -152,6 +176,98 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
+	if got := len(recordingStore.events); got != 1 {
+		t.Fatalf("persisted events = %d, want 1", got)
+	}
+	gotPersisted, err := recordingStore.ListEventDeliveryRecipients(context.Background(), "evt-1")
+	if err != nil {
+		t.Fatalf("ListEventDeliveryRecipients: %v", err)
+	}
+	if strings.Join(gotPersisted, ",") != "reviewer" {
+		t.Fatalf("persisted recipients = %v, want [reviewer]", gotPersisted)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "control-plane"},
+			{AgentID: "reviewer-ent-1", EntityID: "ent-1"},
+			{AgentID: "reviewer-ent-2", EntityID: "ent-2"},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	controlCh := eb.Subscribe("control-plane")
+	matchCh := eb.Subscribe("reviewer-ent-1")
+	otherCh := eb.Subscribe("reviewer-ent-2")
+
+	intent := runtimeengine.EmitIntent{
+		Event: events.Event{
+			ID:        "evt-direct-intent",
+			Type:      events.EventType("custom.direct"),
+			Payload:   []byte(`{"entity_id":"ent-1"}`),
+			CreatedAt: time.Now().UTC(),
+		}.WithEntityID("ent-1"),
+		Recipients: []string{"control-plane", "reviewer-ent-1", "reviewer-ent-2", "missing-agent"},
+	}
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("WriteOutbox: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	gotPersisted, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID)
+	if err != nil {
+		t.Fatalf("ListEventDeliveryRecipients: %v", err)
+	}
+	wantPersisted := []string{"control-plane", "reviewer-ent-1"}
+	if strings.Join(gotPersisted, ",") != strings.Join(wantPersisted, ",") {
+		t.Fatalf("persisted recipients = %v, want %v", gotPersisted, wantPersisted)
+	}
+
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("DispatchPostCommit: %v", err)
+	}
+	select {
+	case <-controlCh:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("control-plane did not receive direct intent")
+	}
+	select {
+	case evt := <-matchCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("matched event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("matching entity-scoped agent did not receive direct intent")
+	}
+	select {
+	case evt := <-otherCh:
+		t.Fatalf("unexpected event delivered to filtered recipient: %#v", evt)
+	case <-time.After(25 * time.Millisecond):
+	}
+
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}

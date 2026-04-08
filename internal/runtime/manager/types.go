@@ -32,6 +32,7 @@ type AgentFactory func(cfg models.AgentConfig) (Agent, error)
 type Bus interface {
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
+	PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error
 	Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event
 	Unsubscribe(agentID string)
 	Store() runtimebus.EventStore

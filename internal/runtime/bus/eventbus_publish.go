@@ -579,9 +579,9 @@ func (eb *EventBus) recordPublishDiagnostic(ctx context.Context, evt events.Even
 	})
 }
 
-// PublishDirect persists an event and delivers it to the specified recipients
-// regardless of routing tables or subscription patterns. This is the "message"
-// primitive: explicit, point-to-point delivery.
+// PublishDirect persists an event and delivers it to an explicit caller-supplied
+// recipient set. The recipient manifest still routes through the canonical
+// delivery policy so explicit delivery cannot bypass scoped-recipient rules.
 func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipients []string) (err error) {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
@@ -596,10 +596,6 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		status, errText := pipelineReceiptStatus(ctx, err)
 		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 	}()
-	recipients = uniqueStrings(recipients)
-	if len(recipients) == 0 {
-		return errors.New("direct publish recipients are required")
-	}
 	if evt.Type == "" {
 		return errors.New("event type is required")
 	}
@@ -618,18 +614,63 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		evt.CreatedAt = time.Now()
 	}
 	ctx, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
-	if err := eb.persistEventRecord(ctx, evt, recipients); err != nil {
+	plan, err := eb.deliveryPlanner.PlanDirect(ctx, evt, recipients)
+	if err != nil {
+		return err
+	}
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients); err != nil {
 		return err
 	}
 	persisted = true
-	eb.logQueuedDeliveries(ctx, evt, recipients, "direct_publish", map[string]any{"direct": true})
+	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "direct_publish", plan.ExtraDetail)
+	if err := eb.deliverToAgents(ctx, evt, plan.Recipients); err != nil {
+		return err
+	}
+	detail := map[string]any{
+		"direct":           true,
+		"recipients_count": len(plan.Recipients),
+		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+	}
+	for k, v := range plan.ExtraDetail {
+		detail[k] = v
+	}
+	eb.logRuntime(ctx, "debug", "Event was delivered directly to recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, detail, "", int(time.Since(start)/time.Microsecond))
+	return nil
+}
+
+// PublishPersistedRecipients delivers an already-persisted authoritative
+// recipient manifest without re-running direct recipient planning.
+func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error {
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	recipients = uniqueStrings(recipients)
+	if len(recipients) == 0 {
+		return errors.New("persisted recipients are required")
+	}
+	if evt.Type == "" {
+		return errors.New("event type is required")
+	}
+	if !isValidEventTypeName(string(evt.Type)) {
+		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	}
+	if evt.ID == "" {
+		evt.ID = uuid.NewString()
+	}
+	if evt.CreatedAt.IsZero() {
+		evt.CreatedAt = time.Now()
+	}
 	if err := eb.deliverToAgents(ctx, evt, recipients); err != nil {
 		return err
 	}
-	eb.logRuntime(ctx, "debug", "Event was delivered directly to recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
-		"direct":           true,
-		"recipients_count": len(recipients),
-		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
-	}, "", int(time.Since(start)/time.Microsecond))
+	eb.logRuntime(ctx, "debug", "Persisted event was delivered to authoritative recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
+		"direct":                     true,
+		"delivery_manifest_owner":    "event_deliveries",
+		"recipients_count":           len(recipients),
+		"parent_event_id":            strings.TrimSpace(evt.ParentEventID),
+		"requested_recipients":       append([]string(nil), recipients...),
+		"requested_recipients_count": len(recipients),
+	}, "", 0)
 	return nil
 }

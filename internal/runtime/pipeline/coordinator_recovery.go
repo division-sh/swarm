@@ -22,7 +22,7 @@ type EventStore interface {
 
 type Publisher interface {
 	Publish(ctx context.Context, evt events.Event) error
-	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
+	PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error
 }
 
 type RecoveryManager struct {
@@ -129,7 +129,7 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			_ = lease.Release(ctx)
 			continue
 		}
-		if err := r.bus.PublishDirect(ctx, evt, persistedRecipients); err != nil {
+		if err := r.bus.PublishPersistedRecipients(ctx, evt, persistedRecipients); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("replay event %s: %w", evt.ID, err)
 			}
