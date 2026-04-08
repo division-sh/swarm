@@ -30,14 +30,14 @@ var (
 	workflowExpressionNullEntityEqualPattern        = regexp.MustCompile(`\bnull\s*==\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
 )
 
-type DataContext struct {
+type ValueContext struct {
 	Entity  map[string]any
 	Payload map[string]any
 	Policy  map[string]any
 	FanOut  map[string]any
 }
 
-func ValidateDataExpression(expression string) error {
+func ValidateValueExpression(expression string) error {
 	env, err := dataExpressionEnvForContext()
 	if err != nil {
 		return err
@@ -53,7 +53,7 @@ func ValidateDataExpression(expression string) error {
 	return nil
 }
 
-func EvalDataExpression(expression string, ctx DataContext) (any, error) {
+func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
 	env, err := dataExpressionEnvForContext()
 	if err != nil {
 		return nil, err
@@ -83,6 +83,10 @@ func EvalDataExpression(expression string, ctx DataContext) (any, error) {
 		return nil, err
 	}
 	return NormalizeCELValue(out), nil
+}
+
+func ExpressionReferencesEntity(expression string) bool {
+	return len(EntityReferences(expression)) > 0
 }
 
 func RewriteEntityNullPresenceChecks(expression string) string {

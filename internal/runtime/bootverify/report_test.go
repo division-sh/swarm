@@ -719,6 +719,31 @@ func TestRun_RejectsAccumulatedNamespaceInDataAccumulationExpressions(t *testing
 	}
 }
 
+func TestRun_RejectsAccumulatedNamespaceInPayloadTransformExpressions(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						PayloadTransform: &runtimecontracts.PayloadTransformSpec{
+							Fields: map[string]string{
+								"bad": "accumulated.size()",
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "payload_transform_expression_validation", "accumulated.size()") {
+		t.Fatalf("expected accumulated namespace in payload_transform expression to fail validation, got %#v", report.Errors())
+	}
+}
+
 func TestRun_PreservesPermissionMismatchWarningsDuringMigration(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-permission-tool-mismatch")
 
@@ -1341,8 +1366,8 @@ func TestRun_UsesCompiledOwnersForEquivalentSingleNodePerEventRoutes(t *testing.
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 37 {
-		t.Fatalf("bootCheckRegistry count = %d, want 37", got)
+	if got := len(bootCheckRegistry); got != 38 {
+		t.Fatalf("bootCheckRegistry count = %d, want 38", got)
 	}
 	if got := len(supplementalChecks); got != 2 {
 		t.Fatalf("supplementalChecks count = %d, want 2", got)
