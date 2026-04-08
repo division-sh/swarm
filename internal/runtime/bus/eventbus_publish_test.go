@@ -331,50 +331,72 @@ func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T
 }
 
 func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t *testing.T) {
-	ctx := context.Background()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pg := &store.PostgresStore{DB: db}
-	eb, err := runtimebus.NewEventBus(pg)
+	store := &descriptorAwareEventStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "agent-a"},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 
-	eventID := uuid.NewString()
-	entityID := uuid.NewString()
-	err = eb.PublishDirect(ctx, (events.Event{
-		ID:        eventID,
+	err = eb.PublishDirect(context.Background(), (events.Event{
+		ID:        uuid.NewString(),
 		Type:      events.EventType("custom.direct"),
-		Payload:   []byte(`{"entity_id":"` + entityID + `"}`),
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
 		CreatedAt: time.Now().UTC(),
-	}).WithEntityID(entityID), []string{"agent-a"})
+	}).WithEntityID("ent-1"), []string{"agent-a"})
 	if err == nil || !strings.Contains(err.Error(), "authoritative delivery incomplete") {
 		t.Fatalf("PublishDirect missing recipient error = %v, want authoritative delivery incomplete", err)
 	}
+	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
+}
 
-	var eventCount, deliveryCount, receiptCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&eventCount); err != nil {
-		t.Fatalf("count events: %v", err)
+func TestEventBusPublishDirect_FiltersEntityScopedRecipientsByExplicitMetadata(t *testing.T) {
+	store := &descriptorAwareEventStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "control-plane"},
+			{AgentID: "reviewer-ent-1", EntityID: "ent-1"},
+			{AgentID: "reviewer-ent-2", EntityID: "ent-2"},
+		},
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, eventID).Scan(&deliveryCount); err != nil {
-		t.Fatalf("count deliveries: %v", err)
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&receiptCount); err != nil {
-		t.Fatalf("count pipeline receipts: %v", err)
+	controlCh := eb.Subscribe("control-plane")
+	matchCh := eb.Subscribe("reviewer-ent-1")
+	otherCh := eb.Subscribe("reviewer-ent-2")
+
+	err = eb.PublishDirect(context.Background(), events.Event{
+		Type:      events.EventType("custom.direct"),
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}.WithEntityID("ent-1"), []string{"control-plane", "reviewer-ent-1", "reviewer-ent-2", "missing-agent"})
+	if err != nil {
+		t.Fatalf("PublishDirect: %v", err)
 	}
-	if eventCount != 1 || deliveryCount != 1 {
-		t.Fatalf("persisted rows = events:%d deliveries:%d, want 1 each", eventCount, deliveryCount)
+
+	select {
+	case evt := <-controlCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("control event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("control-plane did not receive direct event")
 	}
-	if receiptCount != 0 {
-		t.Fatalf("pipeline receipt count = %d, want 0 before real fan-out", receiptCount)
+	select {
+	case evt := <-matchCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("matched event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("matching entity-scoped reviewer did not receive direct event")
 	}
+	waitForNoEvent(t, otherCh)
+
+	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"control-plane", "reviewer-ent-1"})
 }
 
 func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *testing.T) {

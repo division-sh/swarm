@@ -425,6 +425,9 @@ func (*conformanceRecoveryBus) Publish(context.Context, events.Event) error { re
 func (*conformanceRecoveryBus) PublishDirect(context.Context, events.Event, []string) error {
 	return nil
 }
+func (*conformanceRecoveryBus) PublishPersistedRecipients(context.Context, events.Event, []string) error {
+	return nil
+}
 func (*conformanceRecoveryBus) Subscribe(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }

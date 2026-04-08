@@ -127,6 +127,9 @@ func (b *flowActivationTestBus) Publish(_ context.Context, evt events.Event) err
 func (*flowActivationTestBus) PublishDirect(context.Context, events.Event, []string) error {
 	return nil
 }
+func (*flowActivationTestBus) PublishPersistedRecipients(context.Context, events.Event, []string) error {
+	return nil
+}
 func (*flowActivationTestBus) Subscribe(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }

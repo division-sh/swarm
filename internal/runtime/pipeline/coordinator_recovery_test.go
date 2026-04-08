@@ -32,9 +32,9 @@ func (p *recoveryCapturePublisher) Publish(ctx context.Context, evt events.Event
 	return p.inner.Publish(ctx, evt)
 }
 
-func (p *recoveryCapturePublisher) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error {
+func (p *recoveryCapturePublisher) PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error {
 	p.direct = append(p.direct, evt)
-	return p.inner.PublishDirect(ctx, evt, recipients)
+	return p.inner.PublishPersistedRecipients(ctx, evt, recipients)
 }
 
 func (s *recoveryMissingClaimStore) AppendEvent(context.Context, events.Event) error { return nil }
@@ -64,7 +64,7 @@ type blockingRecoveryPublisher struct {
 
 func (*blockingRecoveryPublisher) Publish(context.Context, events.Event) error { return nil }
 
-func (p *blockingRecoveryPublisher) PublishDirect(context.Context, events.Event, []string) error {
+func (p *blockingRecoveryPublisher) PublishPersistedRecipients(context.Context, events.Event, []string) error {
 	if p.count.Add(1) == 1 {
 		close(p.started)
 		<-p.release

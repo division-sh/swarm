@@ -23,6 +23,9 @@ type recoveryTestBus struct {
 
 func (*recoveryTestBus) Publish(context.Context, events.Event) error                 { return nil }
 func (*recoveryTestBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
+func (*recoveryTestBus) PublishPersistedRecipients(context.Context, events.Event, []string) error {
+	return nil
+}
 func (*recoveryTestBus) Subscribe(string, ...events.EventType) <-chan events.Event {
 	return make(chan events.Event)
 }

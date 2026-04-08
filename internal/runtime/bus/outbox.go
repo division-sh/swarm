@@ -69,7 +69,11 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 
 func (o engineOutbox) persistedRecipientsForIntent(ctx context.Context, intent runtimeengine.EmitIntent) ([]string, error) {
 	if len(intent.Recipients) > 0 {
-		return uniqueStrings(intent.Recipients), nil
+		plan, err := o.bus.deliveryPlanner.PlanDirect(ctx, intent.Event, intent.Recipients)
+		if err != nil {
+			return nil, err
+		}
+		return plan.PersistedRecipients, nil
 	}
 	plan, err := o.bus.deliveryPlanner.Plan(ctx, intent.Event)
 	if err != nil {
@@ -115,21 +119,15 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		if !passthrough {
 			return nil
 		}
-		recipients, err := d.bus.authoritativeRecipientsForEvent(ctx, intent.Event.ID)
-		if err != nil {
-			return err
-		}
-		intent.Recipients = recipients
 	}
-	recipients := uniqueStrings(intent.Recipients)
+	recipients, err := d.bus.authoritativeRecipientsForEvent(ctx, intent.Event.ID)
+	if err != nil {
+		return err
+	}
 	if len(recipients) > 0 {
-		if err := d.bus.deliverToAgents(ctx, intent.Event, recipients); err != nil {
+		if err := d.bus.PublishPersistedRecipients(ctx, intent.Event, recipients); err != nil {
 			return err
 		}
-		d.bus.logRuntime(ctx, "debug", "Deferred event intent was delivered", "eventbus", "delivered", intent.Event.ID, string(intent.Event.Type), "", intent.Event.EntityID(), "", nil, map[string]any{
-			"direct":           true,
-			"recipients_count": len(recipients),
-		}, "", 0)
 	}
 	return nil
 }
