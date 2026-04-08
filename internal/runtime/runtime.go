@@ -298,17 +298,9 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			}
 		}
 		if stores.ScheduleStore != nil {
-			if err := stores.ScheduleStore.MarkScheduleFiredExact(callbackCtx, sc); err != nil {
+			if err := stores.ScheduleStore.CompleteScheduleFireExact(callbackCtx, sc); err != nil {
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("scheduler", "mark_fired_failed", rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
-						"agent_id":   sc.AgentID,
-						"event_type": sc.EventType,
-						"entity_id":  sc.EffectiveEntityID(),
-					}, err))
-				}
-			} else if strings.EqualFold(strings.TrimSpace(sc.Mode), "once") {
-				if err := stores.ScheduleStore.ReleaseSchedule(callbackCtx, sc); err != nil && rt.Logger != nil {
-					handleRuntimeLogPersistenceError("scheduler", "release_ownership_failed", rt.Logger.Error(callbackCtx, "scheduler", "release_ownership_failed", map[string]any{
 						"agent_id":   sc.AgentID,
 						"event_type": sc.EventType,
 						"entity_id":  sc.EffectiveEntityID(),

@@ -104,6 +104,7 @@ type recordingRuntimeScheduleStore struct {
 	schedules  []runtimepipeline.Schedule
 	active     []runtimepipeline.Schedule
 	firedExact atomic.Int32
+	firedOwned atomic.Int32
 	fired      chan runtimepipeline.Schedule
 }
 
@@ -113,6 +114,10 @@ func (s *recordingRuntimeScheduleStore) UpsertSchedule(_ context.Context, sc run
 }
 
 func (*recordingRuntimeScheduleStore) CancelScheduleExact(context.Context, runtimepipeline.Schedule) error {
+	return nil
+}
+
+func (*recordingRuntimeScheduleStore) CancelScheduleExactTerminal(context.Context, runtimepipeline.Schedule) error {
 	return nil
 }
 
@@ -134,6 +139,17 @@ func (*recordingRuntimeScheduleStore) ReleaseScheduleClaims(context.Context) err
 
 func (s *recordingRuntimeScheduleStore) MarkScheduleFiredExact(_ context.Context, sc runtimepipeline.Schedule) error {
 	s.firedExact.Add(1)
+	if s.fired != nil {
+		select {
+		case s.fired <- sc:
+		default:
+		}
+	}
+	return nil
+}
+
+func (s *recordingRuntimeScheduleStore) CompleteScheduleFireExact(_ context.Context, sc runtimepipeline.Schedule) error {
+	s.firedOwned.Add(1)
 	if s.fired != nil {
 		select {
 		case s.fired <- sc:
@@ -219,7 +235,7 @@ func TestEnsureRecurringWorkflowSchedulesRegistersBootRecurringTimers(t *testing
 	}
 }
 
-func TestNewRuntime_SchedulerMarksSchedulesFiredThroughExactContract(t *testing.T) {
+func TestNewRuntime_SchedulerMarksSchedulesFiredThroughCanonicalTerminalHelper(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
 	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
@@ -261,8 +277,8 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughExactContract(t *testing.
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for exact schedule fire persistence")
 	}
-	if got := store.firedExact.Load(); got != 1 {
-		t.Fatalf("MarkScheduleFiredExact calls = %d, want 1", got)
+	if got := store.firedOwned.Load(); got != 1 {
+		t.Fatalf("CompleteScheduleFireExact calls = %d, want 1", got)
 	}
 }
 
@@ -331,7 +347,7 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 			t.Fatalf("timed out waiting for restored exact schedules to fire; seen flow instances = %#v", seenFlows)
 		}
 	}
-	if got := store.firedExact.Load(); got != 2 {
-		t.Fatalf("MarkScheduleFiredExact calls = %d, want 2 for distinct restored flow instances", got)
+	if got := store.firedOwned.Load(); got != 2 {
+		t.Fatalf("CompleteScheduleFireExact calls = %d, want 2 for distinct restored flow instances", got)
 	}
 }

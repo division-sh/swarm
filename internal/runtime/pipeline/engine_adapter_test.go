@@ -1034,7 +1034,14 @@ func (s *recordingScheduleStore) CancelScheduleExact(_ context.Context, sc Sched
 	s.cancels = append(s.cancels, sc)
 	return nil
 }
+func (s *recordingScheduleStore) CancelScheduleExactTerminal(_ context.Context, sc Schedule) error {
+	s.cancels = append(s.cancels, sc)
+	return nil
+}
 func (s *recordingScheduleStore) MarkScheduleFiredExact(context.Context, Schedule) error { return nil }
+func (s *recordingScheduleStore) CompleteScheduleFireExact(context.Context, Schedule) error {
+	return nil
+}
 
 func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(t *testing.T) {
 	store := &recordingScheduleStore{}

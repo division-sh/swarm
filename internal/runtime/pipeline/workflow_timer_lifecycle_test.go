@@ -19,6 +19,7 @@ type recordingSchedulePersistence struct {
 	cancels      []Schedule
 	releases     []Schedule
 	cancelExacts int
+	cancelOwned  int
 }
 
 func (s *recordingSchedulePersistence) UpsertSchedule(_ context.Context, sc Schedule) error {
@@ -49,7 +50,17 @@ func (s *recordingSchedulePersistence) CancelScheduleExact(_ context.Context, sc
 	return nil
 }
 
+func (s *recordingSchedulePersistence) CancelScheduleExactTerminal(_ context.Context, sc Schedule) error {
+	s.cancelOwned++
+	s.cancels = append(s.cancels, sc)
+	return nil
+}
+
 func (s *recordingSchedulePersistence) MarkScheduleFiredExact(context.Context, Schedule) error {
+	return nil
+}
+
+func (*recordingSchedulePersistence) CompleteScheduleFireExact(context.Context, Schedule) error {
 	return nil
 }
 
@@ -199,14 +210,11 @@ func TestPersistWorkflowTimerCancellation_ReleasesClaimAfterCanonicalCancel(t *t
 
 	pc.persistWorkflowTimerCancellation(context.Background(), sc)
 
-	if got := store.cancelExacts; got != 1 {
-		t.Fatalf("cancel exact calls = %d, want 1", got)
+	if got := store.cancelOwned; got != 1 {
+		t.Fatalf("cancel owned calls = %d, want 1", got)
 	}
-	if len(store.releases) != 1 {
-		t.Fatalf("released schedules = %d, want 1", len(store.releases))
-	}
-	if store.releases[0].TaskID != sc.TaskID {
-		t.Fatalf("released task_id = %q, want %q", store.releases[0].TaskID, sc.TaskID)
+	if len(store.releases) != 0 {
+		t.Fatalf("caller-side releases = %d, want 0", len(store.releases))
 	}
 }
 
@@ -414,8 +422,8 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 	if len(store.cancels) != 1 {
 		t.Fatalf("cancelled schedules = %d, want 1", len(store.cancels))
 	}
-	if store.cancelExacts != 1 {
-		t.Fatalf("CancelScheduleExact calls = %d, want 1", store.cancelExacts)
+	if store.cancelOwned != 1 {
+		t.Fatalf("CancelScheduleExactTerminal calls = %d, want 1", store.cancelOwned)
 	}
 	if got := store.cancels[0].TaskID; got != timeridentity.AccumulationTimeoutHandle(timeridentity.NewAccumulatorBucketRef("test-node", "item.arrived")).TaskID() {
 		t.Fatalf("cancelled task_id = %q", got)

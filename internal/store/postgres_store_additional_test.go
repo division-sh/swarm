@@ -1808,20 +1808,14 @@ func TestSchedules_ClaimedOwnerIsOnlyRestoredTimerThatFires(t *testing.T) {
 	var fired1, fired2 atomic.Int32
 	scheduler1 := runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
 		fired1.Add(1)
-		if err := pg1.MarkScheduleFiredExact(context.Background(), sc); err != nil {
-			t.Errorf("MarkScheduleFiredExact(pg1): %v", err)
-		}
-		if err := pg1.ReleaseSchedule(context.Background(), sc); err != nil {
-			t.Errorf("ReleaseSchedule(pg1): %v", err)
+		if err := pg1.CompleteScheduleFireExact(context.Background(), sc); err != nil {
+			t.Errorf("CompleteScheduleFireExact(pg1): %v", err)
 		}
 	})
 	scheduler2 := runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
 		fired2.Add(1)
-		if err := pg2.MarkScheduleFiredExact(context.Background(), sc); err != nil {
-			t.Errorf("MarkScheduleFiredExact(pg2): %v", err)
-		}
-		if err := pg2.ReleaseSchedule(context.Background(), sc); err != nil {
-			t.Errorf("ReleaseSchedule(pg2): %v", err)
+		if err := pg2.CompleteScheduleFireExact(context.Background(), sc); err != nil {
+			t.Errorf("CompleteScheduleFireExact(pg2): %v", err)
 		}
 	})
 	t.Cleanup(scheduler1.Stop)
@@ -1861,7 +1855,7 @@ func TestSchedules_ClaimedOwnerIsOnlyRestoredTimerThatFires(t *testing.T) {
 	}
 }
 
-func TestSchedules_CancelAndReleaseAllowsSubsequentReclaim(t *testing.T) {
+func TestSchedules_CancelExactTerminalAllowsSubsequentReclaim(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	pgOwner := &PostgresStore{DB: db}
@@ -1888,11 +1882,8 @@ func TestSchedules_CancelAndReleaseAllowsSubsequentReclaim(t *testing.T) {
 		t.Fatal("expected owner to claim schedule")
 	}
 
-	if err := pgOwner.CancelScheduleExact(ctx, sc); err != nil {
-		t.Fatalf("CancelScheduleExact: %v", err)
-	}
-	if err := pgOwner.ReleaseSchedule(ctx, sc); err != nil {
-		t.Fatalf("ReleaseSchedule: %v", err)
+	if err := pgOwner.CancelScheduleExactTerminal(ctx, sc); err != nil {
+		t.Fatalf("CancelScheduleExactTerminal: %v", err)
 	}
 
 	claimed, err = pgSuccessor.ClaimSchedule(ctx, sc)
@@ -1912,6 +1903,57 @@ func TestSchedules_CancelAndReleaseAllowsSubsequentReclaim(t *testing.T) {
 	}
 	if !claimed {
 		t.Fatal("expected successor to claim recreated schedule after owner cancel+release")
+	}
+}
+
+func TestSchedules_CompleteScheduleFireExactReleasesClaimForRecreatedOnceTimer(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	pgOwner := &PostgresStore{DB: db}
+	pgSuccessor := &PostgresStore{DB: db}
+
+	sc := runtimepipeline.Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		At:           time.Now().Add(30 * time.Minute).UTC(),
+		EntityID:     uuid.NewString(),
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-fire-reclaim",
+		Payload:      []byte(`{"timer_id":"timer-fire-reclaim"}`),
+	}
+	if err := pgOwner.UpsertSchedule(ctx, sc); err != nil {
+		t.Fatalf("UpsertSchedule: %v", err)
+	}
+	claimed, err := pgOwner.ClaimSchedule(ctx, sc)
+	if err != nil {
+		t.Fatalf("ClaimSchedule(owner): %v", err)
+	}
+	if !claimed {
+		t.Fatal("expected owner to claim schedule")
+	}
+
+	if err := pgOwner.CompleteScheduleFireExact(ctx, sc); err != nil {
+		t.Fatalf("CompleteScheduleFireExact: %v", err)
+	}
+
+	claimed, err = pgSuccessor.ClaimSchedule(ctx, sc)
+	if err != nil {
+		t.Fatalf("ClaimSchedule(successor after fire): %v", err)
+	}
+	if claimed {
+		t.Fatal("expected fired once schedule to remain unclaimable while inactive")
+	}
+
+	if err := pgOwner.UpsertSchedule(ctx, sc); err != nil {
+		t.Fatalf("UpsertSchedule(recreate): %v", err)
+	}
+	claimed, err = pgSuccessor.ClaimSchedule(ctx, sc)
+	if err != nil {
+		t.Fatalf("ClaimSchedule(successor after recreate): %v", err)
+	}
+	if !claimed {
+		t.Fatal("expected successor to claim recreated once timer after canonical fire helper released ownership")
 	}
 }
 
