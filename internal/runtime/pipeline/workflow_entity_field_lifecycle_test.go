@@ -91,6 +91,46 @@ func TestWorkflowEntityFieldsAvailableBeforePayloadTransform_ExcludesRuleOnlyWri
 	}
 }
 
+func TestWorkflowEntityFieldsAvailableBeforePayloadTransform_ExcludesRuleOnlyComputeOutputs(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Rules: []runtimecontracts.HandlerRuleEntry{{
+			Condition: "entity.entity_id != null",
+			Compute: &runtimecontracts.ComputeSpec{
+				Operation: runtimecontracts.ComputeOpCount,
+				StoreAs:   "entity.revision_count",
+			},
+		}},
+	}
+
+	available := WorkflowEntityFieldsAvailableBeforePayloadTransform(handler)
+	if _, ok := available["revision_count"]; ok {
+		t.Fatalf("revision_count unexpectedly available before payload_transform: %#v", available)
+	}
+}
+
+func TestWorkflowEntityFieldsAvailableBeforePayloadTransform_PreservesUnconditionalWriterWhenRuleAlsoWritesField(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		Compute: &runtimecontracts.ComputeSpec{
+			Operation: runtimecontracts.ComputeOpCount,
+			StoreAs:   "entity.revision_count",
+		},
+		Rules: []runtimecontracts.HandlerRuleEntry{{
+			Condition: "entity.entity_id != null",
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{
+					{TargetField: "revision_count", Value: runtimecontracts.LiteralExpression(0)},
+				},
+			},
+		}},
+	}
+
+	available := WorkflowEntityFieldsAvailableBeforePayloadTransform(handler)
+	if _, ok := available["revision_count"]; !ok {
+		t.Fatalf("revision_count missing from payload_transform availability: %#v", available)
+	}
+}
+
 func TestWorkflowEntityFieldsAvailableBeforeCondition_StillExcludesCreateEntityTopLevelWrites(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
