@@ -319,22 +319,6 @@ func (a *WorkflowDataAccumulation) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func decodeWorkflowDataAccumulationShorthandWrite(target string, node *yaml.Node) (WorkflowDataWrite, error) {
-	write := WorkflowDataWrite{TargetField: strings.TrimSpace(target)}
-	if node == nil || node.Kind == 0 {
-		write.TargetPath = paths.Parse(write.Target())
-		return write, nil
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		return WorkflowDataWrite{}, fmt.Errorf("workflow data accumulation shorthand writes are not supported; use writes list")
-	case yaml.MappingNode:
-		return WorkflowDataWrite{}, fmt.Errorf("workflow data accumulation shorthand writes are not supported; use writes list")
-	default:
-		return WorkflowDataWrite{}, fmt.Errorf("workflow data accumulation shorthand writes are not supported; use writes list")
-	}
-}
-
 func (s *FilterSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil

@@ -1,10 +1,10 @@
 package pipeline
 
 import (
-	"regexp"
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/workflowexpr"
 )
 
 type WorkflowEntityFieldLifecyclePhase string
@@ -24,96 +24,16 @@ const (
 	WorkflowEntityFieldLifecyclePayloadTransform WorkflowEntityFieldLifecyclePhase = "payload_transform"
 )
 
-var workflowExpressionEntityReferencePattern = regexp.MustCompile(`entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-var workflowExpressionEntityPresencePattern = regexp.MustCompile(`["']([a-zA-Z_][a-zA-Z0-9_]*)["']\s+in\s+entity\b`)
-var workflowExpressionEntityHasPattern = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)`)
-var workflowExpressionEntityHasTernaryTruePattern = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-var workflowExpressionEntityHasTernaryFalsePattern = regexp.MustCompile(`!\s*has\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*[^:]+:\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-var workflowExpressionEntityNullCompareLeftPattern = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=)\s*null\b`)
-var workflowExpressionEntityNullCompareRightPattern = regexp.MustCompile(`\bnull\s*(==|!=)\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
-
 func WorkflowEntityReferences(expression string) []string {
-	expression = strings.TrimSpace(stripWorkflowExpressionStringLiterals(expression))
-	if expression == "" {
-		return nil
-	}
-	matches := workflowExpressionEntityReferencePattern.FindAllStringSubmatch(expression, -1)
-	out := make([]string, 0, len(matches))
-	seen := map[string]struct{}{}
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		ref := strings.TrimSpace(match[1])
-		if ref == "" {
-			continue
-		}
-		if _, ok := seen[ref]; ok {
-			continue
-		}
-		seen[ref] = struct{}{}
-		out = append(out, ref)
-	}
-	return out
+	return workflowexpr.EntityReferences(expression)
 }
 
 func stripWorkflowExpressionStringLiterals(expression string) string {
-	if expression == "" {
-		return ""
-	}
-	var out strings.Builder
-	out.Grow(len(expression))
-	inSingle := false
-	inDouble := false
-	escaped := false
-	for i := 0; i < len(expression); i++ {
-		ch := expression[i]
-		if escaped {
-			if inSingle || inDouble {
-				out.WriteByte(' ')
-			} else {
-				out.WriteByte(ch)
-			}
-			escaped = false
-			continue
-		}
-		if ch == '\\' {
-			escaped = true
-			if inSingle || inDouble {
-				out.WriteByte(' ')
-			} else {
-				out.WriteByte(ch)
-			}
-			continue
-		}
-		if ch == '"' && !inSingle {
-			inDouble = !inDouble
-			out.WriteByte(' ')
-			continue
-		}
-		if ch == '\'' && !inDouble {
-			inSingle = !inSingle
-			out.WriteByte(' ')
-			continue
-		}
-		if inSingle || inDouble {
-			out.WriteByte(' ')
-			continue
-		}
-		out.WriteByte(ch)
-	}
-	return out.String()
+	return workflowexpr.StripStringLiterals(expression)
 }
 
 func WorkflowEntityReferenceField(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	if idx := strings.IndexByte(ref, '.'); idx >= 0 {
-		ref = ref[:idx]
-	}
-	return strings.TrimSpace(ref)
+	return workflowexpr.EntityReferenceField(ref)
 }
 
 func WorkflowBuiltinEntityField(field string) bool {
@@ -126,51 +46,7 @@ func WorkflowBuiltinEntityField(field string) bool {
 }
 
 func WorkflowPresenceGuardedEntityFields(expression string) map[string]struct{} {
-	expression = strings.TrimSpace(stripWorkflowExpressionStringLiterals(expression))
-	if expression == "" {
-		return nil
-	}
-	out := map[string]struct{}{}
-	addField := func(field string) {
-		field = WorkflowEntityReferenceField(field)
-		if field != "" {
-			out[field] = struct{}{}
-		}
-	}
-	for _, match := range workflowExpressionEntityPresencePattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 2 {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityHasPattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 2 {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityHasTernaryTruePattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 3 && WorkflowEntityReferenceField(match[1]) == WorkflowEntityReferenceField(match[2]) {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityHasTernaryFalsePattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 3 && WorkflowEntityReferenceField(match[1]) == WorkflowEntityReferenceField(match[2]) {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityNullCompareLeftPattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 2 {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityNullCompareRightPattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 3 {
-			addField(match[2])
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return workflowexpr.PresenceGuardedEntityFields(expression)
 }
 
 func WorkflowEntityFieldsAvailableBeforeCondition(handler runtimecontracts.SystemNodeEventHandler, context WorkflowConditionContext) map[string]struct{} {

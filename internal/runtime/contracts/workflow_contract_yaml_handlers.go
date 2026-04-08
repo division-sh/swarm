@@ -392,7 +392,7 @@ func decodeHandlerRuleEntryNode(node *yaml.Node) (*HandlerRuleEntry, error) {
 	if err := node.Decode(&rule); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emits.Empty() && !rule.DataAccumulation.HasWrites() && rule.DataAccumulation.Value.IsZero() && rule.Compute == nil && rule.FanOut == nil {
+	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emits.Empty() && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
 		return nil, nil
 	}
 	return &rule, nil

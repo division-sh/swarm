@@ -21,6 +21,7 @@ import (
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
+	"swarm/internal/runtime/workflowexpr"
 )
 
 type Check struct {
@@ -119,6 +120,9 @@ type checkerContext struct {
 	conditionExprLoaded   bool
 	conditionExprFindings []Finding
 
+	dataAccumulationExprLoaded   bool
+	dataAccumulationExprFindings []Finding
+
 	entityRefLoaded   bool
 	entityRefFindings []Finding
 
@@ -178,6 +182,7 @@ var bootCheckRegistry = []Check{
 	{ID: "agent_permission_validation", Severity: "error", Run: checkAgentPermissionValidation},
 	{ID: "transition_reference_validation", Severity: "error", Run: checkTransitionReferenceValidation},
 	{ID: "condition_expression_validation", Severity: "error", Run: checkConditionExpressionValidation},
+	{ID: "data_accumulation_expression_validation", Severity: "error", Run: checkDataAccumulationExpressionValidation},
 	{ID: "expression_field_reference_validation", Severity: "warning", Run: checkExpressionFieldReferenceValidation},
 	{ID: "transition_ownership_validation", Severity: "error", Run: checkTransitionOwnershipValidation},
 	{ID: "event_runtime_wiring_validation", Severity: "error", Run: checkEventRuntimeWiringValidation},
@@ -242,6 +247,9 @@ func checkSingleNodePerEvent(c *checkerContext) []Finding            { return c.
 func checkPlatformMetadataValidation(c *checkerContext) []Finding    { return c.platformMetadata() }
 func checkTransitionReferenceValidation(c *checkerContext) []Finding { return c.transitionReferences() }
 func checkConditionExpressionValidation(c *checkerContext) []Finding { return c.conditionExpressions() }
+func checkDataAccumulationExpressionValidation(c *checkerContext) []Finding {
+	return c.dataAccumulationExpressions()
+}
 func checkExpressionFieldReferenceValidation(c *checkerContext) []Finding {
 	return c.expressionFieldReferences()
 }
@@ -460,6 +468,33 @@ func (c *checkerContext) conditionExpressions() []Finding {
 		}
 	}
 	return c.conditionExprFindings
+}
+
+func (c *checkerContext) dataAccumulationExpressions() []Finding {
+	if c.dataAccumulationExprLoaded {
+		return c.dataAccumulationExprFindings
+	}
+	c.dataAccumulationExprLoaded = true
+	for nodeID, node := range c.source.NodeEntries() {
+		nodeID = strings.TrimSpace(nodeID)
+		for eventType, handler := range node.EventHandlers {
+			eventType = strings.TrimSpace(eventType)
+			for _, expr := range handlerEntityExpressions(handler) {
+				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation {
+					continue
+				}
+				if err := workflowexpr.ValidateDataExpression(expr.Expression); err != nil {
+					c.dataAccumulationExprFindings = append(c.dataAccumulationExprFindings, Finding{
+						CheckID:  "data_accumulation_expression_validation",
+						Severity: "error",
+						Message:  fmt.Sprintf("node %s handler %s %s %q is invalid for data_accumulation.expression: %v", nodeID, eventType, expr.Kind, expr.Expression, err),
+						Location: nodeID,
+					})
+				}
+			}
+		}
+	}
+	return c.dataAccumulationExprFindings
 }
 
 func (c *checkerContext) expressionFieldReferences() []Finding {

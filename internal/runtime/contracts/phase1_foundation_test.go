@@ -39,7 +39,6 @@ func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
 
 	expectFieldType(t, reflect.TypeOf(ReduceSpec{}), "Params", reflect.TypeOf(map[string]ExpressionValue{}))
 	expectFieldType(t, reflect.TypeOf(WorkflowTransitionContract{}), "From", reflect.TypeOf([]string{}))
-	expectFieldType(t, reflect.TypeOf(WorkflowDataAccumulation{}), "Value", reflect.TypeOf(ExpressionValue{}))
 	expectFieldType(t, reflect.TypeOf(WorkflowDataWrite{}), "Value", reflect.TypeOf(ExpressionValue{}))
 	expectFieldType(t, reflect.TypeOf(FlowInstanceVariables{}), "Variables", reflect.TypeOf(map[string]FlowVariable{}))
 	expectFieldType(t, reflect.TypeOf(ToolSchemaEntry{}), "InputSchema", reflect.TypeOf(ToolInputSchema{}))
