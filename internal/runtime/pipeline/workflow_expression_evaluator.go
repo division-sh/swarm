@@ -19,6 +19,10 @@ var workflowExpressionCountGEPattern = regexp.MustCompile(`count\(\s*([a-zA-Z_][
 var workflowExpressionStageRangeCountPattern = regexp.MustCompile(`count\(\s*entities\s+in\s+\[([a-zA-Z_][a-zA-Z0-9_]*)\.\.([a-zA-Z_][a-zA-Z0-9_]*)\]\s*\)`)
 var workflowExpressionQueryEntitiesCountPattern = regexp.MustCompile(`query_entities\(\s*([^()]+?)\s*\)\.count`)
 var workflowExpressionQueryPredicatePattern = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=|>=|<=|>|<)\s*(.+?)\s*$`)
+var workflowExpressionEntityNullNotEqualPattern = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*!=\s*null\b`)
+var workflowExpressionEntityNullEqualPattern = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*==\s*null\b`)
+var workflowExpressionNullEntityNotEqualPattern = regexp.MustCompile(`\bnull\s*!=\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
+var workflowExpressionNullEntityEqualPattern = regexp.MustCompile(`\bnull\s*==\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
 
 type workflowExpressionContext struct {
 	Entity           map[string]any
@@ -170,6 +174,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		}
 	})
 	normalized = normalizeWorkflowExpressionStringLiterals(normalized)
+	normalized = rewriteWorkflowExpressionEntityNullPresenceChecks(normalized)
 	normalizedCtx := workflowExpressionContext{
 		Entity:           cloneStringAnyMap(ctx.Entity),
 		Payload:          cloneStringAnyMap(ctx.Payload),
@@ -199,6 +204,14 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		return "", workflowExpressionContext{}, err
 	}
 	return normalized, normalizedCtx, nil
+}
+
+func rewriteWorkflowExpressionEntityNullPresenceChecks(expression string) string {
+	expression = workflowExpressionEntityNullNotEqualPattern.ReplaceAllString(expression, `has(entity.$1) && entity.$1 != null`)
+	expression = workflowExpressionNullEntityNotEqualPattern.ReplaceAllString(expression, `has(entity.$1) && entity.$1 != null`)
+	expression = workflowExpressionEntityNullEqualPattern.ReplaceAllString(expression, `!has(entity.$1) || entity.$1 == null`)
+	expression = workflowExpressionNullEntityEqualPattern.ReplaceAllString(expression, `!has(entity.$1) || entity.$1 == null`)
+	return expression
 }
 
 func rewriteWorkflowExpressionQueryEntityCounts(expression string, ctx workflowExpressionContext) (string, error) {

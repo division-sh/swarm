@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -16,36 +17,92 @@ func stringValue(v any) string {
 	return ""
 }
 
+func asBool(v any) bool {
+	typed, ok := v.(bool)
+	return ok && typed
+}
+
 func workflowEntitySchemaFields(source semanticview.Source) map[string]struct{} {
-	out := map[string]struct{}{}
 	if source == nil {
-		return out
+		return map[string]struct{}{}
 	}
-	collectEntitySchemaFields(source.WorkflowEntitySchema(), out)
+	return workflowEntitySchemaFieldNames(source.WorkflowEntitySchema())
+}
+
+func workflowEntitySchemaFieldNames(raw any) map[string]struct{} {
+	out := map[string]struct{}{}
+	collectEntitySchemaFields(raw, out)
 	return out
 }
 
 func collectEntitySchemaFields(raw any, out map[string]struct{}) {
+	for name := range workflowEntitySchemaFieldDefinitions(raw) {
+		out[name] = struct{}{}
+	}
+}
+
+func workflowEntitySchemaInitialValues(source semanticview.Source) map[string]any {
+	if source == nil {
+		return nil
+	}
+	return workflowEntitySchemaInitialValuesFromRaw(source.WorkflowEntitySchema())
+}
+
+func WorkflowEntitySchemaInitialValueFields(source semanticview.Source) map[string]struct{} {
+	if source == nil {
+		return nil
+	}
+	out := map[string]struct{}{}
+	for field := range workflowEntitySchemaInitialValuesFromRaw(source.WorkflowEntitySchema()) {
+		out[field] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func workflowEntitySchemaInitialValuesFromRaw(raw any) map[string]any {
+	fields := workflowEntitySchemaFieldDefinitions(raw)
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(fields))
+	for name, field := range fields {
+		if field.Initial == nil {
+			continue
+		}
+		out[name] = cloneWorkflowSchemaValue(field.Initial)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func workflowEntitySchemaFieldDefinitions(raw any) map[string]runtimecontracts.EntitySchemaField {
+	out := map[string]runtimecontracts.EntitySchemaField{}
 	switch typed := raw.(type) {
 	case runtimecontracts.EntitySchema:
 		for _, group := range typed.Groups {
 			for _, field := range group.Fields {
 				name := strings.TrimSpace(field.Name)
 				if name != "" {
-					out[name] = struct{}{}
+					field.Name = name
+					out[name] = field
 				}
 			}
 		}
-		return
+		return out
 	case *runtimecontracts.EntitySchema:
 		if typed != nil {
-			collectEntitySchemaFields(*typed, out)
+			return workflowEntitySchemaFieldDefinitions(*typed)
 		}
-		return
+		return out
 	}
 	obj, ok := asObject(raw)
 	if !ok {
-		return
+		return out
 	}
 	if groups, ok := obj["groups"]; ok {
 		switch typed := groups.(type) {
@@ -59,13 +116,17 @@ func collectEntitySchemaFields(raw any, out map[string]struct{}) {
 				if !ok {
 					continue
 				}
-				collectEntitySchemaFields(fields, out)
+				for name, field := range workflowEntitySchemaFieldDefinitions(fields) {
+					out[name] = field
+				}
 			}
 		}
 	}
 	if fields, ok := obj["fields"]; ok {
-		collectEntitySchemaFields(fields, out)
-		return
+		for name, field := range workflowEntitySchemaFieldDefinitions(fields) {
+			out[name] = field
+		}
+		return out
 	}
 	if items, ok := raw.([]any); ok {
 		for _, item := range items {
@@ -75,9 +136,39 @@ func collectEntitySchemaFields(raw any, out map[string]struct{}) {
 			}
 			name := strings.TrimSpace(asString(field["name"]))
 			if name != "" {
-				out[name] = struct{}{}
+				out[name] = runtimecontracts.EntitySchemaField{
+					Name:        name,
+					Type:        strings.TrimSpace(asString(field["type"])),
+					Initial:     cloneWorkflowSchemaValue(field["initial"]),
+					Nullable:    asBool(field["nullable"]),
+					Description: strings.TrimSpace(asString(field["description"])),
+				}
 			}
 		}
+	}
+	return out
+}
+
+func cloneWorkflowSchemaValue(value any) any {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = cloneWorkflowSchemaValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, cloneWorkflowSchemaValue(item))
+		}
+		return out
+	case json.RawMessage:
+		return append(json.RawMessage(nil), typed...)
+	default:
+		return typed
 	}
 }
 

@@ -403,10 +403,13 @@ func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID stri
 		),
 	}
 	if handler.CreateEntity {
-		snapshot.StateCarrier.Metadata = cloneStringAnyMap(state.Metadata)
-		if snapshot.StateCarrier.Metadata == nil {
-			snapshot.StateCarrier.Metadata = map[string]any{}
+		snapshot.CurrentState = strings.TrimSpace(string(state.Stage))
+		carrier, err := runtimeengine.StateCarrierFromPersisted(cloneStringAnyMap(state.Metadata), nil)
+		if err != nil {
+			return runtimeengine.StateSnapshot{}, fmt.Errorf("workflow state metadata.gates: %w", err)
 		}
+		snapshot.StateCarrier.Metadata = carrier.Metadata
+		snapshot.StateCarrier.Gates = carrier.Gates
 		return snapshot, nil
 	}
 	snapshot.CurrentState = strings.TrimSpace(string(state.Stage))
