@@ -11,7 +11,6 @@ import (
 	"swarm/internal/events"
 	runtimeengine "swarm/internal/runtime/engine"
 	runtimepipeline "swarm/internal/runtime/pipeline"
-	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 type engineOutbox struct {
@@ -116,11 +115,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		if !passthrough {
 			return nil
 		}
-		recipientReader, err := runtimereplayclaim.RequireRecipientReader(d.bus.store)
-		if err != nil {
-			return err
-		}
-		recipients, err := d.bus.authoritativeRecipientsForEvent(ctx, recipientReader, intent.Event.ID)
+		recipients, err := d.bus.authoritativeRecipientsForEvent(ctx, intent.Event.ID)
 		if err != nil {
 			return err
 		}

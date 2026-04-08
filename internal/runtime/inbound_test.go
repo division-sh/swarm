@@ -23,6 +23,10 @@ func (failingInboundEventStore) InsertEventDeliveries(context.Context, string, [
 	return nil
 }
 
+func (failingInboundEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return []string{}, nil
+}
+
 type rollbackTrackingInboundStore struct {
 	recorded bool
 	rolled   bool

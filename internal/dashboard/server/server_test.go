@@ -115,6 +115,9 @@ func (stubBuilderRunStore) AppendEvent(context.Context, events.Event) error { re
 func (stubBuilderRunStore) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil
 }
+func (stubBuilderRunStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return []string{}, nil
+}
 func (stubBuilderRunStore) MarkRunTerminal(context.Context, string, string, string, time.Time) error {
 	return nil
 }
