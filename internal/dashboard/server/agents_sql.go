@@ -216,7 +216,7 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 	if !ok || factSource == nil {
 		return nil, fmt.Errorf("missing pending agent delivery fact source")
 	}
-	factsByAgent, err := factSource.ListPendingAgentDeliveryFacts(ctx, agentIDs, time.Now().Add(-30*24*time.Hour))
+	factsByAgent, err := factSource.ListPendingAgentDeliveryFacts(ctx, agentIDs, time.Time{})
 	if err != nil {
 		return nil, err
 	}

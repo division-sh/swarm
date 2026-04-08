@@ -1111,6 +1111,78 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	}
 }
 
+func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *testing.T) {
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg, err := store.NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:     "agent-1",
+			Role:   "researcher",
+			Mode:   "global",
+			Type:   "managed",
+			Config: json.RawMessage(`{"system_prompt":"You are an operator agent."}`),
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '45 days'
+		)
+	`, eventID, runID); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, last_error, delivered_at, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', 0, '', NULL, now() - interval '45 days'
+		)
+	`, runID, eventID); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+
+	factsByAgent, err := pg.ListPendingAgentDeliveryFacts(ctx, []string{"agent-1"}, time.Time{})
+	if err != nil {
+		t.Fatalf("ListPendingAgentDeliveryFacts: %v", err)
+	}
+	reader := NewSQLAgentReader(db, pg, 12)
+	items, err := reader.ListGenericAgents(ctx)
+	if err != nil {
+		t.Fatalf("ListGenericAgents: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one agent, got %+v", items)
+	}
+	if items[0].PendingEvents != 1 {
+		t.Fatalf("pending_events = %d, want 1 full-horizon pending delivery", items[0].PendingEvents)
+	}
+	if items[0].OldestPendingAgeSec != factsByAgent["agent-1"].OldestPendingAgeSec {
+		t.Fatalf("oldest_pending_age_sec = %d, want %d canonical full-horizon age", items[0].OldestPendingAgeSec, factsByAgent["agent-1"].OldestPendingAgeSec)
+	}
+	if items[0].OldestPendingAgeSec < 30*24*60*60 {
+		t.Fatalf("oldest_pending_age_sec = %d, want at least 30 days", items[0].OldestPendingAgeSec)
+	}
+}
+
 func TestSQLConversationReader_GetPrefersCanonicalTurnBlocks(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

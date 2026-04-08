@@ -50,6 +50,35 @@ func (r pendingAgentDeliveryRecord) isPending(now time.Time) bool {
 	return !r.ReceiptFound
 }
 
+func canonicalPendingDeliveryPredicateSQL(deliveryAlias, receiptAlias string) string {
+	return fmt.Sprintf(`(
+		(
+			%s.delivery_id IS NOT NULL
+			AND (
+				%s.status IN ('pending', 'in_progress')
+				OR (
+					%s.status = 'failed'
+					AND COALESCE(%s.retry_count, 0) < 2
+					AND COALESCE(%s.delivered_at, %s.created_at) <= now() - interval '1 minute'
+				)
+			)
+		)
+		OR (
+			%s.delivery_id IS NULL
+			AND %s.event_id IS NULL
+		)
+	)`,
+		deliveryAlias,
+		deliveryAlias,
+		deliveryAlias,
+		deliveryAlias,
+		deliveryAlias,
+		deliveryAlias,
+		deliveryAlias,
+		receiptAlias,
+	)
+}
+
 func (r pendingAgentDeliveryRecord) pendingAgeSec(now time.Time) int {
 	if r.Event.CreatedAt.IsZero() {
 		return 0
@@ -117,9 +146,6 @@ func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, agent
 	normalized := normalizePendingAgentIDs(agentIDs)
 	if len(normalized) == 0 {
 		return map[string]PendingAgentDeliveryFacts{}, nil
-	}
-	if since.IsZero() {
-		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
 	for _, agentID := range normalized {
 		if err := s.normalizeLegacyAgentRetryOwners(ctx, agentID, since); err != nil {
@@ -190,14 +216,22 @@ func (s *PostgresStore) listPendingAgentDeliveryFactRecordsSpec(ctx context.Cont
 			AND r.subscriber_id = d.subscriber_id
 		WHERE d.subscriber_type = 'agent'
 		  AND d.subscriber_id = ANY($1)
-		  AND e.created_at >= $2
+		  AND ($2::timestamptz IS NULL OR e.created_at >= $2::timestamptz)
+		  AND `+canonicalPendingDeliveryPredicateSQL("d", "r")+`
 		ORDER BY d.subscriber_id ASC, e.created_at ASC, e.event_id ASC
-	`, pq.Array(agentIDs), since)
+	`, pq.Array(agentIDs), pendingDeliverySinceArg(since))
 	if err != nil {
 		return nil, fmt.Errorf("query pending agent delivery facts: %w", err)
 	}
 	defer rows.Close()
 	return scanPendingAgentDeliveryRecords(rows)
+}
+
+func pendingDeliverySinceArg(since time.Time) any {
+	if since.IsZero() {
+		return nil
+	}
+	return since
 }
 
 func scanPendingAgentDeliveryRecords(rows *sql.Rows) ([]pendingAgentDeliveryRecord, error) {
