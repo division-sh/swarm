@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	runtimebus "swarm/internal/runtime/bus"
@@ -175,5 +176,31 @@ func TestBuildTurnBlocks_AppendsCanonicalSummaryForExplicitBlocks(t *testing.T) 
 	}
 	if summary.ToolResults[0].ToolName != "schedule" {
 		t.Fatalf("tool_result = %#v", summary.ToolResults[0])
+	}
+}
+
+func TestDecodeCanonicalTurnSummaryBlocks_FailsWhenSummaryBearingBlocksLackCanonicalSummary(t *testing.T) {
+	_, ok, err := DecodeCanonicalTurnSummaryBlocks([]TurnBlock{
+		{Kind: "assistant_text", Text: "Parking for manual review."},
+		{Kind: "outcome", Text: "14-day review scheduled."},
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing canonical turn_summary for summary-bearing turn blocks") {
+		t.Fatalf("DecodeCanonicalTurnSummaryBlocks error = %v", err)
+	}
+	if ok {
+		t.Fatal("expected missing canonical summary not to decode successfully")
+	}
+}
+
+func TestDecodeCanonicalTurnSummaryBlocks_FailsOnDuplicateCanonicalSummary(t *testing.T) {
+	_, ok, err := DecodeCanonicalTurnSummaryBlocks([]TurnBlock{
+		newTurnSummaryTurnBlock(TurnSummaryTurnBlockData{AssistantVisibleOutput: "one", Outcome: "one"}),
+		newTurnSummaryTurnBlock(TurnSummaryTurnBlockData{AssistantVisibleOutput: "two", Outcome: "two"}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "multiple canonical turn_summary blocks") {
+		t.Fatalf("DecodeCanonicalTurnSummaryBlocks error = %v", err)
+	}
+	if ok {
+		t.Fatal("expected duplicate canonical summary not to decode successfully")
 	}
 }
