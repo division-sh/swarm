@@ -1057,7 +1057,7 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 		t.Fatalf("pending event ids = %#v, want %#v", gotPendingIDs, wantPendingIDs)
 	}
 
-	reader := NewSQLAgentReader(db, pg, 12)
+	reader := NewSQLAgentReader(db, pendingFactsOverrideStore{PostgresStore: pg, facts: factsByAgent}, 12)
 	items, err := reader.ListGenericAgents(ctx)
 	if err != nil {
 		t.Fatalf("ListGenericAgents: %v", err)
@@ -1135,7 +1135,7 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	if err != nil {
 		t.Fatalf("ListPendingAgentDeliveryFacts: %v", err)
 	}
-	reader := NewSQLAgentReader(db, pg, 12)
+	reader := NewSQLAgentReader(db, pendingFactsOverrideStore{PostgresStore: pg, facts: factsByAgent}, 12)
 	items, err := reader.ListGenericAgents(ctx)
 	if err != nil {
 		t.Fatalf("ListGenericAgents: %v", err)
@@ -1152,6 +1152,23 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	if items[0].OldestPendingAgeSec < 30*24*60*60 {
 		t.Fatalf("oldest_pending_age_sec = %d, want at least 30 days", items[0].OldestPendingAgeSec)
 	}
+}
+
+type pendingFactsOverrideStore struct {
+	*store.PostgresStore
+	facts map[string]store.PendingAgentDeliveryFacts
+	err   error
+}
+
+func (s pendingFactsOverrideStore) ListPendingAgentDeliveryFacts(context.Context, []string, time.Time) (map[string]store.PendingAgentDeliveryFacts, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	out := make(map[string]store.PendingAgentDeliveryFacts, len(s.facts))
+	for agentID, facts := range s.facts {
+		out[agentID] = facts
+	}
+	return out, nil
 }
 
 func TestSQLConversationReader_GetPrefersCanonicalTurnBlocks(t *testing.T) {
