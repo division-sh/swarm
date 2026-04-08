@@ -18,8 +18,10 @@ import (
 type SchedulePersistence interface {
 	UpsertSchedule(ctx context.Context, sc Schedule) error
 	CancelScheduleExact(ctx context.Context, sc Schedule) error
+	CancelScheduleExactTerminal(ctx context.Context, sc Schedule) error
 	LoadActiveSchedules(ctx context.Context) ([]Schedule, error)
 	MarkScheduleFiredExact(ctx context.Context, sc Schedule) error
+	CompleteScheduleFireExact(ctx context.Context, sc Schedule) error
 	ClaimSchedule(ctx context.Context, sc Schedule) (bool, error)
 	ReleaseSchedule(ctx context.Context, sc Schedule) error
 	ReleaseScheduleClaims(ctx context.Context) error

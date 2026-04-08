@@ -412,18 +412,12 @@ func (pc *PipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Context, 
 	if pc.timerScheduleStore == nil {
 		return
 	}
-	if err := pc.timerScheduleStore.CancelScheduleExact(ctx, sc); err != nil {
+	if err := pc.timerScheduleStore.CancelScheduleExactTerminal(ctx, sc); err != nil {
 		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
 			"task_id": strings.TrimSpace(sc.TaskID),
 			"mode":    strings.TrimSpace(sc.Mode),
 		}, err)
 		return
-	}
-	if err := ReleaseOwnedSchedule(ctx, pc.timerScheduleStore, sc); err != nil {
-		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_release_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-			"task_id": strings.TrimSpace(sc.TaskID),
-			"mode":    strings.TrimSpace(sc.Mode),
-		}, err)
 	}
 }
 
@@ -459,18 +453,12 @@ func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Cont
 		return
 	}
 	if pc.timerScheduleStore != nil {
-		if err := pc.timerScheduleStore.CancelScheduleExact(ctx, sc); err != nil {
+		if err := pc.timerScheduleStore.CancelScheduleExactTerminal(ctx, sc); err != nil {
 			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
 				"task_id": strings.TrimSpace(sc.TaskID),
 				"mode":    strings.TrimSpace(sc.Mode),
 			}, err)
 			return
-		}
-		if err := ReleaseOwnedSchedule(ctx, pc.timerScheduleStore, sc); err != nil {
-			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_release_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
-				"task_id": strings.TrimSpace(sc.TaskID),
-				"mode":    strings.TrimSpace(sc.Mode),
-			}, err)
 		}
 	}
 	if pc.timerScheduler != nil {

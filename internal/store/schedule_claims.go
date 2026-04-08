@@ -93,6 +93,15 @@ func (s *PostgresStore) ReleaseSchedule(ctx context.Context, sc runtimepipeline.
 	return nil
 }
 
+func (s *PostgresStore) CancelScheduleExactTerminal(ctx context.Context, sc runtimepipeline.Schedule) error {
+	return s.applyScheduleTerminalTransition(ctx, sc, s.CancelScheduleExact, true)
+}
+
+func (s *PostgresStore) CompleteScheduleFireExact(ctx context.Context, sc runtimepipeline.Schedule) error {
+	release := strings.EqualFold(strings.TrimSpace(sc.Mode), "once")
+	return s.applyScheduleTerminalTransition(ctx, sc, s.MarkScheduleFiredExact, release)
+}
+
 func (s *PostgresStore) ReleaseScheduleClaims(ctx context.Context) error {
 	if s == nil {
 		return nil
@@ -126,6 +135,24 @@ func (s *PostgresStore) closeScheduleClaimConnLocked() error {
 	}
 	if err := conn.Close(); err != nil {
 		return fmt.Errorf("close schedule ownership connection: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) applyScheduleTerminalTransition(
+	ctx context.Context,
+	sc runtimepipeline.Schedule,
+	transition func(context.Context, runtimepipeline.Schedule) error,
+	release bool,
+) error {
+	if err := transition(ctx, sc); err != nil {
+		return err
+	}
+	if !release {
+		return nil
+	}
+	if err := s.ReleaseSchedule(ctx, sc); err != nil {
+		return err
 	}
 	return nil
 }
