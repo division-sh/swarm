@@ -144,6 +144,41 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			rec.Error,
 		}
 	}
+	if !runtimeMode.IsStateless() {
+		updateQ = `
+			UPDATE agent_sessions
+			SET updated_at = now()
+			WHERE agent_id = $1
+			  AND runtime_mode = $2
+			  AND session_id = $3::uuid
+			  AND status = 'active'
+		`
+		updateArgs = []any{
+			rec.AgentID,
+			runtimeMode,
+			rec.SessionID,
+		}
+		if hasConversationRunID {
+			if err := s.ensureRunRow(ctx, caps, tx, runID); err != nil {
+				return err
+			}
+			updateQ = `
+				UPDATE agent_sessions
+				SET run_id = COALESCE(NULLIF($4,'')::uuid, run_id),
+				    updated_at = now()
+				WHERE agent_id = $1
+				  AND runtime_mode = $2
+				  AND session_id = $3::uuid
+				  AND status = 'active'
+			`
+			updateArgs = []any{
+				rec.AgentID,
+				runtimeMode,
+				rec.SessionID,
+				nullUUIDString(runID),
+			}
+		}
+	}
 	res, err := tx.ExecContext(ctx, updateQ,
 		updateArgs...,
 	)
