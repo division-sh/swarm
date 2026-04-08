@@ -99,11 +99,13 @@ func (s *PostgresStore) MarkAgentTerminated(ctx context.Context, agentID string)
 	const qSessions = `
 		UPDATE agent_sessions
 		SET status = 'terminated',
+		    termination_reason = 'cancelled',
+		    terminated_at = COALESCE(terminated_at, now()),
 		    lease_holder = NULL,
 		    lease_expires_at = NULL,
 		    updated_at = now()
 		WHERE agent_id = $1
-		  AND status = 'active'
+		  AND status IN ('active', 'suspended')
 	`
 	if _, err := tx.ExecContext(ctx, qSessions, agentID); err != nil {
 		return fmt.Errorf("mark agent terminated sessions: %w", err)

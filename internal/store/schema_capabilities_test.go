@@ -43,7 +43,8 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	addColumns("agent_sessions",
 		"session_id", "run_id", "agent_id", "entity_id", "flow_instance", "scope_key", "scope",
 		"conversation", "turn_count", "runtime_mode", "runtime_state", "lease_holder",
-		"lease_expires_at", "status", "created_at", "updated_at",
+		"lease_expires_at", "status", "termination_reason", "termination_detail",
+		"successor_session_id", "terminated_at", "created_at", "updated_at",
 	)
 	addColumns("agent_conversation_audits",
 		"session_id", "run_id", "agent_id", "entity_id", "flow_instance", "scope_key", "scope",

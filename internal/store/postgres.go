@@ -129,6 +129,9 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	if err := s.ensureConversationAuditTable(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureAgentSessionTerminationMetadata(ctx); err != nil {
+		return err
+	}
 ensureAgents:
 	if err := s.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
 		return err
@@ -146,6 +149,199 @@ ensureAgents:
 	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
+}
+
+func (s *PostgresStore) ensureAgentSessionTerminationMetadata(ctx context.Context) error {
+	if s == nil || s.DB == nil {
+		return nil
+	}
+	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
+		return err
+	}
+	if !catalog.hasTable("agent_sessions") {
+		return nil
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS termination_reason TEXT`,
+		`ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS termination_detail TEXT`,
+		`ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS successor_session_id UUID REFERENCES agent_sessions(session_id)`,
+		`ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS terminated_at TIMESTAMPTZ`,
+	} {
+		if _, err := s.DB.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("ensure agent_sessions termination metadata columns: %w", err)
+		}
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET termination_reason = COALESCE(NULLIF(termination_reason, ''), 'legacy'),
+		    terminated_at = COALESCE(terminated_at, updated_at, created_at)
+		WHERE status = 'terminated'
+		  AND (NULLIF(termination_reason, '') IS NULL OR terminated_at IS NULL)
+	`); err != nil {
+		return fmt.Errorf("backfill agent_sessions termination metadata: %w", err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		DO $$
+		DECLARE rec RECORD;
+		BEGIN
+			FOR rec IN
+				SELECT c.conname
+				FROM pg_constraint c
+				WHERE c.conrelid = 'agent_sessions'::regclass
+				  AND c.contype = 'u'
+				  AND c.conkey = ARRAY[
+					(SELECT attnum FROM pg_attribute WHERE attrelid = 'agent_sessions'::regclass AND attname = 'agent_id'),
+					(SELECT attnum FROM pg_attribute WHERE attrelid = 'agent_sessions'::regclass AND attname = 'scope_key')
+				  ]
+			LOOP
+				EXECUTE format('ALTER TABLE agent_sessions DROP CONSTRAINT %I', rec.conname);
+			END LOOP;
+		END
+		$$;
+	`); err != nil {
+		return fmt.Errorf("drop legacy agent_sessions uniqueness constraint: %w", err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		CREATE UNIQUE INDEX IF NOT EXISTS agent_sessions_nonterminated_unique
+		ON agent_sessions (agent_id, scope_key)
+		WHERE status <> 'terminated'
+	`); err != nil {
+		return fmt.Errorf("ensure agent_sessions nonterminated unique index: %w", err)
+	}
+	for name, statement := range map[string]string{
+		"agent_sessions_termination_reason_enum_check": `
+			ALTER TABLE agent_sessions
+			ADD CONSTRAINT agent_sessions_termination_reason_enum_check
+			CHECK (
+				termination_reason IS NULL OR
+				termination_reason IN ('normal', 'cancelled', 'failed', 'orphaned', 'contaminated', 'legacy')
+			)
+		`,
+		"agent_sessions_status_termination_check": `
+			ALTER TABLE agent_sessions
+			ADD CONSTRAINT agent_sessions_status_termination_check
+			CHECK (
+				(status IN ('active', 'suspended') AND termination_reason IS NULL AND termination_detail IS NULL AND successor_session_id IS NULL AND terminated_at IS NULL)
+				OR
+				(status = 'terminated' AND termination_reason IS NOT NULL AND terminated_at IS NOT NULL)
+			)
+		`,
+		"agent_sessions_termination_detail_requires_reason_check": `
+			ALTER TABLE agent_sessions
+			ADD CONSTRAINT agent_sessions_termination_detail_requires_reason_check
+			CHECK (termination_detail IS NULL OR termination_reason IS NOT NULL)
+		`,
+		"agent_sessions_successor_requires_terminated_check": `
+			ALTER TABLE agent_sessions
+			ADD CONSTRAINT agent_sessions_successor_requires_terminated_check
+			CHECK (successor_session_id IS NULL OR status = 'terminated')
+		`,
+		"agent_sessions_successor_not_self_check": `
+			ALTER TABLE agent_sessions
+			ADD CONSTRAINT agent_sessions_successor_not_self_check
+			CHECK (successor_session_id IS NULL OR successor_session_id <> session_id)
+		`,
+	} {
+		exists, err := namedTableConstraintExists(ctx, s.DB, "agent_sessions", name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := s.DB.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("ensure %s: %w", name, err)
+		}
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		CREATE OR REPLACE FUNCTION enforce_agent_session_termination_invariants()
+		RETURNS trigger
+		LANGUAGE plpgsql
+		AS $$
+		DECLARE
+			succ_agent TEXT;
+			succ_scope TEXT;
+			succ_scope_key TEXT;
+			creates_cycle BOOLEAN;
+		BEGIN
+			IF TG_OP = 'UPDATE' THEN
+				IF NEW.agent_id IS DISTINCT FROM OLD.agent_id OR NEW.scope IS DISTINCT FROM OLD.scope OR NEW.scope_key IS DISTINCT FROM OLD.scope_key THEN
+					RAISE EXCEPTION 'agent_sessions identity fields are immutable';
+				END IF;
+				IF OLD.termination_reason IS NOT NULL AND NEW.termination_reason IS DISTINCT FROM OLD.termination_reason THEN
+					RAISE EXCEPTION 'agent_sessions termination_reason is immutable once set';
+				END IF;
+				IF OLD.terminated_at IS NOT NULL AND NEW.terminated_at IS DISTINCT FROM OLD.terminated_at THEN
+					RAISE EXCEPTION 'agent_sessions terminated_at is immutable once set';
+				END IF;
+			END IF;
+			IF NEW.termination_reason = 'legacy' AND (TG_OP = 'INSERT' OR COALESCE(OLD.termination_reason, '') <> 'legacy') THEN
+				RAISE EXCEPTION 'agent_sessions termination_reason legacy is reserved for migration backfill';
+			END IF;
+			IF NEW.successor_session_id IS NOT NULL THEN
+				SELECT agent_id, scope, scope_key
+				INTO succ_agent, succ_scope, succ_scope_key
+				FROM agent_sessions
+				WHERE session_id = NEW.successor_session_id;
+				IF NOT FOUND THEN
+					RAISE EXCEPTION 'agent_sessions successor_session_id must reference an existing session';
+				END IF;
+				IF succ_agent IS DISTINCT FROM NEW.agent_id OR succ_scope IS DISTINCT FROM NEW.scope OR succ_scope_key IS DISTINCT FROM NEW.scope_key THEN
+					RAISE EXCEPTION 'agent_sessions successor_session_id must reference the same agent/scope/scope_key lineage';
+				END IF;
+				WITH RECURSIVE lineage AS (
+					SELECT session_id, successor_session_id
+					FROM agent_sessions
+					WHERE session_id = NEW.successor_session_id
+					UNION ALL
+					SELECT s.session_id, s.successor_session_id
+					FROM agent_sessions s
+					JOIN lineage l ON s.session_id = l.successor_session_id
+					WHERE l.successor_session_id IS NOT NULL
+				)
+				SELECT EXISTS (
+					SELECT 1 FROM lineage WHERE session_id = NEW.session_id OR successor_session_id = NEW.session_id
+				)
+				INTO creates_cycle;
+				IF creates_cycle THEN
+					RAISE EXCEPTION 'agent_sessions successor_session_id must be acyclic';
+				END IF;
+			END IF;
+			RETURN NEW;
+		END
+		$$;
+	`); err != nil {
+		return fmt.Errorf("ensure agent_sessions invariant function: %w", err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		DROP TRIGGER IF EXISTS agent_sessions_invariant_write_guard ON agent_sessions;
+		CREATE TRIGGER agent_sessions_invariant_write_guard
+		BEFORE INSERT OR UPDATE ON agent_sessions
+		FOR EACH ROW
+		EXECUTE FUNCTION enforce_agent_session_termination_invariants();
+	`); err != nil {
+		return fmt.Errorf("ensure agent_sessions invariant trigger: %w", err)
+	}
+	return nil
+}
+
+func namedTableConstraintExists(ctx context.Context, db *sql.DB, tableName, constraintName string) (bool, error) {
+	if db == nil {
+		return false, nil
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_constraint
+			WHERE conrelid = to_regclass($1)
+			  AND conname = $2
+		)
+	`, strings.TrimSpace(tableName), strings.TrimSpace(constraintName)).Scan(&exists); err != nil {
+		return false, fmt.Errorf("query constraint %s on %s: %w", strings.TrimSpace(constraintName), strings.TrimSpace(tableName), err)
+	}
+	return exists, nil
 }
 
 func (s *PostgresStore) ensureAgentRuntimeDescriptorColumn(ctx context.Context) error {

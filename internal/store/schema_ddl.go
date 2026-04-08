@@ -20,7 +20,7 @@ var (
 	schemaDDLIdentifierPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 	schemaDDLNumericPattern    = regexp.MustCompile(`^numeric\(\s*(\d+)\s*,\s*(\d+)\s*\)$`)
 	schemaDDLCreateTableName   = regexp.MustCompile(`(?is)^create\s+table(?:\s+if\s+not\s+exists)?\s+"?([a-z_][a-z0-9_]*)"?`)
-	schemaDDLInlineIndexLine   = regexp.MustCompile(`(?i)^index\s+([a-z_][a-z0-9_]*)\s*\((.+?)\)\s*(where\s+.+)?$`)
+	schemaDDLInlineIndexLine   = regexp.MustCompile(`(?i)^(unique\s+)?index\s+([a-z_][a-z0-9_]*)\s*\((.+?)\)\s*(where\s+.+)?$`)
 )
 
 func SchemaFieldTypeToDDL(schemaType string) (string, error) {
@@ -350,6 +350,8 @@ func normalizePlatformDDLStatements(rawDDL string) ([]string, error) {
 			continue
 		case strings.HasPrefix(strings.ToUpper(statement), "CREATE INDEX "):
 			statement = schemaDDLEnsureIfNotExists(statement, "CREATE INDEX")
+		case strings.HasPrefix(strings.ToUpper(statement), "CREATE UNIQUE INDEX "):
+			statement = schemaDDLEnsureIfNotExists(statement, "CREATE UNIQUE INDEX")
 		default:
 			return nil, fmt.Errorf("unsupported platform DDL statement %q", statement)
 		}
@@ -382,13 +384,17 @@ func schemaDDLNormalizeCreateTable(statement string) (string, []string, error) {
 			continue
 		}
 		if matches := schemaDDLInlineIndexLine.FindStringSubmatch(trimmed); len(matches) >= 3 {
-			indexName := strings.TrimSpace(matches[1])
-			indexCols := strings.TrimSpace(matches[2])
+			uniquePrefix := strings.TrimSpace(matches[1])
+			indexName := strings.TrimSpace(matches[2])
+			indexCols := strings.TrimSpace(matches[3])
 			whereClause := ""
-			if len(matches) >= 4 {
-				whereClause = strings.TrimSpace(matches[3])
+			if len(matches) >= 5 {
+				whereClause = strings.TrimSpace(matches[4])
 			}
 			statement := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", quoteIdent(indexName), quoteIdent(tableName), indexCols)
+			if uniquePrefix != "" {
+				statement = fmt.Sprintf("CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s(%s)", quoteIdent(indexName), quoteIdent(tableName), indexCols)
+			}
 			if whereClause != "" {
 				statement += " " + whereClause
 			}
