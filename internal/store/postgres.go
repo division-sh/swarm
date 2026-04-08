@@ -67,6 +67,8 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 	return s.DB.PingContext(ctx)
 }
 
+func (*PostgresStore) SupportsPersistedReplay() bool { return true }
+
 func (s *PostgresStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTableDDL) error {
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required for schema ddl")

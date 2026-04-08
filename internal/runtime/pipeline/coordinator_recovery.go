@@ -49,9 +49,12 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 	if r == nil || r.store == nil || r.bus == nil {
 		return nil
 	}
-	replayStore, err := runtimereplayclaim.RequireStore(r.store)
+	replayStore, participates, err := runtimereplayclaim.RequireStore(r.store)
 	if err != nil {
 		return fmt.Errorf("recover pipeline receipts: %w", err)
+	}
+	if !participates {
+		return nil
 	}
 	window := r.window
 	if window <= 0 {
