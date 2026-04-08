@@ -7,16 +7,6 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 )
 
-type TurnBlock struct {
-	Kind     string         `json:"kind"`
-	Title    string         `json:"title,omitempty"`
-	Text     string         `json:"text,omitempty"`
-	ToolName string         `json:"tool_name,omitempty"`
-	Input    any            `json:"input,omitempty"`
-	Output   any            `json:"output,omitempty"`
-	Data     map[string]any `json:"data,omitempty"`
-}
-
 const turnSummaryBlockKind = "turn_summary"
 
 func BuildTurnBlocks(rec AgentTurnRecord) []TurnBlock {
@@ -41,24 +31,12 @@ func buildDispatchBlock(rec AgentTurnRecord) TurnBlock {
 		strings.TrimSpace(rec.TaskID) == "" {
 		return TurnBlock{}
 	}
-	data := map[string]any{}
-	if v := strings.TrimSpace(rec.TriggerEventID); v != "" {
-		data["trigger_event_id"] = v
-	}
-	if v := strings.TrimSpace(rec.TriggerEventType); v != "" {
-		data["trigger_event_type"] = v
-	}
-	if v := strings.TrimSpace(rec.EntityID); v != "" {
-		data["entity_id"] = v
-	}
-	if v := strings.TrimSpace(rec.TaskID); v != "" {
-		data["task_id"] = v
-	}
-	return TurnBlock{
-		Kind:  "dispatch",
-		Title: strings.TrimSpace(rec.TriggerEventType),
-		Data:  data,
-	}
+	return newDispatchTurnBlock(strings.TrimSpace(rec.TriggerEventType), TurnBlockDispatchData{
+		TriggerEventID:   strings.TrimSpace(rec.TriggerEventID),
+		TriggerEventType: strings.TrimSpace(rec.TriggerEventType),
+		EntityID:         strings.TrimSpace(rec.EntityID),
+		TaskID:           strings.TrimSpace(rec.TaskID),
+	})
 }
 
 func buildFlightRecorderBlocks(rec AgentTurnRecord) []TurnBlock {
@@ -86,59 +64,33 @@ func buildPublishBlock(entry runtimebus.FlightRecorderEntry) (TurnBlock, bool) {
 	if eventType == "" {
 		return TurnBlock{}, false
 	}
-	data := map[string]any{}
-	if v := strings.TrimSpace(entry.EventID); v != "" {
-		data["event_id"] = v
-	}
-	if v := strings.TrimSpace(entry.EntityID); v != "" {
-		data["entity_id"] = v
-	}
-	if v := strings.TrimSpace(entry.ParentEventID); v != "" {
-		data["parent_event_id"] = v
-	}
-	if len(entry.RoutedRecipients) > 0 {
-		data["routed_recipients"] = entry.RoutedRecipients
-		data["routed_recipients_count"] = len(entry.RoutedRecipients)
-	}
-	if len(entry.SubscriptionRecipients) > 0 {
-		data["subscription_recipients"] = entry.SubscriptionRecipients
-		data["subscription_recipients_count"] = len(entry.SubscriptionRecipients)
-	}
-	return TurnBlock{
-		Kind:  "publish",
-		Title: eventType,
-		Data:  data,
-	}, true
+	return newPublishTurnBlock(eventType, TurnBlockPublishData{
+		EventID:                     strings.TrimSpace(entry.EventID),
+		EntityID:                    strings.TrimSpace(entry.EntityID),
+		ParentEventID:               strings.TrimSpace(entry.ParentEventID),
+		RoutedRecipients:            append([]runtimebus.PublishDiagnosticRecipient(nil), entry.RoutedRecipients...),
+		RoutedRecipientsCount:       len(entry.RoutedRecipients),
+		SubscriptionRecipients:      append([]string(nil), entry.SubscriptionRecipients...),
+		SubscriptionRecipientsCount: len(entry.SubscriptionRecipients),
+	}), true
 }
 
 func buildRuntimeLogBlock(entry runtimebus.FlightRecorderEntry) (TurnBlock, bool) {
 	message := strings.TrimSpace(entry.Message)
-	details, _ := entry.Details.(map[string]any)
-	if message == "" && len(details) == 0 {
+	detailsRaw := rawTurnBlockValue(entry.Details)
+	if message == "" && len(detailsRaw) == 0 {
 		return TurnBlock{}, false
-	}
-	data := map[string]any{}
-	if v := strings.TrimSpace(entry.LogLevel); v != "" {
-		data["log_level"] = v
-	}
-	if message != "" {
-		data["message"] = message
-	}
-	if entry.Details != nil {
-		data["details"] = entry.Details
-	}
-	if v := strings.TrimSpace(entry.StackTrace); v != "" {
-		data["stack_trace"] = v
 	}
 	title := message
 	if title == "" {
 		title = "runtime log"
 	}
-	return TurnBlock{
-		Kind:  "runtime_log",
-		Title: title,
-		Data:  data,
-	}, true
+	return newRuntimeLogTurnBlock(title, TurnBlockRuntimeLogData{
+		LogLevel:   strings.TrimSpace(entry.LogLevel),
+		Message:    message,
+		Details:    detailsRaw,
+		StackTrace: strings.TrimSpace(entry.StackTrace),
+	}), true
 }
 
 func parseTurnBlocksFromRaw(raw []byte) []TurnBlock {
@@ -266,14 +218,7 @@ func parseBlocksFromContent(content []any) []TurnBlock {
 			if input == nil {
 				input = entry["arguments"]
 			}
-			blocks = append(blocks, TurnBlock{
-				Kind:     "tool_use",
-				ToolName: name,
-				Input:    input,
-				Data: map[string]any{
-					"tool_use_id": strings.TrimSpace(asString(entry["id"])),
-				},
-			})
+			blocks = append(blocks, newToolUseTurnBlock(name, input, strings.TrimSpace(asString(entry["id"]))))
 		}
 	}
 	return blocks
@@ -290,20 +235,15 @@ func blocksFromUserObject(obj map[string]any) []TurnBlock {
 		if strings.TrimSpace(strings.ToLower(asString(entry["type"]))) != "tool_result" {
 			continue
 		}
-		block := TurnBlock{
-			Kind: "tool_result",
-			Data: map[string]any{
-				"tool_use_id": strings.TrimSpace(asString(entry["tool_use_id"])),
-			},
-		}
+		block := newToolResultTurnBlock("", nil, strings.TrimSpace(asString(entry["tool_use_id"])))
 		if content, ok := entry["content"].([]any); ok && len(content) > 0 {
 			if first, ok := content[0].(map[string]any); ok {
 				if text := strings.TrimSpace(asString(first["text"])); text != "" {
 					var decoded any
 					if json.Unmarshal([]byte(text), &decoded) == nil {
-						block.Output = decoded
+						block.Output = rawTurnBlockValue(decoded)
 					} else {
-						block.Output = text
+						block.Output = rawTurnBlockValue(text)
 					}
 				}
 			}
@@ -361,14 +301,7 @@ func blocksFromStreamEvent(obj map[string]any, pending map[int]*cliPendingToolCa
 			}
 		}
 		if strings.TrimSpace(call.Name) != "" {
-			return []TurnBlock{{
-				Kind:     "tool_use",
-				ToolName: call.Name,
-				Input:    args,
-				Data: map[string]any{
-					"tool_use_id": strings.TrimSpace(call.ID),
-				},
-			}}
+			return []TurnBlock{newToolUseTurnBlock(call.Name, args, strings.TrimSpace(call.ID))}
 		}
 	}
 	return nil
@@ -446,7 +379,7 @@ func buildTurnSummaryBlock(blocks []TurnBlock) (TurnBlock, bool) {
 	outcome := ""
 	reasoning := []string{}
 	progress := []string{}
-	toolResults := []any{}
+	toolResults := []TurnSummaryToolResult{}
 	reasoningSeen := map[string]struct{}{}
 	progressSeen := map[string]struct{}{}
 	for _, block := range blocks {
@@ -487,50 +420,45 @@ func buildTurnSummaryBlock(blocks []TurnBlock) (TurnBlock, bool) {
 	if outcome == "" {
 		outcome = assistantVisibleOutput
 	}
-	data := map[string]any{}
-	if assistantVisibleOutput != "" {
-		data["assistant_visible_output"] = assistantVisibleOutput
+	data := TurnSummaryTurnBlockData{
+		AssistantVisibleOutput: assistantVisibleOutput,
+		Outcome:                outcome,
+		ReasoningBlocks:        reasoning,
+		ProgressUpdates:        progress,
+		ToolResults:            toolResults,
 	}
-	if outcome != "" {
-		data["outcome"] = outcome
-	}
-	if len(reasoning) > 0 {
-		data["reasoning_blocks"] = reasoning
-	}
-	if len(progress) > 0 {
-		data["progress_updates"] = progress
-	}
-	if len(toolResults) > 0 {
-		data["tool_results"] = toolResults
-	}
-	if len(data) == 0 {
+	if data.AssistantVisibleOutput == "" &&
+		data.Outcome == "" &&
+		len(data.ReasoningBlocks) == 0 &&
+		len(data.ProgressUpdates) == 0 &&
+		len(data.ToolResults) == 0 {
 		return TurnBlock{}, false
 	}
-	return TurnBlock{Kind: turnSummaryBlockKind, Data: data}, true
+	return newTurnSummaryTurnBlock(data), true
 }
 
-func buildTurnSummaryToolResult(block TurnBlock) (map[string]any, bool) {
-	result := map[string]any{}
-	if name := strings.TrimSpace(block.ToolName); name != "" {
-		result["tool_name"] = name
+func buildTurnSummaryToolResult(block TurnBlock) (TurnSummaryToolResult, bool) {
+	result := TurnSummaryToolResult{
+		ToolName: strings.TrimSpace(block.ToolName),
 	}
 	if toolUseID := strings.TrimSpace(blockToolUseID(block)); toolUseID != "" {
-		result["tool_use_id"] = toolUseID
+		result.ToolUseID = toolUseID
 	}
-	if block.Output != nil {
-		result["output"] = block.Output
+	if len(block.Output) > 0 {
+		result.Output = append(json.RawMessage(nil), block.Output...)
 	}
-	if len(result) == 0 {
-		return nil, false
+	if result.ToolName == "" && result.ToolUseID == "" && len(result.Output) == 0 {
+		return TurnSummaryToolResult{}, false
 	}
 	return result, true
 }
 
 func blockToolUseID(block TurnBlock) string {
-	if len(block.Data) == 0 {
+	link, ok, err := block.ToolLinkData()
+	if err != nil || !ok {
 		return ""
 	}
-	return asString(block.Data["tool_use_id"])
+	return strings.TrimSpace(link.ToolUseID)
 }
 
 func firstReadableString(values ...string) string {

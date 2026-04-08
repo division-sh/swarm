@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 
 	runtimebus "swarm/internal/runtime/bus"
@@ -79,9 +80,12 @@ func TestBuildTurnBlocks_IncludesPublishEntriesFromFlightRecorder(t *testing.T) 
 	if blocks[1].Title != "scoring/vertical.shortlisted" {
 		t.Fatalf("blocks[1].title = %q", blocks[1].Title)
 	}
-	routed, ok := blocks[1].Data["routed_recipients"].([]runtimebus.PublishDiagnosticRecipient)
-	if !ok || len(routed) != 1 || routed[0].LocalizedEvent != "vertical.shortlisted" {
-		t.Fatalf("publish block routed_recipients = %#v", blocks[1].Data["routed_recipients"])
+	data, ok, err := blocks[1].PublishData()
+	if err != nil {
+		t.Fatalf("PublishData: %v", err)
+	}
+	if !ok || len(data.RoutedRecipients) != 1 || data.RoutedRecipients[0].LocalizedEvent != "vertical.shortlisted" {
+		t.Fatalf("publish block routed_recipients = %#v", data.RoutedRecipients)
 	}
 }
 
@@ -113,12 +117,19 @@ func TestBuildTurnBlocks_IncludesSpecShapedRuntimeLogFlightRecorderEntries(t *te
 	if blocks[0].Title != "Tool execution was denied for save_entity_field" {
 		t.Fatalf("title = %q", blocks[0].Title)
 	}
-	if got := asString(blocks[0].Data["log_level"]); got != "warn" {
-		t.Fatalf("log_level = %q", got)
+	data, ok, err := blocks[0].RuntimeLogData()
+	if err != nil {
+		t.Fatalf("RuntimeLogData: %v", err)
 	}
-	details, ok := blocks[0].Data["details"].(map[string]any)
 	if !ok {
-		t.Fatalf("details = %#v", blocks[0].Data["details"])
+		t.Fatal("expected runtime_log data")
+	}
+	if data.LogLevel != "warn" {
+		t.Fatalf("log_level = %q", data.LogLevel)
+	}
+	var details map[string]any
+	if err := json.Unmarshal(data.Details, &details); err != nil {
+		t.Fatalf("decode details: %v", err)
 	}
 	if details["denial_layer"] != "executor" {
 		t.Fatalf("details.denial_layer = %#v", details["denial_layer"])
@@ -129,38 +140,40 @@ func TestBuildTurnBlocks_AppendsCanonicalSummaryForExplicitBlocks(t *testing.T) 
 	blocks := BuildTurnBlocks(AgentTurnRecord{
 		TurnBlocks: []TurnBlock{
 			{Kind: "progress", Text: "Scheduling the follow-up review."},
-			{Kind: "tool_result", ToolName: "schedule", Output: map[string]any{"status": "scheduled"}, Data: map[string]any{"tool_use_id": "toolu_1"}},
+			newToolResultTurnBlock("schedule", map[string]any{"status": "scheduled"}, "toolu_1"),
 			{Kind: "assistant_text", Text: "Parking for manual review."},
 			{Kind: "outcome", Text: "14-day review scheduled."},
 		},
 	})
 
-	var summary map[string]any
+	var summary TurnSummaryTurnBlockData
+	var ok bool
 	for _, block := range blocks {
 		if block.Kind == turnSummaryBlockKind {
-			summary = block.Data
+			var err error
+			summary, ok, err = block.TurnSummaryData()
+			if err != nil {
+				t.Fatalf("TurnSummaryData: %v", err)
+			}
 			break
 		}
 	}
-	if len(summary) == 0 {
+	if !ok {
 		t.Fatalf("expected turn summary block, got %#v", blocks)
 	}
-	if got := asString(summary["assistant_visible_output"]); got != "Parking for manual review." {
+	if got := summary.AssistantVisibleOutput; got != "Parking for manual review." {
 		t.Fatalf("assistant_visible_output = %q", got)
 	}
-	if got := asString(summary["outcome"]); got != "14-day review scheduled." {
+	if got := summary.Outcome; got != "14-day review scheduled." {
 		t.Fatalf("outcome = %q", got)
 	}
-	progress, _ := summary["progress_updates"].([]string)
-	if len(progress) != 1 || progress[0] != "Scheduling the follow-up review." {
-		t.Fatalf("progress_updates = %#v", summary["progress_updates"])
+	if len(summary.ProgressUpdates) != 1 || summary.ProgressUpdates[0] != "Scheduling the follow-up review." {
+		t.Fatalf("progress_updates = %#v", summary.ProgressUpdates)
 	}
-	results, _ := summary["tool_results"].([]any)
-	if len(results) != 1 {
-		t.Fatalf("tool_results = %#v", summary["tool_results"])
+	if len(summary.ToolResults) != 1 {
+		t.Fatalf("tool_results = %#v", summary.ToolResults)
 	}
-	result, _ := results[0].(map[string]any)
-	if result["tool_name"] != "schedule" {
-		t.Fatalf("tool_result = %#v", result)
+	if summary.ToolResults[0].ToolName != "schedule" {
+		t.Fatalf("tool_result = %#v", summary.ToolResults[0])
 	}
 }

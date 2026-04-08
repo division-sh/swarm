@@ -53,8 +53,8 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 		ScopeKey:    "global",
 		TurnBlocks: []runtimellm.TurnBlock{
 			{Kind: "dispatch", Title: "task.run"},
-			{Kind: "tool_use", ToolName: "schedule", Input: map[string]any{"delay_seconds": 1209600}, Data: map[string]any{"tool_use_id": "toolu_1"}},
-			{Kind: "tool_result", Output: map[string]any{"status": "scheduled"}, Data: map[string]any{"tool_use_id": "toolu_1"}},
+			{Kind: "tool_use", ToolName: "schedule", Input: json.RawMessage(`{"delay_seconds":1209600}`), Data: json.RawMessage(`{"tool_use_id":"toolu_1"}`)},
+			{Kind: "tool_result", Output: json.RawMessage(`{"status":"scheduled"}`), Data: json.RawMessage(`{"tool_use_id":"toolu_1"}`)},
 			{Kind: "assistant_text", Text: "Parking for manual review."},
 			{Kind: "outcome", Text: "14-day review scheduled."},
 		},

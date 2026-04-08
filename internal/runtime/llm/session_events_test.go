@@ -328,6 +328,26 @@ func TestAnthropicAPIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
 	}
 }
 
+func TestAnthropicAPIRuntime_PersistTurnDefersTurnBlockCanonicalizationToStore(t *testing.T) {
+	turns := &turnCapture{}
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", turns, nil, nil, nil)
+
+	runtime.persistTurn(context.Background(), AgentTurnRecord{
+		AgentID:        "agent-1",
+		RuntimeMode:    sessions.RuntimeModeTask.String(),
+		SessionID:      "session-1",
+		ResponseRaw:    []byte(`{"result":"done"}`),
+		TriggerEventID: "evt-1",
+	})
+
+	if len(turns.records) != 1 {
+		t.Fatalf("persisted turn count = %d, want 1", len(turns.records))
+	}
+	if len(turns.records[0].TurnBlocks) != 0 {
+		t.Fatalf("persisted turn blocks = %#v, want store-side canonicalization", turns.records[0].TurnBlocks)
+	}
+}
+
 func TestClaudeCLIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
 	turns := &turnCapture{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", turns, nil, nil, nil, nil)
@@ -343,6 +363,26 @@ func TestClaudeCLIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
 	}
 	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask.String() {
 		t.Fatalf("runtime_mode = %q, want task", turns.records[0].RuntimeMode)
+	}
+}
+
+func TestClaudeCLIRuntime_PersistTurnDefersTurnBlockCanonicalizationToStore(t *testing.T) {
+	turns := &turnCapture{}
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", turns, nil, nil, nil, nil)
+
+	runtime.persistTurn(context.Background(), AgentTurnRecord{
+		AgentID:        "agent-2",
+		RuntimeMode:    sessions.RuntimeModeTask.String(),
+		SessionID:      "session-2",
+		ResponseRaw:    []byte(`{"result":"done"}`),
+		TriggerEventID: "evt-2",
+	})
+
+	if len(turns.records) != 1 {
+		t.Fatalf("persisted turn count = %d, want 1", len(turns.records))
+	}
+	if len(turns.records[0].TurnBlocks) != 0 {
+		t.Fatalf("persisted turn blocks = %#v, want store-side canonicalization", turns.records[0].TurnBlocks)
 	}
 }
 
