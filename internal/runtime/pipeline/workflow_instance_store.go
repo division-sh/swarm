@@ -162,8 +162,10 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	instance.InstanceID = identity.InstanceID
 	instance.Metadata["storage_ref"] = identity.StorageRef
 	instance.Metadata["instance_id"] = identity.InstanceID
-	if identity.InstancePath != "" {
+	if identity.HasStoredPath && identity.InstancePath != "" {
 		instance.Metadata["flow_path"] = identity.InstancePath
+	} else {
+		delete(instance.Metadata, "flow_path")
 	}
 	return s.upsertSpec(ctx, identity.RowID(), identity.StorageRef, instance)
 }
@@ -799,13 +801,15 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		Name:              strings.TrimSpace(asString(instance.Metadata["name"])),
 		EntityType:        strings.TrimSpace(asString(instance.Metadata["entity_type"])),
 		InstanceID:        strings.TrimSpace(persistedIdentity.InstanceID),
-		FlowPath:          strings.TrimSpace(persistedIdentity.InstancePath),
 		InstanceKind:      strings.TrimSpace(asString(instance.Metadata["instance_kind"])),
 		TemplateVersion:   strings.TrimSpace(asString(instance.Metadata["template_version"])),
 		LastSourceEvent:   strings.TrimSpace(asString(instance.Metadata["last_source_event"])),
 		Status:            strings.TrimSpace(asString(instance.Metadata["status"])),
 		ParentEntityID:    strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
 		TransitionHistory: append([]WorkflowTransitionRecord{}, instance.TransitionHistory...),
+	}
+	if persistedIdentity.HasStoredPath {
+		control.FlowPath = strings.TrimSpace(persistedIdentity.InstancePath)
 	}
 	for _, key := range []string{
 		"slug", "name", "entity_type", "subject_id", "parent_entity_id",
