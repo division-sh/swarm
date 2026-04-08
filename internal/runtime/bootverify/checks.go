@@ -510,6 +510,11 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						if expr.SelfTargetField == field {
 							continue
 						}
+						if runtimepipeline.WorkflowEntityReadsPersistedStateBeforeHandlerWrites(expr.Phase) {
+							if _, ok := handlerWriters[field]; ok {
+								continue
+							}
+						}
 						if _, ok := handlerWriters[field]; ok {
 							seen[key] = struct{}{}
 							c.entityRefFindings = append(c.entityRefFindings, Finding{

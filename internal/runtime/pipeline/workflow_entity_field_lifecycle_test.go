@@ -56,3 +56,27 @@ func TestWorkflowEntityFieldsAvailableBeforeDataAccumulation_IncludesEarlierComp
 		t.Fatalf("base_score unexpectedly available before sibling data_accumulation write: %#v", available)
 	}
 }
+
+func TestWorkflowEntityReadsPersistedStateBeforeHandlerWrites(t *testing.T) {
+	tests := []struct {
+		name  string
+		phase WorkflowEntityFieldLifecyclePhase
+		want  bool
+	}{
+		{name: "guard", phase: WorkflowEntityFieldLifecycleGuard, want: true},
+		{name: "filter", phase: WorkflowEntityFieldLifecycleFilter, want: true},
+		{name: "count", phase: WorkflowEntityFieldLifecycleCount, want: true},
+		{name: "rule", phase: WorkflowEntityFieldLifecycleRule, want: true},
+		{name: "on_complete", phase: WorkflowEntityFieldLifecycleOnComplete, want: true},
+		{name: "data_accumulation", phase: WorkflowEntityFieldLifecycleDataAccumulation, want: false},
+		{name: "reduce", phase: WorkflowEntityFieldLifecycleReduce, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := WorkflowEntityReadsPersistedStateBeforeHandlerWrites(tt.phase); got != tt.want {
+				t.Fatalf("WorkflowEntityReadsPersistedStateBeforeHandlerWrites(%q) = %v, want %v", tt.phase, got, tt.want)
+			}
+		})
+	}
+}
