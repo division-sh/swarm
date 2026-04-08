@@ -16,6 +16,7 @@ import (
 	"swarm/internal/runtime/core/toolidentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	llm "swarm/internal/runtime/llm"
+	runtimerterr "swarm/internal/runtime/rterrors"
 )
 
 type GatewayHooks struct {
@@ -206,10 +207,8 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	case "tools/call":
 		if g.executor == nil {
-			WriteRPCResult(w, req.ID, map[string]any{
-				"content": []map[string]any{{"type": "text", "text": "tool executor unavailable"}},
-				"isError": true,
-			})
+			err := g.newRuntimeError(ErrCodeToolExecFailed, "mcp.tools.call.execute", false, nil, "tool executor unavailable")
+			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
 		toolName := strings.TrimSpace(asString(req.Params["name"]))
@@ -218,10 +217,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.logMCP(r, "warn", "mcp.tools.call.invalid", err, map[string]any{
 				"method": "tools/call",
 			})
-			WriteRPCResult(w, req.ID, map[string]any{
-				"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
-				"isError": true,
-			})
+			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
 		ctx, err := g.mcpExecutionContext(r, toolName)
@@ -230,10 +226,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 				"method":    "tools/call",
 				"tool_name": toolName,
 			})
-			WriteRPCResult(w, req.ID, map[string]any{
-				"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
-				"isError": true,
-			})
+			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
 		r = r.WithContext(ctx)
@@ -244,10 +237,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 				"tool_name":    toolName,
 				"denial_layer": "gateway",
 			})
-			WriteRPCResult(w, req.ID, map[string]any{
-				"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
-				"isError": true,
-			})
+			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
 		if toolIsKindInContext(ctx, toolName, toolcapabilities.KindEmit) {
@@ -278,10 +268,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 				"method":    "tools/call",
 				"tool_name": toolName,
 			})
-			WriteRPCResult(w, req.ID, map[string]any{
-				"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
-				"isError": true,
-			})
+			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
 		g.logMCP(r, "debug", "mcp.tools.call.success", nil, map[string]any{
@@ -626,21 +613,22 @@ func (g *Gateway) formatError(err error) string {
 	return err.Error()
 }
 
+func (g *Gateway) writeToolCallErrorResult(w http.ResponseWriter, id any, err error) {
+	payload := map[string]any{
+		"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
+		"isError": true,
+	}
+	if runtimeErr := RuntimeErrorPayloadFromError(err); runtimeErr != nil {
+		payload["runtimeError"] = runtimeErr
+	}
+	WriteRPCResult(w, id, payload)
+}
+
 func (g *Gateway) newRuntimeError(code, operation string, retryable bool, cause error, format string, args ...any) error {
 	if g != nil && g.hooks.NewRuntimeError != nil {
 		return g.hooks.NewRuntimeError(code, operation, retryable, cause, format, args...)
 	}
-	message := strings.TrimSpace(fmt.Sprintf(format, args...))
-	if message == "" && cause != nil {
-		message = strings.TrimSpace(cause.Error())
-	}
-	if message == "" {
-		message = strings.TrimSpace(code)
-	}
-	if cause != nil {
-		return fmt.Errorf("%s: %w", message, cause)
-	}
-	return fmt.Errorf("%s", message)
+	return runtimerterr.WrapRuntimeError(code, "mcp-gateway", operation, retryable, cause, format, args...)
 }
 
 func asString(v any) string {

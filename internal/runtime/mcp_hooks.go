@@ -30,14 +30,6 @@ func newMCPRuntimeError(code, operation string, retryable bool, cause error, for
 	return WrapRuntimeError(code, "mcp-gateway", operation, retryable, cause, format, args...)
 }
 
-func runtimeErrorCodeFromText(raw string) string {
-	return runtimemcp.RuntimeErrorCodeFromText(raw)
-}
-
-func runtimeErrorEnvelope(raw string) string {
-	return runtimemcp.RuntimeErrorEnvelope(raw)
-}
-
 func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool), emitRegistry *runtimetools.EmitRegistry, turnContexts *runtimemcp.TurnContextRegistry) runtimemcp.GatewayHooks {
 	if emitRegistry == nil {
 		emitRegistry = runtimetools.NewEmitRegistry(nil, nil)

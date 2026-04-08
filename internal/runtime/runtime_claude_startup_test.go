@@ -278,7 +278,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_ToleratesValidationStyleCallable
 		defs: startupProbeDefs(),
 		caps: startupProbeCaps(),
 		execErrs: map[string]error{
-			"query_entities": errors.New("runtime tool input validation failed: schema validation failed: input.query is required"),
+			"query_entities": WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.filter", false, nil, "query is required"),
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
@@ -321,7 +321,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnGenericPhraseNonVal
 		defs: startupProbeDefs(),
 		caps: startupProbeCaps(),
 		execErrs: map[string]error{
-			"query_entities": errors.New("execution path must be enabled before use"),
+			"query_entities": errors.New("schema validation failed: execution path must be enabled before use"),
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
