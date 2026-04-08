@@ -20,6 +20,7 @@ type recordingSchedulePersistence struct {
 	releases     []Schedule
 	cancelExacts int
 	cancelOwned  int
+	cancelErr    error
 }
 
 func (s *recordingSchedulePersistence) UpsertSchedule(_ context.Context, sc Schedule) error {
@@ -53,7 +54,7 @@ func (s *recordingSchedulePersistence) CancelScheduleExact(_ context.Context, sc
 func (s *recordingSchedulePersistence) CancelScheduleExactTerminal(_ context.Context, sc Schedule) error {
 	s.cancelOwned++
 	s.cancels = append(s.cancels, sc)
-	return nil
+	return s.cancelErr
 }
 
 func (s *recordingSchedulePersistence) MarkScheduleFiredExact(context.Context, Schedule) error {
@@ -215,6 +216,43 @@ func TestPersistWorkflowTimerCancellation_ReleasesClaimAfterCanonicalCancel(t *t
 	}
 	if len(store.releases) != 0 {
 		t.Fatalf("caller-side releases = %d, want 0", len(store.releases))
+	}
+}
+
+func TestPersistWorkflowTimerCancellation_StillCancelsSchedulerWhenClaimReleaseFailsAfterPersist(t *testing.T) {
+	store := &recordingSchedulePersistence{
+		cancelErr: &ScheduleTerminalError{
+			Stage:             "release_claim",
+			TransitionApplied: true,
+			Err:               context.DeadlineExceeded,
+		},
+	}
+	scheduler := NewScheduler()
+	defer scheduler.Stop()
+	pc := &PipelineCoordinator{
+		timerScheduleStore: store,
+		timerScheduler:     scheduler,
+	}
+	sc := Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		At:           time.Now().Add(time.Hour),
+		EntityID:     "ent-001",
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-a",
+	}
+	if err := scheduler.Register(sc); err != nil {
+		t.Fatalf("Register(schedule): %v", err)
+	}
+
+	pc.persistWorkflowTimerCancellation(context.Background(), sc)
+
+	if got := store.cancelOwned; got != 1 {
+		t.Fatalf("cancel owned calls = %d, want 1", got)
+	}
+	if got := len(scheduler.tasks); got != 0 {
+		t.Fatalf("scheduler tasks after partial failure = %d, want 0", got)
 	}
 }
 

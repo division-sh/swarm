@@ -152,7 +152,11 @@ func (s *PostgresStore) applyScheduleTerminalTransition(
 		return nil
 	}
 	if err := s.ReleaseSchedule(ctx, sc); err != nil {
-		return err
+		return &runtimepipeline.ScheduleTerminalError{
+			Stage:             "release_claim",
+			TransitionApplied: true,
+			Err:               err,
+		}
 	}
 	return nil
 }
