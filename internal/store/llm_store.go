@@ -206,7 +206,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	hasTurnBlocks := caps.Conversations.TurnBlocks
 	turnBlocksPayload := ""
 	if hasTurnBlocks {
-		rec.TurnBlocks = runtimellm.BuildTurnBlocks(rec)
+		rec = runtimellm.CanonicalizeTurnForPersistence(rec)
 		turnBlocksPayload = normalizeJSONArray(rec.TurnBlocks)
 	}
 
