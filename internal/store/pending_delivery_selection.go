@@ -30,14 +30,7 @@ func CanonicalPendingAgentDeliveryPredicateSQL(deliveryAlias, receiptAlias strin
 		)
 		OR (
 			%s.delivery_id IS NULL
-			AND (
-				%s.event_id IS NULL
-				OR (
-					COALESCE(%s.side_effects->>'manager_status', '') = 'error'
-					AND COALESCE((%s.side_effects->>'retry_count')::int, 0) < 2
-					AND %s.processed_at <= now() - interval '1 minute'
-				)
-			)
+			AND %s.event_id IS NULL
 		)
 	)`,
 		deliveryAlias,
@@ -47,9 +40,6 @@ func CanonicalPendingAgentDeliveryPredicateSQL(deliveryAlias, receiptAlias strin
 		deliveryAlias,
 		deliveryAlias,
 		deliveryAlias,
-		receiptAlias,
-		receiptAlias,
-		receiptAlias,
 		receiptAlias,
 	)
 }

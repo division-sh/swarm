@@ -118,6 +118,90 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 	}
 }
 
+func TestUpsertEventReceipt_AlignsRetryOwnershipAcrossDeliveryBackedAndReceiptOnly_V2(t *testing.T) {
+	tests := []struct {
+		name           string
+		insertDelivery bool
+	}{
+		{name: "delivery_backed", insertDelivery: true},
+		{name: "receipt_only_normalized_to_delivery", insertDelivery: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pg, cleanup := newTestPostgresStore(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+			evt := seedEvent(t, ctx, pg, entityID, "test.retry_alignment."+tt.name)
+			if tt.insertDelivery {
+				if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+					t.Fatalf("insert deliveries: %v", err)
+				}
+			}
+
+			if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				t.Fatalf("upsert retryable error: %v", err)
+			}
+
+			var (
+				deliveryStatus string
+				deliveryRetry  int
+				reasonCode     string
+				managerStatus  string
+				receiptRetry   int
+			)
+			if err := pg.DB.QueryRowContext(ctx, `
+				SELECT
+					COALESCE(d.status, ''),
+					COALESCE(d.retry_count, 0),
+					COALESCE(d.reason_code, ''),
+					COALESCE(r.side_effects->>'manager_status', ''),
+					COALESCE((r.side_effects->>'retry_count')::int, 0)
+				FROM event_deliveries d
+				INNER JOIN event_receipts r
+					ON r.event_id = d.event_id
+					AND r.subscriber_type = 'agent'
+					AND r.subscriber_id = d.subscriber_id
+				WHERE d.event_id = $1::uuid
+				  AND d.subscriber_type = 'agent'
+				  AND d.subscriber_id = $2
+			`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
+				t.Fatalf("query retryable aligned state: %v", err)
+			}
+			if deliveryStatus != "failed" || deliveryRetry != 1 || reasonCode != "handler_error" || managerStatus != "error" || receiptRetry != 1 {
+				t.Fatalf("retryable aligned state mismatch: delivery=%q retry=%d reason=%q manager=%q receiptRetry=%d", deliveryStatus, deliveryRetry, reasonCode, managerStatus, receiptRetry)
+			}
+
+			if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				t.Fatalf("upsert exhausted error: %v", err)
+			}
+			if err := pg.DB.QueryRowContext(ctx, `
+				SELECT
+					COALESCE(d.status, ''),
+					COALESCE(d.retry_count, 0),
+					COALESCE(d.reason_code, ''),
+					COALESCE(r.side_effects->>'manager_status', ''),
+					COALESCE((r.side_effects->>'retry_count')::int, 0)
+				FROM event_deliveries d
+				INNER JOIN event_receipts r
+					ON r.event_id = d.event_id
+					AND r.subscriber_type = 'agent'
+					AND r.subscriber_id = d.subscriber_id
+				WHERE d.event_id = $1::uuid
+				  AND d.subscriber_type = 'agent'
+				  AND d.subscriber_id = $2
+			`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
+				t.Fatalf("query exhausted aligned state: %v", err)
+			}
+			if deliveryStatus != "dead_letter" || deliveryRetry != 2 || reasonCode != "retry_exhausted" || managerStatus != "dead_letter" || receiptRetry != 2 {
+				t.Fatalf("exhausted aligned state mismatch: delivery=%q retry=%d reason=%q manager=%q receiptRetry=%d", deliveryStatus, deliveryRetry, reasonCode, managerStatus, receiptRetry)
+			}
+		})
+	}
+}
+
 func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
