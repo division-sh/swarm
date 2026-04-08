@@ -13,6 +13,7 @@ import (
 	"swarm/internal/runtime/core/timeridentity"
 	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/runtime/workflowexpr"
 )
 
 type Event = events.Event
@@ -453,7 +454,7 @@ func payloadTransformReferencesEntity(spec *runtimecontracts.PayloadTransformSpe
 		return false
 	}
 	for _, entry := range spec.TransformEntries() {
-		if entry.Value.Kind == runtimecontracts.ExpressionKindCEL && strings.HasPrefix(strings.TrimSpace(entry.Value.CEL), "entity.") {
+		if entry.Value.Kind == runtimecontracts.ExpressionKindCEL && workflowexpr.ExpressionReferencesEntity(entry.Value.CEL) {
 			return true
 		}
 	}

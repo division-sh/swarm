@@ -2,24 +2,24 @@ package workflowexpr
 
 import "testing"
 
-func TestEvalDataExpression_AllowsNullPresenceCheckOnMissingField(t *testing.T) {
-	value, err := EvalDataExpression(`entity.kill_reason == null`, DataContext{
+func TestEvalValueExpression_AllowsNullPresenceCheckOnMissingField(t *testing.T) {
+	value, err := EvalValueExpression(`entity.kill_reason == null`, ValueContext{
 		Entity: map[string]any{},
 	})
 	if err != nil {
-		t.Fatalf("EvalDataExpression error = %v", err)
+		t.Fatalf("EvalValueExpression error = %v", err)
 	}
 	got, ok := value.(bool)
 	if !ok {
-		t.Fatalf("EvalDataExpression value = %#v (%T), want bool", value, value)
+		t.Fatalf("EvalValueExpression value = %#v (%T), want bool", value, value)
 	}
 	if !got {
 		t.Fatal("expected sparse field == null presence check to evaluate true")
 	}
 }
 
-func TestEvalDataExpression_FailsClosedOnMissingEntityValueRead(t *testing.T) {
-	_, err := EvalDataExpression(`entity.revision_count + 1`, DataContext{
+func TestEvalValueExpression_FailsClosedOnMissingEntityValueRead(t *testing.T) {
+	_, err := EvalValueExpression(`entity.revision_count + 1`, ValueContext{
 		Entity: map[string]any{},
 	})
 	if err == nil {
@@ -30,9 +30,18 @@ func TestEvalDataExpression_FailsClosedOnMissingEntityValueRead(t *testing.T) {
 	}
 }
 
-func TestValidateDataExpression_RejectsAccumulatedNamespace(t *testing.T) {
-	err := ValidateDataExpression(`accumulated.size()`)
+func TestValidateValueExpression_RejectsAccumulatedNamespace(t *testing.T) {
+	err := ValidateValueExpression(`accumulated.size()`)
 	if err == nil {
 		t.Fatal("expected accumulated namespace to be rejected for data expressions")
+	}
+}
+
+func TestExpressionReferencesEntity_IgnoresStringLiterals(t *testing.T) {
+	if ExpressionReferencesEntity(`payload.reason == "entity.kill_reason"`) {
+		t.Fatal("expected quoted entity reference text to be ignored")
+	}
+	if !ExpressionReferencesEntity(`has(entity.kill_reason) ? entity.kill_reason : payload.reason`) {
+		t.Fatal("expected real entity reference to be detected")
 	}
 }

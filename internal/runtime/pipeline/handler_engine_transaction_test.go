@@ -1268,6 +1268,100 @@ func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *test
 	}
 }
 
+func TestExecuteNodeContractHandlerAppliesPayloadTransformSparseFieldPresenceCheck(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+	}
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
+		PayloadTransform: &runtimecontracts.PayloadTransformSpec{
+			Fields: map[string]string{
+				"kill_reason_missing": "entity.kill_reason == null",
+			},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("custom.trigger"),
+			Payload: mustJSON(map[string]any{"entity_id": "ent-1"}),
+		}.WithEntityID("ent-1"),
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if got := payload["kill_reason_missing"]; got != true {
+		t.Fatalf("payload.kill_reason_missing = %#v, want true", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerPayloadTransformEntityPresenceCheckMintsEntityID(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module: &previewWorkflowModule{
+			bundle: &runtimecontracts.WorkflowContractBundle{
+				Semantics: runtimecontracts.WorkflowSemanticView{
+					EntitySchema: runtimecontracts.EntitySchema{
+						Groups: []runtimecontracts.EntitySchemaGroup{
+							{
+								Name: "identity",
+								Fields: []runtimecontracts.EntitySchemaField{
+									{Name: "kill_reason", Type: "text"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
+		PayloadTransform: &runtimecontracts.PayloadTransformSpec{
+			Fields: map[string]string{
+				"label": `has(entity.kill_reason) ? entity.kill_reason : payload.reason`,
+			},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("custom.trigger"),
+			Payload: mustJSON(map[string]any{"reason": "active"}),
+		},
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	emitted := bus.publishedEvent(0)
+	if got := emitted.EntityID(); got == "" {
+		t.Fatal("expected payload_transform entity reference to mint entity_id")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(emitted.Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if got := payload["label"]; got != "active" {
+		t.Fatalf("payload.label = %#v, want active", got)
+	}
+}
+
 func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionAdvancesParentFlow(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 	bundle, ok := semanticview.Bundle(source)

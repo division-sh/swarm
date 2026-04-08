@@ -150,7 +150,7 @@ func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecon
 		}
 		return nil, false, nil
 	case runtimecontracts.ExpressionKindCEL:
-		value, err := evalDataAccumulationExpression(base, state, expr.CEL)
+		value, err := evalWorkflowValueExpression(base, state, expr.CEL)
 		if err != nil {
 			return nil, false, err
 		}
@@ -193,7 +193,7 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 		case write.Value.HasLiteralValue():
 			snapshot.SetMetadata(target, write.Value.Literal)
 		case write.Value.HasCELValue():
-			value, err := evalDataAccumulationExpression(base, state, write.Value.CEL)
+			value, err := evalWorkflowValueExpression(base, state, write.Value.CEL)
 			if err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", strings.TrimSpace(write.Target()), err)
 			}
@@ -214,8 +214,8 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 	return nil
 }
 
-func evalDataAccumulationExpression(base BaseContext, state ExecutionState, expression string) (any, error) {
-	return workflowexpr.EvalDataExpression(expression, workflowexpr.DataContext{
+func evalWorkflowValueExpression(base BaseContext, state ExecutionState, expression string) (any, error) {
+	return workflowexpr.EvalValueExpression(expression, workflowexpr.ValueContext{
 		Entity:  base.Entity.Raw(),
 		Payload: base.Payload.Raw(),
 		Policy:  base.Policy.Raw(),
@@ -244,7 +244,7 @@ func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontr
 		if !entry.Value.HasCELValue() {
 			continue
 		}
-		value, err := evalDataAccumulationExpression(base, state, entry.Value.CEL)
+		value, err := evalWorkflowValueExpression(base, state, entry.Value.CEL)
 		if err != nil {
 			return nil, fmt.Errorf("payload transform target %s: %w", entry.Target, err)
 		}
