@@ -207,11 +207,13 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 }
 
 func rewriteWorkflowExpressionEntityNullPresenceChecks(expression string) string {
-	expression = workflowExpressionEntityNullNotEqualPattern.ReplaceAllString(expression, `has(entity.$1) && entity.$1 != null`)
-	expression = workflowExpressionNullEntityNotEqualPattern.ReplaceAllString(expression, `has(entity.$1) && entity.$1 != null`)
-	expression = workflowExpressionEntityNullEqualPattern.ReplaceAllString(expression, `!has(entity.$1) || entity.$1 == null`)
-	expression = workflowExpressionNullEntityEqualPattern.ReplaceAllString(expression, `!has(entity.$1) || entity.$1 == null`)
-	return expression
+	return rewriteWorkflowExpressionOutsideStringLiterals(expression, func(segment string) string {
+		segment = workflowExpressionEntityNullNotEqualPattern.ReplaceAllString(segment, `has(entity.$1) && entity.$1 != null`)
+		segment = workflowExpressionNullEntityNotEqualPattern.ReplaceAllString(segment, `has(entity.$1) && entity.$1 != null`)
+		segment = workflowExpressionEntityNullEqualPattern.ReplaceAllString(segment, `!has(entity.$1) || entity.$1 == null`)
+		segment = workflowExpressionNullEntityEqualPattern.ReplaceAllString(segment, `!has(entity.$1) || entity.$1 == null`)
+		return segment
+	})
 }
 
 func rewriteWorkflowExpressionQueryEntityCounts(expression string, ctx workflowExpressionContext) (string, error) {
@@ -378,6 +380,62 @@ func normalizeWorkflowExpressionStringLiterals(expression string) string {
 			continue
 		}
 		out.WriteByte(ch)
+	}
+	return out.String()
+}
+
+func rewriteWorkflowExpressionOutsideStringLiterals(expression string, rewrite func(string) string) string {
+	if expression == "" || rewrite == nil {
+		return expression
+	}
+	var out strings.Builder
+	segmentStart := 0
+	inSingle := false
+	inDouble := false
+	for i := 0; i < len(expression); i++ {
+		ch := expression[i]
+		if ch == '\\' && i+1 < len(expression) {
+			i++
+			continue
+		}
+		if ch == '"' && !inSingle {
+			if !inDouble {
+				out.WriteString(rewrite(expression[segmentStart:i]))
+				segmentStart = i
+				inDouble = true
+				continue
+			}
+			inDouble = false
+			i++
+			out.WriteString(expression[segmentStart:i])
+			segmentStart = i
+			i--
+			continue
+		}
+		if ch == '\'' && !inDouble {
+			if !inSingle {
+				out.WriteString(rewrite(expression[segmentStart:i]))
+				segmentStart = i
+				inSingle = true
+				continue
+			}
+			inSingle = false
+			i++
+			out.WriteString(expression[segmentStart:i])
+			segmentStart = i
+			i--
+			continue
+		}
+	}
+	if segmentStart < len(expression) {
+		if inSingle || inDouble {
+			out.WriteString(expression[segmentStart:])
+		} else {
+			out.WriteString(rewrite(expression[segmentStart:]))
+		}
+	}
+	if segmentStart == 0 && out.Len() == 0 {
+		return rewrite(expression)
 	}
 	return out.String()
 }

@@ -727,9 +727,6 @@ func insertWorkflowCreateEntityInitialValueMutations(
 			continue
 		}
 		finalValue, ok := after.Fields[field]
-		if !ok {
-			return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("create_entity initial value %s missing from persisted entity projection", field)
-		}
 		oldValue, hadOld := adjusted.Fields[field]
 		if hadOld && workflowJSONValuesEqual(oldValue, declared) {
 			continue
@@ -745,7 +742,7 @@ func insertWorkflowCreateEntityInitialValueMutations(
 		}); err != nil {
 			return runtimemutationlog.EntityStateProjection{}, err
 		}
-		if workflowJSONValuesEqual(finalValue, declared) {
+		if ok && workflowJSONValuesEqual(finalValue, declared) {
 			adjusted.Fields[field] = declared
 			continue
 		}
