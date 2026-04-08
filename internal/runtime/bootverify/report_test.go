@@ -640,6 +640,51 @@ func TestRun_MapsBareConditionToConditionExpressionValidation(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsUnsupportedGuardOnFail(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						Guard: &runtimecontracts.GuardSpec{
+							Check:  "entity.entity_id != null",
+							OnFail: "explode",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "condition_expression_validation", `unsupported guard on_fail action "explode"`) {
+		t.Fatalf("expected unsupported on_fail error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsMalformedConditionCELAfterRecognizedPrefix(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						Guard: &runtimecontracts.GuardSpec{Check: "entity.entity_id =="},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "condition_expression_validation", `CEL parse failed for "entity.entity_id =="`) {
+		t.Fatalf("expected CEL parse failure, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsFanOutNamespaceInGuardConditions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
