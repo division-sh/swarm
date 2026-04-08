@@ -66,6 +66,13 @@ func (p FlowEventProof) DisplayName() string {
 	}
 }
 
+func (p FlowEventProof) EventKey() string {
+	if canonical := strings.TrimSpace(p.Canonical); canonical != "" {
+		return canonical
+	}
+	return p.DisplayName()
+}
+
 func (p FlowEventProof) CrossesDeclaredOutputBoundary(source Source) bool {
 	if source == nil {
 		return false

@@ -614,6 +614,19 @@ func TestRun_MapsSelfEmitToEventCycleDetection(t *testing.T) {
 	}
 }
 
+func TestRun_MapsSelfEmitToEventCycleDetectionForFlowLocalHandlers(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-local-events"))
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.Emits = runtimecontracts.EventEmission{Single: eventType}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "event_cycle_detection", "emits its own trigger event") {
+		t.Fatalf("expected event_cycle_detection error for flow-local handler, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsBareConditionToConditionExpressionValidation(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-bare-condition")
 
@@ -1854,6 +1867,13 @@ func writeFlowHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBun
 		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
 	}
 	bundle.Nodes[nodeID] = node
+	if bundle.Semantics.NodeHandlers == nil {
+		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	if bundle.Semantics.NodeHandlers[nodeID] == nil {
+		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
 }
 
 func renameFlowHandlerEvent(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, nodeID, oldEventType, newEventType string, handler runtimecontracts.SystemNodeEventHandler) {
@@ -1870,6 +1890,14 @@ func renameFlowHandlerEvent(t *testing.T, bundle *runtimecontracts.WorkflowContr
 		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
 	}
 	bundle.Nodes[nodeID] = node
+	if bundle.Semantics.NodeHandlers == nil {
+		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	if bundle.Semantics.NodeHandlers[nodeID] == nil {
+		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	delete(bundle.Semantics.NodeHandlers[nodeID], oldEventType)
+	bundle.Semantics.NodeHandlers[nodeID][newEventType] = handler
 	if len(bundle.Semantics.FlowInputs[flowID]) > 0 {
 		inputs := append([]string{}, bundle.Semantics.FlowInputs[flowID]...)
 		for idx, eventType := range inputs {
