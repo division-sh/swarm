@@ -636,7 +636,6 @@ type WorkflowTransitionContract struct {
 type WorkflowDataAccumulation struct {
 	Writes      []WorkflowDataWrite `yaml:"writes"`
 	SourceEvent string              `yaml:"source_event"`
-	Value       ExpressionValue     `yaml:"value,omitempty"`
 }
 type WorkflowDataWrite struct {
 	Field       string          `yaml:"-" json:"field,omitempty"`

@@ -671,6 +671,41 @@ func TestRun_RejectsItemNamespaceOutsideFilterConditions(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsAccumulatedNamespaceInDataAccumulationExpressions(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "tracking",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "expected_count", Type: "integer"},
+					},
+				}},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+							Writes: []runtimecontracts.WorkflowDataWrite{
+								{TargetField: "expected_count", Value: runtimecontracts.CELExpression("accumulated.size()")},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "data_accumulation_expression_validation", "accumulated.size()") {
+		t.Fatalf("expected accumulated namespace in data_accumulation expression to fail validation, got %#v", report.Errors())
+	}
+}
+
 func TestRun_PreservesPermissionMismatchWarningsDuringMigration(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-permission-tool-mismatch")
 
@@ -1270,8 +1305,8 @@ func TestRun_UsesCompiledOwnersForEquivalentSingleNodePerEventRoutes(t *testing.
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 36 {
-		t.Fatalf("bootCheckRegistry count = %d, want 36", got)
+	if got := len(bootCheckRegistry); got != 37 {
+		t.Fatalf("bootCheckRegistry count = %d, want 37", got)
 	}
 	if got := len(supplementalChecks); got != 2 {
 		t.Fatalf("supplementalChecks count = %d, want 2", got)

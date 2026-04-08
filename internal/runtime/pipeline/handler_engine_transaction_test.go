@@ -505,6 +505,69 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	}
 }
 
+func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpression(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
+			Semantics: runtimecontracts.WorkflowSemanticView{
+				Name:    "validation",
+				Version: "v-test",
+				EntitySchema: runtimecontracts.EntitySchema{
+					Groups: []runtimecontracts.EntitySchemaGroup{
+						{
+							Name: "tracking",
+							Fields: []runtimecontracts.EntitySchemaField{
+								{Name: "kill_reason", Type: "text"},
+								{Name: "kill_reason_missing", Type: "boolean"},
+							},
+						},
+					},
+				},
+			},
+		}},
+	})
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "validation",
+		WorkflowVersion: "v-test",
+		CurrentState:    "queued",
+		Metadata: map[string]any{
+			"subject_id": entityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "kill_reason_missing", Value: runtimecontracts.CELExpression("entity.kill_reason == null")},
+			},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{Type: events.EventType("validation.spec_requested")}.WithEntityID(entityID),
+		State: pc.currentWorkflowState(context.Background(), entityID),
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+
+	instance, ok, err := pc.workflowStore.Load(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("workflow instance missing after declarative write")
+	}
+	if got := instance.Metadata["kill_reason_missing"]; got != true {
+		t.Fatalf("kill_reason_missing = %#v, want true", got)
+	}
+}
+
 func TestResolveHandlerEntityIDForFlowKeepsSameFlowEntity(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{

@@ -10,22 +10,18 @@ import (
 	"time"
 
 	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common/types/ref"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/core/timeridentity"
 	"swarm/internal/runtime/core/values"
+	"swarm/internal/runtime/workflowexpr"
 )
 
 const handlerAccumulatorBucketKey = "handler_accumulators"
 
 var (
-	dataExpressionEnvOnce sync.Once
-	dataExpressionEnv     *cel.Env
-	dataExpressionEnvErr  error
-
 	executionConditionEnvOnce sync.Once
 	executionConditionEnvRef  *cel.Env
 	executionConditionEnvErr  error
@@ -219,81 +215,20 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 }
 
 func evalDataAccumulationExpression(base BaseContext, state ExecutionState, expression string) (any, error) {
-	env, err := dataAccumulationEnv()
-	if err != nil {
-		return nil, err
-	}
-	ast, issues := env.Compile(strings.TrimSpace(expression))
-	if issues != nil && issues.Err() != nil {
-		return nil, issues.Err()
-	}
-	program, err := env.Program(ast)
-	if err != nil {
-		return nil, err
-	}
-	out, _, err := program.Eval(map[string]any{
-		"entity":  normalizedCELInputMap(base.Entity.Raw()),
-		"payload": normalizedCELInputMap(base.Payload.Raw()),
-		"policy":  normalizedCELInputMap(base.Policy.Raw()),
-		"fan_out": normalizedCELInputMap(state.FanOut),
+	return workflowexpr.EvalDataExpression(expression, workflowexpr.DataContext{
+		Entity:  base.Entity.Raw(),
+		Payload: base.Payload.Raw(),
+		Policy:  base.Policy.Raw(),
+		FanOut:  state.FanOut,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return normalizeCELValue(out), nil
-}
-
-func dataAccumulationEnv() (*cel.Env, error) {
-	dataExpressionEnvOnce.Do(func() {
-		dataExpressionEnv, dataExpressionEnvErr = cel.NewEnv(
-			cel.Variable("entity", cel.DynType),
-			cel.Variable("payload", cel.DynType),
-			cel.Variable("policy", cel.DynType),
-			cel.Variable("fan_out", cel.DynType),
-		)
-	})
-	return dataExpressionEnv, dataExpressionEnvErr
 }
 
 func normalizeCELValue(value any) any {
-	switch typed := value.(type) {
-	case nil:
-		return nil
-	case ref.Val:
-		return normalizeCELValue(typed.Value())
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, normalizeCELValue(item))
-		}
-		return out
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			out[key] = normalizeCELValue(item)
-		}
-		return out
-	case float64:
-		if math.Trunc(typed) == typed && typed <= math.MaxInt && typed >= math.MinInt {
-			return int(typed)
-		}
-		return typed
-	case int64:
-		return int(typed)
-	default:
-		return typed
-	}
+	return workflowexpr.NormalizeCELValue(value)
 }
 
 func normalizedCELInputMap(source map[string]any) map[string]any {
-	if len(source) == 0 {
-		return map[string]any{}
-	}
-	normalized, _ := normalizeCELValue(cloneStringAnyMap(source)).(map[string]any)
-	if normalized == nil {
-		return map[string]any{}
-	}
-	return normalized
+	return workflowexpr.NormalizeCELInputMap(source)
 }
 
 func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontracts.PayloadTransformSpec) (map[string]any, error) {
