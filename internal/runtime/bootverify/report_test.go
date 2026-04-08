@@ -921,6 +921,29 @@ func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsCreateEntityConditionReferenceToFieldClearedLaterInSameHandler(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
+		Groups: []runtimecontracts.EntitySchemaGroup{{
+			Name: "tracking",
+			Fields: []runtimecontracts.EntitySchemaField{
+				{Name: "revision_count", Type: "integer"},
+			},
+		}},
+	}
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.CreateEntity = true
+	handler.Condition = "entity.revision_count > 0"
+	handler.Clear = &runtimecontracts.ClearSpec{Target: "revision_count"}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsGuardReferenceToSparseFieldEvenWhenSameHandlerWritesFieldLater(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
@@ -935,6 +958,27 @@ func TestRun_RejectsGuardReferenceToSparseFieldEvenWhenSameHandlerWritesFieldLat
 
 	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_score") {
 		t.Fatalf("expected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestHandlerEntityFieldWriters_TracksSetsGateAndClearTargets(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
+		Clear: &runtimecontracts.ClearSpec{
+			Target:  "revision_count",
+			Targets: []string{"entity.base_score"},
+		},
+	}
+
+	writers := handlerEntityFieldWriters(handler)
+	if _, ok := writers["gates"]; !ok {
+		t.Fatalf("gates missing from handler writers: %#v", writers)
+	}
+	if _, ok := writers["revision_count"]; !ok {
+		t.Fatalf("revision_count missing from handler writers: %#v", writers)
+	}
+	if _, ok := writers["base_score"]; !ok {
+		t.Fatalf("base_score missing from handler writers: %#v", writers)
 	}
 }
 
