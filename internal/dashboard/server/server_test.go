@@ -129,9 +129,10 @@ func (s stubConversationCaps) ResolveSchemaCapabilities(context.Context) (store.
 }
 
 type stubSQLAgents struct {
-	rows []runtimemanager.PersistedAgent
-	caps store.StoreSchemaCapabilities
-	err  error
+	rows  []runtimemanager.PersistedAgent
+	caps  store.StoreSchemaCapabilities
+	err   error
+	facts map[string]store.PendingAgentDeliveryFacts
 }
 
 func (s stubSQLAgents) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
@@ -140,6 +141,14 @@ func (s stubSQLAgents) LoadAgents(context.Context) ([]runtimemanager.PersistedAg
 
 func (s stubSQLAgents) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
 	return s.caps, s.err
+}
+
+func (s stubSQLAgents) ListPendingAgentDeliveryFacts(_ context.Context, agentIDs []string, _ time.Time) (map[string]store.PendingAgentDeliveryFacts, error) {
+	out := make(map[string]store.PendingAgentDeliveryFacts, len(agentIDs))
+	for _, agentID := range agentIDs {
+		out[agentID] = s.facts[agentID]
+	}
+	return out, nil
 }
 
 func (s stubObservability) ListEvents(context.Context, EventFilter, int) ([]eventRecord, error) {
@@ -894,6 +903,9 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 			Status: "terminated",
 		}},
 		caps: canonicalEventAndConversationCaps(),
+		facts: map[string]store.PendingAgentDeliveryFacts{
+			"agent-1": {PendingCount: 2, OldestPendingAgeSec: 45},
+		},
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
@@ -1059,6 +1071,10 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	if err != nil {
 		t.Fatalf("ListPendingEventsForAgent: %v", err)
 	}
+	factsByAgent, err := pg.ListPendingAgentDeliveryFacts(ctx, []string{"agent-1"}, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("ListPendingAgentDeliveryFacts: %v", err)
+	}
 	gotPendingIDs := make([]string, 0, len(pending))
 	for _, evt := range pending {
 		gotPendingIDs = append(gotPendingIDs, evt.ID)
@@ -1080,6 +1096,9 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	}
 	if items[0].PendingEvents != len(pending) {
 		t.Fatalf("pending_events = %d, want %d canonical pending deliveries", items[0].PendingEvents, len(pending))
+	}
+	if items[0].OldestPendingAgeSec != factsByAgent["agent-1"].OldestPendingAgeSec {
+		t.Fatalf("oldest_pending_age_sec = %d, want %d canonical pending age", items[0].OldestPendingAgeSec, factsByAgent["agent-1"].OldestPendingAgeSec)
 	}
 	if items[0].Failures24h != 1 {
 		t.Fatalf("failures_24h = %d, want 1 failed delivery", items[0].Failures24h)

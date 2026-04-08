@@ -574,13 +574,19 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 }
 
 func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
-	pendingPredicate := CanonicalPendingAgentDeliveryPredicateSQL("d", "r")
-	q := fmt.Sprintf(`
+	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
+			d.subscriber_id,
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
 			e.payload, e.created_at,
-			COALESCE(e.source_event_id::text, '')
+			COALESCE(e.source_event_id::text, ''),
+			TRUE,
+			COALESCE(d.status, ''),
+			COALESCE(d.retry_count, 0),
+			d.created_at,
+			d.delivered_at,
+			CASE WHEN r.event_id IS NULL THEN FALSE ELSE TRUE END
 		FROM event_deliveries d
 		INNER JOIN events e ON e.event_id = d.event_id
 		LEFT JOIN event_receipts r
@@ -590,26 +596,33 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 		WHERE d.subscriber_type = 'agent'
 		  AND d.subscriber_id = $1
 		  AND e.created_at >= $2
-		  AND %s
 		ORDER BY e.created_at ASC
-		LIMIT $3
-	`, pendingPredicate)
-	rows, err := s.DB.QueryContext(ctx, q, agentID, since, limit)
+	`, agentID, since)
 	if err != nil {
 		return nil, fmt.Errorf("query pending events for %s: %w", agentID, err)
 	}
 	defer rows.Close()
-	return scanSpecPendingEvents(rows)
+	records, err := scanPendingAgentDeliveryRecords(rows)
+	if err != nil {
+		return nil, err
+	}
+	return pendingEventsFromRecords(records, time.Now(), limit), nil
 }
 
 func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error) {
-	pendingPredicate := CanonicalPendingAgentDeliveryPredicateSQL("d", "r")
-	q := fmt.Sprintf(`
+	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
+			$1,
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
 			e.payload, e.created_at,
-			COALESCE(e.source_event_id::text, '')
+			COALESCE(e.source_event_id::text, ''),
+			CASE WHEN d.delivery_id IS NULL THEN FALSE ELSE TRUE END,
+			COALESCE(d.status, ''),
+			COALESCE(d.retry_count, 0),
+			COALESCE(d.created_at, e.created_at),
+			d.delivered_at,
+			CASE WHEN r.event_id IS NULL THEN FALSE ELSE TRUE END
 		FROM events e
 		LEFT JOIN event_deliveries d
 			ON d.event_id = e.event_id
@@ -634,24 +647,25 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 					  AND d_me.subscriber_id = $1
 				)
 			)
-		  AND %s
 		ORDER BY e.created_at ASC
-		LIMIT $3
-	`, pendingPredicate)
-	rows, err := s.DB.QueryContext(ctx, q, agentID, since, limit)
+	`, agentID, since)
 	if err != nil {
 		return nil, fmt.Errorf("query pending subscribed events for %s: %w", agentID, err)
 	}
 	defer rows.Close()
-	out, err := scanSpecPendingEvents(rows)
+	records, err := scanPendingAgentDeliveryRecords(rows)
 	if err != nil {
 		return nil, err
 	}
-	filtered := make([]events.Event, 0, len(out))
-	for _, evt := range out {
+	pending := pendingEventsFromRecords(records, time.Now(), 0)
+	filtered := make([]events.Event, 0, len(pending))
+	for _, evt := range pending {
 		for _, subscription := range subscriptions {
 			if eventidentity.MatchPattern(string(subscription), string(evt.Type)) {
 				filtered = append(filtered, evt)
+				if limit > 0 && len(filtered) >= limit {
+					return filtered, nil
+				}
 				break
 			}
 		}
@@ -720,63 +734,6 @@ func (s *PostgresStore) getEventReceiptSpec(ctx context.Context, eventID, agentI
 		}
 	}
 	return receipt, true, nil
-}
-
-func scanLegacyPendingEvents(rows *sql.Rows) ([]events.Event, error) {
-	out := make([]events.Event, 0)
-	for rows.Next() {
-		var evt events.Event
-		var legacyEntityID string
-		if err := rows.Scan(
-			&evt.ID,
-			&evt.Type,
-			&evt.SourceAgent,
-			&evt.TaskID,
-			&legacyEntityID,
-			&evt.Payload,
-			&evt.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan pending event: %w", err)
-		}
-		evt = evt.WithEnvelope(events.EventEnvelope{EntityID: legacyEntityID})
-		out = append(out, evt)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read pending events rows: %w", err)
-	}
-	return out, nil
-}
-
-func scanSpecPendingEvents(rows *sql.Rows) ([]events.Event, error) {
-	out := make([]events.Event, 0)
-	for rows.Next() {
-		var evt events.Event
-		var entityID, flowInstance, scope string
-		if err := rows.Scan(
-			&evt.ID,
-			&evt.RunID,
-			&evt.Type,
-			&evt.SourceAgent,
-			&entityID,
-			&flowInstance,
-			&scope,
-			&evt.Payload,
-			&evt.CreatedAt,
-			&evt.ParentEventID,
-		); err != nil {
-			return nil, fmt.Errorf("scan pending event: %w", err)
-		}
-		evt = evt.WithEnvelope(events.EventEnvelope{
-			EntityID:     entityID,
-			FlowInstance: flowInstance,
-			Scope:        events.EventScope(scope),
-		})
-		out = append(out, evt)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read pending events rows: %w", err)
-	}
-	return out, nil
 }
 
 func mapManagerReceiptStatusToOutcome(status runtimemanager.ReceiptStatus) string {

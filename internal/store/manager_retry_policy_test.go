@@ -562,6 +562,57 @@ func TestPendingAgentEvents_NormalizesLegacyReceiptOnlyRetryOwner_V2(t *testing.
 	}
 }
 
+func TestListPendingAgentDeliveryFacts_AlignsWithCanonicalPendingStates_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+
+	pendingEvt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.pending")
+	retryableEvt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.failed")
+	inProgressEvt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.in_progress")
+	deadEvt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.dead")
+
+	for _, eventID := range []string{pendingEvt.ID, retryableEvt.ID, inProgressEvt.ID, deadEvt.ID} {
+		if err := pg.InsertEventDeliveries(ctx, eventID, []string{agentID}); err != nil {
+			t.Fatalf("insert deliveries for %s: %v", eventID, err)
+		}
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET created_at = now() - interval '8 minutes'
+		WHERE event_id = $1::uuid AND subscriber_id = $2
+	`, pendingEvt.ID, agentID); err != nil {
+		t.Fatalf("age pending delivery: %v", err)
+	}
+	if err := pg.UpsertEventReceipt(ctx, retryableEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert retryable receipt: %v", err)
+	}
+	rewindCanonicalDeliveryAttempt(t, ctx, pg, retryableEvt.ID, agentID, time.Now().Add(-2*time.Minute))
+	if err := pg.MarkEventDeliveryInProgress(ctx, inProgressEvt.ID, agentID, ""); err != nil {
+		t.Fatalf("mark in progress: %v", err)
+	}
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert dead-letter first error: %v", err)
+	}
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert dead-letter second error: %v", err)
+	}
+
+	factsByAgent, err := pg.ListPendingAgentDeliveryFacts(ctx, []string{agentID}, time.Now().Add(-2*time.Hour))
+	if err != nil {
+		t.Fatalf("ListPendingAgentDeliveryFacts: %v", err)
+	}
+	facts := factsByAgent[agentID]
+	if facts.PendingCount != 3 {
+		t.Fatalf("pending_count = %d, want 3", facts.PendingCount)
+	}
+	if facts.OldestPendingAgeSec <= 0 {
+		t.Fatalf("oldest_pending_age_sec = %d, want > 0", facts.OldestPendingAgeSec)
+	}
+}
+
 func TestListPendingEventsForAgent_InProgressWithoutReceipt_RemainsPending(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
