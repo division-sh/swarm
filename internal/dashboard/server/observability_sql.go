@@ -444,7 +444,10 @@ func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter Incid
 		if agg == nil {
 			agg = &incidentAggregate{
 				record: incidentRecord{
-					Code: logRecord.ErrorCode,
+					Code:      logRecord.ErrorCode,
+					RootCause: firstNonEmpty(logRecord.Error, logRecord.Message),
+					Component: strings.TrimSpace(logRecord.Component),
+					Level:     strings.TrimSpace(logRecord.Level),
 				},
 				firstSeen:     createdAt,
 				lastSeen:      createdAt,
@@ -461,13 +464,13 @@ func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter Incid
 		if createdAt.After(agg.lastSeen) {
 			agg.lastSeen = createdAt
 		}
-		if strings.TrimSpace(logRecord.Error) > strings.TrimSpace(agg.record.RootCause) {
-			agg.record.RootCause = strings.TrimSpace(logRecord.Error)
+		if agg.record.RootCause == "" {
+			agg.record.RootCause = firstNonEmpty(logRecord.Error, logRecord.Message)
 		}
-		if strings.TrimSpace(logRecord.Component) > strings.TrimSpace(agg.record.Component) {
+		if agg.record.Component == "" {
 			agg.record.Component = strings.TrimSpace(logRecord.Component)
 		}
-		if strings.TrimSpace(logRecord.Level) > strings.TrimSpace(agg.record.Level) {
+		if agg.record.Level == "" {
 			agg.record.Level = strings.TrimSpace(logRecord.Level)
 		}
 		if v := strings.TrimSpace(logRecord.AgentID); v != "" {
@@ -484,8 +487,18 @@ func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter Incid
 		return nil, fmt.Errorf("incident runtime log rows: %w", err)
 	}
 
-	out := make([]incidentRecord, 0, len(aggregates))
+	sorted := make([]*incidentAggregate, 0, len(aggregates))
 	for _, agg := range aggregates {
+		sorted = append(sorted, agg)
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		if !sorted[i].lastSeen.Equal(sorted[j].lastSeen) {
+			return sorted[i].lastSeen.After(sorted[j].lastSeen)
+		}
+		return sorted[i].record.Code < sorted[j].record.Code
+	})
+	out := make([]incidentRecord, 0, len(sorted))
+	for _, agg := range sorted {
 		agg.record.Agents = sortedStringSet(agg.agentsSet)
 		agg.record.Components = sortedStringSet(agg.componentsSet)
 		agg.record.Actions = sortedStringSet(agg.actionsSet)
@@ -493,12 +506,6 @@ func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter Incid
 		agg.record.LastSeen = formatTime(agg.lastSeen)
 		out = append(out, agg.record)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].LastSeen != out[j].LastSeen {
-			return out[i].LastSeen > out[j].LastSeen
-		}
-		return out[i].Code < out[j].Code
-	})
 	if len(out) > limit {
 		out = out[:limit]
 	}
