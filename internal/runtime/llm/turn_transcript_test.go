@@ -217,3 +217,16 @@ func TestDecodeCanonicalRuntimeLogTurnBlocks_FailsOnMissingCanonicalDetailsCompo
 		t.Fatalf("DecodeCanonicalRuntimeLogTurnBlocks error = %v", err)
 	}
 }
+
+func TestDecodeCanonicalRuntimeLogTurnBlocks_FailsOnNonStringCanonicalDetailsComponent(t *testing.T) {
+	_, err := DecodeCanonicalRuntimeLogTurnBlocks([]TurnBlock{
+		newRuntimeLogTurnBlock("runtime log", TurnBlockRuntimeLogData{
+			LogLevel: "warn",
+			Message:  "runtime log",
+			Details:  json.RawMessage(`{"component":123,"action":"tool_execution_denied"}`),
+		}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "canonical runtime_log block details.component must be a string") {
+		t.Fatalf("DecodeCanonicalRuntimeLogTurnBlocks error = %v", err)
+	}
+}
