@@ -3539,6 +3539,46 @@ func TestManagerStore_AppendAgentTurn_FailsOnMalformedCanonicalRuntimeLogTurnBlo
 	}
 }
 
+func TestManagerStore_AppendAgentTurn_FailsOnNonStringCanonicalRuntimeLogTurnBlockField(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := uuid.NewString()
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "a1",
+		Mode:      "task",
+		Messages: []llm.Message{
+			{Role: "assistant", Content: "done"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task): %v", err)
+	}
+
+	err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:     "a1",
+		RuntimeMode: "task",
+		SessionID:   sessionID,
+		TurnBlocks: []runtimellm.TurnBlock{
+			{
+				Kind:  "runtime_log",
+				Title: "runtime log",
+				Data:  json.RawMessage(`{"log_level":"warn","message":"runtime log","details":{"component":123,"action":"tool_execution_denied"}}`),
+			},
+		},
+		ParseOK: true,
+		Latency: 5 * time.Millisecond,
+	})
+	if err == nil || !strings.Contains(err.Error(), "canonical runtime_log block details.component must be a string") {
+		t.Fatalf("AppendAgentTurn error = %v, want canonical runtime_log string-type failure", err)
+	}
+}
+
 func TestManagerStore_AppendAgentTurn_TaskReactivatesExistingInactiveAuditRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

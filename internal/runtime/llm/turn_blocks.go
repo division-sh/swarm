@@ -331,14 +331,28 @@ func normalizeCanonicalRuntimeLogTurnBlockData(data TurnBlockRuntimeLogData) (Tu
 	if details == nil {
 		return TurnBlockRuntimeLogData{}, fmt.Errorf("canonical runtime_log block details are required")
 	}
-	component := strings.TrimSpace(asString(details["component"]))
-	if component == "" {
-		return TurnBlockRuntimeLogData{}, fmt.Errorf("canonical runtime_log block details.component is required")
+	if _, err := requireCanonicalRuntimeLogDetailString(details, "component"); err != nil {
+		return TurnBlockRuntimeLogData{}, err
 	}
-	action := strings.TrimSpace(asString(details["action"]))
-	if action == "" {
-		return TurnBlockRuntimeLogData{}, fmt.Errorf("canonical runtime_log block details.action is required")
+	if _, err := requireCanonicalRuntimeLogDetailString(details, "action"); err != nil {
+		return TurnBlockRuntimeLogData{}, err
 	}
 	data.Details = append(json.RawMessage(nil), raw...)
 	return data, nil
+}
+
+func requireCanonicalRuntimeLogDetailString(details map[string]any, key string) (string, error) {
+	value, ok := details[key]
+	if !ok {
+		return "", fmt.Errorf("canonical runtime_log block details.%s is required", key)
+	}
+	s, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("canonical runtime_log block details.%s must be a string", key)
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", fmt.Errorf("canonical runtime_log block details.%s is required", key)
+	}
+	return s, nil
 }
