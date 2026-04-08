@@ -960,6 +960,77 @@ func TestGatewayAuthorize_DeniesInvalidBearer(t *testing.T) {
 	}
 }
 
+func TestGatewayHandleTool_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
+	callCount := 0
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		callCount++
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), testGatewayToken, GatewayHooks{
+		RuntimeShutdownAdmissionClosed: func() bool { return true },
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/tools/query_entities", strings.NewReader(`{"input":{"query":"kind='vertical'"}}`))
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "runtime shutting down") {
+		t.Fatalf("body = %s, want runtime shutting down", rec.Body.String())
+	}
+	if callCount != 0 {
+		t.Fatalf("executor call count = %d, want 0", callCount)
+	}
+}
+
+func TestGatewayHandleMCP_DeniesToolCallWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	callCount := 0
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		callCount++
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), testGatewayToken, GatewayHooks{
+		RuntimeShutdownAdmissionClosed: func() bool { return true },
+		ResolveTurnContext:             registry.ResolveTurnContext,
+		WithActor:                      models.WithActor,
+		WithCurrentRuntimeEpoch:        runtimebus.WithCurrentRuntimeEpoch,
+	})
+	putTestTurnContext(t, registry, "ctx-shutdown", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "query_entities",
+			"arguments": map[string]any{"query": "kind = 'vertical'"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-shutdown")
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	resp := mustRPCResponse(t, rec)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "runtime shutting down") {
+		t.Fatalf("rpc error = %#v, want runtime shutting down", resp.Error)
+	}
+	if callCount != 0 {
+		t.Fatalf("executor call count = %d, want 0", callCount)
+	}
+}
+
 func TestGatewayHandleMCP_RejectsReadOnlyToolWhenContextTokenMisses(t *testing.T) {
 	callCount := 0
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {

@@ -20,23 +20,24 @@ import (
 )
 
 type GatewayHooks struct {
-	RuntimeIngressPaused      func() bool
-	FormatError               func(error) string
-	NewRuntimeError           func(code, operation string, retryable bool, cause error, format string, args ...any) error
-	RetryableFromError        func(error) (bool, bool)
-	WithActor                 func(context.Context, models.AgentConfig) context.Context
-	ActorFromContext          func(context.Context) (models.AgentConfig, bool)
-	ResolveActorConfig        func(string) (models.AgentConfig, bool)
-	WithCurrentRuntimeEpoch   func(context.Context) context.Context
-	WithInboundEvent          func(context.Context, events.Event) context.Context
-	WithEmittedEventsRecorder func(context.Context, *runtimebus.EmittedEventsRecorder) context.Context
-	ResolveTurnContext        func(string) (TurnContext, bool)
-	MarkEmitKeyUsed           func(string, string) bool
-	EmitToolsForActor         func(models.AgentConfig) []llm.ToolDefinition
-	EmitTools                 func(string) []llm.ToolDefinition
-	EmitSchemaForTool         func(string) (description string, schema any, ok bool)
-	Log                       func(context.Context, string, string, string, string, map[string]any, string)
-	AfterToolSuccess          func(context.Context, *http.Request, string)
+	RuntimeIngressPaused           func() bool
+	RuntimeShutdownAdmissionClosed func() bool
+	FormatError                    func(error) string
+	NewRuntimeError                func(code, operation string, retryable bool, cause error, format string, args ...any) error
+	RetryableFromError             func(error) (bool, bool)
+	WithActor                      func(context.Context, models.AgentConfig) context.Context
+	ActorFromContext               func(context.Context) (models.AgentConfig, bool)
+	ResolveActorConfig             func(string) (models.AgentConfig, bool)
+	WithCurrentRuntimeEpoch        func(context.Context) context.Context
+	WithInboundEvent               func(context.Context, events.Event) context.Context
+	WithEmittedEventsRecorder      func(context.Context, *runtimebus.EmittedEventsRecorder) context.Context
+	ResolveTurnContext             func(string) (TurnContext, bool)
+	MarkEmitKeyUsed                func(string, string) bool
+	EmitToolsForActor              func(models.AgentConfig) []llm.ToolDefinition
+	EmitTools                      func(string) []llm.ToolDefinition
+	EmitSchemaForTool              func(string) (description string, schema any, ok bool)
+	Log                            func(context.Context, string, string, string, string, map[string]any, string)
+	AfterToolSuccess               func(context.Context, *http.Request, string)
 }
 
 type Gateway struct {
@@ -89,12 +90,16 @@ func (g *Gateway) Handler() http.Handler {
 }
 
 func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
-	if g.runtimeIngressPaused() {
-		WriteJSON(w, http.StatusServiceUnavailable, ToolGatewayResponse{OK: false, Error: "runtime reset in progress"})
-		return
-	}
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, ToolGatewayResponse{OK: false, Error: "method not allowed"})
+		return
+	}
+	if g.runtimeShutdownAdmissionClosed() {
+		WriteJSON(w, http.StatusServiceUnavailable, ToolGatewayResponse{OK: false, Error: "runtime shutting down"})
+		return
+	}
+	if g.runtimeIngressPaused() {
+		WriteJSON(w, http.StatusServiceUnavailable, ToolGatewayResponse{OK: false, Error: "runtime reset in progress"})
 		return
 	}
 	if err := g.authorize(r); err != nil {
@@ -147,10 +152,6 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
-	if g.runtimeIngressPaused() {
-		WriteRPCError(w, nil, -32002, "runtime reset in progress")
-		return
-	}
 	switch r.Method {
 	case http.MethodGet:
 		w.Header().Set("content-type", "text/plain")
@@ -159,6 +160,14 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 		return
 	case http.MethodPost:
+		if g.runtimeShutdownAdmissionClosed() {
+			WriteRPCError(w, nil, -32002, "runtime shutting down")
+			return
+		}
+		if g.runtimeIngressPaused() {
+			WriteRPCError(w, nil, -32002, "runtime reset in progress")
+			return
+		}
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -601,6 +610,13 @@ func (g *Gateway) runtimeIngressPaused() bool {
 		return false
 	}
 	return g.hooks.RuntimeIngressPaused()
+}
+
+func (g *Gateway) runtimeShutdownAdmissionClosed() bool {
+	if g == nil || g.hooks.RuntimeShutdownAdmissionClosed == nil {
+		return false
+	}
+	return g.hooks.RuntimeShutdownAdmissionClosed()
 }
 
 func (g *Gateway) formatError(err error) string {

@@ -30,21 +30,22 @@ func newMCPRuntimeError(code, operation string, retryable bool, cause error, for
 	return WrapRuntimeError(code, "mcp-gateway", operation, retryable, cause, format, args...)
 }
 
-func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool), emitRegistry *runtimetools.EmitRegistry, turnContexts *runtimemcp.TurnContextRegistry) runtimemcp.GatewayHooks {
+func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool), runtimeShutdownAdmissionClosed func() bool, emitRegistry *runtimetools.EmitRegistry, turnContexts *runtimemcp.TurnContextRegistry) runtimemcp.GatewayHooks {
 	if emitRegistry == nil {
 		emitRegistry = runtimetools.NewEmitRegistry(nil, nil)
 	}
 	return runtimemcp.GatewayHooks{
-		RuntimeIngressPaused:      runtimebus.RuntimeIngressPaused,
-		FormatError:               FormatRuntimeError,
-		NewRuntimeError:           newMCPRuntimeError,
-		RetryableFromError:        retryableFromGatewayError,
-		WithActor:                 runtimeactors.WithActor,
-		ActorFromContext:          runtimeactors.ActorFromContext,
-		ResolveActorConfig:        resolveActorConfig,
-		WithCurrentRuntimeEpoch:   runtimebus.WithCurrentRuntimeEpoch,
-		WithInboundEvent:          runtimebus.WithInboundEvent,
-		WithEmittedEventsRecorder: runtimebus.WithEmittedEventsRecorder,
+		RuntimeIngressPaused:           runtimebus.RuntimeIngressPaused,
+		RuntimeShutdownAdmissionClosed: runtimeShutdownAdmissionClosed,
+		FormatError:                    FormatRuntimeError,
+		NewRuntimeError:                newMCPRuntimeError,
+		RetryableFromError:             retryableFromGatewayError,
+		WithActor:                      runtimeactors.WithActor,
+		ActorFromContext:               runtimeactors.ActorFromContext,
+		ResolveActorConfig:             resolveActorConfig,
+		WithCurrentRuntimeEpoch:        runtimebus.WithCurrentRuntimeEpoch,
+		WithInboundEvent:               runtimebus.WithInboundEvent,
+		WithEmittedEventsRecorder:      runtimebus.WithEmittedEventsRecorder,
 		ResolveTurnContext: func(token string) (runtimemcp.TurnContext, bool) {
 			if turnContexts == nil {
 				return runtimemcp.TurnContext{}, false

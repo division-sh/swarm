@@ -27,7 +27,12 @@ type runCanceller interface {
 	CancelActiveRunWorkByProducer(ctx context.Context, producerID string) ([]runtimedelivery.Transition, error)
 }
 
+var errRuntimeShuttingDown = errors.New("runtime shutting down")
+
 func (am *AgentManager) RestartAgent(agentID string) error {
+	if am.shutdownAdmissionClosed() {
+		return errRuntimeShuttingDown
+	}
 	am.mu.RLock()
 	agent, ok := am.agents[agentID]
 	am.mu.RUnlock()
@@ -307,6 +312,9 @@ func (am *AgentManager) safeProcessEvent(ctx context.Context, agent Agent, evt e
 }
 
 func (am *AgentManager) ChatWithAgent(ctx context.Context, agentID, directive string, killPrevious bool) (string, error) {
+	if am.shutdownAdmissionClosed() {
+		return "", errRuntimeShuttingDown
+	}
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return "", errors.New("agent id is required")
@@ -564,6 +572,9 @@ func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
 			return nil
 		}
 		if err := am.ReplayAgentBacklog(ctx, id); err != nil {
+			if errors.Is(err, errRuntimeShuttingDown) {
+				return nil
+			}
 			if am.bus != nil {
 				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
@@ -580,7 +591,7 @@ func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
 
 func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) error {
 	if am.shutdownAdmissionClosed() {
-		return nil
+		return errRuntimeShuttingDown
 	}
 	if am.store == nil {
 		return fmt.Errorf("manager store unavailable")

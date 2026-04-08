@@ -153,8 +153,8 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	if !rt.shutdownAdmissionClosed() {
 		t.Fatal("runtime shutdown admission was not closed before manager drain")
 	}
-	if err := am.ReplayAgentBacklog(context.Background(), agent.id); err != nil {
-		t.Fatalf("ReplayAgentBacklog during shutdown: %v", err)
+	if err := am.ReplayAgentBacklog(context.Background(), agent.id); err == nil || !strings.Contains(err.Error(), "runtime shutting down") {
+		t.Fatalf("ReplayAgentBacklog during shutdown err = %v, want runtime shutting down", err)
 	}
 	if managerStore.listPendingCalled {
 		t.Fatal("ReplayAgentBacklog touched manager persistence even though runtime shutdown admission was closed")

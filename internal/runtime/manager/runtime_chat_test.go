@@ -129,3 +129,18 @@ func TestAgentManager_ChatWithAgent_KillPreviousLogsForcedTerminalLifecycle(t *t
 		t.Fatalf("terminal detail = %#v", detail)
 	}
 }
+
+func TestAgentManager_ChatWithAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
+	agent := &chatTestAgent{id: "campaign-coordinator"}
+	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{
+		RuntimeShutdownAdmissionClosed: func() bool { return true },
+	})
+	am.agents[agent.id] = agent
+
+	if _, err := am.ChatWithAgent(context.Background(), agent.id, "run corpus", false); err == nil || err.Error() != "runtime shutting down" {
+		t.Fatalf("ChatWithAgent err = %v, want runtime shutting down", err)
+	}
+	if agent.calls != 0 {
+		t.Fatalf("board step calls = %d, want 0", agent.calls)
+	}
+}

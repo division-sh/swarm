@@ -426,7 +426,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 				return runtimeactors.AgentConfig{}, false
 			}
 			return rt.Manager.GetAgentConfig(strings.TrimSpace(agentID))
-		}, rt.EmitRegistry, rt.MCPTurns))
+		}, rt.shutdownAdmissionClosed, rt.EmitRegistry, rt.MCPTurns))
 	}
 
 	return rt, nil
