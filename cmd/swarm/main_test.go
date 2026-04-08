@@ -342,6 +342,7 @@ func testWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {
 
 func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	cases := []struct {
 		name        string
 		bundle      *runtimecontracts.WorkflowContractBundle
@@ -358,6 +359,20 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 				return bundle
 			}(),
 			wantErr: false,
+		},
+		{
+			name: "tool implementation warning",
+			bundle: func() *runtimecontracts.WorkflowContractBundle {
+				bundle := testWorkflowValidationBundle()
+				bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+					"legacy_call": {
+						HandlerType: "api_call",
+					},
+				}
+				return bundle
+			}(),
+			errContains: "tool implementation warnings",
+			wantErr:     true,
 		},
 		{
 			name: "missing emit schema",

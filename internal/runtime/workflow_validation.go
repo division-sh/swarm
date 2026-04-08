@@ -14,9 +14,10 @@ import (
 )
 
 type WorkflowContractValidationOptions struct {
-	Credentials       runtimecredentials.Store
-	CheckMCPReachable bool
-	StrictEmitSchemas bool
+	Credentials                    runtimecredentials.Store
+	CheckMCPReachable              bool
+	StrictEmitSchemas              bool
+	FatalToolImplementationWarning bool
 }
 
 type WorkflowContractValidationResult struct {
@@ -27,9 +28,10 @@ type WorkflowContractValidationResult struct {
 
 func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store) WorkflowContractValidationOptions {
 	return WorkflowContractValidationOptions{
-		Credentials:       credentials,
-		CheckMCPReachable: true,
-		StrictEmitSchemas: runtimeEnvBool("SWARM_EMIT_SCHEMA_STRICT", true),
+		Credentials:                    credentials,
+		CheckMCPReachable:              true,
+		StrictEmitSchemas:              runtimeEnvBool("SWARM_EMIT_SCHEMA_STRICT", true),
+		FatalToolImplementationWarning: bootWarningsFatal(),
 	}
 }
 
@@ -59,6 +61,9 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if err != nil {
 		return result, fmt.Errorf("tool implementation validation failed: %w", err)
 	}
+	if opts.FatalToolImplementationWarning && len(warnings) > 0 {
+		return result, fmt.Errorf("tool implementation warnings:\n%s", formatValidationErrors(warnings))
+	}
 
 	emitRegistry := runtimetools.NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 	result.MissingEmitSchemaEventTypes = emitRegistry.GeneratedEmitSchemasForAgentRoles()
@@ -77,6 +82,17 @@ func formatWorkflowValidationFindings(findings []runtimebootverify.Finding) stri
 	lines := make([]string, 0, len(findings))
 	for _, finding := range findings {
 		lines = append(lines, fmt.Sprintf("%s [%s] %s", strings.TrimSpace(finding.CheckID), strings.TrimSpace(finding.Location), strings.TrimSpace(finding.Message)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatValidationErrors(errs []error) string {
+	lines := make([]string, 0, len(errs))
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		lines = append(lines, strings.TrimSpace(err.Error()))
 	}
 	return strings.Join(lines, "\n")
 }
