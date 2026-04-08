@@ -15,6 +15,10 @@ var (
 	ErrMissingAuthoritativeRecipientReader = errors.New("store does not support authoritative delivery recipient reads")
 )
 
+type Participation interface {
+	SupportsPersistedReplay() bool
+}
+
 type Lister interface {
 	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error)
 }
@@ -37,19 +41,30 @@ type composedStore struct {
 	Owner
 }
 
-func RequireStore(store any) (Store, error) {
+func SupportsPersistedReplay(store any) bool {
+	support, ok := store.(Participation)
+	if !ok {
+		return true
+	}
+	return support.SupportsPersistedReplay()
+}
+
+func RequireStore(store any) (Store, bool, error) {
+	if !SupportsPersistedReplay(store) {
+		return nil, false, nil
+	}
 	lister, ok := store.(Lister)
 	if !ok {
-		return nil, ErrMissingReplayEventReader
+		return nil, true, ErrMissingReplayEventReader
 	}
 	owner, ok := store.(Owner)
 	if !ok {
-		return nil, ErrMissingReplayClaimOwner
+		return nil, true, ErrMissingReplayClaimOwner
 	}
 	return composedStore{
 		Lister: lister,
 		Owner:  owner,
-	}, nil
+	}, true, nil
 }
 
 func RequireRecipientReader(store any) (RecipientReader, error) {

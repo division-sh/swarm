@@ -76,9 +76,12 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if eb == nil || eb.store == nil {
 		return 0, nil
 	}
-	replayStore, err := runtimereplayclaim.RequireStore(eb.store)
+	replayStore, participates, err := runtimereplayclaim.RequireStore(eb.store)
 	if err != nil {
 		return 0, err
+	}
+	if !participates {
+		return 0, nil
 	}
 	recipientReader, err := runtimereplayclaim.RequireRecipientReader(eb.store)
 	if err != nil {

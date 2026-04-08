@@ -304,3 +304,18 @@ func TestSweepUndispatched_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 		t.Fatalf("SweepUndispatched error = %q, want explicit replay claim owner failure", got)
 	}
 }
+
+func TestSweepUndispatched_NoopsWithoutPersistedReplayStore(t *testing.T) {
+	eb, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("swept count = %d, want 0", count)
+	}
+}

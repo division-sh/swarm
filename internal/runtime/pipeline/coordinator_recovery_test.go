@@ -519,3 +519,15 @@ func TestRecoveryManager_FailsClosedWithoutReplayClaimOwner(t *testing.T) {
 		t.Fatalf("Recover error = %q, want explicit replay claim owner failure", got)
 	}
 }
+
+func TestRecoveryManager_NoopsWithoutPersistedReplayStore(t *testing.T) {
+	capture := &recoveryCapturePublisher{}
+	rm := runtimepipeline.NewRecoveryManagerWith(runtimebus.InMemoryEventStore{}, capture)
+
+	if err := rm.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(capture.published) != 0 || len(capture.direct) != 0 {
+		t.Fatalf("recovery capture = published:%#v direct:%#v, want no replay activity", capture.published, capture.direct)
+	}
+}

@@ -94,3 +94,4 @@ func (InMemoryEventStore) AppendEvent(_ context.Context, _ events.Event) error {
 func (InMemoryEventStore) InsertEventDeliveries(_ context.Context, _ string, _ []string) error {
 	return nil
 }
+func (InMemoryEventStore) SupportsPersistedReplay() bool { return false }
