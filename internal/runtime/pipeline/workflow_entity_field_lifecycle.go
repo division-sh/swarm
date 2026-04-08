@@ -21,10 +21,16 @@ const (
 	WorkflowEntityFieldLifecycleOnComplete       WorkflowEntityFieldLifecyclePhase = "on_complete"
 	WorkflowEntityFieldLifecycleRule             WorkflowEntityFieldLifecyclePhase = "rule"
 	WorkflowEntityFieldLifecycleDataAccumulation WorkflowEntityFieldLifecyclePhase = "data_accumulation"
+	WorkflowEntityFieldLifecyclePayloadTransform WorkflowEntityFieldLifecyclePhase = "payload_transform"
 )
 
 var workflowExpressionEntityReferencePattern = regexp.MustCompile(`entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 var workflowExpressionEntityPresencePattern = regexp.MustCompile(`["']([a-zA-Z_][a-zA-Z0-9_]*)["']\s+in\s+entity\b`)
+var workflowExpressionEntityHasPattern = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)`)
+var workflowExpressionEntityHasTernaryTruePattern = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+var workflowExpressionEntityHasTernaryFalsePattern = regexp.MustCompile(`!\s*has\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*[^:]+:\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+var workflowExpressionEntityNullCompareLeftPattern = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=)\s*null\b`)
+var workflowExpressionEntityNullCompareRightPattern = regexp.MustCompile(`\bnull\s*(==|!=)\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
 
 func WorkflowEntityReferences(expression string) []string {
 	expression = strings.TrimSpace(stripWorkflowExpressionStringLiterals(expression))
@@ -120,24 +126,49 @@ func WorkflowBuiltinEntityField(field string) bool {
 }
 
 func WorkflowPresenceGuardedEntityFields(expression string) map[string]struct{} {
-	expression = strings.TrimSpace(expression)
+	expression = strings.TrimSpace(stripWorkflowExpressionStringLiterals(expression))
 	if expression == "" {
 		return nil
 	}
-	matches := workflowExpressionEntityPresencePattern.FindAllStringSubmatch(expression, -1)
-	if len(matches) == 0 {
-		return nil
+	out := map[string]struct{}{}
+	addField := func(field string) {
+		field = WorkflowEntityReferenceField(field)
+		if field != "" {
+			out[field] = struct{}{}
+		}
 	}
-	out := make(map[string]struct{}, len(matches))
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
+	for _, match := range workflowExpressionEntityPresencePattern.FindAllStringSubmatch(expression, -1) {
+		if len(match) >= 2 {
+			addField(match[1])
 		}
-		field := strings.TrimSpace(match[1])
-		if field == "" {
-			continue
+	}
+	for _, match := range workflowExpressionEntityHasPattern.FindAllStringSubmatch(expression, -1) {
+		if len(match) >= 2 {
+			addField(match[1])
 		}
-		out[field] = struct{}{}
+	}
+	for _, match := range workflowExpressionEntityHasTernaryTruePattern.FindAllStringSubmatch(expression, -1) {
+		if len(match) >= 3 && WorkflowEntityReferenceField(match[1]) == WorkflowEntityReferenceField(match[2]) {
+			addField(match[1])
+		}
+	}
+	for _, match := range workflowExpressionEntityHasTernaryFalsePattern.FindAllStringSubmatch(expression, -1) {
+		if len(match) >= 3 && WorkflowEntityReferenceField(match[1]) == WorkflowEntityReferenceField(match[2]) {
+			addField(match[1])
+		}
+	}
+	for _, match := range workflowExpressionEntityNullCompareLeftPattern.FindAllStringSubmatch(expression, -1) {
+		if len(match) >= 2 {
+			addField(match[1])
+		}
+	}
+	for _, match := range workflowExpressionEntityNullCompareRightPattern.FindAllStringSubmatch(expression, -1) {
+		if len(match) >= 3 {
+			addField(match[2])
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -161,6 +192,10 @@ func WorkflowEntityFieldsAvailableBeforeCondition(handler runtimecontracts.Syste
 
 func WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler runtimecontracts.SystemNodeEventHandler) map[string]struct{} {
 	return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleDataAccumulation)
+}
+
+func WorkflowEntityFieldsAvailableBeforePayloadTransform(handler runtimecontracts.SystemNodeEventHandler) map[string]struct{} {
+	return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecyclePayloadTransform)
 }
 
 func WorkflowEntityReadsPersistedStateBeforeHandlerWrites(phase WorkflowEntityFieldLifecyclePhase) bool {
@@ -324,6 +359,8 @@ func workflowEntityFieldLifecycleOrder(phase WorkflowEntityFieldLifecyclePhase) 
 		return 10
 	case WorkflowEntityFieldLifecycleDataAccumulation:
 		return 11
+	case WorkflowEntityFieldLifecyclePayloadTransform:
+		return 12
 	default:
 		return 0
 	}

@@ -355,11 +355,13 @@ type EntitySchemaGroup struct {
 	Fields []EntitySchemaField `yaml:"fields"`
 }
 type EntitySchemaField struct {
-	Name     string `yaml:"name"`
-	Type     string `yaml:"type"`
-	Primary  bool   `yaml:"primary"`
-	Indexed  bool   `yaml:"indexed"`
-	Nullable bool   `yaml:"nullable"`
+	Name        string `yaml:"name"`
+	Type        string `yaml:"type"`
+	Initial     any    `yaml:"initial"`
+	Primary     bool   `yaml:"primary"`
+	Indexed     bool   `yaml:"indexed"`
+	Nullable    bool   `yaml:"nullable"`
+	Description string `yaml:"description"`
 }
 type NodeStateSchema struct {
 	Description string           `yaml:"description"`

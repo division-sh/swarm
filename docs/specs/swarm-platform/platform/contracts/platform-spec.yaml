@@ -148,11 +148,26 @@ contract_formats:
       derives database DDL from this schema at boot.
     format:
       groups: Schema is organized into named groups (e.g., intake_phase, processing_phase).
-      fields: 'Each field is declared as: field_name: type_description'
+      fields: 'Each field is declared in one of two forms.'
+      scalar_form:
+        shape: 'field_name: type_description'
+        meaning: Type-only declaration. No initial value. The field remains sparse until first explicit write.
+      mapping_form:
+        shape: 'field_name: { type: string, initial: value, nullable: bool, description: string }'
+        required_fields:
+          type: string — same type vocabulary as scalar form
+        optional_fields:
+          initial: Constant value materialized once at create_entity time. Type must match the declared type.
+          nullable: Boolean. Defaults to false. If true, the field may later be set to null without re-materializing the initial value.
+          description: Human-readable annotation, not parsed.
       types: text, integer, numeric(precision,scale), boolean, jsonb, timestamp, uuid
       annotations: Parenthetical notes after the type are human-readable, not machine-parsed.
-    example: "entity_schema:\n  identity:\n    order_id: uuid (primary key)\n    name: text\n  processing_phase:\n    total_amount:\
-      \ numeric(10,2)\n    order_type: text"
+      invalid_forms:
+        string_with_initial_suffix: 'revision_count: integer initial 0 — REJECTED. Use mapping form when declaring an initial value.'
+        mapping_without_type: 'field_name: { initial: 0 } — REJECTED. type is required in mapping form.'
+    example: "entity_schema:\n  identity:\n    order_id: uuid (primary key)\n    name: text\n  processing_phase:\n    revision_count:\n      type:\
+      \ integer\n      initial: 0\n    is_duplicate:\n      type: boolean\n      initial: false\n    total_amount: numeric(10,2)\n\
+      \    order_type: text"
   event_schema:
     description: Each workflow defines event payload schemas in events.yaml. Events are keyed by event name. Each entry contains
       a payload object mapping field names to types (string, integer, object, array, boolean). The platform uses these schemas
@@ -267,7 +282,8 @@ handler_specification:
       type: boolean
       purpose: When true, the handler mints a fresh entity_id before any other processing. All subsequent handler steps
         (guard, data_accumulation, advances_to, emits, etc.) operate on the NEW entity. The inbound event's entity_id is
-        ignored for state operations — the new entity starts with a clean state at the flow's initial_state. The original
+        ignored for state operations — the new entity starts at the flow's initial_state with schema-declared initial values
+        already materialized. The original
         event entity_id is preserved in the event payload for reference.
       default: false — handler operates on the inbound event's entity_id (inherit)
       when_to_use: When an event arriving from outside the flow represents a new entity entering this flow's lifecycle.
@@ -279,17 +295,20 @@ handler_specification:
         entity_id: Auto-generated UUID
         initial_state: From the flow's schema.yaml initial_state
         flow_instance: Current flow instance path
-        fields: Empty (clean slate). The handler's data_accumulation writes the initial field values.
+        fields: Schema-declared initial values materialized once at create_entity time. Fields without declared initial values remain sparse until first explicit write.
       interactions:
         with_accumulate: 'PROHIBITED. create_entity mints a new entity_id on every handler invocation. Accumulate receives
           multiple events for the same entity. Combining them would create a different entity on each accumulation event.
           Boot error if both are declared on the same handler.'
         with_fan_out: 'ALLOWED. create_entity creates ONE entity, then fan_out emits multiple events all carrying that entity_id.
           Fan_out items share the new entity.'
-        with_guard: 'ALLOWED but guards evaluate against the NEWLY CREATED entity state (empty fields, initial_state). Guards
-          on create_entity handlers should check payload fields, not entity fields.'
-        with_on_complete: ALLOWED. on_complete evaluates after data_accumulation writes to the new entity.
-        with_rules: ALLOWED. Rules evaluate against payload, which is unaffected by create_entity.
+        with_guard: 'ALLOWED. Guards evaluate against the NEWLY CREATED entity state after schema initial values materialize.
+          Guards may read schema-initialized fields directly. Sparse fields still require explicit presence checks such as
+          has(entity.field) or entity.field != null.'
+        with_on_complete: 'ALLOWED. on_complete conditions evaluate according to the handler dependency graph. They may rely on
+          schema initial values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
+        with_rules: 'ALLOWED. rule conditions evaluate according to the handler dependency graph. They may rely on schema initial
+          values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
         with_advances_to: ALLOWED. Advances the new entity from initial_state to the target state.
       note_on_static_flows: 'For static flows (scoring, validation), create_entity is the mechanism for entity creation.
         Without it, the first event arriving from outside the flow has no entity to write to unless the runtime creates one
@@ -360,13 +379,19 @@ handler_specification:
   expression_context:
     description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
       rules.condition, data_accumulation.expression, and filter.condition. Each namespace resolves to a specific
-      data source. Referencing a field that does not exist in the resolved data source is a runtime error.'
+      data source. Referencing an entity field that does not exist in entity_state.fields is a runtime error unless
+      the reference appears in an explicit presence-check position.'
     namespaces:
       entity:
         resolves_to: 'entity_state row for the current entity. entity.X reads entity_state.fields->>X.
           entity.current_state reads entity_state.current_state. entity.gates.X reads entity_state.gates->>X.'
         populated_by: 'data_accumulation writes, compute.store_as, sets_gate, advances_to, save_entity_field
           (agent tool), and create_entity (initial field population).'
+        read_model:
+          sparse_field: A field with no declared initial value remains absent from entity_state.fields until first explicit write.
+          missing_field_as_value: Reading a missing entity field as a value is a runtime error (no such key).
+          presence_check_positions: 'Missing fields are allowed only inside has(entity.X) or == null / != null comparisons.
+            These positions test presence instead of requiring a value.'
         does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
           collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
           only in the accumulator. To reference them, use the accumulated namespace.'
@@ -397,17 +422,31 @@ handler_specification:
         resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
           (or root policy.yaml if not overridden at flow level).'
     boot_validation:
-      description: 'The platform SHOULD validate expression field references at boot. For every entity.X
-        reference in a condition or expression, verify that at least one handler in the same flow writes X
-        to entity state (via data_accumulation, compute.store_as, or create_entity field population). If no
-        upstream writer exists, emit a boot warning. This catches the class of bug where a condition references
-        entity.field_name but the field is only available in the accumulator or was never written.'
-      severity: warning (not error — agents may write fields via save_entity_field that are not statically
-        visible in the contract)
-      example_violation: 'on_complete condition references entity.build_complexity, but no handler in the flow
-        has data_accumulation writing build_complexity or compute storing to build_complexity. The field only
-        exists as a dimension name in accumulated items. Correct usage would be
-        accumulated.filter(d, d.dimension == "build_complexity" && d.score >= threshold).size() == 1.'
+      description: 'The platform MUST validate entity field references at boot using only statically provable
+        initializers. Every entity.X used as a VALUE (not in a presence-check position) must be guaranteed initialized
+        at that position in the handler dependency graph.'
+      statically_provable_initializers:
+        schema_initial_value:
+          form: 'entity_schema mapping form with initial: ...'
+          valid_for: All reference positions, including guards on create_entity handlers.
+        create_entity_unconditional_data_accumulation:
+          form: The handler containing create_entity writes X unconditionally in top-level data_accumulation.
+          valid_for: Only positions that run strictly after same-handler top-level data_accumulation in the dependency graph
+            (payload_transform, emits, action, clear), plus downstream handlers after commit.
+          not_valid_for: guard.check, filter, reduce, count, compute inputs, on_complete.condition, rules.condition,
+            and same-handler data_accumulation.expression.
+      presence_positions:
+      - has(entity.X)
+      - entity.X == null
+      - entity.X != null
+      rule: 'For every entity.X used as a value, at least one of the following must be true: (1) X has a declared
+        schema initial value, or (2) the current create_entity handler writes X unconditionally in top-level
+        data_accumulation and the reference position runs strictly after that step, or (3) the reference is in a
+        presence-check position. Dynamic agent writes and conditional reachability do not count as static proof.'
+      severity: error (boot fails)
+      example_violation: 'A create_entity guard references entity.build_complexity as a value, but build_complexity is sparse
+        and only later written by data_accumulation or a downstream handler. Correct usage would be to declare an initial value
+        in entity_schema or use a presence check such as has(entity.build_complexity).'
     advances_to:
       field: advances_to
       type: string
@@ -1410,6 +1449,13 @@ engine:
     - 'Membership: in, contains'
     - 'String: startsWith, endsWith, matches'
     - 'List: size, exists, all, filter, map'
+    presence_semantics:
+      has_function:
+        signature: has(entity.X) -> boolean
+        meaning: Returns true if entity.X exists in entity_state.fields, false otherwise. Does not raise an error for missing fields.
+      null_comparison:
+        meaning: 'entity.X == null and entity.X != null are presence-check positions. They do not raise an error when X is missing.'
+      missing_field_rule: Missing entity fields are never implicitly coerced to a default value or to null outside explicit presence checks.
     examples:
     - entity.retry_count <= policy.max_retries
     - payload.category == "billing"
@@ -1418,6 +1464,8 @@ engine:
     - payload.decision == "approve"
     - entity.revision_count < policy.max_revisions
     - entity.total_amount >= policy.approval_threshold
+    - has(entity.kill_reason) ? entity.kill_reason : "active"
+    - entity.kill_reason != null
   error_model:
     description: How the platform handles failures at each layer.
     event_validation_failure:

@@ -717,7 +717,22 @@ func TestResolveHandlerEntityIDForFlowDoesNotRetargetSameFlowInstancePath(t *tes
 	}
 }
 
-func TestResolveHandlerEntityIDForFlowCreateEntityKeepsInboundReferenceAndClearsState(t *testing.T) {
+func TestResolveHandlerEntityIDForFlowCreateEntitySeedsInitialStateAndSchemaDefaults(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			InitialStage: "queued",
+			FlowInitial:  map[string]string{"scoring": "queued"},
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "scoring_phase",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "revision_count", Type: "integer", Initial: 0},
+						{Name: "is_duplicate", Type: "boolean", Initial: false},
+					},
+				}},
+			},
+		},
+	})
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	const inboundEntityID = "ent-parent"
 	state := WorkflowState{
@@ -731,7 +746,7 @@ func TestResolveHandlerEntityIDForFlowCreateEntityKeepsInboundReferenceAndClears
 		Payload: mustJSON(map[string]any{"entity_id": inboundEntityID, "name": "Parent"}),
 	}.WithEnvelope(events.EventEnvelope{EntityID: inboundEntityID})
 
-	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "scoring", handler, inboundEntityID, inbound, &state)
+	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, inboundEntityID, inbound, &state)
 
 	if gotID == "" || gotID == inboundEntityID {
 		t.Fatalf("entityID = %q, want fresh id", gotID)
@@ -742,8 +757,8 @@ func TestResolveHandlerEntityIDForFlowCreateEntityKeepsInboundReferenceAndClears
 	if state.EntityID != gotID {
 		t.Fatalf("state entity_id = %q, want %q", state.EntityID, gotID)
 	}
-	if state.Stage != "" {
-		t.Fatalf("state stage = %q, want cleared", state.Stage)
+	if state.Stage != "queued" {
+		t.Fatalf("state stage = %q, want queued", state.Stage)
 	}
 	if state.Status != "" {
 		t.Fatalf("state status = %q, want cleared", state.Status)
@@ -767,16 +782,26 @@ func TestResolveHandlerEntityIDForFlowCreateEntityKeepsInboundReferenceAndClears
 	if got := strings.TrimSpace(asString(state.Metadata["storage_ref"])); got != "scoring/"+instanceID {
 		t.Fatalf("state storage_ref = %q, want %q", got, "scoring/"+instanceID)
 	}
+	if got := state.Metadata["revision_count"]; got != 0 {
+		t.Fatalf("state revision_count = %#v, want 0", got)
+	}
+	if got := state.Metadata["is_duplicate"]; got != false {
+		t.Fatalf("state is_duplicate = %#v, want false", got)
+	}
 	if wantEntityID := FlowInstanceEntityID("scoring/" + instanceID); gotID != wantEntityID {
 		t.Fatalf("entityID = %q, want persisted flow entity id %q", gotID, wantEntityID)
 	}
 }
 
-func TestHandlerExecutionStateSnapshotCreateEntityStartsClean(t *testing.T) {
+func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefaults(t *testing.T) {
 	snapshot, err := handlerExecutionStateSnapshot(runtimecontracts.SystemNodeEventHandler{CreateEntity: true}, "ent-child", WorkflowState{
 		EntityID: "ent-parent",
 		Stage:    WorkflowStateID("queued"),
-		Metadata: map[string]any{"subject_id": "ent-parent"},
+		Metadata: map[string]any{
+			"subject_id":     "ent-parent",
+			"revision_count": 0,
+			"is_duplicate":   false,
+		},
 	})
 	if err != nil {
 		t.Fatalf("handlerExecutionStateSnapshot: %v", err)
@@ -785,14 +810,20 @@ func TestHandlerExecutionStateSnapshotCreateEntityStartsClean(t *testing.T) {
 	if got := snapshot.EntityID.String(); got != "ent-child" {
 		t.Fatalf("snapshot entity_id = %q, want ent-child", got)
 	}
-	if snapshot.CurrentState != "" {
-		t.Fatalf("snapshot current_state = %q, want empty", snapshot.CurrentState)
+	if snapshot.CurrentState != "queued" {
+		t.Fatalf("snapshot current_state = %q, want queued", snapshot.CurrentState)
 	}
 	if snapshot.Metadata == nil {
 		t.Fatal("snapshot metadata = nil, want subject metadata")
 	}
 	if got := strings.TrimSpace(asString(snapshot.Metadata["subject_id"])); got != "ent-parent" {
 		t.Fatalf("snapshot subject_id = %q, want ent-parent", got)
+	}
+	if got := snapshot.Metadata["revision_count"]; got != 0 {
+		t.Fatalf("snapshot revision_count = %#v, want 0", got)
+	}
+	if got := snapshot.Metadata["is_duplicate"]; got != false {
+		t.Fatalf("snapshot is_duplicate = %#v, want false", got)
 	}
 }
 
@@ -834,6 +865,169 @@ func TestResolveHandlerEntityIDForFlowCreateEntitySeedsFirstFlowSubjectID(t *tes
 	}
 	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != gotID {
 		t.Fatalf("state subject_id = %q, want %q", got, gotID)
+	}
+}
+
+func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bus := &recordingPipelineBus{}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:         "validation",
+			Version:      "v-test",
+			InitialStage: "queued",
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "validation_phase",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "revision_count", Type: "integer", Initial: 0},
+						{Name: "kill_reason", Type: "text"},
+					},
+				}},
+			},
+		},
+	}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		db:             db,
+		workflowStore:  NewWorkflowInstanceStore(db),
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module: &previewWorkflowModule{
+			bundle: bundle,
+			workflow: NewWorkflowDefinition("validation", []WorkflowStage{
+				{Name: "queued"},
+			}, nil),
+		},
+	}
+
+	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0 && !has(entity.kill_reason)"},
+		Emits:        runtimecontracts.EventEmission{Single: "entity.created"},
+	}, workflowTriggerContext{
+		Event: events.Event{Type: events.EventType("candidate.discovered")},
+		State: WorkflowState{},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	emitted := bus.publishedEvent(0)
+	entityID := emitted.EntityID()
+	if entityID == "" {
+		t.Fatal("expected emitted event to carry created entity id")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(emitted.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal emitted payload: %v", err)
+	}
+	if got := payload["revision_count"]; got != float64(0) && got != 0 {
+		t.Fatalf("emitted payload revision_count = %#v, want 0", got)
+	}
+
+	instance, ok, err := pc.workflowStore.Load(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected created entity to persist")
+	}
+	if got := instance.Metadata["revision_count"]; got != float64(0) && got != 0 {
+		t.Fatalf("persisted revision_count = %#v, want 0", got)
+	}
+
+	rows, err := db.QueryContext(context.Background(), `
+		SELECT field, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
+		FROM entity_mutations
+		WHERE entity_id = $1::uuid
+		ORDER BY field, created_at
+	`, entityID)
+	if err != nil {
+		t.Fatalf("query entity_mutations: %v", err)
+	}
+	defer rows.Close()
+
+	initialMutations := map[string][3]string{}
+	for rows.Next() {
+		var field, writerType, writerID, handlerStep string
+		if err := rows.Scan(&field, &writerType, &writerID, &handlerStep); err != nil {
+			t.Fatalf("scan entity_mutations: %v", err)
+		}
+		if writerType == "platform" && writerID == "entity_initial_value" {
+			initialMutations[field] = [3]string{writerType, writerID, handlerStep}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	if got, ok := initialMutations["revision_count"]; !ok {
+		t.Fatalf("expected initial-value mutation for revision_count, got %#v", initialMutations)
+	} else if got[2] != "create_entity" {
+		t.Fatalf("revision_count initial mutation metadata = %#v, want handler_step create_entity", got)
+	}
+}
+
+func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-a": {
+				ID: "node-a",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"candidate.discovered": {
+						CreateEntity: true,
+						Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"},
+						Emits:        runtimecontracts.EventEmission{Single: "entity.created"},
+					},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:         "validation",
+			Version:      "v-test",
+			InitialStage: "queued",
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"node-a": {
+					"candidate.discovered": {
+						CreateEntity: true,
+						Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"},
+						Emits:        runtimecontracts.EventEmission{Single: "entity.created"},
+					},
+				},
+			},
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "validation_phase",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "revision_count", Type: "integer", Initial: 0},
+						{Name: "is_duplicate", Type: "boolean", Initial: false},
+					},
+				}},
+			},
+		},
+	}
+
+	preview, err := PreviewContractHandlerExecution(context.Background(), bundle, "node-a", events.Event{
+		Type: events.EventType("candidate.discovered"),
+	}, WorkflowState{}, nil)
+	if err != nil {
+		t.Fatalf("PreviewContractHandlerExecution: %v", err)
+	}
+	if got := preview.Metadata["revision_count"]; got != 0 {
+		t.Fatalf("preview revision_count = %#v, want 0", got)
+	}
+	if got := preview.InitialValues["revision_count"]; got != 0 {
+		t.Fatalf("preview initial revision_count = %#v, want 0", got)
+	}
+	if got := preview.InitialValues["is_duplicate"]; got != false {
+		t.Fatalf("preview initial is_duplicate = %#v, want false", got)
 	}
 }
 
@@ -1053,7 +1247,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 		entityLocks:    map[string]*sync.Mutex{},
 	}
 
-	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "branch_target", Value: runtimecontracts.LiteralExpression("handler")},
@@ -1068,17 +1262,11 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 		}.WithEntityID("ent-1"),
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
-	if err != nil {
-		t.Fatalf("executeNodeContractHandler: %v", err)
+	if err == nil {
+		t.Fatal("expected missing early entity field to fail closed at runtime")
 	}
-	if !result.Handled {
-		t.Fatal("expected handled result")
-	}
-	if got := strings.TrimSpace(result.Outcome.RuleID); got != "" {
-		t.Fatalf("rule_id = %q, want empty when on_complete cannot see current-handler top-level writes", got)
-	}
-	if got := bus.publishedCount(); got != 0 {
-		t.Fatalf("published count = %d, want 0 when branch selection cannot see early top-level writes", got)
+	if !strings.Contains(err.Error(), "entity.branch_target") {
+		t.Fatalf("error = %v, want missing entity.branch_target context", err)
 	}
 }
 

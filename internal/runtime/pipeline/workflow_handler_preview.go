@@ -17,6 +17,7 @@ type HandlerPreview struct {
 	Stage           WorkflowStateID
 	StatusText      string
 	Metadata        map[string]any
+	InitialValues   map[string]any
 	Emits           []string
 	ActionsExecuted []string
 	GuardsEvaluated []string
@@ -152,7 +153,8 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		Status:          status,
 		Stage:           stage,
 		StatusText:      state.Status,
-		Metadata:        cloneStringAnyMap(state.Metadata),
+		Metadata:        cloneStringAnyMap(result.PreviewMetadata),
+		InitialValues:   cloneStringAnyMap(result.InitialValuesMaterialized),
 		Emits:           emits,
 		ActionsExecuted: actions,
 		GuardsEvaluated: guards,

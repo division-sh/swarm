@@ -340,6 +340,9 @@ func decodeEntitySchemaField(name string, node *yaml.Node) (EntitySchemaField, e
 	field := EntitySchemaField{Name: strings.TrimSpace(name)}
 	switch node.Kind {
 	case yaml.ScalarNode:
+		if strings.Contains(strings.ToLower(node.Value), " initial ") {
+			return EntitySchemaField{}, fmt.Errorf("entity schema field %s: scalar form cannot declare initial values; use mapping form with type and initial", field.Name)
+		}
 		parsed := parseTypedFieldString(node.Value)
 		field.Type = parsed.Type
 		field.Primary = parsed.Primary
@@ -353,9 +356,14 @@ func decodeEntitySchemaField(name string, node *yaml.Node) (EntitySchemaField, e
 			return EntitySchemaField{}, err
 		}
 		field.Type = aux.Type
+		field.Initial = aux.Initial
 		field.Primary = aux.Primary
 		field.Indexed = aux.Indexed
 		field.Nullable = aux.Nullable
+		field.Description = aux.Description
+		if strings.TrimSpace(field.Type) == "" {
+			return EntitySchemaField{}, fmt.Errorf("entity schema field %s: type is required", field.Name)
+		}
 		return field, nil
 	default:
 		return EntitySchemaField{}, fmt.Errorf("unsupported entity schema field yaml node kind %d", node.Kind)

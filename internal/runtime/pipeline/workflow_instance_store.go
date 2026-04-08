@@ -95,8 +95,35 @@ type WorkflowInstanceStore struct {
 
 var workflowInstancePathNamespace = uuid.MustParse("5e7507c8-bd4f-46e0-a098-b016dc31df23")
 
+type workflowCreateEntityInitialValuesContextKey struct{}
+
+type workflowCreateEntityInitialValues struct {
+	Fields map[string]any
+}
+
 func NewWorkflowInstanceStore(db *sql.DB) *WorkflowInstanceStore {
 	return &WorkflowInstanceStore{db: db}
+}
+
+func withWorkflowCreateEntityInitialValues(ctx context.Context, fields map[string]any) context.Context {
+	if len(fields) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, workflowCreateEntityInitialValuesContextKey{}, workflowCreateEntityInitialValues{
+		Fields: cloneStringAnyMap(fields),
+	})
+}
+
+func workflowCreateEntityInitialValuesFromContext(ctx context.Context) (workflowCreateEntityInitialValues, bool) {
+	if ctx == nil {
+		return workflowCreateEntityInitialValues{}, false
+	}
+	raw := ctx.Value(workflowCreateEntityInitialValuesContextKey{})
+	info, ok := raw.(workflowCreateEntityInitialValues)
+	if !ok || len(info.Fields) == 0 {
+		return workflowCreateEntityInitialValues{}, false
+	}
+	return workflowCreateEntityInitialValues{Fields: cloneStringAnyMap(info.Fields)}, true
 }
 
 func (s *WorkflowInstanceStore) Enabled() bool {
@@ -584,12 +611,21 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	); err != nil {
 		return err
 	}
-	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, rowID, previous, runtimemutationlog.EntityStateProjection{
+	afterProjection := runtimemutationlog.EntityStateProjection{
 		CurrentState: strings.TrimSpace(instance.CurrentState),
 		Fields:       projection.Fields,
 		Gates:        projection.GatesAny(),
 		Accumulator:  projection.Accumulator,
-	}, runtimemutationlog.Writer{
+	}
+	previousForDiff := previous
+	if createInfo, ok := workflowCreateEntityInitialValuesFromContext(ctx); ok {
+		nextPrevious, err := insertWorkflowCreateEntityInitialValueMutations(ctx, tx, rowID, previous, afterProjection, createInfo.Fields)
+		if err != nil {
+			return err
+		}
+		previousForDiff = nextPrevious
+	}
+	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, rowID, previousForDiff, afterProjection, runtimemutationlog.Writer{
 		Type:        "platform",
 		ID:          "workflow_instance_store",
 		HandlerStep: "upsert",
@@ -664,6 +700,65 @@ func lockWorkflowInstanceMutation(ctx context.Context, tx *sql.Tx, instanceID st
 		return fmt.Errorf("lock workflow instance mutation: %w", err)
 	}
 	return nil
+}
+
+func insertWorkflowCreateEntityInitialValueMutations(
+	ctx context.Context,
+	tx *sql.Tx,
+	entityID string,
+	before, after runtimemutationlog.EntityStateProjection,
+	initialValues map[string]any,
+) (runtimemutationlog.EntityStateProjection, error) {
+	if len(initialValues) == 0 {
+		return before, nil
+	}
+	adjusted := runtimemutationlog.EntityStateProjection{
+		CurrentState: before.CurrentState,
+		Fields:       cloneStringAnyMap(before.Fields),
+		Gates:        cloneStringAnyMap(before.Gates),
+		Accumulator:  cloneStringAnyMap(before.Accumulator),
+	}
+	if adjusted.Fields == nil {
+		adjusted.Fields = map[string]any{}
+	}
+	for field, declared := range initialValues {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		finalValue, ok := after.Fields[field]
+		if !ok {
+			return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("create_entity initial value %s missing from persisted entity projection", field)
+		}
+		oldValue, hadOld := adjusted.Fields[field]
+		if hadOld && workflowJSONValuesEqual(oldValue, declared) {
+			continue
+		}
+		if err := runtimemutationlog.Insert(ctx, tx, runtimemutationlog.Record{
+			EntityID:    entityID,
+			Field:       field,
+			OldValue:    oldValueOrNil(oldValue, hadOld),
+			NewValue:    declared,
+			WriterType:  "platform",
+			WriterID:    "entity_initial_value",
+			HandlerStep: "create_entity",
+		}); err != nil {
+			return runtimemutationlog.EntityStateProjection{}, err
+		}
+		if workflowJSONValuesEqual(finalValue, declared) {
+			adjusted.Fields[field] = declared
+			continue
+		}
+		adjusted.Fields[field] = declared
+	}
+	return adjusted, nil
+}
+
+func oldValueOrNil(value any, ok bool) any {
+	if !ok {
+		return nil
+	}
+	return value
 }
 
 func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, entityID string) (runtimemutationlog.EntityStateProjection, error) {

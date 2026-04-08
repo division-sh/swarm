@@ -68,6 +68,63 @@ func TestWorkflowExpressionEvaluator_EvalBoolFailsClosedOnMissingEntityField(t *
 	}
 }
 
+func TestWorkflowExpressionEvaluator_EvalBoolAllowsHasPresenceCheckOnSparseField(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	ok, err := eval.EvalBool(`has(entity.kill_reason)`, workflowExpressionContext{
+		Entity:  map[string]any{},
+		Payload: map[string]any{},
+		Policy:  map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("EvalBool error = %v", err)
+	}
+	if ok {
+		t.Fatal("expected has(entity.kill_reason) to be false for sparse field")
+	}
+}
+
+func TestWorkflowExpressionEvaluator_EvalBoolAllowsNullPresenceChecksOnSparseField(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	ok, err := eval.EvalBool(`entity.kill_reason == null`, workflowExpressionContext{
+		Entity:  map[string]any{},
+		Payload: map[string]any{},
+		Policy:  map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("EvalBool == null error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected sparse field == null to be true")
+	}
+
+	ok, err = eval.EvalBool(`entity.kill_reason != null`, workflowExpressionContext{
+		Entity:  map[string]any{},
+		Payload: map[string]any{},
+		Policy:  map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("EvalBool != null error = %v", err)
+	}
+	if ok {
+		t.Fatal("expected sparse field != null to be false")
+	}
+}
+
+func TestWorkflowExpressionEvaluator_EvalBoolAllowsHasGuardedTernaryReadOnSparseField(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	ok, err := eval.EvalBool(`has(entity.kill_reason) ? entity.kill_reason == "manual" : true`, workflowExpressionContext{
+		Entity:  map[string]any{},
+		Payload: map[string]any{},
+		Policy:  map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("EvalBool ternary error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected guarded ternary read to take fallback branch for sparse field")
+	}
+}
+
 func TestWorkflowExpressionEvaluator_EvalBoolIgnoresEntityRefsInsideStringLiterals(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
 	ok, err := eval.EvalBool(`payload.label == "entity.score"`, workflowExpressionContext{

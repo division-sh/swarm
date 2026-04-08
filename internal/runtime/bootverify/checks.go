@@ -474,6 +474,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 		if flowID == "" {
 			continue
 		}
+		schemaInitials := runtimepipeline.WorkflowEntitySchemaInitialValueFields(c.source)
 		writers := flowEntityFieldWriters(flow.Nodes)
 		for _, transition := range c.source.DerivedHandlerTransitions() {
 			if strings.TrimSpace(transition.FlowID) != flowID {
@@ -500,6 +501,9 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						if _, ok := guarded[field]; ok {
 							continue
 						}
+						if _, ok := schemaInitials[field]; ok {
+							continue
+						}
 						key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, field}, "|")
 						if _, ok := seen[key]; ok {
 							continue
@@ -507,11 +511,11 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						if _, ok := available[field]; ok {
 							continue
 						}
-						if expr.SelfTargetField == field {
+						if expr.SelfTargetField == field && !handler.CreateEntity {
 							continue
 						}
 						if runtimepipeline.WorkflowEntityReadsPersistedStateBeforeHandlerWrites(expr.Phase) {
-							if _, ok := handlerWriters[field]; ok {
+							if _, ok := handlerWriters[field]; ok && !handler.CreateEntity {
 								continue
 							}
 						}
@@ -2901,6 +2905,13 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 			out = append(out, expressionReference{Kind: "count condition", Expression: condition, Phase: runtimepipeline.WorkflowEntityFieldLifecycleCount})
 		}
 	}
+	if handler.PayloadTransform != nil {
+		for _, entry := range handler.PayloadTransform.TransformEntries() {
+			if expr := strings.TrimSpace(entry.Value.CEL); expr != "" {
+				out = append(out, expressionReference{Kind: "payload_transform value", Expression: expr, Phase: runtimepipeline.WorkflowEntityFieldLifecyclePayloadTransform})
+			}
+		}
+	}
 	if handler.Query != nil {
 		appendQueryExpressions(&out, *handler.Query)
 	}
@@ -2950,6 +2961,8 @@ func availableEntityFieldsForExpression(handler runtimecontracts.SystemNodeEvent
 		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeCondition(handler, runtimepipeline.WorkflowConditionContextRule)
 	case runtimepipeline.WorkflowEntityFieldLifecycleReduce:
 		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler)
+	case runtimepipeline.WorkflowEntityFieldLifecyclePayloadTransform:
+		return runtimepipeline.WorkflowEntityFieldsAvailableBeforePayloadTransform(handler)
 	default:
 		return map[string]struct{}{}
 	}

@@ -45,11 +45,13 @@ type handlerExecutionOutcome struct {
 }
 
 type contractHandlerExecutionResult struct {
-	Transition      WorkflowTransition
-	Plan            handlerExecutionPlan
-	Outcome         *handlerExecutionOutcome
-	GuardsEvaluated []string
-	Handled         bool
+	Transition                WorkflowTransition
+	Plan                      handlerExecutionPlan
+	Outcome                   *handlerExecutionOutcome
+	GuardsEvaluated           []string
+	PreviewMetadata           map[string]any
+	InitialValuesMaterialized map[string]any
+	Handled                   bool
 }
 
 func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Context, evt events.Event, triggerCtx workflowTriggerContext) (contractHandlerExecutionResult, error) {
@@ -173,6 +175,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			Plan:            plan,
 			Outcome:         outcome,
 			GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
+			PreviewMetadata: cloneStringAnyMap(triggerCtx.State.Metadata),
 			Handled:         true,
 		}, nil
 	}
@@ -185,6 +188,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, triggerCtx.Event)
 	ctx = runtimecorrelation.WithHandlerID(ctx, strings.TrimSpace(nodeID)+":"+strings.TrimSpace(string(triggerCtx.Event.Type)))
+	if handler.CreateEntity {
+		ctx = withWorkflowCreateEntityInitialValues(ctx, workflowEntitySchemaInitialValues(source))
+	}
 	deps := coordinatorEngineDependencies(pc)
 	if collectLocally {
 		deps.Outbox = noOpEngineOutbox{}
@@ -210,6 +216,14 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
+	if handler.CreateEntity && result.StateMutation.StateCarrier.Metadata == nil {
+		result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(stateSnapshot.StateCarrier.Metadata)
+	}
+	previewMetadata := previewMetadataAfterExecution(stateSnapshot, result.StateMutation)
+	initialValuesMaterialized := map[string]any(nil)
+	if handler.CreateEntity {
+		initialValuesMaterialized = workflowEntitySchemaInitialValues(source)
+	}
 	if !preview {
 		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result))
 	}
@@ -234,11 +248,13 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	plan.DataAccumulation = outcome.DataAccumulation
 	return contractHandlerExecutionResult{
-		Transition:      workflowTransitionFromHandlerOutcome(triggerCtx.State, nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), outcome),
-		Plan:            plan,
-		Outcome:         outcome,
-		GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
-		Handled:         true,
+		Transition:                workflowTransitionFromHandlerOutcome(triggerCtx.State, nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), outcome),
+		Plan:                      plan,
+		Outcome:                   outcome,
+		GuardsEvaluated:           append([]string{}, outcome.GuardsEvaluated...),
+		PreviewMetadata:           previewMetadata,
+		InitialValuesMaterialized: initialValuesMaterialized,
+		Handled:                   true,
 	}, nil
 }
 
@@ -268,17 +284,9 @@ func resolveHandlerEntityIDForFlow(
 		entityID = instance.EntityID
 		if state != nil {
 			state.EntityID = entityID
-			state.Stage = ""
+			state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
 			state.Status = ""
-			state.Metadata = map[string]any{"subject_id": instance.SubjectID}
-			if instance.InstancePath != "" {
-				state.Metadata["flow_path"] = instance.InstancePath
-				state.Metadata["storage_ref"] = instance.InstancePath
-			}
-			state.Metadata["instance_id"] = instance.InstanceID
-			if instance.ParentEntityID != "" {
-				state.Metadata["parent_entity_id"] = instance.ParentEntityID
-			}
+			state.Metadata = workflowCreateEntityMetadata(source, flowID, instance)
 		}
 		return entityID, evt
 	}
@@ -304,6 +312,41 @@ func resolveHandlerEntityIDForFlow(
 		state.EntityID = entityID
 	}
 	return entityID, evt
+}
+
+func workflowCreateEntityMetadata(source semanticview.Source, flowID string, instance FlowInstanceIdentity) map[string]any {
+	metadata := workflowEntitySchemaInitialValues(source)
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	if instance.SubjectID != "" {
+		metadata["subject_id"] = instance.SubjectID
+	}
+	if instance.InstancePath != "" {
+		metadata["flow_path"] = instance.InstancePath
+		metadata["storage_ref"] = instance.InstancePath
+	}
+	if instance.InstanceID != "" {
+		metadata["instance_id"] = instance.InstanceID
+	}
+	if instance.ParentEntityID != "" {
+		metadata["parent_entity_id"] = instance.ParentEntityID
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
+}
+
+func previewMetadataAfterExecution(snapshot runtimeengine.StateSnapshot, mutation runtimeengine.StateMutation) map[string]any {
+	carrier := snapshot.StateCarrier
+	if mutation.StateCarrier.Metadata != nil {
+		carrier.Metadata = cloneStringAnyMap(mutation.StateCarrier.Metadata)
+	}
+	if len(mutation.StateCarrier.Gates) > 0 {
+		carrier.Gates = workflowCloneBoolMap(mutation.StateCarrier.Gates)
+	}
+	return carrier.PersistedMetadata()
 }
 
 func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *handlerExecutionOutcome {
