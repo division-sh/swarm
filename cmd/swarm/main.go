@@ -27,7 +27,6 @@ import (
 	"swarm/internal/config"
 	dashboardserver "swarm/internal/dashboard/server"
 	"swarm/internal/runtime"
-	runtimeauthority "swarm/internal/runtime/authority"
 	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -38,7 +37,6 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
-	runtimetools "swarm/internal/runtime/tools"
 	workspace "swarm/internal/runtime/workspace"
 	"swarm/internal/store"
 )
@@ -142,13 +140,15 @@ func main() {
 		slog.Error("configure credentials", "error", err)
 		os.Exit(1)
 	}
-	bootReport := runtimebootverify.Run(ctx, source, runtimebootverify.Options{
-		Credentials:       credentialStore,
-		CheckMCPReachable: true,
-	})
-	if bootReport.HasErrors() {
-		for _, finding := range bootReport.Errors() {
-			slog.Error("swarm boot verification failed", "check_id", finding.CheckID, "location", finding.Location, "detail", finding.Message)
+	validation, err := runtime.ValidateWorkflowContractSurface(ctx, source, runtime.DefaultWorkflowContractValidationOptions(credentialStore))
+	bootReport := validation.BootReport
+	if err != nil {
+		if bootReport.HasErrors() {
+			for _, finding := range bootReport.Errors() {
+				slog.Error("swarm boot verification failed", "check_id", finding.CheckID, "location", finding.Location, "detail", finding.Message)
+			}
+		} else {
+			slog.Error("workflow contract validation failed", "error", err)
 		}
 		os.Exit(1)
 	}
@@ -785,42 +785,12 @@ func verifyBundle(ctx context.Context, source semanticview.Source) error {
 	if source == nil {
 		return errors.New("semantic source is required")
 	}
-	if bundle, ok := semanticview.Bundle(source); ok {
-		if err := runtimecontracts.ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
-			return fmt.Errorf("validate prompt schema guards: %w", err)
-		}
-	}
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
 		return fmt.Errorf("configure credentials: %w", err)
 	}
-	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{
-		Credentials:       credentialStore,
-		CheckMCPReachable: true,
-	})
-	if report.HasErrors() {
-		lines := make([]string, 0, len(report.Errors()))
-		for _, finding := range report.Errors() {
-			lines = append(lines, fmt.Sprintf("%s [%s] %s", strings.TrimSpace(finding.CheckID), strings.TrimSpace(finding.Location), strings.TrimSpace(finding.Message)))
-		}
-		return fmt.Errorf("boot verification failed:\n%s", strings.Join(lines, "\n"))
-	}
-	return verifyEmitSchemaCoverage(source)
-}
-
-func verifyEmitSchemaCoverage(source semanticview.Source) error {
-	if source == nil {
-		return errors.New("semantic source is required")
-	}
-	registry := runtimetools.NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
-	if generated := registry.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 && envBool("SWARM_EMIT_SCHEMA_STRICT", true) {
-		sample := generated
-		if len(sample) > 10 {
-			sample = sample[:10]
-		}
-		return fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries (sample: %s)", len(generated), strings.Join(sample, ", "))
-	}
-	return nil
+	_, err = runtime.ValidateWorkflowContractSurface(ctx, source, runtime.DefaultWorkflowContractValidationOptions(credentialStore))
+	return err
 }
 
 func loadRuntimeConfig(path string) (*config.Config, error) {

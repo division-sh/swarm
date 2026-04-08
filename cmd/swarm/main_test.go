@@ -333,33 +333,71 @@ func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
 	}
 }
 
-func TestVerifyEmitSchemaCoverage_RejectsStrictMissingEmitSchemas(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"agent-1": {
-				ID:         "agent-1",
-				EmitEvents: []string{"missing.event"},
-			},
-		},
-	})
-	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
-	err := verifyEmitSchemaCoverage(source)
-	if err == nil || !strings.Contains(err.Error(), "emit schema strict mode enabled") {
-		t.Fatalf("verifyEmitSchemaCoverage error = %v, want strict emit schema error", err)
-	}
+func testWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {
+	bundle := &runtimecontracts.WorkflowContractBundle{}
+	bundle.Platform.Platform.Name = "swarm"
+	bundle.Platform.Platform.Version = "test"
+	return bundle
 }
 
-func TestVerifyEmitSchemaCoverage_AllowsMissingWhenStrictDisabled(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"agent-1": {
-				ID:         "agent-1",
-				EmitEvents: []string{"missing.event"},
-			},
+func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t *testing.T) {
+	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+	cases := []struct {
+		name        string
+		bundle      *runtimecontracts.WorkflowContractBundle
+		errContains string
+		wantErr     bool
+	}{
+		{
+			name: "missing tool reference",
+			bundle: func() *runtimecontracts.WorkflowContractBundle {
+				bundle := testWorkflowValidationBundle()
+				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+					"agent-1": {ID: "agent-1", Tools: []string{"missing_tool"}},
+				}
+				return bundle
+			}(),
+			wantErr: false,
 		},
-	})
-	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "false")
-	if err := verifyEmitSchemaCoverage(source); err != nil {
-		t.Fatalf("verifyEmitSchemaCoverage: %v", err)
+		{
+			name: "missing emit schema",
+			bundle: func() *runtimecontracts.WorkflowContractBundle {
+				bundle := testWorkflowValidationBundle()
+				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+					"agent-1": {ID: "agent-1", EmitEvents: []string{"missing.event"}},
+				}
+				return bundle
+			}(),
+			errContains: "emit schema strict mode enabled",
+			wantErr:     true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := semanticview.Wrap(tc.bundle)
+			verifyErr := verifyBundle(context.Background(), source)
+			if tc.wantErr {
+				if verifyErr == nil || !strings.Contains(verifyErr.Error(), tc.errContains) {
+					t.Fatalf("verifyBundle error = %v, want substring %q", verifyErr, tc.errContains)
+				}
+			} else if verifyErr != nil {
+				t.Fatalf("verifyBundle error = %v, want nil", verifyErr)
+			}
+
+			result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil))
+			if tc.wantErr {
+				if runtimeErr == nil || !strings.Contains(runtimeErr.Error(), tc.errContains) {
+					t.Fatalf("ValidateWorkflowContractSurface error = %v, want substring %q", runtimeErr, tc.errContains)
+				}
+				return
+			}
+			if runtimeErr != nil {
+				t.Fatalf("ValidateWorkflowContractSurface error = %v, want nil", runtimeErr)
+			}
+			if warnings := result.BootReport.Warnings(); len(warnings) == 0 || !strings.Contains(warnings[0].Message, "missing tool missing_tool") {
+				t.Fatalf("BootReport warnings = %#v, want tool_resolution warning", warnings)
+			}
+		})
 	}
 }

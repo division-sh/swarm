@@ -173,27 +173,47 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 			return fmt.Errorf("workspace validation failed: %w", err)
 		}
 	}
-	report := runtimebootverify.Run(context.Background(), opts.WorkflowModule.SemanticSource(), runtimebootverify.Options{
-		Credentials:       opts.Credentials,
-		CheckMCPReachable: true,
-	})
-	if !report.HasErrors() && !(bootWarningsFatal() && len(report.Warnings()) > 0) {
+	result, err := ValidateWorkflowContractSurface(context.Background(), source, DefaultWorkflowContractValidationOptions(opts.Credentials))
+	if err != nil {
+		return err
+	}
+	if !bootWarningsFatal() {
 		return nil
 	}
-	lines := make([]string, 0, len(report.Errors())+len(report.Warnings()))
-	for _, finding := range report.Errors() {
-		lines = append(lines, strings.TrimSpace(finding.Message))
+	warnings := bootWarningsExcludingCheckIDs(result.BootReport.Warnings(), "tool_resolution")
+	if len(warnings) == 0 {
+		return nil
 	}
-	if bootWarningsFatal() {
-		for _, finding := range report.Warnings() {
-			lines = append(lines, strings.TrimSpace(finding.Message))
-		}
+	lines := make([]string, 0, len(warnings))
+	for _, finding := range warnings {
+		lines = append(lines, strings.TrimSpace(finding.Message))
 	}
 	return fmt.Errorf(strings.Join(lines, "\n"))
 }
 
 func bootWarningsFatal() bool {
 	return runtimeEnvBool("SWARM_BOOT_WARNINGS_FATAL", true)
+}
+
+func bootWarningsExcludingCheckIDs(findings []runtimebootverify.Finding, checkIDs ...string) []runtimebootverify.Finding {
+	if len(findings) == 0 {
+		return nil
+	}
+	skip := make(map[string]struct{}, len(checkIDs))
+	for _, checkID := range checkIDs {
+		checkID = strings.TrimSpace(checkID)
+		if checkID != "" {
+			skip[checkID] = struct{}{}
+		}
+	}
+	out := make([]runtimebootverify.Finding, 0, len(findings))
+	for _, finding := range findings {
+		if _, excluded := skip[strings.TrimSpace(finding.CheckID)]; excluded {
+			continue
+		}
+		out = append(out, finding)
+	}
+	return out
 }
 
 func newRuntimePromptResolver(source semanticview.Source) (runtimecontracts.PromptResolver, error) {
@@ -225,22 +245,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	authorityProvider := runtimeauthority.NewSourceProvider(source)
 	emitRegistry := runtimetools.NewEmitRegistry(source, authorityProvider)
-	if warnings, err := runtimetools.ValidateToolImplementations(source); err != nil {
-		return nil, fmt.Errorf("tool implementation validation failed: %w", err)
-	} else {
-		if bootWarningsFatal() && len(warnings) > 0 {
-			parts := make([]string, 0, len(warnings))
-			for _, warning := range warnings {
-				parts = append(parts, strings.TrimSpace(warning.Error()))
-			}
-			sort.Strings(parts)
-			return nil, fmt.Errorf("tool implementation validation warnings are fatal: %s", strings.Join(parts, "; "))
-		}
-		for _, warning := range warnings {
-			slog.Warn("tool implementation validation warning", "warning", warning.Error())
-		}
-	}
-
 	rt := &Runtime{
 		ownerID:        newRuntimeOwnerID(),
 		Config:         cfg,
@@ -415,20 +419,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			slog.Warn("credential requirement warning", "key", item.Key, "required_by", strings.Join(requiredBy, ", "))
 		}
 	}
-	if generated := rt.EmitRegistry.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
-		if runtimeEnvBool("SWARM_EMIT_SCHEMA_STRICT", true) {
-			return nil, fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries", len(generated))
-		}
-		sample := generated
-		if len(sample) > 10 {
-			sample = sample[:10]
-		}
-		slog.Warn("emit schema hardening: agent-emitted event schemas missing explicit definitions",
-			"count", len(generated),
-			"sample", strings.Join(sample, ", "),
-		)
-	}
-
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, rt.ToolExecutor.ToolDefinitions(), runtimeagents.LLMAgentOptions{
 		PromptResolver:    rt.PromptResolver,
 		AuthorityProvider: rt.Authority,
