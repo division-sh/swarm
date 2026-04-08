@@ -25,6 +25,10 @@ var (
 	dataExpressionEnvOnce sync.Once
 	dataExpressionEnv     *cel.Env
 	dataExpressionEnvErr  error
+
+	executionConditionEnvOnce sync.Once
+	executionConditionEnvRef  *cel.Env
+	executionConditionEnvErr  error
 )
 
 type Accumulator struct {
@@ -537,191 +541,158 @@ func executionItems(value any) []any {
 	return sliceFromAny(value)
 }
 
-func executionEvalCondition(expr string, roots map[string]any) bool {
+type executionScope struct {
+	Item    any
+	Payload map[string]any
+	Entity  map[string]any
+	Policy  map[string]any
+}
+
+type executionOperandDefaultScope string
+
+const (
+	executionOperandDefaultNone executionOperandDefaultScope = ""
+	executionOperandDefaultItem executionOperandDefaultScope = "item"
+)
+
+func newExecutionScope(item any, payload, entity, policy map[string]any) executionScope {
+	return executionScope{
+		Item:    normalizeCELValue(item),
+		Payload: normalizedCELInputMap(payload),
+		Entity:  normalizedCELInputMap(entity),
+		Policy:  normalizedCELInputMap(policy),
+	}
+}
+
+func (s executionScope) activation() map[string]any {
+	return map[string]any{
+		"item":    s.Item,
+		"payload": s.Payload,
+		"entity":  s.Entity,
+		"policy":  s.Policy,
+	}
+}
+
+func executionConditionEnv() (*cel.Env, error) {
+	executionConditionEnvOnce.Do(func() {
+		executionConditionEnvRef, executionConditionEnvErr = cel.NewEnv(
+			cel.Variable("item", cel.DynType),
+			cel.Variable("payload", cel.DynType),
+			cel.Variable("entity", cel.DynType),
+			cel.Variable("policy", cel.DynType),
+		)
+	})
+	return executionConditionEnvRef, executionConditionEnvErr
+}
+
+func executionEvalCondition(expr string, scope executionScope) (bool, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
-		return true
+		return true, nil
 	}
-	expr = executionTrimOuterParens(expr)
-	if parts := executionSplitTopLevel(expr, " OR "); len(parts) > 1 {
-		for _, part := range parts {
-			if executionEvalCondition(part, roots) {
-				return true
-			}
-		}
-		return false
+	env, err := executionConditionEnv()
+	if err != nil {
+		return false, err
 	}
-	if parts := executionSplitTopLevel(expr, " AND "); len(parts) > 1 {
-		for _, part := range parts {
-			if !executionEvalCondition(part, roots) {
-				return false
-			}
-		}
-		return true
+	ast, issues := env.Compile(expr)
+	if issues != nil && issues.Err() != nil {
+		return false, issues.Err()
 	}
-	for _, op := range []string{">=", "<=", "!=", "==", ">", "<"} {
-		if parts := executionSplitTopLevel(expr, " "+op+" "); len(parts) == 2 {
-			left := executionResolveOperand(parts[0], roots)
-			right := executionResolveOperand(parts[1], roots)
-			return executionCompareValues(left, right, op)
-		}
+	program, err := env.Program(ast)
+	if err != nil {
+		return false, err
 	}
-	return truthy(executionResolveOperand(expr, roots))
+	out, _, err := program.Eval(scope.activation())
+	if err != nil {
+		return false, err
+	}
+	value := normalizeCELValue(out)
+	boolean, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("condition %q did not evaluate to bool", expr)
+	}
+	return boolean, nil
 }
 
-func executionSplitTopLevel(expr, sep string) []string {
-	if strings.TrimSpace(expr) == "" {
-		return nil
-	}
-	depth := 0
-	quote := rune(0)
-	parts := make([]string, 0, 4)
-	start := 0
-	for i, r := range expr {
-		switch r {
-		case '\'', '"':
-			if quote == 0 {
-				quote = r
-			} else if quote == r {
-				quote = 0
-			}
-		case '(':
-			if quote == 0 {
-				depth++
-			}
-		case ')':
-			if quote == 0 {
-				depth--
-			}
-		}
-		if quote == 0 && depth == 0 && strings.HasPrefix(expr[i:], sep) {
-			parts = append(parts, strings.TrimSpace(expr[start:i]))
-			start = i + len(sep)
-			i += len(sep) - 1
-		}
-	}
-	if len(parts) == 0 {
-		return []string{expr}
-	}
-	parts = append(parts, strings.TrimSpace(expr[start:]))
-	return parts
-}
-
-func executionTrimOuterParens(expr string) string {
-	expr = strings.TrimSpace(expr)
-	for strings.HasPrefix(expr, "(") && strings.HasSuffix(expr, ")") {
-		depth := 0
-		quote := rune(0)
-		wrapped := true
-		for i, r := range expr {
-			switch r {
-			case '\'', '"':
-				if quote == 0 {
-					quote = r
-				} else if quote == r {
-					quote = 0
-				}
-			case '(':
-				if quote == 0 {
-					depth++
-				}
-			case ')':
-				if quote == 0 {
-					depth--
-					if depth == 0 && i != len(expr)-1 {
-						wrapped = false
-					}
-				}
-			}
-		}
-		if !wrapped {
-			return expr
-		}
-		expr = strings.TrimSpace(expr[1 : len(expr)-1])
-	}
-	return expr
-}
-
-func executionResolveOperand(expr string, roots map[string]any) any {
+func (s executionScope) resolveOperand(expr string, defaultScope executionOperandDefaultScope) (any, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
-		return nil
+		return nil, nil
 	}
 	if strings.EqualFold(expr, "true") {
-		return true
+		return true, nil
 	}
 	if strings.EqualFold(expr, "false") {
-		return false
+		return false, nil
 	}
 	if strings.EqualFold(expr, "null") {
-		return nil
+		return nil, nil
 	}
 	if (strings.HasPrefix(expr, "\"") && strings.HasSuffix(expr, "\"")) || (strings.HasPrefix(expr, "'") && strings.HasSuffix(expr, "'")) {
-		return strings.Trim(expr, "\"'")
+		return strings.Trim(expr, "\"'"), nil
 	}
 	if n, err := strconv.Atoi(expr); err == nil {
-		return n
+		return n, nil
 	}
 	if f, err := strconv.ParseFloat(expr, 64); err == nil {
-		return f
+		return f, nil
 	}
-	segments := strings.Split(expr, ".")
-	if len(segments) == 1 {
-		for _, rootName := range []string{"item", "payload", "entity", "policy"} {
-			if rootMap, ok := roots[rootName].(map[string]any); ok {
-				if value, ok := rootMap[segments[0]]; ok {
-					return value
-				}
-			}
-		}
-		return expr
-	}
-	current, ok := roots[strings.TrimSpace(segments[0])]
-	if !ok {
-		return nil
-	}
-	for _, segment := range segments[1:] {
-		object, ok := asObject(current)
+	if strings.HasPrefix(expr, "item.") {
+		value, ok := lookupExecutionOperandPath(s.Item, strings.Split(strings.TrimPrefix(expr, "item."), "."))
 		if !ok {
-			return nil
+			return nil, fmt.Errorf("operand %q is unavailable in item scope", expr)
 		}
-		current, ok = object[strings.TrimSpace(segment)]
-		if !ok {
-			return nil
-		}
+		return value, nil
 	}
-	return current
+	parsed := paths.Parse(expr)
+	if parsed.HasExplicitRoot() {
+		value, ok := s.lookupExplicitRoot(parsed.Root, parsed.Segments)
+		if !ok {
+			return nil, fmt.Errorf("operand %q is unavailable in %s scope", expr, parsed.Root.String())
+		}
+		return value, nil
+	}
+	if defaultScope == executionOperandDefaultItem {
+		value, ok := lookupExecutionOperandPath(s.Item, parsed.Segments)
+		if !ok {
+			return nil, fmt.Errorf("operand %q is unavailable in item scope", expr)
+		}
+		return value, nil
+	}
+	return nil, fmt.Errorf("operand %q requires explicit scope", expr)
 }
 
-func executionCompareValues(left, right any, op string) bool {
-	lf, lok := asFloat(left)
-	rf, rok := asFloat(right)
-	if lok && rok {
-		switch op {
-		case ">=":
-			return lf >= rf
-		case "<=":
-			return lf <= rf
-		case ">":
-			return lf > rf
-		case "<":
-			return lf < rf
-		case "==":
-			return lf == rf
-		case "!=":
-			return lf != rf
-		}
-	}
-	ls := strings.TrimSpace(asString(left))
-	rs := strings.TrimSpace(asString(right))
-	switch op {
-	case "==":
-		return ls == rs
-	case "!=":
-		return ls != rs
+func (s executionScope) lookupExplicitRoot(root paths.PathRoot, segments []string) (any, bool) {
+	switch root {
+	case paths.RootPayload:
+		return lookupExecutionOperandPath(s.Payload, segments)
+	case paths.RootEntity:
+		return lookupExecutionOperandPath(s.Entity, segments)
+	case paths.RootPolicy:
+		return lookupExecutionOperandPath(s.Policy, segments)
 	default:
-		return false
+		return nil, false
 	}
+}
+
+func lookupExecutionOperandPath(root any, segments []string) (any, bool) {
+	current := root
+	if len(segments) == 0 {
+		return current, current != nil
+	}
+	for _, segment := range segments {
+		segment = strings.TrimSpace(segment)
+		object, ok := asObject(current)
+		if !ok {
+			return nil, false
+		}
+		next, ok := object[segment]
+		if !ok {
+			return nil, false
+		}
+		current = next
+	}
+	return current, true
 }
 
 func executionReduceValue(items []any, operation string) any {
