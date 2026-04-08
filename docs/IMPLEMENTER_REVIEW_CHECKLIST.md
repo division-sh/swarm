@@ -9,6 +9,7 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 ## Stop-Ship Questions
 
 - Does this change agree with the platform spec, or does it make a spec/implementation mismatch explicit?
+- For semantic/runtime/spec-governed work, did the reviewer step back and test whether the issue is describing the full failure class rather than only the first visible symptom?
 - If the semantics were unclear, did the implementer stop and escalate instead of inferring locally?
 - If this is a non-trivial semantic change, was there a reviewed spec delta before code?
 - Is the semantic owner of this behavior explicit and singular?
@@ -89,8 +90,42 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - If the issue or PR does not cite an exact spec section, did it explicitly state that the seam is a spec gap / ambiguity instead of presenting local issue wording as authoritative?
 - Before implementation, did the implementer re-read the cited spec section(s) rather than relying on issue prose or memory?
 - If the PR cites spec references, did the reviewer compare the implementation against the cited spec section(s), not just against the issue summary?
+- For semantic/runtime/spec-governed work, did the reviewer explicitly ask:
+  - what broader semantic rule this symptom belongs to
+  - what sibling contexts use that same rule
+  - whether the PR proves the failure class rather than only the first example
+- For semantic/runtime/spec-governed work, did the implementer post the required `Pre-Implementation Coverage Audit` comment on the GitHub issue before coding began?
+- Did that issue-level pre-audit explicitly list every currently known manifestation from the issue body, issue thread, triage/reproducer notes, and prior review context?
+- For each listed manifestation, did the pre-audit classify it as exactly one of:
+  - direct reproducer and fix
+  - execution proof through the same corrected path
+  - split / escalate as a separate class
+- Did the pre-audit avoid unsupported closure claims such as:
+  - “same seam”
+  - “same validator”
+  - “shared owner should cover it”
+  unless it also named the exact execution proof that would demonstrate coverage?
+- If this is a surface-parity issue, did the pre-audit name the supported surface(s) that must be exercised before closure?
+- If the issue has multiple currently known manifestations and the pre-audit is missing, incomplete, or hand-wavy, did the reviewer stop there and mark the PR as not review-ready?
+- For semantic/runtime/spec-governed work, did the implementer post a post-implementation proof audit comment on the PR that explicitly states:
+  - the broader failure class
+  - whether the issue was symptom-shaped
+  - the sibling contexts checked
+  - the generic failing proof used or created
+- For failure-class issues, did the PR audit include a manifestation coverage table rather than only a narrative summary?
+- Does that coverage table include one row for every currently known manifestation and mark each row as exactly one of:
+  - reproduced and fixed
+  - execution-proven through the same corrected path
+  - split / escalated as separate class
+- For each manifestation row, did the audit name the exact proof used and any required supported-surface or end-to-end proof?
+- If no generic reproducer existed before implementation, did the reviewer verify that the PR now creates one?
+- If any currently known manifestation lacks an explicit final status or proof line, did the reviewer stop the review and mark the PR as not review-ready?
+- If the audit relies on “shared owner introduced”, “same seam”, or “cleaner architecture” without manifestation-level proof, did the reviewer reject that as insufficient closure evidence?
+- For verify-vs-boot, boot-vs-runtime, reader-vs-writer, or other surface-parity issues, did the reviewer require proof at each relevant surface rather than accepting only synthetic agreement tests?
+- If the issue was discovered through a supported helper or supported boot/runtime surface, did the reviewer require supported-surface closure evidence before saying the failure class is unlikely to reproduce?
 - If the PR claims non-semantic maintenance, did the reviewer verify that no semantic/runtime contract behavior is being changed under that label?
 - If implementation uncovered existing off-spec behavior outside the issue's stated scope, did the implementer stop and escalate instead of silently widening the change?
+- If the issue appears narrower than the actual failure class, did the reviewer require the issue/PR framing or tests to be widened before calling the work complete?
 - If the PR description lists follow-up work, did the reviewer check whether any follow-up item is narrow enough to be absorbed into the current PR instead of becoming another tiny issue?
 - If a follow-up item is left out of the PR, is there a clear reason it should remain separate:
   - meaningful additional scope

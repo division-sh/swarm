@@ -161,11 +161,15 @@ Core semantics include:
 Default rule:
 
 - if the runtime needs to know what something means, encode that meaning explicitly
+- heuristic behavior is disallowed in semantic/runtime code unless the lead explicitly approves that exact heuristic in writing
 - do not infer it from:
   - string prefixes
   - naming accidents
   - field presence alone
   - “best guess” fallback branches
+  - partial projections
+  - path patterns when a canonical owner exists
+  - loose string matching when an explicit contract exists
 
 Practical implication:
 
@@ -173,12 +177,14 @@ Practical implication:
   - “if this fails, try interpreting it as something else”
   - “if the path looks like X, treat it as Y”
   - “if metadata exists, assume this is a child-flow context”
+- if a heuristic seems necessary, stop and escalate instead of implementing it by default
 - if the model cannot represent the case cleanly, improve the model
 
 Absolute rule:
 
 - do not add compatibility heuristics for core semantics
 - do not keep an old interpretation alive “just in case”
+- if an issue or PR relies on heuristic ownership, heuristic classification, or heuristic fallback without explicit written approval, treat the work as incomplete
 
 ### 3. Centralize semantics; do not re-implement them in multiple layers
 
@@ -615,6 +621,121 @@ Pre-implementation rule:
 - treat those cited sections as the binding semantic contract for the work
 - if the current code, tests, or issue wording disagree with the cited spec, stop and escalate before implementation
 - do not rely on memory of the spec or on the issue summary alone for semantic changes
+
+Symptom vs failure-class rule:
+
+- this rule applies to semantic, runtime, loader, bootverify, persistence, read-model, and other spec-governed work
+- it does not require the same broad semantic reassessment for purely non-semantic maintenance, mechanical cleanup, or docs-only work
+- assume the reported issue may be only the first visible symptom of a broader semantic defect
+- before writing code, take a step back and reassess the full semantic rule the issue belongs to
+- inspect adjacent logic in the same seam to determine the true scope of the problem, not just the first failing example
+- use the cited spec section(s) to decide whether sibling contexts should behave the same way
+- if the issue appears narrower than the actual failure class, stop and escalate or update the issue before treating the work as complete
+- do not stop at fixing the first symptom if adjacent logic is governed by the same semantic rule
+
+Pre-Implementation Coverage Audit rule:
+
+- for semantic/runtime/spec-governed work, implementation must not begin until the implementer posts a `Pre-Implementation Coverage Audit` comment on the GitHub issue
+- this is mandatory when:
+  - the issue is about a failure class rather than one isolated bug
+  - the issue names more than one manifestation
+  - the reproducer or triage record names more than one manifestation
+  - the issue concerns parity between surfaces such as verify vs boot, boot vs runtime, or reader vs writer
+- the purpose of this audit is to make failure-class coverage reviewable before coding starts, not after the patch already exists
+
+Required issue-comment format:
+
+- `Failure class`
+  - state the broader generic failure class, not just the first symptom
+- `Currently known manifestations in scope`
+  - list every currently known manifestation from:
+    - the issue body
+    - the issue thread
+    - triage / reproducer notes
+    - prior review comments if they already exist
+- for each manifestation, provide exactly one planned coverage status:
+  - direct reproducer and fix
+  - execution proof through the same corrected path
+  - split / escalate as a separate class
+- for each manifestation, also state:
+  - why it is believed to be the same seam or a separate seam
+  - the exact proof that will be used
+  - whether that proof is:
+    - focused unit/integration proof
+    - generic reproducer
+    - supported-surface / end-to-end proof
+- `Required closure proof`
+  - list the focused proof required
+  - list the supported-surface or end-to-end proof required
+  - if this is a parity issue, name each surface that must be exercised before closure
+- `Unsafe assumptions you are NOT making`
+  - explicitly name anything that might look “probably covered” but is not yet proven
+  - do not say “same seam” without naming the execution proof that will show it
+- `Blocking ambiguities or split conditions`
+  - list any reason the issue may need to split before implementation
+  - if none, say none
+
+Absolute rules:
+
+- do not begin implementation if any currently known manifestation is missing from the audit
+- do not classify a manifestation as “same seam” without naming the execution proof that will show it flows through the corrected path
+- do not use “shared owner introduced”, “same validator”, “same helper”, or “same architecture seam” as sufficient coverage by themselves
+- if a manifestation is not directly reproduced, the audit must explain exactly how it will be execution-proven through the same corrected path
+- if that proof cannot be named before coding starts, mark the manifestation as split / escalate instead
+- for parity issues, supported-surface proof is mandatory; synthetic agreement tests alone are not enough if the issue was discovered through a supported surface
+
+Invalid pre-audit example:
+
+- tool drift: direct reproducer and fix
+- event-schema drift: same local class, should be covered by shared validator refactor
+
+Why invalid:
+
+- it does not name the execution proof for the event-schema manifestation
+- it assumes an architecture change is enough proof by itself
+- it does not require supported-surface proof before closure
+
+Narrow patch vs broad semantic proof rule:
+
+- for semantic/runtime/spec-governed work, keep the implementation patch narrow but do not keep the semantic assessment narrow
+- after reading the cited spec, assess the full rule family in the touched seam, not only the first failing example
+- after identifying the failure class, explicitly determine whether the touched seam has multiple currently known manifestations
+- if yes, design proof for each manifestation before treating the patch as complete
+- do not let a narrow patch implicitly redefine the issue as narrower than the tracked failure class
+- inspect adjacent logic that is governed by the same semantic rule
+- design tests to cover the rule in that area, including adjacent valid, invalid, mixed-case, malformed, rollback, or fail-closed paths where relevant
+- do not treat a narrow code diff as sufficient proof if the touched semantic rule spans a broader area
+
+Post-Implementation Proof Audit rule:
+
+- for semantic/runtime/spec-governed work, a PR is not review-ready until the implementer posts a post-implementation proof audit comment on the PR
+- for failure-class issues, that audit must include a failure-class coverage table, not only a narrative summary
+- the PR audit must explicitly include:
+  - the broader failure class the issue belongs to
+  - whether the issue described the full class or only the first visible symptom
+  - which sibling contexts in the touched seam were checked
+  - the generic reproducer, fixture, or focused failing proof used to capture the failure class
+  - or, if none existed, the generic proof created as part of the work
+- for issues with multiple currently known manifestations, include one row per manifestation with exactly one final status:
+  - reproduced and fixed
+  - execution-proven through the same corrected path
+  - split / escalated as separate class
+- for each manifestation row, also name:
+  - the exact proof used
+  - any mandatory end-to-end or supported-surface proof used for closure
+  - any manifestation that remains unproven
+- do not rely on “tests pass” as sufficient proof without naming the generic failing proof that the fix resolves
+- do not rely on “shared owner introduced”, “same seam”, or “architecture now looks cleaner” as substitutes for manifestation-level proof
+- if any currently known manifestation lacks one of the required statuses above, the PR is not review-ready
+- if no generic reproducer exists yet for a semantic/runtime failure class, deriving one is part of the implementation task
+- if the implementer cannot derive a clean generic proof for the failure class, stop and escalate before treating the work as complete
+
+Surface-parity closure rule:
+
+- for verify-vs-boot, boot-vs-runtime, reader-vs-writer, or other surface-parity issues, closure requires at least one proof at each relevant surface
+- targeted verify proof alone is never sufficient for a verify-vs-boot issue
+- synthetic unit agreement tests are useful but do not replace a supported end-to-end or supported-surface smoke when the issue was discovered through a supported surface
+- if the issue names multiple semantic classes or manifestations in scope, each one must have explicit closure evidence
 
 Minimum spec-reference block:
 
