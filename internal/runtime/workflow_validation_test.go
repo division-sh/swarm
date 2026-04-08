@@ -37,6 +37,20 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 			wantErr: false,
 		},
 		{
+			name: "tool implementation warning",
+			source: func() semanticview.Source {
+				bundle := testRuntimeWorkflowValidationBundle()
+				bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+					"legacy_call": {
+						HandlerType: "api_call",
+					},
+				}
+				return semanticview.Wrap(bundle)
+			}(),
+			errContains: "tool implementation warnings",
+			wantErr:     true,
+		},
+		{
 			name: "missing emit schema",
 			source: func() semanticview.Source {
 				bundle := testRuntimeWorkflowValidationBundle()
@@ -89,5 +103,21 @@ func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T
 	}
 	if len(result.MissingEmitSchemaEventTypes) != 0 {
 		t.Fatalf("MissingEmitSchemaEventTypes = %#v, want none", result.MissingEmitSchemaEventTypes)
+	}
+}
+
+func TestValidateWorkflowContractSurface_FatalToolImplementationWarningsFollowSharedOptions(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"legacy_call": {
+			HandlerType: "api_call",
+		},
+	}
+	source := semanticview.Wrap(bundle)
+
+	_, err := ValidateWorkflowContractSurface(context.Background(), source, DefaultWorkflowContractValidationOptions(nil))
+	if err == nil || !strings.Contains(err.Error(), "tool implementation warnings") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want tool implementation warning failure", err)
 	}
 }
