@@ -171,6 +171,43 @@ func (b TurnBlock) ToolLinkData() (TurnBlockToolLinkData, bool, error) {
 	return data, ok, err
 }
 
+func DecodeCanonicalRuntimeLogTurnBlocks(blocks []TurnBlock) ([]TurnBlockRuntimeLogData, error) {
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+	out := make([]TurnBlockRuntimeLogData, 0)
+	for _, block := range blocks {
+		if strings.TrimSpace(block.Kind) != "runtime_log" {
+			continue
+		}
+		data, ok, err := block.RuntimeLogData()
+		if err != nil {
+			return nil, fmt.Errorf("decode canonical runtime_log block: %w", err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("canonical runtime_log block is empty")
+		}
+		normalized, err := normalizeCanonicalRuntimeLogTurnBlockData(data)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, normalized)
+	}
+	return out, nil
+}
+
+func DecodeCanonicalRuntimeLogTurnBlocksJSON(raw []byte) ([]TurnBlockRuntimeLogData, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil, nil
+	}
+	var blocks []TurnBlock
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return nil, err
+	}
+	return DecodeCanonicalRuntimeLogTurnBlocks(blocks)
+}
+
 func DecodeCanonicalTurnSummaryBlocks(blocks []TurnBlock) (TurnSummaryTurnBlockData, bool, error) {
 	var (
 		summary      TurnSummaryTurnBlockData
@@ -270,4 +307,38 @@ func trimSummaryStringSlice(in []string) []string {
 		return nil
 	}
 	return out
+}
+
+func normalizeCanonicalRuntimeLogTurnBlockData(data TurnBlockRuntimeLogData) (TurnBlockRuntimeLogData, error) {
+	data.LogLevel = strings.TrimSpace(data.LogLevel)
+	if data.LogLevel == "" {
+		return TurnBlockRuntimeLogData{}, fmt.Errorf("canonical runtime_log block log_level is required")
+	}
+	data.Message = strings.TrimSpace(data.Message)
+	if data.Message == "" {
+		return TurnBlockRuntimeLogData{}, fmt.Errorf("canonical runtime_log block message is required")
+	}
+	data.StackTrace = strings.TrimSpace(data.StackTrace)
+
+	raw := bytes.TrimSpace(data.Details)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return TurnBlockRuntimeLogData{}, fmt.Errorf("canonical runtime_log block details are required")
+	}
+	var details map[string]any
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return TurnBlockRuntimeLogData{}, fmt.Errorf("canonical runtime_log block details must be an object: %w", err)
+	}
+	if details == nil {
+		return TurnBlockRuntimeLogData{}, fmt.Errorf("canonical runtime_log block details are required")
+	}
+	component := strings.TrimSpace(asString(details["component"]))
+	if component == "" {
+		return TurnBlockRuntimeLogData{}, fmt.Errorf("canonical runtime_log block details.component is required")
+	}
+	action := strings.TrimSpace(asString(details["action"]))
+	if action == "" {
+		return TurnBlockRuntimeLogData{}, fmt.Errorf("canonical runtime_log block details.action is required")
+	}
+	data.Details = append(json.RawMessage(nil), raw...)
+	return data, nil
 }

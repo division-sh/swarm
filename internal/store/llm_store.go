@@ -207,6 +207,9 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	turnBlocksPayload := ""
 	if hasTurnBlocks {
 		rec = runtimellm.CanonicalizeTurnForPersistence(rec)
+		if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocks(rec.TurnBlocks); err != nil {
+			return fmt.Errorf("validate canonical runtime_log turn_blocks: %w", err)
+		}
 		turnBlocksPayload = normalizeJSONArray(rec.TurnBlocks)
 	}
 

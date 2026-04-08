@@ -204,3 +204,16 @@ func TestDecodeCanonicalTurnSummaryBlocks_FailsOnDuplicateCanonicalSummary(t *te
 		t.Fatal("expected duplicate canonical summary not to decode successfully")
 	}
 }
+
+func TestDecodeCanonicalRuntimeLogTurnBlocks_FailsOnMissingCanonicalDetailsComponent(t *testing.T) {
+	_, err := DecodeCanonicalRuntimeLogTurnBlocks([]TurnBlock{
+		newRuntimeLogTurnBlock("runtime log", TurnBlockRuntimeLogData{
+			LogLevel: "warn",
+			Message:  "runtime log",
+			Details:  json.RawMessage(`{"action":"tool_execution_denied"}`),
+		}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "canonical runtime_log block details.component is required") {
+		t.Fatalf("DecodeCanonicalRuntimeLogTurnBlocks error = %v", err)
+	}
+}

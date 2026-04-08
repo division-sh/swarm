@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimellm "swarm/internal/runtime/llm"
 	"swarm/internal/store"
 )
 
@@ -482,6 +483,9 @@ func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {
 		return ConversationTurn{}, fmt.Errorf("decode turn response_payload: %w", err)
 	}
 	if len(turnBlocksRaw) > 0 {
+		if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocksJSON(turnBlocksRaw); err != nil {
+			return ConversationTurn{}, fmt.Errorf("decode canonical runtime_log turn_blocks: %w", err)
+		}
 		if item.TurnBlocks, err = decodeJSONArray[ConversationTurnBlock](turnBlocksRaw); err != nil {
 			return ConversationTurn{}, fmt.Errorf("decode turn turn_blocks: %w", err)
 		}
