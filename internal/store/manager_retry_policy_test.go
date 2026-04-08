@@ -613,6 +613,45 @@ func TestListPendingAgentDeliveryFacts_AlignsWithCanonicalPendingStates_V2(t *te
 	}
 }
 
+func TestListPendingAgentDeliveryFacts_UsesFullPendingHorizon_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.full_horizon")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+		t.Fatalf("insert deliveries: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		UPDATE events
+		SET created_at = now() - interval '45 days'
+		WHERE event_id = $1::uuid
+	`, evt.ID); err != nil {
+		t.Fatalf("age event: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET created_at = now() - interval '45 days'
+		WHERE event_id = $1::uuid
+		  AND subscriber_id = $2
+	`, evt.ID, agentID); err != nil {
+		t.Fatalf("age delivery: %v", err)
+	}
+
+	factsByAgent, err := pg.ListPendingAgentDeliveryFacts(ctx, []string{agentID}, time.Time{})
+	if err != nil {
+		t.Fatalf("ListPendingAgentDeliveryFacts: %v", err)
+	}
+	facts := factsByAgent[agentID]
+	if facts.PendingCount != 1 {
+		t.Fatalf("pending_count = %d, want 1", facts.PendingCount)
+	}
+	if facts.OldestPendingAgeSec < 30*24*60*60 {
+		t.Fatalf("oldest_pending_age_sec = %d, want at least 30 days", facts.OldestPendingAgeSec)
+	}
+}
+
 func TestListPendingEventsForAgent_InProgressWithoutReceipt_RemainsPending(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()

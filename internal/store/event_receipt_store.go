@@ -438,9 +438,9 @@ func (s *PostgresStore) normalizeLegacyAgentRetryOwners(ctx context.Context, age
 			AND d.subscriber_id = r.subscriber_id
 		WHERE r.subscriber_type = 'agent'
 		  AND r.subscriber_id = $1
-		  AND e.created_at >= $2
+		  AND ($2::timestamptz IS NULL OR e.created_at >= $2::timestamptz)
 		  AND d.delivery_id IS NULL
-	`, agentID, since)
+	`, agentID, pendingDeliverySinceArg(since))
 	if err != nil {
 		return fmt.Errorf("query legacy agent retry owners: %w", err)
 	}
@@ -596,8 +596,10 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 		WHERE d.subscriber_type = 'agent'
 		  AND d.subscriber_id = $1
 		  AND e.created_at >= $2
+		  AND `+canonicalPendingDeliveryPredicateSQL("d", "r")+`
 		ORDER BY e.created_at ASC
-	`, agentID, since)
+		LIMIT $3
+	`, agentID, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query pending events for %s: %w", agentID, err)
 	}
@@ -647,6 +649,7 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 					  AND d_me.subscriber_id = $1
 				)
 			)
+		  AND `+canonicalPendingDeliveryPredicateSQL("d", "r")+`
 		ORDER BY e.created_at ASC
 	`, agentID, since)
 	if err != nil {
