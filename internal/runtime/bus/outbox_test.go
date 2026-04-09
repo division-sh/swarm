@@ -321,3 +321,34 @@ func TestEngineDispatcher_FailsClosedWithoutAuthoritativeRecipientManifestOnInMe
 		t.Fatalf("DispatchPostCommit error = %q, want missing authoritative manifest failure", got)
 	}
 }
+
+func TestEngineDispatcher_DirectIntentUsesExplicitRecipientsWhenManifestWasNotPersisted(t *testing.T) {
+	eb, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	recipientCh := eb.Subscribe("agent-a")
+
+	intent := runtimeengine.EmitIntent{
+		Event: events.Event{
+			ID:        "evt-direct-no-tx",
+			Type:      events.EventType("custom.emitted"),
+			Payload:   []byte(`{"entity_id":"ent-1"}`),
+			CreatedAt: time.Now().UTC(),
+		}.WithEntityID("ent-1"),
+		Recipients: []string{"agent-a"},
+	}
+
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("DispatchPostCommit: %v", err)
+	}
+
+	select {
+	case evt := <-recipientCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("delivered event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected explicit direct recipient to receive event")
+	}
+}

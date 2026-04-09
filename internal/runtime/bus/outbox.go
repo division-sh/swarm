@@ -11,6 +11,7 @@ import (
 	"swarm/internal/events"
 	runtimeengine "swarm/internal/runtime/engine"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 type engineOutbox struct {
@@ -122,13 +123,39 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	}
 	recipients, err := d.bus.authoritativeRecipientsForEvent(ctx, intent.Event.ID)
 	if err != nil {
+		if len(intent.Recipients) > 0 && errors.Is(err, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable) {
+			return d.dispatchExplicitDirectIntent(ctx, intent)
+		}
 		return err
+	}
+	if len(intent.Recipients) > 0 && len(recipients) == 0 {
+		return d.dispatchExplicitDirectIntent(ctx, intent)
 	}
 	if len(recipients) > 0 {
 		if err := d.bus.PublishPersistedRecipients(ctx, intent.Event, recipients); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, intent runtimeengine.EmitIntent) error {
+	plan, err := d.bus.deliveryPlanner.PlanDirect(ctx, intent.Event, intent.Recipients)
+	if err != nil {
+		return err
+	}
+	if err := d.bus.deliverToAgents(ctx, intent.Event, plan.Recipients); err != nil {
+		return err
+	}
+	detail := map[string]any{
+		"direct":           true,
+		"recipients_count": len(plan.Recipients),
+		"parent_event_id":  strings.TrimSpace(intent.Event.ParentEventID),
+	}
+	for k, v := range plan.ExtraDetail {
+		detail[k] = v
+	}
+	d.bus.logRuntime(ctx, "debug", "Deferred direct event intent was delivered", "eventbus", "delivered", intent.Event.ID, string(intent.Event.Type), "", intent.Event.EntityID(), "", nil, detail, "", 0)
 	return nil
 }
 
