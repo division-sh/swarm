@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
+	runtimemutationlog "swarm/internal/runtime/mutationlog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimesemanticview "swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
@@ -448,7 +450,9 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		t.Fatalf("update workflow instance: %v", err)
 	}
 
-	assertTrackedMutationStateMatchesEntityState(t, db, entityID)
+	if err := trackedMutationStateMatchesEntityState(db, entityID); err != nil {
+		t.Fatalf("trackedMutationStateMatchesEntityState(workflow): %v", err)
+	}
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t *testing.T) {
@@ -476,7 +480,46 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 		t.Fatalf("save_entity_field: %v", err)
 	}
 
-	assertTrackedMutationStateMatchesEntityState(t, db, entityID)
+	if err := trackedMutationStateMatchesEntityState(db, entityID); err != nil {
+		t.Fatalf("trackedMutationStateMatchesEntityState(tool): %v", err)
+	}
+}
+
+func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+
+	requireMutationSurface(t, db)
+
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator
+		)
+		VALUES (
+			$1::uuid, 'mutation-flow/inst-1', 'default', 'queued', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
+		)
+	`, entityID); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
+	}
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id) VALUES ($1::uuid)`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, writer_type, writer_id, handler_step
+		) VALUES (
+			$1::uuid, $2::uuid, 'gates.', 'null'::jsonb, 'true'::jsonb, 'platform', 'test', 'seed'
+		)
+	`, runID, entityID); err != nil {
+		t.Fatalf("seed malformed mutation: %v", err)
+	}
+
+	err := trackedMutationStateMatchesEntityState(db, entityID)
+	if err == nil || !strings.Contains(err.Error(), "gates mutation key is required") {
+		t.Fatalf("trackedMutationStateMatchesEntityState error = %v, want malformed gates failure", err)
+	}
 }
 
 func requireCanonicalConversationSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
@@ -563,15 +606,7 @@ func countTurnSummaryBlocks(blocks []dashboardserver.ConversationTurnBlock) int 
 	return count
 }
 
-type trackedMutationState struct {
-	CurrentState string         `json:"current_state"`
-	Fields       map[string]any `json:"fields"`
-	Gates        map[string]any `json:"gates"`
-	Accumulator  map[string]any `json:"accumulator"`
-}
-
-func assertTrackedMutationStateMatchesEntityState(t *testing.T, db *sql.DB, entityID string) {
-	t.Helper()
+func trackedMutationStateMatchesEntityState(db *sql.DB, entityID string) error {
 	var (
 		currentState string
 		fieldsRaw    []byte
@@ -587,20 +622,26 @@ func assertTrackedMutationStateMatchesEntityState(t *testing.T, db *sql.DB, enti
 		FROM entity_state
 		WHERE entity_id = $1::uuid
 	`, entityID).Scan(&currentState, &fieldsRaw, &gatesRaw, &accRaw); err != nil {
-		t.Fatalf("load entity_state projection: %v", err)
+		return fmt.Errorf("load entity_state projection: %w", err)
 	}
 
-	want := trackedMutationState{
+	want := runtimemutationlog.EntityStateProjection{
 		CurrentState: strings.TrimSpace(currentState),
-		Fields:       decodeJSONMap(t, fieldsRaw),
-		Gates:        decodeJSONMap(t, gatesRaw),
-		Accumulator:  decodeJSONMap(t, accRaw),
+		Fields:       map[string]any{},
+		Gates:        map[string]any{},
+		Accumulator:  map[string]any{},
 	}
-	got := trackedMutationState{
-		Fields:      map[string]any{},
-		Gates:       map[string]any{},
-		Accumulator: map[string]any{},
+	var err error
+	if want.Fields, err = decodeJSONMapErr(fieldsRaw); err != nil {
+		return fmt.Errorf("decode entity_state fields: %w", err)
 	}
+	if want.Gates, err = decodeJSONMapErr(gatesRaw); err != nil {
+		return fmt.Errorf("decode entity_state gates: %w", err)
+	}
+	if want.Accumulator, err = decodeJSONMapErr(accRaw); err != nil {
+		return fmt.Errorf("decode entity_state accumulator: %w", err)
+	}
+	records := make([]runtimemutationlog.ProjectionMutation, 0, 8)
 
 	rows, err := db.QueryContext(context.Background(), `
 		SELECT field, new_value
@@ -609,7 +650,7 @@ func assertTrackedMutationStateMatchesEntityState(t *testing.T, db *sql.DB, enti
 		ORDER BY created_at ASC, mutation_id ASC
 	`, entityID)
 	if err != nil {
-		t.Fatalf("query mutations: %v", err)
+		return fmt.Errorf("query mutations: %w", err)
 	}
 	defer rows.Close()
 
@@ -621,87 +662,75 @@ func assertTrackedMutationStateMatchesEntityState(t *testing.T, db *sql.DB, enti
 			newValue []byte
 		)
 		if err := rows.Scan(&field, &newValue); err != nil {
-			t.Fatalf("scan mutation: %v", err)
+			return fmt.Errorf("scan mutation: %w", err)
 		}
-		applyTrackedMutation(&got, strings.TrimSpace(field), decodeJSONValue(t, newValue))
+		value, err := decodeJSONValueErr(newValue)
+		if err != nil {
+			return fmt.Errorf("decode mutation value: %w", err)
+		}
+		records = append(records, runtimemutationlog.ProjectionMutation{
+			Field:    strings.TrimSpace(field),
+			NewValue: value,
+		})
 	}
 	if err := rows.Err(); err != nil {
-		t.Fatalf("read mutations: %v", err)
+		return fmt.Errorf("read mutations: %w", err)
 	}
 	if rowCount == 0 {
-		t.Fatal("entity_mutations is empty; canonical mutation surface is missing")
+		return fmt.Errorf("entity_mutations is empty; canonical mutation surface is missing")
+	}
+	got, err := runtimemutationlog.ReconstructEntityStateProjection(records)
+	if err != nil {
+		return fmt.Errorf("reconstruct mutation state: %w", err)
 	}
 	if !trackedStatesEqual(got, want) {
-		t.Fatalf("mutation reconstruction mismatch:\n got=%s\nwant=%s", mustCanonicalJSON(t, got), mustCanonicalJSON(t, want))
+		return fmt.Errorf("mutation reconstruction mismatch:\n got=%s\nwant=%s", mustCanonicalJSON(nil, got), mustCanonicalJSON(nil, want))
 	}
+	return nil
 }
 
-func applyTrackedMutation(state *trackedMutationState, field string, value any) {
-	if state == nil {
-		return
-	}
-	switch {
-	case field == "current_state":
-		state.CurrentState = strings.TrimSpace(readString(value))
-	case strings.HasPrefix(field, "gates."):
-		key := strings.TrimSpace(strings.TrimPrefix(field, "gates."))
-		if key == "" {
-			return
-		}
-		if value == nil {
-			delete(state.Gates, key)
-			return
-		}
-		state.Gates[key] = value
-	case strings.HasPrefix(field, "accumulator."):
-		key := strings.TrimSpace(strings.TrimPrefix(field, "accumulator."))
-		if key == "" {
-			return
-		}
-		if value == nil {
-			delete(state.Accumulator, key)
-			return
-		}
-		state.Accumulator[key] = value
-	default:
-		key := strings.TrimSpace(field)
-		if key == "" {
-			return
-		}
-		if value == nil {
-			delete(state.Fields, key)
-			return
-		}
-		state.Fields[key] = value
-	}
-}
-
-func trackedStatesEqual(left, right trackedMutationState) bool {
+func trackedStatesEqual(left, right runtimemutationlog.EntityStateProjection) bool {
 	return mustCanonicalJSON(nil, left) == mustCanonicalJSON(nil, right)
 }
 
 func decodeJSONMap(t *testing.T, raw []byte) map[string]any {
 	t.Helper()
-	if len(raw) == 0 {
-		return map[string]any{}
-	}
-	out := map[string]any{}
-	if err := json.Unmarshal(raw, &out); err != nil {
+	out, err := decodeJSONMapErr(raw)
+	if err != nil {
 		t.Fatalf("json.Unmarshal map: %v", err)
 	}
 	return out
 }
 
+func decodeJSONMapErr(raw []byte) (map[string]any, error) {
+	if len(raw) == 0 {
+		return map[string]any{}, nil
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func decodeJSONValue(t *testing.T, raw []byte) any {
 	t.Helper()
-	if len(raw) == 0 {
-		return nil
-	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
+	out, err := decodeJSONValueErr(raw)
+	if err != nil {
 		t.Fatalf("json.Unmarshal value: %v", err)
 	}
 	return out
+}
+
+func decodeJSONValueErr(raw []byte) (any, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func mustCanonicalJSON(t *testing.T, value any) string {

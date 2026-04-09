@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimemutationlog "swarm/internal/runtime/mutationlog"
 	"swarm/internal/testutil"
 )
 
@@ -137,7 +139,9 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 		}
 	}
 
-	assertMutationLogMatchesTrackedEntityState(t, db, entityID)
+	if err := trackedMutationStateMatchesEntityState(t, db, entityID); err != nil {
+		t.Fatalf("trackedMutationStateMatchesEntityState(upsert): %v", err)
+	}
 }
 
 func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
@@ -154,7 +158,9 @@ func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
 	if !containsMutationField(fields, "gates.g_ready") {
 		t.Fatalf("mutation fields missing gates.g_ready: %v", fields)
 	}
-	assertMutationLogMatchesTrackedEntityState(t, db, entityID)
+	if err := trackedMutationStateMatchesEntityState(t, db, entityID); err != nil {
+		t.Fatalf("trackedMutationStateMatchesEntityState(gate): %v", err)
+	}
 }
 
 func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
@@ -171,7 +177,35 @@ func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
 	if !containsMutationField(fields, "accumulator.evidence") {
 		t.Fatalf("mutation fields missing accumulator.evidence: %v", fields)
 	}
-	assertMutationLogMatchesTrackedEntityState(t, db, entityID)
+	if err := trackedMutationStateMatchesEntityState(t, db, entityID); err != nil {
+		t.Fatalf("trackedMutationStateMatchesEntityState(evidence): %v", err)
+	}
+}
+
+func TestMutationLogTrackedStateFailsOnMalformedCanonicalMutationField(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	entityID := uuid.NewString()
+	pc := testMutationLoggingCoordinator(db)
+	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
+
+	var runID string
+	if err := db.QueryRowContext(context.Background(), `SELECT run_id::text FROM runs ORDER BY started_at DESC LIMIT 1`).Scan(&runID); err != nil {
+		t.Fatalf("load run_id: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, writer_type, writer_id, handler_step
+		) VALUES (
+			$1::uuid, $2::uuid, 'accumulator.', 'null'::jsonb, '{"bad":true}'::jsonb, 'platform', 'test', 'seed'
+		)
+	`, runID, entityID); err != nil {
+		t.Fatalf("seed malformed mutation: %v", err)
+	}
+
+	err := trackedMutationStateMatchesEntityState(t, db, entityID)
+	if err == nil || !strings.Contains(err.Error(), "accumulator mutation key is required") {
+		t.Fatalf("trackedMutationStateMatchesEntityState error = %v, want malformed accumulator failure", err)
+	}
 }
 
 func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *testing.T) {
@@ -325,7 +359,7 @@ func mutationFieldsForEntity(t *testing.T, db *sql.DB, entityID string) []string
 	return out
 }
 
-func assertMutationLogMatchesTrackedEntityState(t *testing.T, db *sql.DB, entityID string) {
+func trackedMutationStateMatchesEntityState(t *testing.T, db *sql.DB, entityID string) error {
 	t.Helper()
 	var (
 		currentState string
@@ -342,20 +376,16 @@ func assertMutationLogMatchesTrackedEntityState(t *testing.T, db *sql.DB, entity
 		FROM entity_state
 		WHERE entity_id = $1::uuid
 	`, entityID).Scan(&currentState, &fieldsRaw, &gatesRaw, &accRaw); err != nil {
-		t.Fatalf("load entity_state projection: %v", err)
+		return fmt.Errorf("load entity_state projection: %w", err)
 	}
 
-	want := trackedMutationState{
+	want := runtimemutationlog.EntityStateProjection{
 		CurrentState: strings.TrimSpace(currentState),
 		Fields:       decodeJSONMap(t, fieldsRaw),
 		Gates:        decodeJSONMap(t, gatesRaw),
 		Accumulator:  decodeJSONMap(t, accRaw),
 	}
-	got := trackedMutationState{
-		Fields:      map[string]any{},
-		Gates:       map[string]any{},
-		Accumulator: map[string]any{},
-	}
+	records := make([]runtimemutationlog.ProjectionMutation, 0, 8)
 	rows, err := db.QueryContext(context.Background(), `
 		SELECT field, old_value, new_value
 		FROM entity_mutations
@@ -363,7 +393,7 @@ func assertMutationLogMatchesTrackedEntityState(t *testing.T, db *sql.DB, entity
 		ORDER BY created_at ASC, mutation_id ASC
 	`, entityID)
 	if err != nil {
-		t.Fatalf("query mutations: %v", err)
+		return fmt.Errorf("query mutations: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -373,52 +403,25 @@ func assertMutationLogMatchesTrackedEntityState(t *testing.T, db *sql.DB, entity
 			newValue []byte
 		)
 		if err := rows.Scan(&field, &oldValue, &newValue); err != nil {
-			t.Fatalf("scan mutation: %v", err)
+			return fmt.Errorf("scan mutation: %w", err)
 		}
-		applyTrackedMutation(&got, strings.TrimSpace(field), decodeJSONValue(t, newValue))
+		records = append(records, runtimemutationlog.ProjectionMutation{
+			Field:    strings.TrimSpace(field),
+			NewValue: decodeJSONValue(t, newValue),
+		})
 	}
 	if err := rows.Err(); err != nil {
-		t.Fatalf("read mutations: %v", err)
+		return fmt.Errorf("read mutations: %w", err)
+	}
+	got, err := runtimemutationlog.ReconstructEntityStateProjection(records)
+	if err != nil {
+		return fmt.Errorf("reconstruct mutation state: %w", err)
 	}
 
 	if !trackedStatesEqual(got, want) {
-		t.Fatalf("mutation reconstruction mismatch:\n got=%s\nwant=%s", mustCanonicalJSON(t, got), mustCanonicalJSON(t, want))
+		return fmt.Errorf("mutation reconstruction mismatch:\n got=%s\nwant=%s", mustCanonicalJSON(t, got), mustCanonicalJSON(t, want))
 	}
-}
-
-type trackedMutationState struct {
-	CurrentState string         `json:"current_state"`
-	Fields       map[string]any `json:"fields"`
-	Gates        map[string]any `json:"gates"`
-	Accumulator  map[string]any `json:"accumulator"`
-}
-
-func applyTrackedMutation(state *trackedMutationState, field string, value any) {
-	if state == nil {
-		return
-	}
-	switch {
-	case field == "current_state":
-		state.CurrentState = strings.TrimSpace(trackedAsString(value))
-	case strings.HasPrefix(field, "gates."):
-		applyTrackedMapValue(state.Gates, strings.TrimPrefix(field, "gates."), value)
-	case strings.HasPrefix(field, "accumulator."):
-		applyTrackedMapValue(state.Accumulator, strings.TrimPrefix(field, "accumulator."), value)
-	default:
-		applyTrackedMapValue(state.Fields, field, value)
-	}
-}
-
-func applyTrackedMapValue(target map[string]any, key string, value any) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return
-	}
-	if value == nil {
-		delete(target, key)
-		return
-	}
-	target[key] = value
+	return nil
 }
 
 func decodeJSONMap(t *testing.T, raw []byte) map[string]any {
@@ -448,7 +451,7 @@ func decodeJSONValue(t *testing.T, raw []byte) any {
 	return out
 }
 
-func trackedStatesEqual(left, right trackedMutationState) bool {
+func trackedStatesEqual(left, right runtimemutationlog.EntityStateProjection) bool {
 	return mustCanonicalJSONForCompare(left) == mustCanonicalJSONForCompare(right)
 }
 
@@ -469,13 +472,4 @@ func containsMutationField(items []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func trackedAsString(v any) string {
-	switch typed := v.(type) {
-	case string:
-		return typed
-	default:
-		return ""
-	}
 }
