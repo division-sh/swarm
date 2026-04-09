@@ -11,6 +11,7 @@ import (
 	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimeownership "swarm/internal/runtime/core/ownership"
+	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/testutil"
 )
@@ -18,6 +19,33 @@ import (
 type startupRecoveryTestLease struct{}
 
 func (startupRecoveryTestLease) Release(context.Context) error { return nil }
+
+type startupRecoveryManagerStore struct {
+	loadErr error
+}
+
+func (s startupRecoveryManagerStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
+	return nil
+}
+
+func (s startupRecoveryManagerStore) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
+	if s.loadErr != nil {
+		return nil, s.loadErr
+	}
+	return nil, nil
+}
+
+func (startupRecoveryManagerStore) MarkAgentTerminated(context.Context, string) error { return nil }
+func (startupRecoveryManagerStore) EnsureEntitySchema(context.Context, string) error  { return nil }
+func (startupRecoveryManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, string) error {
+	return nil
+}
+func (startupRecoveryManagerStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+func (startupRecoveryManagerStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
 
 type startupRecoveryCapabilityEventStore struct{}
 
@@ -369,4 +397,55 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 		t.Fatalf("manager_reset_attempted = %#v, want true", detail["manager_reset_attempted"])
 	}
 	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "events missing pipeline receipts")
+}
+
+func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartup(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	module := loadRuntimeOwnershipWorkflowModule(t)
+
+	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(true), Stores{
+		SQLDB:        db,
+		EventStore:   startupRecoveryCapabilityEventStore{},
+		ManagerStore: startupRecoveryManagerStore{loadErr: errors.New("load agents failed")},
+	}, RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}()
+
+	level, _, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	if level != "error" {
+		t.Fatalf("log level = %q, want error", level)
+	}
+	if !strings.Contains(errorText, "load agents: load agents failed") {
+		t.Fatalf("log error = %q, want manager recovery failure detail", errorText)
+	}
+	if got := detailString(detail["decision_outcome"]); got != "degraded" {
+		t.Fatalf("decision_outcome = %q, want degraded", got)
+	}
+	if got := detailString(detail["decision_reason_code"]); got != string(startupRecoveryReasonRecoverFailed) {
+		t.Fatalf("decision_reason_code = %q, want %q", got, startupRecoveryReasonRecoverFailed)
+	}
+	if got := detailBool(detail["recovery_inspection_complete"]); got {
+		t.Fatalf("recovery_inspection_complete = %#v, want false", detail["recovery_inspection_complete"])
+	}
+	if got := detailString(detail["recovery_inspection_error"]); !strings.Contains(got, "inspect recoverable manager state: load persisted agents: load agents failed") {
+		t.Fatalf("recovery_inspection_error = %q, want startup inspection failure detail", got)
+	}
+	if !detailBool(detail["manager_recovery_attempted"]) {
+		t.Fatalf("manager_recovery_attempted = %#v, want true", detail["manager_recovery_attempted"])
+	}
 }

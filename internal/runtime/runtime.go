@@ -550,10 +550,16 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}()
 
 	startupRecoverySnapshot, err := rt.inspectStartupRecoverySnapshot(ctx)
-	if err != nil {
+	startupRecoveryDecision := newStartupRecoveryDecisionReport(startupRecoverySnapshot)
+	if err != nil && !startupRecoverySnapshot.RecoveryOnStartup {
 		return err
 	}
-	startupRecoveryDecision := newStartupRecoveryDecisionReport(startupRecoverySnapshot)
+	if err != nil {
+		startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
+		startupRecoveryDecision.ReasonCode = startupRecoveryReasonInspectFailed
+		startupRecoveryDecision.ErrorText = err.Error()
+		startupRecoveryDecision.InspectionError = err.Error()
+	}
 	if denyErr := startupRecoveryDecision.denialError(); denyErr != nil {
 		startupRecoveryDecision.ErrorText = denyErr.Error()
 		rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)

@@ -25,12 +25,14 @@ const (
 	startupRecoveryReasonDisabledWithWork startupRecoveryReasonCode = "recovery_disabled_with_persisted_work"
 	startupRecoveryReasonEnabledNoWork    startupRecoveryReasonCode = "recovery_enabled_no_persisted_work"
 	startupRecoveryReasonEnabledWithWork  startupRecoveryReasonCode = "recovery_enabled_with_persisted_work"
+	startupRecoveryReasonInspectFailed    startupRecoveryReasonCode = "startup_recovery_inspection_failed"
 	startupRecoveryReasonScheduleRestore  startupRecoveryReasonCode = "schedule_restore_failed"
 	startupRecoveryReasonRecoverFailed    startupRecoveryReasonCode = "startup_recovery_failed"
 )
 
 type startupRecoverySnapshot struct {
 	RecoveryOnStartup   bool
+	InspectionComplete  bool
 	ActiveScheduleCount int
 	Manager             runtimemanager.RecoverableStateSnapshot
 }
@@ -51,13 +53,16 @@ func (s startupRecoverySnapshot) WorkClasses() []string {
 
 func (s startupRecoverySnapshot) Detail() map[string]any {
 	detail := map[string]any{
-		"recovery_on_startup":      s.RecoveryOnStartup,
-		"active_schedule_count":    s.ActiveScheduleCount,
-		"recoverable_work_present": s.HasRecoverableWork(),
-		"recoverable_work_classes": s.WorkClasses(),
+		"recovery_on_startup":          s.RecoveryOnStartup,
+		"recovery_inspection_complete": s.InspectionComplete,
 	}
-	for key, value := range s.Manager.Detail() {
-		detail[key] = value
+	if s.InspectionComplete {
+		detail["active_schedule_count"] = s.ActiveScheduleCount
+		detail["recoverable_work_present"] = s.HasRecoverableWork()
+		detail["recoverable_work_classes"] = s.WorkClasses()
+		for key, value := range s.Manager.Detail() {
+			detail[key] = value
+		}
 	}
 	return detail
 }
@@ -74,6 +79,7 @@ type startupRecoveryDecisionReport struct {
 	ManagerRecoveryAttempted bool
 	ManagerResetAttempted    bool
 	ManagerResetError        string
+	InspectionError          string
 }
 
 func newStartupRecoveryDecisionReport(snapshot startupRecoverySnapshot) startupRecoveryDecisionReport {
@@ -136,6 +142,9 @@ func (r startupRecoveryDecisionReport) detail() map[string]any {
 	if errText := strings.TrimSpace(r.ErrorText); errText != "" {
 		detail["error"] = errText
 	}
+	if inspectErr := strings.TrimSpace(r.InspectionError); inspectErr != "" {
+		detail["recovery_inspection_error"] = inspectErr
+	}
 	if resetErr := strings.TrimSpace(r.ManagerResetError); resetErr != "" {
 		detail["manager_reset_error"] = resetErr
 	}
@@ -144,7 +153,8 @@ func (r startupRecoveryDecisionReport) detail() map[string]any {
 
 func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context) (startupRecoverySnapshot, error) {
 	snapshot := startupRecoverySnapshot{
-		RecoveryOnStartup: rt != nil && rt.Config != nil && rt.Config.Runtime.RecoveryOnStartup,
+		RecoveryOnStartup:  rt != nil && rt.Config != nil && rt.Config.Runtime.RecoveryOnStartup,
+		InspectionComplete: true,
 	}
 	if rt == nil {
 		return snapshot, nil
@@ -152,14 +162,16 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context) (startupR
 	if rt.Stores.ScheduleStore != nil {
 		schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
 		if err != nil {
-			return startupRecoverySnapshot{}, fmt.Errorf("inspect active schedules: %w", err)
+			snapshot.InspectionComplete = false
+			return snapshot, fmt.Errorf("inspect active schedules: %w", err)
 		}
 		snapshot.ActiveScheduleCount = len(schedules)
 	}
 	if rt.Manager != nil {
 		managerSnapshot, err := rt.Manager.RecoverableStateSnapshot(ctx)
 		if err != nil {
-			return startupRecoverySnapshot{}, fmt.Errorf("inspect recoverable manager state: %w", err)
+			snapshot.InspectionComplete = false
+			return snapshot, fmt.Errorf("inspect recoverable manager state: %w", err)
 		}
 		snapshot.Manager = managerSnapshot
 	}
