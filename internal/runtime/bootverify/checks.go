@@ -218,24 +218,17 @@ func checkEventConsumerExists(c *checkerContext) []Finding {
 func checkEventProducerExists(c *checkerContext) []Finding {
 	return c.eventWarningsByCheck("event_producer_exists")
 }
-func checkPayloadFieldCoverage(c *checkerContext) []Finding { return c.payloadFieldCoverage() }
-func checkConditionPayloadAlignment(c *checkerContext) []Finding {
-	return c.conditionPayloadAlignment()
-}
-func checkConditionPolicyAlignment(c *checkerContext) []Finding { return c.conditionPolicyAlignment() }
-func checkStateMachineCoherence(c *checkerContext) []Finding    { return c.stateMachineCoherence() }
-func checkRequiredAgentsMatch(c *checkerContext) []Finding      { return c.requiredAgentsMatch() }
-func checkHandlerFieldCompliance(c *checkerContext) []Finding   { return c.handlerFieldCompliance() }
-func checkToolResolution(c *checkerContext) []Finding           { return c.toolResolution() }
-func checkPromptExists(c *checkerContext) []Finding             { return c.promptExists() }
-func checkProducesDrift(c *checkerContext) []Finding            { return c.producesDrift() }
-func checkInvalidFieldDetection(c *checkerContext) []Finding    { return c.invalidFieldDetection() }
-func checkPolicyConflictDetection(c *checkerContext) []Finding  { return c.policyConflicts() }
-func checkEventCycleDetection(c *checkerContext) []Finding      { return c.eventCycleDetection() }
-func checkDialectCompliance(c *checkerContext) []Finding        { return c.dialectCompliance() }
-func checkConfigFromPayloadAlignment(c *checkerContext) []Finding {
-	return c.configFromPayloadAlignment()
-}
+func checkPayloadFieldCoverage(c *checkerContext) []Finding       { return c.payloadFieldCoverage() }
+func checkStateMachineCoherence(c *checkerContext) []Finding      { return c.stateMachineCoherence() }
+func checkRequiredAgentsMatch(c *checkerContext) []Finding        { return c.requiredAgentsMatch() }
+func checkHandlerFieldCompliance(c *checkerContext) []Finding     { return c.handlerFieldCompliance() }
+func checkToolResolution(c *checkerContext) []Finding             { return c.toolResolution() }
+func checkPromptExists(c *checkerContext) []Finding               { return c.promptExists() }
+func checkProducesDrift(c *checkerContext) []Finding              { return c.producesDrift() }
+func checkInvalidFieldDetection(c *checkerContext) []Finding      { return c.invalidFieldDetection() }
+func checkPolicyConflictDetection(c *checkerContext) []Finding    { return c.policyConflicts() }
+func checkEventCycleDetection(c *checkerContext) []Finding        { return c.eventCycleDetection() }
+func checkDialectCompliance(c *checkerContext) []Finding          { return c.dialectCompliance() }
 func checkNativeToolsValid(c *checkerContext) []Finding           { return c.nativeTools() }
 func checkPlatformNamespaceViolation(c *checkerContext) []Finding { return c.platformNamespace() }
 func checkWorkspaceClassExists(c *checkerContext) []Finding       { return c.workspace() }
@@ -1272,59 +1265,6 @@ func eventProducedExternallyLocal(entry runtimecontracts.EventCatalogEntry) bool
 	return strings.HasPrefix(source, "external") || strings.HasPrefix(source, "platform")
 }
 
-func (c *checkerContext) conditionPolicyAlignment() []Finding {
-	if c.conditionPolicyLoaded {
-		return c.conditionPolicyFindings
-	}
-	c.conditionPolicyLoaded = true
-	for nodeID, node := range c.source.NodeEntries() {
-		resolvedPolicy := policyValueMap(c.source.ResolvedPolicyForNode(nodeID))
-		for eventType, handler := range node.EventHandlers {
-			eventType = strings.TrimSpace(eventType)
-			for _, cond := range handlerConditions(handler) {
-				for _, ref := range policyReferences(cond.Expression) {
-					if policyFieldExists(resolvedPolicy, ref) {
-						continue
-					}
-					c.conditionPolicyFindings = append(c.conditionPolicyFindings, Finding{
-						CheckID:  "condition_policy_alignment",
-						Severity: "warning",
-						Message:  fmt.Sprintf("node %s handler %s references policy.%s but policy does not define it", strings.TrimSpace(nodeID), eventType, ref),
-						Location: strings.TrimSpace(nodeID),
-					})
-				}
-			}
-		}
-	}
-	return c.conditionPolicyFindings
-}
-
-func (c *checkerContext) conditionPayloadAlignment() []Finding {
-	if c.conditionPayloadLoaded {
-		return c.conditionPayloadFindings
-	}
-	c.conditionPayloadLoaded = true
-	for nodeID, node := range c.source.NodeEntries() {
-		for eventType, handler := range node.EventHandlers {
-			eventType = strings.TrimSpace(eventType)
-			payloadFields := eventPayloadFields(c.source, eventType)
-			for _, cond := range handlerConditions(handler) {
-				for _, ref := range payloadReferences(cond.Expression) {
-					if len(payloadFields) > 0 && !payloadFieldExists(payloadFields, ref) {
-						c.conditionPayloadFindings = append(c.conditionPayloadFindings, Finding{
-							CheckID:  "condition_payload_alignment",
-							Severity: "error",
-							Message:  fmt.Sprintf("node %s handler %s references payload.%s outside event payload schema", strings.TrimSpace(nodeID), eventType, ref),
-							Location: strings.TrimSpace(nodeID),
-						})
-					}
-				}
-			}
-		}
-	}
-	return c.conditionPayloadFindings
-}
-
 func (c *checkerContext) payloadFieldCoverage() []Finding {
 	if c.payloadCoverageLoaded {
 		return c.payloadCoverageFindings
@@ -1353,29 +1293,6 @@ func (c *checkerContext) payloadFieldCoverage() []Finding {
 		}
 	}
 	return c.payloadCoverageFindings
-}
-
-func (c *checkerContext) configFromPayloadAlignment() []Finding {
-	if c.configPayloadLoaded {
-		return c.configPayloadFindings
-	}
-	c.configPayloadLoaded = true
-	for _, transition := range c.source.DerivedHandlerTransitions() {
-		sourceEvent := strings.TrimSpace(transition.DataAccumulation.SourceEvent)
-		if sourceEvent == "" {
-			continue
-		}
-		if sourceEvent == strings.TrimSpace(transition.EventType) || derivedAccumulationSource(sourceEvent) {
-			continue
-		}
-		c.configPayloadFindings = append(c.configPayloadFindings, Finding{
-			CheckID:  "config_from_payload_alignment",
-			Severity: "error",
-			Message:  fmt.Sprintf("handler transition %s data_accumulation.source_event %s does not match handler event %s", transition.ID, sourceEvent, transition.EventType),
-			Location: strings.TrimSpace(transition.ID),
-		})
-	}
-	return c.configPayloadFindings
 }
 
 func (c *checkerContext) dialectCompliance() []Finding {
@@ -2608,16 +2525,6 @@ func anyAgentNeedsNativeCapability(source semanticview.Source, capability string
 	return false
 }
 
-func policyValueMap(policy runtimecontracts.PolicyDocument) map[string]any {
-	out := make(map[string]any, len(policy.Values))
-	for key, value := range policy.Values {
-		out[strings.TrimSpace(key)] = value.Value
-	}
-	return out
-}
-
-var bootverifyPolicyReferencePattern = regexp.MustCompile(`policy\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-var bootverifyPayloadReferencePattern = regexp.MustCompile(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 var bootverifyEntityReferencePattern = regexp.MustCompile(`entity\.([a-zA-Z_][a-zA-Z0-9_]*)`)
 
 func entityReferences(expression string) []string {
@@ -2638,121 +2545,6 @@ func entityReferences(expression string) []string {
 	return out
 }
 
-func policyReferences(expression string) []string {
-	expression = strings.TrimSpace(expression)
-	if expression == "" {
-		return nil
-	}
-	matches := bootverifyPolicyReferencePattern.FindAllStringSubmatch(expression, -1)
-	out := make([]string, 0, len(matches))
-	seen := map[string]struct{}{}
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		ref := strings.TrimSpace(match[1])
-		if ref == "" {
-			continue
-		}
-		if _, ok := seen[ref]; ok {
-			continue
-		}
-		seen[ref] = struct{}{}
-		out = append(out, ref)
-	}
-	return out
-}
-
-func payloadReferences(expression string) []string {
-	expression = strings.TrimSpace(expression)
-	if expression == "" {
-		return nil
-	}
-	matches := bootverifyPayloadReferencePattern.FindAllStringSubmatch(expression, -1)
-	out := make([]string, 0, len(matches))
-	seen := map[string]struct{}{}
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		ref := strings.TrimSpace(match[1])
-		if ref == "" {
-			continue
-		}
-		if _, ok := seen[ref]; ok {
-			continue
-		}
-		seen[ref] = struct{}{}
-		out = append(out, ref)
-	}
-	return out
-}
-
-func policyFieldExists(policy map[string]any, ref string) bool {
-	if len(policy) == 0 {
-		return false
-	}
-	_, ok := lookupPolicyValue(policy, ref)
-	return ok
-}
-
-func lookupPolicyValue(policy map[string]any, ref string) (any, bool) {
-	current := any(policy)
-	for _, part := range strings.Split(strings.TrimSpace(ref), ".") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			return nil, false
-		}
-		next, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		value, ok := next[part]
-		if !ok {
-			return nil, false
-		}
-		current = value
-	}
-	return current, true
-}
-
-func eventPayloadFields(source semanticview.Source, eventType string) map[string]struct{} {
-	if source == nil {
-		return nil
-	}
-	entry, ok := source.EventEntry(strings.TrimSpace(eventType))
-	if !ok {
-		return nil
-	}
-	out := map[string]struct{}{}
-	collectPayloadFields("", entry.Payload.Properties, out)
-	return out
-}
-
-func collectPayloadFields(prefix string, fields map[string]runtimecontracts.EventFieldSpec, out map[string]struct{}) {
-	for name := range fields {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		full := name
-		if prefix != "" {
-			full = prefix + "." + name
-		}
-		out[full] = struct{}{}
-	}
-}
-
-func payloadFieldExists(fields map[string]struct{}, ref string) bool {
-	ref = strings.TrimSpace(ref)
-	for field := range fields {
-		if ref == field || strings.HasPrefix(ref, field+".") || strings.HasPrefix(field, ref+".") {
-			return true
-		}
-	}
-	return false
-}
-
 func entitySchemaFields(source semanticview.Source) map[string]struct{} {
 	if source == nil {
 		return nil
@@ -2768,18 +2560,6 @@ func entitySchemaFields(source semanticview.Source) map[string]struct{} {
 		}
 	}
 	return out
-}
-
-func derivedAccumulationSource(sourceEvent string) bool {
-	sourceEvent = strings.TrimSpace(sourceEvent)
-	switch {
-	case sourceEvent == "":
-		return false
-	case strings.HasPrefix(sourceEvent, "fan_out."):
-		return true
-	default:
-		return false
-	}
 }
 
 func requiredAgentsByFlow(source semanticview.Source) map[string][]runtimecontracts.FlowRequiredAgent {
