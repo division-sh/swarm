@@ -271,6 +271,31 @@ func TestRun_MapsConditionPolicyToNamedWarning(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsNestedConditionPolicyReferencePresentInResolvedPolicy(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-success")
+	nodeID, eventType, handler, ok := firstBundleHandler(bundle)
+	if !ok {
+		t.Fatal("expected at least one handler")
+	}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "policy.retry.max_attempts > 0"}
+	node := bundle.Nodes[nodeID]
+	node.EventHandlers[eventType] = handler
+	bundle.Nodes[nodeID] = node
+	bundle.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+		"retry": {
+			Value: map[string]any{
+				"max_attempts": 3,
+			},
+		},
+	}}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "condition_policy_alignment", "policy.retry.max_attempts") {
+		t.Fatalf("expected nested policy reference to be accepted, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_MapsRequiredAgentMismatchToNamedError(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-required-agent-missing")
 
@@ -350,6 +375,29 @@ func TestRun_MapsConditionPayloadMismatchToNamedError(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-success")
+	nodeID, eventType, handler, ok := firstBundleHandler(bundle)
+	if !ok {
+		t.Fatal("expected at least one handler")
+	}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: `payload.task.id != ""`}
+	node := bundle.Nodes[nodeID]
+	node.EventHandlers[eventType] = handler
+	bundle.Nodes[nodeID] = node
+	entry := bundle.Events[eventType]
+	entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{
+		"task": {Type: "object"},
+	}
+	bundle.Events[eventType] = entry
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "condition_payload_alignment", "payload.task.id") {
+		t.Fatalf("expected nested payload reference to be accepted, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsPayloadCoverageMismatchToNamedError(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-payload-mismatch")
 
@@ -381,6 +429,23 @@ func TestRun_MapsConfigFromPayloadMismatchToNamedError(t *testing.T) {
 	}
 	if !reportContains(report.Errors(), "config_from_payload_alignment", "source_event other.event does not match handler event task.requested") {
 		t.Fatalf("expected config_from_payload_alignment error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsFanOutDerivedAccumulationSourceEvent(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-success")
+	bundle.Semantics.HandlerTransitions = []runtimecontracts.HandlerTransitionSemantic{{
+		ID:        "transition-1",
+		EventType: "task.requested",
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			SourceEvent: "fan_out.child_completed",
+		},
+	}}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "config_from_payload_alignment", "fan_out.child_completed") {
+		t.Fatalf("expected fan_out source_event to be accepted, got %#v", report.Errors())
 	}
 }
 
