@@ -615,7 +615,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				handleRuntimeLogPersistenceError("runtime", "recovery_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed", nil, err))
 			}
 			startupRecoveryDecision.ManagerResetAttempted = true
-			if resetErr := rt.Manager.ResetRuntimeState(); resetErr != nil {
+			if resetErr := rt.Manager.ResetRuntimeStateWithSource("startup_recovery_failed"); resetErr != nil {
 				startupRecoveryDecision.ManagerResetError = resetErr.Error()
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("runtime", "recovery_reset_failed", rt.Logger.Error(ctx, "runtime", "recovery_reset_failed", nil, resetErr))

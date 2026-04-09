@@ -19,7 +19,29 @@ type Registry interface {
 }
 
 type Resetter interface {
-	ResetAll(runtimeMode RuntimeMode) error
+	ResetAll(runtimeMode RuntimeMode, metadata ResetMetadata) (ResetSummary, error)
+}
+
+type ResetMetadata struct {
+	Source string
+}
+
+type ResetDisposition struct {
+	SessionID         string
+	AgentID           string
+	RuntimeMode       RuntimeMode
+	ScopeKey          string
+	PreviousStatus    string
+	TerminationReason string
+	TerminationDetail string
+}
+
+type ResetSummary struct {
+	OrphanedSessions []ResetDisposition
+}
+
+func (s ResetSummary) OrphanedCount() int {
+	return len(s.OrphanedSessions)
 }
 
 type Lease struct {
@@ -351,9 +373,11 @@ func (sr *InMemoryRegistry) History(agentID string) []Record {
 	return out
 }
 
-func (sr *InMemoryRegistry) ResetAll(runtimeMode RuntimeMode) error {
+func (sr *InMemoryRegistry) ResetAll(runtimeMode RuntimeMode, metadata ResetMetadata) (ResetSummary, error) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
+	summary := ResetSummary{}
+	source := strings.TrimSpace(metadata.Source)
 	if runtimeMode == "" {
 		now := time.Now()
 		for key, rec := range sr.byKey {
@@ -363,17 +387,27 @@ func (sr *InMemoryRegistry) ResetAll(runtimeMode RuntimeMode) error {
 			terminated := *rec
 			terminated.Status = "terminated"
 			terminated.TerminationReason = TerminationReasonOrphaned.String()
+			terminated.TerminationDetail = source
 			terminated.TerminatedAt = now
 			terminated.LockOwner = ""
 			terminated.LockExpiresAt = time.Time{}
 			terminated.SuccessorSessionID = ""
 			sr.history[key] = append(sr.history[key], &terminated)
+			summary.OrphanedSessions = append(summary.OrphanedSessions, ResetDisposition{
+				SessionID:         terminated.SessionID,
+				AgentID:           terminated.AgentID,
+				RuntimeMode:       terminated.RuntimeMode,
+				ScopeKey:          terminated.ScopeKey,
+				PreviousStatus:    rec.Status,
+				TerminationReason: terminated.TerminationReason,
+				TerminationDetail: terminated.TerminationDetail,
+			})
 		}
 		sr.byKey = make(map[string]*Record)
-		return nil
+		return summary, nil
 	}
 	if runtimeMode == RuntimeModeTask {
-		return nil
+		return summary, nil
 	}
 	now := time.Now()
 	for key, rec := range sr.byKey {
@@ -385,13 +419,23 @@ func (sr *InMemoryRegistry) ResetAll(runtimeMode RuntimeMode) error {
 			terminated := *rec
 			terminated.Status = "terminated"
 			terminated.TerminationReason = TerminationReasonOrphaned.String()
+			terminated.TerminationDetail = source
 			terminated.TerminatedAt = now
 			terminated.LockOwner = ""
 			terminated.LockExpiresAt = time.Time{}
 			terminated.SuccessorSessionID = ""
 			sr.history[key] = append(sr.history[key], &terminated)
+			summary.OrphanedSessions = append(summary.OrphanedSessions, ResetDisposition{
+				SessionID:         terminated.SessionID,
+				AgentID:           terminated.AgentID,
+				RuntimeMode:       terminated.RuntimeMode,
+				ScopeKey:          terminated.ScopeKey,
+				PreviousStatus:    rec.Status,
+				TerminationReason: terminated.TerminationReason,
+				TerminationDetail: terminated.TerminationDetail,
+			})
 			delete(sr.byKey, key)
 		}
 	}
-	return nil
+	return summary, nil
 }
