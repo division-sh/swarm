@@ -933,6 +933,33 @@ func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
 	}
 }
 
+func TestRun_DoesNotWarnForExternalInputPinWithoutEmitter(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	entry := bundle.Events["task.feedback"]
+	entry.Source = "external"
+	bundle.Events["task.feedback"] = entry
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unexpected input_pin_wiring warning for external input, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_ReportsConflictingWritePinOwners(t *testing.T) {
+	root := writeCrossFlowPinAmbiguityFixture(t, false)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle.Semantics.FlowWrites["producer_a"] = []string{"ticket.status"}
+	bundle.Semantics.FlowWrites["producer_b"] = []string{"ticket.status"}
+	bundle.Semantics.WritePinOwners["ticket.status"] = []string{"producer_a", "producer_b"}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "write_pin_ownership_validation", "ticket.status") {
+		t.Fatalf("expected write_pin_ownership_validation error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_DoesNotWarnForLocalizedCrossFlowEventRouting(t *testing.T) {
 	root := writeLocalizedEventRoutingFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
