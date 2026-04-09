@@ -12,6 +12,7 @@ import (
 	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 type recoveryGuardManagerStore struct {
@@ -44,6 +45,9 @@ type recoveryGuardEventStore struct {
 
 func (*recoveryGuardEventStore) AppendEvent(context.Context, events.Event) error { return nil }
 func (*recoveryGuardEventStore) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+func (*recoveryGuardEventStore) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
 	return nil
 }
 func (*recoveryGuardEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {

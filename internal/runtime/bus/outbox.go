@@ -64,6 +64,13 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if err := txStore.InsertEventDeliveriesTx(ctx, tx, intent.Event.ID, recipients); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
+		if scopeWriter, ok := o.bus.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
+			if err := scopeWriter.UpsertCommittedReplayScopeTx(ctx, tx, intent.Event.ID, replayScopeForEmitIntent(*intent)); err != nil {
+				return fmt.Errorf("persist committed replay scope: %w", err)
+			}
+		} else if replayScopePersistenceRequired(o.bus.store) {
+			return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+		}
 		o.bus.setPendingInternalRecipients(intent.Event.ID, internalRecipients)
 	}
 	return nil
@@ -180,6 +187,13 @@ func normalizeOutboxEvent(evt events.Event) events.Event {
 		evt.CreatedAt = time.Now().UTC()
 	}
 	return evt
+}
+
+func replayScopeForEmitIntent(intent runtimeengine.EmitIntent) runtimereplayclaim.CommittedReplayScope {
+	if len(intent.Recipients) > 0 {
+		return runtimereplayclaim.CommittedReplayScopeDirect
+	}
+	return runtimereplayclaim.CommittedReplayScopeSubscribed
 }
 
 func (eb *EventBus) setPendingInternalRecipients(eventID string, recipients []string) {

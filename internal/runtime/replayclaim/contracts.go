@@ -13,6 +13,14 @@ var (
 	ErrMissingReplayEventReader                  = errors.New("store does not support replay-eligible event reads")
 	ErrMissingReplayClaimOwner                   = errors.New("store does not support explicit pipeline replay claims")
 	ErrAuthoritativeRecipientManifestUnavailable = errors.New("authoritative delivery recipient manifest is unavailable for non-persistent event stores")
+	ErrMissingCommittedReplayScope               = errors.New("store does not support authoritative committed replay scope for persisted replay")
+)
+
+type CommittedReplayScope string
+
+const (
+	CommittedReplayScopeDirect     CommittedReplayScope = "direct"
+	CommittedReplayScopeSubscribed CommittedReplayScope = "subscribed"
 )
 
 type Participation interface {
@@ -34,6 +42,10 @@ type Store interface {
 
 type RecipientReader interface {
 	ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error)
+}
+
+type ScopeReader interface {
+	LoadCommittedReplayScope(ctx context.Context, eventID string) (CommittedReplayScope, error)
 }
 
 type composedStore struct {

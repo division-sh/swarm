@@ -13,6 +13,14 @@ import (
 	"swarm/internal/events"
 	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
+)
+
+const (
+	replayScopeMarkerSubscriberType = "node"
+	replayScopeMarkerSubscriberID   = "__runtime_replay_scope__"
+	replayScopeReasonDirect         = "replay_scope_direct"
+	replayScopeReasonSubscribed     = "replay_scope_subscribed"
 )
 
 type rowQueryer interface {
@@ -77,6 +85,28 @@ func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt even
 	return nil
 }
 
+func (s *PostgresStore) PersistEventWithDeliveriesAndScope(
+	ctx context.Context,
+	evt events.Event,
+	agentIDs []string,
+	scope runtimereplayclaim.CommittedReplayScope,
+) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	evt = s.enrichEventCorrelation(ctx, caps, chooseRowQueryer(s.DB, nil), evt)
+	switch {
+	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
+		return s.persistEventWithDeliveriesAndScopeSpec(ctx, caps, evt, agentIDs, scope)
+	case caps.Events.Log != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("events", caps.Events.Log)
+	case caps.Events.Deliveries != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	}
+	return nil
+}
+
 func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.Event {
 	parentID := strings.TrimSpace(evt.ParentEventID)
 	if parentID == "" {
@@ -133,6 +163,35 @@ func (s *PostgresStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx,
 	switch {
 	case caps.Events.Deliveries == SchemaFlavorCanonical && caps.Events.Log == SchemaFlavorCanonical:
 		return s.insertEventDeliveriesSpec(ctx, caps, tx, eventID, agentIDs)
+	case caps.Events.Deliveries != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	case caps.Events.Log != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("events", caps.Events.Log)
+	}
+	return nil
+}
+
+func (s *PostgresStore) UpsertCommittedReplayScope(
+	ctx context.Context,
+	eventID string,
+	scope runtimereplayclaim.CommittedReplayScope,
+) error {
+	return s.UpsertCommittedReplayScopeTx(ctx, nil, eventID, scope)
+}
+
+func (s *PostgresStore) UpsertCommittedReplayScopeTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	eventID string,
+	scope runtimereplayclaim.CommittedReplayScope,
+) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	switch {
+	case caps.Events.Deliveries == SchemaFlavorCanonical && caps.Events.Log == SchemaFlavorCanonical:
+		return s.upsertCommittedReplayScopeSpec(ctx, caps, tx, eventID, scope)
 	case caps.Events.Deliveries != SchemaFlavorCanonical:
 		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
 	case caps.Events.Log != SchemaFlavorCanonical:
@@ -299,6 +358,46 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 	return recipients, nil
 }
 
+func (s *PostgresStore) LoadCommittedReplayScope(
+	ctx context.Context,
+	eventID string,
+) (runtimereplayclaim.CommittedReplayScope, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return "", err
+	}
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
+	}
+	switch caps.Events.Deliveries {
+	case SchemaFlavorCanonical:
+	default:
+		return "", unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	}
+	var reasonCode string
+	err = s.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = $2
+		  AND subscriber_id = $3
+		ORDER BY created_at DESC, delivery_id DESC
+		LIMIT 1
+	`, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID).Scan(&reasonCode)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
+	case err != nil:
+		return "", fmt.Errorf("load committed replay scope: %w", err)
+	}
+	scope, ok := committedReplayScopeFromReasonCode(reasonCode)
+	if !ok {
+		return "", fmt.Errorf("load committed replay scope: unrecognized reason_code %q", strings.TrimSpace(reasonCode))
+	}
+	return scope, nil
+}
+
 func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, evt events.Event) error {
 	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, sourceEventID, createdAt, err := eventStorageEnvelope(evt)
 	if err != nil {
@@ -357,6 +456,35 @@ func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, caps
 			return err
 		}
 		if err := s.insertEventDeliveriesSpec(ctx, caps, tx, evt.ID, agentIDs); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit event tx: %w", err)
+		}
+		return nil
+	})
+}
+
+func (s *PostgresStore) persistEventWithDeliveriesAndScopeSpec(
+	ctx context.Context,
+	caps StoreSchemaCapabilities,
+	evt events.Event,
+	agentIDs []string,
+	scope runtimereplayclaim.CommittedReplayScope,
+) error {
+	return withEventStoreRetry(ctx, nil, func() error {
+		tx, err := s.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin event tx: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
+			return err
+		}
+		if err := s.insertEventDeliveriesSpec(ctx, caps, tx, evt.ID, agentIDs); err != nil {
+			return err
+		}
+		if err := s.upsertCommittedReplayScopeSpec(ctx, caps, tx, evt.ID, scope); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
@@ -435,6 +563,89 @@ func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, caps Stor
 		}
 	}
 	return nil
+}
+
+func (s *PostgresStore) upsertCommittedReplayScopeSpec(
+	ctx context.Context,
+	caps StoreSchemaCapabilities,
+	tx *sql.Tx,
+	eventID string,
+	scope runtimereplayclaim.CommittedReplayScope,
+) error {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil
+	}
+	reasonCode, err := committedReplayScopeReasonCode(scope)
+	if err != nil {
+		return err
+	}
+	execFn := s.DB.ExecContext
+	if tx != nil {
+		execFn = tx.ExecContext
+	}
+	res, err := execFn(ctx, `
+		UPDATE event_deliveries
+		SET reason_code = $4,
+		    status = 'delivered',
+		    delivered_at = now()
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = $2
+		  AND subscriber_id = $3
+	`, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, reasonCode)
+	if err != nil {
+		return fmt.Errorf("update committed replay scope: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update committed replay scope rows: %w", err)
+	}
+	if rows > 0 {
+		return nil
+	}
+	q := `
+		INSERT INTO event_deliveries (
+			event_id, subscriber_type, subscriber_id, status, reason_code, delivered_at, created_at
+		)
+		VALUES ($1::uuid, $2, $3, 'delivered', $4, now(), now())
+	`
+	if caps.Events.DeliveryRunID {
+		q = `
+			INSERT INTO event_deliveries (
+				run_id, event_id, subscriber_type, subscriber_id, status, reason_code, delivered_at, created_at
+			)
+			SELECT
+				e.run_id, e.event_id, $2, $3, 'delivered', $4, now(), now()
+			FROM events e
+			WHERE e.event_id = $1::uuid
+		`
+	}
+	if _, err := execFn(ctx, q, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, reasonCode); err != nil {
+		return fmt.Errorf("insert committed replay scope: %w", err)
+	}
+	return nil
+}
+
+func committedReplayScopeReasonCode(scope runtimereplayclaim.CommittedReplayScope) (string, error) {
+	switch scope {
+	case runtimereplayclaim.CommittedReplayScopeDirect:
+		return replayScopeReasonDirect, nil
+	case runtimereplayclaim.CommittedReplayScopeSubscribed:
+		return replayScopeReasonSubscribed, nil
+	default:
+		return "", fmt.Errorf("committed replay scope: unsupported scope %q", strings.TrimSpace(string(scope)))
+	}
+}
+
+func committedReplayScopeFromReasonCode(reasonCode string) (runtimereplayclaim.CommittedReplayScope, bool) {
+	switch strings.TrimSpace(reasonCode) {
+	case replayScopeReasonDirect:
+		return runtimereplayclaim.CommittedReplayScopeDirect, true
+	case replayScopeReasonSubscribed:
+		return runtimereplayclaim.CommittedReplayScopeSubscribed, true
+	default:
+		return "", false
+	}
 }
 
 func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {

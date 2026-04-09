@@ -12,6 +12,7 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
 )
@@ -116,6 +117,13 @@ func findRecoveryAftermathLog(t *testing.T, logs []runtimepipeline.RuntimeLogEnt
 	return runtimepipeline.RuntimeLogEntry{}
 }
 
+func persistCommittedReplayScope(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventID string, scope runtimereplayclaim.CommittedReplayScope) {
+	t.Helper()
+	if err := pg.UpsertCommittedReplayScope(ctx, eventID, scope); err != nil {
+		t.Fatalf("UpsertCommittedReplayScope(%s): %v", eventID, err)
+	}
+}
+
 func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	ctx := context.Background()
 	_, db, cleanup := testutil.StartPostgres(t)
@@ -161,6 +169,7 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	if err := pg.InsertEventDeliveries(ctx, childID, []string{recipientID}); err != nil {
 		t.Fatalf("InsertEventDeliveries(child): %v", err)
 	}
+	persistCommittedReplayScope(t, ctx, pg, childID, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
@@ -281,6 +290,7 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	if err := pg.InsertEventDeliveries(ctx, goodEventID, []string{goodRecipientID}); err != nil {
 		t.Fatalf("InsertEventDeliveries(good child): %v", err)
 	}
+	persistCommittedReplayScope(t, ctx, pg, goodEventID, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	if err := pg.UpsertPipelineReceipt(ctx, goodParentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(good parent): %v", err)
 	}
@@ -423,6 +433,7 @@ func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
 	if err := pg1.InsertEventDeliveries(ctx, childID, []string{"agent-recovery"}); err != nil {
 		t.Fatalf("InsertEventDeliveries(child): %v", err)
 	}
+	persistCommittedReplayScope(t, ctx, pg1, childID, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	if err := pg1.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
@@ -516,6 +527,7 @@ func TestRecoveryManager_ExplicitlySkipsReplayWithoutPersistedRecipients(t *test
 	if err := pg.AppendEvent(ctx, child); err != nil {
 		t.Fatalf("AppendEvent(child): %v", err)
 	}
+	persistCommittedReplayScope(t, ctx, pg, childID, runtimereplayclaim.CommittedReplayScopeDirect)
 	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
 	}
@@ -637,6 +649,7 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 	if err := pg.InsertEventDeliveries(ctx, eventID, []string{"agent-a"}); err != nil {
 		t.Fatalf("InsertEventDeliveries: %v", err)
 	}
+	persistCommittedReplayScope(t, ctx, pg, eventID, runtimereplayclaim.CommittedReplayScopeDirect)
 
 	agentA := bus.Subscribe("agent-a")
 	agentB := bus.Subscribe("agent-b", events.EventType("system.recover.explicit"))
@@ -675,6 +688,126 @@ func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscrip
 	if receiptStatus != "success" {
 		t.Fatalf("child receipt outcome = %q, want success", receiptStatus)
 	}
+}
+
+func TestRecoveryManager_ReplaysSubscribedInternalOnlyUsingCommittedReplayScope(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	capture := &recoveryCapturePublisher{inner: bus}
+
+	runID := uuid.NewString()
+	parentID := uuid.NewString()
+	eventID := uuid.NewString()
+
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          parentID,
+		Type:        events.EventType("system.parent"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"ok":true}`),
+		RunID:       runID,
+		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(parent): %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
+	}
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:            eventID,
+		Type:          events.EventType("system.recover.internal"),
+		SourceAgent:   "runtime",
+		Payload:       []byte(`{"ok":true}`),
+		RunID:         runID,
+		ParentEventID: parentID,
+		CreatedAt:     time.Now().Add(-time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(child): %v", err)
+	}
+	persistCommittedReplayScope(t, ctx, pg, eventID, runtimereplayclaim.CommittedReplayScopeSubscribed)
+
+	internalCh := bus.SubscribeInternal("workflow-runtime", events.EventType("system.recover.internal"))
+
+	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(capture.direct) != 1 || capture.direct[0].ID != eventID {
+		t.Fatalf("direct replayed events = %#v, want [%s]", capture.direct, eventID)
+	}
+	select {
+	case evt := <-internalCh:
+		if evt.ID != eventID {
+			t.Fatalf("internal replayed event id = %q, want %q", evt.ID, eventID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected internal subscriber to receive replayed subscribed event")
+	}
+}
+
+func TestRecoveryManager_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubscribers(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	capture := &recoveryCapturePublisher{inner: bus}
+
+	runID := uuid.NewString()
+	parentID := uuid.NewString()
+	eventID := uuid.NewString()
+
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          parentID,
+		Type:        events.EventType("system.parent"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"ok":true}`),
+		RunID:       runID,
+		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(parent): %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
+	}
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:            eventID,
+		Type:          events.EventType("system.recover.direct_empty"),
+		SourceAgent:   "runtime",
+		Payload:       []byte(`{"ok":true}`),
+		RunID:         runID,
+		ParentEventID: parentID,
+		CreatedAt:     time.Now().Add(-time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(child): %v", err)
+	}
+	persistCommittedReplayScope(t, ctx, pg, eventID, runtimereplayclaim.CommittedReplayScopeDirect)
+
+	internalCh := bus.SubscribeInternal("workflow-runtime", events.EventType("system.recover.direct_empty"))
+
+	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(capture.direct) != 0 {
+		t.Fatalf("direct replayed events = %#v, want none", capture.direct)
+	}
+	select {
+	case evt := <-internalCh:
+		t.Fatalf("direct replay should not broaden to internal subscriber: %#v", evt)
+	case <-time.After(50 * time.Millisecond):
+	}
+	findRecoveryAftermathLog(t, capture.logs, eventID, "skipped", "no_persisted_recipients")
 }
 
 func TestRecoveryManager_FailsClosedWithoutReplayClaimOwner(t *testing.T) {

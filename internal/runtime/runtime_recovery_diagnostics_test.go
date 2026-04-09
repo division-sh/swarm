@@ -13,6 +13,7 @@ import (
 	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	"swarm/internal/testutil"
 )
 
@@ -79,6 +80,10 @@ func (startupRecoveryEventStore) CanonicalRuntimeLogCapability(context.Context) 
 func (startupRecoveryEventStore) AppendEvent(context.Context, events.Event) error { return nil }
 
 func (startupRecoveryEventStore) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+
+func (startupRecoveryEventStore) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
 	return nil
 }
 
