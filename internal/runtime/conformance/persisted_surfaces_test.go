@@ -23,6 +23,7 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemutationlog "swarm/internal/runtime/mutationlog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	runtimesemanticview "swarm/internal/runtime/semanticview"
 	runtimesessions "swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
@@ -632,6 +633,9 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	if err := pg.InsertEventDeliveries(ctx, replayChildID, []string{replayRecipient}); err != nil {
 		t.Fatalf("InsertEventDeliveries(replay child): %v", err)
 	}
+	if err := pg.UpsertCommittedReplayScope(ctx, replayChildID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		t.Fatalf("UpsertCommittedReplayScope(replay child): %v", err)
+	}
 	if err := pg.UpsertPipelineReceipt(ctx, replayParentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(replay parent): %v", err)
 	}
@@ -659,6 +663,9 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		CreatedAt:     time.Now().Add(-2 * time.Minute).UTC(),
 	}); err != nil {
 		t.Fatalf("AppendEvent(skip child): %v", err)
+	}
+	if err := pg.UpsertCommittedReplayScope(ctx, skipChildID, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+		t.Fatalf("UpsertCommittedReplayScope(skip child): %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, skipParentID, "processed", ""); err != nil {
 		t.Fatalf("UpsertPipelineReceipt(skip parent): %v", err)
