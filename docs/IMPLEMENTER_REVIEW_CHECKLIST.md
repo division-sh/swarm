@@ -4,6 +4,8 @@ Use this checklist before merging any non-trivial change.
 
 This is a practical companion to [IMPLEMENTER_GUIDELINES.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_GUIDELINES.md).
 
+Short copy-paste operational blocks live in [PROCESS_CHECKLIST_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROCESS_CHECKLIST_TEMPLATES.md).
+
 If any answer below is "no", "not sure", or "this patch needs an exception", stop and review the design before merging.
 
 ## Process Summary
@@ -26,10 +28,14 @@ Review the work against this process, in order:
 
 3. Was the pre-audit good enough to start coding?
 - broadest plausible failure class tested
+- chosen working failure class stated explicitly
+- parent failure class stated explicitly when a broader parent exists
 - issue framing challenged rather than accepted
 - canonical owner(s) named
 - repo-wide consumer sweep done
 - manifestation table present when required
+- sibling seams under the parent failure class probed enough to assess parent state
+- explicit post-pre-audit action decision made for the parent failure class when a broader parent exists
 - intended closure level stated explicitly
 - explicit watchlist decision made:
   - maps to existing node
@@ -39,14 +45,17 @@ Review the work against this process, in order:
 - for failure-class / parity / semantic-drift work, was manifestation identification treated as the main effort rather than rushed as lightweight paperwork?
 
 4. If the category required it, did an independent pre-audit review gate happen before coding?
+- and did the reviewer/lead record that gate outcome explicitly on the issue thread before coding started?
 
 5. Was the PR proof audit good enough to merge?
 - achieved closure level stated explicitly
+- did the PR claim closure of its chosen working failure class, not only one manifestation inside it?
 - manifestation-level proof provided
 - any split or residual seam stated explicitly
 
 6. Does the merge recommendation match the proven closure level?
 - did the reviewer explicitly decide whether the watchlist needs to be updated at review close-out or merge time?
+- if the PR closed only a child slice of a broader parent class, was the parent issue/watchlist record updated to say what child closed and what parent obligation remains?
 
 ## Stop-Ship Questions
 
@@ -139,6 +148,8 @@ Review the work against this process, in order:
 - If the PR cites spec references, did the reviewer compare the implementation against the cited spec section(s), not just against the issue summary?
 - For semantic/runtime/spec-governed work, did the reviewer explicitly ask:
   - what is the broadest plausible semantic concept, not just the local failing seam
+  - what chosen working failure class the PR actually selected
+  - what parent failure class that chosen class belongs to, if any
   - what broader semantic rule this symptom belongs to
   - whether the PR and pre-audit started broad and only narrowed by proof
   - what repo-wide consumers use that same concept
@@ -168,6 +179,13 @@ Review the work against this process, in order:
   - touched seam canonicalized
   - failure class eliminated
 - Did that issue-level pre-audit explicitly state whether the issue framing itself was broad enough or still narrower than the true failure class?
+- If a broader parent failure class existed, did the pre-audit explicitly probe sibling seams under that parent and classify them as broken, apparently clean with proof, different class with proof, or still unproven?
+- If a broader parent failure class existed, did the implementer make an explicit post-pre-audit action decision before coding:
+  - absorb the parent class now
+  - keep first-slice scope
+  - open or update a dedicated follow-up stream
+  - leave the parent explicitly open as still unproven?
+- If the category required an independent pre-audit gate, did the reviewer/lead explicitly record the gate outcome on the issue thread before coding began?
 - Did the reviewer verify that the pre-audit started from the broadest plausible concept and did not narrow seams out of scope without explicit proof that they are a different concept?
 - Did the reviewer independently check that the repo-wide consumer sweep is credible rather than just local to nearby files?
 - Did that issue-level pre-audit explicitly list every currently known manifestation from the issue body, issue thread, triage/reproducer notes, and prior review context?
@@ -228,6 +246,17 @@ Review the work against this process, in order:
   - that seam was proven to be a different concept
   - or it was covered by an explicit lead-approved staged broad-refactor plan?
 - If a sibling seam still bypasses the canonical owner, did the PR either absorb it now or explicitly prove why full concept closure was not feasible in the same PR?
+- If the PR took a child slice of a broader parent class, did the reviewer verify that the PR still aimed to eliminate its chosen working failure class entirely rather than only improve one manifestation inside it?
+- If sibling probing found a concrete remaining same-class seam outside the chosen class, did the reviewer verify that a follow-up issue/stream was created or updated before implementation unless the PR absorbed it now?
+- If the PR closed only a child slice of a broader parent class, did the reviewer verify that the parent issue/watchlist record was updated to state the closed child class, the remaining parent state, and the next known same-class stream if any?
+- If review smelled something off, did the reviewer classify it explicitly as:
+  - concrete same-class remaining seam
+  - broader parent class than the PR chose
+  - different class worth tracking
+  - architecture smell / cleanup opportunity
+  - or still too weak to track?
+- If the reviewer could name the seam, class, and remaining obligation clearly, did they create or update a tracked follow-up instead of leaving it only in chat, review prose, or residual-risk notes?
+- If the concern was not concrete enough for an issue, did the reviewer at least decide whether watchlist-only or residual-risk-only was the honest record?
 - If the PR leaves dual semantic ownership in place, did the reviewer verify that this is a lead-approved temporary seam rather than a migration excuse?
 - If any currently known manifestation lacks an explicit final status or proof line, did the reviewer stop the review and mark the PR as not review-ready?
 - If the audit relies on “shared owner introduced”, “same seam”, or “cleaner architecture” without manifestation-level proof, did the reviewer reject that as insufficient closure evidence?

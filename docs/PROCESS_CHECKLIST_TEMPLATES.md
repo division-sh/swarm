@@ -1,0 +1,292 @@
+# Process Checklist Templates
+
+Use these when a short copy-paste checklist is better than re-deriving the process from prose.
+
+These templates are operational helpers, not replacements for:
+
+- [IMPLEMENTER_GUIDELINES.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_GUIDELINES.md)
+- [IMPLEMENTER_REVIEW_CHECKLIST.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_REVIEW_CHECKLIST.md)
+- [PROMPT_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROMPT_TEMPLATES.md)
+
+Default rule:
+
+- use the smallest template that removes ambiguity
+- do not fill a template mechanically if half the fields are irrelevant
+- but do not skip a template when the workflow depends on an explicit recorded decision
+
+## 1. Pre-Implementation Coverage Audit
+
+Use on the issue before coding for semantic/runtime/spec-governed work.
+
+```text
+Pre-Implementation Coverage Audit
+
+Category:
+- <local | failure-class | parity | semantic-drift | high-risk maintenance>
+
+Concept:
+- <exact semantic concept(s) being changed>
+
+Failure class:
+- broader failure class: <...>
+- chosen working failure class for this PR: <...>
+- parent failure class above it, if any: <...>
+- issue framing assessment:
+  - broad enough
+  - narrower-but-acceptable as first slice
+  - too narrow
+
+Canonical owner(s):
+- <owner 1>
+- <owner 2 if any>
+
+Consumers of each owner:
+- <owner> -> <consumers/surfaces>
+
+Systematic consumption audit:
+- <seam> -> already consumes canonical owner
+- <seam> -> moved to canonical owner in this work
+- <seam> -> different semantic concept, with proof
+- <seam> -> still bypasses canonical owner and is explicitly split / escalated
+
+Old non-authoritative paths:
+- <old helper/reader/writer/interpreter now invalid or removal-candidate>
+
+Currently known manifestations in scope:
+- <manifestation 1>
+- <manifestation 2>
+
+Manifestation coverage table:
+- manifestation: <...>
+  - canonical owner: <...>
+  - planned coverage status: <direct reproducer and fix | execution proof through same corrected path | split / escalate as separate class>
+  - exact proof planned: <...>
+  - required supported-surface / end-to-end proof: <... or none>
+  - same class or separate class: <...>
+
+Parent-class sibling probe:
+- sibling seam: <...>
+  - status: <broken now | apparently clean, with proof | different class, with proof | still unproven>
+- action decision for parent class:
+  - absorb parent now
+  - keep first-slice scope
+  - open or update dedicated follow-up stream
+  - leave parent explicitly open as still unproven
+- remaining parent obligation tracked at: <issue/watchlist/follow-up>
+
+Watchlist decision:
+- <maps to existing node | existing node refined | new manifestation added | new node needed>
+- node: <...>
+
+Intended closure level:
+- <local symptom fixed | touched seam canonicalized | failure class eliminated>
+
+Chosen-class closure commitment:
+- this PR aims to eliminate the chosen working failure class entirely
+
+Required closure proof:
+- focused proof: <...>
+- supported-surface / end-to-end proof: <...>
+
+Unsafe assumptions you are NOT making:
+- <...>
+
+Blocking ambiguities or split conditions:
+- <... or none>
+```
+
+## 2. Independent Pre-Audit Gate Decision
+
+Use on the issue thread before coding when the category requires independent gate review.
+
+```text
+Independent Pre-Audit Gate Decision
+
+Issue:
+- #<NNN>
+
+Category:
+- <failure-class | parity | semantic-drift | high-risk maintenance>
+
+Decision:
+- <pre-audit approved | pre-audit approved as first slice | pre-audit insufficient; widen class | pre-audit insufficient; escalate broad refactor>
+
+Why:
+- <1-3 short bullets on why this gate outcome is honest>
+
+Conditions before coding:
+- <none>
+- or <specific required correction if not approved>
+
+Watchlist:
+- <node / refinement decision>
+
+Parent-class action:
+- <absorb now | keep first-slice scope | open/update follow-up stream | leave parent open as unproven>
+```
+
+## 3. Broad Refactor Escalation
+
+Use after pre-audit, before coding, when a narrow slice would be dishonest.
+
+```text
+Broad Refactor Escalation
+
+Concept:
+- <exact concept>
+
+Chosen working failure class:
+- <...>
+
+Parent failure class:
+- <...>
+
+Canonical owner:
+- <...>
+
+Remaining sibling seams bypassing the owner:
+- <seam 1>
+- <seam 2>
+
+Why a narrow fix would be dishonest:
+- <...>
+
+Proposed broader refactor scope:
+- <what would move now>
+
+Out of scope if broad refactor is approved:
+- <...>
+
+Main risks:
+- migration risk: <...>
+- behavior risk: <...>
+- test-surface risk: <...>
+- coordination risk: <...>
+
+Lead decision requested:
+- approved as broad refactor
+- denied; keep first-slice scope
+- split: do first slice now, open canonicalization follow-up
+```
+
+## 4. Post-Implementation Proof Audit
+
+Use on the PR before review/merge.
+
+```text
+Post-Implementation Proof Audit
+
+Head SHA:
+- <sha>
+
+Concept changed:
+- <exact concept(s)>
+
+Failure class:
+- broader failure class: <...>
+- chosen working failure class closed by this PR: <...>
+- parent failure class above it, if any: <...>
+- issue was symptom-shaped: <yes/no>
+
+Canonical owner accounting:
+- <owner> -> <consumers now using it>
+
+Repo-wide consumer accounting:
+- <seam> -> already consumes canonical owner
+- <seam> -> moved to canonical owner in this PR
+- <seam> -> different semantic concept, with proof
+- <seam> -> still bypasses canonical owner and is explicitly split / escalated
+
+Old non-authoritative paths:
+- <invalid / non-authoritative / still surviving>
+
+Sibling contexts checked:
+- <...>
+
+Generic failing proof used or created:
+- <...>
+
+Manifestation coverage table:
+- manifestation: <...>
+  - final status: <reproduced and fixed | execution-proven through same corrected path | split / escalated as separate class>
+  - exact proof used: <...>
+  - required supported-surface / end-to-end proof: <... or none>
+
+Achieved closure level:
+- <local symptom fixed | touched seam canonicalized | failure class eliminated>
+
+If claiming failure class eliminated:
+- <one explicit statement defending why the full currently known class is closed>
+
+Parent-class residual state:
+- <parent still open | parent apparently clean | no broader parent>
+- tracked at: <issue/watchlist/follow-up>
+
+Watchlist decision:
+- <no watchlist change needed | refine existing node | add manifestation to existing node | create new node>
+```
+
+## 5. Follow-Up Decision
+
+Use during pre-audit or review whenever something smells off and the next action is not obvious.
+
+```text
+Follow-Up Decision
+
+Finding:
+- <short statement of what smells off>
+
+Classification:
+- <concrete same-class remaining seam | broader parent class than PR chose | different class worth tracking | architecture smell / cleanup opportunity | still too weak to track>
+
+Named seam:
+- <... or none>
+
+Named class:
+- <... or none>
+
+Remaining obligation:
+- <... or none>
+
+Action:
+- absorb now
+- update existing parent issue/stream
+- create new child issue
+- watchlist only
+- residual risk only
+
+Why this action is the honest one:
+- <1-3 short bullets>
+
+Tracked at:
+- <issue/watchlist/PR residual risk>
+```
+
+## 6. Parent-Class State Update
+
+Use on the parent issue or watchlist record after a child-slice PR merges.
+
+```text
+Parent-Class State Update
+
+Parent failure class:
+- <...>
+
+Child failure class closed:
+- <...>
+
+Closed by:
+- PR: #<NNN>
+
+What is now proven:
+- <...>
+
+What remains open or unproven in the parent:
+- <...>
+
+Next known same-class stream or sibling seam:
+- <... or none known yet>
+
+Tracked at:
+- <parent issue/watchlist/new child issue>
+```

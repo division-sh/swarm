@@ -11,6 +11,7 @@ Operational companion:
 - apply [IMPLEMENTER_REVIEW_CHECKLIST.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_REVIEW_CHECKLIST.md) before merging non-trivial changes
 - apply [SEMANTIC_DRIFT.md](/Users/youmew/dev/swarm/docs/SEMANTIC_DRIFT.md) when a change touches semantic ownership, identity, validation, lifecycle, or cross-surface parity
 - use [PROMPT_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROMPT_TEMPLATES.md) for the default implementer and reviewer prompt shapes
+- use [PROCESS_CHECKLIST_TEMPLATES.md](/Users/youmew/dev/swarm/docs/PROCESS_CHECKLIST_TEMPLATES.md) when you need short copy-paste templates for pre-audits, gate decisions, follow-up decisions, or parent-state updates
 
 The default bias of this codebase should be:
 
@@ -55,7 +56,17 @@ Default process:
 3. Pre-audit happens before coding
 - this is the real gate for starting implementation
 - the implementer must test whether the issue framing is too narrow
-- the implementer must identify the broadest plausible failure class, the canonical owner(s), the repo-wide consumer set, the manifestation table, and the intended closure level
+- the implementer must identify the broadest plausible failure class
+- the implementer must explicitly state the chosen working failure class for the PR, as broad as possible while still naming one coherent owner and one honest implementation scope
+- if a broader parent failure class exists above the chosen working failure class, the implementer must state that parent class explicitly
+- the implementer must identify the canonical owner(s), the repo-wide consumer set, the manifestation table, and the intended closure level
+- after identifying the parent failure class, the implementer must probe sibling seams under that parent strongly enough to assess whether the parent is still live, already clean, a different class, or still unproven
+- a PR may take a child slice of a broader parent failure class, but once the working failure class for the PR is chosen, the PR must aim to eliminate that chosen class entirely rather than only improve one manifestation inside it
+- immediately after the pre-audit, before implementation starts, the implementer must make an explicit action decision for the parent failure class:
+  - absorb the parent class now
+  - keep first-slice scope
+  - open or update a dedicated follow-up stream
+  - or leave the parent explicitly open as still unproven
 - the implementer must also identify which watchlist node the work belongs to, or create/refine one if the existing watchlist does not capture the failure class cleanly
 - the watchlist should be treated as a semantic trie / failure-class map, not as passive notes
 - for failure-class, parity, semantic-drift, and similar high-risk semantic work, the main effort is expected to go into manifestation identification and classification before coding starts
@@ -71,6 +82,8 @@ Default process:
   - semantic-drift / canonical-owner work
   - other high-risk semantic work likely to have multiple manifestations or consumers
 - the gate is lightweight and checks whether the pre-audit is honest enough to start coding
+- the independent reviewer or lead who evaluates the pre-audit must record the gate outcome explicitly on the issue thread before coding starts
+- if the gate outcome is not explicitly recorded on the issue thread, the gate is not yet satisfied
 - valid outcomes:
   - pre-audit approved
   - pre-audit approved as first slice
@@ -79,6 +92,9 @@ Default process:
 
 5. Implementation starts only after the pre-audit gate is satisfied
 - if broad duplication or new sibling manifestations are discovered while coding, stop and escalate rather than silently narrowing the class
+- if sibling probing shows the broader parent failure class is actively broken in multiple same-class seams, prefer tackling the parent failure class directly in the PR when feasible
+- if closing the parent class is not feasible, the pre-audit and PR proof audit must say so explicitly and keep the remaining parent-class obligation tracked in the issue/watchlist record
+- if a concrete remaining same-class seam is discovered during sibling probing and is not being absorbed now, create or update the follow-up issue/stream immediately rather than leaving it as narrative-only review debt
 
 6. PR proof audit happens before merge
 - this is the real gate for calling the work complete
@@ -96,7 +112,31 @@ Default process:
   - new watchlist branch/node created
 - update the watchlist during pre-audit if the class map is missing or too weak
 - update it again during review close-out or after merge if the work changed the semantic map, closed a node, split a node, or revealed a missed sibling manifestation
+- after any PR that closes only a child slice of a broader parent class, update the parent issue/watchlist record to say:
+  - what child failure class was closed
+  - what broader parent class still remains open or unproven
+  - what next same-class stream or sibling seam is already known, if any
 - do not leave a meaningful watchlist refinement as chat-only commentary
+
+9. Follow-up creation happens when remaining work is concrete enough to assign
+- do not leave a concrete remaining same-class seam only in review prose, residual-risk notes, or chat
+- create or update a tracked follow-up immediately when:
+  - a concrete same-class seam remains live and the PR is not absorbing it
+  - sibling probing shows the broader parent class is still live in another seam
+  - review discovers a broader class than the issue/PR was using
+  - a temporary seam or staged plan needs an explicit removal target
+  - a worthwhile follow-up is specific enough that another implementer could pick it up honestly
+- update an existing issue/stream when:
+  - the new finding is still part of the same parent class
+  - the remaining work belongs to an already-open umbrella/watchpoint
+  - the remaining obligation is refinement of an already-tracked parent issue
+- create a new issue when:
+  - the remaining work is a new concrete child slice
+  - the remaining work is a different class
+  - the parent issue would become too muddy if the concrete slice were left only there
+- watchlist-only is acceptable when the concern is reusable but not yet concrete enough to assign
+- residual-risk-only is acceptable only when the concern is still too weak to name a concrete seam or honest assignable obligation
+- if the seam, class, and remaining obligation can be named clearly, track it now
 
 Default role split:
 
@@ -108,6 +148,7 @@ Default role split:
   - must not start coding until that framing is reviewable
 - reviewer:
   - must independently test whether the framing is still too narrow
+  - must record the independent pre-audit gate outcome on the issue thread when the category requires that gate
   - must not let seam-level improvement be presented as failure-class elimination without proof
   - must also verify that the watchlist mapping/update decision is explicit when the work touches a failure-class family
 
@@ -754,7 +795,10 @@ Symptom vs failure-class rule:
 - do not treat the issue title, first reproducer, or first failing helper as the failure class by default
 - the pre-audit must explicitly answer:
   - what is the broadest plausible failure class?
+  - what is the chosen working failure class for this PR?
+  - what is the parent failure class above it, if any?
   - is the issue framing narrower than that class?
+  - after probing sibling seams under the parent, does the parent appear broken, apparently clean, different-class, or still unproven?
   - if the issue framing is narrower, is this work still honestly a first slice or does the issue need to be widened or split?
 
 Pre-Implementation Coverage Audit rule:
@@ -808,6 +852,8 @@ Required issue-comment format:
   - for each named owner, list any old helpers, readers, writers, or interpreters that become invalid, non-canonical, or removal candidates
 - `Failure class`
   - state the broader generic failure class, not just the first symptom
+  - state the chosen working failure class for the PR
+  - if a broader parent exists, state the parent failure class above the chosen class
   - explicitly say whether the current issue framing is:
     - already broad enough
     - narrower than the true class but still acceptable as a first slice
@@ -848,6 +894,30 @@ Required issue-comment format:
     - focused unit/integration proof
     - generic reproducer
     - supported-surface / end-to-end proof
+- `Parent-class sibling probe`
+  - if a broader parent failure class exists, list the sibling seams probed under that parent
+  - classify each probed sibling as exactly one of:
+    - broken now
+    - apparently clean, with proof
+    - different class, with proof
+    - still unproven
+  - state the explicit post-pre-audit action decision for the parent failure class:
+    - absorb the parent class now
+    - keep first-slice scope
+    - open or update a dedicated follow-up stream
+    - leave the parent explicitly open as still unproven
+  - if not absorbing now, state exactly where the remaining parent-class obligation is tracked
+- `Independent pre-audit gate status`
+  - for failure-class, parity, semantic-drift, and other high-risk semantic work, record the reviewer/lead gate outcome on the issue thread before coding starts
+  - valid outcomes:
+    - pre-audit approved
+    - pre-audit approved as first slice
+    - pre-audit insufficient; widen class
+    - pre-audit insufficient; escalate broad refactor
+  - if the gate is waived, record the waiver explicitly on the issue thread before coding
+- `Chosen-class closure commitment`
+  - state plainly that this PR aims to eliminate the chosen working failure class entirely
+  - do not describe the PR as a fix for only one manifestation inside the chosen class
 - `Required closure proof`
   - list the focused proof required
   - list the supported-surface or end-to-end proof required
@@ -871,6 +941,12 @@ Absolute rules:
 - do not begin implementation if any currently known manifestation is missing from the audit
 - do not begin implementation on failure-class work if the pre-audit does not include a manifestation coverage table
 - do not begin implementation if the manifestation coverage table is artificially narrow, collapsed, or obviously less extensive than the currently available issue/thread/triage/review evidence supports
+- do not begin implementation if the chosen working failure class is not stated explicitly
+- do not begin implementation if a broader parent failure class exists but the pre-audit does not probe sibling seams under that parent enough to assess parent state
+- do not begin implementation if the PR is only planning to improve one manifestation inside its own chosen working failure class rather than close that chosen class entirely
+- do not begin implementation if a broader parent failure class exists and there is no explicit post-pre-audit action decision for that parent
+- do not begin implementation if a concrete remaining same-class seam is discovered but no follow-up issue/stream was created or updated when the work is not absorbing it now
+- do not begin implementation on failure-class / parity / semantic-drift / high-risk semantic work if the required independent pre-audit gate outcome is not explicitly recorded on the issue thread
 - do not begin implementation on failure-class / parity / semantic-drift / high-risk semantic work if there is no explicit watchlist decision:
   - maps to existing node
   - existing node refined
@@ -993,12 +1069,15 @@ Post-Implementation Proof Audit rule:
     - still bypasses the canonical owner and is explicitly split / escalated
   - which old producers, readers, or interpreters are now invalid, non-authoritative, or still surviving for each owner
   - the broader failure class the issue belongs to
+  - the chosen working failure class the PR claims to close entirely
+  - the parent failure class above it, if any
   - whether the issue described the full class or only the first visible symptom
   - the achieved closure level, marked as exactly one of:
     - local symptom fixed
     - touched seam canonicalized
     - failure class eliminated
   - if the achieved closure level is `failure class eliminated`, one explicit statement of why the full currently known class is now closed rather than only the touched seam
+  - if a broader parent failure class exists, the sibling seams probed under that parent and whether the parent still remains open after the PR
   - which sibling contexts in the touched seam were checked
   - the generic reproducer, fixture, or focused failing proof used to capture the failure class
   - or, if none existed, the generic proof created as part of the work
@@ -1027,6 +1106,10 @@ Post-Implementation Proof Audit rule:
   - node refinement
   - new manifestation row / note
   - new branch/node
+- if the PR closed only a child slice of a broader parent class, update the parent issue/watchlist record before or at merge time to state:
+  - which child class was closed
+  - whether the parent class remains open or still unproven
+  - what next same-class stream or sibling seam is already known, if any
 - if review discovered a broader class, missed sibling manifestation, or corrected canonical owner understanding, update the watchlist rather than leaving that learning only in the PR thread
 
 Surface-parity closure rule:
