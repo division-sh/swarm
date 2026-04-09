@@ -137,6 +137,31 @@ func TestProjectRunOperationalStatus_UsesScoringOutcomeBlockingLayer(t *testing.
 	}
 }
 
+func TestProjectRunOperationalStatus_TreatsScopedShortlistAsTerminalScoringOutcome(t *testing.T) {
+	report := runStatusReport{
+		RunTableStatus: "running",
+		LastEventAt:    time.Unix(1700000000, 0).UTC(),
+		EventCounts: []runStatusEventCount{
+			{EventName: "scoring/scoring.requested", Count: 1},
+			{EventName: "scoring/vertical.shortlisted", Count: 1},
+		},
+		Deliveries: []runStatusDeliveryCount{
+			{SubscriberID: "agent-1", Status: "delivered", Count: 1},
+		},
+	}
+
+	got := projectRunOperationalStatus(report)
+	if got.State != "stalled" {
+		t.Fatalf("state = %q, want stalled", got.State)
+	}
+	if got.BlockingLayer != "delivery_lifecycle" {
+		t.Fatalf("blocking_layer = %q, want delivery_lifecycle", got.BlockingLayer)
+	}
+	if got.BlockingReason != "no_active_deliveries" {
+		t.Fatalf("blocking_reason = %q, want no_active_deliveries", got.BlockingReason)
+	}
+}
+
 func TestProjectRunOperationalStatus_PreservesHealthyRunningWhenActiveDeliveriesRemain(t *testing.T) {
 	report := runStatusReport{
 		RunTableStatus: "running",
