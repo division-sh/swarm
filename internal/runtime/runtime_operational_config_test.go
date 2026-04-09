@@ -8,6 +8,7 @@ import (
 
 	"swarm/internal/config"
 	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -53,6 +54,16 @@ func (s *recoveryGuardEventStore) ListEventsMissingPipelineReceipt(context.Conte
 }
 func (*recoveryGuardEventStore) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
 	return nil, true, nil
+}
+
+type minimalRuntimeEventStore struct{}
+
+func (*minimalRuntimeEventStore) AppendEvent(context.Context, events.Event) error { return nil }
+func (*minimalRuntimeEventStore) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+func (*minimalRuntimeEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return nil, nil
 }
 
 func testOperationalRuntimeConfig() *config.Config {
@@ -137,5 +148,52 @@ func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testi
 	}
 	if err := rt.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
+func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	rt, err := NewRuntime(context.Background(), testOperationalRuntimeConfig(), Stores{
+		EventStore:    &minimalRuntimeEventStore{},
+		ScheduleStore: &recordingRuntimeScheduleStore{},
+		ManagerStore:  &recoveryGuardManagerStore{},
+	}, RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := rt.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
+func TestNewRuntime_FailsClosedOnMalformedExtensionConfig(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	rt, err := NewRuntime(context.Background(), &config.Config{
+		Runtime: config.RuntimeConfig{RecoveryOnStartup: false},
+		LLM:     config.LLMConfig{RuntimeMode: "api"},
+		Extensions: map[string]any{
+			"budget": map[string]any{
+				"human_tasks": "oops",
+			},
+		},
+	}, Stores{
+		EventStore: runtimebus.InMemoryEventStore{},
+	}, RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime config validation failed") || !strings.Contains(err.Error(), "decode extensions") {
+		t.Fatalf("NewRuntime error = %v, want explicit extension validation failure", err)
+	}
+	if rt != nil {
+		t.Fatalf("NewRuntime returned %#v, want nil runtime on malformed config", rt)
 	}
 }

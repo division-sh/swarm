@@ -20,6 +20,7 @@ type Config struct {
 
 	typedExtensions ExtensionsConfig `yaml:"-"`
 	extensionsReady bool             `yaml:"-"`
+	extensionsErr   error            `yaml:"-"`
 }
 
 type RuntimeConfig struct {
@@ -83,14 +84,11 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) Validate() error {
+	if err := c.ValidateOperationalControls(); err != nil {
+		return err
+	}
 	if c.LLM.RuntimeMode != "api" && c.LLM.RuntimeMode != "cli_test" {
 		return fmt.Errorf("invalid llm.runtime_mode: %q", c.LLM.RuntimeMode)
-	}
-	if c.Runtime.MaxConcurrentAgents != 0 {
-		return errors.New("runtime.max_concurrent_agents is unsupported: no runtime path enforces it")
-	}
-	if c.Runtime.EventPollInterval != 0 {
-		return errors.New("runtime.event_poll_interval is unsupported: no runtime path enforces it")
 	}
 	if c.LLM.RuntimeMode == "cli_test" {
 		if c.LLM.ClaudeCLI.Command == "" {
@@ -114,6 +112,20 @@ func (c *Config) Validate() error {
 	if c.LLM.Session.RotateOnParseFailures <= 0 {
 		return errors.New("llm.session.rotate_on_parse_failures must be > 0")
 	}
+	return nil
+}
+
+func (c *Config) ValidateOperationalControls() error {
+	if c.Runtime.MaxConcurrentAgents != 0 {
+		return errors.New("runtime.max_concurrent_agents is unsupported: no runtime path enforces it")
+	}
+	if c.Runtime.EventPollInterval != 0 {
+		return errors.New("runtime.event_poll_interval is unsupported: no runtime path enforces it")
+	}
+	return c.ValidateExtensions()
+}
+
+func (c *Config) ValidateExtensions() error {
 	if err := c.prepareTypedExtensions(); err != nil {
 		return err
 	}
@@ -125,7 +137,9 @@ func (c *Config) Sharding() runtimesharding.Config {
 	if c == nil {
 		return runtimesharding.Config{}
 	}
-	c.mustPrepareTypedExtensions()
+	if err := c.prepareTypedExtensions(); err != nil {
+		return runtimesharding.Config{}
+	}
 	return c.typedExtensions.Sharding
 }
 
@@ -134,7 +148,9 @@ func (c *Config) Budget() BudgetConfig {
 	if c == nil {
 		return BudgetConfig{}
 	}
-	c.mustPrepareTypedExtensions()
+	if err := c.prepareTypedExtensions(); err != nil {
+		return BudgetConfig{}
+	}
 	return c.typedExtensions.Budget
 }
 
@@ -156,24 +172,26 @@ func (c *Config) DecodeExtensions(out any) error {
 }
 
 func (c *Config) prepareTypedExtensions() error {
-	if c == nil || c.extensionsReady {
+	if c == nil {
 		return nil
+	}
+	if c.extensionsReady {
+		return nil
+	}
+	if c.extensionsErr != nil {
+		return c.extensionsErr
 	}
 	var ext ExtensionsConfig
 	if err := c.DecodeExtensions(&ext); err != nil {
+		c.extensionsErr = err
 		return err
 	}
 	if _, ok := c.Extensions["sharding"]; ok {
-		return errors.New("sharding extension is unsupported: no runtime path consumes it")
+		c.extensionsErr = errors.New("sharding extension is unsupported: no runtime path consumes it")
+		return c.extensionsErr
 	}
 	ext.ApplyDefaults()
 	c.typedExtensions = ext
 	c.extensionsReady = true
 	return nil
-}
-
-func (c *Config) mustPrepareTypedExtensions() {
-	if err := c.prepareTypedExtensions(); err != nil {
-		panic(fmt.Sprintf("invalid runtime config extensions: %v", err))
-	}
 }
