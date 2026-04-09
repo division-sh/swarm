@@ -174,6 +174,11 @@ func (n *systemNodeRunner) subscribe() <-chan events.Event {
 	if n.subscriptionsFn != nil {
 		subscriptions = n.subscriptionsFn()
 	}
+	if internalBus, ok := any(n.bus).(interface {
+		SubscribeInternal(string, ...events.EventType) <-chan events.Event
+	}); ok {
+		return internalBus.SubscribeInternal(n.nodeID, subscriptions...)
+	}
 	return n.bus.Subscribe(n.nodeID, subscriptions...)
 }
 

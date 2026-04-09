@@ -510,6 +510,58 @@ func TestEventBusPublish_DropsRecipientsMissingExplicitDescriptor(t *testing.T) 
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"control-plane"})
 }
 
+func TestEventBusPublish_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning(t *testing.T) {
+	store := &descriptorAwareEventStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "agent-a"},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	workflowCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.trigger"))
+	nodeCh := eb.SubscribeInternal("scan-orchestrator", events.EventType("custom.trigger"))
+	agentCh := eb.Subscribe("agent-a", events.EventType("custom.trigger"))
+	missingCh := eb.Subscribe("agent-missing", events.EventType("custom.trigger"))
+
+	if err := eb.Publish(context.Background(), events.Event{
+		Type:      events.EventType("custom.trigger"),
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}.WithEntityID("ent-1")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case evt := <-workflowCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("workflow-runtime event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("workflow-runtime did not receive event")
+	}
+	select {
+	case evt := <-nodeCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("system node event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("system node did not receive event")
+	}
+	select {
+	case evt := <-agentCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("agent event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("agent did not receive event")
+	}
+	waitForNoEvent(t, missingCh)
+
+	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
+}
+
 func TestEventBusPublish_FailsClosedWhenDescriptorLookupFails(t *testing.T) {
 	store := &descriptorAwareEventStore{
 		listErr: errors.New("descriptor lookup failed"),

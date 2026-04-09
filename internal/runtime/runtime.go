@@ -689,7 +689,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	var bootCheck <-chan events.Event
 	if rt.Options.SelfCheck && rt.Bus != nil {
-		bootCheck = rt.Bus.Subscribe("bootstrap-self-check", events.EventType("platform.boot"))
+		bootCheck = rt.Bus.SubscribeInternal("bootstrap-self-check", events.EventType("platform.boot"))
 	}
 	if err := rt.publishBootCompleted(context.Background()); err != nil {
 		return fmt.Errorf("publish platform.boot: %w", err)

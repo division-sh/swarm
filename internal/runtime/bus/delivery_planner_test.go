@@ -19,8 +19,12 @@ func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing
 				RouteSource:  "pin_auto_wire",
 			}}
 		},
-		resolveSubscribedRecipients: func(string) []string {
-			return []string{"direct-agent", "scan-orchestrator", "direct-agent"}
+		resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+			return []deliveryRecipientCandidate{
+				{ID: "direct-agent", PersistAsDelivery: true},
+				{ID: "scan-orchestrator", PersistAsDelivery: false},
+				{ID: "direct-agent", PersistAsDelivery: true},
+			}
 		},
 		describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
 			return []PublishDiagnosticRecipient{{
@@ -38,17 +42,17 @@ func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing
 	if got, want := len(result.RoutedRecipients), 1; got != want {
 		t.Fatalf("routed recipients = %d, want %d", got, want)
 	}
-	if got, want := len(result.SubscribedRecipients), 3; got != want {
+	if got, want := len(result.SubscribedRecipients), 2; got != want {
 		t.Fatalf("subscription recipients = %d, want %d", got, want)
 	}
 	if got, want := len(result.Recipients), 2; got != want {
 		t.Fatalf("candidate recipients = %d, want %d", got, want)
 	}
-	if got := result.Recipients[0]; got != "scan-orchestrator" {
-		t.Fatalf("first candidate recipient = %q, want scan-orchestrator", got)
+	if got := result.Recipients[0].ID; got != "direct-agent" {
+		t.Fatalf("first candidate recipient = %q, want direct-agent", got)
 	}
-	if got := result.Recipients[1]; got != "direct-agent" {
-		t.Fatalf("second candidate recipient = %q, want direct-agent", got)
+	if got := result.Recipients[1].ID; got != "scan-orchestrator" {
+		t.Fatalf("second candidate recipient = %q, want scan-orchestrator", got)
 	}
 	if got := result.ExtraDetail["routed_recipients_count"]; got != 1 {
 		t.Fatalf("routed_recipients_count = %#v, want 1", got)
@@ -75,7 +79,7 @@ func TestDeliveryRecipientPolicy_FiltersExplicitAgentScopeIntoManifest(t *testin
 
 	manifest, err := policy.Evaluate(context.Background(), (events.Event{
 		Type: "task.completed",
-	}).WithEntityID("ent-1"), []string{"entity-agent", "other-agent", "shared-agent"})
+	}).WithEntityID("ent-1"), agentDeliveryRecipientCandidates([]string{"entity-agent", "other-agent", "shared-agent"}))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -90,14 +94,43 @@ func TestDeliveryRecipientPolicy_FiltersExplicitAgentScopeIntoManifest(t *testin
 	}
 }
 
+func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning(t *testing.T) {
+	policy := deliveryRecipientPolicy{
+		loadActiveAgentDescriptors: func(context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+			return map[string]ActiveAgentDescriptor{
+				"agent-a": {AgentID: "agent-a"},
+			}, true, nil
+		},
+	}
+
+	manifest, err := policy.Evaluate(context.Background(), events.Event{Type: "task.completed"}, []deliveryRecipientCandidate{
+		{ID: "workflow-runtime", PersistAsDelivery: false},
+		{ID: "node:scan-orchestrator", PersistAsDelivery: false},
+		{ID: "agent-a", PersistAsDelivery: true},
+		{ID: "missing-agent", PersistAsDelivery: true},
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if len(manifest.Recipients) != 3 || manifest.Recipients[0] != "workflow-runtime" || manifest.Recipients[1] != "node:scan-orchestrator" || manifest.Recipients[2] != "agent-a" {
+		t.Fatalf("recipients = %#v, want [workflow-runtime node:scan-orchestrator agent-a]", manifest.Recipients)
+	}
+	if len(manifest.PersistedRecipients) != 1 || manifest.PersistedRecipients[0] != "agent-a" {
+		t.Fatalf("persisted recipients = %#v, want [agent-a]", manifest.PersistedRecipients)
+	}
+}
+
 func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(string) []Subscriber {
 				return []Subscriber{{ID: "worker", Type: "node"}}
 			},
-			resolveSubscribedRecipients: func(string) []string {
-				return []string{"worker", "observer"}
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{
+					{ID: "worker", PersistAsDelivery: false},
+					{ID: "observer", PersistAsDelivery: true},
+				}
 			},
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
 				return []PublishDiagnosticRecipient{{ID: "worker", Type: "node"}}
@@ -117,8 +150,11 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	if got, want := len(plan.Recipients), 2; got != want {
 		t.Fatalf("plan recipients = %d, want %d", got, want)
 	}
-	if got, want := len(plan.PersistedRecipients), 2; got != want {
+	if got, want := len(plan.PersistedRecipients), 1; got != want {
 		t.Fatalf("persisted recipients = %d, want %d", got, want)
+	}
+	if got := plan.PersistedRecipients[0]; got != "observer" {
+		t.Fatalf("persisted recipient = %q, want observer", got)
 	}
 	if got := plan.ExtraDetail["routed_recipients_count"]; got != 1 {
 		t.Fatalf("routed_recipients_count = %#v, want 1", got)
@@ -128,8 +164,10 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers:    func(string) []Subscriber { return nil },
-			resolveSubscribedRecipients: func(string) []string { return []string{"worker"} },
+			resolveRoutedSubscribers: func(string) []Subscriber { return nil },
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "worker", PersistAsDelivery: true}}
+			},
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient { return nil },
 		},
 		deliveryRecipientPolicy{

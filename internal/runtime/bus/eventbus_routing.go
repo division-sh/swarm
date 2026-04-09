@@ -192,18 +192,25 @@ func (eb *EventBus) deliverByType(evt events.Event) {
 }
 
 func (eb *EventBus) resolveSubscribedRecipients(eventType string) []string {
+	return deliveryRecipientIDs(eb.resolveSubscribedRecipientsForPlanning(eventType))
+}
+
+func (eb *EventBus) resolveSubscribedRecipientsForPlanning(eventType string) []deliveryRecipientCandidate {
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
-	recipients := make([]string, 0, len(eb.subscriptions))
+	recipients := make([]deliveryRecipientCandidate, 0, len(eb.subscriptions))
 	for agentID, pats := range eb.subscriptions {
 		for _, pat := range pats {
 			if routeMatches(string(pat), eventType) {
-				recipients = append(recipients, agentID)
+				recipients = append(recipients, deliveryRecipientCandidate{
+					ID:                agentID,
+					PersistAsDelivery: eb.subscriptionKinds[agentID] != inMemorySubscriberInternal,
+				})
 				break
 			}
 		}
 	}
-	return recipients
+	return normalizeDeliveryRecipientCandidates(recipients)
 }
 
 func (eb *EventBus) ResolveSubscribedRecipients(eventType string) []string {
