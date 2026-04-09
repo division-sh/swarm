@@ -1001,6 +1001,57 @@ func TestSQLAgentReader_GetGenericAgent_UsesCanonicalLifecycleProjection(t *test
 	}
 }
 
+func TestSQLAgentReader_ListGenericAgents_FallsBackToActiveSessionLifecycleWhenDeliveryLifecycleIsAbsent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLAgentReader(db, stubSQLAgents{
+		rows: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{
+				ID:   "agent-1",
+				Role: "researcher",
+				Mode: "global",
+				Type: "managed",
+			},
+			Status: "active",
+		}},
+		caps: canonicalEventAndConversationCaps(),
+		facts: map[string]store.PendingAgentDeliveryFacts{
+			"agent-1": {},
+		},
+		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+			"agent-1": {},
+		},
+	}, 12)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", 2, "lease-owner", time.Now().Add(time.Minute), 0, 0, 0, 0, 0, "", false, []byte(`[]`)))
+
+	items, err := reader.ListGenericAgents(context.Background())
+	if err != nil {
+		t.Fatalf("ListGenericAgents: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one agent, got %+v", items)
+	}
+	if items[0].State != "active" {
+		t.Fatalf("state = %q, want active from live session fallback", items[0].State)
+	}
+	if items[0].BlockingLayer != "session_execution" {
+		t.Fatalf("blocking_layer = %q, want session_execution from live session fallback", items[0].BlockingLayer)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

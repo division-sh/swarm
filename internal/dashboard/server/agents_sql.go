@@ -263,7 +263,7 @@ func applyOperatorProjection(agent *genericAgent, projection agentOperatorProjec
 		return
 	}
 	agent.Status = strings.TrimSpace(projection.Status)
-	agent.BlockingLayer = strings.TrimSpace(projection.BlockingLayer)
+	agent.BlockingLayer = projection.blockingLayer()
 	agent.PendingEvents = projection.PendingEvents
 	agent.OldestPendingAgeSec = projection.OldestPendingAgeSec
 	agent.LockOwner = strings.TrimSpace(projection.LockOwner)
@@ -291,7 +291,20 @@ func (p agentOperatorProjection) state() string {
 	if state := strings.TrimSpace(p.LifecycleState); state != "" {
 		return state
 	}
+	if p.InFlightTurn {
+		return "active"
+	}
 	return "idle"
+}
+
+func (p agentOperatorProjection) blockingLayer() string {
+	if layer := strings.TrimSpace(p.BlockingLayer); layer != "" {
+		return layer
+	}
+	if p.InFlightTurn {
+		return "session_execution"
+	}
+	return ""
 }
 
 func enrichAgentOperatorProjectionFromLatestTurn(projection *agentOperatorProjection, taskID string, parseOK bool, turnBlocksRaw []byte) error {
