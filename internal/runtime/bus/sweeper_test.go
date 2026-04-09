@@ -9,11 +9,13 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeownership "swarm/internal/runtime/core/ownership"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 type sweeperTestStore struct {
 	events      []events.PersistedReplayEvent
 	deliveries  map[string][]string
+	scopes      map[string]runtimereplayclaim.CommittedReplayScope
 	receipts    map[string]string
 	receiptErrs map[string]string
 	claimMu     sync.Mutex
@@ -47,6 +49,13 @@ func (s *sweeperTestStore) ListEventsMissingPipelineReceipt(context.Context, tim
 }
 func (s *sweeperTestStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	return append([]string(nil), s.deliveries[eventID]...), nil
+}
+func (s *sweeperTestStore) LoadCommittedReplayScope(_ context.Context, eventID string) (runtimereplayclaim.CommittedReplayScope, error) {
+	scope, ok := s.scopes[eventID]
+	if !ok {
+		return "", runtimereplayclaim.ErrMissingCommittedReplayScope
+	}
+	return scope, nil
 }
 func (s *sweeperTestStore) ClaimPipelineReplay(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
 	s.claimMu.Lock()
@@ -107,6 +116,7 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 			}).WithEntityID("ent-1")},
 		},
 		deliveries: map[string][]string{"evt-1": {"agent-a"}},
+		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-1": runtimereplayclaim.CommittedReplayScopeSubscribed},
 	}
 	eb, err := runtimebus.NewEventBus(store)
 	if err != nil {
@@ -145,6 +155,7 @@ func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback
 			}).WithEntityID("ent-2")},
 		},
 		deliveries: map[string][]string{},
+		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-2": runtimereplayclaim.CommittedReplayScopeDirect},
 	}
 	eb, err := runtimebus.NewEventBus(store)
 	if err != nil {
@@ -163,6 +174,164 @@ func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback
 		t.Fatalf("receipt status = %q, want processed", got)
 	}
 	waitForNoEvent(t, ch)
+}
+
+func TestSweepUndispatched_ReplaysSubscribedInternalOnlyUsingReplayScope(t *testing.T) {
+	store := &sweeperTestStore{
+		events: []events.PersistedReplayEvent{
+			{Event: (events.Event{
+				ID:        "evt-internal-only",
+				Type:      events.EventType("custom.internal"),
+				Payload:   []byte(`{"entity_id":"ent-internal"}`),
+				CreatedAt: time.Now().UTC(),
+			}).WithEntityID("ent-internal")},
+		},
+		deliveries: map[string][]string{},
+		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-internal-only": runtimereplayclaim.CommittedReplayScopeSubscribed},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.internal"))
+
+	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("swept count = %d, want 1", count)
+	}
+	if got := store.receipts["evt-internal-only"]; got != "processed" {
+		t.Fatalf("receipt status = %q, want processed", got)
+	}
+	select {
+	case evt := <-internalCh:
+		if evt.ID != "evt-internal-only" {
+			t.Fatalf("delivered event id = %q, want evt-internal-only", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected internal subscriber to receive replayed event")
+	}
+}
+
+func TestSweepUndispatched_ReplaysSubscribedMixedRecipientsUsingReplayScope(t *testing.T) {
+	store := &sweeperTestStore{
+		events: []events.PersistedReplayEvent{
+			{Event: (events.Event{
+				ID:        "evt-mixed",
+				Type:      events.EventType("custom.mixed"),
+				Payload:   []byte(`{"entity_id":"ent-mixed"}`),
+				CreatedAt: time.Now().UTC(),
+			}).WithEntityID("ent-mixed")},
+		},
+		deliveries: map[string][]string{"evt-mixed": {"agent-a"}},
+		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-mixed": runtimereplayclaim.CommittedReplayScopeSubscribed},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.mixed"))
+	agentCh := eb.Subscribe("agent-a", events.EventType("custom.mixed"))
+
+	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("swept count = %d, want 1", count)
+	}
+	select {
+	case evt := <-internalCh:
+		if evt.ID != "evt-mixed" {
+			t.Fatalf("internal delivered event id = %q, want evt-mixed", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected internal subscriber to receive replayed event")
+	}
+	select {
+	case evt := <-agentCh:
+		if evt.ID != "evt-mixed" {
+			t.Fatalf("agent delivered event id = %q, want evt-mixed", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected persisted agent to receive replayed event")
+	}
+}
+
+func TestSweepUndispatched_DirectScopeDoesNotBroadenToCurrentInternalSubscribers(t *testing.T) {
+	store := &sweeperTestStore{
+		events: []events.PersistedReplayEvent{
+			{Event: (events.Event{
+				ID:        "evt-direct-mixed",
+				Type:      events.EventType("custom.direct"),
+				Payload:   []byte(`{"entity_id":"ent-direct"}`),
+				CreatedAt: time.Now().UTC(),
+			}).WithEntityID("ent-direct")},
+		},
+		deliveries: map[string][]string{"evt-direct-mixed": {"agent-a"}},
+		scopes: map[string]runtimereplayclaim.CommittedReplayScope{
+			"evt-direct-mixed": runtimereplayclaim.CommittedReplayScopeDirect,
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.direct"))
+	agentCh := eb.Subscribe("agent-a", events.EventType("custom.direct"))
+
+	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("swept count = %d, want 1", count)
+	}
+	select {
+	case evt := <-agentCh:
+		if evt.ID != "evt-direct-mixed" {
+			t.Fatalf("agent delivered event id = %q, want evt-direct-mixed", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected direct persisted agent recipient to receive replayed event")
+	}
+	waitForNoEvent(t, internalCh)
+}
+
+func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSubscribers(t *testing.T) {
+	store := &sweeperTestStore{
+		events: []events.PersistedReplayEvent{
+			{Event: (events.Event{
+				ID:        "evt-direct-empty",
+				Type:      events.EventType("custom.direct.empty"),
+				Payload:   []byte(`{"entity_id":"ent-direct-empty"}`),
+				CreatedAt: time.Now().UTC(),
+			}).WithEntityID("ent-direct-empty")},
+		},
+		deliveries: map[string][]string{},
+		scopes: map[string]runtimereplayclaim.CommittedReplayScope{
+			"evt-direct-empty": runtimereplayclaim.CommittedReplayScopeDirect,
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.direct.empty"))
+
+	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("swept count = %d, want 1", count)
+	}
+	if got := store.receipts["evt-direct-empty"]; got != "processed" {
+		t.Fatalf("receipt status = %q, want processed", got)
+	}
+	waitForNoEvent(t, internalCh)
 }
 
 func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
@@ -186,6 +355,7 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 			},
 		},
 		deliveries: map[string][]string{"evt-good": {"agent-good"}},
+		scopes:     map[string]runtimereplayclaim.CommittedReplayScope{"evt-good": runtimereplayclaim.CommittedReplayScopeSubscribed},
 	}
 	eb, err := runtimebus.NewEventBus(store)
 	if err != nil {
@@ -230,6 +400,7 @@ func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 			}).WithEntityID("ent-claim")},
 		},
 		deliveries:  map[string][]string{"evt-claim": {"agent-claim"}},
+		scopes:      map[string]runtimereplayclaim.CommittedReplayScope{"evt-claim": runtimereplayclaim.CommittedReplayScopeSubscribed},
 		releaseGate: make(chan struct{}),
 		releasing:   make(chan struct{}, 1),
 	}

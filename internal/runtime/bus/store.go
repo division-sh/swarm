@@ -73,6 +73,18 @@ type AtomicEventPersistence interface {
 	PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error
 }
 
+type AtomicEventReplayScopePersistence interface {
+	PersistEventWithDeliveriesAndScope(ctx context.Context, evt events.Event, agentIDs []string, scope runtimereplayclaim.CommittedReplayScope) error
+}
+
+type EventReplayScopePersistence interface {
+	UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
+}
+
+type TransactionalEventReplayScopePersistence interface {
+	UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
+}
+
 // TransactionalEventStore is an optional capability for full publish-time
 // transactional semantics: interceptor state writes + event persistence +
 // deferred event persistence in one DB transaction.

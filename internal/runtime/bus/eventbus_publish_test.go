@@ -15,10 +15,12 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/diaglog"
 	"swarm/internal/runtime/flowmodel"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
@@ -178,6 +180,11 @@ type descriptorAwareEventStore struct {
 	listErr     error
 }
 
+type replayCapableAtomicStoreMissingScope struct {
+	mu         sync.Mutex
+	deliveries []string
+}
+
 func (*descriptorAwareEventStore) AppendEvent(context.Context, events.Event) error { return nil }
 
 func (s *descriptorAwareEventStore) InsertEventDeliveries(_ context.Context, _ string, agentIDs []string) error {
@@ -202,6 +209,35 @@ func (s *descriptorAwareEventStore) persistedDeliveries() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.deliveries...)
+}
+
+func (*replayCapableAtomicStoreMissingScope) AppendEvent(context.Context, events.Event) error {
+	return nil
+}
+
+func (s *replayCapableAtomicStoreMissingScope) InsertEventDeliveries(_ context.Context, _ string, agentIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deliveries = append([]string(nil), agentIDs...)
+	return nil
+}
+
+func (s *replayCapableAtomicStoreMissingScope) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
+	return s.InsertEventDeliveries(ctx, evt.ID, agentIDs)
+}
+
+func (s *replayCapableAtomicStoreMissingScope) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.deliveries...), nil
+}
+
+func (*replayCapableAtomicStoreMissingScope) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
+	return nil, nil
+}
+
+func (*replayCapableAtomicStoreMissingScope) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
+	return nil, false, nil
 }
 
 func waitForNoEvent(t *testing.T, ch <-chan events.Event) {
@@ -309,6 +345,25 @@ func TestEventBusPublish_PayloadValidatorFailureAbortsPublish(t *testing.T) {
 	})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
+	}
+}
+
+func TestEventBusPublish_FailsClosedWhenReplayCapableAtomicStoreOmitsCommittedReplayScope(t *testing.T) {
+	store := &replayCapableAtomicStoreMissingScope{}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	eb.Subscribe("agent-a", events.EventType("custom.replay.checked"))
+
+	err = eb.Publish(context.Background(), events.Event{
+		ID:        uuid.NewString(),
+		Type:      events.EventType("custom.replay.checked"),
+		Payload:   []byte(`{"ok":true}`),
+		CreatedAt: time.Now().UTC(),
+	})
+	if !errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
+		t.Fatalf("Publish error = %v, want missing committed replay scope", err)
 	}
 }
 

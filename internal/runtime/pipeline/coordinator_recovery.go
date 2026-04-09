@@ -204,21 +204,33 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			continue
 		}
 		if len(persistedRecipients) == 0 {
-			if recorder == nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("mark replay event %s delivered receipt: missing pipeline receipt recorder", evt.ID)
+			if scopeReader, ok := r.store.(runtimereplayclaim.ScopeReader); ok && scopeReader != nil {
+				scope, err := scopeReader.LoadCommittedReplayScope(ctx, evt.ID)
+				if err != nil {
+					if firstErr == nil {
+						firstErr = fmt.Errorf("load committed replay scope for replay event %s: %w", evt.ID, err)
+					}
+					_ = lease.Release(ctx)
+					continue
 				}
-				_ = lease.Release(ctx)
-				continue
-			}
-			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID, "processed", ""); err != nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID, err)
+				if scope == runtimereplayclaim.CommittedReplayScopeDirect {
+					if recorder == nil {
+						if firstErr == nil {
+							firstErr = fmt.Errorf("mark replay event %s delivered receipt: missing pipeline receipt recorder", evt.ID)
+						}
+						_ = lease.Release(ctx)
+						continue
+					}
+					if err := recorder.UpsertPipelineReceipt(ctx, evt.ID, "processed", ""); err != nil {
+						if firstErr == nil {
+							firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID, err)
+						}
+					}
+					logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonNoPersistedRecipients, "", nil)
+					_ = lease.Release(ctx)
+					continue
 				}
 			}
-			logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonNoPersistedRecipients, "", nil)
-			_ = lease.Release(ctx)
-			continue
 		}
 		if err := r.bus.PublishPersistedRecipients(ctx, evt, persistedRecipients); err != nil {
 			if firstErr == nil {

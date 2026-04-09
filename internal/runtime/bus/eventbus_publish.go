@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 type pipelineTransitionSchemaCapabilityProvider interface {
@@ -100,7 +101,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		}
 		persisted = true
 	} else {
-		if err := eb.persistEventRecord(ictx, evt, nil); err != nil {
+		if err := eb.persistEventRecord(ictx, evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 			return err
 		}
 		persisted = true
@@ -166,6 +167,13 @@ func (eb *EventBus) publishTransactional(
 		if err := txStore.InsertEventDeliveriesTx(txctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
+	}
+	if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
+		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+			return fmt.Errorf("persist committed replay scope: %w", err)
+		}
+	} else if replayScopePersistenceRequired(eb.store) {
+		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
 	}
 
 	passthrough, deferred, err := eb.runInterceptors(txctx, evt)
@@ -299,7 +307,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		return err
 	}
 	eb.recordPublishDiagnostic(ctx, evt, plan)
-	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients); err != nil {
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		return err
 	}
 	persisted = true
@@ -387,7 +395,7 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 		return err
 	}
 	eb.recordPublishDiagnostic(ctx, evt, plan)
-	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients); err != nil {
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		return err
 	}
 	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "matched_agent_subscription", plan.ExtraDetail)
@@ -408,22 +416,50 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 	return nil
 }
 
-func (eb *EventBus) persistEventRecord(ctx context.Context, evt events.Event, recipients []string) error {
+func (eb *EventBus) persistEventRecord(
+	ctx context.Context,
+	evt events.Event,
+	recipients []string,
+	scope runtimereplayclaim.CommittedReplayScope,
+) error {
 	recipients = uniqueStrings(recipients)
+	if atomicStore, ok := eb.store.(AtomicEventReplayScopePersistence); ok {
+		if err := atomicStore.PersistEventWithDeliveriesAndScope(ctx, evt, recipients, scope); err != nil {
+			return fmt.Errorf("persist event transaction: %w", err)
+		}
+		return nil
+	}
 	if atomicStore, ok := eb.store.(AtomicEventPersistence); ok {
 		if err := atomicStore.PersistEventWithDeliveries(ctx, evt, recipients); err != nil {
 			return fmt.Errorf("persist event transaction: %w", err)
+		}
+		if scopeWriter, ok := eb.store.(EventReplayScopePersistence); ok && scopeWriter != nil {
+			if err := scopeWriter.UpsertCommittedReplayScope(ctx, evt.ID, scope); err != nil {
+				return fmt.Errorf("persist committed replay scope: %w", err)
+			}
+			return nil
+		}
+		if replayScopePersistenceRequired(eb.store) {
+			return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
 		}
 		return nil
 	}
 	if err := eb.store.AppendEvent(ctx, evt); err != nil {
 		return fmt.Errorf("persist event: %w", err)
 	}
-	if len(recipients) == 0 {
+	if len(recipients) > 0 {
+		if err := eb.store.InsertEventDeliveries(ctx, evt.ID, recipients); err != nil {
+			return fmt.Errorf("persist event deliveries: %w", err)
+		}
+	}
+	if scopeWriter, ok := eb.store.(EventReplayScopePersistence); ok && scopeWriter != nil {
+		if err := scopeWriter.UpsertCommittedReplayScope(ctx, evt.ID, scope); err != nil {
+			return fmt.Errorf("persist committed replay scope: %w", err)
+		}
 		return nil
 	}
-	if err := eb.store.InsertEventDeliveries(ctx, evt.ID, recipients); err != nil {
-		return fmt.Errorf("persist event deliveries: %w", err)
+	if replayScopePersistenceRequired(eb.store) {
+		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
 	}
 	return nil
 }
@@ -618,7 +654,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if err != nil {
 		return err
 	}
-	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients); err != nil {
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
 		return err
 	}
 	persisted = true
@@ -638,17 +674,14 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	return nil
 }
 
-// PublishPersistedRecipients delivers an already-persisted authoritative
-// recipient manifest without re-running direct recipient planning.
+// PublishPersistedRecipients delivers an already-committed event using the
+// persisted agent manifest plus the authoritative committed replay scope.
 func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
 	recipients = uniqueStrings(recipients)
-	if len(recipients) == 0 {
-		return errors.New("persisted recipients are required")
-	}
 	if evt.Type == "" {
 		return errors.New("event type is required")
 	}
@@ -661,16 +694,34 @@ func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.E
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now()
 	}
-	if err := eb.deliverToAgents(ctx, evt, recipients); err != nil {
+	scope, err := eb.authoritativeReplayScopeForEvent(ctx, evt.ID)
+	if err != nil {
 		return err
 	}
+	liveRecipients, internalRecipients, err := eb.replayRecipientsForCommittedEvent(ctx, evt, recipients, scope)
+	if err != nil {
+		return err
+	}
+	if len(liveRecipients) == 0 {
+		return nil
+	}
+	if err := eb.deliverToAgents(ctx, evt, liveRecipients); err != nil {
+		return err
+	}
+	owner := "event_deliveries"
+	if scope == runtimereplayclaim.CommittedReplayScopeSubscribed {
+		owner = "event_deliveries+committed_replay_scope"
+	}
 	eb.logRuntime(ctx, "debug", "Persisted event was delivered to authoritative recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
-		"direct":                     true,
-		"delivery_manifest_owner":    "event_deliveries",
-		"recipients_count":           len(recipients),
+		"direct":                     scope == runtimereplayclaim.CommittedReplayScopeDirect,
+		"delivery_manifest_owner":    owner,
+		"recipients_count":           len(liveRecipients),
 		"parent_event_id":            strings.TrimSpace(evt.ParentEventID),
-		"requested_recipients":       append([]string(nil), recipients...),
-		"requested_recipients_count": len(recipients),
+		"requested_recipients":       append([]string(nil), liveRecipients...),
+		"requested_recipients_count": len(liveRecipients),
+		"persisted_recipients":       append([]string(nil), recipients...),
+		"internal_recipients":        append([]string(nil), internalRecipients...),
+		"replay_scope":               string(scope),
 	}, "", 0)
 	return nil
 }

@@ -123,12 +123,14 @@ nodes:
     known_manifestations:
       - direct-recipient delivery as a shadow semantic path
       - descriptor-aware recipient policy can silently exclude non-agent in-memory subscribers such as startup control-plane checks, workflow-runtime, and system-node subscribers when publish planning treats all recipients as active-agent descriptors
+      - crash/restart replay can drift direct-vs-subscribed recipient scope unless the committed event carries one durable authoritative replay-scope owner
       - retry counters and delivery-state updates not atomic
       - replayed deliveries and restored timers without explicit shared-store ownership
     representative_issues:
       - 112
       - 144
       - 145
+      - 325
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
