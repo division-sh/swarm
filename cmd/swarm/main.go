@@ -696,7 +696,7 @@ func projectRunOperationalStatus(report runStatusReport) runOperationalProjectio
 			activeDeliveries += item.Count
 		}
 	}
-	terminalScoring := eventCounts["scoring/vertical.marginal"] + eventCounts["scoring/vertical.rejected"] + eventCounts["vertical.shortlisted"]
+	terminalScoring := eventCounts["scoring/vertical.marginal"] + eventCounts["scoring/vertical.rejected"] + eventCounts["scoring/vertical.shortlisted"]
 	if activeDeliveries == 0 && eventCounts["scoring/scoring.requested"] > 0 && terminalScoring == 0 {
 		return runOperationalProjection{
 			State:          "stalled",
