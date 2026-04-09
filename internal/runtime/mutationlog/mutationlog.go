@@ -45,6 +45,11 @@ type EntityStateProjection struct {
 	Accumulator  map[string]any
 }
 
+type ProjectionMutation struct {
+	Field    string
+	NewValue any
+}
+
 func Insert(ctx context.Context, db DBTX, rec Record) error {
 	if db == nil {
 		return ErrInvalidMutationLogWriter("mutation log DB is required")
@@ -149,6 +154,45 @@ func InsertEntityStateDiff(ctx context.Context, db DBTX, entityID string, before
 	return nil
 }
 
+func ReconstructEntityStateProjection(records []ProjectionMutation) (EntityStateProjection, error) {
+	state := EntityStateProjection{
+		Fields:      map[string]any{},
+		Gates:       map[string]any{},
+		Accumulator: map[string]any{},
+	}
+	for _, rec := range records {
+		if err := ApplyEntityStateProjectionMutation(&state, rec.Field, rec.NewValue); err != nil {
+			return EntityStateProjection{}, err
+		}
+	}
+	return state, nil
+}
+
+func ApplyEntityStateProjectionMutation(state *EntityStateProjection, field string, value any) error {
+	if state == nil {
+		return ErrInvalidMutationLogWriter("projection state is required")
+	}
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return ErrInvalidMutationLogWriter("mutation field is required")
+	}
+	switch {
+	case field == "current_state":
+		next, ok := value.(string)
+		if !ok {
+			return ErrInvalidMutationLogWriter("current_state mutation value must be a string")
+		}
+		state.CurrentState = strings.TrimSpace(next)
+		return nil
+	case strings.HasPrefix(field, "gates."):
+		return applyProjectionMapValue(state.ensureGates(), strings.TrimPrefix(field, "gates."), value, "gates")
+	case strings.HasPrefix(field, "accumulator."):
+		return applyProjectionMapValue(state.ensureAccumulator(), strings.TrimPrefix(field, "accumulator."), value, "accumulator")
+	default:
+		return applyProjectionMapValue(state.ensureFields(), field, value, "fields")
+	}
+}
+
 func diffMapRecords(entityID, prefix string, before, after map[string]any, writerType, writerID, handlerStep string) ([]Record, error) {
 	keys := make([]string, 0, len(before)+len(after))
 	seen := map[string]struct{}{}
@@ -223,6 +267,43 @@ func stringOrNil(raw string) any {
 		return nil
 	}
 	return raw
+}
+
+func (p *EntityStateProjection) ensureFields() map[string]any {
+	if p.Fields == nil {
+		p.Fields = map[string]any{}
+	}
+	return p.Fields
+}
+
+func (p *EntityStateProjection) ensureGates() map[string]any {
+	if p.Gates == nil {
+		p.Gates = map[string]any{}
+	}
+	return p.Gates
+}
+
+func (p *EntityStateProjection) ensureAccumulator() map[string]any {
+	if p.Accumulator == nil {
+		p.Accumulator = map[string]any{}
+	}
+	return p.Accumulator
+}
+
+func applyProjectionMapValue(target map[string]any, key string, value any, bucket string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		if bucket == "" {
+			return ErrInvalidMutationLogWriter("mutation field is required")
+		}
+		return ErrInvalidMutationLogWriter(fmt.Sprintf("%s mutation key is required", strings.TrimSpace(bucket)))
+	}
+	if value == nil {
+		delete(target, key)
+		return nil
+	}
+	target[key] = value
+	return nil
 }
 
 func normalizeRunID(runID string) string {
