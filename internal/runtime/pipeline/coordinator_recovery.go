@@ -117,6 +117,9 @@ func logStartupRecoveryPipelineReplayAftermath(ctx context.Context, logger recov
 	if logger == nil {
 		return
 	}
+	if evt.Type == events.EventType("platform.runtime_log") {
+		return
+	}
 	_ = logger.LogRuntime(ctx, RuntimeLogEntry{
 		Level:     startupRecoveryPipelineReplayLevel(outcome),
 		Component: "pipeline-recovery",
