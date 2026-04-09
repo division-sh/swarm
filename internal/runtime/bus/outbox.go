@@ -54,7 +54,7 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if strings.TrimSpace(string(intent.Event.Type)) == "" {
 			continue
 		}
-		recipients, err := o.persistedRecipientsForIntent(ctx, *intent)
+		recipients, internalRecipients, err := o.deliveryRecipientsForIntent(ctx, *intent)
 		if err != nil {
 			return err
 		}
@@ -64,24 +64,25 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if err := txStore.InsertEventDeliveriesTx(ctx, tx, intent.Event.ID, recipients); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
+		o.bus.setPendingInternalRecipients(intent.Event.ID, internalRecipients)
 	}
 	return nil
 }
 
-func (o engineOutbox) persistedRecipientsForIntent(ctx context.Context, intent runtimeengine.EmitIntent) ([]string, error) {
+func (o engineOutbox) deliveryRecipientsForIntent(ctx context.Context, intent runtimeengine.EmitIntent) ([]string, []string, error) {
 	if len(intent.Recipients) > 0 {
 		plan, err := o.bus.deliveryPlanner.PlanDirect(ctx, intent.Event, intent.Recipients)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return plan.PersistedRecipients, nil
+		return plan.PersistedRecipients, nil, nil
 	}
 	plan, err := o.bus.deliveryPlanner.Plan(ctx, intent.Event)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	o.bus.recordPublishDiagnostic(ctx, intent.Event, plan)
-	return plan.PersistedRecipients, nil
+	return plan.PersistedRecipients, filterOutAgentIDs(plan.Recipients, plan.PersistedRecipients), nil
 }
 
 func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
@@ -128,11 +129,26 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		}
 		return err
 	}
-	if len(recipients) > 0 {
-		if err := d.bus.PublishPersistedRecipients(ctx, intent.Event, recipients); err != nil {
-			return err
-		}
+	internalRecipients := d.bus.pendingInternalRecipients(intent.Event.ID)
+	liveRecipients := uniqueStrings(append(append([]string(nil), recipients...), internalRecipients...))
+	if len(liveRecipients) == 0 {
+		d.bus.clearPendingInternalRecipients(intent.Event.ID)
+		return nil
 	}
+	if err := d.bus.deliverToAgents(ctx, intent.Event, liveRecipients); err != nil {
+		return err
+	}
+	d.bus.clearPendingInternalRecipients(intent.Event.ID)
+	d.bus.logRuntime(ctx, "debug", "Persisted event intent was delivered", "eventbus", "delivered", intent.Event.ID, string(intent.Event.Type), "", intent.Event.EntityID(), "", nil, map[string]any{
+		"direct":                     true,
+		"delivery_manifest_owner":    "event_deliveries+in_memory_internal",
+		"recipients_count":           len(liveRecipients),
+		"parent_event_id":            strings.TrimSpace(intent.Event.ParentEventID),
+		"requested_recipients":       append([]string(nil), liveRecipients...),
+		"requested_recipients_count": len(liveRecipients),
+		"persisted_recipients":       append([]string(nil), recipients...),
+		"internal_recipients":        append([]string(nil), internalRecipients...),
+	}, "", 0)
 	return nil
 }
 
@@ -164,4 +180,45 @@ func normalizeOutboxEvent(evt events.Event) events.Event {
 		evt.CreatedAt = time.Now().UTC()
 	}
 	return evt
+}
+
+func (eb *EventBus) setPendingInternalRecipients(eventID string, recipients []string) {
+	if eb == nil {
+		return
+	}
+	eventID = strings.TrimSpace(eventID)
+	recipients = uniqueStrings(recipients)
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+	if eventID == "" || len(recipients) == 0 {
+		delete(eb.pendingInternalByID, eventID)
+		return
+	}
+	eb.pendingInternalByID[eventID] = append([]string(nil), recipients...)
+}
+
+func (eb *EventBus) pendingInternalRecipients(eventID string) []string {
+	if eb == nil {
+		return nil
+	}
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	return append([]string(nil), eb.pendingInternalByID[eventID]...)
+}
+
+func (eb *EventBus) clearPendingInternalRecipients(eventID string) {
+	if eb == nil {
+		return
+	}
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return
+	}
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+	delete(eb.pendingInternalByID, eventID)
 }

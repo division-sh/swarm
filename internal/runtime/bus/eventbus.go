@@ -29,6 +29,7 @@ type EventBus struct {
 	agentChans          map[string]chan events.Event
 	subscriptions       map[string][]events.EventType
 	subscriptionKinds   map[string]inMemorySubscriberKind
+	pendingInternalByID map[string][]string
 	routeTable          *RouteTable
 	deliveryPlanner     deliveryPlanner
 	interceptors        []EventInterceptor
@@ -101,6 +102,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		agentChans:          make(map[string]chan events.Event),
 		subscriptions:       make(map[string][]events.EventType),
 		subscriptionKinds:   make(map[string]inMemorySubscriberKind),
+		pendingInternalByID: make(map[string][]string),
 		routeTable:          routeTable,
 		store:               store,
 		logger:              opts.Logger,
@@ -240,6 +242,7 @@ func (eb *EventBus) ResetInMemoryState() error {
 	eb.agentChans = make(map[string]chan events.Event)
 	eb.subscriptions = make(map[string][]events.EventType)
 	eb.subscriptionKinds = make(map[string]inMemorySubscriberKind)
+	eb.pendingInternalByID = make(map[string][]string)
 	routeTable, err := eb.deriveBootRouteTableLocked()
 	if err != nil {
 		return err

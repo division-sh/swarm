@@ -273,6 +273,81 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 	}
 }
 
+func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedManifest(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "agent-a"},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.emitted"))
+	agentCh := eb.Subscribe("agent-a", events.EventType("custom.emitted"))
+
+	intent := runtimeengine.EmitIntent{
+		Event: events.Event{
+			ID:        "evt-internal-live",
+			Type:      events.EventType("custom.emitted"),
+			Payload:   []byte(`{"entity_id":"ent-1"}`),
+			CreatedAt: time.Now().UTC(),
+		}.WithEntityID("ent-1"),
+	}
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("WriteOutbox: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	gotPersisted, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID)
+	if err != nil {
+		t.Fatalf("ListEventDeliveryRecipients: %v", err)
+	}
+	if strings.Join(gotPersisted, ",") != "agent-a" {
+		t.Fatalf("persisted recipients = %v, want [agent-a]", gotPersisted)
+	}
+
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("DispatchPostCommit: %v", err)
+	}
+	select {
+	case evt := <-internalCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("internal event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected internal subscriber to receive outbox event")
+	}
+	select {
+	case evt := <-agentCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("agent event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected agent subscriber to receive outbox event")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestEngineDispatcherRunsInterceptorsForPersistedEmitIntents(t *testing.T) {
 	store := &recordingEventStore{}
 	eb, err := runtimebus.NewEventBus(store)
