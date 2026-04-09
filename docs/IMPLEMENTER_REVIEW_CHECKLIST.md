@@ -37,6 +37,7 @@ Review the work against this process, in order:
 - sibling seams under the parent failure class probed enough to assess parent state
 - explicit post-pre-audit action decision made for the parent failure class when a broader parent exists
 - intended closure level stated explicitly
+- deeper architecture issue / type-model smell stated when the implementer noticed one
 - explicit watchlist decision made:
   - maps to existing node
   - existing node refined
@@ -46,6 +47,14 @@ Review the work against this process, in order:
 
 4. If the category required it, did an independent pre-audit review gate happen before coding?
 - and did the reviewer/lead record that gate outcome explicitly on the issue thread before coding started?
+- and was that gate review adversarial rather than clerical?
+- did the reviewer start from the default presumption of complete closure rather than treating follow-up staging as normal?
+- if the outcome was `approved as first slice`, did the reviewer verify that:
+  - the chosen class is a real coherent class boundary
+  - sibling probing under the parent was actually done
+  - the parent tracker is valid and independently verified
+  - the PR can still honestly eliminate its chosen class entirely?
+- if those conditions were not true, did the reviewer push back and require wider or complete remediation instead?
 
 5. Was the PR proof audit good enough to merge?
 - achieved closure level stated explicitly
@@ -56,10 +65,14 @@ Review the work against this process, in order:
 6. Does the merge recommendation match the proven closure level?
 - did the reviewer explicitly decide whether the watchlist needs to be updated at review close-out or merge time?
 - if the PR closed only a child slice of a broader parent class, was the parent issue/watchlist record updated to say what child closed and what parent obligation remains?
+- if the implementer surfaced deeper architecture feedback, did the reviewer evaluate whether it should remain guidance only, trigger a broad-refactor escalation, or become a tracked follow-up?
+- if the architecture feedback was concrete and worthwhile, did the reviewer ensure a new or existing issue/stream captured it rather than leaving it only in audit prose?
 
 ## Stop-Ship Questions
 
 - Does this change agree with the platform spec, or does it make a spec/implementation mismatch explicit?
+- At every layer, did the reviewer act adversarially rather than trusting the record at face value?
+- Did the reviewer treat complete closure as the default and require explicit justification for any staged first-slice / follow-up story?
 - For semantic/runtime/spec-governed work, did the reviewer step back and test whether the issue is describing the full failure class rather than only the first visible symptom?
 - Did the reviewer start from the default assumption that the issue framing may be too narrow until the pre-audit proves otherwise?
 - For failure-class work, is the closure level explicit rather than implied:
@@ -258,6 +271,9 @@ Review the work against this process, in order:
 - If the reviewer could name the seam, class, and remaining obligation clearly, did they create or update a tracked follow-up instead of leaving it only in chat, review prose, or residual-risk notes?
 - If the concern was not concrete enough for an issue, did the reviewer at least decide whether watchlist-only or residual-risk-only was the honest record?
 - If the PR leaves dual semantic ownership in place, did the reviewer verify that this is a lead-approved temporary seam rather than a migration excuse?
+- If the pre-audit or PR audit says "remaining parent class is tracked by X", did the reviewer independently verify that `X` is still open, explicitly superseded, or truly closed by proof instead of trusting the reference?
+- If the pre-audit or PR audit says "already captured by X" or "already closed by X", did the reviewer actively try to falsify that claim before accepting it?
+- If the reviewer found that a parent or follow-up tracker reference was stale, did they treat that as a process defect that needed correction before trusting the closure story?
 - If any currently known manifestation lacks an explicit final status or proof line, did the reviewer stop the review and mark the PR as not review-ready?
 - If the audit relies on “shared owner introduced”, “same seam”, or “cleaner architecture” without manifestation-level proof, did the reviewer reject that as insufficient closure evidence?
 - Did the reviewer explicitly ask what manifestation, if any, is still only argued in prose rather than named with execution proof?

@@ -24,6 +24,8 @@ Before coding:
 Important steering:
 - spec is the source of truth
 - fail fast, fail closed, aggressive migration, zero legacy behavior
+- default to complete closure rather than staged follow-up
+- treat first-slice scope as an exception that must be justified, not a neutral starting point
 - no heuristics, no compatibility shims, no preserving old behavior “just in case”
 - close the semantic gap in the PR if it can be closed cleanly
 - do not treat migration as a reason to preserve dual semantic ownership
@@ -55,6 +57,11 @@ That issue comment must state:
 - the intended closure level
 - the chosen-class closure commitment: this PR aims to eliminate its chosen working failure class entirely
 - required supported-surface / end-to-end proof if this is a parity issue
+- any deeper architecture issue / type-model smell noticed and the long-run better direction, if any
+- explicit tracking decision for that architecture feedback:
+  - create/update issue
+  - watchlist only
+  - residual risk only
 - any blocking ambiguity or split condition
 
 Do not start implementation if:
@@ -93,6 +100,9 @@ That PR comment must include:
 - sibling contexts checked
 - generic failing proof used or created
 - the explicit watchlist decision
+- any deeper architecture issue / type-model smell noticed and the long-run better direction, if any
+- explicit tracking decision for that architecture feedback and where it is now tracked
+- optional general feedback section for broader engineering notes, clearly treated as non-closure-bearing
 - a manifestation coverage table with one row per known manifestation, each marked as exactly one of:
   - reproduced and fixed
   - execution-proven through the same corrected path
@@ -133,15 +143,21 @@ Required process:
 4. Read the linked issue, the issue thread, and the exact spec section(s) cited in the issue/PR before judging the code.
 5. Verify the issue category and, if required, the recorded independent pre-audit gate outcome on the issue thread before judging the patch.
 6. If the PR is semantic/runtime work and it does not cite exact governing spec section(s), treat the review as incomplete and say so.
-7. Do a lead-level framing check:
+7. Review adversarially at every layer: pre-audit, implementation, and post-audit.
+   - do not trust parent-class, follow-up, watchlist, closure, or “already captured by X” claims without independent verification
+   - actively try to falsify those claims before accepting them
+   - if the record says a broader parent class remains tracked by issue/stream `X`, verify that `X` is still open, explicitly superseded, or truly closed by proof
+   - if none is true, treat the review/gate as incomplete until the tracking record is repaired
+   - start from the default presumption that complete closure is the right answer and require explicit justification for any first-slice / follow-up story
+8. Do a lead-level framing check:
    - what is the broadest plausible semantic concept or concepts in play?
    - what chosen working failure class did the PR actually take?
    - what parent failure class does that chosen class belong to, if any?
    - what repo-wide consumers or sibling contexts use that same concept?
    - does the issue describe the full class or only the first visible symptom?
    - did the implementer narrow scope only by proof, or merely by local code proximity?
-8. Verify the issue-level `Pre-Implementation Coverage Audit` exists when required.
-9. In that pre-audit, verify:
+9. Verify the issue-level `Pre-Implementation Coverage Audit` exists when required.
+10. In that pre-audit, verify:
    - the chosen working failure class is explicit
    - the parent failure class is explicit when a broader parent exists
    - every relevant canonical owner is named
@@ -159,17 +175,18 @@ Required process:
      - split / escalate as separate class
    - the audit does not rely on “same seam”, “same validator”, or “shared owner” without named execution proof
    - for parity issues, supported surface(s) required for closure are named
-10. If the pre-audit shows multiple live interpreters of the same concept that are not all being moved now, verify there is an explicit lead-approved staged broad-refactor plan before implementation proceeded.
-11. Review the code and tests against:
+   - any parent/follow-up tracker reference is independently verified rather than accepted from the audit text
+11. If the pre-audit shows multiple live interpreters of the same concept that are not all being moved now, verify there is an explicit lead-approved staged broad-refactor plan before implementation proceeded.
+12. Review the code and tests against:
    - the cited spec section(s)
    - `docs/IMPLEMENTER_GUIDELINES.md`
    - `docs/IMPLEMENTER_REVIEW_CHECKLIST.md`
    - `docs/SEMANTIC_DRIFT.md`
-12. Compare any derived selector/projection/validation/summary surface against its adjacent canonical owner.
-13. Run focused local tests when possible.
-14. Build an explicit finding list before posting comments.
-15. Verify the PR-level `Post-Implementation Proof Audit` exists.
-16. In that PR audit, verify:
+13. Compare any derived selector/projection/validation/summary surface against its adjacent canonical owner.
+14. Run focused local tests when possible.
+15. Build an explicit finding list before posting comments.
+16. Verify the PR-level `Post-Implementation Proof Audit` exists.
+17. In that PR audit, verify:
    - the chosen working failure class the PR claims to close is explicit
    - the parent failure class is explicit when one exists
    - every relevant canonical owner after the change is named
@@ -184,25 +201,27 @@ Required process:
      - split / escalated as separate class
    - each row names the exact proof used
    - any required supported-surface or end-to-end proof is named explicitly
-17. Stop review and mark the PR not review-ready if:
+   - any parent/follow-up tracker reference is independently verified rather than accepted from the PR audit text
+18. Stop review and mark the PR not review-ready if:
    - either audit is missing
    - any relevant canonical owner is missing
    - the owner-consumption audit is not exhaustive or not credible repo-wide
    - any narrowed-out seam lacks proof that it is a different concept
    - any known manifestation lacks explicit proof
    - the required pre-audit gate outcome was never recorded on the issue thread
+   - a parent or follow-up tracker reference is stale, unverified, or inconsistent with the closure story
    - multiple currently known live codepaths still interpret the same concept without explicit lead-approved staged handling
    - the PR does not aim to close its chosen working failure class entirely
    - the PR leaves dual semantic ownership in place without explicit lead-approved temporary-seam justification
-18. Do not accept “shared owner introduced”, “same seam”, “same validator”, or “cleaner architecture” as closure evidence by themselves.
-19. For parity issues, require proof at each relevant surface.
-20. If the issue was discovered through a supported helper or supported boot/runtime surface, require supported-surface closure evidence before saying the failure class is unlikely to reproduce.
-21. Do not approve semantic work merely because the touched seam is better; approve only if the PR materially reduces semantic drift for the concept in scope.
-22. After every review pass, leave both required GitHub artifacts on the PR:
+19. Do not accept “shared owner introduced”, “same seam”, “same validator”, or “cleaner architecture” as closure evidence by themselves.
+20. For parity issues, require proof at each relevant surface.
+21. If the issue was discovered through a supported helper or supported boot/runtime surface, require supported-surface closure evidence before saying the failure class is unlikely to reproduce.
+22. Do not approve semantic work merely because the touched seam is better; approve only if the PR materially reduces semantic drift for the concept in scope.
+23. After every review pass, leave both required GitHub artifacts on the PR:
    - one human-readable substantive review comment
    - one short checklist-style PR comment with guideline checks, residual risk, risk level, and merge recommendation
-23. If review reveals worthwhile follow-up work, do not leave it as chat-only commentary.
-24. On approval, explicitly state:
+24. If review reveals worthwhile follow-up work, do not leave it as chat-only commentary.
+25. On approval, explicitly state:
    - spec compliance assessment
    - failure-class coverage assessment
    - closure level assessment

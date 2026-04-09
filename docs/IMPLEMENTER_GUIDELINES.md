@@ -90,11 +90,69 @@ Default process:
   - pre-audit insufficient; widen class
   - pre-audit insufficient; escalate broad refactor
 
+Default closure rule:
+
+- the default option is always complete closure of the broadest class that can honestly be closed in the PR
+- staged follow-up is an exception, not the baseline
+- `pre-audit approved as first slice` must be justified against the default of complete closure
+- if reviewer/implementer are unsure whether full closure is feasible, the bias is to pressure-test wider remediation first, not to assume follow-up is acceptable
+- do not choose a staged slice merely because:
+  - the local seam is nearby
+  - the patch is smaller
+  - the rollout feels easier
+  - follow-up seems convenient
+  - the broader class would require more thought
+
+Meaning of `pre-audit approved as first slice`:
+
+- this is an exception to the default rule of complete closure, not a neutral option
+- use this only when all of the following are true:
+  - a broader parent failure class exists above the chosen working failure class
+  - the chosen working failure class is still a real coherent class boundary, not only a local seam or one manifestation
+  - sibling probing under the parent was actually performed
+  - the parent-class action decision is explicit
+  - the parent-class tracking record is independently verified and valid
+  - the PR can still honestly aim to eliminate its chosen working failure class entirely
+- this approval means:
+  - implementation may proceed on the narrower chosen class
+  - the broader parent class is not being claimed closed
+  - the parent remains explicitly open, superseded, or otherwise durably tracked
+  - the default expected closure level is `touched seam canonicalized`, not `failure class eliminated`
+- do not use `approved as first slice` when:
+  - the chosen class is really only one manifestation inside itself
+  - sibling probing was shallow or missing
+  - the parent tracker is stale, closed without proof, missing, or ambiguous
+  - the parent is small enough and actively broken enough that full parent remediation is the honest default
+  - the narrower scope exists only because the implementer started near one file/helper and never pressure-tested the broader class
+
+When to push back and require complete remediation instead of approving a first slice:
+
+- start from the presumption that complete remediation is the right answer
+- push back and ask for full parent-class remediation when any of the following are true:
+  - the parent failure class is small enough to close honestly in one PR
+  - multiple sibling seams under the parent are already known broken and live in the same owner cluster
+  - the chosen narrow class is not a real semantic class boundary
+  - the proposed PR would only improve one manifestation inside its own chosen class
+  - parent tracking is invalid or missing, so a first-slice story would strand the remaining obligation
+  - leaving the siblings behind would preserve live same-concept interpreters in a way that keeps the semantic drift active
+  - the cost/risk of doing the parent now is lower than the process and architecture cost of creating another staged slice
+- in those cases, the honest gate outcomes are usually:
+  - `pre-audit insufficient; widen class`
+  - or `pre-audit insufficient; escalate broad refactor`
+
 5. Implementation starts only after the pre-audit gate is satisfied
 - if broad duplication or new sibling manifestations are discovered while coding, stop and escalate rather than silently narrowing the class
 - if sibling probing shows the broader parent failure class is actively broken in multiple same-class seams, prefer tackling the parent failure class directly in the PR when feasible
 - if closing the parent class is not feasible, the pre-audit and PR proof audit must say so explicitly and keep the remaining parent-class obligation tracked in the issue/watchlist record
 - if a concrete remaining same-class seam is discovered during sibling probing and is not being absorbed now, create or update the follow-up issue/stream immediately rather than leaving it as narrative-only review debt
+- if the implementer smells a deeper architecture or type-model issue while doing the pre-audit or implementation, they should state it explicitly even if the current PR remains narrowly scoped
+- architecture feedback is encouraged in both pre-audit and post-audit when it helps explain:
+  - why the local failure class keeps recurring
+  - where the current type model or ownership model is weak
+  - what larger refactor direction would reduce long-run semantic drift
+- this architecture feedback does not by itself widen scope, but it must not be suppressed just because the current PR is a first slice
+- if that architecture feedback is concrete enough to name an honest long-run obligation, create or update a tracked issue/stream instead of leaving it only in audit prose
+- if the architecture feedback is interesting but not yet concrete enough to assign, record it explicitly as watchlist refinement or residual risk rather than letting it disappear
 
 6. PR proof audit happens before merge
 - this is the real gate for calling the work complete
@@ -148,6 +206,8 @@ Default role split:
   - must not start coding until that framing is reviewable
 - reviewer:
   - must independently test whether the framing is still too narrow
+  - must review adversarially at every layer: pre-audit, implementation, and post-audit
+  - must actively try to falsify parent-class, follow-up, closure, and "already tracked by X" claims before accepting them
   - must record the independent pre-audit gate outcome on the issue thread when the category requires that gate
   - must not let seam-level improvement be presented as failure-class elimination without proof
   - must also verify that the watchlist mapping/update decision is explicit when the work touches a failure-class family
@@ -824,6 +884,25 @@ Broad-first pre-audit rule:
 - the purpose of the pre-audit is to discover every currently known consumer of the concept before code shape narrows the thinking
 - the watchlist should be used as a starting semantic map for that sweep when relevant, but never as a substitute for doing the sweep
 
+Adversarial review rule:
+
+- every pre-audit, implementation review, and post-implementation proof audit must be reviewed adversarially, not clerically
+- default reviewer posture is to assume the record may be wrong until independently verified
+- reviewer must actively try to falsify:
+  - chosen-class framing
+  - parent-class framing
+  - sibling classification
+  - follow-up references
+  - watchlist references
+  - "already tracked by X"
+  - "already closed by X"
+  - closure-level claims
+- if a pre-audit or PR audit says a broader parent class remains tracked by issue or stream `X`, the reviewer must independently verify that `X` is:
+  - still open
+  - or explicitly superseded
+  - or truly closed by proof
+- if none of those are true, the gate/review is not clean and the record must be corrected before merge
+
 Repo-wide consumer sweep rule:
 
 - before implementation, the implementer must perform an exhaustive repo-wide sweep for currently known consumers of each relevant semantic concept / canonical owner
@@ -1081,6 +1160,7 @@ Post-Implementation Proof Audit rule:
   - which sibling contexts in the touched seam were checked
   - the generic reproducer, fixture, or focused failing proof used to capture the failure class
   - or, if none existed, the generic proof created as part of the work
+  - optional general feedback section for broader engineering notes, provided it is clearly non-closure-bearing
 - for issues with multiple currently known manifestations, include one row per manifestation with exactly one final status:
   - reproduced and fixed
   - execution-proven through the same corrected path

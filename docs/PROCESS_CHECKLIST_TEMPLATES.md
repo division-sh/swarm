@@ -13,6 +13,8 @@ Default rule:
 - use the smallest template that removes ambiguity
 - do not fill a template mechanically if half the fields are irrelevant
 - but do not skip a template when the workflow depends on an explicit recorded decision
+- default to complete closure over staged follow-up
+- treat first-slice approval as an exception that must be justified explicitly
 
 ## 1. Pre-Implementation Coverage Audit
 
@@ -88,6 +90,12 @@ Required closure proof:
 - focused proof: <...>
 - supported-surface / end-to-end proof: <...>
 
+Architecture feedback:
+- deeper architecture issue or type-model smell noticed: <... or none>
+- long-run better direction: <... or none>
+- tracking decision: <create/update issue | watchlist only | residual risk only | none>
+- tracked at: <issue/watchlist/none>
+
 Unsafe assumptions you are NOT making:
 - <...>
 
@@ -110,6 +118,18 @@ Category:
 
 Decision:
 - <pre-audit approved | pre-audit approved as first slice | pre-audit insufficient; widen class | pre-audit insufficient; escalate broad refactor>
+
+Adversarial checks performed:
+- <what parent / follow-up / closure / tracker claims were independently re-checked>
+- <what claim was actively challenged or falsified>
+
+Why complete closure is not being required, if first-slice approval is used:
+- <why the broader class is not the honest default for this PR>
+
+Why first-slice approval is honest, if used:
+- <chosen class is a real class boundary>
+- <parent tracker is valid>
+- <PR can still eliminate the chosen class entirely>
 
 Why:
 - <1-3 short bullets on why this gate outcome is honest>
@@ -224,6 +244,15 @@ Parent-class residual state:
 
 Watchlist decision:
 - <no watchlist change needed | refine existing node | add manifestation to existing node | create new node>
+
+Architecture feedback:
+- deeper architecture issue or type-model smell noticed: <... or none>
+- long-run better direction: <... or none>
+- tracking decision: <create/update issue | watchlist only | residual risk only | none>
+- tracked at: <issue/watchlist/none>
+
+Optional general feedback:
+- <freeform engineering feedback, implementation feedback, or long-run notes; non-closure-bearing>
 ```
 
 ## 5. Follow-Up Decision
