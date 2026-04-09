@@ -18,6 +18,7 @@ import (
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
@@ -498,6 +499,53 @@ func (am *AgentManager) Recover(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (am *AgentManager) RecoverableStateReasons(ctx context.Context) ([]string, error) {
+	reasons := make([]string, 0, 4)
+	if am == nil {
+		return reasons, nil
+	}
+	if am.store != nil {
+		agents, err := am.store.LoadAgents(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("load persisted agents: %w", err)
+		}
+		if len(agents) > 0 {
+			reasons = append(reasons, "persisted agents")
+		}
+	}
+	if am.bus == nil {
+		return reasons, nil
+	}
+	store := am.bus.Store()
+	if store == nil {
+		return reasons, nil
+	}
+	if routeStore, ok := store.(runtimebus.FlowInstanceRoutePersistence); ok && routeStore != nil {
+		routes, err := routeStore.ListFlowInstanceRoutes(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list persisted flow instance routes: %w", err)
+		}
+		if len(routes) > 0 {
+			reasons = append(reasons, "persisted flow instance routes")
+		}
+	}
+	replayStore, supported, err := runtimereplayclaim.RequireStore(store)
+	if err != nil {
+		return nil, fmt.Errorf("inspect persisted replay state: %w", err)
+	}
+	if supported {
+		eventsToReplay, err := replayStore.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-30*24*time.Hour), 1)
+		if err != nil {
+			return nil, fmt.Errorf("list events missing pipeline receipts: %w", err)
+		}
+		if len(eventsToReplay) > 0 {
+			reasons = append(reasons, "events missing pipeline receipts")
+		}
+	}
+	sort.Strings(reasons)
+	return reasons, nil
 }
 
 func (am *AgentManager) restoreFlowInstanceRoutes(ctx context.Context) error {

@@ -205,6 +205,34 @@ func newRuntimePromptResolver(source semanticview.Source) (runtimecontracts.Prom
 	return runtimecontracts.NewBundlePromptResolver(bundle), nil
 }
 
+func (rt *Runtime) ensureRecoveryStartupExplicit(ctx context.Context) error {
+	if rt == nil || rt.Config == nil || rt.Config.Runtime.RecoveryOnStartup {
+		return nil
+	}
+	reasons := make([]string, 0, 4)
+	if rt.Stores.ScheduleStore != nil {
+		schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
+		if err != nil {
+			return fmt.Errorf("inspect active schedules: %w", err)
+		}
+		if len(schedules) > 0 {
+			reasons = append(reasons, "active schedules")
+		}
+	}
+	if rt.Manager != nil {
+		managerReasons, err := rt.Manager.RecoverableStateReasons(ctx)
+		if err != nil {
+			return fmt.Errorf("inspect recoverable manager state: %w", err)
+		}
+		reasons = append(reasons, managerReasons...)
+	}
+	if len(reasons) == 0 {
+		return nil
+	}
+	sort.Strings(reasons)
+	return fmt.Errorf("runtime.recovery_on_startup=false but persisted runtime-owned work exists: %s", strings.Join(reasons, ", "))
+}
+
 func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts RuntimeOptions) (*Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
@@ -545,6 +573,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 		rt.cleanupStartFailure()
 	}()
+
+	if err := rt.ensureRecoveryStartupExplicit(ctx); err != nil {
+		return err
+	}
 
 	if rt.Pipeline != nil {
 		go rt.Pipeline.RunMaintenance(startCtx)
