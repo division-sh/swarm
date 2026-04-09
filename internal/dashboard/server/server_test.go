@@ -132,10 +132,33 @@ func (s stubConversationCaps) ResolveSchemaCapabilities(context.Context) (store.
 }
 
 type stubSQLAgents struct {
+	rows           []runtimemanager.PersistedAgent
+	caps           store.StoreSchemaCapabilities
+	err            error
+	facts          map[string]store.PendingAgentDeliveryFacts
+	lifecycleFacts map[string]store.AgentLifecycleFacts
+}
+
+type stubSQLAgentsWithoutLifecycle struct {
 	rows  []runtimemanager.PersistedAgent
 	caps  store.StoreSchemaCapabilities
-	err   error
 	facts map[string]store.PendingAgentDeliveryFacts
+}
+
+func (s stubSQLAgentsWithoutLifecycle) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
+	return s.rows, nil
+}
+
+func (s stubSQLAgentsWithoutLifecycle) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
+	return s.caps, nil
+}
+
+func (s stubSQLAgentsWithoutLifecycle) ListPendingAgentDeliveryFacts(_ context.Context, agentIDs []string, _ time.Time) (map[string]store.PendingAgentDeliveryFacts, error) {
+	out := make(map[string]store.PendingAgentDeliveryFacts, len(agentIDs))
+	for _, agentID := range agentIDs {
+		out[agentID] = s.facts[agentID]
+	}
+	return out, nil
 }
 
 func (s stubSQLAgents) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
@@ -150,6 +173,14 @@ func (s stubSQLAgents) ListPendingAgentDeliveryFacts(_ context.Context, agentIDs
 	out := make(map[string]store.PendingAgentDeliveryFacts, len(agentIDs))
 	for _, agentID := range agentIDs {
 		out[agentID] = s.facts[agentID]
+	}
+	return out, nil
+}
+
+func (s stubSQLAgents) ListAgentLifecycleFacts(_ context.Context, agentIDs []string) (map[string]store.AgentLifecycleFacts, error) {
+	out := make(map[string]store.AgentLifecycleFacts, len(agentIDs))
+	for _, agentID := range agentIDs {
+		out[agentID] = s.lifecycleFacts[agentID]
 	}
 	return out, nil
 }
@@ -880,6 +911,9 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 		facts: map[string]store.PendingAgentDeliveryFacts{
 			"agent-1": {PendingCount: 2, OldestPendingAgeSec: 45},
 		},
+		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+			"agent-1": {CurrentState: "launching", BlockingLayer: "session_launch"},
+		},
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
@@ -899,14 +933,68 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 	if items[0].Status != "active" {
 		t.Fatalf("status = %q, want active from operator projection", items[0].Status)
 	}
-	if items[0].State != "running" {
-		t.Fatalf("state = %q, want running from operator projection", items[0].State)
+	if items[0].State != "launching" {
+		t.Fatalf("state = %q, want launching from canonical lifecycle owner", items[0].State)
+	}
+	if items[0].BlockingLayer != "session_launch" {
+		t.Fatalf("blocking_layer = %q, want session_launch", items[0].BlockingLayer)
 	}
 	if items[0].PendingEvents != 2 {
 		t.Fatalf("pending_events = %d, want 2", items[0].PendingEvents)
 	}
 	if items[0].CurrentTaskID != "task-7" {
 		t.Fatalf("current_task_id = %q, want task-7", items[0].CurrentTaskID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLAgentReader_GetGenericAgent_UsesCanonicalLifecycleProjection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLAgentReader(db, stubSQLAgents{
+		rows: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{
+				ID:   "agent-1",
+				Role: "researcher",
+				Mode: "global",
+				Type: "managed",
+			},
+			Status: "active",
+		}},
+		caps: canonicalEventAndConversationCaps(),
+		facts: map[string]store.PendingAgentDeliveryFacts{
+			"agent-1": {PendingCount: 1, OldestPendingAgeSec: 12},
+		},
+		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+			"agent-1": {CurrentState: "active", BlockingLayer: "session_execution"},
+		},
+	}, 12)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", 3, "lease-owner", time.Now().Add(time.Minute), 0, 0, 0, 0, 0, "", false, []byte(`[]`)))
+
+	item, ok, err := reader.GetGenericAgent(context.Background(), "agent-1")
+	if err != nil {
+		t.Fatalf("GetGenericAgent: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected agent to exist")
+	}
+	if item.State != "active" {
+		t.Fatalf("state = %q, want active", item.State)
+	}
+	if item.BlockingLayer != "session_execution" {
+		t.Fatalf("blocking_layer = %q, want session_execution", item.BlockingLayer)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
@@ -931,6 +1019,9 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t
 			Status: "active",
 		}},
 		caps: canonicalEventAndConversationCaps(),
+		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+			"agent-1": {},
+		},
 	}, 12)
 
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
@@ -969,6 +1060,9 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalReceiptCapa
 			Status: "active",
 		}},
 		caps: caps,
+		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+			"agent-1": {},
+		},
 	}, 12)
 
 	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "event_receipts schema is unsupported") {
@@ -1019,10 +1113,51 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalTurnCapabil
 			Status: "active",
 		}},
 		caps: caps,
+		lifecycleFacts: map[string]store.AgentLifecycleFacts{
+			"agent-1": {},
+		},
 	}, 12)
 
 	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "agent_turns schema is unsupported") {
 		t.Fatalf("expected explicit unsupported turn capability error, got %v", err)
+	}
+}
+
+func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutLifecycleFactOwner(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLAgentReader(db, stubSQLAgentsWithoutLifecycle{
+		rows: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{
+				ID:   "agent-1",
+				Role: "researcher",
+				Mode: "global",
+				Type: "managed",
+			},
+			Status: "active",
+		}},
+		caps: canonicalEventAndConversationCaps(),
+		facts: map[string]store.PendingAgentDeliveryFacts{
+			"agent-1": {PendingCount: 1, OldestPendingAgeSec: 10},
+		},
+	}, 12)
+
+	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
+		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", 0, "", nil, 0, 0, 0, 0, 0, "", false, []byte(`[]`)))
+
+	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "missing agent lifecycle fact source") {
+		t.Fatalf("expected explicit lifecycle fact source error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
 	}
 }
 
@@ -1131,8 +1266,11 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	if items[0].DeadLetters24h != 1 {
 		t.Fatalf("dead_letters_24h = %d, want 1 dead-letter delivery", items[0].DeadLetters24h)
 	}
-	if items[0].State != "stuck" {
-		t.Fatalf("state = %q, want stuck", items[0].State)
+	if items[0].State != "retrying" {
+		t.Fatalf("state = %q, want retrying", items[0].State)
+	}
+	if items[0].BlockingLayer != "delivery_retry" {
+		t.Fatalf("blocking_layer = %q, want delivery_retry", items[0].BlockingLayer)
 	}
 }
 
@@ -1206,6 +1344,12 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	}
 	if items[0].OldestPendingAgeSec < 30*24*60*60 {
 		t.Fatalf("oldest_pending_age_sec = %d, want at least 30 days", items[0].OldestPendingAgeSec)
+	}
+	if items[0].State != "queued" {
+		t.Fatalf("state = %q, want queued", items[0].State)
+	}
+	if items[0].BlockingLayer != "delivery_queue" {
+		t.Fatalf("blocking_layer = %q, want delivery_queue", items[0].BlockingLayer)
 	}
 }
 

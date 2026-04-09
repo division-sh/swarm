@@ -83,6 +83,8 @@ func (r *SQLAgentReader) GetGenericAgent(ctx context.Context, id string) (generi
 
 type agentOperatorProjection struct {
 	Status              string
+	LifecycleState      string
+	BlockingLayer       string
 	PendingEvents       int
 	OldestPendingAgeSec int
 	LockOwner           string
@@ -99,6 +101,10 @@ type agentOperatorProjection struct {
 
 type pendingAgentDeliveryFactSource interface {
 	ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]store.PendingAgentDeliveryFacts, error)
+}
+
+type agentLifecycleFactSource interface {
+	ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentLifecycleFacts, error)
 }
 
 func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[string]agentOperatorProjection, error) {
@@ -220,10 +226,24 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	lifecycleSource, ok := r.base.(agentLifecycleFactSource)
+	if !ok || lifecycleSource == nil {
+		return nil, fmt.Errorf("missing agent lifecycle fact source")
+	}
+	lifecycleByAgent, err := lifecycleSource.ListAgentLifecycleFacts(ctx, agentIDs)
+	if err != nil {
+		return nil, err
+	}
 	for agentID, facts := range factsByAgent {
 		projection := out[strings.TrimSpace(agentID)]
 		projection.PendingEvents = facts.PendingCount
 		projection.OldestPendingAgeSec = facts.OldestPendingAgeSec
+		out[strings.TrimSpace(agentID)] = projection
+	}
+	for agentID, facts := range lifecycleByAgent {
+		projection := out[strings.TrimSpace(agentID)]
+		projection.LifecycleState = strings.TrimSpace(facts.CurrentState)
+		projection.BlockingLayer = strings.TrimSpace(facts.BlockingLayer)
 		out[strings.TrimSpace(agentID)] = projection
 	}
 	return out, nil
@@ -243,6 +263,7 @@ func applyOperatorProjection(agent *genericAgent, projection agentOperatorProjec
 		return
 	}
 	agent.Status = strings.TrimSpace(projection.Status)
+	agent.BlockingLayer = strings.TrimSpace(projection.BlockingLayer)
 	agent.PendingEvents = projection.PendingEvents
 	agent.OldestPendingAgeSec = projection.OldestPendingAgeSec
 	agent.LockOwner = strings.TrimSpace(projection.LockOwner)
@@ -267,11 +288,8 @@ func (p agentOperatorProjection) state() string {
 	if status == "terminated" {
 		return "terminated"
 	}
-	if p.InFlightTurn {
-		return "running"
-	}
-	if p.DeadLetters24h > 0 || p.Failures24h > 0 {
-		return "stuck"
+	if state := strings.TrimSpace(p.LifecycleState); state != "" {
+		return state
 	}
 	return "idle"
 }
