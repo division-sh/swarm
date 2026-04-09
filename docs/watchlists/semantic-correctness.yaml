@@ -1,0 +1,186 @@
+version: 1
+kind: watchlist
+id: semantic_correctness
+title: Semantic Correctness Watchlist
+canonical_home_for: spec alignment, persistence/recovery truth, lifecycle proof, conformance, and fail-closed boundary semantics
+role:
+  mode: failure_class_map
+  guidance:
+    - treat this watchlist as a semantic trie rather than a flat backlog
+    - start from the broadest relevant class, then walk down to the lowest coherent node with one canonical owner
+    - enumerate known manifestations under that node as explicitly as possible
+    - map issues and PRs to a node during intake and pre-audit
+    - refine the node when review reveals a broader class, a missed sibling manifestation, or a better canonical owner understanding
+update_rules:
+  applies_to:
+    - failure_class
+    - parity
+    - semantic_drift
+  review_closeout_decisions:
+    - no_watchlist_change_needed
+    - existing_node_refined
+    - new_manifestation_added_to_existing_node
+    - new_branch_or_node_created
+  node_focus_requirements:
+    - one coherent failure class or sub-class
+    - one main canonical owner or tightly-coupled owner set
+    - the currently known manifestations under that node
+node_template:
+  required_fields:
+    - id
+    - title
+    - parent_class
+    - canonical_owners
+    - why_this_node_exists
+    - known_manifestations
+    - representative_issues
+    - common_framing_mistakes
+    - current_action_pressure
+active_issues:
+  - id: 113
+    title: Align event-loop validation, delivery receipts, and recovery with the authoritative spec
+  - id: 114
+    title: Reconcile boot and loader contract vocabulary with the authoritative platform spec
+  - id: 115
+    title: Preserve full persisted correlation envelope during pipeline recovery replay
+  - id: 118
+    title: Add a reusable cross-boundary delivery lifecycle conformance suite
+  - id: 119
+    title: Persist canonical terminal lifecycle for template flow instances
+  - id: 120
+    title: Persist canonical run completion instead of inferring it from quiescence
+  - id: 132
+    title: Make CEL validation lifecycle-aware for entity-field availability
+    maps_to:
+      - lifecycle_aware_entity_field_availability_validation
+  - id: 133
+    title: Introduce a typed canonical carrier for entity-state semantics across execution seams
+  - id: 149
+    title: Make handler execution order match the spec for branch selection and top-level data_accumulation
+  - id: 150
+    title: Make task conversation persistence rollout-safe across legacy and canonical storage
+  - id: 151
+    title: Remove preview-backed non-success assertions from conformance cases that claim runtime/store semantics
+  - id: 152
+    title: Fail closed on non-UUID entity_id at the store event boundary
+  - id: 253
+    title: Preserve owning flow identity for flow-scoped session_scope validation in package-backed flows
+    maps_to:
+      - boot_verification_false_negative_validation
+      - loader_tree_identity_loss_before_boot_validation
+  - id: 255
+    title: Allow self-target entity updates in expression field reference validation
+    maps_to:
+      - boot_verification_false_negative_validation
+      - lifecycle_aware_entity_field_availability_validation
+  - id: 270
+    title: Align targeted verify and runtime boot on event-schema and tool-registry validation
+    maps_to:
+      - verify_vs_boot_contract_acceptance_drift
+nodes:
+  - id: boot_verification_false_negative_validation
+    title: Boot/Verification False-Negative Validation
+    parent_class: semantic correctness drift between authored contracts and startup validation
+    canonical_owners:
+      - internal/runtime/bootverify
+    why_this_node_exists: spec-valid contracts can still be rejected because boot verification interprets the semantic rule too narrowly
+    known_manifestations:
+      - package-backed flow ownership not preserved deeply enough for flow-scoped session_scope validation
+      - self-target entity updates rejected even though the authored pattern is semantically valid
+      - adjacent authored patterns rejected because validation encodes a narrower lifecycle or ownership model than the spec
+    representative_issues:
+      - 253
+      - 255
+    common_framing_mistakes:
+      too_broad:
+        - all bootverify drift
+      too_narrow:
+        - one validator helper
+        - one rejected contract example
+    current_action_pressure: active
+  - id: loader_tree_identity_loss_before_boot_validation
+    title: Loader/Tree Identity Loss Before Boot Validation
+    parent_class: semantic identity drift across loader, semantic-view, and boot boundaries
+    canonical_owners:
+      - contract tree and semantic view flow ownership into boot verification
+    why_this_node_exists: boot validation can only enforce the correct rule if upstream loader/tree seams preserve the canonical identity proof it depends on
+    known_manifestations:
+      - package-backed flow identity not carried through deeply enough for later scope validation
+      - adjacent package/tree ownership seams preserve enough shape for local parsing but still lose the owner proof boot needs
+    representative_issues:
+      - 253
+    common_framing_mistakes:
+      too_broad:
+        - loader is wrong
+      too_narrow:
+        - one session_scope rejection site
+    current_action_pressure: active
+  - id: lifecycle_aware_entity_field_availability_validation
+    title: Lifecycle-Aware Entity-Field Availability Validation
+    parent_class: lifecycle proof drift across handler planning, validation, and execution
+    canonical_owners:
+      - handler lifecycle and entity-field availability validation
+    why_this_node_exists: field-availability validation can reject authored patterns that are valid once lifecycle ordering and ownership are interpreted correctly
+    known_manifestations:
+      - self-target entity updates rejected even though they are valid
+      - rule drift between top-level and nested lifecycle writers/readers
+      - adjacent CEL/data-availability checks classify the same field proof differently across seams
+    representative_issues:
+      - 132
+      - 255
+    common_framing_mistakes:
+      too_broad:
+        - CEL validation is wrong
+      too_narrow:
+        - one field writer/reader pair in one helper
+    current_action_pressure: active
+  - id: verify_vs_boot_contract_acceptance_drift
+    title: Verify-vs-Boot Contract Acceptance Drift
+    parent_class: supported-surface parity drift
+    canonical_owners:
+      - shared contract validation ownership across cmd/swarm verify and runtime boot
+    why_this_node_exists: verification cannot be trusted if supported surfaces disagree on the same semantic class
+    known_manifestations:
+      - event-schema validation drift between targeted verify and runtime boot
+      - tool-registry validation drift between targeted verify and runtime boot
+      - future supported-surface agreement gaps in shared contract validation ownership
+    representative_issues:
+      - 270
+    common_framing_mistakes:
+      too_broad:
+        - verification is inconsistent
+      too_narrow:
+        - one failing CLI command
+        - one boot error message
+    current_action_pressure: active
+reserve_backlog:
+  - ordinal: 7
+    title: Audit and prove mutation-log completeness for all entity_state write paths
+    follow_on_priority:
+      issue: 162
+      relation: follow_on_priority
+  - ordinal: 9
+    title: Make declarative data_accumulation expression semantics fully explicit and CEL-capable
+    follow_on_priority:
+      issue: 163
+      relation: follow_on_priority
+  - ordinal: 11
+    title: Introduce a first-class flow-instance model instead of passing identity/scope semantics through loosely-related strings
+    follow_on_priority:
+      issue: 164
+      relation: combined_follow_on_priority
+  - ordinal: 12
+    title: Separate semantic flow scope from concrete flow-instance path everywhere
+    follow_on_priority:
+      issue: 164
+      relation: combined_follow_on_priority
+  - ordinal: 15
+    title: Replace the engine helper fallback interpreter with an explicit typed expression model
+    follow_on_priority:
+      issue: 165
+      relation: combined_follow_on_priority
+  - ordinal: 19
+    title: Replace flat expression-context merging with explicit scoped variable semantics
+    follow_on_priority:
+      issue: 165
+      relation: combined_follow_on_priority

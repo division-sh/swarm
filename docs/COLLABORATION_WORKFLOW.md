@@ -46,6 +46,9 @@ Default rule:
 
 - GitHub issues are the source of truth for work, prioritization, scope, and completion state
 - the watchlist is incident memory, root-cause guidance, and architectural pressure tracking
+- the watchlist should be maintained as a failure-class map with explicit nodes, canonical owners, and known manifestations
+- for failure-class / parity / semantic-drift work, map the issue to a watchlist node during intake or pre-audit when possible
+- if review discovers a broader class, missed sibling manifestation, or better canonical owner understanding, update the watchlist instead of leaving that learning only in PR comments
 - do not maintain duplicate backlog state in the watchlist once an issue exists on GitHub
 
 ## Spec Change Workflow

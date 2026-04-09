@@ -1,0 +1,156 @@
+version: 1
+kind: watchlist
+id: maintenance_and_cleanup
+title: Maintenance And Cleanup Watchlist
+canonical_home_for: decomposition, dead code, conformance-fixture coverage, and legacy compatibility removal
+role:
+  mode: architecture_and_cleanup_map
+  guidance:
+    - keep active issues mapped to the smallest coherent cleanup or maintenance node
+    - use nodes to avoid flattening unrelated decomposition work into one maintenance bucket
+    - refine nodes when review shows a repeated cleanup or compatibility-removal pattern
+active_issues:
+  - id: 125
+    title: Wire excluded runtime catalog conformance fixtures into e2e execution
+    maps_to:
+      - invariant_suite_coverage
+  - id: 126
+    title: Split boot verification into boundary-owned modules and close major test gaps
+    maps_to:
+      - boundary_owned_decomposition
+      - invariant_suite_coverage
+  - id: 127
+    title: Remove or implement the inert post-turn contract enforcement path in the LLM agent
+    maps_to:
+      - dead_or_inert_paths
+  - id: 128
+    title: Consolidate event bus publish paths and remove dead publish variants
+    maps_to:
+      - dead_or_inert_paths
+      - boundary_owned_decomposition
+  - id: 157
+    title: Remove legacy schema and error fallback helpers from runtime/store hot paths
+    maps_to:
+      - legacy_compatibility_removal
+  - id: 158
+    title: Remove the exact-schedule compatibility shim after canonical identity lands
+    maps_to:
+      - legacy_compatibility_removal
+  - id: 159
+    title: Legacy compatibility removal wave
+    maps_to:
+      - legacy_compatibility_removal
+nodes:
+  - id: boundary_owned_decomposition
+    title: Boundary-Owned Decomposition
+    parent_class: maintenance decomposition of oversized seams
+    canonical_owners:
+      - boundary-owned modules in the touched seam
+    why_this_node_exists: oversized files and mixed-responsibility seams invite local patches, weak ownership, and shallow test coverage
+    known_manifestations:
+      - large seams that still mix multiple concepts in one file
+      - extractions that leave same-concept logic duplicated across old and new modules
+      - decomposition that moves code without moving the test burden with it
+    representative_issues:
+      - 126
+      - 128
+    common_framing_mistakes:
+      too_broad:
+        - cleanup the whole subsystem
+      too_narrow:
+        - move one helper because the file is large
+    current_action_pressure: active
+  - id: legacy_compatibility_removal
+    title: Legacy Compatibility Removal
+    parent_class: maintenance removal of transitional runtime or store shims
+    canonical_owners:
+      - canonical runtime/store schema and semantic owners after migration
+    why_this_node_exists: temporary compatibility paths tend to become permanent unless they are tracked and removed deliberately
+    known_manifestations:
+      - hot-path schema capability branching
+      - compatibility shims that preserve obsolete scheduling or identity behavior
+      - fallback helpers that survive after the canonical owner lands
+    representative_issues:
+      - 157
+      - 158
+      - 159
+    common_framing_mistakes:
+      too_broad:
+        - delete all legacy code
+      too_narrow:
+        - remove one branch without checking sibling compatibility seams
+    current_action_pressure: active
+  - id: invariant_suite_coverage
+    title: Invariant Suite Coverage
+    parent_class: reusable proof coverage for completed or maturing seams
+    canonical_owners:
+      - conformance and focused invariant test suites for the touched seam
+    why_this_node_exists: mature seams still drift if proof remains issue-local instead of reusable
+    known_manifestations:
+      - one-off regressions without reusable invariant coverage
+      - conformance fixtures excluded from e2e execution
+      - completed canonicalization work without a durable invariant suite
+    representative_issues:
+      - 125
+      - 126
+    common_framing_mistakes:
+      too_broad:
+        - add more tests everywhere
+      too_narrow:
+        - add one regression and call the seam covered
+    current_action_pressure: active
+  - id: dead_or_inert_paths
+    title: Dead Or Inert Paths
+    parent_class: maintenance removal of non-authoritative codepaths
+    canonical_owners:
+      - the real live execution path in the touched subsystem
+    why_this_node_exists: dead, inert, or shadow execution paths create fake optionality and weaken reviewer understanding of what is actually authoritative
+    known_manifestations:
+      - inert enforcement branches
+      - unused publish variants
+      - helper paths with no live caller or semantic authority
+    representative_issues:
+      - 127
+      - 128
+    common_framing_mistakes:
+      too_broad:
+        - cleanup all dead code
+      too_narrow:
+        - delete one function without checking whether the surrounding path still duplicates authority
+    current_action_pressure: active
+reserve_backlog:
+  - ordinal: 30
+    title: Add short canonical-owner comments at key architecture seams
+    follow_on_priority:
+      issue: 173
+      relation: combined_follow_on_priority
+  - ordinal: 33
+    title: Collapse duplicate turn canonicalization ownership behind one canonical persistence adapter
+    follow_on_priority:
+      issue: 171
+      relation: combined_follow_on_priority
+  - ordinal: 34
+    title: Add typed structs for canonical turn_blocks payload shapes
+    follow_on_priority:
+      issue: 171
+      relation: combined_follow_on_priority
+  - ordinal: 40
+    title: Reduce runtime_state JSON sidecars as control-plane owners
+    follow_on_priority:
+      issue: 172
+      relation: follow_on_priority
+  - ordinal: 43
+    title: Collapse schema-capability branching toward a narrower canonical store schema
+    follow_on_priority:
+      issue: 157
+      relation: already_covered_by_issue
+  - ordinal: 44
+    title: Add reusable invariant suites for completed architecture seams, not only issue-local regressions
+    follow_on_priority:
+      issue: 173
+      relation: combined_follow_on_priority
+  - ordinal: lower_priority_5
+    title: Keep maintenance-only file decomposition work moving in oversized seams that no longer own active semantic migration
+    follow_on_priority:
+      issue: 174
+      relation: follow_on_priority

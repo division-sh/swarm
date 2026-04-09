@@ -1778,13 +1778,13 @@ The flat backlog has been split into themed watchlists so this file can stay an 
 
 ### Active Watchlists
 
-- [Semantic Correctness](./watchlists/semantic-correctness.md)
+- [Semantic Correctness](./watchlists/semantic-correctness.yaml)
   - spec drift, persistence/recovery truth, lifecycle proof, conformance, and fail-closed boundary semantics
-- [Operator Surfaces](./watchlists/operator-surfaces.md)
+- [Operator Surfaces](./watchlists/operator-surfaces.yaml)
   - dashboard, CLI, builder, API/read-models, observability, and canonical run-scoped query ownership
-- [Runtime Operations](./watchlists/runtime-operations.md)
+- [Runtime Operations](./watchlists/runtime-operations.yaml)
   - execution-boundary, security, concurrency, replay, shutdown, multi-runtime, and operational config work
-- [Maintenance And Cleanup](./watchlists/maintenance-and-cleanup.md)
+- [Maintenance And Cleanup](./watchlists/maintenance-and-cleanup.yaml)
   - decomposition, dead code, conformance-fixture coverage, and legacy compatibility removal
 
 ### Current Active Wave
@@ -1800,6 +1800,9 @@ The flat backlog has been split into themed watchlists so this file can stay an 
 
 - This file still owns the maintenance protocol, incident watchlist, recent root causes, and healthy-state definition.
 - Each open backlog item should now have one canonical home in the themed watchlists above.
+- Treat the themed watchlists as maintained failure-class maps, not passive issue lists.
+- For failure-class / parity / semantic-drift work, issues should map to a watchlist node during intake or pre-audit.
+- Review close-out should explicitly decide whether the relevant watchlist node needs no change, refinement, a new manifestation, or a new branch.
 - Completed checkpoints remain visible through the issue tracker, merged PRs, and git history rather than an ever-growing flat list here.
 ## Known Recent Root Causes
 

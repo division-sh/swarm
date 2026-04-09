@@ -1,0 +1,216 @@
+version: 1
+kind: watchlist
+id: runtime_operations
+title: Runtime Operations Watchlist
+canonical_home_for: execution-boundary, security, concurrency, replay, shutdown, multi-runtime, and operational config work
+role:
+  mode: operational_failure_class_map
+  guidance:
+    - group runtime-operational work by the semantic runtime boundary, not by one caller or endpoint
+    - use nodes to keep security, delivery, shutdown, and config classes distinct
+active_issues:
+  - id: 111
+    title: Unify tool transport context-token policy across /mcp and /tools/*
+    maps_to:
+      - transport_policy_and_surface_parity
+  - id: 112
+    title: Make direct-recipient delivery an explicit semantic path or route it through the delivery planner
+    maps_to:
+      - delivery_and_replay_ownership
+  - id: 116
+    title: Make workflow instance mutation atomic across load, mutate, and upsert
+    maps_to:
+      - atomic_runtime_state_mutation
+  - id: 136
+    title: Make managed-agent startup validation prove the real filtered tool transport path
+    maps_to:
+      - transport_policy_and_surface_parity
+  - id: 137
+    title: Unify agent-visible tool availability across prompt and transport surfaces
+    maps_to:
+      - transport_policy_and_surface_parity
+  - id: 139
+    title: Make gateway auth fail closed and remove caller-owned privilege data from tool authorization
+    maps_to:
+      - privileged_control_plane_auth
+  - id: 140
+    title: Authenticate builder RPC and WebSocket as a privileged control plane
+    maps_to:
+      - privileged_control_plane_auth
+  - id: 141
+    title: Cap delegable privileges on agent hire and reconfigure
+    maps_to:
+      - privileged_control_plane_auth
+  - id: 142
+    title: Require authentication for dashboard and runtime-control surfaces on the default listener
+    maps_to:
+      - privileged_control_plane_auth
+  - id: 143
+    title: Drain in-flight work before runtime shutdown tears down dependencies
+    maps_to:
+      - shutdown_and_runtime_lifecycle
+  - id: 144
+    title: Make receipt retry counting and delivery-state updates atomic
+    maps_to:
+      - delivery_and_replay_ownership
+  - id: 145
+    title: Add explicit shared-store ownership for replayed deliveries and restored timers
+    maps_to:
+      - delivery_and_replay_ownership
+  - id: 146
+    title: Add multi-runtime fencing or explicit single-instance enforcement
+    maps_to:
+      - multi_runtime_fencing
+  - id: 147
+    title: Make operational config surfaces fail closed and remove inert controls
+    maps_to:
+      - fail_closed_operational_config
+nodes:
+  - id: transport_policy_and_surface_parity
+    title: Transport Policy And Surface Parity
+    parent_class: runtime execution-boundary policy drift
+    canonical_owners:
+      - canonical tool transport and validation ownership across prompt, verify, and runtime surfaces
+    why_this_node_exists: transport-visible behavior drifts when prompt, managed startup, and live transport paths enforce different policies
+    known_manifestations:
+      - context-token policy differs across transport surfaces
+      - startup validation does not prove the real filtered transport path
+      - agent-visible tool availability differs between prompt and transport
+    representative_issues:
+      - 111
+      - 136
+      - 137
+    common_framing_mistakes:
+      too_broad:
+        - tool transport is inconsistent
+      too_narrow:
+        - one endpoint or one token limit is wrong
+    current_action_pressure: active
+  - id: delivery_and_replay_ownership
+    title: Delivery And Replay Ownership
+    parent_class: runtime delivery lifecycle and recovery semantics
+    canonical_owners:
+      - delivery planner / recipient ownership / replay claim ownership in the touched seam
+    why_this_node_exists: runtime delivery drifts when publish, recovery, retry, and replay ownership are split across local paths
+    known_manifestations:
+      - direct-recipient delivery as a shadow semantic path
+      - retry counters and delivery-state updates not atomic
+      - replayed deliveries and restored timers without explicit shared-store ownership
+    representative_issues:
+      - 112
+      - 144
+      - 145
+    common_framing_mistakes:
+      too_broad:
+        - delivery is flaky
+      too_narrow:
+        - one dispatcher or retry function is wrong
+    current_action_pressure: active
+  - id: atomic_runtime_state_mutation
+    title: Atomic Runtime State Mutation
+    parent_class: operational state mutation integrity
+    canonical_owners:
+      - one atomic owner for workflow instance load/mutate/upsert semantics
+    why_this_node_exists: runtime state correctness drifts when mutation spans multiple non-atomic steps
+    known_manifestations:
+      - workflow instance mutation split across load, mutate, and upsert
+    representative_issues:
+      - 116
+    common_framing_mistakes:
+      too_broad:
+        - persistence is nonatomic
+      too_narrow:
+        - one update statement races
+    current_action_pressure: active
+  - id: privileged_control_plane_auth
+    title: Privileged Control Plane Authentication
+    parent_class: security and authorization fail-closed boundaries
+    canonical_owners:
+      - privileged transport/control-plane auth and delegation policy owners
+    why_this_node_exists: control-plane surfaces drift open when auth or privilege semantics are left to callers or split by endpoint
+    known_manifestations:
+      - gateway auth not fail-closed
+      - builder RPC/WebSocket privileged paths unauthenticated
+      - delegable privileges not capped on hire/reconfigure
+      - dashboard/runtime-control default listener left open
+    representative_issues:
+      - 139
+      - 140
+      - 141
+      - 142
+    common_framing_mistakes:
+      too_broad:
+        - auth needs work
+      too_narrow:
+        - one listener or caller path is unauthenticated
+    current_action_pressure: active
+  - id: shutdown_and_runtime_lifecycle
+    title: Shutdown And Runtime Lifecycle
+    parent_class: runtime shutdown and dependency-teardown integrity
+    canonical_owners:
+      - runtime-owned shutdown admission and drain semantics
+    why_this_node_exists: shutdown correctness drifts when admission, draining, and dependency teardown are interpreted independently
+    known_manifestations:
+      - in-flight work not drained before dependencies tear down
+    representative_issues:
+      - 143
+    common_framing_mistakes:
+      too_broad:
+        - shutdown is messy
+      too_narrow:
+        - one shutdown caller is wrong
+    current_action_pressure: active
+  - id: multi_runtime_fencing
+    title: Multi-Runtime Fencing
+    parent_class: operational deployment ownership and instance exclusivity
+    canonical_owners:
+      - explicit multi-runtime fencing or single-instance enforcement owner
+    why_this_node_exists: runtime correctness drifts when deployment topology is implicit rather than enforced
+    known_manifestations:
+      - multiple runtimes can act without fencing or explicit single-instance enforcement
+    representative_issues:
+      - 146
+    common_framing_mistakes:
+      too_broad:
+        - clustering is unsupported
+      too_narrow:
+        - one startup guard is missing
+    current_action_pressure: active
+  - id: fail_closed_operational_config
+    title: Fail-Closed Operational Config
+    parent_class: operational boundary semantics
+    canonical_owners:
+      - fail-closed operational config surface owners
+    why_this_node_exists: config surfaces drift when inert or permissive controls survive as if they still matter
+    known_manifestations:
+      - inert controls left exposed
+      - operational config surfaces not fail-closed
+    representative_issues:
+      - 147
+    common_framing_mistakes:
+      too_broad:
+        - config is confusing
+      too_narrow:
+        - one flag is inert
+    current_action_pressure: active
+reserve_backlog:
+  - ordinal: 5
+    title: Add watchdogs for long-running/no-output turns and stalled runs
+    follow_on_priority:
+      issue: 169
+      relation: combined_follow_on_priority
+  - ordinal: 8
+    title: Make delivery lifecycle first-class and observable
+    follow_on_priority:
+      issue: 169
+      relation: combined_follow_on_priority
+  - ordinal: 9
+    title: Improve restart/recovery observability for in-flight turns
+    follow_on_priority:
+      issue: 169
+      relation: combined_follow_on_priority
+  - ordinal: 25
+    title: Introduce an explicit runtime dependency graph object for boot wiring
+    follow_on_priority:
+      issue: 170
+      relation: follow_on_priority

@@ -49,11 +49,15 @@ Default process:
 - the issue writer may suggest a category
 - the implementer may escalate the category
 - the reviewer may reclassify it later if the original categorization was too light
+- at issue intake or assignment time, the issue should also be mapped to an existing watchlist node when possible
+- if no suitable watchlist node exists, that gap should be called out so the pre-audit can create or refine the node rather than proceeding without semantic map context
 
 3. Pre-audit happens before coding
 - this is the real gate for starting implementation
 - the implementer must test whether the issue framing is too narrow
 - the implementer must identify the broadest plausible failure class, the canonical owner(s), the repo-wide consumer set, the manifestation table, and the intended closure level
+- the implementer must also identify which watchlist node the work belongs to, or create/refine one if the existing watchlist does not capture the failure class cleanly
+- the watchlist should be treated as a semantic trie / failure-class map, not as passive notes
 - for failure-class, parity, semantic-drift, and similar high-risk semantic work, the main effort is expected to go into manifestation identification and classification before coding starts
 - that is normal and desirable
 - the expensive work is identifying the true failure class, enumerating the manifestation set as extensively as possible, and deciding which manifestations are same-class versus separate-class before code narrows the thinking
@@ -84,6 +88,16 @@ Default process:
 - do not approve because the touched seam is cleaner
 - approve only when the achieved closure level is explicit and actually supported by the proof
 
+8. Watchlist state is updated when the semantic map changed
+- every failure-class, parity, semantic-drift, or similar high-risk semantic review must explicitly decide one of:
+  - no watchlist change needed
+  - existing node refined
+  - new manifestation added to existing node
+  - new watchlist branch/node created
+- update the watchlist during pre-audit if the class map is missing or too weak
+- update it again during review close-out or after merge if the work changed the semantic map, closed a node, split a node, or revealed a missed sibling manifestation
+- do not leave a meaningful watchlist refinement as chat-only commentary
+
 Default role split:
 
 - issue writer:
@@ -95,6 +109,7 @@ Default role split:
 - reviewer:
   - must independently test whether the framing is still too narrow
   - must not let seam-level improvement be presented as failure-class elimination without proof
+  - must also verify that the watchlist mapping/update decision is explicit when the work touches a failure-class family
 
 ## Platform Spec Authority
 
@@ -714,6 +729,9 @@ Issue readiness vs implementation readiness rule:
 - if the issue is symptom-shaped or under-analyzed, the implementer must produce the missing canonical-owner mapping, repo-wide consumer sweep, manifestation table, and closure target in the pre-audit before implementation begins
 - do not delay assignment waiting for fake completeness in the issue body
 - do not begin implementation until the pre-audit makes the seam and intended closure level reviewable
+- every failure-class / parity / semantic-drift / high-risk semantic issue must either map to an existing watchlist node or create/refine one during pre-audit
+- if the watchlist has a relevant node, the pre-audit must use it to widen the sweep rather than ignoring it
+- if no watchlist node exists, the pre-audit should say so explicitly and create or refine the node as part of class clarification
 
 Pre-implementation rule:
 
@@ -760,6 +778,7 @@ Broad-first pre-audit rule:
 - narrowing is allowed only by explicit proof that a seam consumes a different semantic concept
 - “nearby files checked” is not sufficient
 - the purpose of the pre-audit is to discover every currently known consumer of the concept before code shape narrows the thinking
+- the watchlist should be used as a starting semantic map for that sweep when relevant, but never as a substitute for doing the sweep
 
 Repo-wide consumer sweep rule:
 
@@ -805,6 +824,7 @@ Required issue-comment format:
     - the issue thread
     - triage / reproducer notes
     - prior review comments if they already exist
+    - relevant watchlist node(s)
 - `Manifestation coverage table`
   - include one row per currently known manifestation
   - make the table as extensive as possible from the evidence currently available
@@ -851,6 +871,11 @@ Absolute rules:
 - do not begin implementation if any currently known manifestation is missing from the audit
 - do not begin implementation on failure-class work if the pre-audit does not include a manifestation coverage table
 - do not begin implementation if the manifestation coverage table is artificially narrow, collapsed, or obviously less extensive than the currently available issue/thread/triage/review evidence supports
+- do not begin implementation on failure-class / parity / semantic-drift / high-risk semantic work if there is no explicit watchlist decision:
+  - maps to existing node
+  - existing node refined
+  - new manifestation added
+  - new node needed
 - do not begin implementation if the intended closure level is not stated explicitly
 - do not begin implementation if the pre-audit claims `failure class eliminated` without an explicit defendable statement of why the full currently known class is in scope
 - do not classify a manifestation as “same seam” without naming the execution proof that will show it flows through the corrected path
@@ -997,6 +1022,12 @@ Post-Implementation Proof Audit rule:
 - if the PR claims `failure class eliminated` without defendable manifestation-level proof, the PR is not review-ready
 - if no generic reproducer exists yet for a semantic/runtime failure class, deriving one is part of the implementation task
 - if the implementer cannot derive a clean generic proof for the failure class, stop and escalate before treating the work as complete
+- before merge, explicitly decide whether the watchlist needs:
+  - no change
+  - node refinement
+  - new manifestation row / note
+  - new branch/node
+- if review discovered a broader class, missed sibling manifestation, or corrected canonical owner understanding, update the watchlist rather than leaving that learning only in the PR thread
 
 Surface-parity closure rule:
 
