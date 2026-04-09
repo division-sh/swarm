@@ -28,6 +28,7 @@ type EventBus struct {
 	channels            map[events.EventType]map[string]chan events.Event
 	agentChans          map[string]chan events.Event
 	subscriptions       map[string][]events.EventType
+	subscriptionKinds   map[string]inMemorySubscriberKind
 	routeTable          *RouteTable
 	deliveryPlanner     deliveryPlanner
 	interceptors        []EventInterceptor
@@ -65,6 +66,13 @@ type eventDeliveryPlan struct {
 	CycleEscalation      *events.Event
 }
 
+type inMemorySubscriberKind string
+
+const (
+	inMemorySubscriberAgent    inMemorySubscriberKind = "agent"
+	inMemorySubscriberInternal inMemorySubscriberKind = "internal"
+)
+
 func NewEventBus(store EventStore) (*EventBus, error) {
 	return NewEventBusWithOptions(store, EventBusOptions{})
 }
@@ -92,6 +100,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		channels:            make(map[events.EventType]map[string]chan events.Event),
 		agentChans:          make(map[string]chan events.Event),
 		subscriptions:       make(map[string][]events.EventType),
+		subscriptionKinds:   make(map[string]inMemorySubscriberKind),
 		routeTable:          routeTable,
 		store:               store,
 		logger:              opts.Logger,
@@ -230,6 +239,7 @@ func (eb *EventBus) ResetInMemoryState() error {
 	eb.channels = make(map[events.EventType]map[string]chan events.Event)
 	eb.agentChans = make(map[string]chan events.Event)
 	eb.subscriptions = make(map[string][]events.EventType)
+	eb.subscriptionKinds = make(map[string]inMemorySubscriberKind)
 	routeTable, err := eb.deriveBootRouteTableLocked()
 	if err != nil {
 		return err
@@ -271,22 +281,31 @@ func (eb *EventBus) PendingAgentDeliveries() int {
 }
 
 func (eb *EventBus) Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event {
+	return eb.subscribe(agentID, inMemorySubscriberAgent, eventTypes...)
+}
+
+func (eb *EventBus) SubscribeInternal(subscriberID string, eventTypes ...events.EventType) <-chan events.Event {
+	return eb.subscribe(subscriberID, inMemorySubscriberInternal, eventTypes...)
+}
+
+func (eb *EventBus) subscribe(subscriberID string, kind inMemorySubscriberKind, eventTypes ...events.EventType) <-chan events.Event {
 	ch := make(chan events.Event, 128)
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 
-	if existing, ok := eb.agentChans[agentID]; ok {
+	if existing, ok := eb.agentChans[subscriberID]; ok {
 		ch = existing
 	} else {
-		eb.agentChans[agentID] = ch
+		eb.agentChans[subscriberID] = ch
 	}
+	eb.subscriptionKinds[subscriberID] = kind
 
 	for _, et := range eventTypes {
-		eb.subscriptions[agentID] = AppendUniqueEventType(eb.subscriptions[agentID], et)
+		eb.subscriptions[subscriberID] = AppendUniqueEventType(eb.subscriptions[subscriberID], et)
 		if eb.channels[et] == nil {
 			eb.channels[et] = make(map[string]chan events.Event)
 		}
-		eb.channels[et][agentID] = ch
+		eb.channels[et][subscriberID] = ch
 	}
 	return ch
 }
@@ -304,6 +323,7 @@ func (eb *EventBus) Unsubscribe(agentID string) {
 		close(ch)
 	}
 	delete(eb.subscriptions, agentID)
+	delete(eb.subscriptionKinds, agentID)
 	for et := range eb.channels {
 		delete(eb.channels[et], agentID)
 		if len(eb.channels[et]) == 0 {

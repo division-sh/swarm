@@ -184,7 +184,7 @@ func (eb *EventBus) publishTransactional(
 	if passthrough {
 		if len(inboundPlan.Recipients) > 0 {
 			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverToAgents(ctx, evt, inboundPlan.PersistedRecipients); err != nil {
+			if err := eb.deliverToAgents(ctx, evt, inboundPlan.Recipients); err != nil {
 				return err
 			}
 			eb.logDelivery(ctx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
@@ -310,7 +310,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	}
 	if passthrough {
 		if len(plan.Recipients) > 0 {
-			if err := eb.deliverToAgents(ctx, evt, plan.PersistedRecipients); err != nil {
+			if err := eb.deliverToAgents(ctx, evt, plan.Recipients); err != nil {
 				return err
 			}
 			eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
@@ -392,7 +392,7 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 	}
 	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "matched_agent_subscription", plan.ExtraDetail)
 	if len(plan.Recipients) > 0 {
-		if err := eb.deliverToAgents(ctx, evt, plan.PersistedRecipients); err != nil {
+		if err := eb.deliverToAgents(ctx, evt, plan.Recipients); err != nil {
 			return err
 		}
 		eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
