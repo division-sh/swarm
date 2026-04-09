@@ -413,7 +413,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		t.Fatalf("Start error = %v, want explicit recovery denial", startErr)
 	}
 
-	reader := dashboardserver.NewSQLObservabilityReader(db)
+	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
 	if reader == nil {
 		t.Fatal("NewSQLObservabilityReader returned nil")
 	}

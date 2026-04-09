@@ -306,6 +306,7 @@ type genericAgent struct {
 	Mode                string         `json:"mode,omitempty"`
 	Status              string         `json:"status,omitempty"`
 	State               string         `json:"state,omitempty"`
+	BlockingLayer       string         `json:"blocking_layer,omitempty"`
 	EntityID            string         `json:"entity_id,omitempty"`
 	ParentAgentID       string         `json:"parent_agent_id,omitempty"`
 	CoordinatorID       string         `json:"coordinator_id,omitempty"`
