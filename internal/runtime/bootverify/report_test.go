@@ -1782,6 +1782,42 @@ func TestRun_ReportsWarningForUnknownTimerTriggerEvent(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsErrorForTimerMissingOwner(t *testing.T) {
+	root := writeTimerValidationFixture(t, "event:ticket.opened", "")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle := loadFixtureBundleAt(t, repoRoot, root, platformSpec)
+	bundle.Semantics.Timers[0].Owner = ""
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "missing owner") {
+		t.Fatalf("expected timer_validation missing owner error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForTimerOwnerMissingFromParticipants(t *testing.T) {
+	root := writeTimerValidationFixture(t, "event:ticket.opened", "")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle := loadFixtureBundleAt(t, repoRoot, root, platformSpec)
+	bundle.Semantics.Timers[0].Owner = "missing-owner"
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "owner missing-owner missing from participants") {
+		t.Fatalf("expected timer_validation missing participant owner error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForTimerEventMissingFromCatalog(t *testing.T) {
+	root := writeTimerValidationFixture(t, "event:ticket.opened", "")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle := loadFixtureBundleAt(t, repoRoot, root, platformSpec)
+	bundle.Semantics.Timers[0].Event = "timer.missing"
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "event timer.missing missing from event catalog") {
+		t.Fatalf("expected timer_validation missing timer event error, got %#v", report.Errors())
+	}
+}
+
 func repoRootForBootverifyTest(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -1912,9 +1948,30 @@ support/item.created:
 	return root
 }
 
+type timerValidationFixtureOptions struct {
+	startOn           string
+	cancelOn          string
+	owner             string
+	event             string
+	includeTimerEvent bool
+}
+
 func writeTimerValidationFixture(t *testing.T, startOn, cancelOn string) string {
+	return writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
+		startOn:           startOn,
+		cancelOn:          cancelOn,
+		owner:             "support-node",
+		event:             "timer.reminder",
+		includeTimerEvent: true,
+	})
+}
+
+func writeTimerValidationFixtureWithOptions(t *testing.T, opts timerValidationFixtureOptions) string {
 	t.Helper()
 	root := t.TempDir()
+	if strings.TrimSpace(opts.event) == "" {
+		opts.event = "timer.reminder"
+	}
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: timer-validation
@@ -1936,6 +1993,16 @@ flows:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	timerEventBlock := ""
+	if opts.includeTimerEvent {
+		timerEventBlock = strings.TrimSpace(`
+` + opts.event + `:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
 name: support
 initial_state: waiting
@@ -1954,19 +2021,16 @@ ticket.closed:
     properties:
       entity_id:
         type: string
-timer.reminder:
-  payload:
-    properties:
-      entity_id:
-        type: string
+`+timerEventBlock+`
 `)
 	timerBlock := `
     - id: reminder
-      event: timer.reminder
+      owner: ` + opts.owner + `
+      event: ` + opts.event + `
       delay: 1m
-      start_on: ` + startOn + "\n"
-	if strings.TrimSpace(cancelOn) != "" {
-		timerBlock += "      cancel_on: " + cancelOn + "\n"
+      start_on: ` + opts.startOn + "\n"
+	if strings.TrimSpace(opts.cancelOn) != "" {
+		timerBlock += "      cancel_on: " + opts.cancelOn + "\n"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
 support-node:
