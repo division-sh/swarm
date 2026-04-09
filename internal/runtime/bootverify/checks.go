@@ -1446,7 +1446,10 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					Location: agentLabel,
 				})
 			}
-			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, scope.OwningFlowID, agentID, agent)
+			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, semanticview.ResolveAgentSessionScopeProof(c.source, semanticview.AgentSessionScopeLocator{
+				AgentID:         agentID,
+				ProjectScopeKey: scope.Key,
+			}), agentID, agent)
 			if len(agent.Subscriptions) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
@@ -1557,7 +1560,10 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					Location: agentLabel,
 				})
 			}
-			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, scope.OwningFlowID, agentID, agent)
+			c.invalidFindings = appendAgentSessionScopeFindings(c.invalidFindings, c.source, scopeLabel, semanticview.ResolveAgentSessionScopeProof(c.source, semanticview.AgentSessionScopeLocator{
+				AgentID: agentID,
+				FlowID:  scope.ID,
+			}), agentID, agent)
 			if len(agent.Subscriptions) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
@@ -1571,7 +1577,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 	return c.invalidFindings
 }
 
-func appendAgentSessionScopeFindings(findings []Finding, source semanticview.Source, scopeLabel, flowID, agentID string, agent runtimecontracts.AgentRegistryEntry) []Finding {
+func appendAgentSessionScopeFindings(findings []Finding, source semanticview.Source, scopeLabel string, proof semanticview.AgentSessionScopeProof, agentID string, agent runtimecontracts.AgentRegistryEntry) []Finding {
 	agentLabel := scopedObjectLabel(scopeLabel, agentID)
 	mode, err := sessions.ParseConversationRuntimeMode(agent.ConversationMode)
 	if err != nil {
@@ -1588,7 +1594,7 @@ func appendAgentSessionScopeFindings(findings []Finding, source semanticview.Sou
 	}
 	switch sessionScope {
 	case sessions.SessionScopeFlow:
-		if strings.TrimSpace(flowID) == "" {
+		if strings.TrimSpace(proof.OwningFlowID) == "" {
 			return append(findings, Finding{
 				CheckID:  "invalid_field_detection",
 				Severity: "error",
@@ -1597,7 +1603,7 @@ func appendAgentSessionScopeFindings(findings []Finding, source semanticview.Sou
 			})
 		}
 	case sessions.SessionScopeEntity:
-		if strings.TrimSpace(flowID) == "" {
+		if strings.TrimSpace(proof.OwningFlowID) == "" {
 			return append(findings, Finding{
 				CheckID:  "invalid_field_detection",
 				Severity: "error",
@@ -1605,11 +1611,11 @@ func appendAgentSessionScopeFindings(findings []Finding, source semanticview.Sou
 				Location: agentLabel,
 			})
 		}
-		if flowIsStateless(source, flowID) {
+		if flowIsStateless(source, proof.OwningFlowID) {
 			return append(findings, Finding{
 				CheckID:  "invalid_field_detection",
 				Severity: "error",
-				Message:  fmt.Sprintf("agent %s session_scope entity requires stateful flow %s", agentLabel, validationFlowLabel(flowID)),
+				Message:  fmt.Sprintf("agent %s session_scope entity requires stateful flow %s", agentLabel, validationFlowLabel(proof.OwningFlowID)),
 				Location: agentLabel,
 			})
 		}

@@ -206,11 +206,11 @@ func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticv
 	for _, scope := range source.ProjectScopes() {
 		projectAgents := make(map[string]runtimecontracts.AgentRegistryEntry, len(scope.Agents))
 		for logicalID, entry := range scope.Agents {
-			agentID := strings.TrimSpace(entry.ID)
-			if agentID == "" {
-				agentID = strings.TrimSpace(logicalID)
-			}
-			if sourceInfo, ok := source.AgentContractSource(agentID); ok && strings.TrimSpace(sourceInfo.FlowID) != "" {
+			proof := semanticview.ResolveAgentSessionScopeProof(source, semanticview.AgentSessionScopeLocator{
+				AgentID:         logicalID,
+				ProjectScopeKey: scope.Key,
+			})
+			if strings.TrimSpace(proof.OwningFlowID) != "" {
 				continue
 			}
 			projectAgents[strings.TrimSpace(logicalID)] = entry
@@ -224,7 +224,10 @@ func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticv
 		if flowID == "" || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
 			continue
 		}
-		if err := am.ensureStaticAgentsForScope(ctx, source, flowID, strings.Trim(scope.Path, "/"), scope.Agents); err != nil {
+		proof := semanticview.ResolveAgentSessionScopeProof(source, semanticview.AgentSessionScopeLocator{
+			FlowID: flowID,
+		})
+		if err := am.ensureStaticAgentsForScope(ctx, source, proof.OwningFlowID, proof.FlowPath, scope.Agents); err != nil {
 			return err
 		}
 	}
