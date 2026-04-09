@@ -258,7 +258,7 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 	if err != nil {
 		return nil, err
 	}
-	if err := requireConversationTurnCapabilities(caps, "conversation turn reader capability surface"); err != nil {
+	if err := requireConversationTurnCapabilities(caps); err != nil {
 		return nil, err
 	}
 	query := `
