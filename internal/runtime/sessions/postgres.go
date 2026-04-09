@@ -457,6 +457,8 @@ func (sr *PostgresRegistry) ResetAll(runtimeMode RuntimeMode, metadata ResetMeta
 			    updated_at = now()
 			FROM affected
 			WHERE s.session_id = affected.session_id
+			  AND s.status IN ('active', 'suspended')
+			  AND s.runtime_mode IN ('session', 'session_per_entity')
 			RETURNING affected.session_id::text, affected.agent_id, affected.scope_key, affected.runtime_mode, affected.status
 		)
 		SELECT session_id, agent_id, scope_key, runtime_mode, status
@@ -501,6 +503,8 @@ func (sr *PostgresRegistry) ResetAll(runtimeMode RuntimeMode, metadata ResetMeta
 			    updated_at = now()
 			FROM affected
 			WHERE s.session_id = affected.session_id
+			  AND s.status IN ('active', 'suspended')
+			  AND s.runtime_mode = $1
 			RETURNING affected.session_id::text, affected.agent_id, affected.scope_key, affected.runtime_mode, affected.status
 		)
 		SELECT session_id, agent_id, scope_key, runtime_mode, status
