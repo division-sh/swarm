@@ -1683,6 +1683,29 @@ func TestRun_UsesCompiledOwnersForEquivalentSingleNodePerEventRoutes(t *testing.
 	}
 }
 
+func TestRun_ReportsExactDuplicateSingleNodePerEventOwnership(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-success")
+	handler := bundle.Nodes["complete-task"].EventHandlers["task.requested"]
+	addProjectHandler(t, bundle, "shadow-complete-task", "task.requested", handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "single_node_per_event", "task.requested") {
+		t.Fatalf("expected single_node_per_event duplicate-owner error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_DoesNotReportSingleNodePerEventForWildcardOnlyOverlap(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	addProjectHandler(t, bundle, "dispatcher-shadow", "child/*", runtimecontracts.SystemNodeEventHandler{})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "single_node_per_event", "child/task.feedback") {
+		t.Fatalf("unexpected single_node_per_event wildcard collision, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ReportsMissingTransitionTriggerEvent(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
 	bundle.Semantics.Transitions[0].Trigger = "ticket.missing"
@@ -2424,4 +2447,26 @@ func renameFlowHandlerEvent(t *testing.T, bundle *runtimecontracts.WorkflowContr
 		}
 		bundle.Semantics.FlowInputs[flowID] = inputs
 	}
+}
+
+func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) {
+	t.Helper()
+	if bundle.Nodes == nil {
+		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
+	}
+	node := bundle.Nodes[nodeID]
+	node.ID = nodeID
+	node.ExecutionType = "system_node"
+	if node.EventHandlers == nil {
+		node.EventHandlers = map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	node.EventHandlers[eventType] = handler
+	bundle.Nodes[nodeID] = node
+	if bundle.Semantics.NodeHandlers == nil {
+		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	if bundle.Semantics.NodeHandlers[nodeID] == nil {
+		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
 }
