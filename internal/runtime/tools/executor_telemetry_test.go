@@ -401,6 +401,33 @@ func TestExecutorTelemetry_EmitToolLogsPayloadShapeFailureBeforeSchemaValidation
 	}
 }
 
+func TestExecutorTelemetry_EmitToolLogsInvalidEmitToolNameOutcome(t *testing.T) {
+	bus := &telemetryBusStub{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{})
+	actor := models.AgentConfig{ID: "agent-emit-5"}
+
+	if _, err := exec.handleEmitTool(context.Background(), actor, "emit_not_registered", map[string]any{}); err == nil {
+		t.Fatal("expected invalid emit tool name failure")
+	}
+	if len(bus.logs) != 1 {
+		t.Fatalf("runtime log count = %d, want 1", len(bus.logs))
+	}
+	log := bus.logs[0]
+	if log.Action != emitToolOutcomeAction {
+		t.Fatalf("action = %q, want %q", log.Action, emitToolOutcomeAction)
+	}
+	detail, _ := log.Detail.(map[string]any)
+	if got := strings.TrimSpace(asString(detail["outcome"])); got != "invalid_emit_tool_name" {
+		t.Fatalf("outcome = %#v, want invalid_emit_tool_name", detail["outcome"])
+	}
+	if got := strings.TrimSpace(asString(detail["failure_class"])); got != "payload_shape" {
+		t.Fatalf("failure_class = %#v, want payload_shape", detail["failure_class"])
+	}
+	if got := strings.TrimSpace(asString(detail["failure_stage"])); got != "resolve_event_type" {
+		t.Fatalf("failure_stage = %#v, want resolve_event_type", detail["failure_stage"])
+	}
+}
+
 func testTime() time.Time {
 	return time.Unix(1700000000, 0).UTC()
 }
