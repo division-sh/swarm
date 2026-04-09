@@ -830,6 +830,109 @@ func TestGatewayHandleMCP_ToolsCallIncludesStructuredRuntimeErrorPayload(t *test
 	}
 }
 
+func TestGatewayHandleMCP_ToolsCallIncludesExplicitStartupProbeSuccessOutcome(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	g := NewGateway(testToolExecutor(func(_ context.Context, _ string, _ any) (any, error) {
+		return map[string]any{"ok": true}, nil
+	}), testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-startup-probe-success", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "query_entities",
+			"arguments": map[string]any{},
+			"swarmProbe": map[string]any{
+				"contract": StartupProbeContractManagedAgentCallable,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-startup-probe-success")
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	resp := mustRPCResponse(t, rec)
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", resp.Result)
+	}
+	probeResult, err := DecodeStartupProbeResult(result["swarmStartupProbe"])
+	if err != nil {
+		t.Fatalf("DecodeStartupProbeResult: %v", err)
+	}
+	if probeResult.Outcome != StartupProbeOutcomeSuccess {
+		t.Fatalf("startup probe outcome = %q, want success", probeResult.Outcome)
+	}
+}
+
+func TestGatewayHandleMCP_ToolsCallIncludesExplicitStartupProbeValidationOnlyOutcome(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	g := NewGateway(testToolExecutor(func(_ context.Context, _ string, _ any) (any, error) {
+		return nil, runtimerterr.WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.filter", false, nil, "query is required")
+	}), testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-startup-probe-validation", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "query_entities",
+			"arguments": map[string]any{},
+			"swarmProbe": map[string]any{
+				"contract": StartupProbeContractManagedAgentCallable,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-startup-probe-validation")
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	resp := mustRPCResponse(t, rec)
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", resp.Result)
+	}
+	probeResult, err := DecodeStartupProbeResult(result["swarmStartupProbe"])
+	if err != nil {
+		t.Fatalf("DecodeStartupProbeResult: %v", err)
+	}
+	if probeResult.Outcome != StartupProbeOutcomeValidationOnly {
+		t.Fatalf("startup probe outcome = %q, want validation_only", probeResult.Outcome)
+	}
+	if probeResult.CauseCode != "invalid_tool_input" {
+		t.Fatalf("startup probe cause_code = %q, want invalid_tool_input", probeResult.CauseCode)
+	}
+}
+
 func TestGatewayHandleMCP_RejectsToolWhenContextTokenMisses(t *testing.T) {
 	callCount := 0
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {

@@ -229,6 +229,34 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesRealFilteredTransport(t *tes
 	}
 }
 
+func TestValidateClaudeMCPToolsForManagedAgents_AcceptsExplicitValidationOnlyProbeOutcome(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
+		ID:     "campaign-coordinator",
+		Role:   "campaign_coordinator",
+		Config: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: startupProbeDefs(),
+		caps: startupProbeCaps(),
+		execErrs: map[string]error{
+			"health_check": WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_health_check.input", false, nil, "probe input is invalid"),
+		},
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager); err != nil {
+		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if !slices.Equal(exec.executed, []string{"health_check"}) {
+		t.Fatalf("executed = %#v, want health_check tools/call smoke", exec.executed)
+	}
+}
+
 func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnConfiguredGatewayTokenMismatch(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.RuntimeMode = "cli_test"

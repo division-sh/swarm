@@ -81,6 +81,10 @@ active_issues:
     title: Add structured tool-call diagnostics for payload validation, enrichment, and publish outcomes
     maps_to:
       - tool_execution_outcome_diagnostics
+  - id: 218
+    title: Eliminate string-based startup tool probe classification with an explicit validation/probe contract
+    maps_to:
+      - transport_policy_and_surface_parity
   - id: 179
     title: Expose recovery and restart decisions through canonical diagnostics
     maps_to:
@@ -96,11 +100,13 @@ nodes:
       - context-token policy differs across transport surfaces
       - startup validation does not prove the real filtered transport path
       - startup reachability probe conflates tool-call transport proof with tool-specific required-input validity
+      - startup callable proof lacks an explicit typed probe outcome contract
       - agent-visible tool availability differs between prompt and transport
     representative_issues:
       - 111
       - 136
       - 137
+      - 218
       - 305
     common_framing_mistakes:
       too_broad:
