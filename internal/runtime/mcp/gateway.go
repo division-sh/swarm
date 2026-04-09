@@ -229,6 +229,16 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
+		startupProbe, err := DecodeStartupProbeRequest(req.Params[startupProbeParamKey])
+		if err != nil {
+			err = g.newRuntimeError(ErrCodeInvalidRequest, "mcp.tools.call.startup_probe", false, err, "invalid startup probe request")
+			g.logMCP(r, "warn", "mcp.tools.call.invalid_probe", err, map[string]any{
+				"method":    "tools/call",
+				"tool_name": toolName,
+			})
+			g.writeToolCallErrorResult(w, req.ID, err)
+			return
+		}
 		ctx, err := g.mcpExecutionContext(r, toolName)
 		if err != nil {
 			g.logMCP(r, "warn", "mcp.tools.call.context_error", err, map[string]any{
@@ -277,7 +287,23 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 				"method":    "tools/call",
 				"tool_name": toolName,
 			})
-			g.writeToolCallErrorResult(w, req.ID, err)
+			payload := map[string]any{
+				"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
+				"isError": true,
+			}
+			if runtimeErr := RuntimeErrorPayloadFromError(err); runtimeErr != nil {
+				payload["runtimeError"] = runtimeErr
+				if startupProbe != nil {
+					outcome, outcomeErr := StartupProbeResultForRuntimeError(startupProbe.Contract, toolName, runtimeErr)
+					if outcomeErr != nil {
+						err = g.newRuntimeError(ErrCodeInvalidRequest, "mcp.tools.call.startup_probe", false, outcomeErr, "invalid startup probe request")
+						g.writeToolCallErrorResult(w, req.ID, err)
+						return
+					}
+					payload[startupProbeResultKey] = outcome
+				}
+			}
+			WriteRPCResult(w, req.ID, payload)
 			return
 		}
 		g.logMCP(r, "debug", "mcp.tools.call.success", nil, map[string]any{
@@ -287,10 +313,14 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		if g.hooks.AfterToolSuccess != nil {
 			g.hooks.AfterToolSuccess(ctx, r, toolName)
 		}
-		WriteRPCResult(w, req.ID, map[string]any{
+		result := map[string]any{
 			"content": []map[string]any{{"type": "text", "text": ToolResultText(out)}},
 			"isError": false,
-		})
+		}
+		if startupProbe != nil {
+			result[startupProbeResultKey] = StartupProbeSuccessResult(startupProbe.Contract, toolName)
+		}
+		WriteRPCResult(w, req.ID, result)
 		return
 	case "ping":
 		WriteRPCResult(w, req.ID, map[string]any{})

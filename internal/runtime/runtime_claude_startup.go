@@ -331,6 +331,9 @@ func startupProbeMCPToolsCall(ctx context.Context, client *http.Client, binding 
 		Params: map[string]any{
 			"name":      strings.TrimSpace(name),
 			"arguments": map[string]any{},
+			"swarmProbe": map[string]any{
+				"contract": runtimemcp.StartupProbeContractManagedAgentCallable,
+			},
 		},
 		ID: "startup-tools-call",
 	})
@@ -341,21 +344,44 @@ func startupProbeMCPToolsCall(ctx context.Context, client *http.Client, binding 
 	if !ok {
 		return fmt.Errorf("tools/call returned invalid result payload")
 	}
-	if isError, _ := result["isError"].(bool); !isError {
-		return nil
-	}
-	runtimeErr, err := runtimemcp.DecodeRuntimeErrorPayload(result["runtimeError"])
+	probeResult, err := runtimemcp.DecodeStartupProbeResult(result["swarmStartupProbe"])
 	if err != nil {
-		return fmt.Errorf("tools/call returned invalid runtimeError payload: %w", err)
+		return fmt.Errorf("tools/call returned invalid startup probe result: %w", err)
 	}
-	message := strings.TrimSpace(startupMCPErrorText(result))
-	if message != "" {
-		return fmt.Errorf(message)
+	if probeResult.ToolName != strings.TrimSpace(name) {
+		return fmt.Errorf("tools/call returned startup probe result for unexpected tool %q", probeResult.ToolName)
 	}
-	if runtimeErr != nil && strings.TrimSpace(runtimeErr.Message) != "" {
-		return fmt.Errorf("%s", strings.TrimSpace(runtimeErr.Message))
+	isError, _ := result["isError"].(bool)
+	switch probeResult.Outcome {
+	case runtimemcp.StartupProbeOutcomeSuccess, runtimemcp.StartupProbeOutcomeValidationOnly:
+		if probeResult.Outcome == runtimemcp.StartupProbeOutcomeSuccess && isError {
+			return fmt.Errorf("tools/call returned inconsistent startup probe success result")
+		}
+		if probeResult.Outcome == runtimemcp.StartupProbeOutcomeValidationOnly && !isError {
+			return fmt.Errorf("tools/call returned inconsistent startup probe validation-only result")
+		}
+		return nil
+	case runtimemcp.StartupProbeOutcomeExecutionFailure:
+		if !isError {
+			return fmt.Errorf("tools/call returned inconsistent startup probe execution-failure result")
+		}
+		if message := strings.TrimSpace(startupMCPErrorText(result)); message != "" {
+			return fmt.Errorf(message)
+		}
+		runtimeErr, err := runtimemcp.DecodeRuntimeErrorPayload(result["runtimeError"])
+		if err == nil && runtimeErr != nil {
+			if strings.TrimSpace(runtimeErr.Message) != "" {
+				return fmt.Errorf("%s", strings.TrimSpace(runtimeErr.Message))
+			}
+			return fmt.Errorf("tools/call returned runtime error code=%s", strings.TrimSpace(runtimeErr.Code))
+		}
+		if code := strings.TrimSpace(probeResult.RuntimeErrorCode); code != "" {
+			return fmt.Errorf("tools/call returned runtime error code=%s", code)
+		}
+		return fmt.Errorf("tools/call returned startup probe execution failure")
+	default:
+		return fmt.Errorf("tools/call returned unsupported startup probe outcome %q", probeResult.Outcome)
 	}
-	return fmt.Errorf("tools/call returned runtime error code=%s", strings.TrimSpace(runtimeErr.Code))
 }
 
 func startupMCPErrorText(result map[string]any) string {
