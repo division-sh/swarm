@@ -980,6 +980,18 @@ Required issue-comment format:
     - apparently clean, with proof
     - different class, with proof
     - still unproven
+  - estimate the remaining child slices likely needed to close the parent failure class:
+    - estimated remaining child slices: <number or range>
+    - rough grouping of those remaining slices
+    - confidence level:
+      - high
+      - medium
+      - low
+  - state whether that estimate argues for:
+    - absorb the parent class now
+    - keep first-slice scope
+    - open or update a dedicated follow-up stream
+    - leave the parent explicitly open as still unproven
   - state the explicit post-pre-audit action decision for the parent failure class:
     - absorb the parent class now
     - keep first-slice scope
@@ -1022,6 +1034,7 @@ Absolute rules:
 - do not begin implementation if the manifestation coverage table is artificially narrow, collapsed, or obviously less extensive than the currently available issue/thread/triage/review evidence supports
 - do not begin implementation if the chosen working failure class is not stated explicitly
 - do not begin implementation if a broader parent failure class exists but the pre-audit does not probe sibling seams under that parent enough to assess parent state
+- do not begin implementation if a broader parent failure class exists but the pre-audit does not estimate the remaining child-slice tail likely needed to close that parent class
 - do not begin implementation if the PR is only planning to improve one manifestation inside its own chosen working failure class rather than close that chosen class entirely
 - do not begin implementation if a broader parent failure class exists and there is no explicit post-pre-audit action decision for that parent
 - do not begin implementation if a concrete remaining same-class seam is discovered but no follow-up issue/stream was created or updated when the work is not absorbing it now
@@ -1157,6 +1170,14 @@ Post-Implementation Proof Audit rule:
     - failure class eliminated
   - if the achieved closure level is `failure class eliminated`, one explicit statement of why the full currently known class is now closed rather than only the touched seam
   - if a broader parent failure class exists, the sibling seams probed under that parent and whether the parent still remains open after the PR
+  - if a broader parent failure class exists, the updated estimate of the remaining child slices likely needed to close that parent class:
+    - estimated remaining child slices: <number or range>
+    - rough grouping of those remaining slices
+    - confidence level:
+      - high
+      - medium
+      - low
+  - whether implementation/review changed that estimate and why
   - which sibling contexts in the touched seam were checked
   - the generic reproducer, fixture, or focused failing proof used to capture the failure class
   - or, if none existed, the generic proof created as part of the work

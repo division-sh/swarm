@@ -53,6 +53,7 @@ That issue comment must state:
 - every currently known manifestation in scope
 - the exact proof planned for each manifestation
 - the parent-class sibling probe and post-pre-audit parent action decision
+- the estimated remaining child-slice tail needed to close the parent failure class, if any, with rough grouping and confidence level
 - the watchlist mapping or refinement decision
 - the intended closure level
 - the chosen-class closure commitment: this PR aims to eliminate its chosen working failure class entirely
@@ -97,6 +98,7 @@ That PR comment must include:
 - whether the issue was symptom-shaped
 - the achieved closure level
 - whether the parent class remains open after this PR, if any
+- the updated estimate of the remaining child-slice tail needed to close the parent failure class, if any, and whether implementation/review changed that estimate
 - sibling contexts checked
 - generic failing proof used or created
 - the explicit watchlist decision

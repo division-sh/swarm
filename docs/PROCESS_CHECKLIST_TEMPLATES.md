@@ -69,6 +69,9 @@ Manifestation coverage table:
 Parent-class sibling probe:
 - sibling seam: <...>
   - status: <broken now | apparently clean, with proof | different class, with proof | still unproven>
+- estimated remaining child slices to close the parent class: <number or range>
+- rough grouping of remaining slices: <...>
+- confidence level: <high | medium | low>
 - action decision for parent class:
   - absorb parent now
   - keep first-slice scope
@@ -241,6 +244,10 @@ If claiming failure class eliminated:
 Parent-class residual state:
 - <parent still open | parent apparently clean | no broader parent>
 - tracked at: <issue/watchlist/follow-up>
+- updated estimated remaining child slices to close the parent class: <number or range>
+- rough grouping of remaining slices: <...>
+- confidence level: <high | medium | low>
+- did implementation/review change that estimate?: <yes/no and why>
 
 Watchlist decision:
 - <no watchlist change needed | refine existing node | add manifestation to existing node | create new node>

@@ -193,6 +193,7 @@ Review the work against this process, in order:
   - failure class eliminated
 - Did that issue-level pre-audit explicitly state whether the issue framing itself was broad enough or still narrower than the true failure class?
 - If a broader parent failure class existed, did the pre-audit explicitly probe sibling seams under that parent and classify them as broken, apparently clean with proof, different class with proof, or still unproven?
+- If a broader parent failure class existed, did the pre-audit explicitly estimate the remaining child-slice tail needed to close that parent class, with rough grouping and confidence level?
 - If a broader parent failure class existed, did the implementer make an explicit post-pre-audit action decision before coding:
   - absorb the parent class now
   - keep first-slice scope
@@ -237,6 +238,7 @@ Review the work against this process, in order:
     - local symptom fixed
     - touched seam canonicalized
     - failure class eliminated
+  - if a broader parent failure class existed, the updated estimate of the remaining child-slice tail needed to close that parent class and whether implementation/review changed that estimate
   - the sibling contexts checked
   - the generic failing proof used or created
 - For failure-class issues, did the PR audit include a manifestation coverage table rather than only a narrative summary?
