@@ -158,6 +158,14 @@ func startupProbeDefs() []llm.ToolDefinition {
 				"required":   []any{"query"},
 			},
 		},
+		{
+			Name:        "health_check",
+			Description: "No-input reachability smoke",
+			Schema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
 	}
 }
 
@@ -171,6 +179,12 @@ func startupProbeCaps() map[string]toolcapabilities.Capability {
 		},
 		"query_entities": {
 			Name:               "query_entities",
+			Visible:            true,
+			Callable:           true,
+			ContextRequirement: toolcapabilities.ContextRequirementActorContext,
+		},
+		"health_check": {
+			Name:               "health_check",
 			Visible:            true,
 			Callable:           true,
 			ContextRequirement: toolcapabilities.ContextRequirementActorContext,
@@ -210,8 +224,8 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesRealFilteredTransport(t *tes
 	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
 	}
-	if !slices.Equal(exec.executed, []string{"query_entities"}) {
-		t.Fatalf("executed = %#v, want query_entities tools/call smoke", exec.executed)
+	if !slices.Equal(exec.executed, []string{"health_check"}) {
+		t.Fatalf("executed = %#v, want health_check tools/call smoke", exec.executed)
 	}
 }
 
@@ -267,24 +281,53 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsOnEmptyVisibleToolSurface(t
 	}
 }
 
-func TestValidateClaudeMCPToolsForManagedAgents_ToleratesValidationStyleCallableProbeErrors(t *testing.T) {
+func TestValidateClaudeMCPToolsForManagedAgents_SkipsCallableProbeWhenVisibleToolsRequireInput(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.RuntimeMode = "cli_test"
-	manager := runtimemanager.NewAgentManager(nil, nil)
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
-	exec := &startupProbeToolExecutor{
-		defs: startupProbeDefs(),
-		caps: startupProbeCaps(),
-		execErrs: map[string]error{
-			"query_entities": WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.filter", false, nil, "query is required"),
+	for _, tc := range []struct {
+		name    string
+		execErr error
+	}{
+		{
+			name:    "structured_invalid_tool_input",
+			execErr: WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.filter", false, nil, "query is required"),
 		},
-	}
-	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+		{
+			name:    "plain_required_field_message",
+			execErr: errors.New("bash.command is required"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := runtimemanager.NewAgentManager(nil, nil)
+			if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}); err != nil {
+				t.Fatalf("SpawnAgent: %v", err)
+			}
+			exec := &startupProbeToolExecutor{
+				defs: []llm.ToolDefinition{{
+					Name:   "query_entities",
+					Schema: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []any{"query"}},
+				}},
+				caps: map[string]toolcapabilities.Capability{
+					"query_entities": {
+						Name:               "query_entities",
+						Visible:            true,
+						Callable:           true,
+						ContextRequirement: toolcapabilities.ContextRequirementActorContext,
+					},
+				},
+				execErrs: map[string]error{
+					"query_entities": tc.execErr,
+				},
+			}
+			turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager); err != nil {
-		t.Fatalf("expected validation-style probe error to be tolerated, got %v", err)
+			if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager); err != nil {
+				t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+			}
+			if len(exec.executed) != 0 {
+				t.Fatalf("executed = %#v, want no tools/call smoke for required-input-only surface", exec.executed)
+			}
+		})
 	}
 }
 
@@ -299,7 +342,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedCallableP
 		defs: startupProbeDefs(),
 		caps: startupProbeCaps(),
 		execErrs: map[string]error{
-			"query_entities": errors.New("unexpected tool failure"),
+			"health_check": errors.New("unexpected tool failure"),
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
@@ -321,7 +364,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnGenericPhraseNonVal
 		defs: startupProbeDefs(),
 		caps: startupProbeCaps(),
 		execErrs: map[string]error{
-			"query_entities": errors.New("schema validation failed: execution path must be enabled before use"),
+			"health_check": errors.New("schema validation failed: execution path must be enabled before use"),
 		},
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
