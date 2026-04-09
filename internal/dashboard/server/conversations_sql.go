@@ -19,14 +19,10 @@ const (
 
 type SQLConversationReader struct {
 	db        *sql.DB
-	capSource conversationCapabilitySource
+	capSource schemaCapabilitySource
 }
 
-type conversationCapabilitySource interface {
-	ResolveSchemaCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error)
-}
-
-func NewSQLConversationReader(db *sql.DB, capSource conversationCapabilitySource) *SQLConversationReader {
+func NewSQLConversationReader(db *sql.DB, capSource schemaCapabilitySource) *SQLConversationReader {
 	if db == nil {
 		return nil
 	}
@@ -44,10 +40,10 @@ func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]Conversa
 	if err != nil {
 		return nil, err
 	}
-	sources := conversationQuerySources(caps)
-	if len(sources) == 0 {
-		return []ConversationSummary{}, nil
+	if err := requireConversationSurfaceCapabilities(caps); err != nil {
+		return nil, err
 	}
+	sources := conversationQuerySources(caps)
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
 			session_id,
@@ -97,10 +93,10 @@ func (r *SQLConversationReader) Get(ctx context.Context, sessionID string) (Conv
 	if err != nil {
 		return ConversationDetail{}, false, err
 	}
-	sources := conversationQuerySources(caps)
-	if len(sources) == 0 {
-		return ConversationDetail{}, false, nil
+	if err := requireConversationSurfaceCapabilities(caps); err != nil {
+		return ConversationDetail{}, false, err
 	}
+	sources := conversationQuerySources(caps)
 
 	row := r.db.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT
@@ -262,8 +258,8 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 	if err != nil {
 		return nil, err
 	}
-	if caps.Conversations.Turns != store.SchemaFlavorCanonical {
-		return []ConversationTurn{}, nil
+	if err := requireConversationTurnCapabilities(caps, "conversation turn reader capability surface"); err != nil {
+		return nil, err
 	}
 	query := `
 		SELECT
@@ -358,14 +354,7 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 
 func (r *SQLConversationReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
 	if r == nil || r.capSource == nil {
-		return store.StoreSchemaCapabilities{
-			Conversations: store.ConversationSchemaCapabilities{
-				Sessions:   store.SchemaFlavorCanonical,
-				Audits:     store.SchemaFlavorCanonical,
-				Turns:      store.SchemaFlavorCanonical,
-				TurnBlocks: true,
-			},
-		}, nil
+		return store.StoreSchemaCapabilities{}, missingDashboardCapabilityOwner("conversation reader")
 	}
 	return r.capSource.ResolveSchemaCapabilities(ctx)
 }

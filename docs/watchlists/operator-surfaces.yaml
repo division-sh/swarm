@@ -86,6 +86,7 @@ nodes:
     why_this_node_exists: operator APIs drift when they widen typed persisted data into loose carriers and inference-heavy summaries
     known_manifestations:
       - conversation and turn APIs widen typed persisted data
+      - dashboard readers synthesize canonical schema capabilities when no explicit capability owner is provided
       - summary/runtime-log/mutation completeness may be inferred or silently omitted
       - mutation-surface reconstruction can silently tolerate malformed persisted `entity_mutations` proof in touched conformance/read-model seams
     representative_issues:
