@@ -193,6 +193,95 @@ func TestRun_MapsEventNoProducerToNamedWarning(t *testing.T) {
 	}
 }
 
+func TestRun_DoesNotWarnForEventConsumerExistsWhenCatalogDeclaresConsumerMetadata(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"producer": {
+					"task.start": {Emits: runtimecontracts.EventEmission{Single: "task.done"}},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"producer": {
+				SubscribesTo: []string{"task.start"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.start": {
+						Emits: runtimecontracts.EventEmission{Single: "task.done"},
+					},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.start": {Source: "external"},
+			"task.done":  {ConsumerType: []string{"dashboard"}},
+		},
+	}
+	bundle.Platform.Platform.Name = "test"
+	bundle.Platform.Platform.Version = "1.0.0"
+	source := semanticview.Wrap(bundle)
+
+	report := Run(context.Background(), source, Options{})
+
+	if reportContains(report.Warnings(), "event_consumer_exists", "task.done") {
+		t.Fatalf("unexpected event_consumer_exists warning with consumer metadata, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnForEventProducerExistsWhenCatalogDeclaresExternalOrPlannedSource(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		entry runtimecontracts.EventCatalogEntry
+	}{
+		{
+			name:  "external source",
+			entry: runtimecontracts.EventCatalogEntry{Source: "external system"},
+		},
+		{
+			name:  "planned status",
+			entry: runtimecontracts.EventCatalogEntry{Status: "planned"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := &runtimecontracts.WorkflowContractBundle{
+				Platform: runtimecontracts.PlatformSpecDocument{},
+				Semantics: runtimecontracts.WorkflowSemanticView{
+					NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+						"consumer": {
+							"task.requested": {},
+						},
+					},
+				},
+				Nodes: map[string]runtimecontracts.SystemNodeContract{
+					"consumer": {
+						SubscribesTo: []string{"task.requested"},
+						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+							"task.requested": {},
+						},
+					},
+				},
+				Events: map[string]runtimecontracts.EventCatalogEntry{
+					"task.requested": tc.entry,
+				},
+			}
+			bundle.Platform.Platform.Name = "test"
+			bundle.Platform.Platform.Version = "1.0.0"
+			source := semanticview.Wrap(bundle)
+
+			report := Run(context.Background(), source, Options{})
+
+			if reportContains(report.Warnings(), "event_producer_exists", "task.requested") {
+				t.Fatalf("unexpected event_producer_exists warning for %s, got %#v", tc.name, report.Warnings())
+			}
+		})
+	}
+}
+
 func TestRun_MapsMissingPromptToPromptExistsWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-prompt-missing")
 
@@ -689,6 +778,47 @@ func TestRun_MapsSelfEmitToEventCycleDetectionForFlowLocalHandlers(t *testing.T)
 
 	if !reportContains(report.Errors(), "event_cycle_detection", "emits its own trigger event") {
 		t.Fatalf("expected event_cycle_detection error for flow-local handler, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsSemanticModelMultiHopEventCycle(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-self-emit")
+	bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+		"node-a": {
+			"task.a": {Emits: runtimecontracts.EventEmission{Single: "task.b"}},
+		},
+		"node-b": {
+			"task.b": {Emits: runtimecontracts.EventEmission{Single: "task.a"}},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"node-a": {
+			ID:           "node-a",
+			SubscribesTo: []string{"task.a"},
+			Produces:     []string{"task.b"},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"task.a": {Emits: runtimecontracts.EventEmission{Single: "task.b"}},
+			},
+		},
+		"node-b": {
+			ID:           "node-b",
+			SubscribesTo: []string{"task.b"},
+			Produces:     []string{"task.a"},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"task.b": {Emits: runtimecontracts.EventEmission{Single: "task.a"}},
+			},
+		},
+	}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
+		"task.a": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"entity_id": {Type: "string"}}}},
+		"task.b": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"entity_id": {Type: "string"}}}},
+	}
+	source := semanticview.Wrap(bundle)
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "event_cycle_detection", "EVENT-CYCLE") {
+		t.Fatalf("expected semantic-model event_cycle_detection error, got %#v", report.Errors())
 	}
 }
 
