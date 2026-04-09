@@ -143,6 +143,158 @@ func TestPostgresStore_AgentSessionTerminationMetadataMigrationBackfillsLegacyRo
 	}
 }
 
+func TestPostgresStore_EnsureSchemaTables_PhasesAgentSessionCompatibilityBeforeDependentDDL(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE`); err != nil {
+		t.Fatalf("drop agent_sessions: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agent_sessions (
+			session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			agent_id TEXT NOT NULL,
+			entity_id UUID,
+			flow_instance TEXT,
+			scope_key TEXT NOT NULL,
+			scope TEXT NOT NULL DEFAULT 'entity',
+			conversation JSONB NOT NULL DEFAULT '[]'::jsonb,
+			turn_count INTEGER NOT NULL DEFAULT 0,
+			runtime_mode TEXT NOT NULL DEFAULT 'session',
+			runtime_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+			lease_holder TEXT,
+			lease_expires_at TIMESTAMPTZ,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (agent_id, scope_key)
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agent_sessions: %v", err)
+	}
+
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agent_sessions": {
+			DDL: "CREATE TABLE IF NOT EXISTS agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'session',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCREATE INDEX IF NOT EXISTS idx_sessions_terminated_reason ON agent_sessions (termination_reason, terminated_at) WHERE status = 'terminated';",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(agent_sessions dependent ddl): %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables(agent_sessions dependent ddl): %v", err)
+	}
+
+	var (
+		hasTerminationReason bool
+		hasTerminatedAt      bool
+		indexName            string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'agent_sessions' AND column_name = 'termination_reason'
+		)
+	`).Scan(&hasTerminationReason); err != nil {
+		t.Fatalf("check termination_reason column: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'agent_sessions' AND column_name = 'terminated_at'
+		)
+	`).Scan(&hasTerminatedAt); err != nil {
+		t.Fatalf("check terminated_at column: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(to_regclass('idx_sessions_terminated_reason')::text, '')`).Scan(&indexName); err != nil {
+		t.Fatalf("check idx_sessions_terminated_reason: %v", err)
+	}
+	if !hasTerminationReason || !hasTerminatedAt {
+		t.Fatalf("termination metadata columns missing: termination_reason=%v terminated_at=%v", hasTerminationReason, hasTerminatedAt)
+	}
+	if indexName != "idx_sessions_terminated_reason" {
+		t.Fatalf("idx_sessions_terminated_reason regclass = %q, want idx_sessions_terminated_reason", indexName)
+	}
+}
+
+func TestPostgresStore_EnsureSchemaTables_PhasesAgentRuntimeDescriptorCompatibilityBeforeDependentDDL(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agents CASCADE`); err != nil {
+		t.Fatalf("drop agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agents (
+			agent_id TEXT PRIMARY KEY,
+			flow_instance TEXT,
+			role TEXT NOT NULL,
+			model_tier TEXT NOT NULL,
+			llm_backend TEXT NOT NULL DEFAULT 'api',
+			conversation_mode TEXT NOT NULL,
+			parent_agent_id TEXT,
+			entity_id UUID,
+			config JSONB NOT NULL DEFAULT '{}'::jsonb,
+			subscriptions JSONB NOT NULL DEFAULT '[]'::jsonb,
+			emit_events JSONB NOT NULL DEFAULT '[]'::jsonb,
+			tools JSONB NOT NULL DEFAULT '[]'::jsonb,
+			permissions JSONB NOT NULL DEFAULT '[]'::jsonb,
+			status TEXT NOT NULL DEFAULT 'active',
+			turn_count INTEGER NOT NULL DEFAULT 0,
+			last_active_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agents: %v", err)
+	}
+
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agents": {
+			DDL: "CREATE TABLE IF NOT EXISTS agents (\n    agent_id TEXT PRIMARY KEY,\n    flow_instance TEXT,\n    role TEXT NOT NULL,\n    model_tier TEXT NOT NULL,\n    llm_backend TEXT NOT NULL DEFAULT 'api',\n    conversation_mode TEXT NOT NULL,\n    parent_agent_id TEXT,\n    entity_id UUID,\n    config JSONB NOT NULL DEFAULT '{}',\n    subscriptions JSONB NOT NULL DEFAULT '[]',\n    emit_events JSONB NOT NULL DEFAULT '[]',\n    tools JSONB NOT NULL DEFAULT '[]',\n    permissions JSONB NOT NULL DEFAULT '[]',\n    runtime_descriptor JSONB NOT NULL DEFAULT '{}',\n    status TEXT NOT NULL DEFAULT 'active',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    last_active_at TIMESTAMPTZ,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCREATE INDEX IF NOT EXISTS idx_agents_runtime_descriptor ON agents USING GIN (runtime_descriptor);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(agents dependent ddl): %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables(agents dependent ddl): %v", err)
+	}
+
+	var (
+		hasRuntimeDescriptor bool
+		indexName            string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'agents' AND column_name = 'runtime_descriptor'
+		)
+	`).Scan(&hasRuntimeDescriptor); err != nil {
+		t.Fatalf("check runtime_descriptor column: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(to_regclass('idx_agents_runtime_descriptor')::text, '')`).Scan(&indexName); err != nil {
+		t.Fatalf("check idx_agents_runtime_descriptor: %v", err)
+	}
+	if !hasRuntimeDescriptor {
+		t.Fatal("runtime_descriptor column missing after EnsureSchemaTables")
+	}
+	if indexName != "idx_agents_runtime_descriptor" {
+		t.Fatalf("idx_agents_runtime_descriptor regclass = %q, want idx_agents_runtime_descriptor", indexName)
+	}
+}
+
 func TestPostgresStore_AgentSessionTerminationMetadataMigrationWithoutAgentTurnsSupportsResetAll(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
