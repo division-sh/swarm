@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -144,7 +145,15 @@ func safeTelemetryPayloadSnapshot(payload map[string]any) any {
 	if len(payload) == 0 {
 		return nil
 	}
-	return RedactTelemetryValue(payload)
+	redacted := RedactTelemetryValue(payload)
+	raw, err := json.Marshal(redacted)
+	if err == nil && len(raw) <= maxToolTelemetryChars {
+		return redacted
+	}
+	return map[string]any{
+		"truncated": true,
+		"summary":   SafeTelemetryText(payload),
+	}
 }
 
 func isEmitToolName(toolName string) bool {
