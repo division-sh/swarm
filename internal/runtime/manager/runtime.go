@@ -531,11 +531,8 @@ func (am *AgentManager) RecoverableStateReasons(ctx context.Context) ([]string, 
 			reasons = append(reasons, "persisted flow instance routes")
 		}
 	}
-	replayStore, supported, err := runtimereplayclaim.RequireStore(store)
-	if err != nil {
-		return nil, fmt.Errorf("inspect persisted replay state: %w", err)
-	}
-	if supported {
+	replayStore, ok := store.(runtimereplayclaim.Lister)
+	if ok && replayStore != nil {
 		eventsToReplay, err := replayStore.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-30*24*time.Hour), 1)
 		if err != nil {
 			return nil, fmt.Errorf("list events missing pipeline receipts: %w", err)

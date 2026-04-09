@@ -237,6 +237,9 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
+	if err := cfg.ValidateExtensions(); err != nil {
+		return nil, fmt.Errorf("runtime config validation failed: %w", err)
+	}
 	if err := validateClaudeStartupConfig(cfg, opts); err != nil {
 		return nil, fmt.Errorf("claude runtime startup validation failed: %w", err)
 	}
