@@ -1,0 +1,129 @@
+package runtime
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"swarm/internal/config"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
+)
+
+func TestRuntimeStart_PackageBackedFlowOwnedStaticAgentsCarryCanonicalFlowPath(t *testing.T) {
+	source := loadPackageBackedRuntimeSessionScopeSource(t)
+
+	rt, err := NewRuntime(context.Background(), &config.Config{}, Stores{}, RuntimeOptions{
+		SelfCheck:      false,
+		LLMRuntime:     noopLLMRuntime{},
+		WorkflowModule: semanticOnlyWorkflowRuntime{source: source},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = rt.Shutdown()
+	})
+
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	cfg, ok := rt.Manager.GetAgentConfig("backend-{vertical_id}")
+	if !ok {
+		t.Fatal("expected package-backed static flow agent config")
+	}
+	if cfg.FlowPath != "support" {
+		t.Fatalf("FlowPath = %q, want support", cfg.FlowPath)
+	}
+	if cfg.Mode != "support" {
+		t.Fatalf("Mode = %q, want support", cfg.Mode)
+	}
+}
+
+func loadPackageBackedRuntimeSessionScopeSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	root := t.TempDir()
+
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: session-scope-validation
+version: "1.0.0"
+platform_version: ">=1.0.0"
+entity_schema:
+  groups:
+    - name: item
+      fields:
+        - name: item_id
+          type: string
+          primary: true
+flows:
+  - id: support
+    flow: support
+    mode: static
+`)
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "events.yaml"), `
+item.created:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
+name: support
+version: "1.0.0"
+flows: []
+`)
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+name: support
+initial_state: waiting
+states:
+  - waiting
+  - done
+`)
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "prompts", "backend.md"), "Handle support events.\n")
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+support/item.created:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
+backend:
+  id: backend-{vertical_id}
+  type: generic
+  role: backend
+  model_tier: sonnet
+  conversation_mode: session
+  session_scope: flow
+  subscriptions:
+    - support/item.created
+  emit_events:
+    - support/item.created
+`)
+
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func writeRuntimeSessionScopeFixtureFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}

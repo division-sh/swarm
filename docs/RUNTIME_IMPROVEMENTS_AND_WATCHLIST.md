@@ -306,6 +306,36 @@ Improvement items:
 - make invalid event payloads fail closed before persistence in canonical runtime paths
 - align delivery receipts and restart recovery semantics with the spec
 
+### Flow-owned session-scope proof drifts across supported consumers
+
+Symptoms:
+
+- package-backed flow-owned agents verify cleanly on one surface but fail on another
+- `session_scope flow/entity` is accepted in boot verification but later rejected during runtime startup/static bootstrap
+- supported consumers disagree about whether an agent is flow-owned or root-level
+
+Likely causes:
+
+- loader/tree ownership proof is preserved in one carrier but not another
+- semantic view, boot verification, and static bootstrap consume different flow-ownership carriers
+- runtime startup derives scope from contract-source locality while boot verification uses a stronger owning-flow proof
+
+Current mitigations:
+
+- package-backed project scopes now carry `OwningFlowID` in semantic view
+- boot verification consumes that owning-flow proof for `session_scope` validation
+
+Still brittle because:
+
+- runtime startup/static bootstrap can still bypass that proof model and classify the same agent through weaker local metadata
+
+Improvement items:
+
+- define one canonical agent-level owning-flow/session-scope proof model
+- make boot verification and static bootstrap consume the same proof owner
+- keep targeted verify and supported startup smoke as closure gates for this class
+- tracked in: `#253`
+
 ### Host/container path or network split causes environment confusion
 
 Symptoms:
