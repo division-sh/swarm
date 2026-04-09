@@ -57,6 +57,19 @@ body:
       required: true
 
   - type: textarea
+    id: known_manifestations
+    attributes:
+      label: Known Manifestations
+      description: List the known manifestations as extensively as the currently available evidence supports. Prefer over-enumeration to collapsing multiple manifestations into one prose sentence.
+      placeholder: |
+        - manifestation 1:
+        - manifestation 2:
+        - manifestation 3:
+        - if only one is known so far, say that explicitly
+    validations:
+      required: true
+
+  - type: textarea
     id: impact
     attributes:
       label: Impact
@@ -89,6 +102,32 @@ body:
         Example:
         - generic reproducer: focused bootverify fixture with package-backed flow agent outside flow dir
         - if missing: implementer must derive this as part of the fix
+    validations:
+      required: true
+
+  - type: dropdown
+    id: suggested_pre_audit_gate
+    attributes:
+      label: Suggested Pre-Audit Gate
+      description: Suggest whether independent pre-audit review should be required before coding. Lead/triage makes the final call.
+      options:
+        - required
+        - likely required
+        - maybe
+        - not expected
+    validations:
+      required: true
+
+  - type: dropdown
+    id: intended_closure_level
+    attributes:
+      label: Intended Closure Level
+      description: What is the honest target if this issue is solved as written?
+      options:
+        - local symptom fixed
+        - touched seam canonicalized
+        - failure class eliminated
+        - unknown yet
     validations:
       required: true
 

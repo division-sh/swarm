@@ -24,73 +24,34 @@ Review the work against this process, in order:
 - parity
 - semantic-drift
 - high-risk maintenance
-- was the issue mapped to the right watchlist node when one existed?
 
 3. Was the pre-audit good enough to start coding?
 - broadest plausible failure class tested
-- chosen working failure class stated explicitly
-- parent failure class stated explicitly when a broader parent exists
-- observed symptom, chosen class, immediate parent, and broadest plausible parent all stated explicitly
-- did the implementer treat the reproducer / failing line / error spot as an entry point rather than the audit boundary?
-- if the issue concerns a multi-step user-visible flow, was the full relevant execution path enumerated in order rather than only the observed failing endpoint?
-- for each gate on that path, was it classified as same class, different concept with proof, or explicitly split/tracked?
 - issue framing challenged rather than accepted
 - canonical owner(s) named
-- did the pre-audit test whether the chosen owner is a real semantic owner rather than only the first helper/file near the error?
 - repo-wide consumer sweep done
 - manifestation table present when required
-- sibling seams under the parent failure class probed enough to assess parent state
-- was the mapped watchlist node consulted as active evidence when deciding whether to absorb the parent now versus keep first-slice scope?
-- did the watchlist node suggest any additional live sibling manifestations or consumer families that should have changed that decision?
-- explicit post-pre-audit action decision made for the parent failure class when a broader parent exists
-- explicit tracker-state decision made after pre-audit:
-  - current issue remains correct as written
-  - current issue must be updated before coding
-  - new child issue required before coding
-  - parent issue / umbrella issue must be updated before coding
-  - older issue / stream superseded and must be marked accordingly before coding
-  - watchlist-only refinement is sufficient
-- if the audited class understanding changed, were the issue / parent / follow-up / watchlist records repaired before coding started?
 - intended closure level stated explicitly
-- did the pre-audit test closure feasibility explicitly rather than assuming the chosen class can be closed?
-- did the pre-audit ask whether another same-concept interpreter would remain live even if the local endpoint were fixed?
-- did the pre-audit distinguish real code-level remediation from narrative-only reconciliation around unchanged ownership?
-- deeper architecture issue / type-model smell stated when the implementer noticed one
-- explicit watchlist decision made:
-  - maps to existing node
-  - existing node refined
-  - new manifestation added
-  - new node needed
 - for failure-class / parity / semantic-drift work, was manifestation identification treated as the main effort rather than rushed as lightweight paperwork?
 
 4. If the category required it, did an independent pre-audit review gate happen before coding?
-- and did the reviewer/lead record that gate outcome explicitly on the issue thread before coding started?
-- and was that gate review adversarial rather than clerical?
-- did the reviewer start from the default presumption of complete closure rather than treating follow-up staging as normal?
-- if the outcome was `approved as first slice`, did the reviewer verify that:
-  - the chosen class is a real coherent class boundary
-  - sibling probing under the parent was actually done
-  - the mapped watchlist node was checked as active evidence before accepting staged scope
-  - the parent tracker is valid and independently verified
-  - the PR can still honestly eliminate its chosen class entirely?
-- if those conditions were not true, did the reviewer push back and require wider or complete remediation instead?
 
 5. Was the PR proof audit good enough to merge?
 - achieved closure level stated explicitly
-- did the PR claim closure of its chosen working failure class, not only one manifestation inside it?
 - manifestation-level proof provided
 - any split or residual seam stated explicitly
 
 6. Does the merge recommendation match the proven closure level?
-- did the reviewer explicitly decide whether the watchlist needs to be updated at review close-out or merge time?
-- if the PR closed only a child slice of a broader parent class, was the parent issue/watchlist record updated to say what child closed and what parent obligation remains?
-- if the implementer surfaced deeper architecture feedback, did the reviewer evaluate whether it should remain guidance only, trigger a broad-refactor escalation, or become a tracked follow-up?
-- if the architecture feedback was concrete and worthwhile, did the reviewer ensure a new or existing issue/stream captured it rather than leaving it only in audit prose?
 
 ## Stop-Ship Questions
 
 - Does this change agree with the platform spec, or does it make a spec/implementation mismatch explicit?
 - For semantic/runtime/spec-governed work, did the reviewer step back and test whether the issue is describing the full failure class rather than only the first visible symptom?
+- Did the reviewer start from the default assumption that the issue framing may be too narrow until the pre-audit proves otherwise?
+- For failure-class work, is the closure level explicit rather than implied:
+  - local symptom fixed
+  - touched seam canonicalized
+  - failure class eliminated
 - If the semantics were unclear, did the implementer stop and escalate instead of inferring locally?
 - If this is a non-trivial semantic change, was there a reviewed spec delta before code?
 - Is the semantic owner of this behavior explicit and singular?
@@ -176,7 +137,14 @@ Review the work against this process, in order:
   - what broader semantic rule this symptom belongs to
   - what sibling contexts use that same rule
   - whether the PR proves the failure class rather than only the first example
+- Did the reviewer independently verify the broad-first framing rather than accepting the PR's chosen seam boundary at face value?
+- For failure-class / parity / semantic-drift work, did the reviewer expect manifestation identification to be the dominant effort, and treat a surprisingly cheap pre-audit as a reason to question whether the manifestation set is under-identified?
+- Did the reviewer explicitly decide whether the issue framing was:
+  - already broad enough
+  - narrower than the true failure class but acceptable as a first slice
+  - or too narrow to implement honestly without widening or splitting?
 - For semantic/runtime/spec-governed work, did the implementer post the required `Pre-Implementation Coverage Audit` comment on the GitHub issue before coding began?
+- Was the issue good enough to assign, and the pre-audit good enough to start coding, instead of expecting the issue alone to carry all analysis?
 - Did that issue-level pre-audit explicitly state:
   - the exact semantic concept or concepts being changed
   - every relevant canonical owner for those concepts
@@ -186,7 +154,16 @@ Review the work against this process, in order:
     - moved to the canonical owner in this work
     - still bypasses the canonical owner and is explicitly split / escalated
   - the old non-authoritative producers/readers/interpreters that become invalid or removal candidates for each owner?
+- Did that issue-level pre-audit explicitly state the intended closure level as exactly one of:
+  - local symptom fixed
+  - touched seam canonicalized
+  - failure class eliminated
+- Did that issue-level pre-audit explicitly state whether the issue framing itself was broad enough or still narrower than the true failure class?
+- Did the reviewer verify that the pre-audit started from the broadest plausible concept and did not narrow seams out of scope without explicit proof that they are a different concept?
+- Did the reviewer independently check that the repo-wide consumer sweep is credible rather than just local to nearby files?
 - Did that issue-level pre-audit explicitly list every currently known manifestation from the issue body, issue thread, triage/reproducer notes, and prior review context?
+- For failure-class work, did that issue-level pre-audit include a manifestation coverage table rather than only a narrative list?
+- Was that manifestation table as extensive as the available evidence supports, rather than artificially minimized or collapsed into broad prose rows?
 - For each listed manifestation, did the pre-audit classify it as exactly one of:
   - direct reproducer and fix
   - execution proof through the same corrected path
@@ -209,6 +186,10 @@ Review the work against this process, in order:
   - which old producers/readers/interpreters are now invalid, non-authoritative, or still surviving for each owner
   - the broader failure class
   - whether the issue was symptom-shaped
+  - the achieved closure level as exactly one of:
+    - local symptom fixed
+    - touched seam canonicalized
+    - failure class eliminated
   - the sibling contexts checked
   - the generic failing proof used or created
 - For failure-class issues, did the PR audit include a manifestation coverage table rather than only a narrative summary?
@@ -216,6 +197,8 @@ Review the work against this process, in order:
   - reproduced and fixed
   - execution-proven through the same corrected path
   - split / escalated as separate class
+- By merge time, is that coverage table as extensive as the available issue/thread/triage/review evidence supports?
+- If the PR claims `failure class eliminated`, did the reviewer verify there is one explicit defendable statement of why the full currently known class is now closed rather than only the touched seam?
 - For each manifestation row, did the audit name the exact proof used and any required supported-surface or end-to-end proof?
 - If no generic reproducer existed before implementation, did the reviewer verify that the PR now creates one?
 - If the implementer could not identify every relevant canonical owner for the touched semantic concept or concepts, did the reviewer stop the review and mark the PR as not review-ready?
@@ -224,6 +207,9 @@ Review the work against this process, in order:
 - If the PR leaves dual semantic ownership in place, did the reviewer verify that this is a lead-approved temporary seam rather than a migration excuse?
 - If any currently known manifestation lacks an explicit final status or proof line, did the reviewer stop the review and mark the PR as not review-ready?
 - If the audit relies on “shared owner introduced”, “same seam”, or “cleaner architecture” without manifestation-level proof, did the reviewer reject that as insufficient closure evidence?
+- Did the reviewer explicitly ask what manifestation, if any, is still only argued in prose rather than named with execution proof?
+- Did the reviewer judge whether the implementation materially reduced semantic drift for the concept in scope rather than only improving the touched seam?
+- Did the reviewer avoid approval language such as “good scoped fix” when multiple live interpreters of the same concept still remain?
 - For verify-vs-boot, boot-vs-runtime, reader-vs-writer, or other surface-parity issues, did the reviewer require proof at each relevant surface rather than accepting only synthetic agreement tests?
 - If the issue was discovered through a supported helper or supported boot/runtime surface, did the reviewer require supported-surface closure evidence before saying the failure class is unlikely to reproduce?
 - If the PR claims non-semantic maintenance, did the reviewer verify that no semantic/runtime contract behavior is being changed under that label?
