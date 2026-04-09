@@ -17,6 +17,9 @@ type Config struct {
 	Database   DatabaseConfig `yaml:"database"`
 	LLM        LLMConfig      `yaml:"llm"`
 	Extensions map[string]any `yaml:",inline"`
+
+	typedExtensions ExtensionsConfig `yaml:"-"`
+	extensionsReady bool             `yaml:"-"`
 }
 
 type RuntimeConfig struct {
@@ -83,6 +86,12 @@ func (c *Config) Validate() error {
 	if c.LLM.RuntimeMode != "api" && c.LLM.RuntimeMode != "cli_test" {
 		return fmt.Errorf("invalid llm.runtime_mode: %q", c.LLM.RuntimeMode)
 	}
+	if c.Runtime.MaxConcurrentAgents != 0 {
+		return errors.New("runtime.max_concurrent_agents is unsupported: no runtime path enforces it")
+	}
+	if c.Runtime.EventPollInterval != 0 {
+		return errors.New("runtime.event_poll_interval is unsupported: no runtime path enforces it")
+	}
 	if c.LLM.RuntimeMode == "cli_test" {
 		if c.LLM.ClaudeCLI.Command == "" {
 			return errors.New("llm.claude_cli.command is required in cli_test mode")
@@ -105,32 +114,28 @@ func (c *Config) Validate() error {
 	if c.LLM.Session.RotateOnParseFailures <= 0 {
 		return errors.New("llm.session.rotate_on_parse_failures must be > 0")
 	}
+	if err := c.prepareTypedExtensions(); err != nil {
+		return err
+	}
 	return nil
 }
 
 // Sharding returns the sharding extension config, or zero value if not configured.
 func (c *Config) Sharding() runtimesharding.Config {
-	if c == nil || len(c.Extensions) == 0 {
+	if c == nil {
 		return runtimesharding.Config{}
 	}
-	var ext struct {
-		Sharding runtimesharding.Config `yaml:"sharding"`
-	}
-	_ = c.DecodeExtensions(&ext)
-	ext.Sharding.ApplyDefaults()
-	return ext.Sharding
+	c.mustPrepareTypedExtensions()
+	return c.typedExtensions.Sharding
 }
 
 // Budget returns the budget extension config, or zero value if not configured.
 func (c *Config) Budget() BudgetConfig {
-	if c == nil || len(c.Extensions) == 0 {
+	if c == nil {
 		return BudgetConfig{}
 	}
-	var ext struct {
-		Budget BudgetConfig `yaml:"budget"`
-	}
-	_ = c.DecodeExtensions(&ext)
-	return ext.Budget
+	c.mustPrepareTypedExtensions()
+	return c.typedExtensions.Budget
 }
 
 func (c *Config) DecodeExtensions(out any) error {
@@ -148,4 +153,27 @@ func (c *Config) DecodeExtensions(out any) error {
 		return fmt.Errorf("decode extensions: %w", err)
 	}
 	return nil
+}
+
+func (c *Config) prepareTypedExtensions() error {
+	if c == nil || c.extensionsReady {
+		return nil
+	}
+	var ext ExtensionsConfig
+	if err := c.DecodeExtensions(&ext); err != nil {
+		return err
+	}
+	if _, ok := c.Extensions["sharding"]; ok {
+		return errors.New("sharding extension is unsupported: no runtime path consumes it")
+	}
+	ext.ApplyDefaults()
+	c.typedExtensions = ext
+	c.extensionsReady = true
+	return nil
+}
+
+func (c *Config) mustPrepareTypedExtensions() {
+	if err := c.prepareTypedExtensions(); err != nil {
+		panic(fmt.Sprintf("invalid runtime config extensions: %v", err))
+	}
 }

@@ -13,8 +13,6 @@ import (
 func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"runtime:",
-		"  max_concurrent_agents: 10",
-		"  event_poll_interval: 1s",
 		"  recovery_on_startup: false",
 		"database:",
 		"  host: 127.0.0.1",
@@ -103,6 +101,64 @@ func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 	c.LLM.ClaudeCLI.NoSessionPersistence = true
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected error for missing command")
+	}
+}
+
+func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
+	cfgText := strings.Join([]string{
+		"llm:",
+		"  runtime_mode: api",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+		"budget:",
+		"  human_tasks: oops",
+	}, "\n") + "\n"
+	p := filepath.Join(t.TempDir(), "swarm.yaml")
+	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "decode extensions") {
+		t.Fatalf("Load error = %v, want decode extensions failure", err)
+	}
+}
+
+func TestValidate_RejectsUnsupportedRuntimeControls(t *testing.T) {
+	c := &Config{}
+	c.LLM.RuntimeMode = "api"
+	c.LLM.Session.LockTTL = 1 * time.Second
+	c.LLM.Session.RotateAfterTurns = 1
+	c.LLM.Session.RotateOnParseFailures = 1
+	c.Runtime.MaxConcurrentAgents = 2
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "runtime.max_concurrent_agents") {
+		t.Fatalf("Validate error = %v, want unsupported max_concurrent_agents", err)
+	}
+
+	c.Runtime.MaxConcurrentAgents = 0
+	c.Runtime.EventPollInterval = time.Second
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "runtime.event_poll_interval") {
+		t.Fatalf("Validate error = %v, want unsupported event_poll_interval", err)
+	}
+}
+
+func TestLoad_RejectsUnsupportedShardingExtension(t *testing.T) {
+	cfgText := strings.Join([]string{
+		"llm:",
+		"  runtime_mode: api",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+		"sharding:",
+		"  max_shards_per_job: 4",
+	}, "\n") + "\n"
+	p := filepath.Join(t.TempDir(), "swarm.yaml")
+	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "sharding extension is unsupported") {
+		t.Fatalf("Load error = %v, want unsupported sharding extension", err)
 	}
 }
 

@@ -205,6 +205,39 @@ func TestLoadRunStatusRuntimeLogs_UsesCanonicalPersistedRunID(t *testing.T) {
 	}
 }
 
+func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) {
+	t.Setenv("SWARM_LLM_RUNTIME_MODE", "api")
+	t.Setenv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", "4")
+	t.Setenv("SWARM_CLAUDE_DEFAULT_MODEL", "test-model")
+	cfg, err := defaultRuntimeConfig()
+	if err == nil || !strings.Contains(err.Error(), "SWARM_RUNTIME_MAX_CONCURRENT_AGENTS") {
+		t.Fatalf("defaultRuntimeConfig error = %v, want unsupported env rejection", err)
+	}
+	if cfg != nil {
+		t.Fatalf("defaultRuntimeConfig cfg = %#v, want nil on unsupported env", cfg)
+	}
+}
+
+func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.T) {
+	cfgText := strings.Join([]string{
+		"runtime:",
+		"  max_concurrent_agents: 4",
+		"llm:",
+		"  runtime_mode: api",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n") + "\n"
+	p := filepath.Join(t.TempDir(), "swarm.yaml")
+	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := loadRuntimeConfig(p); err == nil || !strings.Contains(err.Error(), "runtime.max_concurrent_agents") {
+		t.Fatalf("loadRuntimeConfig error = %v, want unsupported runtime control rejection", err)
+	}
+}
+
 func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}

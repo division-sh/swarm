@@ -807,6 +807,9 @@ func loadRuntimeConfig(path string) (*config.Config, error) {
 }
 
 func defaultRuntimeConfig() (*config.Config, error) {
+	if err := rejectUnsupportedRuntimeControlEnv(); err != nil {
+		return nil, err
+	}
 	mode := strings.TrimSpace(os.Getenv("SWARM_LLM_RUNTIME_MODE"))
 	if mode == "" {
 		if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) != "" && strings.TrimSpace(os.Getenv("SWARM_CLAUDE_DEFAULT_MODEL")) != "" {
@@ -817,9 +820,7 @@ func defaultRuntimeConfig() (*config.Config, error) {
 	}
 	cfg := &config.Config{
 		Runtime: config.RuntimeConfig{
-			MaxConcurrentAgents: envInt("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", 10),
-			EventPollInterval:   envDuration("SWARM_RUNTIME_EVENT_POLL_INTERVAL", time.Second),
-			RecoveryOnStartup:   envBool("SWARM_RUNTIME_RECOVERY_ON_STARTUP", false),
+			RecoveryOnStartup: envBool("SWARM_RUNTIME_RECOVERY_ON_STARTUP", false),
 		},
 		Database: config.DatabaseConfig{
 			Host:     envOrDefault("SWARM_DB_HOST", envOrDefault("PGHOST", "127.0.0.1")),
@@ -857,6 +858,21 @@ func defaultRuntimeConfig() (*config.Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func rejectUnsupportedRuntimeControlEnv() error {
+	unsupported := make([]string, 0, 2)
+	if _, ok := os.LookupEnv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS"); ok {
+		unsupported = append(unsupported, "SWARM_RUNTIME_MAX_CONCURRENT_AGENTS")
+	}
+	if _, ok := os.LookupEnv("SWARM_RUNTIME_EVENT_POLL_INTERVAL"); ok {
+		unsupported = append(unsupported, "SWARM_RUNTIME_EVENT_POLL_INTERVAL")
+	}
+	if len(unsupported) == 0 {
+		return nil
+	}
+	sort.Strings(unsupported)
+	return fmt.Errorf("unsupported inert runtime controls configured: %s", strings.Join(unsupported, ", "))
 }
 
 func envOrDefault(key, fallback string) string {
