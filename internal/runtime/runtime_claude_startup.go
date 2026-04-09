@@ -231,7 +231,7 @@ func selectStartupCallableTool(tools []runtimemcp.ToolDef, capabilities toolcapa
 		if !ok || !capability.Callable || capability.Kind == toolcapabilities.KindEmit {
 			continue
 		}
-		if !schemaRequiresObjectFields(tool.InputSchema) {
+		if !schemaAllowsEmptyObjectArguments(tool.InputSchema) {
 			continue
 		}
 		return name, true
@@ -239,19 +239,38 @@ func selectStartupCallableTool(tools []runtimemcp.ToolDef, capabilities toolcapa
 	return "", false
 }
 
-func schemaRequiresObjectFields(schema any) bool {
+func schemaAllowsEmptyObjectArguments(schema any) bool {
 	typed, ok := schema.(map[string]any)
 	if !ok {
 		return false
 	}
-	if strings.TrimSpace(asString(typed["type"])) != "object" {
+	if schemaType := strings.TrimSpace(asString(typed["type"])); schemaType != "" && schemaType != "object" {
 		return false
 	}
-	required, ok := typed["required"].([]any)
-	if !ok || len(required) == 0 {
-		return false
+	return len(schemaRequiredFieldNames(typed["required"])) == 0
+}
+
+func schemaRequiredFieldNames(raw any) []string {
+	switch typed := raw.(type) {
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if name := strings.TrimSpace(asString(item)); name != "" {
+				out = append(out, name)
+			}
+		}
+		return out
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if name := strings.TrimSpace(item); name != "" {
+				out = append(out, name)
+			}
+		}
+		return out
+	default:
+		return nil
 	}
-	return true
 }
 
 func startupProbeMCPToolsList(ctx context.Context, client *http.Client, binding llm.MCPHTTPBinding) ([]runtimemcp.ToolDef, error) {
@@ -329,27 +348,14 @@ func startupProbeMCPToolsCall(ctx context.Context, client *http.Client, binding 
 	if err != nil {
 		return fmt.Errorf("tools/call returned invalid runtimeError payload: %w", err)
 	}
-	if startupProbeAcceptsRuntimeValidation(runtimeErr) {
-		return nil
-	}
 	message := strings.TrimSpace(startupMCPErrorText(result))
 	if message != "" {
 		return fmt.Errorf(message)
 	}
+	if runtimeErr != nil && strings.TrimSpace(runtimeErr.Message) != "" {
+		return fmt.Errorf("%s", strings.TrimSpace(runtimeErr.Message))
+	}
 	return fmt.Errorf("tools/call returned runtime error code=%s", strings.TrimSpace(runtimeErr.Code))
-}
-
-func startupProbeAcceptsRuntimeValidation(runtimeErr *runtimemcp.RuntimeErrorPayload) bool {
-	if runtimeErr == nil {
-		return false
-	}
-	if strings.TrimSpace(runtimeErr.Code) != runtimemcp.ErrCodeToolExecFailed {
-		return false
-	}
-	if runtimeErr.Cause == nil {
-		return false
-	}
-	return strings.TrimSpace(runtimeErr.Cause.Code) == "invalid_tool_input"
 }
 
 func startupMCPErrorText(result map[string]any) string {

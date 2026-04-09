@@ -95,11 +95,13 @@ nodes:
     known_manifestations:
       - context-token policy differs across transport surfaces
       - startup validation does not prove the real filtered transport path
+      - startup reachability probe conflates tool-call transport proof with tool-specific required-input validity
       - agent-visible tool availability differs between prompt and transport
     representative_issues:
       - 111
       - 136
       - 137
+      - 305
     common_framing_mistakes:
       too_broad:
         - tool transport is inconsistent
