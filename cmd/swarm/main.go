@@ -1249,7 +1249,7 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		agents = dashboardserver.NewSQLAgentReader(stores.Postgres.DB, stores.Postgres, rotateAfterTurns)
 		mailbox = stores.Postgres
 		conversations = dashboardserver.NewSQLConversationReader(stores.Postgres.DB, stores.Postgres)
-		observability = dashboardserver.NewSQLObservabilityReader(stores.Postgres.DB)
+		observability = dashboardserver.NewSQLObservabilityReader(stores.Postgres.DB, stores.Postgres)
 	}
 	if supervisor != nil {
 		agentControl = dashboardDynamicAgentControl{supervisor: supervisor}

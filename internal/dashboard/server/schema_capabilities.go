@@ -51,3 +51,20 @@ func requireAgentOperatorProjectionCapabilities(caps store.StoreSchemaCapabiliti
 	}
 	return store.RequireCanonicalPendingAgentDeliveryCapabilities(caps)
 }
+
+func requireObservabilityEventCapabilities(caps store.StoreSchemaCapabilities) error {
+	if caps.Events.Log != store.SchemaFlavorCanonical {
+		return unsupportedDashboardSchemaCapability("events", caps.Events.Log)
+	}
+	if caps.Events.Deliveries != store.SchemaFlavorCanonical {
+		return unsupportedDashboardSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	}
+	return nil
+}
+
+func requireObservabilityRuntimeLogCapabilities(caps store.StoreSchemaCapabilities) error {
+	if caps.Events.Log != store.SchemaFlavorCanonical {
+		return unsupportedDashboardSchemaCapability("events", caps.Events.Log)
+	}
+	return nil
+}
