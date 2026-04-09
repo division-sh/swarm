@@ -31,6 +31,9 @@ func TestPrintRunStatusReport(t *testing.T) {
 	report := runStatusReport{
 		RunID:             "run-123",
 		RunTableStatus:    "running",
+		OperationalState:  "stalled",
+		BlockingLayer:     "scoring_terminal_outcome",
+		BlockingReason:    "terminal_scoring_outcome_missing",
 		RootEventID:       "evt-1",
 		RootEventType:     "scan.requested",
 		StartedAt:         started,
@@ -66,7 +69,10 @@ func TestPrintRunStatusReport(t *testing.T) {
 	for _, want := range []string{
 		"Run run-123",
 		"Root: scan.requested (evt-1)",
-		"Run Status: running",
+		"Run Table Status: running",
+		"Operational State: stalled",
+		"Blocking Layer: scoring_terminal_outcome",
+		"Blocking Reason: terminal_scoring_outcome_missing",
 		"Summary: events=7 deliveries=1 dead_letters=0 agent_turns=1 runtime_warn_errors=1",
 		"Heuristics:",
 		"run appears settled after scoring started but no terminal scoring outcome was emitted",
@@ -82,6 +88,71 @@ func TestPrintRunStatusReport(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationallyStalled(t *testing.T) {
+	report := runStatusReport{
+		RunTableStatus: "running",
+		LastEventAt:    time.Unix(1700000000, 0).UTC(),
+		Deliveries: []runStatusDeliveryCount{
+			{SubscriberID: "agent-1", Status: "delivered", Count: 2},
+			{SubscriberID: "agent-2", Status: "failed", Count: 1},
+		},
+	}
+
+	got := projectRunOperationalStatus(report)
+	if got.State != "stalled" {
+		t.Fatalf("state = %q, want stalled", got.State)
+	}
+	if got.BlockingLayer != "delivery_lifecycle" {
+		t.Fatalf("blocking_layer = %q, want delivery_lifecycle", got.BlockingLayer)
+	}
+	if got.BlockingReason != "no_active_deliveries" {
+		t.Fatalf("blocking_reason = %q, want no_active_deliveries", got.BlockingReason)
+	}
+}
+
+func TestProjectRunOperationalStatus_UsesScoringOutcomeBlockingLayer(t *testing.T) {
+	report := runStatusReport{
+		RunTableStatus: "running",
+		LastEventAt:    time.Unix(1700000000, 0).UTC(),
+		EventCounts: []runStatusEventCount{
+			{EventName: "scoring/scoring.requested", Count: 1},
+		},
+		Deliveries: []runStatusDeliveryCount{
+			{SubscriberID: "agent-1", Status: "delivered", Count: 1},
+		},
+	}
+
+	got := projectRunOperationalStatus(report)
+	if got.State != "stalled" {
+		t.Fatalf("state = %q, want stalled", got.State)
+	}
+	if got.BlockingLayer != "scoring_terminal_outcome" {
+		t.Fatalf("blocking_layer = %q, want scoring_terminal_outcome", got.BlockingLayer)
+	}
+	if got.BlockingReason != "terminal_scoring_outcome_missing" {
+		t.Fatalf("blocking_reason = %q, want terminal_scoring_outcome_missing", got.BlockingReason)
+	}
+}
+
+func TestProjectRunOperationalStatus_PreservesHealthyRunningWhenActiveDeliveriesRemain(t *testing.T) {
+	report := runStatusReport{
+		RunTableStatus: "running",
+		LastEventAt:    time.Unix(1700000000, 0).UTC(),
+		Deliveries: []runStatusDeliveryCount{
+			{SubscriberID: "agent-1", Status: "in_progress", Count: 1},
+			{SubscriberID: "agent-2", Status: "delivered", Count: 1},
+		},
+	}
+
+	got := projectRunOperationalStatus(report)
+	if got.State != "running" {
+		t.Fatalf("state = %q, want running", got.State)
+	}
+	if got.BlockingLayer != "" || got.BlockingReason != "" {
+		t.Fatalf("unexpected blocking projection: %#v", got)
 	}
 }
 
@@ -309,6 +380,106 @@ func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 	for _, heuristic := range report.Heuristics {
 		if strings.Contains(heuristic, "runs table still says running") {
 			t.Fatalf("unexpected running heuristic after durable completion: %#v", report.Heuristics)
+		}
+	}
+}
+
+func TestLoadRunStatusReport_ProjectsExplicitStalledRunState(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	rootEventID := uuid.NewString()
+	deliveredEventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', now() - interval '10 minutes')
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	for _, eventID := range []string{rootEventID, deliveredEventID} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (
+				run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				$1::uuid, $2::uuid, 'scan.requested', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '5 minutes'
+			)
+		`, runID, eventID); err != nil {
+			t.Fatalf("seed event %s: %v", eventID, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, delivered_at, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'agent', 'agent-1', 'delivered', now() - interval '2 minutes', now() - interval '4 minutes'
+		)
+	`, runID, deliveredEventID); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+
+	report, err := loadRunStatusReport(ctx, db, runID, runStatusOptions{})
+	if err != nil {
+		t.Fatalf("loadRunStatusReport: %v", err)
+	}
+	if report.RunTableStatus != "running" {
+		t.Fatalf("run_table_status = %q, want running", report.RunTableStatus)
+	}
+	if report.OperationalState != "stalled" {
+		t.Fatalf("operational_state = %q, want stalled", report.OperationalState)
+	}
+	if report.BlockingLayer != "delivery_lifecycle" {
+		t.Fatalf("blocking_layer = %q, want delivery_lifecycle", report.BlockingLayer)
+	}
+	if report.BlockingReason != "no_active_deliveries" {
+		t.Fatalf("blocking_reason = %q, want no_active_deliveries", report.BlockingReason)
+	}
+	for _, heuristic := range report.Heuristics {
+		if strings.Contains(heuristic, "runs table still says running") {
+			t.Fatalf("unexpected stalled heuristic fallback: %#v", report.Heuristics)
+		}
+	}
+}
+
+func TestLoadRunStatusReport_ProjectsScoringOutcomeStall(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	rootEventID := uuid.NewString()
+	scoringEventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', now() - interval '10 minutes')
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES
+			($1::uuid, $2::uuid, 'scan.requested', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '9 minutes'),
+			($1::uuid, $3::uuid, 'scoring/scoring.requested', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '2 minutes')
+	`, runID, rootEventID, scoringEventID); err != nil {
+		t.Fatalf("seed events: %v", err)
+	}
+
+	report, err := loadRunStatusReport(ctx, db, runID, runStatusOptions{})
+	if err != nil {
+		t.Fatalf("loadRunStatusReport: %v", err)
+	}
+	if report.OperationalState != "stalled" {
+		t.Fatalf("operational_state = %q, want stalled", report.OperationalState)
+	}
+	if report.BlockingLayer != "scoring_terminal_outcome" {
+		t.Fatalf("blocking_layer = %q, want scoring_terminal_outcome", report.BlockingLayer)
+	}
+	if report.BlockingReason != "terminal_scoring_outcome_missing" {
+		t.Fatalf("blocking_reason = %q, want terminal_scoring_outcome_missing", report.BlockingReason)
+	}
+	for _, heuristic := range report.Heuristics {
+		if strings.Contains(heuristic, "run appears settled after scoring started") {
+			t.Fatalf("unexpected scoring heuristic fallback: %#v", report.Heuristics)
 		}
 	}
 }

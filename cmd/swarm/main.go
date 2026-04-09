@@ -236,6 +236,9 @@ func runVerifyCommand(ctx context.Context, repo string, args []string, out io.Wr
 type runStatusReport struct {
 	RunID             string                    `json:"run_id"`
 	RunTableStatus    string                    `json:"run_table_status,omitempty"`
+	OperationalState  string                    `json:"operational_state,omitempty"`
+	BlockingLayer     string                    `json:"blocking_layer,omitempty"`
+	BlockingReason    string                    `json:"blocking_reason,omitempty"`
 	RootEventID       string                    `json:"root_event_id,omitempty"`
 	RootEventType     string                    `json:"root_event_type,omitempty"`
 	StartedAt         time.Time                 `json:"started_at,omitempty"`
@@ -251,6 +254,12 @@ type runStatusReport struct {
 	Heuristics        []string                  `json:"heuristics,omitempty"`
 	RuntimeLogSummary []runStatusRuntimeSummary `json:"runtime_log_summary,omitempty"`
 	RuntimeLogs       []runStatusRuntimeLog     `json:"runtime_logs,omitempty"`
+}
+
+type runOperationalProjection struct {
+	State          string
+	BlockingLayer  string
+	BlockingReason string
 }
 
 type runStatusEventCount struct {
@@ -560,6 +569,10 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string, opts run
 			return runStatusReport{}, err
 		}
 	}
+	operational := projectRunOperationalStatus(report)
+	report.OperationalState = operational.State
+	report.BlockingLayer = operational.BlockingLayer
+	report.BlockingReason = operational.BlockingReason
 	report.Heuristics = deriveRunStatusHeuristics(report)
 
 	return report, nil
@@ -656,6 +669,22 @@ func logLimitForStatus(opts runStatusOptions) int {
 }
 
 func deriveRunStatusHeuristics(report runStatusReport) []string {
+	heuristics := make([]string, 0, 4)
+	if len(report.DeadLetters) > 0 {
+		heuristics = append(heuristics, "dead letters exist for this run")
+	}
+	return heuristics
+}
+
+func projectRunOperationalStatus(report runStatusReport) runOperationalProjection {
+	status := strings.ToLower(strings.TrimSpace(report.RunTableStatus))
+	if status == "" {
+		return runOperationalProjection{}
+	}
+	if status != "running" {
+		return runOperationalProjection{State: status}
+	}
+
 	eventCounts := map[string]int{}
 	for _, item := range report.EventCounts {
 		eventCounts[strings.TrimSpace(item.EventName)] = item.Count
@@ -667,18 +696,22 @@ func deriveRunStatusHeuristics(report runStatusReport) []string {
 			activeDeliveries += item.Count
 		}
 	}
-	heuristics := make([]string, 0, 4)
 	terminalScoring := eventCounts["scoring/vertical.marginal"] + eventCounts["scoring/vertical.rejected"] + eventCounts["vertical.shortlisted"]
 	if activeDeliveries == 0 && eventCounts["scoring/scoring.requested"] > 0 && terminalScoring == 0 {
-		heuristics = append(heuristics, "run appears settled after scoring started but no terminal scoring outcome was emitted")
+		return runOperationalProjection{
+			State:          "stalled",
+			BlockingLayer:  "scoring_terminal_outcome",
+			BlockingReason: "terminal_scoring_outcome_missing",
+		}
 	}
-	if strings.EqualFold(strings.TrimSpace(report.RunTableStatus), "running") && activeDeliveries == 0 && !report.LastEventAt.IsZero() {
-		heuristics = append(heuristics, "runs table still says running, but there are no pending or in-progress deliveries")
+	if activeDeliveries == 0 && !report.LastEventAt.IsZero() {
+		return runOperationalProjection{
+			State:          "stalled",
+			BlockingLayer:  "delivery_lifecycle",
+			BlockingReason: "no_active_deliveries",
+		}
 	}
-	if len(report.DeadLetters) > 0 {
-		heuristics = append(heuristics, "dead letters exist for this run")
-	}
-	return heuristics
+	return runOperationalProjection{State: "running"}
 }
 
 func printRunStatusReport(w io.Writer, report runStatusReport) {
@@ -690,7 +723,16 @@ func printRunStatusReport(w io.Writer, report runStatusReport) {
 		fmt.Fprintf(w, "Root: %s (%s)\n", report.RootEventType, report.RootEventID)
 	}
 	if strings.TrimSpace(report.RunTableStatus) != "" {
-		fmt.Fprintf(w, "Run Status: %s\n", report.RunTableStatus)
+		fmt.Fprintf(w, "Run Table Status: %s\n", report.RunTableStatus)
+	}
+	if strings.TrimSpace(report.OperationalState) != "" {
+		fmt.Fprintf(w, "Operational State: %s\n", report.OperationalState)
+	}
+	if strings.TrimSpace(report.BlockingLayer) != "" {
+		fmt.Fprintf(w, "Blocking Layer: %s\n", report.BlockingLayer)
+	}
+	if strings.TrimSpace(report.BlockingReason) != "" {
+		fmt.Fprintf(w, "Blocking Reason: %s\n", report.BlockingReason)
 	}
 	fmt.Fprintf(w, "Started: %s\n", report.StartedAt.Format(time.RFC3339))
 	if !report.LastEventAt.IsZero() {
