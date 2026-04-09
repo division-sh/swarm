@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	runtimeengine "swarm/internal/runtime/engine"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
@@ -93,7 +92,6 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if err != nil {
 		return 0, err
 	}
-	dispatcher := engineDispatcher{bus: eb}
 	redelivered := 0
 	for _, record := range events {
 		evt := record.Event
@@ -115,8 +113,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			_ = lease.Release(ctx)
 			return redelivered, err
 		}
-		intent := runtimeengine.EmitIntent{Event: evt, Recipients: recipients}
-		if err := dispatcher.dispatchIntent(ctx, intent); err != nil {
+		if err := eb.PublishPersistedRecipients(ctx, evt, recipients); err != nil {
 			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
 				eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
 			}
@@ -128,21 +125,4 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 		redelivered++
 	}
 	return redelivered, nil
-}
-
-func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, eventID string) ([]string, error) {
-	if !runtimereplayclaim.SupportsPersistedReplay(eb.store) {
-		return nil, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable
-	}
-	recipients, err := eb.store.ListEventDeliveryRecipients(ctx, eventID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range recipients {
-		recipients[i] = strings.TrimSpace(recipients[i])
-	}
-	if recipients == nil {
-		return []string{}, nil
-	}
-	return uniqueStrings(recipients), nil
 }

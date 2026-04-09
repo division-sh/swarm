@@ -134,6 +134,88 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 	}
 }
 
+func TestSweepUndispatched_ReconstructsInternalSubscribersForInternalOnlyReplay(t *testing.T) {
+	store := &sweeperTestStore{
+		events: []events.PersistedReplayEvent{
+			{Event: (events.Event{
+				ID:        "evt-internal-only",
+				Type:      events.EventType("custom.internal"),
+				Payload:   []byte(`{"entity_id":"ent-internal"}`),
+				CreatedAt: time.Now().UTC(),
+			}).WithEntityID("ent-internal")},
+		},
+		deliveries: map[string][]string{},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.internal"))
+
+	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("swept count = %d, want 1", count)
+	}
+	if got := store.receipts["evt-internal-only"]; got != "processed" {
+		t.Fatalf("receipt status = %q, want processed", got)
+	}
+	select {
+	case evt := <-internalCh:
+		if evt.ID != "evt-internal-only" {
+			t.Fatalf("delivered event id = %q, want evt-internal-only", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected internal replay delivery")
+	}
+}
+
+func TestSweepUndispatched_ReconstructsInternalSubscribersAlongsidePersistedAgents(t *testing.T) {
+	store := &sweeperTestStore{
+		events: []events.PersistedReplayEvent{
+			{Event: (events.Event{
+				ID:        "evt-mixed",
+				Type:      events.EventType("custom.mixed"),
+				Payload:   []byte(`{"entity_id":"ent-mixed"}`),
+				CreatedAt: time.Now().UTC(),
+			}).WithEntityID("ent-mixed")},
+		},
+		deliveries: map[string][]string{"evt-mixed": {"agent-a"}},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.mixed"))
+	agentCh := eb.Subscribe("agent-a", events.EventType("custom.mixed"))
+
+	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("swept count = %d, want 1", count)
+	}
+	select {
+	case evt := <-internalCh:
+		if evt.ID != "evt-mixed" {
+			t.Fatalf("internal delivered event id = %q, want evt-mixed", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected internal subscriber to receive replayed event")
+	}
+	select {
+	case evt := <-agentCh:
+		if evt.ID != "evt-mixed" {
+			t.Fatalf("agent delivered event id = %q, want evt-mixed", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected persisted agent recipient to receive replayed event")
+	}
+}
+
 func TestSweepUndispatched_UsesAuthoritativeEmptyFanOutWithoutSubscribedFallback(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{

@@ -638,17 +638,14 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	return nil
 }
 
-// PublishPersistedRecipients delivers an already-persisted authoritative
-// recipient manifest without re-running direct recipient planning.
+// PublishPersistedRecipients delivers an already-committed event using the
+// authoritative persisted agent manifest plus current internal subscribers.
 func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
 	recipients = uniqueStrings(recipients)
-	if len(recipients) == 0 {
-		return errors.New("persisted recipients are required")
-	}
 	if evt.Type == "" {
 		return errors.New("event type is required")
 	}
@@ -661,16 +658,29 @@ func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.E
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now()
 	}
-	if err := eb.deliverToAgents(ctx, evt, recipients); err != nil {
+	liveRecipients, internalRecipients, err := eb.committedLiveRecipients(ctx, evt, recipients, true)
+	if err != nil {
 		return err
+	}
+	if len(liveRecipients) == 0 {
+		return nil
+	}
+	if err := eb.deliverToAgents(ctx, evt, liveRecipients); err != nil {
+		return err
+	}
+	owner := "event_deliveries"
+	if len(internalRecipients) > 0 {
+		owner = "event_deliveries+current_internal_subscribers"
 	}
 	eb.logRuntime(ctx, "debug", "Persisted event was delivered to authoritative recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
 		"direct":                     true,
-		"delivery_manifest_owner":    "event_deliveries",
-		"recipients_count":           len(recipients),
+		"delivery_manifest_owner":    owner,
+		"recipients_count":           len(liveRecipients),
 		"parent_event_id":            strings.TrimSpace(evt.ParentEventID),
-		"requested_recipients":       append([]string(nil), recipients...),
-		"requested_recipients_count": len(recipients),
+		"requested_recipients":       append([]string(nil), liveRecipients...),
+		"requested_recipients_count": len(liveRecipients),
+		"persisted_recipients":       append([]string(nil), recipients...),
+		"internal_recipients":        append([]string(nil), internalRecipients...),
 	}, "", 0)
 	return nil
 }

@@ -175,6 +175,66 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	}
 }
 
+func TestRecoveryManager_ReplaysInternalSubscribersWithEmptyPersistedManifest(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	capture := &recoveryCapturePublisher{inner: bus}
+	internalCh := bus.SubscribeInternal("workflow-runtime", events.EventType("system.recover.internal"))
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	evt := events.Event{
+		ID:          eventID,
+		Type:        events.EventType("system.recover.internal"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"ok":true}`),
+		RunID:       runID,
+		CreatedAt:   time.Now().Add(-time.Minute).UTC(),
+	}.WithEntityID(entityID)
+
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(capture.direct) != 1 {
+		t.Fatalf("direct replayed events = %#v, want one replayed event", capture.direct)
+	}
+	select {
+	case delivered := <-internalCh:
+		if delivered.ID != eventID {
+			t.Fatalf("delivered event id = %q, want %q", delivered.ID, eventID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected internal subscriber to receive replayed event")
+	}
+
+	var receiptStatus string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&receiptStatus); err != nil {
+		t.Fatalf("load replay receipt: %v", err)
+	}
+	if receiptStatus != "success" {
+		t.Fatalf("replay receipt outcome = %q, want success", receiptStatus)
+	}
+}
+
 func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing.T) {
 	ctx := context.Background()
 	_, db, cleanup := testutil.StartPostgres(t)

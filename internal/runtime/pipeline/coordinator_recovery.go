@@ -113,22 +113,6 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			_ = lease.Release(ctx)
 			continue
 		}
-		if len(persistedRecipients) == 0 {
-			if recorder == nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("mark replay event %s delivered receipt: missing pipeline receipt recorder", evt.ID)
-				}
-				_ = lease.Release(ctx)
-				continue
-			}
-			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID, "processed", ""); err != nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID, err)
-				}
-			}
-			_ = lease.Release(ctx)
-			continue
-		}
 		if err := r.bus.PublishPersistedRecipients(ctx, evt, persistedRecipients); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("replay event %s: %w", evt.ID, err)
