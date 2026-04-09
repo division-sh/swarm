@@ -976,6 +976,56 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalReceiptCapa
 	}
 }
 
+func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCapabilityOwner(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLAgentReader(db, stubAgents{rows: []runtimemanager.PersistedAgent{{
+		Config: runtimeactors.AgentConfig{
+			ID:   "agent-1",
+			Role: "researcher",
+			Mode: "global",
+			Type: "managed",
+		},
+		Status: "active",
+	}}}, 12)
+
+	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "agent reader requires explicit schema capability owner") {
+		t.Fatalf("expected missing capability owner error, got %v", err)
+	}
+}
+
+func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalTurnCapability(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	caps := canonicalEventAndConversationCaps()
+	caps.Conversations.Turns = store.SchemaFlavorLegacy
+
+	reader := NewSQLAgentReader(db, stubSQLAgents{
+		rows: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{
+				ID:   "agent-1",
+				Role: "researcher",
+				Mode: "global",
+				Type: "managed",
+			},
+			Status: "active",
+		}},
+		caps: caps,
+	}, 12)
+
+	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "agent_turns schema is unsupported") {
+		t.Fatalf("expected explicit unsupported turn capability error, got %v", err)
+	}
+}
+
 func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelector(t *testing.T) {
 	dsn, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -1737,7 +1787,51 @@ func TestSQLConversationReader_GetMissing(t *testing.T) {
 	}
 }
 
-func TestSQLConversationReader_GetSkipsTurnsWithoutCapability(t *testing.T) {
+func TestSQLConversationReader_ListFailsClosedWithoutCapabilityOwner(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, nil)
+	if _, err := reader.List(context.Background(), 10); err == nil || !strings.Contains(err.Error(), "conversation reader requires explicit schema capability owner") {
+		t.Fatalf("expected missing capability owner error, got %v", err)
+	}
+}
+
+func TestSQLConversationReader_ListFailsClosedWithoutCanonicalConversationSurface(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions: store.SchemaFlavorLegacy,
+			Audits:   store.SchemaFlavorLegacy,
+		},
+	}})
+	if _, err := reader.List(context.Background(), 10); err == nil || !strings.Contains(err.Error(), "schema is unsupported by the explicit capability boundary") {
+		t.Fatalf("expected unsupported conversation surface capability error, got %v", err)
+	}
+}
+
+func TestSQLConversationReader_GetFailsClosedWithoutCapabilityOwner(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, nil)
+	if _, _, err := reader.Get(context.Background(), "sess-1"); err == nil || !strings.Contains(err.Error(), "conversation reader requires explicit schema capability owner") {
+		t.Fatalf("expected missing capability owner error, got %v", err)
+	}
+}
+
+func TestSQLConversationReader_GetFailsClosedWithoutTurnCapability(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -1747,6 +1841,7 @@ func TestSQLConversationReader_GetSkipsTurnsWithoutCapability(t *testing.T) {
 	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
 		Conversations: store.ConversationSchemaCapabilities{
 			Sessions: store.SchemaFlavorCanonical,
+			Turns:    store.SchemaFlavorLegacy,
 		},
 	}})
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
@@ -1760,14 +1855,8 @@ func TestSQLConversationReader_GetSkipsTurnsWithoutCapability(t *testing.T) {
 		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 1, []byte(summaryState), []byte(messagePayload), now))
 
 	item, ok, err := reader.Get(context.Background(), "sess-1")
-	if err != nil {
-		t.Fatalf("get conversation: %v", err)
-	}
-	if !ok {
-		t.Fatalf("expected conversation to exist")
-	}
-	if len(item.Turns) != 0 {
-		t.Fatalf("turns = %#v", item.Turns)
+	if err == nil || !strings.Contains(err.Error(), "agent_turns schema is unsupported") {
+		t.Fatalf("expected unsupported turn capability error, got item=%+v ok=%v err=%v", item, ok, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
