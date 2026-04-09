@@ -87,6 +87,7 @@ nodes:
     known_manifestations:
       - conversation and turn APIs widen typed persisted data
       - summary/runtime-log/mutation completeness may be inferred or silently omitted
+      - mutation-surface reconstruction can silently tolerate malformed persisted `entity_mutations` proof in touched conformance/read-model seams
     representative_issues:
       - 134
       - 224
