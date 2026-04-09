@@ -87,6 +87,7 @@ nodes:
     known_manifestations:
       - conversation and turn APIs widen typed persisted data
       - dashboard readers synthesize canonical schema capabilities when no explicit capability owner is provided
+      - observability readers bypass explicit schema capability ownership for event and runtime-log surfaces
       - summary/runtime-log/mutation completeness may be inferred or silently omitted
       - mutation-surface reconstruction can silently tolerate malformed persisted `entity_mutations` proof in touched conformance/read-model seams
     representative_issues:

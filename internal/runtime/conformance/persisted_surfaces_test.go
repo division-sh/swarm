@@ -282,7 +282,7 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 		t.Fatalf("logger.Log() error = %v", err)
 	}
 
-	reader := dashboardserver.NewSQLObservabilityReader(db)
+	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
 	if reader == nil {
 		t.Fatal("NewSQLObservabilityReader returned nil")
 	}
