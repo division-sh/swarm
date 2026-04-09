@@ -544,6 +544,54 @@ func TestRecoveryManager_ExplicitlySkipsReplayWithoutPersistedRecipients(t *test
 	findRecoveryAftermathLog(t, capture.logs, childID, "skipped", "no_persisted_recipients")
 }
 
+func TestRecoveryManager_DoesNotEmitAftermathLogForRuntimeLogReplayCandidate(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	capture := &recoveryCapturePublisher{inner: bus}
+
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, 'platform.runtime_log', 'global', '{"message":"prior diagnostics"}'::jsonb, 'runtime', 'platform', now()
+		)
+	`, eventID); err != nil {
+		t.Fatalf("seed runtime log event: %v", err)
+	}
+
+	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(capture.logs) != 0 {
+		t.Fatalf("runtime log aftermath entries = %#v, want none", capture.logs)
+	}
+	var receiptStatus, receiptReason string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&receiptStatus, &receiptReason); err != nil {
+		t.Fatalf("load runtime log receipt: %v", err)
+	}
+	if receiptStatus != "dead_letter" {
+		t.Fatalf("runtime log receipt outcome = %q, want dead_letter", receiptStatus)
+	}
+	if receiptReason != "pipeline_error" {
+		t.Fatalf("runtime log receipt reason = %q, want pipeline_error", receiptReason)
+	}
+}
+
 func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscriptions(t *testing.T) {
 	ctx := context.Background()
 	_, db, cleanup := testutil.StartPostgres(t)
