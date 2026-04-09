@@ -69,6 +69,11 @@ Manifestation coverage table:
 Parent-class sibling probe:
 - sibling seam: <...>
   - status: <broken now | apparently clean, with proof | different class, with proof | still unproven>
+- watchlist-backed promotion check:
+  - mapped node: <...>
+  - broader class already tracked there: <...>
+  - additional sibling manifestations / consumer families suggested by that node: <... or none>
+  - does that watchlist evidence mean the parent should be absorbed now: <yes/no and why>
 - estimated remaining child slices to close the parent class: <number or range>
 - rough grouping of remaining slices: <...>
 - confidence level: <high | medium | low>
@@ -125,6 +130,7 @@ Decision:
 Adversarial checks performed:
 - <what parent / follow-up / closure / tracker claims were independently re-checked>
 - <what claim was actively challenged or falsified>
+- <what the mapped watchlist node implied about broader parent closure, and whether that changed the gate decision>
 
 Why complete closure is not being required, if first-slice approval is used:
 - <why the broader class is not the honest default for this PR>

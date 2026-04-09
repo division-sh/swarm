@@ -53,6 +53,10 @@ That issue comment must state:
 - every currently known manifestation in scope
 - the exact proof planned for each manifestation
 - the parent-class sibling probe and post-pre-audit parent action decision
+- the watchlist-backed promotion check:
+  - what broader class is already tracked in the mapped watchlist node
+  - whether that node suggests additional live sibling manifestations or consumer families beyond the proposed slice
+  - whether that watchlist evidence means the parent should be absorbed now rather than left for follow-up
 - the estimated remaining child-slice tail needed to close the parent failure class, if any, with rough grouping and confidence level
 - the watchlist mapping or refinement decision
 - the intended closure level
@@ -70,6 +74,7 @@ Do not start implementation if:
 - the systematic-consumption audit is not exhaustive
 - any manifestation is labeled “same seam” without named execution proof
 - a broader parent exists but sibling probing or the parent action decision is missing
+- a broader parent exists but the watchlist-backed promotion check was not done
 - a required watchlist decision is missing
 - a required independent pre-audit gate outcome is not explicitly recorded on the issue thread
 - the intended closure level is not stated
@@ -172,6 +177,7 @@ Required process:
    - sibling seams under the parent were probed enough to assess parent state
    - the post-pre-audit parent action decision is explicit
    - the watchlist decision is explicit
+   - the mapped watchlist node was checked as active evidence when deciding whether broader parent closure should be required now
    - the intended closure level is explicit
    - seams narrowed out as “different concept” are supported by explicit proof
    - each manifestation is classified as exactly one of:

@@ -35,6 +35,8 @@ Review the work against this process, in order:
 - repo-wide consumer sweep done
 - manifestation table present when required
 - sibling seams under the parent failure class probed enough to assess parent state
+- was the mapped watchlist node consulted as active evidence when deciding whether to absorb the parent now versus keep first-slice scope?
+- did the watchlist node suggest any additional live sibling manifestations or consumer families that should have changed that decision?
 - explicit post-pre-audit action decision made for the parent failure class when a broader parent exists
 - intended closure level stated explicitly
 - deeper architecture issue / type-model smell stated when the implementer noticed one
@@ -52,6 +54,7 @@ Review the work against this process, in order:
 - if the outcome was `approved as first slice`, did the reviewer verify that:
   - the chosen class is a real coherent class boundary
   - sibling probing under the parent was actually done
+  - the mapped watchlist node was checked as active evidence before accepting staged scope
   - the parent tracker is valid and independently verified
   - the PR can still honestly eliminate its chosen class entirely?
 - if those conditions were not true, did the reviewer push back and require wider or complete remediation instead?

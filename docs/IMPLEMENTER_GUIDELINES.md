@@ -67,6 +67,10 @@ Default process:
   - keep first-slice scope
   - open or update a dedicated follow-up stream
   - or leave the parent explicitly open as still unproven
+- when making that parent-class action decision, the implementer and reviewer must consult the mapped watchlist node as active evidence, not just as bookkeeping:
+  - verify what broader parent class is already tracked there
+  - verify whether the node already suggests additional live sibling manifestations or consumer families beyond the proposed slice
+  - if the watchlist evidence makes broader parent closure the honest default, promote scope before coding rather than leaving that pressure hidden
 - the implementer must also identify which watchlist node the work belongs to, or create/refine one if the existing watchlist does not capture the failure class cleanly
 - the watchlist should be treated as a semantic trie / failure-class map, not as passive notes
 - for failure-class, parity, semantic-drift, and similar high-risk semantic work, the main effort is expected to go into manifestation identification and classification before coding starts
@@ -110,6 +114,7 @@ Meaning of `pre-audit approved as first slice`:
   - a broader parent failure class exists above the chosen working failure class
   - the chosen working failure class is still a real coherent class boundary, not only a local seam or one manifestation
   - sibling probing under the parent was actually performed
+  - the mapped watchlist node was checked as active evidence when deciding whether broader parent closure should be required now
   - the parent-class action decision is explicit
   - the parent-class tracking record is independently verified and valid
   - the PR can still honestly aim to eliminate its chosen working failure class entirely
@@ -143,6 +148,10 @@ When to push back and require complete remediation instead of approving a first 
 5. Implementation starts only after the pre-audit gate is satisfied
 - if broad duplication or new sibling manifestations are discovered while coding, stop and escalate rather than silently narrowing the class
 - if sibling probing shows the broader parent failure class is actively broken in multiple same-class seams, prefer tackling the parent failure class directly in the PR when feasible
+- when deciding whether to promote from child-slice to broader parent closure, explicitly re-check the watchlist node for:
+  - the currently tracked broader class
+  - any sibling manifestations or consumer families already named there
+  - whether the watchlist evidence makes broader parent closure the honest default
 - if closing the parent class is not feasible, the pre-audit and PR proof audit must say so explicitly and keep the remaining parent-class obligation tracked in the issue/watchlist record
 - if a concrete remaining same-class seam is discovered during sibling probing and is not being absorbed now, create or update the follow-up issue/stream immediately rather than leaving it as narrative-only review debt
 - if the implementer smells a deeper architecture or type-model issue while doing the pre-audit or implementation, they should state it explicitly even if the current PR remains narrowly scoped
