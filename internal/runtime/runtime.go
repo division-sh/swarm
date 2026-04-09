@@ -205,34 +205,6 @@ func newRuntimePromptResolver(source semanticview.Source) (runtimecontracts.Prom
 	return runtimecontracts.NewBundlePromptResolver(bundle), nil
 }
 
-func (rt *Runtime) ensureRecoveryStartupExplicit(ctx context.Context) error {
-	if rt == nil || rt.Config == nil || rt.Config.Runtime.RecoveryOnStartup {
-		return nil
-	}
-	reasons := make([]string, 0, 4)
-	if rt.Stores.ScheduleStore != nil {
-		schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
-		if err != nil {
-			return fmt.Errorf("inspect active schedules: %w", err)
-		}
-		if len(schedules) > 0 {
-			reasons = append(reasons, "active schedules")
-		}
-	}
-	if rt.Manager != nil {
-		managerReasons, err := rt.Manager.RecoverableStateReasons(ctx)
-		if err != nil {
-			return fmt.Errorf("inspect recoverable manager state: %w", err)
-		}
-		reasons = append(reasons, managerReasons...)
-	}
-	if len(reasons) == 0 {
-		return nil
-	}
-	sort.Strings(reasons)
-	return fmt.Errorf("runtime.recovery_on_startup=false but persisted runtime-owned work exists: %s", strings.Join(reasons, ", "))
-}
-
 func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts RuntimeOptions) (*Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
@@ -577,8 +549,15 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.cleanupStartFailure()
 	}()
 
-	if err := rt.ensureRecoveryStartupExplicit(ctx); err != nil {
+	startupRecoverySnapshot, err := rt.inspectStartupRecoverySnapshot(ctx)
+	if err != nil {
 		return err
+	}
+	startupRecoveryDecision := newStartupRecoveryDecisionReport(startupRecoverySnapshot)
+	if denyErr := startupRecoveryDecision.denialError(); denyErr != nil {
+		startupRecoveryDecision.ErrorText = denyErr.Error()
+		rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
+		return denyErr
 	}
 
 	if rt.Pipeline != nil {
@@ -594,8 +573,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("load schedules failed: %w", err)
 		}
+		startupRecoveryDecision.ScheduleRestoreAttempted = len(schedules) > 0
 		for _, sc := range schedules {
 			if _, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, rt.Stores.ScheduleStore, rt.Scheduler, sc); err != nil {
+				startupRecoveryDecision.ScheduleRestoreFailures++
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("scheduler", "restore_schedule_failed", rt.Logger.Error(ctx, "scheduler", "restore_schedule_failed", map[string]any{
 						"agent_id":   sc.AgentID,
@@ -603,7 +584,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 						"entity_id":  sc.EffectiveEntityID(),
 					}, err))
 				}
+				continue
 			}
+			startupRecoveryDecision.ScheduleRestoreSuccesses++
 		}
 		if err := ensureLifecycleWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
 			if rt.Logger != nil {
@@ -617,11 +600,17 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 	}
 	if rt.Config.Runtime.RecoveryOnStartup && rt.Manager != nil {
+		startupRecoveryDecision.ManagerRecoveryAttempted = true
 		if err := rt.Manager.Recover(ctx); err != nil {
+			startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
+			startupRecoveryDecision.ReasonCode = startupRecoveryReasonRecoverFailed
+			startupRecoveryDecision.ErrorText = err.Error()
 			if rt.Logger != nil {
 				handleRuntimeLogPersistenceError("runtime", "recovery_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed", nil, err))
 			}
+			startupRecoveryDecision.ManagerResetAttempted = true
 			if resetErr := rt.Manager.ResetRuntimeState(); resetErr != nil {
+				startupRecoveryDecision.ManagerResetError = resetErr.Error()
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("runtime", "recovery_reset_failed", rt.Logger.Error(ctx, "runtime", "recovery_reset_failed", nil, resetErr))
 				}
@@ -662,6 +651,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			}
 		}
 	}
+	if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ScheduleRestoreFailures > 0 {
+		startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
+		startupRecoveryDecision.ReasonCode = startupRecoveryReasonScheduleRestore
+		startupRecoveryDecision.ErrorText = fmt.Sprintf("failed to restore %d active schedule(s)", startupRecoveryDecision.ScheduleRestoreFailures)
+	}
+	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
 	if rt.Bus != nil {
 		rt.Bus.StartOutboxSweeper(startCtx, runtimebus.DefaultOutboxSweeperConfig())
 	}
