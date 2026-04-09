@@ -19,11 +19,16 @@ import (
 type recoveryTestBus struct {
 	storedRoutes []runtimebus.FlowInstanceRouteRecord
 	restored     []string
+	replayable   []events.PersistedReplayEvent
+	deliveries   map[string][]string
+	runtimeLogs  []runtimepipeline.RuntimeLogEntry
+	direct       []events.Event
 }
 
 func (*recoveryTestBus) Publish(context.Context, events.Event) error                 { return nil }
 func (*recoveryTestBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
-func (*recoveryTestBus) PublishPersistedRecipients(context.Context, events.Event, []string) error {
+func (b *recoveryTestBus) PublishPersistedRecipients(_ context.Context, evt events.Event, _ []string) error {
+	b.direct = append(b.direct, evt)
 	return nil
 }
 func (*recoveryTestBus) Subscribe(string, ...events.EventType) <-chan events.Event {
@@ -31,20 +36,21 @@ func (*recoveryTestBus) Subscribe(string, ...events.EventType) <-chan events.Eve
 }
 func (*recoveryTestBus) Unsubscribe(string)        {}
 func (*recoveryTestBus) ResetInMemoryState() error { return nil }
-func (*recoveryTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+func (b *recoveryTestBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	b.runtimeLogs = append(b.runtimeLogs, entry)
 	return nil
 }
 func (b *recoveryTestBus) Store() runtimebus.EventStore                                  { return b }
 func (b *recoveryTestBus) AppendEvent(context.Context, events.Event) error               { return nil }
 func (b *recoveryTestBus) InsertEventDeliveries(context.Context, string, []string) error { return nil }
-func (*recoveryTestBus) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
-	return []string{}, nil
+func (b *recoveryTestBus) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
+	return append([]string(nil), b.deliveries[eventID]...), nil
 }
 func (*recoveryTestBus) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
 	return recoveryTestReplayLease{}, true, nil
 }
 func (b *recoveryTestBus) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
-	return nil, nil
+	return append([]events.PersistedReplayEvent(nil), b.replayable...), nil
 }
 func (b *recoveryTestBus) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
 	return nil
@@ -173,11 +179,68 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	}
 }
 
+func TestRecover_UsesCanonicalPipelineReplayAftermathDiagnostics(t *testing.T) {
+	childID := "evt-replay"
+	parentID := "evt-parent"
+	bus := &recoveryTestBus{
+		replayable: []events.PersistedReplayEvent{{
+			Event: events.Event{
+				ID:            childID,
+				Type:          events.EventType("system.recover"),
+				RunID:         "run-1",
+				ParentEventID: parentID,
+				CreatedAt:     time.Now().UTC(),
+			},
+		}},
+		deliveries: map[string][]string{
+			childID: {"agent-a"},
+		},
+	}
+	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, &recoveryTestStore{})
+
+	if err := am.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(bus.direct) != 1 || bus.direct[0].ID != childID {
+		t.Fatalf("direct replayed events = %#v, want [%s]", bus.direct, childID)
+	}
+	entry := findManagerRecoveryAftermathLog(t, bus.runtimeLogs, childID, "replayed", "persisted_recipients_replayed")
+	if strings.TrimSpace(entry.Component) != "pipeline-recovery" {
+		t.Fatalf("runtime log component = %q, want pipeline-recovery", entry.Component)
+	}
+}
+
 type recoveryTestAgent struct{ id string }
 
 type recoveryTestReplayLease struct{}
 
 func (recoveryTestReplayLease) Release(context.Context) error { return nil }
+
+func findManagerRecoveryAftermathLog(t *testing.T, logs []runtimepipeline.RuntimeLogEntry, eventID, outcome, reason string) runtimepipeline.RuntimeLogEntry {
+	t.Helper()
+	for _, entry := range logs {
+		if strings.TrimSpace(entry.Action) != "startup_recovery_pipeline_replay_aftermath" {
+			continue
+		}
+		if strings.TrimSpace(entry.EventID) != strings.TrimSpace(eventID) {
+			continue
+		}
+		detail, _ := entry.Detail.(map[string]any)
+		outcomeText, _ := detail["decision_outcome"].(string)
+		reasonText, _ := detail["decision_reason_code"].(string)
+		if strings.TrimSpace(outcomeText) != strings.TrimSpace(outcome) {
+			continue
+		}
+		if strings.TrimSpace(reasonText) != strings.TrimSpace(reason) {
+			continue
+		}
+		return entry
+	}
+	t.Fatalf("missing manager recovery aftermath log for event=%q outcome=%q reason=%q in %#v", eventID, outcome, reason, logs)
+	return runtimepipeline.RuntimeLogEntry{}
+}
 
 func (a recoveryTestAgent) ID() string                      { return a.id }
 func (recoveryTestAgent) Type() string                      { return "generic" }

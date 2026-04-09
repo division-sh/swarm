@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,7 @@ type recoveryCapturePublisher struct {
 	inner     runtimepipeline.Publisher
 	published []events.Event
 	direct    []events.Event
+	logs      []runtimepipeline.RuntimeLogEntry
 }
 
 type recoveryMissingClaimStore struct {
@@ -35,6 +37,11 @@ func (p *recoveryCapturePublisher) Publish(ctx context.Context, evt events.Event
 func (p *recoveryCapturePublisher) PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error {
 	p.direct = append(p.direct, evt)
 	return p.inner.PublishPersistedRecipients(ctx, evt, recipients)
+}
+
+func (p *recoveryCapturePublisher) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	p.logs = append(p.logs, entry)
+	return nil
 }
 
 func (s *recoveryMissingClaimStore) AppendEvent(context.Context, events.Event) error { return nil }
@@ -60,6 +67,7 @@ type blockingRecoveryPublisher struct {
 	started chan struct{}
 	release chan struct{}
 	count   atomic.Int32
+	logs    []runtimepipeline.RuntimeLogEntry
 }
 
 func (*blockingRecoveryPublisher) Publish(context.Context, events.Event) error { return nil }
@@ -70,6 +78,42 @@ func (p *blockingRecoveryPublisher) PublishPersistedRecipients(context.Context, 
 		<-p.release
 	}
 	return nil
+}
+
+func (p *blockingRecoveryPublisher) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.logs = append(p.logs, entry)
+	return nil
+}
+
+func recoveryDetailString(v any) string {
+	if text, ok := v.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return strings.TrimSpace("")
+}
+
+func findRecoveryAftermathLog(t *testing.T, logs []runtimepipeline.RuntimeLogEntry, eventID, outcome, reason string) runtimepipeline.RuntimeLogEntry {
+	t.Helper()
+	for _, entry := range logs {
+		if strings.TrimSpace(entry.Action) != "startup_recovery_pipeline_replay_aftermath" {
+			continue
+		}
+		if strings.TrimSpace(entry.EventID) != strings.TrimSpace(eventID) {
+			continue
+		}
+		detail, _ := entry.Detail.(map[string]any)
+		if got := recoveryDetailString(detail["decision_outcome"]); got != strings.TrimSpace(outcome) {
+			continue
+		}
+		if got := recoveryDetailString(detail["decision_reason_code"]); got != strings.TrimSpace(reason) {
+			continue
+		}
+		return entry
+	}
+	t.Fatalf("missing recovery aftermath log for event=%q outcome=%q reason=%q in %#v", eventID, outcome, reason, logs)
+	return runtimepipeline.RuntimeLogEntry{}
 }
 
 func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
@@ -173,6 +217,18 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	if receiptStatus != "success" {
 		t.Fatalf("child receipt outcome = %q, want success", receiptStatus)
 	}
+	logEntry := findRecoveryAftermathLog(t, capture.logs, childID, "replayed", "persisted_recipients_replayed")
+	if logEntry.Level != "info" {
+		t.Fatalf("recovery aftermath level = %q, want info", logEntry.Level)
+	}
+	if logEntry.EventType != string(child.Type) {
+		t.Fatalf("recovery aftermath event_type = %q, want %q", logEntry.EventType, child.Type)
+	}
+	detail, _ := logEntry.Detail.(map[string]any)
+	recipients, _ := detail["persisted_recipients"].([]string)
+	if len(recipients) != 1 || recipients[0] != recipientID {
+		t.Fatalf("persisted_recipients = %#v, want [%q]", detail["persisted_recipients"], recipientID)
+	}
 }
 
 func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing.T) {
@@ -264,6 +320,13 @@ func TestRecoveryManager_QuarantinesMissingPersistedRunIDAndContinues(t *testing
 	}
 	if badReason != "pipeline_error" {
 		t.Fatalf("bad receipt reason = %q, want pipeline_error", badReason)
+	}
+	logEntry := findRecoveryAftermathLog(t, capture.logs, badEventID, "dropped", "replay_quarantined")
+	if logEntry.Level != "warn" {
+		t.Fatalf("recovery aftermath level = %q, want warn", logEntry.Level)
+	}
+	if got := strings.TrimSpace(logEntry.Error); got == "" {
+		t.Fatal("expected dropped recovery aftermath log to carry explicit error text")
 	}
 }
 
@@ -410,6 +473,75 @@ func TestRecoveryManager_ClaimsReplayOwnershipUnderOverlap(t *testing.T) {
 	if receiptStatus != "success" {
 		t.Fatalf("pipeline receipt outcome = %q, want success", receiptStatus)
 	}
+	findRecoveryAftermathLog(t, publisher.logs, childID, "skipped", "replay_claim_not_acquired")
+}
+
+func TestRecoveryManager_ExplicitlySkipsReplayWithoutPersistedRecipients(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	capture := &recoveryCapturePublisher{inner: bus}
+
+	runID := uuid.NewString()
+	parentID := uuid.NewString()
+	childID := uuid.NewString()
+
+	parent := events.Event{
+		ID:          parentID,
+		Type:        events.EventType("system.parent"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"ok":true}`),
+		RunID:       runID,
+		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
+	}
+	child := events.Event{
+		ID:            childID,
+		Type:          events.EventType("system.recover.no_recipients"),
+		SourceAgent:   "runtime",
+		Payload:       []byte(`{"ok":true}`),
+		RunID:         runID,
+		ParentEventID: parentID,
+		CreatedAt:     time.Now().Add(-1 * time.Minute).UTC(),
+	}
+
+	if err := pg.AppendEvent(ctx, parent); err != nil {
+		t.Fatalf("AppendEvent(parent): %v", err)
+	}
+	if err := pg.AppendEvent(ctx, child); err != nil {
+		t.Fatalf("AppendEvent(child): %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt(parent): %v", err)
+	}
+
+	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(capture.direct) != 0 {
+		t.Fatalf("direct replayed events = %#v, want none", capture.direct)
+	}
+
+	var receiptStatus string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, childID).Scan(&receiptStatus); err != nil {
+		t.Fatalf("load child receipt: %v", err)
+	}
+	if receiptStatus != "success" {
+		t.Fatalf("child receipt outcome = %q, want success", receiptStatus)
+	}
+	findRecoveryAftermathLog(t, capture.logs, childID, "skipped", "no_persisted_recipients")
 }
 
 func TestRecoveryManager_UsesPersistedDeliveryRecipientsInsteadOfCurrentSubscriptions(t *testing.T) {
