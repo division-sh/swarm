@@ -1091,6 +1091,15 @@ Improvement items:
 - add a drift-detection command or test path that reconstructs entity state from `entity_mutations` and compares it to `entity_state`
 - treat any write path that bypasses mutation logging as a correctness bug, not observability debt
 
+Current extracted slices:
+
+- `#300` first slice: canonical mutation-proof completeness for reconstructable tracked `entity_state` from persisted `entity_mutations`
+  - closure target: touched seam canonicalized
+  - current same-concept consumers in that slice:
+    - conformance tracked-state reconstruction
+    - pipeline mutation-log tracked-state reconstruction
+  - remaining broader family work stays separate unless later sweeps find another live same-concept reconstruction consumer
+
 ### Entity state changes occur but `entity_mutations` stays empty
 
 Symptoms:
