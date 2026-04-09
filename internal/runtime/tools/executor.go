@@ -221,6 +221,9 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 	input = normalizeRuntimeToolInput(name, input)
 	start := time.Now()
 	out, err := e.dispatchTool(ctx, actor, name, input)
+	if isEmitToolName(name) {
+		return out, err
+	}
 	e.emitToolExecutionEvent(ctx, actor, name, input, out, err, time.Since(start), "dispatch")
 	return out, err
 }
@@ -502,6 +505,17 @@ func decodeToolInput(input any, out any) error {
 		return fmt.Errorf("decode input: %w", err)
 	}
 	return nil
+}
+
+func diagnosticPayloadMap(input any) map[string]any {
+	payload := map[string]any{}
+	if err := decodeToolInput(input, &payload); err != nil {
+		return nil
+	}
+	if payload == nil {
+		return map[string]any{}
+	}
+	return payload
 }
 
 func (e *Executor) mailboxStoreDependency() (MailboxPersistence, error) {
