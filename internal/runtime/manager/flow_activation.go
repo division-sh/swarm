@@ -205,18 +205,42 @@ func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticv
 	}
 	for _, scope := range source.ProjectScopes() {
 		projectAgents := make(map[string]runtimecontracts.AgentRegistryEntry, len(scope.Agents))
+		packageFlowAgents := map[string]staticAgentFlowGroup{}
 		for logicalID, entry := range scope.Agents {
 			proof := semanticview.ResolveAgentSessionScopeProof(source, semanticview.AgentSessionScopeLocator{
 				AgentID:         logicalID,
 				ProjectScopeKey: scope.Key,
 			})
 			if strings.TrimSpace(proof.OwningFlowID) != "" {
+				if flowScopeContainsStaticAgent(source, proof.OwningFlowID, logicalID, entry) {
+					continue
+				}
+				groupKey := staticAgentFlowGroupKey(proof.OwningFlowID, proof.FlowPath)
+				group := packageFlowAgents[groupKey]
+				group.FlowID = strings.TrimSpace(proof.OwningFlowID)
+				group.FlowPath = strings.Trim(strings.TrimSpace(proof.FlowPath), "/")
+				if group.Agents == nil {
+					group.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
+				}
+				group.Agents[strings.TrimSpace(logicalID)] = entry
+				packageFlowAgents[groupKey] = group
 				continue
 			}
 			projectAgents[strings.TrimSpace(logicalID)] = entry
 		}
 		if err := am.ensureStaticAgentsForScope(ctx, source, "", "", projectAgents); err != nil {
 			return err
+		}
+		groupKeys := make([]string, 0, len(packageFlowAgents))
+		for key := range packageFlowAgents {
+			groupKeys = append(groupKeys, key)
+		}
+		sort.Strings(groupKeys)
+		for _, key := range groupKeys {
+			group := packageFlowAgents[key]
+			if err := am.ensureStaticAgentsForScope(ctx, source, group.FlowID, group.FlowPath, group.Agents); err != nil {
+				return err
+			}
 		}
 	}
 	for _, scope := range source.FlowScopes() {
@@ -232,6 +256,41 @@ func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticv
 		}
 	}
 	return nil
+}
+
+type staticAgentFlowGroup struct {
+	FlowID   string
+	FlowPath string
+	Agents   map[string]runtimecontracts.AgentRegistryEntry
+}
+
+func staticAgentFlowGroupKey(flowID, flowPath string) string {
+	return strings.TrimSpace(flowID) + "\x00" + strings.Trim(strings.TrimSpace(flowPath), "/")
+}
+
+func flowScopeContainsStaticAgent(source semanticview.Source, flowID, logicalID string, entry runtimecontracts.AgentRegistryEntry) bool {
+	flowID = strings.TrimSpace(flowID)
+	logicalID = strings.TrimSpace(logicalID)
+	if source == nil || flowID == "" || logicalID == "" {
+		return false
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		return false
+	}
+	if scopedEntry, ok := scope.Agents[logicalID]; ok {
+		return scopedEntry.ID == entry.ID
+	}
+	entryID := strings.TrimSpace(entry.ID)
+	if entryID == "" {
+		return false
+	}
+	for scopedLogicalID, scopedEntry := range scope.Agents {
+		if strings.TrimSpace(scopedLogicalID) == logicalID || strings.TrimSpace(scopedEntry.ID) == entryID {
+			return true
+		}
+	}
+	return false
 }
 
 func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, instanceID, flowPath, entityID string) error {

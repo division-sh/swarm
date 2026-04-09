@@ -762,6 +762,36 @@ func TestEnsureStaticAgents_PackageBackedFlowOwnedAgentsCarryCanonicalFlowPath(t
 	}
 }
 
+func TestEnsureStaticAgents_SoleParentFlowPackageAgentsStartWithOwningFlowPath(t *testing.T) {
+	source := loadSoleParentFlowStaticAgentSource(t)
+	bus := &flowActivationTestBus{}
+	store := &flowActivationTestStore{}
+	var captured []models.AgentConfig
+	am := NewAgentManagerWithOptions(bus, func(cfg models.AgentConfig) (Agent, error) {
+		if _, err := sessions.ValidateAgentSessionScopeConfig(cfg); err != nil {
+			return nil, err
+		}
+		captured = append(captured, cfg)
+		return flowActivationStubAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{}, store)
+
+	if err := am.EnsureStaticAgents(context.Background(), source); err != nil {
+		t.Fatalf("EnsureStaticAgents: %v", err)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("captured agents = %#v, want 1", captured)
+	}
+	if captured[0].FlowPath != "support" {
+		t.Fatalf("FlowPath = %q, want support", captured[0].FlowPath)
+	}
+	if captured[0].Mode != "support" {
+		t.Fatalf("Mode = %q, want support", captured[0].Mode)
+	}
+	if captured[0].ID != "backend-{vertical_id}" {
+		t.Fatalf("ID = %q, want backend-{vertical_id}", captured[0].ID)
+	}
+}
+
 func TestActivateFlowInstanceFailsWithoutWorkflowInstanceStore(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := NewAgentManager(bus, nil)
@@ -825,6 +855,79 @@ support/item.created:
         type: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
+backend:
+  id: backend-{vertical_id}
+  type: generic
+  role: backend
+  model_tier: sonnet
+  conversation_mode: session
+  session_scope: flow
+  subscriptions:
+    - support/item.created
+`)
+
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func loadSoleParentFlowStaticAgentSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	root := t.TempDir()
+
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: session-scope-validation
+version: "1.0.0"
+platform_version: ">=1.0.0"
+packages:
+  - path: extras
+entity_schema:
+  groups:
+    - name: item
+      fields:
+        - name: item_id
+          type: string
+          primary: true
+flows:
+  - id: support
+    flow: support
+    mode: static
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+item.created:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+name: support
+initial_state: waiting
+states:
+  - waiting
+  - done
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+support/item.created:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `
+name: extras
+version: "1.0.0"
+flows: []
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), `
 backend:
   id: backend-{vertical_id}
   type: generic
