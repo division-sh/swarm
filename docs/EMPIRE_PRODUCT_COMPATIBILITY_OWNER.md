@@ -133,6 +133,57 @@ For every worthwhile Empire-exposed failure, record:
   - Empire-only contract bug, not Swarm issue
 - cheapest validation check that should catch this class next time
 
+### Required EPO Triage Loop
+
+For every EPO-reported failure worth keeping, complete this loop before considering the intake done:
+
+1. identify the true failure class
+- describe the generic platform mismatch, not only the first symptom
+- state whether the issue body already captures that class or only one manifestation of it
+
+2. identify the canonical seam and owner
+- name the loader / verifier / runtime / store seam where semantic truth should live
+- name the adjacent surfaces that may be drifting from that owner
+
+3. classify the report itself
+- real new bug
+- stale symptom of already-fixed work
+- duplicate of an existing issue
+- broader recurring drift class already captured elsewhere
+
+4. update tracking surfaces
+- create or update the GitHub issue when the problem is concrete and actionable
+- update [`docs/watchlists/semantic-correctness.yaml`](/Users/youmew/dev/swarm/docs/watchlists/semantic-correctness.yaml) or another relevant watchlist when the failure reveals a recurring class
+- update [`docs/POTENTIAL_ISSUES.md`](/Users/youmew/dev/swarm/docs/POTENTIAL_ISSUES.md) only when the concern is real but not yet mature enough for a GitHub issue
+
+5. extract architecture drift and smells
+- duplicated semantic owners
+- verify-vs-runtime drift
+- reader/writer mismatch
+- heuristic classification
+- optionalized required semantics
+- incomplete closure proof
+- or any other concrete drift the failure reveals
+
+6. define prevention, not just diagnosis
+- code-level prevention:
+  - one canonical owner
+  - shared validation/helper entrypoint
+  - explicit typed contract
+  - conformance or fixture proof
+- process-level prevention:
+  - better issue framing
+  - generic reproducer / proof
+  - self-audit
+  - reviewer framing check
+  - compatibility-owner closeout gate
+
+7. record the cheapest check that should catch this class next time
+- prefer deterministic targeted verify, bootverify, conformance, fixture-based runtime tests, CLI smoke, or startup smoke before full Empire runs
+- full Empire runs should validate residual risk, not be the first routine detector
+
+The EPO intake is incomplete if it stops at “new issue created” without also naming the failure class, the drift class, and the next cheapest preventative check.
+
 ### Issue And Watchlist Policy
 
 - If the failure is a generic platform problem and not already tracked:
@@ -140,7 +191,7 @@ For every worthwhile Empire-exposed failure, record:
 - If the failure is already covered:
   - cite the covering issue explicitly
 - If the failure reveals a recurring class of semantic break:
-  - update [`docs/watchlists/semantic-correctness.md`](/Users/youmew/dev/swarm/docs/watchlists/semantic-correctness.md)
+  - update [`docs/watchlists/semantic-correctness.yaml`](/Users/youmew/dev/swarm/docs/watchlists/semantic-correctness.yaml)
 - Do not maintain duplicate backlog state in docs once the GitHub issue exists.
 
 ### Test Improvement Rule

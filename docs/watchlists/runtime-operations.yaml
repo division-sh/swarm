@@ -21,10 +21,6 @@ active_issues:
     title: Make workflow instance mutation atomic across load, mutate, and upsert
     maps_to:
       - atomic_runtime_state_mutation
-  - id: 161
-    title: Canonicalize workflow-instance mutation lock identity before row creation
-    maps_to:
-      - atomic_runtime_state_mutation
   - id: 136
     title: Make managed-agent startup validation prove the real filtered tool transport path
     maps_to:
@@ -49,10 +45,6 @@ active_issues:
     title: Require authentication for dashboard and runtime-control surfaces on the default listener
     maps_to:
       - privileged_control_plane_auth
-  - id: 326
-    title: Align the supported run helper with builder RPC auth requirements
-    maps_to:
-      - privileged_control_plane_auth
   - id: 143
     title: Drain in-flight work before runtime shutdown tears down dependencies
     maps_to:
@@ -73,46 +65,6 @@ active_issues:
     title: Make operational config surfaces fail closed and remove inert controls
     maps_to:
       - fail_closed_operational_config
-  - id: 170
-    title: Introduce an explicit runtime dependency graph object for boot wiring
-    maps_to:
-      - boot_wiring_dependency_ownership
-  - id: 175
-    title: Add first-class launch, stalled-run, and long-running session observability
-    maps_to:
-      - runtime_lifecycle_observability
-  - id: 177
-    title: Add structured tool-call diagnostics for payload validation, enrichment, and publish outcomes
-    maps_to:
-      - tool_execution_outcome_diagnostics
-  - id: 127
-    title: Remove or implement the inert post-turn contract enforcement path in the LLM agent
-    maps_to:
-      - inert_execution_boundary_scaffolding
-  - id: 218
-    title: Eliminate string-based startup tool probe classification with an explicit validation/probe contract
-    maps_to:
-      - transport_policy_and_surface_parity
-  - id: 342
-    title: Align request-context propagation across /mcp and /tools transport execution paths
-    maps_to:
-      - transport_policy_and_surface_parity
-  - id: 347
-    title: Keep directive turns aligned with actor-scoped emit-tool availability
-    maps_to:
-      - transport_policy_and_surface_parity
-  - id: 179
-    title: Expose recovery and restart decisions through canonical diagnostics
-    maps_to:
-      - recovery_restart_diagnostics
-  - id: 346
-    title: Reconcile run lifecycle ownership and accounting across builder, store, and runtime writers
-    maps_to:
-      - run_lifecycle_and_accounting_coherence
-  - id: 355
-    title: Keep accepted run terminal-failed state aligned with same-run delivery and live work truth
-    maps_to:
-      - run_lifecycle_and_accounting_coherence
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -122,20 +74,12 @@ nodes:
     why_this_node_exists: transport-visible behavior drifts when prompt, managed startup, and live transport paths enforce different policies
     known_manifestations:
       - context-token policy differs across transport surfaces
-      - request-lifetime semantics differ across /mcp and /tools after the same turn is resolved
       - startup validation does not prove the real filtered transport path
-      - startup reachability probe conflates tool-call transport proof with tool-specific required-input validity
-      - startup callable proof lacks an explicit typed probe outcome contract
       - agent-visible tool availability differs between prompt and transport
-      - directive turns can omit actor-authorized emit tools after the correct active agent turn is resolved
     representative_issues:
       - 111
       - 136
       - 137
-      - 218
-      - 342
-      - 347
-      - 305
     common_framing_mistakes:
       too_broad:
         - tool transport is inconsistent
@@ -150,15 +94,12 @@ nodes:
     why_this_node_exists: runtime delivery drifts when publish, recovery, retry, and replay ownership are split across local paths
     known_manifestations:
       - direct-recipient delivery as a shadow semantic path
-      - descriptor-aware recipient policy can silently exclude non-agent in-memory subscribers such as startup control-plane checks, workflow-runtime, and system-node subscribers when publish planning treats all recipients as active-agent descriptors
-      - crash/restart replay can drift direct-vs-subscribed recipient scope unless the committed event carries one durable authoritative replay-scope owner
       - retry counters and delivery-state updates not atomic
       - replayed deliveries and restored timers without explicit shared-store ownership
     representative_issues:
       - 112
       - 144
       - 145
-      - 325
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
@@ -175,30 +116,11 @@ nodes:
       - workflow instance mutation split across load, mutate, and upsert
     representative_issues:
       - 116
-      - 161
     common_framing_mistakes:
       too_broad:
         - persistence is nonatomic
       too_narrow:
         - one update statement races
-    current_action_pressure: active
-  - id: boot_wiring_dependency_ownership
-    title: Boot Wiring Dependency Ownership
-    parent_class: runtime constructor and boot dependency ownership
-    canonical_owners:
-      - explicit validated dependency ownership for the runtime boot path
-    why_this_node_exists: boot wiring drifts opaque when constructors and package-local setup paths split dependency ownership implicitly
-    known_manifestations:
-      - NewRuntime boot wiring spreads important ownership across multiple constructors
-      - dependency validation is implicit instead of being owned by one explicit boot object
-      - adjacent boot entrypaths become harder to reason about because dependency truth is not centralized
-    representative_issues:
-      - 170
-    common_framing_mistakes:
-      too_broad:
-        - constructors are messy
-      too_narrow:
-        - one parameter list is too long
     current_action_pressure: active
   - id: privileged_control_plane_auth
     title: Privileged Control Plane Authentication
@@ -209,7 +131,6 @@ nodes:
     known_manifestations:
       - gateway auth not fail-closed
       - builder RPC/WebSocket privileged paths unauthenticated
-      - supported helper paths drift across local control-plane auth/readiness gates such as operator-authenticated `/api/health` and builder-authenticated `/api/rpc`, causing the helper to fail after runtime reaches ready
       - delegable privileges not capped on hire/reconfigure
       - dashboard/runtime-control default listener left open
     representative_issues:
@@ -217,7 +138,6 @@ nodes:
       - 140
       - 141
       - 142
-      - 326
     common_framing_mistakes:
       too_broad:
         - auth needs work
@@ -273,105 +193,12 @@ nodes:
       too_narrow:
         - one flag is inert
     current_action_pressure: active
-  - id: inert_execution_boundary_scaffolding
-    title: Inert Execution-Boundary Scaffolding
-    parent_class: execution-path ownership drift
-    canonical_owners:
-      - one honest production execution path in the touched runtime family, without dead post-step enforcement or remediation scaffolding
-    why_this_node_exists: execution boundaries drift when production code keeps structurally wired but inert side paths that look live even though they never own any real behavior
-    known_manifestations:
-      - post-step enforcement/remediation path is wired in production but functionally inert
-      - dead remediation loops survive as if they are part of the runtime contract
-    representative_issues:
-      - 127
-    common_framing_mistakes:
-      too_broad:
-        - runtime cleanup is generally needed
-      too_narrow:
-        - one helper returns nil
-    current_action_pressure: active
-  - id: runtime_lifecycle_observability
-    title: Runtime Lifecycle Observability
-    parent_class: operator-visible runtime activity and stuckness truth
-    canonical_owners:
-      - canonical launch, progress, and session-liveness visibility for the touched runtime surfaces
-    why_this_node_exists: operators cannot distinguish healthy progress from blocked or stalled runtime state when launch and liveness semantics are only partially surfaced
-    known_manifestations:
-      - launch lifecycle is not exposed clearly enough
-      - stalled runs and healthy running state look too similar
-      - long-running or no-output sessions require log archaeology instead of first-class visibility
-    representative_issues:
-      - 175
-    common_framing_mistakes:
-      too_broad:
-        - observability is weak
-      too_narrow:
-        - one stuck run needs a better message
-    current_action_pressure: active
-  - id: recovery_restart_diagnostics
-    title: Recovery And Restart Diagnostics
-    parent_class: restart and recovery decision visibility
-    canonical_owners:
-      - canonical diagnostics ownership for replay, skip, drop, and orphan recovery decisions
-    why_this_node_exists: restart behavior drifts opaque when the runtime enforces one recovery model but operators cannot see which recovery decisions were actually taken
-    known_manifestations:
-      - replay, skip, drop, or orphan recovery decisions are not visible enough
-      - in-flight recovery invariants are not explicit in touched diagnostics surfaces
-      - startup environment confusion hides the real recovery behavior being exercised
-    representative_issues:
-      - 179
-    common_framing_mistakes:
-      too_broad:
-        - restart is confusing
-      too_narrow:
-        - one missing restart log line
-    current_action_pressure: active
-  - id: run_lifecycle_and_accounting_coherence
-    title: Run Lifecycle And Accounting Coherence
-    parent_class: runtime run ownership, terminality, and persisted accounting truth
-    canonical_owners:
-      - one canonical persisted owner for run terminality and run-scoped accounting across builder, store, and runtime writers
-    why_this_node_exists: run correctness drifts when builder quiescence, persisted events/deliveries, runtime-log bootstrap activity, and operator readers each carry partial run lifecycle truth
-    known_manifestations:
-      - runs can be marked terminal while same-run work, events, or deliveries are still active
-      - accepted runs can persist terminal `failed` while same-run deliveries, live agent work, or later same-run activity remain active
-      - run-scoped counters can stay zero because no canonical persisted accounting owner updates them
-      - bootstrap or diagnostics-side run row creation can leave extra running rows outside the authoritative accepted run lifecycle
-      - reader/report surfaces compensate after the fact instead of consuming one canonical lifecycle owner
-    representative_issues:
-      - 120
-      - 346
-      - 355
-    common_framing_mistakes:
-      too_broad:
-        - run status is inconsistent
-      too_narrow:
-        - one run row or one counter field is wrong
-    current_action_pressure: active
-  - id: tool_execution_outcome_diagnostics
-    title: Tool Execution Outcome Diagnostics
-    parent_class: execution-boundary observability and failure attribution
-    canonical_owners:
-      - canonical tool execution identity and outcome diagnostics for the touched tool family
-    why_this_node_exists: tool execution is hard to debug when payload shaping, enrichment, validation, and publish outcomes collapse into one opaque failure story
-    known_manifestations:
-      - canonical tool or event identity not surfaced with the tool-call outcome
-      - payload-shape failures and downstream publish failures not distinguished clearly
-      - pre-validation and post-enrichment payload states not inspectable where they should be
-    representative_issues:
-      - 177
-    common_framing_mistakes:
-      too_broad:
-        - tool debugging is weak
-      too_narrow:
-        - one error message needs more detail
-    current_action_pressure: active
 reserve_backlog:
   - ordinal: 5
     title: Add watchdogs for long-running/no-output turns and stalled runs
     follow_on_priority:
-      issue: 175
-      relation: already_covered_by_issue
+      issue: 169
+      relation: combined_follow_on_priority
   - ordinal: 8
     title: Make delivery lifecycle first-class and observable
     follow_on_priority:
@@ -380,10 +207,10 @@ reserve_backlog:
   - ordinal: 9
     title: Improve restart/recovery observability for in-flight turns
     follow_on_priority:
-      issue: 179
-      relation: already_covered_by_issue
+      issue: 169
+      relation: combined_follow_on_priority
   - ordinal: 25
     title: Introduce an explicit runtime dependency graph object for boot wiring
     follow_on_priority:
       issue: 170
-      relation: already_covered_by_issue
+      relation: follow_on_priority

@@ -24,6 +24,7 @@ Review the work against this process, in order:
 - parity
 - semantic-drift
 - high-risk maintenance
+- was the issue mapped to the right watchlist node when one existed?
 
 3. Was the pre-audit good enough to start coding?
 - broadest plausible failure class tested
@@ -32,6 +33,11 @@ Review the work against this process, in order:
 - repo-wide consumer sweep done
 - manifestation table present when required
 - intended closure level stated explicitly
+- explicit watchlist decision made:
+  - maps to existing node
+  - existing node refined
+  - new manifestation added
+  - new node needed
 - for failure-class / parity / semantic-drift work, was manifestation identification treated as the main effort rather than rushed as lightweight paperwork?
 
 4. If the category required it, did an independent pre-audit review gate happen before coding?
@@ -42,6 +48,7 @@ Review the work against this process, in order:
 - any split or residual seam stated explicitly
 
 6. Does the merge recommendation match the proven closure level?
+- did the reviewer explicitly decide whether the watchlist needs to be updated at review close-out or merge time?
 
 ## Stop-Ship Questions
 
@@ -139,6 +146,7 @@ Review the work against this process, in order:
   - whether the PR proves the failure class rather than only the first example
 - Did the reviewer independently verify the broad-first framing rather than accepting the PR's chosen seam boundary at face value?
 - For failure-class / parity / semantic-drift work, did the reviewer expect manifestation identification to be the dominant effort, and treat a surprisingly cheap pre-audit as a reason to question whether the manifestation set is under-identified?
+- Did the reviewer check whether the issue maps to an existing watchlist node, and if not, whether the pre-audit created or refined one?
 - Did the reviewer explicitly decide whether the issue framing was:
   - already broad enough
   - narrower than the true failure class but acceptable as a first slice
@@ -162,6 +170,7 @@ Review the work against this process, in order:
 - Did the reviewer verify that the pre-audit started from the broadest plausible concept and did not narrow seams out of scope without explicit proof that they are a different concept?
 - Did the reviewer independently check that the repo-wide consumer sweep is credible rather than just local to nearby files?
 - Did that issue-level pre-audit explicitly list every currently known manifestation from the issue body, issue thread, triage/reproducer notes, and prior review context?
+- Did the pre-audit use any relevant watchlist node to widen the manifestation sweep rather than treating the issue as an isolated incident?
 - For failure-class work, did that issue-level pre-audit include a manifestation coverage table rather than only a narrative list?
 - Was that manifestation table as extensive as the available evidence supports, rather than artificially minimized or collapsed into broad prose rows?
 - For each listed manifestation, did the pre-audit classify it as exactly one of:
@@ -198,6 +207,11 @@ Review the work against this process, in order:
   - execution-proven through the same corrected path
   - split / escalated as separate class
 - By merge time, is that coverage table as extensive as the available issue/thread/triage/review evidence supports?
+- By merge time, did the reviewer explicitly decide one of:
+  - no watchlist change needed
+  - existing node refined
+  - new manifestation added to existing node
+  - new branch/node created
 - If the PR claims `failure class eliminated`, did the reviewer verify there is one explicit defendable statement of why the full currently known class is now closed rather than only the touched seam?
 - For each manifestation row, did the audit name the exact proof used and any required supported-surface or end-to-end proof?
 - If no generic reproducer existed before implementation, did the reviewer verify that the PR now creates one?
@@ -215,6 +229,7 @@ Review the work against this process, in order:
 - If the PR claims non-semantic maintenance, did the reviewer verify that no semantic/runtime contract behavior is being changed under that label?
 - If implementation uncovered existing off-spec behavior outside the issue's stated scope, did the implementer stop and escalate instead of silently widening the change?
 - If the issue appears narrower than the actual failure class, did the reviewer require the issue/PR framing or tests to be widened before calling the work complete?
+- If review uncovered a broader class, missed sibling manifestation, or better canonical owner understanding, did the reviewer ensure that learning was recorded in the watchlist rather than left only in review comments?
 - If the PR description lists follow-up work, did the reviewer check whether any follow-up item is narrow enough to be absorbed into the current PR instead of becoming another tiny issue?
 - If a follow-up item is left out of the PR, is there a clear reason it should remain separate:
   - meaningful additional scope

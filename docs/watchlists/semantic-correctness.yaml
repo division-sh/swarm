@@ -64,11 +64,10 @@ active_issues:
   - id: 152
     title: Fail closed on non-UUID entity_id at the store event boundary
   - id: 253
-    title: Preserve flow-owned session_scope proof across verify/boot and runtime startup for package-backed flows
+    title: Preserve owning flow identity for flow-scoped session_scope validation in package-backed flows
     maps_to:
       - boot_verification_false_negative_validation
       - loader_tree_identity_loss_before_boot_validation
-      - flow_owned_session_scope_proof_across_supported_consumers
   - id: 255
     title: Allow self-target entity updates in expression field reference validation
     maps_to:
@@ -78,14 +77,6 @@ active_issues:
     title: Align targeted verify and runtime boot on event-schema and tool-registry validation
     maps_to:
       - verify_vs_boot_contract_acceptance_drift
-  - id: 356
-    title: Verify can pass while runtime boot emits missing-tool warnings on the same startup
-    maps_to:
-      - verify_vs_boot_contract_acceptance_drift
-  - id: 181
-    title: Expose accumulator completion and on_complete transaction outcomes together
-    maps_to:
-      - accumulator_completion_and_atomic_outcome_visibility
 nodes:
   - id: boot_verification_false_negative_validation
     title: Boot/Verification False-Negative Validation
@@ -124,25 +115,6 @@ nodes:
       too_narrow:
         - one session_scope rejection site
     current_action_pressure: active
-  - id: flow_owned_session_scope_proof_across_supported_consumers
-    title: Flow-Owned Session-Scope Proof Across Supported Consumers
-    parent_class: supported-surface proof drift for flow-scoped session semantics
-    canonical_owners:
-      - flow ownership proof carried from contract tree and semantic view into both boot verification and runtime startup
-    why_this_node_exists: flow-scoped session validity drifts when supported consumers prove owning flow identity through different carriers or only one surface is fixed
-    known_manifestations:
-      - package-backed flow ownership preserved enough for one surface but not another
-      - boot verification and runtime startup/static bootstrap consume flow-scoped session proof differently
-      - session-scope validity depends on scope path strings or local projection details instead of one shared owner proof
-    representative_issues:
-      - 253
-    common_framing_mistakes:
-      too_broad:
-        - session scope is inconsistent
-      too_narrow:
-        - one bootverify rejection
-        - one loader/tree field is blank
-    current_action_pressure: active
   - id: lifecycle_aware_entity_field_availability_validation
     title: Lifecycle-Aware Entity-Field Availability Validation
     parent_class: lifecycle proof drift across handler planning, validation, and execution
@@ -171,8 +143,6 @@ nodes:
     known_manifestations:
       - event-schema validation drift between targeted verify and runtime boot
       - tool-registry validation drift between targeted verify and runtime boot
-      - boot warns that builtin runtime tools are missing because validation only counts contract tool entries
-      - operator-visible boot diagnostics report tools=0 even when the generic runtime ships callable builtin tools
       - future supported-surface agreement gaps in shared contract validation ownership
     representative_issues:
       - 270
@@ -182,25 +152,6 @@ nodes:
       too_narrow:
         - one failing CLI command
         - one boot error message
-    current_action_pressure: active
-  - id: accumulator_completion_and_atomic_outcome_visibility
-    title: Accumulator Completion And Atomic Outcome Visibility
-    parent_class: entity-state completion truth and transactional outcome proof
-    canonical_owners:
-      - canonical accumulator completion and on_complete transaction outcome owner in the touched execution and diagnostics seam
-    why_this_node_exists: accumulator completion drifts opaque when evaluation outcome, commit outcome, and final entity-state transition truth are not exposed together
-    known_manifestations:
-      - final-item accumulation appears to disappear when on_complete evaluation or commit fails late
-      - accumulator completion and transaction outcome are not visible together in one touched proof surface
-      - atomic completion invariants are not proven directly at the final-item seam
-    representative_issues:
-      - 181
-    common_framing_mistakes:
-      too_broad:
-        - workflow diagnostics are unclear
-      too_narrow:
-        - one final-item bug
-        - one missing log line
     current_action_pressure: active
 reserve_backlog:
   - ordinal: 7
