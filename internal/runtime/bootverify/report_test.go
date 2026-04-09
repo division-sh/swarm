@@ -1683,6 +1683,56 @@ func TestRun_UsesCompiledOwnersForEquivalentSingleNodePerEventRoutes(t *testing.
 	}
 }
 
+func TestRun_ReportsMissingTransitionTriggerEvent(t *testing.T) {
+	bundle := bootverifyTransitionRuntimeOwnershipBundle()
+	bundle.Semantics.Transitions[0].Trigger = "ticket.missing"
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "transition_reference_validation", "trigger ticket.missing missing from event catalog") {
+		t.Fatalf("expected transition_reference_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsTransitionOwnershipMismatch(t *testing.T) {
+	bundle := bootverifyTransitionRuntimeOwnershipBundle()
+	bundle.Semantics.Transitions[0].Node = "projector"
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "transition_ownership_validation", "workflow owner is projector") {
+		t.Fatalf("expected transition_ownership_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsMissingSemanticHandlerForOwnedRuntimeEvent(t *testing.T) {
+	bundle := bootverifyTransitionRuntimeOwnershipBundle()
+	event := bundle.Events["ticket.opened"]
+	event.OwningNode = "dispatcher"
+	bundle.Events["ticket.opened"] = event
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "event_runtime_wiring_validation", "owning_node dispatcher missing semantic event_handler") {
+		t.Fatalf("expected event_runtime_wiring_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
+	bundle := bootverifyTransitionRuntimeOwnershipBundle()
+	bundle.Nodes["idle-owner"] = runtimecontracts.SystemNodeContract{ID: "idle-owner"}
+	event := bundle.Events["ticket.audit"]
+	event.RuntimeHandling = "projection"
+	event.OwningNode = "idle-owner"
+	bundle.Events["ticket.audit"] = event
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "event ticket.audit owning_node idle-owner has no runtime executor") {
+		t.Fatalf("expected handler_field_compliance runtime executor error, got %#v", report.Errors())
+	}
+}
+
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
 	if got := len(bootCheckRegistry); got != 38 {
 		t.Fatalf("bootCheckRegistry count = %d, want 38", got)
@@ -2163,6 +2213,66 @@ func loadFixtureBundleAt(t *testing.T, repoRoot, fixtureRoot, platformSpec strin
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
 	}
 	return bundle
+}
+
+func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowContractBundle {
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Transitions: []runtimecontracts.WorkflowTransitionContract{{
+				ID:      "ticket-open",
+				Trigger: "ticket.created",
+				Node:    "dispatcher",
+				Actions: []string{"emit_opened"},
+				Guards:  []string{"allow_ticket"},
+			}},
+			ActionByID: map[string]runtimecontracts.GuardActionEntry{
+				"emit_opened": {
+					ID:    "emit_opened",
+					Emits: "ticket.opened",
+				},
+			},
+			GuardByID: map[string]runtimecontracts.GuardActionEntry{
+				"allow_ticket": {
+					ID:    "allow_ticket",
+					Check: "true",
+				},
+			},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"dispatcher": {
+					"ticket.created": {},
+				},
+				"projector": {
+					"ticket.opened": {},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"dispatcher": {
+				ID:               "dispatcher",
+				OwnedTransitions: []string{"ticket-open"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"ticket.created": {},
+				},
+			},
+			"projector": {
+				ID: "projector",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"ticket.opened": {},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"ticket.created": {
+				RuntimeHandling: "consuming",
+				OwningNode:      "dispatcher",
+			},
+			"ticket.opened": {
+				RuntimeHandling: "projection",
+				OwningNode:      "projector",
+			},
+			"ticket.audit": {},
+		},
+	}
 }
 
 func reportContains(items []Finding, checkID, contains string) bool {
