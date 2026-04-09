@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"swarm/internal/config"
 	dashboardserver "swarm/internal/dashboard/server"
 	runtimepkg "swarm/internal/runtime"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -322,6 +324,132 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	detail, _ := log.Detail.(map[string]any)
 	if strings.TrimSpace(readString(detail["tool_name"])) != "save_entity_field" {
 		t.Fatalf("log detail.tool_name = %#v, want save_entity_field", detail["tool_name"])
+	}
+}
+
+type conformanceSemanticOnlyWorkflowRuntime struct {
+	source runtimesemanticview.Source
+}
+
+func (s conformanceSemanticOnlyWorkflowRuntime) SemanticSource() runtimesemanticview.Source {
+	return s.source
+}
+
+func (conformanceSemanticOnlyWorkflowRuntime) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
+	return nil
+}
+
+func (conformanceSemanticOnlyWorkflowRuntime) WorkflowNodes() []runtimepipeline.WorkflowNode {
+	return nil
+}
+func (conformanceSemanticOnlyWorkflowRuntime) GuardRegistry() runtimepipeline.GuardRegistry {
+	return nil
+}
+func (conformanceSemanticOnlyWorkflowRuntime) ActionRegistry() runtimepipeline.ActionRegistry {
+	return nil
+}
+
+type conformanceNoopLLMRuntime struct{}
+
+func (conformanceNoopLLMRuntime) StartSession(context.Context, string, string, []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	return &runtimellm.Session{}, nil
+}
+
+func (conformanceNoopLLMRuntime) ContinueSession(context.Context, *runtimellm.Session, runtimellm.Message) (*runtimellm.Response, error) {
+	return &runtimellm.Response{}, nil
+}
+
+func loadConformanceRuntimeWorkflowModule(t *testing.T) conformanceSemanticOnlyWorkflowRuntime {
+	t.Helper()
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	return conformanceSemanticOnlyWorkflowRuntime{source: runtimesemanticview.Wrap(bundle)}
+}
+
+func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pg := &store.PostgresStore{DB: db}
+	requireCanonicalRuntimeLogSurface(t, ctx, pg)
+
+	if err := pg.UpsertSchedule(ctx, runtimepipeline.Schedule{
+		AgentID:   "runtime",
+		EventType: "timer.check",
+		Mode:      "once",
+		At:        time.Now().Add(time.Minute),
+		TaskID:    "recover-me",
+	}); err != nil {
+		t.Fatalf("UpsertSchedule: %v", err)
+	}
+
+	rt, err := runtimepkg.NewRuntime(ctx, &config.Config{
+		Runtime: config.RuntimeConfig{
+			RecoveryOnStartup: false,
+		},
+		LLM: config.LLMConfig{
+			RuntimeMode: "api",
+		},
+	}, runtimepkg.Stores{
+		SQLDB:         db,
+		EventStore:    pg,
+		ManagerStore:  pg,
+		ScheduleStore: pg,
+	}, runtimepkg.RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: loadConformanceRuntimeWorkflowModule(t),
+		LLMRuntime:     conformanceNoopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+
+	startErr := rt.Start(ctx)
+	if startErr == nil || !strings.Contains(startErr.Error(), "runtime.recovery_on_startup=false") {
+		t.Fatalf("Start error = %v, want explicit recovery denial", startErr)
+	}
+
+	reader := dashboardserver.NewSQLObservabilityReader(db)
+	if reader == nil {
+		t.Fatal("NewSQLObservabilityReader returned nil")
+	}
+	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
+		Component: "runtime",
+		Type:      "startup_recovery_decision",
+	}, 10)
+	if err != nil {
+		t.Fatalf("ListRuntimeLogs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("runtime log rows = %d, want 1: %#v", len(logs), logs)
+	}
+	log := logs[0]
+	if log.Level != "warn" {
+		t.Fatalf("log level = %q, want warn", log.Level)
+	}
+	if log.Action != "startup_recovery_decision" {
+		t.Fatalf("log action = %q, want startup_recovery_decision", log.Action)
+	}
+	if log.ErrorCode != "recovery_disabled_with_persisted_work" {
+		t.Fatalf("log error_code = %q, want recovery_disabled_with_persisted_work", log.ErrorCode)
+	}
+	detail, _ := log.Detail.(map[string]any)
+	if got := readString(detail["decision_outcome"]); got != "denied" {
+		t.Fatalf("detail.decision_outcome = %q, want denied", got)
+	}
+	if got := readString(detail["decision_reason_code"]); got != "recovery_disabled_with_persisted_work" {
+		t.Fatalf("detail.decision_reason_code = %q, want recovery_disabled_with_persisted_work", got)
+	}
+	if got, _ := detail["active_schedule_count"].(float64); int(got) != 1 {
+		t.Fatalf("detail.active_schedule_count = %v, want 1", detail["active_schedule_count"])
+	}
+	classes, _ := detail["recoverable_work_classes"].([]any)
+	if len(classes) != 1 || readString(classes[0]) != "active schedules" {
+		t.Fatalf("detail.recoverable_work_classes = %#v, want [active schedules]", detail["recoverable_work_classes"])
 	}
 }
 

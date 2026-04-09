@@ -501,48 +501,74 @@ func (am *AgentManager) Recover(ctx context.Context) error {
 	return nil
 }
 
-func (am *AgentManager) RecoverableStateReasons(ctx context.Context) ([]string, error) {
-	reasons := make([]string, 0, 4)
+type RecoverableStateSnapshot struct {
+	PersistedAgentCount             int
+	PersistedFlowInstanceRouteCount int
+	ReplayEligibleEventPresent      bool
+}
+
+func (s RecoverableStateSnapshot) HasRecoverableWork() bool {
+	return s.PersistedAgentCount > 0 || s.PersistedFlowInstanceRouteCount > 0 || s.ReplayEligibleEventPresent
+}
+
+func (s RecoverableStateSnapshot) Classes() []string {
+	classes := make([]string, 0, 3)
+	if s.PersistedAgentCount > 0 {
+		classes = append(classes, "persisted agents")
+	}
+	if s.PersistedFlowInstanceRouteCount > 0 {
+		classes = append(classes, "persisted flow instance routes")
+	}
+	if s.ReplayEligibleEventPresent {
+		classes = append(classes, "events missing pipeline receipts")
+	}
+	sort.Strings(classes)
+	return classes
+}
+
+func (s RecoverableStateSnapshot) Detail() map[string]any {
+	return map[string]any{
+		"persisted_agent_count":               s.PersistedAgentCount,
+		"persisted_flow_instance_route_count": s.PersistedFlowInstanceRouteCount,
+		"replay_eligible_event_present":       s.ReplayEligibleEventPresent,
+	}
+}
+
+func (am *AgentManager) RecoverableStateSnapshot(ctx context.Context) (RecoverableStateSnapshot, error) {
+	snapshot := RecoverableStateSnapshot{}
 	if am == nil {
-		return reasons, nil
+		return snapshot, nil
 	}
 	if am.store != nil {
 		agents, err := am.store.LoadAgents(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("load persisted agents: %w", err)
+			return RecoverableStateSnapshot{}, fmt.Errorf("load persisted agents: %w", err)
 		}
-		if len(agents) > 0 {
-			reasons = append(reasons, "persisted agents")
-		}
+		snapshot.PersistedAgentCount = len(agents)
 	}
 	if am.bus == nil {
-		return reasons, nil
+		return snapshot, nil
 	}
 	store := am.bus.Store()
 	if store == nil {
-		return reasons, nil
+		return snapshot, nil
 	}
 	if routeStore, ok := store.(runtimebus.FlowInstanceRoutePersistence); ok && routeStore != nil {
 		routes, err := routeStore.ListFlowInstanceRoutes(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("list persisted flow instance routes: %w", err)
+			return RecoverableStateSnapshot{}, fmt.Errorf("list persisted flow instance routes: %w", err)
 		}
-		if len(routes) > 0 {
-			reasons = append(reasons, "persisted flow instance routes")
-		}
+		snapshot.PersistedFlowInstanceRouteCount = len(routes)
 	}
 	replayStore, ok := store.(runtimereplayclaim.Lister)
 	if ok && replayStore != nil {
 		eventsToReplay, err := replayStore.ListEventsMissingPipelineReceipt(ctx, time.Now().Add(-30*24*time.Hour), 1)
 		if err != nil {
-			return nil, fmt.Errorf("list events missing pipeline receipts: %w", err)
+			return RecoverableStateSnapshot{}, fmt.Errorf("list events missing pipeline receipts: %w", err)
 		}
-		if len(eventsToReplay) > 0 {
-			reasons = append(reasons, "events missing pipeline receipts")
-		}
+		snapshot.ReplayEligibleEventPresent = len(eventsToReplay) > 0
 	}
-	sort.Strings(reasons)
-	return reasons, nil
+	return snapshot, nil
 }
 
 func (am *AgentManager) restoreFlowInstanceRoutes(ctx context.Context) error {
