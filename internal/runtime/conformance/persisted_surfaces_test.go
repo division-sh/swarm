@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/config"
 	dashboardserver "swarm/internal/dashboard/server"
+	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -583,6 +584,161 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	}
 	if terminationDetail != "builder_api" {
 		t.Fatalf("termination_detail = %q, want builder_api", terminationDetail)
+	}
+}
+
+func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalRuntimeLogSurface(t, ctx, pg)
+
+	logger := runtimepkg.NewRuntimeLogger(db, pg)
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		Logger: conformanceRuntimeLoggerHook{logger: logger},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	replayRecipient := "agent-replay"
+	_ = bus.Subscribe(replayRecipient)
+
+	replayRunID := uuid.NewString()
+	replayParentID := uuid.NewString()
+	replayChildID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          replayParentID,
+		Type:        events.EventType("system.parent"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"ok":true}`),
+		RunID:       replayRunID,
+		CreatedAt:   time.Now().Add(-3 * time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(replay parent): %v", err)
+	}
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:            replayChildID,
+		Type:          events.EventType("system.recover.replay"),
+		SourceAgent:   "runtime",
+		Payload:       []byte(`{"ok":true}`),
+		RunID:         replayRunID,
+		ParentEventID: replayParentID,
+		CreatedAt:     time.Now().Add(-2 * time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(replay child): %v", err)
+	}
+	if err := pg.InsertEventDeliveries(ctx, replayChildID, []string{replayRecipient}); err != nil {
+		t.Fatalf("InsertEventDeliveries(replay child): %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, replayParentID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt(replay parent): %v", err)
+	}
+
+	skipRunID := uuid.NewString()
+	skipParentID := uuid.NewString()
+	skipChildID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          skipParentID,
+		Type:        events.EventType("system.parent"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"ok":true}`),
+		RunID:       skipRunID,
+		CreatedAt:   time.Now().Add(-3 * time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(skip parent): %v", err)
+	}
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:            skipChildID,
+		Type:          events.EventType("system.recover.skip"),
+		SourceAgent:   "runtime",
+		Payload:       []byte(`{"ok":true}`),
+		RunID:         skipRunID,
+		ParentEventID: skipParentID,
+		CreatedAt:     time.Now().Add(-2 * time.Minute).UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(skip child): %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, skipParentID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt(skip parent): %v", err)
+	}
+
+	droppedEventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, 'system.recover.drop', 'global', '{}'::jsonb, 'runtime', 'platform', now()
+		)
+	`, droppedEventID); err != nil {
+		t.Fatalf("seed dropped replay event: %v", err)
+	}
+
+	rm := runtimepipeline.NewRecoveryManagerWith(pg, bus)
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
+	if reader == nil {
+		t.Fatal("NewSQLObservabilityReader returned nil")
+	}
+	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
+		Component: "pipeline-recovery",
+		Type:      "startup_recovery_pipeline_replay_aftermath",
+	}, 10)
+	if err != nil {
+		t.Fatalf("ListRuntimeLogs: %v", err)
+	}
+	if len(logs) != 3 {
+		t.Fatalf("runtime log rows = %d, want 3: %#v", len(logs), logs)
+	}
+	findLogIndex := func(eventID string) int {
+		t.Helper()
+		for idx, log := range logs {
+			if strings.TrimSpace(log.EventID) == strings.TrimSpace(eventID) {
+				return idx
+			}
+		}
+		t.Fatalf("missing runtime log for event %q in %#v", eventID, logs)
+		return -1
+	}
+
+	replayed := logs[findLogIndex(replayChildID)]
+	if replayed.Action != "startup_recovery_pipeline_replay_aftermath" {
+		t.Fatalf("replayed action = %q, want startup_recovery_pipeline_replay_aftermath", replayed.Action)
+	}
+	replayedDetail, _ := replayed.Detail.(map[string]any)
+	if got := readString(replayedDetail["decision_outcome"]); got != "replayed" {
+		t.Fatalf("replayed detail.decision_outcome = %q, want replayed", got)
+	}
+	if got := readString(replayedDetail["decision_reason_code"]); got != "persisted_recipients_replayed" {
+		t.Fatalf("replayed detail.decision_reason_code = %q, want persisted_recipients_replayed", got)
+	}
+
+	skipped := logs[findLogIndex(skipChildID)]
+	skippedDetail, _ := skipped.Detail.(map[string]any)
+	if got := readString(skippedDetail["decision_outcome"]); got != "skipped" {
+		t.Fatalf("skipped detail.decision_outcome = %q, want skipped", got)
+	}
+	if got := readString(skippedDetail["decision_reason_code"]); got != "no_persisted_recipients" {
+		t.Fatalf("skipped detail.decision_reason_code = %q, want no_persisted_recipients", got)
+	}
+
+	dropped := logs[findLogIndex(droppedEventID)]
+	droppedDetail, _ := dropped.Detail.(map[string]any)
+	if got := readString(droppedDetail["decision_outcome"]); got != "dropped" {
+		t.Fatalf("dropped detail.decision_outcome = %q, want dropped", got)
+	}
+	if got := readString(droppedDetail["decision_reason_code"]); got != "replay_quarantined" {
+		t.Fatalf("dropped detail.decision_reason_code = %q, want replay_quarantined", got)
+	}
+	if readString(droppedDetail["error_code"]) != "replay_quarantined" {
+		t.Fatalf("dropped detail.error_code = %q, want replay_quarantined", readString(droppedDetail["error_code"]))
+	}
+	if strings.TrimSpace(dropped.Error) == "" {
+		t.Fatal("dropped recovery aftermath log missing explicit error text")
 	}
 }
 
