@@ -127,7 +127,10 @@ Required workflow:
 - commit
 - push
 - open PR against `master`
-- include `Closes #NNN` and spec refs in the PR body
+- include the correct issue link in the PR body:
+  - `Closes #NNN` only if this PR actually completes issue `#NNN`
+  - otherwise use `Part of #NNN` or `Related to #NNN`
+- include spec refs in the PR body
 - report back with the PR number
 
 Deliverable is not complete until the PR is open and both audit artifacts exist.

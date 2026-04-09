@@ -800,7 +800,10 @@ Default rule:
 
 PR expectations:
 
-- include `Closes #...` in the PR body
+- include the correct issue linkage in the PR body:
+  - `Closes #...` only when the PR fully completes the tracked obligation for that issue
+  - `Part of #...` or `Related to #...` when the issue remains open after this PR
+  - never use a closing keyword on a parent or umbrella issue that still has pending work
 - include either:
   - exact governing spec references for the touched seam
   - or an explicit statement that the PR is non-semantic maintenance and why no platform spec section governs it
@@ -1289,7 +1292,10 @@ Required workflow:
 - commit
 - push
 - open PR against `master`
-- include `Closes #NNN` and spec refs in the PR body
+- include the correct non-stale issue link in the PR body:
+  - `Closes #NNN` only if this PR actually finishes issue `#NNN`
+  - otherwise use `Part of #NNN` or `Related to #NNN`
+- include spec refs in the PR body
 - report back with the PR number
 
 Deliverable is not complete until the PR is open and both audit artifacts exist.

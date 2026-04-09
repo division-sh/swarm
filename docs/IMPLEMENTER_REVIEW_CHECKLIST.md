@@ -147,6 +147,7 @@ Review the work against this process, in order:
   - an explicit issue link:
     - `Closes #...` for full completion
     - or `Part of #...` for partial work
+    - and no closing keyword for an issue that still has pending work
   - either:
     - exact governing spec references for the touched seam
     - or an explicit statement that this PR is non-semantic maintenance and why no platform spec section governs it
