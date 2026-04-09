@@ -352,3 +352,67 @@ func TestEngineDispatcher_DirectIntentUsesExplicitRecipientsWhenManifestWasNotPe
 		t.Fatal("expected explicit direct recipient to receive event")
 	}
 }
+
+func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "reviewer-ent-2", EntityID: "ent-2"},
+		},
+	}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	filteredCh := eb.Subscribe("reviewer-ent-2")
+
+	intent := runtimeengine.EmitIntent{
+		Event: events.Event{
+			ID:        "evt-empty-direct-manifest",
+			Type:      events.EventType("custom.direct"),
+			Payload:   []byte(`{"entity_id":"ent-1"}`),
+			CreatedAt: time.Now().UTC(),
+		}.WithEntityID("ent-1"),
+		Recipients: []string{"reviewer-ent-2"},
+	}
+	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("WriteOutbox: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	gotPersisted, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID)
+	if err != nil {
+		t.Fatalf("ListEventDeliveryRecipients: %v", err)
+	}
+	if len(gotPersisted) != 0 {
+		t.Fatalf("persisted recipients = %v, want empty authoritative manifest", gotPersisted)
+	}
+
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("DispatchPostCommit: %v", err)
+	}
+	select {
+	case evt := <-filteredCh:
+		t.Fatalf("unexpected event delivered from empty authoritative manifest: %#v", evt)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
