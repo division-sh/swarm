@@ -21,6 +21,25 @@ body:
         - the acceptance criteria
         - the forbidden shortcuts
 
+        This issue only needs to be good enough to assign.
+
+        The implementer pre-audit is still the real gate before coding starts.
+        Use this template to capture the broadest problem class you can honestly defend, plus the most extensive manifestation set you currently know.
+
+  - type: dropdown
+    id: suggested_category
+    attributes:
+      label: Suggested Category
+      description: Suggest the process category. Lead/triage assigns the final category.
+      options:
+        - semantic-drift
+        - failure-class
+        - parity
+        - high-risk maintenance
+        - local
+    validations:
+      required: true
+
   - type: input
     id: source_backlog_item
     attributes:
@@ -41,10 +60,60 @@ body:
       required: true
 
   - type: textarea
+    id: generic_problem_class
+    attributes:
+      label: Generic Problem Class
+      description: Describe the broader platform-level failure or smell class. Do not describe only the first symptom, incident, or example.
+      placeholder: |
+        Example:
+        package-backed flow ownership proof is lost before session-scope validation in boot verification
+    validations:
+      required: true
+
+  - type: textarea
+    id: known_manifestations
+    attributes:
+      label: Known Manifestations
+      description: List the known manifestations as extensively as the currently available evidence supports. Prefer over-enumeration to collapsing multiple manifestations into one prose sentence.
+      placeholder: |
+        - manifestation 1:
+        - manifestation 2:
+        - manifestation 3:
+        - if only one is known so far, say that explicitly
+    validations:
+      required: true
+
+  - type: textarea
     id: why_now
     attributes:
       label: Why This Matters
       description: Why should this be prioritized now? Tie it to real incidents, debugging cost, or architectural leverage.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: suggested_pre_audit_gate
+    attributes:
+      label: Suggested Pre-Audit Gate
+      description: Suggest whether independent pre-audit review should be required before coding. Lead/triage makes the final call.
+      options:
+        - required
+        - likely required
+        - maybe
+        - not expected
+    validations:
+      required: true
+
+  - type: dropdown
+    id: intended_closure_level
+    attributes:
+      label: Intended Closure Level
+      description: What is the honest target if this issue is solved as written?
+      options:
+        - local symptom fixed
+        - touched seam canonicalized
+        - failure class eliminated
+        - unknown yet
     validations:
       required: true
 
@@ -83,6 +152,18 @@ body:
       required: true
 
   - type: textarea
+    id: generic_proof_plan
+    attributes:
+      label: Generic Reproducer / Proof Plan
+      description: State the minimal generic reproducer, failing proof, or invariant bundle that will prove this problem class in the touched seam. If none exists yet, say so explicitly and require the implementer to derive one.
+      placeholder: |
+        Example:
+        - generic reproducer: focused semanticview/bootverify fixture for package-backed flow ownership
+        - if missing: implementer must create the first failing proof as part of the work
+    validations:
+      required: true
+
+  - type: textarea
     id: scope
     attributes:
       label: Scope
@@ -113,7 +194,7 @@ body:
     id: test_plan
     attributes:
       label: Test Plan
-      description: Which focused invariants and broader regression tests prove completion?
+      description: Which focused invariants and broader regression tests prove the problem class is fixed, not only the first visible symptom?
     validations:
       required: true
 

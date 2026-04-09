@@ -6,10 +6,50 @@ This is a practical companion to [IMPLEMENTER_GUIDELINES.md](/Users/youmew/dev/s
 
 If any answer below is "no", "not sure", or "this patch needs an exception", stop and review the design before merging.
 
+## Process Summary
+
+Review the work against this process, in order:
+
+1. Was the issue good enough to assign?
+- broad failure class when known
+- reproducer when known
+- governing spec refs when known
+- already-known sibling manifestations when known
+
+2. Was the category assigned correctly?
+- local
+- failure-class
+- parity
+- semantic-drift
+- high-risk maintenance
+
+3. Was the pre-audit good enough to start coding?
+- broadest plausible failure class tested
+- issue framing challenged rather than accepted
+- canonical owner(s) named
+- repo-wide consumer sweep done
+- manifestation table present when required
+- intended closure level stated explicitly
+- for failure-class / parity / semantic-drift work, was manifestation identification treated as the main effort rather than rushed as lightweight paperwork?
+
+4. If the category required it, did an independent pre-audit review gate happen before coding?
+
+5. Was the PR proof audit good enough to merge?
+- achieved closure level stated explicitly
+- manifestation-level proof provided
+- any split or residual seam stated explicitly
+
+6. Does the merge recommendation match the proven closure level?
+
 ## Stop-Ship Questions
 
 - Does this change agree with the platform spec, or does it make a spec/implementation mismatch explicit?
 - For semantic/runtime/spec-governed work, did the reviewer step back and test whether the issue is describing the full failure class rather than only the first visible symptom?
+- Did the reviewer start from the default assumption that the issue framing may be too narrow until the pre-audit proves otherwise?
+- For failure-class work, is the closure level explicit rather than implied:
+  - local symptom fixed
+  - touched seam canonicalized
+  - failure class eliminated
 - If the semantics were unclear, did the implementer stop and escalate instead of inferring locally?
 - If this is a non-trivial semantic change, was there a reviewed spec delta before code?
 - Is the semantic owner of this behavior explicit and singular?
@@ -97,7 +137,13 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   - what repo-wide consumers use that same concept
   - whether the PR proves the failure class rather than only the first example
 - Did the reviewer independently verify the broad-first framing rather than accepting the PR's chosen seam boundary at face value?
+- For failure-class / parity / semantic-drift work, did the reviewer expect manifestation identification to be the dominant effort, and treat a surprisingly cheap pre-audit as a reason to question whether the manifestation set is under-identified?
+- Did the reviewer explicitly decide whether the issue framing was:
+  - already broad enough
+  - narrower than the true failure class but acceptable as a first slice
+  - or too narrow to implement honestly without widening or splitting?
 - For semantic/runtime/spec-governed work, did the implementer post the required `Pre-Implementation Coverage Audit` comment on the GitHub issue before coding began?
+- Was the issue good enough to assign, and the pre-audit good enough to start coding, instead of expecting the issue alone to carry all analysis?
 - Did that issue-level pre-audit explicitly state:
   - the exact semantic concept or concepts being changed
   - every relevant canonical owner for those concepts
@@ -109,9 +155,16 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
     - broad-refactor blocker
     - still bypasses the canonical owner and is explicitly split / escalated
   - the old non-authoritative producers/readers/interpreters that become invalid or removal candidates for each owner?
+- Did that issue-level pre-audit explicitly state the intended closure level as exactly one of:
+  - local symptom fixed
+  - touched seam canonicalized
+  - failure class eliminated
+- Did that issue-level pre-audit explicitly state whether the issue framing itself was broad enough or still narrower than the true failure class?
 - Did the reviewer verify that the pre-audit started from the broadest plausible concept and did not narrow seams out of scope without explicit proof that they are a different concept?
 - Did the reviewer independently check that the repo-wide consumer sweep is credible rather than just local to nearby files?
 - Did that issue-level pre-audit explicitly list every currently known manifestation from the issue body, issue thread, triage/reproducer notes, and prior review context?
+- For failure-class work, did that issue-level pre-audit include a manifestation coverage table rather than only a narrative list?
+- Was that manifestation table as extensive as the available evidence supports, rather than artificially minimized or collapsed into broad prose rows?
 - For each listed manifestation, did the pre-audit classify it as exactly one of:
   - direct reproducer and fix
   - execution proof through the same corrected path
@@ -140,6 +193,10 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   - which old producers/readers/interpreters are now invalid, non-authoritative, or still surviving for each owner
   - the broader failure class
   - whether the issue was symptom-shaped
+  - the achieved closure level as exactly one of:
+    - local symptom fixed
+    - touched seam canonicalized
+    - failure class eliminated
   - the sibling contexts checked
   - the generic failing proof used or created
 - For failure-class issues, did the PR audit include a manifestation coverage table rather than only a narrative summary?
@@ -147,6 +204,8 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   - reproduced and fixed
   - execution-proven through the same corrected path
   - split / escalated as separate class
+- By merge time, is that coverage table as extensive as the available issue/thread/triage/review evidence supports?
+- If the PR claims `failure class eliminated`, did the reviewer verify there is one explicit defendable statement of why the full currently known class is now closed rather than only the touched seam?
 - For each manifestation row, did the audit name the exact proof used and any required supported-surface or end-to-end proof?
 - If no generic reproducer existed before implementation, did the reviewer verify that the PR now creates one?
 - If the implementer could not identify every relevant canonical owner for the touched semantic concept or concepts, did the reviewer stop the review and mark the PR as not review-ready?
@@ -158,6 +217,7 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - If the PR leaves dual semantic ownership in place, did the reviewer verify that this is a lead-approved temporary seam rather than a migration excuse?
 - If any currently known manifestation lacks an explicit final status or proof line, did the reviewer stop the review and mark the PR as not review-ready?
 - If the audit relies on “shared owner introduced”, “same seam”, or “cleaner architecture” without manifestation-level proof, did the reviewer reject that as insufficient closure evidence?
+- Did the reviewer explicitly ask what manifestation, if any, is still only argued in prose rather than named with execution proof?
 - Did the reviewer judge whether the implementation materially reduced semantic drift for the concept in scope rather than only improving the touched seam?
 - Did the reviewer avoid approval language such as “good scoped fix” when multiple live interpreters of the same concept still remain?
 - For verify-vs-boot, boot-vs-runtime, reader-vs-writer, or other surface-parity issues, did the reviewer require proof at each relevant surface rather than accepting only synthetic agreement tests?

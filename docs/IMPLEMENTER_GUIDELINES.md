@@ -30,6 +30,72 @@ Operational policy:
 - preserve zero legacy behavior by default
 - do not add compatibility seams unless the lead explicitly approves that exact seam in writing
 
+## Process Summary
+
+Default process:
+
+1. Issue is created
+- the issue writer should frame the broadest failure class they can honestly defend
+- the issue only needs to be good enough to assign, not fully pre-analyzed
+
+2. Lead or triage assigns category
+- category examples:
+  - local
+  - failure-class
+  - parity
+  - semantic-drift
+  - high-risk maintenance
+- the category determines whether stricter proof and gate requirements apply
+- the issue writer may suggest a category
+- the implementer may escalate the category
+- the reviewer may reclassify it later if the original categorization was too light
+
+3. Pre-audit happens before coding
+- this is the real gate for starting implementation
+- the implementer must test whether the issue framing is too narrow
+- the implementer must identify the broadest plausible failure class, the canonical owner(s), the repo-wide consumer set, the manifestation table, and the intended closure level
+- for failure-class, parity, semantic-drift, and similar high-risk semantic work, the main effort is expected to go into manifestation identification and classification before coding starts
+- that is normal and desirable
+- the expensive work is identifying the true failure class, enumerating the manifestation set as extensively as possible, and deciding which manifestations are same-class versus separate-class before code narrows the thinking
+- the pre-audit is the vehicle for that work
+- if that effort feels disproportionate, the usual answer is to extract a cleaner slice after the audit, not to make the audit shallower
+
+4. Independent pre-audit review gate applies to risky categories
+- required by default for:
+  - failure-class work
+  - parity work
+  - semantic-drift / canonical-owner work
+  - other high-risk semantic work likely to have multiple manifestations or consumers
+- the gate is lightweight and checks whether the pre-audit is honest enough to start coding
+- valid outcomes:
+  - pre-audit approved
+  - pre-audit approved as first slice
+  - pre-audit insufficient; widen class
+  - pre-audit insufficient; escalate broad refactor
+
+5. Implementation starts only after the pre-audit gate is satisfied
+- if broad duplication or new sibling manifestations are discovered while coding, stop and escalate rather than silently narrowing the class
+
+6. PR proof audit happens before merge
+- this is the real gate for calling the work complete
+- the PR proof audit must state the achieved closure level and provide manifestation-level proof for that claim
+
+7. Review checks the closure claim against the proof
+- do not approve because the touched seam is cleaner
+- approve only when the achieved closure level is explicit and actually supported by the proof
+
+Default role split:
+
+- issue writer:
+  - should frame the broad failure class when possible
+  - should include known reproducers, sibling manifestations, and spec refs when known
+- implementer:
+  - must verify or correct the issue framing in the pre-audit
+  - must not start coding until that framing is reviewable
+- reviewer:
+  - must independently test whether the framing is still too narrow
+  - must not let seam-level improvement be presented as failure-class elimination without proof
+
 ## Platform Spec Authority
 
 The platform spec is the authoritative source for platform/runtime semantics.
@@ -636,6 +702,19 @@ Issue and PR spec-reference rule:
 - if implementation reveals that the current code already violates the cited spec and that drift is not already captured in the issue, stop and escalate instead of silently absorbing the mismatch into the current change
 - do not rely on issue prose alone when the platform spec already defines the semantics
 
+Issue readiness vs implementation readiness rule:
+
+- an implementation issue does not need to arrive fully pre-analyzed before assignment
+- the issue must be good enough to assign:
+  - intended failure class if known
+  - reproducer if known
+  - governing spec refs if they exist
+  - any already-known sibling manifestation
+- the `Pre-Implementation Coverage Audit` is the hard gate for starting code
+- if the issue is symptom-shaped or under-analyzed, the implementer must produce the missing canonical-owner mapping, repo-wide consumer sweep, manifestation table, and closure target in the pre-audit before implementation begins
+- do not delay assignment waiting for fake completeness in the issue body
+- do not begin implementation until the pre-audit makes the seam and intended closure level reviewable
+
 Pre-implementation rule:
 
 - before writing code, re-read the exact spec section(s) cited in the issue
@@ -647,12 +726,18 @@ Symptom vs failure-class rule:
 
 - this rule applies to semantic, runtime, loader, bootverify, persistence, read-model, and other spec-governed work
 - it does not require the same broad semantic reassessment for purely non-semantic maintenance, mechanical cleanup, or docs-only work
+- default assumption: the issue framing is probably narrower than the true failure class until the pre-audit proves otherwise
 - assume the reported issue may be only the first visible symptom of a broader semantic defect
 - before writing code, take a step back and reassess the full semantic rule the issue belongs to
 - inspect adjacent logic in the same seam to determine the true scope of the problem, not just the first failing example
 - use the cited spec section(s) to decide whether sibling contexts should behave the same way
 - if the issue appears narrower than the actual failure class, stop and escalate or update the issue before treating the work as complete
 - do not stop at fixing the first symptom if adjacent logic is governed by the same semantic rule
+- do not treat the issue title, first reproducer, or first failing helper as the failure class by default
+- the pre-audit must explicitly answer:
+  - what is the broadest plausible failure class?
+  - is the issue framing narrower than that class?
+  - if the issue framing is narrower, is this work still honestly a first slice or does the issue need to be widened or split?
 
 Pre-Implementation Coverage Audit rule:
 
@@ -663,6 +748,10 @@ Pre-Implementation Coverage Audit rule:
   - the reproducer or triage record names more than one manifestation
 - the issue concerns parity between surfaces such as verify vs boot, boot vs runtime, or reader vs writer
 - the purpose of this audit is to make failure-class coverage reviewable before coding starts, not after the patch already exists
+- for failure-class work, the pre-audit must contain an explicit manifestation coverage table and an explicit intended closure level
+- for failure-class, parity, and semantic-drift work, the default expectation is that manifestation identification may require considerably more effort than the implementation itself
+- do not treat that as process overhead to be optimized away
+- treat it as the main mechanism preventing narrow framing, false closure, and repeated same-class fixes
 
 Broad-first pre-audit rule:
 
@@ -700,12 +789,34 @@ Required issue-comment format:
   - for each named owner, list any old helpers, readers, writers, or interpreters that become invalid, non-canonical, or removal candidates
 - `Failure class`
   - state the broader generic failure class, not just the first symptom
+  - explicitly say whether the current issue framing is:
+    - already broad enough
+    - narrower than the true class but still acceptable as a first slice
+    - too narrow to implement honestly without widening or splitting
+- `Intended closure level`
+  - state exactly one intended closure target for this work:
+    - local symptom fixed
+    - touched seam canonicalized
+    - failure class eliminated
+  - if the target is `failure class eliminated`, include one explicit statement defending why this issue is believed to cover the full currently known class rather than only one extracted slice
 - `Currently known manifestations in scope`
   - list every currently known manifestation from:
     - the issue body
     - the issue thread
     - triage / reproducer notes
     - prior review comments if they already exist
+- `Manifestation coverage table`
+  - include one row per currently known manifestation
+  - make the table as extensive as possible from the evidence currently available
+  - default bias: over-enumerate plausible same-class manifestations and then classify them, rather than collapsing them into one broad prose row
+  - do not optimize for a short table; optimize for not missing a sibling manifestation that should have been named explicitly
+  - each row must name:
+    - manifestation
+    - canonical owner
+    - planned coverage status
+    - exact proof planned
+    - required supported-surface or end-to-end proof, if any
+    - whether it is being treated as the same class or explicitly split as a separate class
 - for each manifestation, provide exactly one planned coverage status:
   - direct reproducer and fix
   - execution proof through the same corrected path
@@ -732,11 +843,16 @@ Absolute rules:
 
 - do not begin implementation if the audit cannot identify every relevant canonical owner for the touched semantic concept or concepts
 - do not begin implementation if the broad semantic concept is not stated
+- do not begin implementation if the pre-audit does not state whether the issue framing is broad enough, narrower-but-acceptable, or too narrow
 - do not begin implementation if the repo-wide consumer sweep is missing, shallow, or not credible
 - do not begin implementation if the audit does not include an exhaustive systematic-consumption audit for the currently known sibling seams of each named owner
 - do not begin implementation if any currently known consuming seam is unclassified
 - do not narrow a seam out of scope without explicit proof that it consumes a different semantic concept
 - do not begin implementation if any currently known manifestation is missing from the audit
+- do not begin implementation on failure-class work if the pre-audit does not include a manifestation coverage table
+- do not begin implementation if the manifestation coverage table is artificially narrow, collapsed, or obviously less extensive than the currently available issue/thread/triage/review evidence supports
+- do not begin implementation if the intended closure level is not stated explicitly
+- do not begin implementation if the pre-audit claims `failure class eliminated` without an explicit defendable statement of why the full currently known class is in scope
 - do not classify a manifestation as “same seam” without naming the execution proof that will show it flows through the corrected path
 - do not use “shared owner introduced”, “same validator”, “same helper”, or “same architecture seam” as sufficient coverage by themselves
 - if a manifestation is not directly reproduced, the audit must explain exactly how it will be execution-proven through the same corrected path
@@ -853,6 +969,11 @@ Post-Implementation Proof Audit rule:
   - which old producers, readers, or interpreters are now invalid, non-authoritative, or still surviving for each owner
   - the broader failure class the issue belongs to
   - whether the issue described the full class or only the first visible symptom
+  - the achieved closure level, marked as exactly one of:
+    - local symptom fixed
+    - touched seam canonicalized
+    - failure class eliminated
+  - if the achieved closure level is `failure class eliminated`, one explicit statement of why the full currently known class is now closed rather than only the touched seam
   - which sibling contexts in the touched seam were checked
   - the generic reproducer, fixture, or focused failing proof used to capture the failure class
   - or, if none existed, the generic proof created as part of the work
@@ -860,6 +981,8 @@ Post-Implementation Proof Audit rule:
   - reproduced and fixed
   - execution-proven through the same corrected path
   - split / escalated as separate class
+- for failure-class work, that manifestation table is mandatory even if only one manifestation remains in scope at merge time
+- that table must be as extensive as possible from the evidence available by merge time, not only the minimum set needed to justify the chosen patch
 - for each manifestation row, also name:
   - the exact proof used
   - any mandatory end-to-end or supported-surface proof used for closure
@@ -869,6 +992,9 @@ Post-Implementation Proof Audit rule:
 - if the implementer cannot identify every relevant canonical owner for the touched semantic concept or concepts, the PR is not review-ready
 - if the PR does not state exhaustively who still bypasses each named canonical owner, the PR is not review-ready
 - if any currently known manifestation lacks one of the required statuses above, the PR is not review-ready
+- if the manifestation table is obviously under-enumerated relative to the issue body, issue thread, triage notes, reproducers, or review context, the PR is not review-ready
+- if the PR does not state the achieved closure level explicitly, the PR is not review-ready
+- if the PR claims `failure class eliminated` without defendable manifestation-level proof, the PR is not review-ready
 - if no generic reproducer exists yet for a semantic/runtime failure class, deriving one is part of the implementation task
 - if the implementer cannot derive a clean generic proof for the failure class, stop and escalate before treating the work as complete
 

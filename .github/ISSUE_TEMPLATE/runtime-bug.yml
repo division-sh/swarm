@@ -15,6 +15,25 @@ body:
         - check [IMPLEMENTER_REVIEW_CHECKLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/IMPLEMENTER_REVIEW_CHECKLIST.md)
         - link the related entry in [RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md) when applicable
 
+        This issue only needs to be good enough to assign.
+
+        The implementer pre-audit is still the real gate before coding starts.
+        Use this template to capture the broadest failure class you can honestly defend, plus the most extensive manifestation set you currently know.
+
+  - type: dropdown
+    id: suggested_category
+    attributes:
+      label: Suggested Category
+      description: Suggest the process category. Lead/triage assigns the final category.
+      options:
+        - failure-class
+        - parity
+        - semantic-drift
+        - local
+        - high-risk maintenance
+    validations:
+      required: true
+
   - type: textarea
     id: symptom
     attributes:
@@ -23,6 +42,30 @@ body:
       placeholder: |
         Example:
         validation agents emit `research.completed` but `business_brief` is still absent from entity state
+    validations:
+      required: true
+
+  - type: textarea
+    id: generic_bug_class
+    attributes:
+      label: Generic Bug Class
+      description: Describe the platform-level failure class. Do not describe only the first symptom or first example.
+      placeholder: |
+        Example:
+        lifecycle validation rejects spec-valid pre-handler entity reads in touched handler contexts
+    validations:
+      required: true
+
+  - type: textarea
+    id: known_manifestations
+    attributes:
+      label: Known Manifestations
+      description: List the known manifestations as extensively as the currently available evidence supports. Prefer over-enumeration to collapsing multiple manifestations into one prose sentence.
+      placeholder: |
+        - manifestation 1:
+        - manifestation 2:
+        - manifestation 3:
+        - if only one is known so far, say that explicitly
     validations:
       required: true
 
@@ -47,6 +90,44 @@ body:
         - failing test:
         - log excerpt:
         - file references:
+    validations:
+      required: true
+
+  - type: textarea
+    id: generic_proof_plan
+    attributes:
+      label: Generic Reproducer / Proof Plan
+      description: State the minimal generic reproducer or failing proof for this failure class. If none exists yet, say so explicitly and state that creating one is part of the implementation task.
+      placeholder: |
+        Example:
+        - generic reproducer: focused bootverify fixture with package-backed flow agent outside flow dir
+        - if missing: implementer must derive this as part of the fix
+    validations:
+      required: true
+
+  - type: dropdown
+    id: suggested_pre_audit_gate
+    attributes:
+      label: Suggested Pre-Audit Gate
+      description: Suggest whether independent pre-audit review should be required before coding. Lead/triage makes the final call.
+      options:
+        - required
+        - likely required
+        - maybe
+        - not expected
+    validations:
+      required: true
+
+  - type: dropdown
+    id: intended_closure_level
+    attributes:
+      label: Intended Closure Level
+      description: What is the honest target if this issue is solved as written?
+      options:
+        - local symptom fixed
+        - touched seam canonicalized
+        - failure class eliminated
+        - unknown yet
     validations:
       required: true
 
@@ -131,7 +212,7 @@ body:
     id: tests
     attributes:
       label: Required Tests
-      description: List the focused invariants and any broader regression coverage needed.
+      description: List the focused invariants and any broader regression coverage needed. Cover the failure class, not only the first symptom.
       placeholder: |
         - focused unit/conformance test:
         - integration/fixture regression:
