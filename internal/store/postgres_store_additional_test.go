@@ -295,6 +295,139 @@ func TestPostgresStore_EnsureSchemaTables_PhasesAgentRuntimeDescriptorCompatibil
 	}
 }
 
+func TestPostgresStore_EnsureSchemaTables_PhasesConversationAuditRunIDCompatibilityBeforeDependentDDL(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_turns CASCADE`); err != nil {
+		t.Fatalf("drop agent_turns: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_conversation_audits CASCADE`); err != nil {
+		t.Fatalf("drop agent_conversation_audits: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS runs CASCADE`); err != nil {
+		t.Fatalf("drop runs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE runs (run_id UUID PRIMARY KEY DEFAULT gen_random_uuid())`); err != nil {
+		t.Fatalf("create runs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agent_conversation_audits (
+			session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			agent_id TEXT NOT NULL,
+			entity_id UUID,
+			flow_instance TEXT,
+			scope_key TEXT,
+			scope TEXT NOT NULL DEFAULT 'global',
+			conversation JSONB NOT NULL DEFAULT '[]'::jsonb,
+			turn_count INTEGER NOT NULL DEFAULT 0,
+			runtime_mode TEXT NOT NULL DEFAULT 'task',
+			runtime_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agent_conversation_audits: %v", err)
+	}
+
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agent_conversation_audits": {
+			DDL: "CREATE TABLE IF NOT EXISTS agent_conversation_audits (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT,\n    scope TEXT NOT NULL DEFAULT 'global',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    run_id UUID REFERENCES runs(run_id),\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCREATE INDEX IF NOT EXISTS idx_audits_run ON agent_conversation_audits (run_id, created_at) WHERE run_id IS NOT NULL;",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(agent_conversation_audits dependent ddl): %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables(agent_conversation_audits dependent ddl): %v", err)
+	}
+
+	var (
+		hasRunID  bool
+		indexName string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'agent_conversation_audits' AND column_name = 'run_id'
+		)
+	`).Scan(&hasRunID); err != nil {
+		t.Fatalf("check run_id column: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(to_regclass('idx_audits_run')::text, '')`).Scan(&indexName); err != nil {
+		t.Fatalf("check idx_audits_run: %v", err)
+	}
+	if !hasRunID {
+		t.Fatal("run_id column missing after EnsureSchemaTables")
+	}
+	if indexName != "idx_audits_run" {
+		t.Fatalf("idx_audits_run regclass = %q, want idx_audits_run", indexName)
+	}
+}
+
+func TestPostgresStore_EnsureSchemaTables_PhasesEntitySubjectIDCompatibilityBeforeDependentDDL(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS entity_state CASCADE`); err != nil {
+		t.Fatalf("drop entity_state: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE entity_state (
+			entity_id UUID PRIMARY KEY
+		)
+	`); err != nil {
+		t.Fatalf("create legacy entity_state: %v", err)
+	}
+
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"entity_state": {
+			DDL: "CREATE TABLE IF NOT EXISTS entity_state (\n    entity_id UUID PRIMARY KEY,\n    subject_id UUID\n);\nCREATE INDEX IF NOT EXISTS idx_entity_subject ON entity_state(subject_id) WHERE subject_id IS NOT NULL;",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(entity_state dependent ddl): %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables(entity_state dependent ddl): %v", err)
+	}
+
+	var (
+		hasSubjectID bool
+		indexName    string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'entity_state' AND column_name = 'subject_id'
+		)
+	`).Scan(&hasSubjectID); err != nil {
+		t.Fatalf("check subject_id column: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(to_regclass('idx_entity_subject')::text, '')`).Scan(&indexName); err != nil {
+		t.Fatalf("check idx_entity_subject: %v", err)
+	}
+	if !hasSubjectID {
+		t.Fatal("subject_id column missing after EnsureSchemaTables")
+	}
+	if indexName != "idx_entity_subject" {
+		t.Fatalf("idx_entity_subject regclass = %q, want idx_entity_subject", indexName)
+	}
+}
+
 func TestPostgresStore_AgentSessionTerminationMetadataMigrationWithoutAgentTurnsSupportsResetAll(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

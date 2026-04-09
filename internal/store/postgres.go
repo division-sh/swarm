@@ -140,6 +140,8 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 				return fmt.Errorf("ensure agent_turns.turn_blocks column: %w", err)
 			}
 		}
+	}
+	if catalog.hasTable("agent_conversation_audits") || catalog.hasTable("agent_turns") {
 		if err := s.ensureConversationAuditTable(ctx); err != nil {
 			return err
 		}
