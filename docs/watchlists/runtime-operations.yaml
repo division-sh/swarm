@@ -21,6 +21,10 @@ active_issues:
     title: Make workflow instance mutation atomic across load, mutate, and upsert
     maps_to:
       - atomic_runtime_state_mutation
+  - id: 161
+    title: Canonicalize workflow-instance mutation lock identity before row creation
+    maps_to:
+      - atomic_runtime_state_mutation
   - id: 136
     title: Make managed-agent startup validation prove the real filtered tool transport path
     maps_to:
@@ -65,6 +69,22 @@ active_issues:
     title: Make operational config surfaces fail closed and remove inert controls
     maps_to:
       - fail_closed_operational_config
+  - id: 170
+    title: Introduce an explicit runtime dependency graph object for boot wiring
+    maps_to:
+      - boot_wiring_dependency_ownership
+  - id: 175
+    title: Add first-class launch, stalled-run, and long-running session observability
+    maps_to:
+      - runtime_lifecycle_observability
+  - id: 177
+    title: Add structured tool-call diagnostics for payload validation, enrichment, and publish outcomes
+    maps_to:
+      - tool_execution_outcome_diagnostics
+  - id: 179
+    title: Expose recovery and restart decisions through canonical diagnostics
+    maps_to:
+      - recovery_restart_diagnostics
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -116,11 +136,30 @@ nodes:
       - workflow instance mutation split across load, mutate, and upsert
     representative_issues:
       - 116
+      - 161
     common_framing_mistakes:
       too_broad:
         - persistence is nonatomic
       too_narrow:
         - one update statement races
+    current_action_pressure: active
+  - id: boot_wiring_dependency_ownership
+    title: Boot Wiring Dependency Ownership
+    parent_class: runtime constructor and boot dependency ownership
+    canonical_owners:
+      - explicit validated dependency ownership for the runtime boot path
+    why_this_node_exists: boot wiring drifts opaque when constructors and package-local setup paths split dependency ownership implicitly
+    known_manifestations:
+      - NewRuntime boot wiring spreads important ownership across multiple constructors
+      - dependency validation is implicit instead of being owned by one explicit boot object
+      - adjacent boot entrypaths become harder to reason about because dependency truth is not centralized
+    representative_issues:
+      - 170
+    common_framing_mistakes:
+      too_broad:
+        - constructors are messy
+      too_narrow:
+        - one parameter list is too long
     current_action_pressure: active
   - id: privileged_control_plane_auth
     title: Privileged Control Plane Authentication
@@ -193,12 +232,66 @@ nodes:
       too_narrow:
         - one flag is inert
     current_action_pressure: active
+  - id: runtime_lifecycle_observability
+    title: Runtime Lifecycle Observability
+    parent_class: operator-visible runtime activity and stuckness truth
+    canonical_owners:
+      - canonical launch, progress, and session-liveness visibility for the touched runtime surfaces
+    why_this_node_exists: operators cannot distinguish healthy progress from blocked or stalled runtime state when launch and liveness semantics are only partially surfaced
+    known_manifestations:
+      - launch lifecycle is not exposed clearly enough
+      - stalled runs and healthy running state look too similar
+      - long-running or no-output sessions require log archaeology instead of first-class visibility
+    representative_issues:
+      - 175
+    common_framing_mistakes:
+      too_broad:
+        - observability is weak
+      too_narrow:
+        - one stuck run needs a better message
+    current_action_pressure: active
+  - id: recovery_restart_diagnostics
+    title: Recovery And Restart Diagnostics
+    parent_class: restart and recovery decision visibility
+    canonical_owners:
+      - canonical diagnostics ownership for replay, skip, drop, and orphan recovery decisions
+    why_this_node_exists: restart behavior drifts opaque when the runtime enforces one recovery model but operators cannot see which recovery decisions were actually taken
+    known_manifestations:
+      - replay, skip, drop, or orphan recovery decisions are not visible enough
+      - in-flight recovery invariants are not explicit in touched diagnostics surfaces
+      - startup environment confusion hides the real recovery behavior being exercised
+    representative_issues:
+      - 179
+    common_framing_mistakes:
+      too_broad:
+        - restart is confusing
+      too_narrow:
+        - one missing restart log line
+    current_action_pressure: active
+  - id: tool_execution_outcome_diagnostics
+    title: Tool Execution Outcome Diagnostics
+    parent_class: execution-boundary observability and failure attribution
+    canonical_owners:
+      - canonical tool execution identity and outcome diagnostics for the touched tool family
+    why_this_node_exists: tool execution is hard to debug when payload shaping, enrichment, validation, and publish outcomes collapse into one opaque failure story
+    known_manifestations:
+      - canonical tool or event identity not surfaced with the tool-call outcome
+      - payload-shape failures and downstream publish failures not distinguished clearly
+      - pre-validation and post-enrichment payload states not inspectable where they should be
+    representative_issues:
+      - 177
+    common_framing_mistakes:
+      too_broad:
+        - tool debugging is weak
+      too_narrow:
+        - one error message needs more detail
+    current_action_pressure: active
 reserve_backlog:
   - ordinal: 5
     title: Add watchdogs for long-running/no-output turns and stalled runs
     follow_on_priority:
-      issue: 169
-      relation: combined_follow_on_priority
+      issue: 175
+      relation: already_covered_by_issue
   - ordinal: 8
     title: Make delivery lifecycle first-class and observable
     follow_on_priority:
@@ -207,10 +300,10 @@ reserve_backlog:
   - ordinal: 9
     title: Improve restart/recovery observability for in-flight turns
     follow_on_priority:
-      issue: 169
-      relation: combined_follow_on_priority
+      issue: 179
+      relation: already_covered_by_issue
   - ordinal: 25
     title: Introduce an explicit runtime dependency graph object for boot wiring
     follow_on_priority:
       issue: 170
-      relation: follow_on_priority
+      relation: already_covered_by_issue

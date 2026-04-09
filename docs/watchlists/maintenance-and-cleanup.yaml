@@ -40,6 +40,15 @@ active_issues:
     title: Legacy compatibility removal wave
     maps_to:
       - legacy_compatibility_removal
+  - id: 173
+    title: Completed-seam hygiene with canonical-owner notes and reusable invariant suites
+    maps_to:
+      - completed_seam_hygiene
+      - invariant_suite_coverage
+  - id: 182
+    title: Improve local lifecycle and harness reliability so tooling stops hiding runtime semantics
+    maps_to:
+      - harness_reliability_and_local_smoke
 nodes:
   - id: boundary_owned_decomposition
     title: Boundary-Owned Decomposition
@@ -98,6 +107,44 @@ nodes:
         - add more tests everywhere
       too_narrow:
         - add one regression and call the seam covered
+    current_action_pressure: active
+  - id: completed_seam_hygiene
+    title: Completed-Seam Hygiene
+    parent_class: maintenance hardening of already-completed seams
+    canonical_owners:
+      - canonical-owner notes and reusable invariant suites for the touched completed seam
+    why_this_node_exists: completed seams drift back into ambiguity when ownership is not documented locally and proof remains issue-local
+    known_manifestations:
+      - key completed seams still lack short canonical-owner guidance
+      - completed seams rely on one-off regressions instead of reusable invariant suites
+    representative_issues:
+      - 173
+    common_framing_mistakes:
+      too_broad:
+        - add comments everywhere
+        - add more tests everywhere
+      too_narrow:
+        - one comment in one file
+        - one extra regression without seam-level reuse
+    current_action_pressure: active
+  - id: harness_reliability_and_local_smoke
+    title: Harness Reliability And Local Smoke
+    parent_class: maintenance reliability of local lifecycle and development/test harnesses
+    canonical_owners:
+      - local lifecycle smoke coverage and harness reliability for the touched development/test seam
+    why_this_node_exists: local lifecycle and harness noise can hide real runtime semantics and send debugging effort at the wrong layer
+    known_manifestations:
+      - reset/startup smoke coverage is too weak in the touched local path
+      - giant fixtures hide smaller invariant failures
+      - optional infrastructure gaps are unclear during local startup
+    representative_issues:
+      - 182
+    common_framing_mistakes:
+      too_broad:
+        - the harness is flaky
+      too_narrow:
+        - one test is flaky
+        - one script needs cleanup
     current_action_pressure: active
   - id: dead_or_inert_paths
     title: Dead Or Inert Paths

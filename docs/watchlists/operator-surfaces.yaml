@@ -33,6 +33,14 @@ active_issues:
     title: Make run_id canonical across replay, diagnostics, API/dashboard scoping, and operator surfaces
     maps_to:
       - run_scoped_operator_identity
+  - id: 224
+    title: Remove implicit canonical schema defaults from dashboard readers and require explicit capability ownership
+    maps_to:
+      - typed_persisted_operator_reads
+  - id: 300
+    title: Add completeness invariants for canonical mutation surfaces and touched conformance/read-model seams
+    maps_to:
+      - typed_persisted_operator_reads
 nodes:
   - id: canonical_operator_projection_truth
     title: Canonical Operator Projection Truth
@@ -81,6 +89,8 @@ nodes:
       - summary/runtime-log/mutation completeness may be inferred or silently omitted
     representative_issues:
       - 134
+      - 224
+      - 300
     common_framing_mistakes:
       too_broad:
         - API contracts are messy
