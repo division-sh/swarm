@@ -1818,6 +1818,24 @@ func TestSQLConversationReader_ListFailsClosedWithoutCanonicalConversationSurfac
 	}
 }
 
+func TestSQLConversationReader_ListFailsClosedWhenCapabilityOwnerReportsUnavailableConversationSurface(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions: store.SchemaFlavorUnavailable,
+			Audits:   store.SchemaFlavorUnavailable,
+		},
+	}})
+	if _, err := reader.List(context.Background(), 10); err == nil || !strings.Contains(err.Error(), "schema is unavailable at the explicit capability boundary") {
+		t.Fatalf("expected unavailable conversation surface capability error, got %v", err)
+	}
+}
+
 func TestSQLConversationReader_GetFailsClosedWithoutCapabilityOwner(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
@@ -1857,6 +1875,38 @@ func TestSQLConversationReader_GetFailsClosedWithoutTurnCapability(t *testing.T)
 	item, ok, err := reader.Get(context.Background(), "sess-1")
 	if err == nil || !strings.Contains(err.Error(), "agent_turns schema is unsupported") {
 		t.Fatalf("expected unsupported turn capability error, got item=%+v ok=%v err=%v", item, ok, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLConversationReader_GetFailsClosedWhenCapabilityOwnerReportsUnavailableTurnCapability(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions: store.SchemaFlavorCanonical,
+			Turns:    store.SchemaFlavorUnavailable,
+		},
+	}})
+	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
+	summaryState := `{"summary":"brief"}`
+	messagePayload := `[{"role":"assistant","content":"hello"}]`
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
+		WithArgs("sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 1, []byte(summaryState), []byte(messagePayload), now))
+
+	item, ok, err := reader.Get(context.Background(), "sess-1")
+	if err == nil || !strings.Contains(err.Error(), "agent_turns schema is unavailable at the explicit capability boundary") {
+		t.Fatalf("expected unavailable turn capability error, got item=%+v ok=%v err=%v", item, ok, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
