@@ -97,7 +97,7 @@ func TestInMemorySessionRegistry_TaskModeIsStateless(t *testing.T) {
 	if _, err := sr.Acquire(context.Background(), "agent-a", RuntimeModeTask, "", "worker-a", ""); err == nil {
 		t.Fatal("expected task mode acquire to reject stateless sessions")
 	}
-	if err := sr.ResetAll(RuntimeModeTask); err != nil {
+	if _, err := sr.ResetAll(RuntimeModeTask, ResetMetadata{}); err != nil {
 		t.Fatalf("ResetAll(task): %v", err)
 	}
 }

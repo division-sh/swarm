@@ -254,17 +254,32 @@ func TestPostgresSessionRegistry_ResetAll_TerminatesActiveSessions(t *testing.T)
 	defer db.Close()
 
 	sr := NewPostgresRegistry(db, 30*time.Second)
-	mock.ExpectExec("UPDATE agent_sessions\\s+SET status = 'terminated'.*runtime_mode IN \\('session', 'session_per_entity'\\)").
-		WillReturnResult(sqlmock.NewResult(0, 2))
-	if err := sr.ResetAll(""); err != nil {
+	mock.ExpectQuery("WITH affected AS \\(").
+		WithArgs("").
+		WillReturnRows(sqlmock.NewRows([]string{"session_id", "agent_id", "scope_key", "runtime_mode", "status"}).
+			AddRow("sess-1", "a1", "global", RuntimeModeSession, "active").
+			AddRow("sess-2", "a2", "entity-1", RuntimeModeSessionPerEntity, "suspended"))
+	summary, err := sr.ResetAll("", ResetMetadata{})
+	if err != nil {
 		t.Fatalf("ResetAll(all runtimes): %v", err)
 	}
+	if got := summary.OrphanedCount(); got != 2 {
+		t.Fatalf("ResetAll(all runtimes) orphaned_count = %d, want 2", got)
+	}
 
-	mock.ExpectExec("UPDATE agent_sessions\\s+SET status = 'terminated'.*runtime_mode = \\$1").
-		WithArgs(RuntimeModeSession).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := sr.ResetAll(RuntimeModeSession); err != nil {
+	mock.ExpectQuery("WITH affected AS \\(").
+		WithArgs(RuntimeModeSession, "builder_api").
+		WillReturnRows(sqlmock.NewRows([]string{"session_id", "agent_id", "scope_key", "runtime_mode", "status"}).
+			AddRow("sess-3", "a3", "global", RuntimeModeSession, "active"))
+	summary, err = sr.ResetAll(RuntimeModeSession, ResetMetadata{Source: "builder_api"})
+	if err != nil {
 		t.Fatalf("ResetAll(session): %v", err)
+	}
+	if got := summary.OrphanedCount(); got != 1 {
+		t.Fatalf("ResetAll(session) orphaned_count = %d, want 1", got)
+	}
+	if got := summary.OrphanedSessions[0].TerminationDetail; got != "builder_api" {
+		t.Fatalf("ResetAll(session) termination_detail = %q, want builder_api", got)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

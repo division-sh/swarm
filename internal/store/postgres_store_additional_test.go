@@ -490,8 +490,12 @@ func TestPostgresStore_AgentSessionTerminationMetadataMigrationWithoutAgentTurns
 	}
 
 	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
-	if err := registry.ResetAll(runtimesessions.RuntimeModeSession); err != nil {
+	summary, err := registry.ResetAll(runtimesessions.RuntimeModeSession, runtimesessions.ResetMetadata{})
+	if err != nil {
 		t.Fatalf("ResetAll after agent_sessions-only migration: %v", err)
+	}
+	if got := summary.OrphanedCount(); got != 1 {
+		t.Fatalf("ResetAll orphaned_count = %d, want 1", got)
 	}
 
 	var (
@@ -588,20 +592,28 @@ func TestPostgresRegistry_ResetAllMarksActiveSessionsOrphaned(t *testing.T) {
 
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
 	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
-	if err := registry.ResetAll(runtimesessions.RuntimeModeSession); err != nil {
+	summary, err := registry.ResetAll(runtimesessions.RuntimeModeSession, runtimesessions.ResetMetadata{Source: "builder_api"})
+	if err != nil {
 		t.Fatalf("ResetAll: %v", err)
+	}
+	if got := summary.OrphanedCount(); got != 1 {
+		t.Fatalf("ResetAll orphaned_count = %d, want 1", got)
+	}
+	if got := summary.OrphanedSessions[0].TerminationDetail; got != "builder_api" {
+		t.Fatalf("ResetAll termination_detail = %q, want builder_api", got)
 	}
 
 	var (
 		status       string
 		reason       string
+		detail       string
 		terminatedAt time.Time
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(termination_reason, ''), terminated_at
+		SELECT COALESCE(status, ''), COALESCE(termination_reason, ''), COALESCE(termination_detail, ''), terminated_at
 		FROM agent_sessions
 		WHERE session_id = $1::uuid
-	`, sessionID).Scan(&status, &reason, &terminatedAt); err != nil {
+	`, sessionID).Scan(&status, &reason, &detail, &terminatedAt); err != nil {
 		t.Fatalf("load reset session row: %v", err)
 	}
 	if status != "terminated" {
@@ -609,6 +621,9 @@ func TestPostgresRegistry_ResetAllMarksActiveSessionsOrphaned(t *testing.T) {
 	}
 	if reason != "orphaned" {
 		t.Fatalf("termination_reason = %q, want orphaned", reason)
+	}
+	if detail != "builder_api" {
+		t.Fatalf("termination_detail = %q, want builder_api", detail)
 	}
 	if terminatedAt.IsZero() {
 		t.Fatal("terminated_at is zero")

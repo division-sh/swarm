@@ -775,7 +775,10 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 		am.resetRuntimeOwnedState()
 	}
 	if resetter, ok := am.sessions.(sessions.Resetter); ok && resetter != nil {
-		if err := resetter.ResetAll(sessions.NormalizeConversationRuntimeMode(am.runtimeMode)); err != nil {
+		summary, err := resetter.ResetAll(sessions.NormalizeConversationRuntimeMode(am.runtimeMode), sessions.ResetMetadata{
+			Source: source,
+		})
+		if err != nil {
 			if am.bus != nil {
 				am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
@@ -784,6 +787,14 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 					Error:     strings.TrimSpace(err.Error()),
 				})
 			}
+		} else if summary.OrphanedCount() > 0 && am.bus != nil {
+			am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+				Level:     "warn",
+				Component: "runtime",
+				Action:    "reset_orphaned_sessions",
+				Message:   "Runtime reset orphaned live sessions",
+				Detail:    resetOrphanedSessionsDetail(summary, source, sessions.NormalizeConversationRuntimeMode(am.runtimeMode)),
+			})
 		}
 	}
 	if am.bus != nil {
@@ -833,6 +844,36 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 		}
 	}
 	return nil
+}
+
+func resetOrphanedSessionsDetail(summary sessions.ResetSummary, source string, runtimeMode sessions.RuntimeMode) map[string]any {
+	detail := map[string]any{
+		"orphaned_session_count": summary.OrphanedCount(),
+		"orphaned_sessions":      make([]map[string]any, 0, len(summary.OrphanedSessions)),
+	}
+	if runtimeMode != "" {
+		detail["runtime_mode"] = runtimeMode.String()
+	}
+	if source = strings.TrimSpace(source); source != "" {
+		detail["source"] = source
+	}
+	records := detail["orphaned_sessions"].([]map[string]any)
+	for _, item := range summary.OrphanedSessions {
+		record := map[string]any{
+			"session_id":         strings.TrimSpace(item.SessionID),
+			"agent_id":           strings.TrimSpace(item.AgentID),
+			"scope_key":          strings.TrimSpace(item.ScopeKey),
+			"runtime_mode":       item.RuntimeMode.String(),
+			"previous_status":    strings.TrimSpace(item.PreviousStatus),
+			"termination_reason": strings.TrimSpace(item.TerminationReason),
+		}
+		if terminationDetail := strings.TrimSpace(item.TerminationDetail); terminationDetail != "" {
+			record["termination_detail"] = terminationDetail
+		}
+		records = append(records, record)
+	}
+	detail["orphaned_sessions"] = records
+	return detail
 }
 
 func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {

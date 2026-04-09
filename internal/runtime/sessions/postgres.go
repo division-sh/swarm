@@ -435,39 +435,93 @@ func (sr *PostgresRegistry) ScopeKeyEnabledForTest() bool {
 	return true
 }
 
-func (sr *PostgresRegistry) ResetAll(runtimeMode RuntimeMode) error {
+func (sr *PostgresRegistry) ResetAll(runtimeMode RuntimeMode, metadata ResetMetadata) (ResetSummary, error) {
+	summary := ResetSummary{}
+	source := strings.TrimSpace(metadata.Source)
 	if runtimeMode == "" {
-		_, err := sr.db.Exec(`
-		UPDATE agent_sessions
-		SET status = 'terminated',
-		    termination_reason = 'orphaned',
-		    terminated_at = COALESCE(terminated_at, now()),
-		    lease_holder = NULL,
-		    lease_expires_at = NULL,
-		    updated_at = now()
-		WHERE status IN ('active', 'suspended')
-		  AND runtime_mode IN ('session', 'session_per_entity')
-	`)
+		rows, err := sr.db.Query(`
+		WITH affected AS (
+			SELECT session_id, agent_id, scope_key, runtime_mode, status
+			FROM agent_sessions
+			WHERE status IN ('active', 'suspended')
+			  AND runtime_mode IN ('session', 'session_per_entity')
+		),
+		updated AS (
+			UPDATE agent_sessions AS s
+			SET status = 'terminated',
+			    termination_reason = 'orphaned',
+			    termination_detail = NULLIF($1, ''),
+			    terminated_at = COALESCE(terminated_at, now()),
+			    lease_holder = NULL,
+			    lease_expires_at = NULL,
+			    updated_at = now()
+			FROM affected
+			WHERE s.session_id = affected.session_id
+			RETURNING affected.session_id::text, affected.agent_id, affected.scope_key, affected.runtime_mode, affected.status
+		)
+		SELECT session_id, agent_id, scope_key, runtime_mode, status
+		FROM updated
+		ORDER BY agent_id ASC, scope_key ASC, session_id ASC
+	`, source)
 		if err != nil {
-			return fmt.Errorf("reset all sessions: %w", err)
+			return ResetSummary{}, fmt.Errorf("reset all sessions: %w", err)
 		}
-		return nil
+		defer rows.Close()
+		for rows.Next() {
+			var disposition ResetDisposition
+			if err := rows.Scan(&disposition.SessionID, &disposition.AgentID, &disposition.ScopeKey, &disposition.RuntimeMode, &disposition.PreviousStatus); err != nil {
+				return ResetSummary{}, fmt.Errorf("scan reset all session summary: %w", err)
+			}
+			disposition.TerminationReason = TerminationReasonOrphaned.String()
+			disposition.TerminationDetail = source
+			summary.OrphanedSessions = append(summary.OrphanedSessions, disposition)
+		}
+		if err := rows.Err(); err != nil {
+			return ResetSummary{}, fmt.Errorf("reset all sessions rows: %w", err)
+		}
+		return summary, nil
 	}
 	if runtimeMode == RuntimeModeTask {
-		return nil
+		return summary, nil
 	}
-	_, err := sr.db.Exec(`
-		UPDATE agent_sessions
-		SET status = 'terminated',
-		    termination_reason = 'orphaned',
-		    terminated_at = COALESCE(terminated_at, now()),
-		    lease_holder = NULL,
-		    lease_expires_at = NULL,
-		    updated_at = now()
-		WHERE status IN ('active', 'suspended') AND runtime_mode = $1
-	`, runtimeMode)
+	rows, err := sr.db.Query(`
+		WITH affected AS (
+			SELECT session_id, agent_id, scope_key, runtime_mode, status
+			FROM agent_sessions
+			WHERE status IN ('active', 'suspended') AND runtime_mode = $1
+		),
+		updated AS (
+			UPDATE agent_sessions AS s
+			SET status = 'terminated',
+			    termination_reason = 'orphaned',
+			    termination_detail = NULLIF($2, ''),
+			    terminated_at = COALESCE(terminated_at, now()),
+			    lease_holder = NULL,
+			    lease_expires_at = NULL,
+			    updated_at = now()
+			FROM affected
+			WHERE s.session_id = affected.session_id
+			RETURNING affected.session_id::text, affected.agent_id, affected.scope_key, affected.runtime_mode, affected.status
+		)
+		SELECT session_id, agent_id, scope_key, runtime_mode, status
+		FROM updated
+		ORDER BY agent_id ASC, scope_key ASC, session_id ASC
+	`, runtimeMode, source)
 	if err != nil {
-		return fmt.Errorf("reset sessions runtime=%s: %w", runtimeMode.String(), err)
+		return ResetSummary{}, fmt.Errorf("reset sessions runtime=%s: %w", runtimeMode.String(), err)
 	}
-	return nil
+	defer rows.Close()
+	for rows.Next() {
+		var disposition ResetDisposition
+		if err := rows.Scan(&disposition.SessionID, &disposition.AgentID, &disposition.ScopeKey, &disposition.RuntimeMode, &disposition.PreviousStatus); err != nil {
+			return ResetSummary{}, fmt.Errorf("scan reset sessions runtime=%s summary: %w", runtimeMode.String(), err)
+		}
+		disposition.TerminationReason = TerminationReasonOrphaned.String()
+		disposition.TerminationDetail = source
+		summary.OrphanedSessions = append(summary.OrphanedSessions, disposition)
+	}
+	if err := rows.Err(); err != nil {
+		return ResetSummary{}, fmt.Errorf("reset sessions runtime=%s rows: %w", runtimeMode.String(), err)
+	}
+	return summary, nil
 }

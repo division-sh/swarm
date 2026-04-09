@@ -14,13 +14,16 @@ import (
 	"swarm/internal/config"
 	dashboardserver "swarm/internal/dashboard/server"
 	runtimepkg "swarm/internal/runtime"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimediaglog "swarm/internal/runtime/diaglog"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemutationlog "swarm/internal/runtime/mutationlog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimesemanticview "swarm/internal/runtime/semanticview"
+	runtimesessions "swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
@@ -450,6 +453,136 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	classes, _ := detail["recoverable_work_classes"].([]any)
 	if len(classes) != 1 || readString(classes[0]) != "active schedules" {
 		t.Fatalf("detail.recoverable_work_classes = %#v, want [active schedules]", detail["recoverable_work_classes"])
+	}
+}
+
+type conformanceRuntimeLoggerHook struct {
+	logger *runtimepkg.RuntimeLogger
+}
+
+func (h conformanceRuntimeLoggerHook) Log(ctx context.Context, level runtimediaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
+	if h.logger == nil {
+		return nil
+	}
+	return h.logger.Log(ctx, runtimepkg.RuntimeLogEntry{
+		Level:       level,
+		Message:     message,
+		Component:   component,
+		Action:      action,
+		EventID:     eventID,
+		EventType:   eventType,
+		AgentID:     agentID,
+		EntityID:    entityID,
+		SessionID:   sessionID,
+		Correlation: correlation,
+		Detail:      detail,
+		Error:       errText,
+		DurationUS:  durationUS,
+	})
+}
+
+func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalRuntimeLogSurface(t, ctx, pg)
+	seedConformanceAgent(t, ctx, pg, "agent-1")
+
+	logger := runtimepkg.NewRuntimeLogger(db, pg)
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		Logger: conformanceRuntimeLoggerHook{logger: logger},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	lease, err := registry.Acquire(ctx, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "conformance", "global")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+
+	am := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		RuntimeMode: runtimesessions.RuntimeModeSession.String(),
+		Sessions:    registry,
+	})
+	if err := am.ResetRuntimeStateWithSource("builder_api"); err != nil {
+		t.Fatalf("ResetRuntimeStateWithSource: %v", err)
+	}
+
+	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
+	if reader == nil {
+		t.Fatal("NewSQLObservabilityReader returned nil")
+	}
+	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
+		Component: "runtime",
+		Type:      "reset_orphaned_sessions",
+	}, 10)
+	if err != nil {
+		t.Fatalf("ListRuntimeLogs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("runtime log rows = %d, want 1: %#v", len(logs), logs)
+	}
+	log := logs[0]
+	if log.Level != "warn" {
+		t.Fatalf("log level = %q, want warn", log.Level)
+	}
+	if log.Action != "reset_orphaned_sessions" {
+		t.Fatalf("log action = %q, want reset_orphaned_sessions", log.Action)
+	}
+	detail, _ := log.Detail.(map[string]any)
+	if got := readString(detail["source"]); got != "builder_api" {
+		t.Fatalf("detail.source = %q, want builder_api", got)
+	}
+	if got, _ := detail["orphaned_session_count"].(float64); int(got) != 1 {
+		t.Fatalf("detail.orphaned_session_count = %v, want 1", detail["orphaned_session_count"])
+	}
+	orphanedSessions, _ := detail["orphaned_sessions"].([]any)
+	if len(orphanedSessions) != 1 {
+		t.Fatalf("detail.orphaned_sessions = %#v, want one row", detail["orphaned_sessions"])
+	}
+	sessionRow, ok := orphanedSessions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("detail.orphaned_sessions[0] = %#v, want object", orphanedSessions[0])
+	}
+	if got := readString(sessionRow["session_id"]); got != lease.SessionID {
+		t.Fatalf("detail.orphaned_sessions[0].session_id = %q, want %q", got, lease.SessionID)
+	}
+	if got := readString(sessionRow["agent_id"]); got != "agent-1" {
+		t.Fatalf("detail.orphaned_sessions[0].agent_id = %q, want agent-1", got)
+	}
+	if got := readString(sessionRow["termination_reason"]); got != "orphaned" {
+		t.Fatalf("detail.orphaned_sessions[0].termination_reason = %q, want orphaned", got)
+	}
+	if got := readString(sessionRow["termination_detail"]); got != "builder_api" {
+		t.Fatalf("detail.orphaned_sessions[0].termination_detail = %q, want builder_api", got)
+	}
+
+	var (
+		status            string
+		terminationReason string
+		terminationDetail string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(status, ''),
+			COALESCE(termination_reason, ''),
+			COALESCE(termination_detail, '')
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, lease.SessionID).Scan(&status, &terminationReason, &terminationDetail); err != nil {
+		t.Fatalf("load reset session row: %v", err)
+	}
+	if status != "terminated" {
+		t.Fatalf("status = %q, want terminated", status)
+	}
+	if terminationReason != "orphaned" {
+		t.Fatalf("termination_reason = %q, want orphaned", terminationReason)
+	}
+	if terminationDetail != "builder_api" {
+		t.Fatalf("termination_detail = %q, want builder_api", terminationDetail)
 	}
 }
 
