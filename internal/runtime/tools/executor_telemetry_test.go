@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -425,6 +426,52 @@ func TestExecutorTelemetry_EmitToolLogsInvalidEmitToolNameOutcome(t *testing.T) 
 	}
 	if got := strings.TrimSpace(asString(detail["failure_stage"])); got != "resolve_event_type" {
 		t.Fatalf("failure_stage = %#v, want resolve_event_type", detail["failure_stage"])
+	}
+}
+
+func TestExecutorTelemetry_EmitToolCapsOversizedPayloadSnapshots(t *testing.T) {
+	bus := &telemetryBusStub{}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"category.assessed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Type: "object",
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"category": {Type: "string"},
+						"notes":    {Type: "string"},
+					},
+				},
+				Required: []string{"category"},
+			},
+		},
+	})
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:         "agent-emit-6",
+		EmitEvents: []string{"category.assessed"},
+	})
+	oversizedPayload := map[string]any{"category": "finops"}
+	for i := 0; i < 80; i++ {
+		oversizedPayload[fmt.Sprintf("extra_%02d", i)] = strings.Repeat("x", 40)
+	}
+
+	if _, err := exec.Execute(ctx, "emit_category_assessed", oversizedPayload); err != nil {
+		t.Fatalf("Execute(emit oversized): %v", err)
+	}
+	if len(bus.logs) != 1 {
+		t.Fatalf("runtime log count = %d, want 1", len(bus.logs))
+	}
+	detail, _ := bus.logs[0].Detail.(map[string]any)
+	pre, _ := detail["pre_validation_payload"].(map[string]any)
+	if truncated, _ := pre["truncated"].(bool); !truncated {
+		t.Fatalf("pre_validation_payload.truncated = %#v, want true", pre["truncated"])
+	}
+	summary := strings.TrimSpace(asString(pre["summary"]))
+	if summary == "" {
+		t.Fatal("expected truncated payload summary")
+	}
+	if len(summary) > maxToolTelemetryChars+3 {
+		t.Fatalf("summary length = %d, want <= %d", len(summary), maxToolTelemetryChars+3)
 	}
 }
 
