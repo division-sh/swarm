@@ -128,9 +128,6 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		}
 		return err
 	}
-	if len(intent.Recipients) > 0 && len(recipients) == 0 {
-		return d.dispatchExplicitDirectIntent(ctx, intent)
-	}
 	if len(recipients) > 0 {
 		if err := d.bus.PublishPersistedRecipients(ctx, intent.Event, recipients); err != nil {
 			return err
