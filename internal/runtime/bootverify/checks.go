@@ -237,15 +237,12 @@ func checkMCPServerReachable(c *checkerContext) []Finding         { return c.mcp
 func checkAgentPermissionValidation(c *checkerContext) []Finding {
 	return uniqueFindings(append(c.permissions(), c.permissionWarnings()...))
 }
-func checkPhantomProduces(c *checkerContext) []Finding               { return c.phantomProduces() }
-func checkSingleNodePerEvent(c *checkerContext) []Finding            { return c.singleNodePerEvent() }
-func checkPlatformMetadataValidation(c *checkerContext) []Finding    { return c.platformMetadata() }
-func checkTransitionReferenceValidation(c *checkerContext) []Finding { return c.transitionReferences() }
-func checkTransitionOwnershipValidation(c *checkerContext) []Finding { return c.transitionOwnership() }
-func checkEventRuntimeWiringValidation(c *checkerContext) []Finding  { return c.eventRuntimeWiring() }
-func checkTimerValidation(c *checkerContext) []Finding               { return c.timerValidation() }
-func checkGateSchemaValidation(c *checkerContext) []Finding          { return c.gateSchemaValidation() }
-func checkDeprecatedContractAlias(c *checkerContext) []Finding       { return c.deprecatedAliases() }
+func checkPhantomProduces(c *checkerContext) []Finding            { return c.phantomProduces() }
+func checkSingleNodePerEvent(c *checkerContext) []Finding         { return c.singleNodePerEvent() }
+func checkPlatformMetadataValidation(c *checkerContext) []Finding { return c.platformMetadata() }
+func checkTimerValidation(c *checkerContext) []Finding            { return c.timerValidation() }
+func checkGateSchemaValidation(c *checkerContext) []Finding       { return c.gateSchemaValidation() }
+func checkDeprecatedContractAlias(c *checkerContext) []Finding    { return c.deprecatedAliases() }
 
 func (c *checkerContext) eventWarningsByCheck(checkID string) []Finding {
 	items := c.eventWarnings()
@@ -314,205 +311,6 @@ func (c *checkerContext) platformMetadata() []Finding {
 		})
 	}
 	return c.platformMetaFindings
-}
-
-func (c *checkerContext) transitionReferences() []Finding {
-	if c.transitionRefLoaded {
-		return c.transitionRefFindings
-	}
-	c.transitionRefLoaded = true
-	for _, transition := range c.source.WorkflowTransitions() {
-		id := strings.TrimSpace(transition.ID)
-		if id == "" {
-			continue
-		}
-		if strings.TrimSpace(transition.Trigger) == "" {
-			c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-				CheckID:  "transition_reference_validation",
-				Severity: "error",
-				Message:  fmt.Sprintf("transition %s missing trigger", id),
-				Location: id,
-			})
-		} else if !eventExists(c.source, strings.TrimSpace(transition.Trigger)) {
-			c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-				CheckID:  "transition_reference_validation",
-				Severity: "error",
-				Message:  fmt.Sprintf("transition %s trigger %s missing from event catalog", id, transition.Trigger),
-				Location: id,
-			})
-		}
-		for _, actionID := range transition.Actions {
-			actionID = strings.TrimSpace(actionID)
-			if actionID == "" {
-				continue
-			}
-			action, ok := c.source.ActionInstructionByID(actionID)
-			if !ok {
-				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-					CheckID:  "transition_reference_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("transition %s references unknown action %s", id, actionID),
-					Location: id,
-				})
-				continue
-			}
-			if emits := strings.TrimSpace(action.Emits); emits != "" && !eventExists(c.source, emits) {
-				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-					CheckID:  "transition_reference_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("transition %s action %s emits missing event %s", id, actionID, emits),
-					Location: id,
-				})
-			}
-		}
-		for _, guardID := range transition.Guards {
-			guardID = strings.TrimSpace(guardID)
-			if guardID == "" {
-				continue
-			}
-			if _, ok := c.source.GuardInstructionByID(guardID); !ok {
-				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-					CheckID:  "transition_reference_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("transition %s references unknown guard %s", id, guardID),
-					Location: id,
-				})
-			}
-		}
-	}
-	for flowID := range c.source.FlowSchemaEntries() {
-		for _, eventType := range c.source.FlowInputEvents(flowID) {
-			eventType = strings.TrimSpace(eventType)
-			if eventType != "" && !eventExists(c.source, eventType) {
-				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-					CheckID:  "transition_reference_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("flow %s input event %s missing from event catalog", flowID, eventType),
-					Location: strings.TrimSpace(flowID),
-				})
-			}
-		}
-		for _, eventType := range c.source.FlowOutputEvents(flowID) {
-			eventType = strings.TrimSpace(eventType)
-			if eventType != "" && !eventExists(c.source, eventType) {
-				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-					CheckID:  "transition_reference_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("flow %s output event %s missing from event catalog", flowID, eventType),
-					Location: strings.TrimSpace(flowID),
-				})
-			}
-		}
-	}
-	return c.transitionRefFindings
-}
-
-func (c *checkerContext) transitionOwnership() []Finding {
-	if c.transitionOwnerLoaded {
-		return c.transitionOwnerFindings
-	}
-	c.transitionOwnerLoaded = true
-	transitions := c.source.WorkflowTransitions()
-	transitionByID := make(map[string]runtimecontracts.WorkflowTransitionContract, len(transitions))
-	for _, transition := range transitions {
-		id := strings.TrimSpace(transition.ID)
-		if id != "" {
-			transitionByID[id] = transition
-		}
-	}
-	usesOwningNodeModel := contractBundleUsesOwningNodeModel(c.source)
-	for nodeID, node := range c.source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" {
-			continue
-		}
-		subs := stringSet(c.source.NodeRuntimeSubscriptions(nodeID))
-		produces := stringSet(node.Produces)
-		for _, transitionID := range node.OwnedTransitions {
-			transitionID = strings.TrimSpace(transitionID)
-			if transitionID == "" {
-				continue
-			}
-			transition, ok := transitionByID[transitionID]
-			if !ok {
-				c.transitionOwnerFindings = append(c.transitionOwnerFindings, Finding{
-					CheckID:  "transition_ownership_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s owns unknown transition %s", nodeID, transitionID),
-					Location: nodeID,
-				})
-				continue
-			}
-			if owner := strings.TrimSpace(transition.Node); owner != nodeID {
-				c.transitionOwnerFindings = append(c.transitionOwnerFindings, Finding{
-					CheckID:  "transition_ownership_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s owns transition %s but workflow owner is %s", nodeID, transitionID, owner),
-					Location: nodeID,
-				})
-			}
-			trigger := strings.TrimSpace(transition.Trigger)
-			if trigger != "" && !usesOwningNodeModel {
-				if _, ok := subs[trigger]; !ok {
-					if _, emitted := produces[trigger]; !emitted {
-						c.transitionOwnerFindings = append(c.transitionOwnerFindings, Finding{
-							CheckID:  "transition_ownership_validation",
-							Severity: "error",
-							Message:  fmt.Sprintf("node %s cannot see trigger %s for owned transition %s", nodeID, trigger, transitionID),
-							Location: nodeID,
-						})
-					}
-				}
-			}
-		}
-	}
-	return c.transitionOwnerFindings
-}
-
-func (c *checkerContext) eventRuntimeWiring() []Finding {
-	if c.eventRuntimeLoaded {
-		return c.eventRuntimeFindings
-	}
-	c.eventRuntimeLoaded = true
-	nodes := c.source.NodeEntries()
-	usesOwningNodeModel := contractBundleUsesOwningNodeModel(c.source)
-	for eventType, entry := range c.source.EventEntries() {
-		eventType = strings.TrimSpace(eventType)
-		handling := strings.TrimSpace(entry.RuntimeHandling)
-		owner := strings.TrimSpace(entry.OwningNode)
-		if !requiresOwningNode(handling) || !usesOwningNodeModel {
-			continue
-		}
-		if owner == "" {
-			c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
-				CheckID:  "event_runtime_wiring_validation",
-				Severity: "error",
-				Message:  fmt.Sprintf("event %s with runtime_handling=%s missing owning_node", eventType, handling),
-				Location: eventType,
-			})
-			continue
-		}
-		if _, ok := nodes[owner]; !ok {
-			c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
-				CheckID:  "event_runtime_wiring_validation",
-				Severity: "error",
-				Message:  fmt.Sprintf("event %s owning_node %s missing from system nodes", eventType, owner),
-				Location: eventType,
-			})
-			continue
-		}
-		if handlers := c.source.NodeEventHandlers(owner); len(handlers) > 0 {
-			if _, ok := c.source.NodeEventHandler(owner, eventType); !ok {
-				c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
-					CheckID:  "event_runtime_wiring_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("event %s owning_node %s missing semantic event_handler", eventType, owner),
-					Location: eventType,
-				})
-			}
-		}
-	}
-	return c.eventRuntimeFindings
 }
 
 func (c *checkerContext) timerValidation() []Finding {
@@ -1395,7 +1193,6 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 		return c.handlerFindings
 	}
 	c.handlerLoaded = true
-	runtimeExecutors := supportedWorkflowRuntimeExecutorIDs(c.source)
 	nodes := c.source.NodeEntries()
 	for _, transition := range c.source.WorkflowTransitions() {
 		id := strings.TrimSpace(transition.ID)
@@ -1480,30 +1277,7 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 			}
 		}
 	}
-	usesOwningNodeModel := contractBundleUsesOwningNodeModel(c.source)
-	for eventType, entry := range c.source.EventEntries() {
-		eventType = strings.TrimSpace(eventType)
-		handling := strings.TrimSpace(entry.RuntimeHandling)
-		owner := strings.TrimSpace(entry.OwningNode)
-		if !requiresOwningNode(handling) || !usesOwningNodeModel {
-			continue
-		}
-		if owner == "" {
-			continue
-		}
-		if _, ok := nodes[owner]; !ok {
-			continue
-		}
-		if _, ok := runtimeExecutors[owner]; ok {
-			continue
-		}
-		c.handlerFindings = append(c.handlerFindings, Finding{
-			CheckID:  "handler_field_compliance",
-			Severity: "error",
-			Message:  fmt.Sprintf("event %s owning_node %s has no runtime executor", eventType, owner),
-			Location: eventType,
-		})
-	}
+	c.handlerFindings = append(c.handlerFindings, runtimeHandledEventsMissingExecutors(c.source)...)
 	return c.handlerFindings
 }
 
@@ -2899,32 +2673,6 @@ func handlerActionExecutable(source semanticview.Source, actionID string) bool {
 	}
 	entry, ok := source.ActionInstructionByID(actionID)
 	return ok && entry.Executable()
-}
-
-func requiresOwningNode(runtimeHandling string) bool {
-	switch strings.TrimSpace(runtimeHandling) {
-	case "consuming", "dual_delivery", "projection", "stage_projection":
-		return true
-	default:
-		return false
-	}
-}
-
-func contractBundleUsesOwningNodeModel(source semanticview.Source) bool {
-	if source == nil {
-		return false
-	}
-	for _, entry := range source.EventEntries() {
-		if strings.TrimSpace(entry.OwningNode) != "" {
-			return true
-		}
-	}
-	for _, node := range source.NodeEntries() {
-		if len(source.NodeEventHandlers(node.ID)) > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func detectEventCyclesSemanticModel(source semanticview.Source) error {
