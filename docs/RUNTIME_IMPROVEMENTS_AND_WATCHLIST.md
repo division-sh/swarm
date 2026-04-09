@@ -1093,13 +1093,6 @@ Improvement items:
 
 Current extracted slices:
 
-- `#300` first slice: canonical mutation-proof completeness for reconstructable tracked `entity_state` from persisted `entity_mutations`
-  - closure target: touched seam canonicalized
-  - current same-concept consumers in that slice:
-    - conformance tracked-state reconstruction
-    - pipeline mutation-log tracked-state reconstruction
-  - remaining broader family work stays separate unless later sweeps find another live same-concept reconstruction consumer
-
 ### Entity state changes occur but `entity_mutations` stays empty
 
 Symptoms:
