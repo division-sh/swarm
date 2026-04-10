@@ -10,11 +10,13 @@ import (
 	"testing"
 
 	"swarm/internal/events"
+	runtimeauthority "swarm/internal/runtime/authority"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	"swarm/internal/runtime/flowmodel"
 	llm "swarm/internal/runtime/llm"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -555,6 +557,209 @@ func TestNewLLMAgentFactory_PrefersActorScopedToolDefinitions(t *testing.T) {
 	}
 }
 
+type directiveFactoryRuntime struct {
+	steps      []*llm.Response
+	call       int
+	startTools []string
+	inputs     []string
+}
+
+func (r *directiveFactoryRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+	r.startTools = r.startTools[:0]
+	for _, tool := range tools {
+		r.startTools = append(r.startTools, strings.TrimSpace(tool.Name))
+	}
+	return &llm.Session{
+		ID:               "sess-" + strings.TrimSpace(agentID),
+		AgentID:          agentID,
+		RuntimeMode:      "api",
+		ConversationMode: "session",
+		SessionScope:     "global",
+		SystemPrompt:     systemPrompt,
+		Tools:            tools,
+	}, nil
+}
+
+func (r *directiveFactoryRuntime) ContinueSession(_ context.Context, _ *llm.Session, message llm.Message) (*llm.Response, error) {
+	r.inputs = append(r.inputs, strings.TrimSpace(message.Content))
+	if r.call >= len(r.steps) {
+		return nil, errors.New("unexpected runtime call")
+	}
+	resp := r.steps[r.call]
+	r.call++
+	return resp, nil
+}
+
+type directiveFactoryPublishBus struct {
+	events []events.Event
+}
+
+func (b *directiveFactoryPublishBus) Publish(_ context.Context, evt events.Event) error {
+	b.events = append(b.events, evt)
+	return nil
+}
+
+func (b *directiveFactoryPublishBus) PublishDirect(_ context.Context, evt events.Event, _ []string) error {
+	b.events = append(b.events, evt)
+	return nil
+}
+
+func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runtime, bundle *runtimecontracts.WorkflowContractBundle) (*LLMAgent, *directiveFactoryPublishBus) {
+	t.Helper()
+
+	source := semanticview.Wrap(bundle)
+	authority := runtimeauthority.NewSourceProvider(source)
+	emitRegistry := runtimetools.NewEmitRegistry(source, authority)
+	bus := &directiveFactoryPublishBus{}
+	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
+		WorkflowSource:    source,
+		AuthorityProvider: authority,
+		EmitRegistry:      emitRegistry,
+	})
+
+	factory := NewLLMAgentFactory(modelRuntime, exec, exec.ToolDefinitions(), LLMAgentOptions{
+		AuthorityProvider: authority,
+		EmitRegistry:      emitRegistry,
+	})
+	agent, err := factory(cfg)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	llmAgent, ok := agent.(*LLMAgent)
+	if !ok {
+		t.Fatalf("agent type = %T, want *LLMAgent", agent)
+	}
+	return llmAgent, bus
+}
+
+func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface(t *testing.T) {
+	rt := &directiveFactoryRuntime{
+		steps: []*llm.Response{
+			{
+				Message: llm.Message{Role: "assistant", Content: "Dispatching workflow now."},
+				ToolCalls: []llm.ToolCall{
+					{Name: "emit_scan_requested", Arguments: map[string]any{"entity_id": "corpus-1"}},
+				},
+			},
+			{Message: llm.Message{Role: "assistant", Content: "scan_requested emitted"}},
+		},
+	}
+	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
+		ID:   "campaign-coordinator",
+		Role: "campaign_coordinator",
+		Config: mustAgentConfigJSON(t, map[string]any{
+			"system_prompt": "You coordinate workflow launch.",
+		}),
+	}, rt, &runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"campaign-coordinator": {
+				ID:         "campaign-coordinator",
+				Role:       "campaign_coordinator",
+				EmitEvents: []string{"scan.requested"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Type: "object",
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+					Required: []string{"entity_id"},
+				},
+			},
+		},
+	})
+
+	got, err := agent.BoardStep(context.Background(), "start a corpus run")
+	if err != nil {
+		t.Fatalf("BoardStep: %v", err)
+	}
+	if got != "Dispatching workflow now." {
+		t.Fatalf("directive response = %q, want terminal emit turn text", got)
+	}
+	if !containsString(rt.startTools, "emit_scan_requested") {
+		t.Fatalf("session tools = %v, want emit_scan_requested", rt.startTools)
+	}
+	if len(rt.inputs) == 0 || !strings.Contains(rt.inputs[0], "Available emit tools in this turn: emit_scan_requested") {
+		t.Fatalf("directive input = %q, want emit tool summary", firstOrEmpty(rt.inputs))
+	}
+	if len(bus.events) != 1 || string(bus.events[0].Type) != "scan.requested" {
+		t.Fatalf("published events = %#v, want one scan.requested event", bus.events)
+	}
+}
+
+func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitToolSurface(t *testing.T) {
+	rt := &directiveFactoryRuntime{
+		steps: []*llm.Response{
+			{Message: llm.Message{Role: "assistant", Content: "I will trigger the workflow now."}},
+			{
+				Message: llm.Message{Role: "assistant", Content: "Dispatching workflow now."},
+				ToolCalls: []llm.ToolCall{
+					{Name: "emit_scan_requested", Arguments: map[string]any{"entity_id": "corpus-1"}},
+				},
+			},
+			{Message: llm.Message{Role: "assistant", Content: "scan_requested emitted"}},
+		},
+	}
+	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
+		ID:         "campaign-coordinator",
+		Role:       "campaign_coordinator",
+		Mode:       "campaign-flow",
+		FlowPath:   "campaign-flow/inst-1",
+		EmitEvents: []string{"campaign-flow/inst-1/scan.requested"},
+		Config: mustAgentConfigJSON(t, map[string]any{
+			"system_prompt": "You coordinate workflow launch.",
+		}),
+	}, rt, &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Type: "object",
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+					Required: []string{"entity_id"},
+				},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"campaign-flow": {
+					Paths: runtimecontracts.FlowContractPaths{
+						ID:   "campaign-flow",
+						Flow: "campaign-flow",
+					},
+					Events: map[string]runtimecontracts.EventCatalogEntry{
+						"scan.requested": {},
+					},
+					Path: "campaign-flow",
+				},
+			},
+		},
+	})
+
+	got, err := agent.BoardStep(context.Background(), "start a corpus run")
+	if err != nil {
+		t.Fatalf("BoardStep: %v", err)
+	}
+	if got != "Dispatching workflow now." {
+		t.Fatalf("directive response = %q, want terminal emit turn text", got)
+	}
+	if !containsString(rt.startTools, "emit_scan_requested") {
+		t.Fatalf("session tools = %v, want emit_scan_requested", rt.startTools)
+	}
+	if len(rt.inputs) == 0 || !strings.Contains(rt.inputs[0], "Available emit tools in this turn: emit_scan_requested") {
+		t.Fatalf("directive input = %q, want emit tool summary", firstOrEmpty(rt.inputs))
+	}
+	if len(rt.inputs) < 2 || !strings.Contains(rt.inputs[1], "call the appropriate emit_* tool in this turn") {
+		t.Fatalf("remediation input = %q, want remediation prompt", firstOrEmpty(rt.inputs[1:]))
+	}
+	if len(bus.events) != 1 || string(bus.events[0].Type) != "campaign-flow/inst-1/scan.requested" {
+		t.Fatalf("published events = %#v, want one externalized scan.requested event", bus.events)
+	}
+}
+
 type taskRetryRuntime struct {
 	startCalls    int
 	continueCalls int
@@ -740,6 +945,13 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func firstOrEmpty(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 func mustAgentConfigJSON(t *testing.T, value any) json.RawMessage {
