@@ -38,6 +38,7 @@ type Session struct {
 	ScopeKey             string
 	RetryReason          string
 	RetriesFromSessionID string
+	Watchdog             *ConversationWatchdog
 	TurnCount            int
 	ParseFailures        int
 	SystemPrompt         string

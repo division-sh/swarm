@@ -10,11 +10,22 @@ import (
 )
 
 func projectConversationSummaryMetadata(p store.ConversationRuntimeStateDescriptor) ConversationSummaryMetadata {
-	return ConversationSummaryMetadata{
+	meta := ConversationSummaryMetadata{
 		ProviderSessionID:    p.ProviderSessionID,
 		RetryReason:          p.RetryReason,
 		RetriesFromSessionID: p.RetriesFromSessionID,
 	}
+	if p.Watchdog != nil {
+		meta.Watchdog = &ConversationRuntimeWatchdog{
+			State:         p.Watchdog.State,
+			BlockingLayer: p.Watchdog.BlockingLayer,
+			Action:        p.Watchdog.Action,
+			Outcome:       p.Watchdog.Outcome,
+			LastOutputAt:  p.Watchdog.LastOutputAt,
+			RecordedAt:    p.Watchdog.RecordedAt,
+		}
+	}
+	return meta
 }
 
 func projectConversationRuntimeState(p store.ConversationRuntimeStateDescriptor) ConversationRuntimeState {
@@ -28,6 +39,16 @@ func projectConversationRuntimeState(p store.ConversationRuntimeStateDescriptor)
 		state.LastTurn = &ConversationRuntimeLastTurn{
 			TaskID:  p.LastTurn.TaskID,
 			ParseOK: p.LastTurn.ParseOK,
+		}
+	}
+	if p.Watchdog != nil {
+		state.Watchdog = &ConversationRuntimeWatchdog{
+			State:         p.Watchdog.State,
+			BlockingLayer: p.Watchdog.BlockingLayer,
+			Action:        p.Watchdog.Action,
+			Outcome:       p.Watchdog.Outcome,
+			LastOutputAt:  p.Watchdog.LastOutputAt,
+			RecordedAt:    p.Watchdog.RecordedAt,
 		}
 	}
 	return state

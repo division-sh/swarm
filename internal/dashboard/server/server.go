@@ -47,9 +47,10 @@ type ConversationSummary struct {
 }
 
 type ConversationSummaryMetadata struct {
-	ProviderSessionID    string `json:"provider_session_id,omitempty"`
-	RetryReason          string `json:"retry_reason,omitempty"`
-	RetriesFromSessionID string `json:"retries_from_session_id,omitempty"`
+	ProviderSessionID    string                       `json:"provider_session_id,omitempty"`
+	RetryReason          string                       `json:"retry_reason,omitempty"`
+	RetriesFromSessionID string                       `json:"retries_from_session_id,omitempty"`
+	Watchdog             *ConversationRuntimeWatchdog `json:"watchdog,omitempty"`
 }
 
 type ConversationDetail struct {
@@ -105,11 +106,21 @@ type ConversationRuntimeState struct {
 	ProviderSessionID    string                       `json:"provider_session_id,omitempty"`
 	RetryReason          string                       `json:"retry_reason,omitempty"`
 	RetriesFromSessionID string                       `json:"retries_from_session_id,omitempty"`
+	Watchdog             *ConversationRuntimeWatchdog `json:"watchdog,omitempty"`
 }
 
 type ConversationRuntimeLastTurn struct {
 	TaskID  string `json:"task_id,omitempty"`
 	ParseOK bool   `json:"parse_ok"`
+}
+
+type ConversationRuntimeWatchdog struct {
+	State         string `json:"state,omitempty"`
+	BlockingLayer string `json:"blocking_layer,omitempty"`
+	Action        string `json:"action,omitempty"`
+	Outcome       string `json:"outcome,omitempty"`
+	LastOutputAt  string `json:"last_output_at,omitempty"`
+	RecordedAt    string `json:"recorded_at,omitempty"`
 }
 
 type ConversationMessage struct {

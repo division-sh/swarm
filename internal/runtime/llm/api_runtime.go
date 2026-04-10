@@ -70,6 +70,7 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 		AgentID:      s.AgentID,
 		SessionScope: strings.TrimSpace(s.SessionScope),
 		ScopeKey:     strings.TrimSpace(s.ScopeKey),
+		Watchdog:     s.Watchdog,
 		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
 		Mode:         mode.String(),
 		Messages:     s.Messages,
@@ -137,6 +138,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 			s.TurnCount = rec.TurnCount
 			s.RetryReason = strings.TrimSpace(rec.RetryReason)
 			s.RetriesFromSessionID = strings.TrimSpace(rec.RetriesFromSessionID)
+			s.Watchdog = rec.Watchdog
 		}
 	}
 	publishAgentStarted(ctx, r.events, s, events.EventType("platform.agent_started"))
@@ -322,6 +324,7 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 		AgentID:      s.AgentID,
 		SessionScope: strings.TrimSpace(s.SessionScope),
 		ScopeKey:     strings.TrimSpace(s.ScopeKey),
+		Watchdog:     s.Watchdog,
 		Mode:         mode.String(),
 		Messages:     s.Messages,
 		Summary:      BuildSessionSummary(s),

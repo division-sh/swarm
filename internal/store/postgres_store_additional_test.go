@@ -3240,6 +3240,122 @@ func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalRuntimeStat
 	}
 }
 
+func TestManagerStore_LoadActiveConversationFailsOnMalformedCanonicalWatchdogRuntimeState(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
+
+	if _, err := db.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET runtime_state = '{"summary":"ok","watchdog":{"state":"mystery","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-04-10T12:00:00Z","recorded_at":"2026-04-10T12:00:30Z"}}'::jsonb
+		WHERE session_id = $1::uuid
+	`, sessionID); err != nil {
+		t.Fatalf("seed malformed watchdog runtime_state: %v", err)
+	}
+
+	if _, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "global", "global"); err == nil || ok {
+		t.Fatalf("expected malformed canonical watchdog runtime_state to fail, ok=%v err=%v", ok, err)
+	} else if !strings.Contains(err.Error(), "decode conversation runtime_state") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestManagerStore_UpdateLiveSessionWatchdog_RoundTripsThroughLoadActiveConversation(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
+
+	err := pg.UpdateLiveSessionWatchdog(ctx, runtimellm.ConversationWatchdogUpdate{
+		SessionID:    sessionID,
+		AgentID:      "a1",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Mode:         "session",
+		Watchdog: &runtimellm.ConversationWatchdog{
+			State:         "healthy_long_running",
+			BlockingLayer: "session_execution",
+			Action:        "turn_long_running",
+			Outcome:       "observed",
+			LastOutputAt:  "2026-04-10T12:00:00Z",
+			RecordedAt:    "2026-04-10T12:00:30Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateLiveSessionWatchdog: %v", err)
+	}
+
+	rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "global", "global")
+	if err != nil || !ok {
+		t.Fatalf("LoadActiveConversation ok=%v err=%v", ok, err)
+	}
+	if rec.Watchdog == nil {
+		t.Fatal("expected watchdog to round-trip")
+	}
+	if rec.Watchdog.State != "healthy_long_running" || rec.Watchdog.Action != "turn_long_running" || rec.Watchdog.Outcome != "observed" {
+		t.Fatalf("unexpected watchdog: %+v", rec.Watchdog)
+	}
+	if rec.Watchdog.BlockingLayer != "session_execution" {
+		t.Fatalf("watchdog blocking_layer = %q, want session_execution", rec.Watchdog.BlockingLayer)
+	}
+}
+
+func TestManagerStore_UpdateLiveSessionWatchdog_PreservesCanonicalSummary(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
+
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    sessionID,
+		AgentID:      "a1",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Mode:         "session",
+		Messages:     []runtimellm.Message{{Role: "assistant", Content: "still working"}},
+		Summary:      "still working",
+		TurnCount:    2,
+		Status:       "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation: %v", err)
+	}
+
+	if err := pg.UpdateLiveSessionWatchdog(ctx, runtimellm.ConversationWatchdogUpdate{
+		SessionID:    sessionID,
+		AgentID:      "a1",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Mode:         "session",
+		Watchdog: &runtimellm.ConversationWatchdog{
+			State:         "no_output",
+			BlockingLayer: "session_execution",
+			Action:        "session_no_output",
+			Outcome:       "warning_emitted",
+			RecordedAt:    "2026-04-10T12:00:30Z",
+		},
+	}); err != nil {
+		t.Fatalf("UpdateLiveSessionWatchdog: %v", err)
+	}
+
+	rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "global", "global")
+	if err != nil || !ok {
+		t.Fatalf("LoadActiveConversation ok=%v err=%v", ok, err)
+	}
+	if rec.Summary != "still working" {
+		t.Fatalf("summary = %q, want still working", rec.Summary)
+	}
+	if rec.Watchdog == nil || rec.Watchdog.State != "no_output" {
+		t.Fatalf("unexpected watchdog after summary-preserving update: %+v", rec.Watchdog)
+	}
+}
+
 func TestManagerStore_Conversations_AndAgentTurns_PersistRunIDWhenColumnsExist(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

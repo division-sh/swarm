@@ -718,6 +718,10 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		return fmt.Errorf("marshal conversation messages: %w", err)
 	}
 	summary := strings.ToValidUTF8(rec.Summary, "\uFFFD")
+	runtimeStatePatch, err := marshalConversationRuntimeStatePatch(&summary, rec.Watchdog)
+	if err != nil {
+		return fmt.Errorf("marshal conversation runtime_state patch: %w", err)
+	}
 	sessionID := strings.TrimSpace(rec.SessionID)
 	runID := nullUUIDString(rec.RunID)
 
@@ -755,7 +759,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 				$7::jsonb,
 				$8,
 				$9,
-				jsonb_build_object('summary', NULLIF($10,'')),
+				$10::jsonb,
 				$11,
 				now(),
 				now()
@@ -769,7 +773,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 				conversation = EXCLUDED.conversation,
 				turn_count = EXCLUDED.turn_count,
 				runtime_mode = EXCLUDED.runtime_mode,
-				runtime_state = COALESCE(agent_conversation_audits.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($10,'')),
+				runtime_state = COALESCE(agent_conversation_audits.runtime_state, '{}'::jsonb) || EXCLUDED.runtime_state,
 				status = EXCLUDED.status,
 				updated_at = now()
 		`
@@ -783,7 +787,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			string(msgJSON),
 			rec.TurnCount,
 			mode.String(),
-			summary,
+			runtimeStatePatch,
 			status,
 		}
 		if caps.Conversations.AuditRunID {
@@ -806,7 +810,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 					$8::jsonb,
 					$9,
 					$10,
-					jsonb_build_object('summary', NULLIF($11,'')),
+					$11::jsonb,
 					$12,
 					now(),
 					now()
@@ -821,7 +825,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 					conversation = EXCLUDED.conversation,
 					turn_count = EXCLUDED.turn_count,
 					runtime_mode = EXCLUDED.runtime_mode,
-					runtime_state = COALESCE(agent_conversation_audits.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($11,'')),
+					runtime_state = COALESCE(agent_conversation_audits.runtime_state, '{}'::jsonb) || EXCLUDED.runtime_state,
 					status = EXCLUDED.status,
 					updated_at = now()
 			`
@@ -836,7 +840,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 				string(msgJSON),
 				rec.TurnCount,
 				mode.String(),
-				summary,
+				runtimeStatePatch,
 				status,
 			}
 		}
@@ -856,7 +860,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		UPDATE agent_sessions
 		SET conversation = $1::jsonb,
 			turn_count = $2,
-			runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($3,'')),
+			runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || $3::jsonb,
 			updated_at = now()
 		WHERE session_id = $4::uuid
 		  AND agent_id = $5
@@ -867,7 +871,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	args := []any{
 		string(msgJSON),
 		rec.TurnCount,
-		summary,
+		runtimeStatePatch,
 		sessionID,
 		rec.AgentID,
 		resolved.ScopeKey,
@@ -881,7 +885,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			UPDATE agent_sessions
 			SET conversation = $1::jsonb,
 				turn_count = $2,
-				runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($3,'')),
+				runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || $3::jsonb,
 				run_id = COALESCE(NULLIF($4,'')::uuid, run_id),
 				updated_at = now()
 			WHERE session_id = $5::uuid
@@ -893,7 +897,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		args = []any{
 			string(msgJSON),
 			rec.TurnCount,
-			summary,
+			runtimeStatePatch,
 			runID,
 			sessionID,
 			rec.AgentID,
@@ -920,6 +924,28 @@ func nullUUIDString(raw string) string {
 		return ""
 	}
 	return raw
+}
+
+func marshalConversationRuntimeStatePatch(summary *string, watchdog *runtimellm.ConversationWatchdog) (string, error) {
+	payload := map[string]any{}
+	if summary != nil && strings.TrimSpace(*summary) != "" {
+		payload["summary"] = *summary
+	}
+	if watchdog != nil {
+		payload["watchdog"] = map[string]any{
+			"state":          strings.TrimSpace(watchdog.State),
+			"blocking_layer": strings.TrimSpace(watchdog.BlockingLayer),
+			"action":         strings.TrimSpace(watchdog.Action),
+			"outcome":        strings.TrimSpace(watchdog.Outcome),
+			"last_output_at": strings.TrimSpace(watchdog.LastOutputAt),
+			"recorded_at":    strings.TrimSpace(watchdog.RecordedAt),
+		}
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mode, sessionScope, scopeKey string) (runtimellm.ConversationRecord, bool, error) {
@@ -991,6 +1017,16 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 	rec.Summary = runtimeState.Summary
 	rec.RetryReason = runtimeState.RetryReason
 	rec.RetriesFromSessionID = runtimeState.RetriesFromSessionID
+	if runtimeState.Watchdog != nil {
+		rec.Watchdog = &runtimellm.ConversationWatchdog{
+			State:         runtimeState.Watchdog.State,
+			BlockingLayer: runtimeState.Watchdog.BlockingLayer,
+			Action:        runtimeState.Watchdog.Action,
+			Outcome:       runtimeState.Watchdog.Outcome,
+			LastOutputAt:  runtimeState.Watchdog.LastOutputAt,
+			RecordedAt:    runtimeState.Watchdog.RecordedAt,
+		}
+	}
 	if len(rawMessages) > 0 {
 		var msgs []runtimellm.Message
 		if json.Unmarshal(rawMessages, &msgs) == nil {
@@ -998,4 +1034,57 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 		}
 	}
 	return rec, true, nil
+}
+
+func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update runtimellm.ConversationWatchdogUpdate) error {
+	agentID := strings.TrimSpace(update.AgentID)
+	if agentID == "" {
+		return fmt.Errorf("agent_id is required")
+	}
+	sessionID := strings.TrimSpace(update.SessionID)
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	mode, err := runtimesessions.ParseConversationRuntimeMode(update.Mode)
+	if err != nil {
+		return err
+	}
+	resolved, err := runtimesessions.ResolveScope(ctx, mode, runtimesessions.NormalizeSessionScope(update.SessionScope), update.ScopeKey)
+	if err != nil {
+		return err
+	}
+	if resolved.Stateless {
+		return fmt.Errorf("live session watchdog updates require session runtime mode")
+	}
+	if update.Watchdog == nil {
+		return fmt.Errorf("watchdog is required")
+	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	if caps.Conversations.Sessions != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
+	}
+	patch, err := marshalConversationRuntimeStatePatch(nil, update.Watchdog)
+	if err != nil {
+		return fmt.Errorf("marshal live session watchdog patch: %w", err)
+	}
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET runtime_state = COALESCE(runtime_state, '{}'::jsonb) || $1::jsonb,
+		    updated_at = now()
+		WHERE session_id = $2::uuid
+		  AND agent_id = $3
+		  AND scope_key = $4
+		  AND runtime_mode = $5
+		  AND status = 'active'
+	`, patch, sessionID, agentID, resolved.ScopeKey, mode.String())
+	if err != nil {
+		return fmt.Errorf("update live session watchdog: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return fmt.Errorf("no active live session row found for agent=%s session=%s runtime=%s scope=%s", agentID, sessionID, mode.String(), resolved.ScopeKey)
+	}
+	return nil
 }

@@ -1786,6 +1786,34 @@ func TestSQLConversationReader_ListFailsOnMalformedCanonicalRuntimeState(t *test
 	}
 }
 
+func TestSQLConversationReader_ListFailsOnMalformedCanonicalSessionWatchdogState(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions: store.SchemaFlavorCanonical,
+		},
+	}})
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*FROM \\(").
+		WithArgs(10).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(`{"summary":"ok","watchdog":{"state":"mystery","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-04-10T12:00:30Z"}}`), time.Now().UTC()))
+
+	if _, err := reader.List(context.Background(), 10); err == nil {
+		t.Fatal("expected malformed canonical session watchdog state to fail")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestSQLConversationReader_GetFailsOnMalformedCanonicalRuntimeState(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -1812,6 +1840,116 @@ func TestSQLConversationReader_GetFailsOnMalformedCanonicalRuntimeState(t *testi
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLConversationReader_GetFailsOnMalformedCanonicalSessionWatchdogState(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions: store.SchemaFlavorCanonical,
+			Turns:    store.SchemaFlavorCanonical,
+		},
+	}})
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
+		WithArgs("sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(`{"summary":"ok","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-04-10T12:00:30Z"}}`), []byte(`[]`), time.Now().UTC()))
+
+	if _, _, err := reader.Get(context.Background(), "sess-1"); err == nil {
+		t.Fatal("expected malformed canonical session watchdog state to fail")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLConversationReader_ListProjectsCanonicalSessionWatchdogState(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions: store.SchemaFlavorCanonical,
+		},
+	}})
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*FROM \\(").
+		WithArgs(10).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(`{"summary":"ok","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-04-10T12:00:00Z","recorded_at":"2026-04-10T12:00:30Z"}}`), time.Now().UTC()))
+
+	items, err := reader.List(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(items) != 1 || items[0].Metadata.Watchdog == nil {
+		t.Fatalf("expected one watchdog-bearing row, got %+v", items)
+	}
+	if items[0].Metadata.Watchdog.State != "healthy_long_running" || items[0].Metadata.Watchdog.Action != "turn_long_running" {
+		t.Fatalf("unexpected summary watchdog: %+v", items[0].Metadata.Watchdog)
+	}
+}
+
+func TestHandler_ConversationDetail_ProjectsSessionWatchdogState(t *testing.T) {
+	now := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	handler := NewHandler(Options{
+		AuthToken: testOperatorAuthToken,
+		Conversations: stubConversations{
+			bySession: map[string]ConversationDetail{
+				"sess-1": {
+					AgentID:   "agent-1",
+					SessionID: "sess-1",
+					UpdatedAt: now.Format(time.RFC3339),
+					RuntimeState: ConversationRuntimeState{
+						Summary: "summarized",
+						Watchdog: &ConversationRuntimeWatchdog{
+							State:         "no_output",
+							BlockingLayer: "session_execution",
+							Action:        "session_no_output",
+							Outcome:       "warning_emitted",
+							RecordedAt:    "2026-04-10T12:00:30Z",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/conversations/sess-1", nil)
+	setOperatorAuth(req)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("conversation detail status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal conversation detail: %v", err)
+	}
+	runtimeState, ok := payload["runtime_state"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime_state missing or invalid: %#v", payload["runtime_state"])
+	}
+	watchdog, ok := runtimeState["watchdog"].(map[string]any)
+	if !ok {
+		t.Fatalf("watchdog missing or invalid: %#v", runtimeState["watchdog"])
+	}
+	if watchdog["state"] != "no_output" || watchdog["action"] != "session_no_output" || watchdog["outcome"] != "warning_emitted" {
+		t.Fatalf("unexpected watchdog payload: %#v", watchdog)
 	}
 }
 

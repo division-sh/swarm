@@ -151,6 +151,7 @@ type ConversationRecord struct {
 	ScopeKey             string
 	RetryReason          string
 	RetriesFromSessionID string
+	Watchdog             *ConversationWatchdog
 	RunID                string
 	TaskID               string
 	Mode                 string
@@ -160,7 +161,26 @@ type ConversationRecord struct {
 	Status               string
 }
 
+type ConversationWatchdog struct {
+	State         string
+	BlockingLayer string
+	Action        string
+	Outcome       string
+	LastOutputAt  string
+	RecordedAt    string
+}
+
+type ConversationWatchdogUpdate struct {
+	SessionID    string
+	AgentID      string
+	SessionScope string
+	ScopeKey     string
+	Mode         string
+	Watchdog     *ConversationWatchdog
+}
+
 type ConversationPersistence interface {
 	UpsertConversation(ctx context.Context, rec ConversationRecord) error
 	LoadActiveConversation(ctx context.Context, agentID, mode, sessionScope, scopeKey string) (ConversationRecord, bool, error)
+	UpdateLiveSessionWatchdog(ctx context.Context, update ConversationWatchdogUpdate) error
 }
