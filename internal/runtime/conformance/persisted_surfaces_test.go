@@ -31,6 +31,19 @@ import (
 	"swarm/internal/testutil"
 )
 
+func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.DB, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, scopeKey string) string {
+	t.Helper()
+	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	lease, err := registry.Acquire(ctx, agentID, runtimeMode, sessionScope, "test-owner", scopeKey)
+	if err != nil {
+		t.Fatalf("Acquire(%s,%s,%s): %v", agentID, runtimeMode, scopeKey, err)
+	}
+	if err := registry.Release(ctx, lease); err != nil {
+		t.Fatalf("Release(%s,%s): %v", agentID, lease.SessionID, err)
+	}
+	return lease.SessionID
+}
+
 func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
@@ -104,6 +117,76 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	}
 	if strings.TrimSpace(turn.ToolResults[0].ToolName) != "schedule" {
 		t.Fatalf("tool_result.tool_name = %#v, want schedule", turn.ToolResults[0].ToolName)
+	}
+}
+
+func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalConversationSurface(t, ctx, pg)
+	seedConformanceAgent(t, ctx, pg, "agent-1")
+
+	sessionID := acquireLiveConversationSession(t, ctx, db, "agent-1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID:    sessionID,
+		AgentID:      "agent-1",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Mode:         "session",
+		Messages: []runtimellm.Message{
+			{Role: "assistant", Content: "Still working on it."},
+		},
+		Summary:   "Working",
+		TurnCount: 3,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(session): %v", err)
+	}
+	if err := pg.UpdateLiveSessionWatchdog(ctx, runtimellm.ConversationWatchdogUpdate{
+		SessionID:    sessionID,
+		AgentID:      "agent-1",
+		SessionScope: "global",
+		ScopeKey:     "global",
+		Mode:         "session",
+		Watchdog: &runtimellm.ConversationWatchdog{
+			State:         "no_output",
+			BlockingLayer: "session_execution",
+			Action:        "session_no_output",
+			Outcome:       "warning_emitted",
+			RecordedAt:    "2026-04-10T12:00:30Z",
+		},
+	}); err != nil {
+		t.Fatalf("UpdateLiveSessionWatchdog: %v", err)
+	}
+
+	reader := dashboardserver.NewSQLConversationReader(db, pg)
+	if reader == nil {
+		t.Fatal("NewSQLConversationReader returned nil")
+	}
+	item, ok, err := reader.Get(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("Get conversation: %v", err)
+	}
+	if !ok {
+		t.Fatalf("conversation %s not found", sessionID)
+	}
+	if item.RuntimeState.Watchdog == nil {
+		t.Fatal("expected runtime_state.watchdog to round-trip")
+	}
+	if item.RuntimeState.Watchdog.State != "no_output" || item.RuntimeState.Watchdog.Action != "session_no_output" {
+		t.Fatalf("unexpected runtime_state.watchdog: %+v", item.RuntimeState.Watchdog)
+	}
+	items, err := reader.List(ctx, 10)
+	if err != nil {
+		t.Fatalf("List conversations: %v", err)
+	}
+	if len(items) == 0 || items[0].Metadata.Watchdog == nil {
+		t.Fatalf("expected list metadata watchdog, got %#v", items)
+	}
+	if items[0].Metadata.Watchdog.Outcome != "warning_emitted" {
+		t.Fatalf("list watchdog outcome = %q, want warning_emitted", items[0].Metadata.Watchdog.Outcome)
 	}
 }
 

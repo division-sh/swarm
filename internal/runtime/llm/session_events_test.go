@@ -60,10 +60,15 @@ func (s *failingConversationStore) LoadActiveConversation(context.Context, strin
 	return ConversationRecord{}, false, nil
 }
 
+func (s *failingConversationStore) UpdateLiveSessionWatchdog(context.Context, ConversationWatchdogUpdate) error {
+	return s.err
+}
+
 type captureConversationStore struct {
-	record ConversationRecord
-	load   ConversationRecord
-	loadOK bool
+	record         ConversationRecord
+	load           ConversationRecord
+	loadOK         bool
+	watchdogUpdate ConversationWatchdogUpdate
 }
 
 func (s *captureConversationStore) UpsertConversation(_ context.Context, rec ConversationRecord) error {
@@ -73,6 +78,11 @@ func (s *captureConversationStore) UpsertConversation(_ context.Context, rec Con
 
 func (s *captureConversationStore) LoadActiveConversation(context.Context, string, string, string, string) (ConversationRecord, bool, error) {
 	return s.load, s.loadOK, nil
+}
+
+func (s *captureConversationStore) UpdateLiveSessionWatchdog(_ context.Context, update ConversationWatchdogUpdate) error {
+	s.watchdogUpdate = update
+	return nil
 }
 
 type failingTurnStore struct {

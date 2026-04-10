@@ -167,13 +167,20 @@ func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, time
 }
 
 func (r *ClaudeCLIRuntime) openMonitorTurn(ctx context.Context, meta MonitorTurnMeta) (MonitorTurnWriter, error) {
-	if r == nil || r.monitor == nil {
+	if r == nil {
 		return nil, nil
 	}
-	if strings.TrimSpace(meta.AgentID) == "" {
-		return nil, nil
+	var (
+		base MonitorTurnWriter
+		err  error
+	)
+	if r.monitor != nil && strings.TrimSpace(meta.AgentID) != "" {
+		base, err = r.monitor.OpenTurn(ctx, meta)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return r.monitor.OpenTurn(ctx, meta)
+	return newSessionWatchdogMonitorWriter(ctx, base, r.conversations, r.events, meta), nil
 }
 
 func readStreamLines(rc io.ReadCloser, monitor MonitorTurnWriter, stderr bool) [][]byte {

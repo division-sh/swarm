@@ -107,6 +107,7 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 		AgentID:      s.AgentID,
 		SessionScope: strings.TrimSpace(s.SessionScope),
 		ScopeKey:     strings.TrimSpace(s.ScopeKey),
+		Watchdog:     s.Watchdog,
 		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
 		Mode:         mode.String(),
 		Messages:     s.Messages,
@@ -175,6 +176,7 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 			s.TurnCount = rec.TurnCount
 			s.RetryReason = strings.TrimSpace(rec.RetryReason)
 			s.RetriesFromSessionID = strings.TrimSpace(rec.RetriesFromSessionID)
+			s.Watchdog = rec.Watchdog
 		}
 	}
 	publishAgentStarted(ctx, r.events, s, events.EventType("platform.agent_started"))
@@ -296,13 +298,18 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	}
 
 	start := time.Now()
+	longRunningAfter, noOutputAfter := conversationWatchdogThresholds(r.effectiveCLITimeout(ctx))
 	monitorMeta := MonitorTurnMeta{
-		AgentID:   s.AgentID,
-		Runtime:   "cli_test",
-		SessionID: sessionToken(s),
-		ScopeKey:  s.ScopeKey,
-		InputRole: message.Role,
-		InputText: prompt,
+		AgentID:                  s.AgentID,
+		Runtime:                  "cli_test",
+		SessionID:                s.ID,
+		ScopeKey:                 s.ScopeKey,
+		SessionScope:             s.SessionScope,
+		ConversationMode:         resolved.RuntimeMode.String(),
+		InputRole:                message.Role,
+		InputText:                prompt,
+		WatchdogLongRunningAfter: longRunningAfter,
+		WatchdogNoOutputAfter:    noOutputAfter,
 		TargetName: func() string {
 			if target == nil {
 				return ""
@@ -374,7 +381,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 				if mcpEnabled {
 					args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 				}
-				monitorMeta.SessionID = sessionToken(s)
+				monitorMeta.SessionID = s.ID
 				resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, message.Content, monitorMeta)
 				transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 				transportFallback.Used = transportFallback.Used || fallback.Used

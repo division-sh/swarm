@@ -13,13 +13,17 @@ import (
 const defaultMonitorDir = "/tmp/runtime-monitor"
 
 type MonitorTurnMeta struct {
-	AgentID    string
-	Runtime    string
-	SessionID  string
-	ScopeKey   string
-	InputRole  string
-	InputText  string
-	TargetName string
+	AgentID                  string
+	Runtime                  string
+	SessionID                string
+	ScopeKey                 string
+	SessionScope             string
+	ConversationMode         string
+	InputRole                string
+	InputText                string
+	TargetName               string
+	WatchdogLongRunningAfter time.Duration
+	WatchdogNoOutputAfter    time.Duration
 }
 
 type MonitorTurnWriter interface {

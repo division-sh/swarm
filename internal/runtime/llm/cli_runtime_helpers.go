@@ -46,6 +46,7 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 		AgentID:      s.AgentID,
 		SessionScope: strings.TrimSpace(s.SessionScope),
 		ScopeKey:     strings.TrimSpace(s.ScopeKey),
+		Watchdog:     s.Watchdog,
 		RunID:        strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
 		Mode:         mode.String(),
 		Messages:     s.Messages,
