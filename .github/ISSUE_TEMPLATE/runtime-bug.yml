@@ -1,5 +1,5 @@
 name: Runtime Bug
-description: Report a concrete runtime bug, production incident, conformance failure, or recurring operational failure pattern.
+description: Report a runtime symptom, incident, conformance failure, or recurring operational failure pattern for repro / classification.
 title: "[runtime bug] "
 labels:
   - bug
@@ -8,29 +8,33 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this for real runtime bugs and concrete failure patterns.
+        Use this for runtime symptom intake and concrete failure reports.
 
         Before submitting:
         - check [IMPLEMENTER_GUIDELINES.md](https://github.com/yazzaoui/Swarm/blob/main/docs/IMPLEMENTER_GUIDELINES.md)
         - check [IMPLEMENTER_REVIEW_CHECKLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/IMPLEMENTER_REVIEW_CHECKLIST.md)
+        - check [BUG_INTAKE_AND_REPRO.md](https://github.com/yazzaoui/Swarm/blob/main/docs/BUG_INTAKE_AND_REPRO.md)
         - link the related entry in [RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md) when applicable
 
-        This issue only needs to be good enough to assign.
+        This issue only needs to be good enough to start repro / identification.
 
-        The implementer pre-audit is still the real gate before coding starts.
-        Use this template to capture the broadest failure class you can honestly defend, plus the most extensive manifestation set you currently know.
+        Default rule:
+        - a bug report starts as a symptom report, not as a confirmed implementation class
+        - if current-head repro / classification is not done yet, say so explicitly
+        - do not force a confirmed root cause, canonical owner, or fix shape when they are still unknown
+        - implementation should not start until repro / classification is complete
 
   - type: dropdown
     id: suggested_category
     attributes:
-      label: Suggested Category
-      description: Suggest the process category. Lead/triage assigns the final category.
+      label: Suggested Handling
+      description: Suggest the current handling state. Lead/triage assigns the final category.
       options:
-        - failure-class
-        - parity
-        - semantic-drift
-        - local
-        - high-risk maintenance
+        - bug-intake / needs repro-classification
+        - likely live bug
+        - likely parity / semantic-drift bug
+        - likely local bug
+        - uncertain yet
     validations:
       required: true
 
@@ -46,13 +50,52 @@ body:
       required: true
 
   - type: textarea
-    id: generic_bug_class
+    id: observed_path
     attributes:
-      label: Generic Bug Class
-      description: Describe the platform-level failure class. Do not describe only the first symptom or first example.
+      label: Exact Observed Path / Surface
+      description: Name the exact path, helper, endpoint, runtime surface, or operator flow where the symptom was observed. If unknown, write `unknown yet`.
       placeholder: |
         Example:
-        lifecycle validation rejects spec-valid pre-handler entity reads in touched handler contexts
+        supported helper run.start path -> builder RPC -> run control -> persisted runs row
+    validations:
+      required: true
+
+  - type: textarea
+    id: generic_bug_class
+    attributes:
+      label: Initial Hypotheses / Candidate Failure Classes
+      description: List the plausible explanations. Do not force one confirmed class if repro / identification has not happened yet.
+      placeholder: |
+        Example:
+        - actor-scoped tool availability drift
+        - wrong execution path exercised
+        - transport-specific tool-surface mismatch
+        - stale or environment-specific report
+    validations:
+      required: true
+
+  - type: textarea
+    id: parent_failure_class
+    attributes:
+      label: Likely Parent / Related Failure Class
+      description: If this looks like a child slice of a broader parent class, name it. Otherwise write `none known yet`.
+      placeholder: |
+        Example:
+        cross-surface flow-owned session-scope proof drift across verify, boot, and runtime startup
+    validations:
+      required: false
+
+  - type: dropdown
+    id: process_status
+    attributes:
+      label: Process Status
+      description: Is this a symptom-intake issue, or is it already classified enough to assign directly?
+      options:
+        - symptom intake / needs repro-classification
+        - direct-assignable
+        - umbrella / watchpoint
+        - blocked on prerequisite
+        - unknown yet
     validations:
       required: true
 
@@ -96,12 +139,13 @@ body:
   - type: textarea
     id: generic_proof_plan
     attributes:
-      label: Generic Reproducer / Proof Plan
-      description: State the minimal generic reproducer or failing proof for this failure class. If none exists yet, say so explicitly and state that creating one is part of the implementation task.
+      label: Current-Head Repro Status / Known Reproducer
+      description: State whether the symptom is reproduced on current head, and give the best known reproducer. If it has not been checked yet, say so explicitly.
       placeholder: |
-        Example:
-        - generic reproducer: focused bootverify fixture with package-backed flow agent outside flow dir
-        - if missing: implementer must derive this as part of the fix
+        - current-head status: not checked yet
+        - observed path:
+        - reproduced path:
+        - generic reproducer:
     validations:
       required: true
 
@@ -109,7 +153,7 @@ body:
     id: suggested_pre_audit_gate
     attributes:
       label: Suggested Pre-Audit Gate
-      description: Suggest whether independent pre-audit review should be required before coding. Lead/triage makes the final call.
+      description: Suggest whether independent pre-audit review should be required once the bug is classified enough for implementation. Lead/triage makes the final call.
       options:
         - required
         - likely required
@@ -122,7 +166,7 @@ body:
     id: intended_closure_level
     attributes:
       label: Intended Closure Level
-      description: What is the honest target if this issue is solved as written?
+      description: If this becomes a classified implementation issue, what is the honest target?
       options:
         - local symptom fixed
         - touched seam canonicalized
@@ -130,6 +174,32 @@ body:
         - unknown yet
     validations:
       required: true
+
+  - type: textarea
+    id: watchlist_mapping
+    attributes:
+      label: Watchlist Mapping
+      description: Name the existing watchlist node this issue likely belongs to, or write `unknown yet` / `needs node/refinement`.
+      placeholder: |
+        Example:
+        semantic-correctness.yaml -> flow_owned_session_scope_proof
+    validations:
+      required: false
+
+  - type: textarea
+    id: likely_parent_action
+    attributes:
+      label: Likely Parent-Class Action After Pre-Audit
+      description: If a broader parent class exists, what is the most likely action after repro / pre-audit?
+      placeholder: |
+        One of:
+        - absorb parent now
+        - keep first-slice scope
+        - open or update dedicated follow-up stream
+        - leave parent explicitly open as still unproven
+        - none known yet
+    validations:
+      required: false
 
   - type: textarea
     id: likely_cause
@@ -145,24 +215,24 @@ body:
   - type: textarea
     id: root_cause
     attributes:
-      label: Actual Root Cause
-      description: Fill this once confirmed. If unknown, write `unknown yet`.
+      label: Confirmed Root Cause
+      description: Fill this only if already confirmed. Otherwise write `unknown yet`.
       placeholder: |
         Example:
         context handling still depended on a gateway-private fallback list instead of the canonical capability model
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: canonical_owner
     attributes:
-      label: Canonical Owner
-      description: Which module or model should own this semantic after the fix?
+      label: Likely Canonical Owner / Owner Chain
+      description: Which module, model, or owner chain probably governs this after repro / classification? If unknown, write `unknown yet`.
       placeholder: |
         Example:
         internal/runtime/core/toolcapabilities
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: spec_authority
@@ -192,13 +262,13 @@ body:
   - type: textarea
     id: fix_shape
     attributes:
-      label: Proposed Fix Shape
-      description: Describe the fix at the architectural level, not just the local patch.
+      label: Proposed Fix Shape If Already Known
+      description: Describe the likely fix at the architectural level only if already known. Otherwise write `unknown yet`.
       placeholder: |
         Example:
         centralize this decision in one shared policy helper and remove the duplicate gateway path
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: what_should_have_caught_it
@@ -223,10 +293,10 @@ body:
     id: watchlist_link
     attributes:
       label: Watchlist Link
-      description: Link the relevant section in docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md or write `new entry needed`.
+      description: Link the relevant section in docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md or write `unknown yet` / `new entry needed`.
       placeholder: https://github.com/...
     validations:
-      required: true
+      required: false
 
   - type: checkboxes
     id: merge_constraints

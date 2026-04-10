@@ -261,8 +261,52 @@ Default label rules:
 
 Use:
 
-- `Runtime Bug` template for concrete incidents/failures
+- `Runtime Bug` template for symptom intake on concrete incidents/failures
 - `Runtime Improvement` template for architecture/refactor initiatives
+
+Runtime bug default:
+
+- a runtime bug issue is symptom intake by default, not implementation-ready by default
+- use `status:needs-scope` until repro / classification is recorded
+- only move a bug to `status:ready` after current-head repro / identification has pinned:
+  - the exact execution path
+  - the working failure class
+  - the next honest action
+
+See:
+
+- [BUG_INTAKE_AND_REPRO.md](/Users/youmew/dev/swarm/docs/BUG_INTAKE_AND_REPRO.md)
+
+## Bug Intake And Repro
+
+For bug reports, do not collapse:
+
+- reported symptom
+- reproduced path
+- chosen failure class
+
+into one step.
+
+Required rule:
+
+- non-trivial bug reports need a repro / identification artifact before implementation gating
+
+That artifact must record:
+
+- observed symptom
+- current-head reproducibility result
+- exact observed path
+- exact reproduced path
+- candidate hypotheses
+- hypothesis disposition
+- working classification
+- next action
+
+Hard rules:
+
+- a bug report is not implementation-ready by default
+- proof-only PRs may not close bug issues unless the issue was explicitly reclassified first
+- if current-head non-repro is discovered during implementation, stop and repair the issue/gate record before continuing
 
 ## Review Standards
 

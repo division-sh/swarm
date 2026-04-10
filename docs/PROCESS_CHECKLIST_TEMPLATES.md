@@ -16,9 +16,62 @@ Default rule:
 - default to complete closure over staged follow-up
 - treat first-slice approval as an exception that must be justified explicitly
 
+## 0. Bug Repro / Identification
+
+Use on bug-intake issues before implementation gating.
+
+```text
+Bug Repro / Identification
+
+Issue:
+- #<NNN>
+
+Observed symptom:
+- <what was reported>
+
+Current-head reproducibility:
+- <reproduced | partially reproduced | not reproduced | reproduced on different path>
+
+Observed path:
+- <reported path>
+
+Reproduced path:
+- <actual exercised path>
+
+Path identity:
+- <same | different | still unclear>
+
+Candidate hypotheses:
+- H1: <...>
+- H2: <...>
+- H3: <...>
+
+Hypothesis disposition:
+- H1: <supported | falsified | unresolved>
+- H2: <supported | falsified | unresolved>
+- H3: <supported | falsified | unresolved>
+
+Working classification:
+- <...>
+
+Confidence:
+- <high | medium | low>
+
+Next action:
+- <implementation issue | broader audit | stale closure | more repro needed>
+```
+
+Hard rule:
+
+- do not move a bug issue to implementation without this artifact unless the exact current-head failure path is already pinned and obviously local
+
 ## 1. Pre-Implementation Coverage Audit
 
 Use on the issue before coding for semantic/runtime/spec-governed work.
+
+For bug issues:
+
+- run `Bug Repro / Identification` first unless current-head liveness and path identity are already explicit
 
 ```text
 Pre-Implementation Coverage Audit
