@@ -96,7 +96,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	}
 
 	if passthrough {
-		if err := eb.routeAndDeliver(ictx, evt); err != nil {
+		if err := eb.publishSubscribedNonTransactional(ictx, evt); err != nil {
 			return err
 		}
 		persisted = true
@@ -302,34 +302,21 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		status, errText := pipelineReceiptStatus(ctx, err)
 		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 	}()
-	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
+	plan, err := eb.planSubscribedPublish(ctx, evt)
 	if err != nil {
 		return err
 	}
-	eb.recordPublishDiagnostic(ctx, evt, plan)
-	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+	if err := eb.persistSubscribedPublishPlan(ctx, evt, plan); err != nil {
 		return err
 	}
 	persisted = true
-	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "matched_agent_subscription", plan.ExtraDetail)
 	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
 	if err != nil {
 		return err
 	}
 	if passthrough {
-		if len(plan.Recipients) > 0 {
-			if err := eb.deliverToAgents(ctx, evt, plan.Recipients); err != nil {
-				return err
-			}
-			eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
-		}
-		if plan.BlockedByCycle && plan.CycleEscalation != nil {
-			if err := eb.publishDeferred(ctx, *plan.CycleEscalation); err != nil {
-				return err
-			}
-		}
-		if strings.TrimSpace(plan.ContradictionReason) != "" {
-			_ = eb.emitContradiction(ctx, evt, plan.ContradictionReason)
+		if err := eb.deliverSubscribedPublishPlan(ctx, evt, plan); err != nil {
+			return err
 		}
 	}
 	eb.logPublished(ctx, evt, 0)
@@ -341,46 +328,6 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	return nil
 }
 
-func (eb *EventBus) publishDeferredNoIntercept(ctx context.Context, evt events.Event) (err error) {
-	ctx = WithCurrentRuntimeEpoch(ctx)
-	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
-	}
-	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
-	eb.inFlightPublishes.Add(1)
-	defer eb.inFlightPublishes.Add(-1)
-	if evt.Type == "" {
-		return errors.New("deferred event type is required")
-	}
-	if !isValidEventTypeName(string(evt.Type)) {
-		return fmt.Errorf("invalid deferred event type: %s", strings.TrimSpace(string(evt.Type)))
-	}
-	if evt.ID == "" {
-		evt.ID = uuid.NewString()
-	}
-	if evt.CreatedAt.IsZero() {
-		evt.CreatedAt = time.Now()
-	}
-	if strings.TrimSpace(evt.SourceAgent) == "" {
-		evt.SourceAgent = "runtime"
-	}
-	persisted := false
-	defer func() {
-		if !shouldPersistPipelineReceipt(persisted, err) {
-			return
-		}
-		status, errText := pipelineReceiptStatus(ctx, err)
-		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
-	}()
-	if err := eb.routeAndDeliver(ctx, evt); err != nil {
-		return err
-	}
-	persisted = true
-	eb.logPublished(ctx, evt, 0)
-	return nil
-}
-
 func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, durationUS int) {
 	eb.logRuntime(ctx, "debug", "Event was published to the event bus", "eventbus", "published", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
 		"type":            string(evt.Type),
@@ -389,16 +336,35 @@ func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, duration
 	}, "", durationUS)
 }
 
-func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error {
-	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
+func (eb *EventBus) publishSubscribedNonTransactional(ctx context.Context, evt events.Event) error {
+	plan, err := eb.planSubscribedPublish(ctx, evt)
 	if err != nil {
 		return err
 	}
+	if err := eb.persistSubscribedPublishPlan(ctx, evt, plan); err != nil {
+		return err
+	}
+	return eb.deliverSubscribedPublishPlan(ctx, evt, plan)
+}
+
+func (eb *EventBus) planSubscribedPublish(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
+	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
+	if err != nil {
+		return eventDeliveryPlan{}, err
+	}
 	eb.recordPublishDiagnostic(ctx, evt, plan)
+	return plan, nil
+}
+
+func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
 	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		return err
 	}
 	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "matched_agent_subscription", plan.ExtraDetail)
+	return nil
+}
+
+func (eb *EventBus) deliverSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
 	if len(plan.Recipients) > 0 {
 		if err := eb.deliverToAgents(ctx, evt, plan.Recipients); err != nil {
 			return err
