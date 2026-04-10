@@ -430,7 +430,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	`
 	args := []any{id, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
 	if caps.Events.LogRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, runID, id, name); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, runID, id, name, false); err != nil {
 			return err
 		}
 		q = `
@@ -446,12 +446,22 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 		`
 		args = []any{id, runID, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
 	}
-	if _, err := execFn(ctx, q, args...); err != nil {
+	res, err := execFn(ctx, q, args...)
+	if err != nil {
 		return fmt.Errorf("append event: %w", err)
 	}
 	if caps.Events.LogRunID {
-		if err := storerunlifecycle.SyncCounts(ctx, chooseExecQueryer(s.DB, tx), runID); err != nil {
+		rows, rowsErr := res.RowsAffected()
+		if rowsErr == nil && rows == 0 {
+			return nil
+		}
+		if err := s.ensureRunRow(ctx, caps, tx, runID, id, name, true); err != nil {
 			return err
+		}
+		if caps.Events.RunCounterColumns {
+			if err := storerunlifecycle.SyncCounts(ctx, chooseExecQueryer(s.DB, tx), runID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -786,12 +796,18 @@ func lookupEventRunID(ctx context.Context, caps StoreSchemaCapabilities, q rowQu
 	return strings.TrimSpace(runID)
 }
 
-func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {
+func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, runID, triggerEventID, triggerEventType string, reopenCompleted bool) error {
 	runID = nullUUIDString(runID)
 	if runID == "" || !caps.Events.HasRuns {
 		return nil
 	}
-	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType)
+	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType, storerunlifecycle.EnsureActiveOptions{
+		ReopenCompleted: reopenCompleted,
+		HasStartedAtCol: caps.Events.RunStartedAt,
+		HasTriggerCols:  caps.Events.RunTriggerColumns,
+		HasCounterCols:  caps.Events.RunCounterColumns,
+		HasTerminalCols: caps.Events.RunTerminalFields,
+	})
 }
 
 func canonicalRunTerminalStatus(raw string) (string, error) {

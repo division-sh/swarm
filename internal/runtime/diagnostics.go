@@ -281,7 +281,7 @@ func ensureRuntimeLogRunRow(ctx context.Context, db *sql.DB, runID string) error
 	if _, err := uuid.Parse(runID); err != nil {
 		return err
 	}
-	return storerunlifecycle.EnsureActive(ctx, db, runID, "", "")
+	return storerunlifecycle.EnsureActive(ctx, db, runID, "", "", storerunlifecycle.EnsureActiveOptions{})
 }
 
 func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detailMap map[string]any, runID, parentEventID, handlerID string) map[string]any {
