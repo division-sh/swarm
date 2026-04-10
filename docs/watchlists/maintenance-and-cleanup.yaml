@@ -40,6 +40,10 @@ active_issues:
     title: Legacy compatibility removal wave
     maps_to:
       - legacy_compatibility_removal
+  - id: 348
+    title: Remove legacy agent runtime-descriptor migration from startup/load hot path
+    maps_to:
+      - legacy_compatibility_removal
   - id: 173
     title: Completed-seam hygiene with canonical-owner notes and reusable invariant suites
     maps_to:
@@ -83,6 +87,7 @@ nodes:
       - 157
       - 158
       - 159
+      - 348
     common_framing_mistakes:
       too_broad:
         - delete all legacy code
