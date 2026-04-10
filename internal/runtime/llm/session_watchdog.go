@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"swarm/internal/runtime/sessions"
 )
 
 const (
@@ -23,6 +25,7 @@ type sessionWatchdogMonitorWriter struct {
 	base    MonitorTurnWriter
 	cancel  context.CancelFunc
 	done    chan struct{}
+	ctx     context.Context
 	meta    MonitorTurnMeta
 	store   ConversationPersistence
 	events  EventPublisher
@@ -58,6 +61,10 @@ func newSessionWatchdogMonitorWriter(ctx context.Context, base MonitorTurnWriter
 	if store == nil || strings.TrimSpace(meta.AgentID) == "" || strings.TrimSpace(meta.SessionID) == "" || strings.TrimSpace(meta.ConversationMode) == "" {
 		return base
 	}
+	mode, err := sessions.ParseConversationRuntimeMode(meta.ConversationMode)
+	if err != nil || mode.IsStateless() {
+		return base
+	}
 	longRunningAfter := meta.WatchdogLongRunningAfter
 	noOutputAfter := meta.WatchdogNoOutputAfter
 	if longRunningAfter <= 0 || noOutputAfter <= 0 {
@@ -72,6 +79,7 @@ func newSessionWatchdogMonitorWriter(ctx context.Context, base MonitorTurnWriter
 		base:    base,
 		cancel:  cancel,
 		done:    make(chan struct{}),
+		ctx:     loopCtx,
 		meta:    meta,
 		store:   store,
 		events:  events,
@@ -177,7 +185,7 @@ func (w *sessionWatchdogMonitorWriter) emit(state, action, outcome string, lastO
 	if !lastOutputAt.IsZero() {
 		payload.LastOutputAt = lastOutputAt.UTC().Format(time.RFC3339Nano)
 	}
-	if err := w.store.UpdateLiveSessionWatchdog(context.Background(), ConversationWatchdogUpdate{
+	if err := w.store.UpdateLiveSessionWatchdog(w.ctx, ConversationWatchdogUpdate{
 		SessionID:    strings.TrimSpace(w.meta.SessionID),
 		AgentID:      strings.TrimSpace(w.meta.AgentID),
 		SessionScope: strings.TrimSpace(w.meta.SessionScope),
@@ -185,13 +193,13 @@ func (w *sessionWatchdogMonitorWriter) emit(state, action, outcome string, lastO
 		Mode:         strings.TrimSpace(w.meta.ConversationMode),
 		Watchdog:     payload,
 	}); err != nil {
-		logPublisherRuntime(context.Background(), w.events, "warn", "persist_session_watchdog_failed", "Persisting live session watchdog state failed", strings.TrimSpace(w.meta.AgentID), strings.TrimSpace(w.meta.SessionID), "", map[string]any{
+		logPublisherRuntime(w.ctx, w.events, "warn", "persist_session_watchdog_failed", "Persisting live session watchdog state failed", strings.TrimSpace(w.meta.AgentID), strings.TrimSpace(w.meta.SessionID), "", map[string]any{
 			"watchdog_state":  payload.State,
 			"watchdog_action": payload.Action,
 		}, err)
 		return
 	}
-	logPublisherRuntime(context.Background(), w.events, "info", action, "Live session watchdog state updated", strings.TrimSpace(w.meta.AgentID), strings.TrimSpace(w.meta.SessionID), "", map[string]any{
+	logPublisherRuntime(w.ctx, w.events, "info", action, "Live session watchdog state updated", strings.TrimSpace(w.meta.AgentID), strings.TrimSpace(w.meta.SessionID), "", map[string]any{
 		"watchdog_state":   payload.State,
 		"blocking_layer":   payload.BlockingLayer,
 		"watchdog_action":  payload.Action,
