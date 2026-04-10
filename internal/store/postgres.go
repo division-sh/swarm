@@ -374,6 +374,29 @@ func (s *PostgresStore) ensureAgentRuntimeDescriptorColumn(ctx context.Context) 
 			return fmt.Errorf("ensure agents.runtime_descriptor column: %w", err)
 		}
 	}
+	if _, err := s.DB.ExecContext(ctx, `
+		UPDATE agents
+		SET runtime_descriptor = jsonb_set(
+			CASE
+				WHEN runtime_descriptor IS NULL THEN '{}'::jsonb
+				WHEN jsonb_typeof(runtime_descriptor) = 'object' THEN runtime_descriptor
+				ELSE '{}'::jsonb
+			END,
+			'{type}',
+			to_jsonb(BTRIM(model_tier)),
+			true
+		)
+		WHERE NULLIF(BTRIM(model_tier), '') IS NOT NULL
+		  AND (
+			runtime_descriptor IS NULL
+			OR (
+				jsonb_typeof(runtime_descriptor) = 'object'
+				AND NOT (runtime_descriptor ? 'type')
+			)
+		  )
+	`); err != nil {
+		return fmt.Errorf("backfill agents.runtime_descriptor.type from model_tier: %w", err)
+	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
 }
