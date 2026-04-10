@@ -1053,6 +1053,42 @@ func TestRun_MapsProducesDriftToNamedWarning(t *testing.T) {
 	}
 }
 
+func TestRun_DoesNotWarnForProducesDriftWhenDeclaredEventsMatchEmits(t *testing.T) {
+	report := Run(context.Background(), semanticview.Wrap(bootverifyDeclarationDriftBundle()), Options{})
+
+	if reportContains(report.Warnings(), "produces_drift", "outside produces list") {
+		t.Fatalf("unexpected produces_drift warning for matching declaration/emission, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_MapsPhantomProducesToNamedWarning(t *testing.T) {
+	bundle := bootverifyDeclarationDriftBundle()
+	bundle.Nodes["producer"] = runtimecontracts.SystemNodeContract{
+		Produces: []string{"task.done", "task.unused"},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"task.start": {Emits: runtimecontracts.EventEmission{Single: "task.done"}},
+		},
+		SubscribesTo: []string{"task.start"},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "phantom_produces", "task.unused") {
+		t.Fatalf("expected phantom_produces warning, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnForPhantomProducesWhenDeclaredEventsMatchEmits(t *testing.T) {
+	report := Run(context.Background(), semanticview.Wrap(bootverifyDeclarationDriftBundle()), Options{})
+
+	if reportContains(report.Warnings(), "phantom_produces", "no handler emits") {
+		t.Fatalf("unexpected phantom_produces warning for matching declaration/emission, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-missing-pin")
 
@@ -2490,6 +2526,35 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 			"ticket.audit": {},
 		},
 	}
+}
+
+func bootverifyDeclarationDriftBundle() *runtimecontracts.WorkflowContractBundle {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"producer": {
+					"task.start": {Emits: runtimecontracts.EventEmission{Single: "task.done"}},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"producer": {
+				SubscribesTo: []string{"task.start"},
+				Produces:     []string{"task.done"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.start": {Emits: runtimecontracts.EventEmission{Single: "task.done"}},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.start": {Source: "external"},
+			"task.done":  {ConsumerType: []string{"dashboard"}},
+		},
+	}
+	bundle.Platform.Platform.Name = "test"
+	bundle.Platform.Platform.Version = "1.0.0"
+	return bundle
 }
 
 func reportContains(items []Finding, checkID, contains string) bool {
