@@ -1171,27 +1171,6 @@ func workflowTimeOrNow(v time.Time) time.Time {
 	return v.UTC()
 }
 
-func shouldFallbackLegacyWorkflowInstanceSchema(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	for _, token := range []string{
-		`relation "entity_state" does not exist`,
-		`relation "flow_instances" does not exist`,
-		`relation "timers" does not exist`,
-		`column "flow_instance" does not exist`,
-		`column "entered_state_at" does not exist`,
-		`column "accumulator" does not exist`,
-		`column "config" does not exist`,
-	} {
-		if strings.Contains(msg, token) {
-			return true
-		}
-	}
-	return false
-}
-
 func workflowInstanceLookupKeys(ref string) []string {
 	return runtimeflowidentity.LookupKeys(ref)
 }
