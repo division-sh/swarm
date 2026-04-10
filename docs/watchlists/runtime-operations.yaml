@@ -101,6 +101,10 @@ active_issues:
     title: Expose recovery and restart decisions through canonical diagnostics
     maps_to:
       - recovery_restart_diagnostics
+  - id: 346
+    title: Reconcile run lifecycle ownership and accounting across builder, store, and runtime writers
+    maps_to:
+      - run_lifecycle_and_accounting_coherence
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -311,6 +315,26 @@ nodes:
         - restart is confusing
       too_narrow:
         - one missing restart log line
+    current_action_pressure: active
+  - id: run_lifecycle_and_accounting_coherence
+    title: Run Lifecycle And Accounting Coherence
+    parent_class: runtime run ownership, terminality, and persisted accounting truth
+    canonical_owners:
+      - one canonical persisted owner for run terminality and run-scoped accounting across builder, store, and runtime writers
+    why_this_node_exists: run correctness drifts when builder quiescence, persisted events/deliveries, runtime-log bootstrap activity, and operator readers each carry partial run lifecycle truth
+    known_manifestations:
+      - runs can be marked terminal while same-run work, events, or deliveries are still active
+      - run-scoped counters can stay zero because no canonical persisted accounting owner updates them
+      - bootstrap or diagnostics-side run row creation can leave extra running rows outside the authoritative accepted run lifecycle
+      - reader/report surfaces compensate after the fact instead of consuming one canonical lifecycle owner
+    representative_issues:
+      - 120
+      - 346
+    common_framing_mistakes:
+      too_broad:
+        - run status is inconsistent
+      too_narrow:
+        - one run row or one counter field is wrong
     current_action_pressure: active
   - id: tool_execution_outcome_diagnostics
     title: Tool Execution Outcome Diagnostics
