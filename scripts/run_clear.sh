@@ -23,8 +23,10 @@ DIRECTIVE_MESSAGE="${DIRECTIVE_MESSAGE:-}"
 CORPUS_PATH="${CORPUS_PATH:-/data/test-signals-25.jsonl}"
 CORPUS_MODE="${CORPUS_MODE:-corpus}"
 CORPUS_GEOGRAPHY="${CORPUS_GEOGRAPHY:-US}"
+SWARM_OPERATOR_AUTH_TOKEN="${SWARM_OPERATOR_AUTH_TOKEN:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
 SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
 
+export SWARM_OPERATOR_AUTH_TOKEN
 export SWARM_BUILDER_AUTH_TOKEN
 
 kill_swarm_processes() {
@@ -91,7 +93,7 @@ SQL
 echo "Starting Swarm with contracts ${CONTRACTS_ROOT}..."
 : > "${LOG_FILE}"
 launcher_pid="$(
-  LOG_FILE="${LOG_FILE}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN}" python3 - <<'PY'
+  LOG_FILE="${LOG_FILE}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" SWARM_OPERATOR_AUTH_TOKEN="${SWARM_OPERATOR_AUTH_TOKEN}" SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN}" python3 - <<'PY'
 import os
 import subprocess
 import sys
@@ -118,7 +120,8 @@ ready=0
 for _ in $(seq 1 "${START_TIMEOUT}"); do
   health_code="$(curl -s -o /tmp/swarm-healthz.json -w '%{http_code}' "${HEALTH_URL}" || true)"
   ready_code="$(curl -s -o /tmp/swarm-readyz.json -w '%{http_code}' "${READY_URL}" || true)"
-  api_code="$(curl -s -o /tmp/swarm-api-health.json -w '%{http_code}' "${API_HEALTH_URL}" || true)"
+  api_code="$(curl -s -o /tmp/swarm-api-health.json -w '%{http_code}' "${API_HEALTH_URL}" \
+    -H "Authorization: Bearer ${SWARM_OPERATOR_AUTH_TOKEN}" || true)"
   if [[ "${health_code}" == "200" && "${ready_code}" == "200" && "${api_code}" == "200" ]]; then
     ready=1
     break
