@@ -309,20 +309,17 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsOnEmptyVisibleToolSurface(t
 	}
 }
 
-func TestValidateClaudeMCPToolsForManagedAgents_SkipsCallableProbeWhenVisibleToolsRequireInput(t *testing.T) {
+func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenVisibleToolsRequireInput(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.RuntimeMode = "cli_test"
 	for _, tc := range []struct {
-		name    string
-		execErr error
+		name string
 	}{
 		{
-			name:    "structured_invalid_tool_input",
-			execErr: WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.filter", false, nil, "query is required"),
+			name: "structured_invalid_tool_input",
 		},
 		{
-			name:    "plain_required_field_message",
-			execErr: errors.New("bash.command is required"),
+			name: "plain_required_field_message",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -343,19 +340,50 @@ func TestValidateClaudeMCPToolsForManagedAgents_SkipsCallableProbeWhenVisibleToo
 						ContextRequirement: toolcapabilities.ContextRequirementActorContext,
 					},
 				},
-				execErrs: map[string]error{
-					"query_entities": tc.execErr,
-				},
 			}
 			turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 
-			if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager); err != nil {
-				t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+			err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager)
+			if err == nil || !strings.Contains(err.Error(), "found no probe-safe callable non-emit tool") {
+				t.Fatalf("expected no probe-safe callable tool error, got %v", err)
 			}
 			if len(exec.executed) != 0 {
 				t.Fatalf("executed = %#v, want no tools/call smoke for required-input-only surface", exec.executed)
 			}
 		})
+	}
+}
+
+func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenVisibleToolsAreEmitOnly(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: []llm.ToolDefinition{{
+			Name:   "emit_category_assessed",
+			Schema: map[string]any{"type": "object", "properties": map[string]any{}},
+		}},
+		caps: map[string]toolcapabilities.Capability{
+			"emit_category_assessed": {
+				Name:               "emit_category_assessed",
+				Kind:               toolcapabilities.KindEmit,
+				Visible:            true,
+				Callable:           true,
+				ContextRequirement: toolcapabilities.ContextRequirementActorContext,
+			},
+		},
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager)
+	if err == nil || !strings.Contains(err.Error(), "found no probe-safe callable non-emit tool") {
+		t.Fatalf("expected no probe-safe callable tool error, got %v", err)
+	}
+	if len(exec.executed) != 0 {
+		t.Fatalf("executed = %#v, want no tools/call smoke for emit-only surface", exec.executed)
 	}
 }
 
