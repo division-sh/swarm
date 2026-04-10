@@ -9,8 +9,15 @@ import (
 	"testing"
 )
 
+type runClearConfig struct {
+	operatorToken    string
+	builderToken     string
+	directiveAgent   string
+	directiveMessage string
+}
+
 func TestRunClear_ProvisionsBuilderAuthTokenAndUsesBearerForRPC(t *testing.T) {
-	result := runRunClear(t, "", "")
+	result := runRunClear(t, runClearConfig{})
 
 	if strings.TrimSpace(result.operatorToken) == "" {
 		t.Fatal("expected helper to provision SWARM_OPERATOR_AUTH_TOKEN")
@@ -43,7 +50,10 @@ func TestRunClear_ProvisionsBuilderAuthTokenAndUsesBearerForRPC(t *testing.T) {
 func TestRunClear_UsesConfiguredBuilderAuthTokenForRPC(t *testing.T) {
 	const explicitOperatorToken = "operator-explicit-token"
 	const explicitBuilderToken = "builder-explicit-token"
-	result := runRunClear(t, explicitOperatorToken, explicitBuilderToken)
+	result := runRunClear(t, runClearConfig{
+		operatorToken: explicitOperatorToken,
+		builderToken:  explicitBuilderToken,
+	})
 
 	if got := strings.TrimSpace(result.operatorToken); got != explicitOperatorToken {
 		t.Fatalf("operator token = %q, want %q", got, explicitOperatorToken)
@@ -61,18 +71,44 @@ func TestRunClear_UsesConfiguredBuilderAuthTokenForRPC(t *testing.T) {
 	}
 }
 
-type runClearResult struct {
-	stdout        string
-	operatorToken string
-	builderToken  string
-	healthHeaders string
-	healthURL     string
-	rpcHeaders    string
-	rpcBody       string
-	rpcURL        string
+func TestRunClear_UsesOperatorBearerForDirective(t *testing.T) {
+	const explicitOperatorToken = "operator-explicit-token"
+	result := runRunClear(t, runClearConfig{
+		operatorToken:    explicitOperatorToken,
+		directiveAgent:   "agent-7",
+		directiveMessage: "hello from test",
+	})
+
+	wantHeader := "Authorization: Bearer " + explicitOperatorToken
+	if !strings.Contains(result.directiveHeaders, wantHeader) {
+		t.Fatalf("directive headers = %q, want %q", result.directiveHeaders, wantHeader)
+	}
+	if got := strings.TrimSpace(result.directiveURL); got != "http://127.0.0.1:8081/api/agents/agent-7/actions/directive" {
+		t.Fatalf("directive url = %q, want helper directive endpoint", got)
+	}
+	if !strings.Contains(result.directiveBody, `"message":"hello from test"`) {
+		t.Fatalf("directive body = %q, want directive message payload", result.directiveBody)
+	}
+	if !strings.Contains(result.directiveBody, `"kill_previous":true`) {
+		t.Fatalf("directive body = %q, want kill_previous payload", result.directiveBody)
+	}
 }
 
-func runRunClear(t *testing.T, operatorToken, builderToken string) runClearResult {
+type runClearResult struct {
+	stdout           string
+	operatorToken    string
+	builderToken     string
+	healthHeaders    string
+	healthURL        string
+	rpcHeaders       string
+	rpcBody          string
+	rpcURL           string
+	directiveHeaders string
+	directiveBody    string
+	directiveURL     string
+}
+
+func runRunClear(t *testing.T, cfg runClearConfig) runClearResult {
 	t.Helper()
 
 	scriptDir := testScriptDir(t)
@@ -86,6 +122,9 @@ func runRunClear(t *testing.T, operatorToken, builderToken string) runClearResul
 	rpcHeadersSink := filepath.Join(t.TempDir(), "rpc-headers.txt")
 	bodySink := filepath.Join(t.TempDir(), "rpc-body.txt")
 	urlSink := filepath.Join(t.TempDir(), "rpc-url.txt")
+	directiveHeadersSink := filepath.Join(t.TempDir(), "directive-headers.txt")
+	directiveBodySink := filepath.Join(t.TempDir(), "directive-body.txt")
+	directiveURLSink := filepath.Join(t.TempDir(), "directive-url.txt")
 
 	writeExecutable(t, binDir, "pgrep", "#!/usr/bin/env bash\nexit 1\n")
 	writeExecutable(t, binDir, "lsof", "#!/usr/bin/env bash\nexit 1\n")
@@ -119,6 +158,9 @@ while (($#)); do
       ;;
     --data-binary)
       body="$2"
+      if [[ "$body" == "@-" ]]; then
+        body="$(cat)"
+      fi
       shift 2
       ;;
     -s|-S|-sS)
@@ -181,6 +223,24 @@ if [[ "$url" == *"/api/rpc" ]]; then
   printf '{"jsonrpc":"2.0","id":"run-clear","error":{"message":"missing authorization bearer token"}}'
   exit 0
 fi
+if [[ "$url" == *"/api/agents/"*"/actions/directive" ]]; then
+  printf '%s' "$url" > "${CURL_DIRECTIVE_URL_SINK}"
+  if ((${#headers[@]})); then
+    printf '%s\n' "${headers[@]}" > "${CURL_DIRECTIVE_HEADERS_SINK}"
+  else
+    : > "${CURL_DIRECTIVE_HEADERS_SINK}"
+  fi
+  printf '%s' "$body" > "${CURL_DIRECTIVE_BODY_SINK}"
+  want="Authorization: Bearer ${SWARM_OPERATOR_AUTH_TOKEN}"
+  for header in "${headers[@]}"; do
+    if [[ "$header" == "$want" ]]; then
+      printf '{"status":"accepted"}'
+      exit 0
+    fi
+  done
+  printf '{"error":"missing authorization bearer token"}'
+  exit 0
+fi
 printf '{}'
 `)
 
@@ -197,17 +257,26 @@ printf '{}'
 		"CURL_HEADERS_SINK=" + rpcHeadersSink,
 		"CURL_BODY_SINK=" + bodySink,
 		"CURL_URL_SINK=" + urlSink,
+		"CURL_DIRECTIVE_HEADERS_SINK=" + directiveHeadersSink,
+		"CURL_DIRECTIVE_BODY_SINK=" + directiveBodySink,
+		"CURL_DIRECTIVE_URL_SINK=" + directiveURLSink,
 		"CONTRACTS_ROOT=/tmp/contracts",
 		"HEALTH_ADDR=127.0.0.1:8081",
 		"LOG_FILE=" + logFile,
 		"PID_FILE=" + pidFile,
 		"START_TIMEOUT=1",
 	}...)
-	if operatorToken != "" {
-		cmd.Env = append(cmd.Env, "SWARM_OPERATOR_AUTH_TOKEN="+operatorToken)
+	if cfg.operatorToken != "" {
+		cmd.Env = append(cmd.Env, "SWARM_OPERATOR_AUTH_TOKEN="+cfg.operatorToken)
 	}
-	if builderToken != "" {
-		cmd.Env = append(cmd.Env, "SWARM_BUILDER_AUTH_TOKEN="+builderToken)
+	if cfg.builderToken != "" {
+		cmd.Env = append(cmd.Env, "SWARM_BUILDER_AUTH_TOKEN="+cfg.builderToken)
+	}
+	if cfg.directiveAgent != "" {
+		cmd.Env = append(cmd.Env, "DIRECTIVE_AGENT="+cfg.directiveAgent)
+	}
+	if cfg.directiveMessage != "" {
+		cmd.Env = append(cmd.Env, "DIRECTIVE_MESSAGE="+cfg.directiveMessage)
 	}
 
 	out, err := cmd.CombinedOutput()
@@ -216,14 +285,17 @@ printf '{}'
 	}
 
 	return runClearResult{
-		stdout:        string(out),
-		operatorToken: readFileTrimmed(t, operatorTokenSink),
-		builderToken:  readFileTrimmed(t, builderTokenSink),
-		healthHeaders: readFileTrimmed(t, healthHeadersSink),
-		healthURL:     readFileTrimmed(t, healthURLSink),
-		rpcHeaders:    readFileTrimmed(t, rpcHeadersSink),
-		rpcBody:       readFileTrimmed(t, bodySink),
-		rpcURL:        readFileTrimmed(t, urlSink),
+		stdout:           string(out),
+		operatorToken:    readFileTrimmed(t, operatorTokenSink),
+		builderToken:     readFileTrimmed(t, builderTokenSink),
+		healthHeaders:    readFileTrimmed(t, healthHeadersSink),
+		healthURL:        readFileTrimmed(t, healthURLSink),
+		rpcHeaders:       readFileTrimmed(t, rpcHeadersSink),
+		rpcBody:          readFileTrimmed(t, bodySink),
+		rpcURL:           readFileTrimmed(t, urlSink),
+		directiveHeaders: readFileTrimmedOptional(t, directiveHeadersSink),
+		directiveBody:    readFileTrimmedOptional(t, directiveBodySink),
+		directiveURL:     readFileTrimmedOptional(t, directiveURLSink),
 	}
 }
 
@@ -268,6 +340,18 @@ func readFileTrimmed(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func readFileTrimmedOptional(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return strings.TrimSpace(string(data))
