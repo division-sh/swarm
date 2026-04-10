@@ -4562,7 +4562,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 }
 
-func TestPostgresStore_LoadAgents_MigratesLegacySessionScopeIntoRuntimeDescriptor(t *testing.T) {
+func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -4585,22 +4585,9 @@ func TestPostgresStore_LoadAgents_MigratesLegacySessionScopeIntoRuntimeDescripto
 		t.Fatalf("seed legacy agent row: %v", err)
 	}
 
-	agents, err := pg.LoadAgents(ctx)
-	if err != nil {
-		t.Fatalf("LoadAgents: %v", err)
-	}
-	found := false
-	for _, agent := range agents {
-		if agent.Config.ID != "legacy-session-agent" {
-			continue
-		}
-		found = true
-		if agent.Config.SessionScope != "global" {
-			t.Fatalf("SessionScope = %q, want global", agent.Config.SessionScope)
-		}
-	}
-	if !found {
-		t.Fatal("expected migrated legacy agent")
+	_, err := pg.LoadAgents(ctx)
+	if err == nil || !strings.Contains(err.Error(), "invalid opaque config: config contains runtime-owned keys: mode, session_scope, type") {
+		t.Fatalf("LoadAgents error = %v, want fail-closed legacy runtime config error", err)
 	}
 
 	var (
@@ -4612,13 +4599,13 @@ func TestPostgresStore_LoadAgents_MigratesLegacySessionScopeIntoRuntimeDescripto
 		FROM agents
 		WHERE agent_id = 'legacy-session-agent'
 	`).Scan(&configJSON, &runtimeDescriptorJSON); err != nil {
-		t.Fatalf("load migrated agent row: %v", err)
+		t.Fatalf("load legacy agent row: %v", err)
 	}
-	if strings.Contains(configJSON, "session_scope") {
-		t.Fatalf("expected session_scope removed from opaque config, got %s", configJSON)
+	if !strings.Contains(configJSON, "session_scope") {
+		t.Fatalf("expected legacy session_scope to remain untouched in opaque config, got %s", configJSON)
 	}
-	if !strings.Contains(runtimeDescriptorJSON, `"session_scope": "global"`) && !strings.Contains(runtimeDescriptorJSON, `"session_scope":"global"`) {
-		t.Fatalf("expected session_scope in runtime_descriptor, got %s", runtimeDescriptorJSON)
+	if runtimeDescriptorJSON != "{}" {
+		t.Fatalf("expected runtime_descriptor to remain untouched, got %s", runtimeDescriptorJSON)
 	}
 }
 

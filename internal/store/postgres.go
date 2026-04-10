@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,7 +10,6 @@ import (
 
 	_ "github.com/lib/pq"
 	"swarm/internal/config"
-	runtimeactors "swarm/internal/runtime/core/actors"
 )
 
 type PostgresStore struct {
@@ -376,184 +374,8 @@ func (s *PostgresStore) ensureAgentRuntimeDescriptorColumn(ctx context.Context) 
 			return fmt.Errorf("ensure agents.runtime_descriptor column: %w", err)
 		}
 	}
-	if err := s.migrateLegacyAgentRuntimeDescriptors(ctx); err != nil {
-		return err
-	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
-}
-
-func (s *PostgresStore) migrateLegacyAgentRuntimeDescriptors(ctx context.Context) error {
-	if s == nil || s.DB == nil {
-		return nil
-	}
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT agent_id, COALESCE(model_tier, ''), COALESCE(config, '{}'::jsonb), COALESCE(runtime_descriptor, '{}'::jsonb)
-		FROM agents
-	`)
-	if err != nil {
-		return fmt.Errorf("query agent runtime descriptor migration rows: %w", err)
-	}
-	defer rows.Close()
-
-	type rowUpdate struct {
-		agentID           string
-		config            []byte
-		runtimeDescriptor []byte
-	}
-	updates := make([]rowUpdate, 0)
-	for rows.Next() {
-		var (
-			agentID           string
-			modelTier         string
-			configRaw         []byte
-			runtimeDescriptor []byte
-		)
-		if err := rows.Scan(&agentID, &modelTier, &configRaw, &runtimeDescriptor); err != nil {
-			return fmt.Errorf("scan agent runtime descriptor migration row: %w", err)
-		}
-		desc, ok := decodePersistedAgentRuntimeDescriptorLoose(runtimeDescriptor)
-		if !ok {
-			// Malformed canonical descriptors must fail closed during hydration rather than
-			// being silently rewritten into a new shape by the legacy migration pass.
-			continue
-		}
-		legacy := decodeLegacyAgentRuntimeConfig(configRaw)
-		if desc.Type == "" {
-			desc.Type = coalesce(legacy.Type, strings.TrimSpace(modelTier))
-		}
-		if desc.Mode == "" {
-			desc.Mode = legacy.Mode
-		}
-		if desc.SessionScope == "" {
-			desc.SessionScope = legacy.SessionScope
-		}
-		if desc.MaxTurnsPerTask == 0 {
-			desc.MaxTurnsPerTask = legacy.MaxTurnsPerTask
-		}
-		if !desc.NativeTools.Any() {
-			desc.NativeTools = legacy.NativeTools
-		}
-		if desc.WorkspaceClass == "" {
-			desc.WorkspaceClass = legacy.WorkspaceClass
-		}
-		if desc.ManagerFallback == "" {
-			desc.ManagerFallback = legacy.ManagerFallback
-		}
-		sanitizedConfig, err := sanitizeOpaqueAgentConfig(configRaw)
-		if err != nil {
-			return fmt.Errorf("sanitize legacy agent config for %s: %w", strings.TrimSpace(agentID), err)
-		}
-		nextDescriptor, err := json.Marshal(desc)
-		if err != nil {
-			return fmt.Errorf("marshal runtime descriptor for %s: %w", strings.TrimSpace(agentID), err)
-		}
-		updates = append(updates, rowUpdate{
-			agentID:           agentID,
-			config:            sanitizedConfig,
-			runtimeDescriptor: nextDescriptor,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("read agent runtime descriptor migration rows: %w", err)
-	}
-	if len(updates) == 0 {
-		return nil
-	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin agent runtime descriptor migration tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-	for _, update := range updates {
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE agents
-			SET config = $2::jsonb,
-			    runtime_descriptor = $3::jsonb
-			WHERE agent_id = $1
-		`, update.agentID, string(update.config), string(update.runtimeDescriptor)); err != nil {
-			return fmt.Errorf("update agent runtime descriptor for %s: %w", strings.TrimSpace(update.agentID), err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit agent runtime descriptor migration tx: %w", err)
-	}
-	committed = true
-	return nil
-}
-
-func decodeLegacyAgentRuntimeConfig(raw []byte) persistedAgentRuntimeDescriptor {
-	if len(raw) == 0 || !json.Valid(raw) {
-		return persistedAgentRuntimeDescriptor{}
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return persistedAgentRuntimeDescriptor{}
-	}
-	desc := persistedAgentRuntimeDescriptor{
-		Type:            strings.TrimSpace(stringValue(payload["type"])),
-		Mode:            strings.TrimSpace(stringValue(payload["mode"])),
-		SessionScope:    strings.TrimSpace(stringValue(payload["session_scope"])),
-		MaxTurnsPerTask: intValue(payload["max_turns_per_task"]),
-		NativeTools:     nativeToolConfigValue(payload["native_tools"]),
-		WorkspaceClass:  strings.TrimSpace(stringValue(payload["workspace_class"])),
-		ManagerFallback: strings.TrimSpace(stringValue(payload["manager_fallback"])),
-	}
-	if desc.MaxTurnsPerTask == 0 {
-		if constraints, ok := payload["constraints"].(map[string]any); ok {
-			desc.MaxTurnsPerTask = intValue(constraints["max_turns_per_task"])
-		}
-	}
-	return desc
-}
-
-func stringValue(v any) string {
-	if value, ok := v.(string); ok {
-		return value
-	}
-	return ""
-}
-
-func intValue(v any) int {
-	switch typed := v.(type) {
-	case int:
-		return typed
-	case int32:
-		return int(typed)
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	case float32:
-		return int(typed)
-	case json.Number:
-		out, _ := typed.Int64()
-		return int(out)
-	default:
-		return 0
-	}
-}
-
-func nativeToolConfigValue(v any) runtimeactors.NativeToolConfig {
-	items, ok := v.(map[string]any)
-	if !ok {
-		return runtimeactors.NativeToolConfig{}
-	}
-	return runtimeactors.NativeToolConfig{
-		Bash:      boolValue(items["bash"]),
-		WebSearch: boolValue(items["web_search"]),
-		FileIO:    boolValue(items["file_io"]),
-	}
-}
-
-func boolValue(v any) bool {
-	value, _ := v.(bool)
-	return value
 }
 
 func (s *PostgresStore) ensureConversationAuditTable(ctx context.Context) error {

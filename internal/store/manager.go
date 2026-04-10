@@ -232,32 +232,6 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) (persistedAgentRuntimeDes
 	return desc, nil
 }
 
-func decodePersistedAgentRuntimeDescriptorLoose(raw []byte) (persistedAgentRuntimeDescriptor, bool) {
-	if len(raw) == 0 {
-		return persistedAgentRuntimeDescriptor{}, true
-	}
-	if !json.Valid(raw) {
-		return persistedAgentRuntimeDescriptor{}, false
-	}
-	obj := map[string]json.RawMessage{}
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return persistedAgentRuntimeDescriptor{}, false
-	}
-	if unknown := invalidPersistedAgentRuntimeDescriptorKeys(obj); len(unknown) > 0 {
-		return persistedAgentRuntimeDescriptor{}, false
-	}
-	var desc persistedAgentRuntimeDescriptor
-	if err := json.Unmarshal(raw, &desc); err != nil {
-		return persistedAgentRuntimeDescriptor{}, false
-	}
-	desc.Type = strings.TrimSpace(desc.Type)
-	desc.Mode = strings.TrimSpace(desc.Mode)
-	desc.SessionScope = strings.TrimSpace(desc.SessionScope)
-	desc.WorkspaceClass = strings.TrimSpace(desc.WorkspaceClass)
-	desc.ManagerFallback = strings.TrimSpace(desc.ManagerFallback)
-	return desc, true
-}
-
 func extractSubscriptions(raw []byte) []string {
 	if len(raw) == 0 || !json.Valid(raw) {
 		return nil
