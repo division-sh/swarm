@@ -426,39 +426,6 @@ func scanSpecMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {
 	return out, nil
 }
 
-func scanLegacyMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {
-	out := make([]runtimetools.MailboxItem, 0)
-	for rows.Next() {
-		var it runtimetools.MailboxItem
-		var timeout sql.NullTime
-		if err := rows.Scan(
-			&it.ID,
-			&it.EventID,
-			&it.EntityID,
-			&it.FromAgent,
-			&it.Type,
-			&it.Priority,
-			&it.Status,
-			&it.Notified,
-			&it.Context,
-			&it.Summary,
-			&timeout,
-			&it.Decision,
-			&it.DecisionNotes,
-		); err != nil {
-			return nil, fmt.Errorf("scan mailbox item: %w", err)
-		}
-		if timeout.Valid {
-			it.TimeoutAt = timeout.Time
-		}
-		out = append(out, it)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate mailbox items: %w", err)
-	}
-	return out, nil
-}
-
 func normalizeMailboxSeverity(priority string) string {
 	switch strings.TrimSpace(priority) {
 	case "critical", "urgent":

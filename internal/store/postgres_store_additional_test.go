@@ -1860,6 +1860,18 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	if err != nil || len(items) == 0 {
 		t.Fatalf("list pending: n=%d err=%v", len(items), err)
 	}
+	foundPending := false
+	for _, item := range items {
+		if item.ID == id {
+			foundPending = true
+			if item.Status != "pending" || item.Priority != "normal" || item.Summary != "need approval" {
+				t.Fatalf("unexpected listed mailbox item: %+v", item)
+			}
+		}
+	}
+	if !foundPending {
+		t.Fatalf("expected inserted pending mailbox item %q in list", id)
+	}
 
 	if err := s.DecideMailboxItem(ctx, id, "decided", "approve", "ok"); err != nil {
 		t.Fatalf("decide: %v", err)
@@ -1915,6 +1927,18 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	crit, err := s.ListUnnotifiedCriticalMailboxItems(ctx, 10)
 	if err != nil || len(crit) == 0 {
 		t.Fatalf("list unnotified critical: n=%d err=%v", len(crit), err)
+	}
+	foundCritical := false
+	for _, item := range crit {
+		if item.ID == critID {
+			foundCritical = true
+			if item.Status != "pending" || item.Priority != "critical" || item.Summary != "critical" {
+				t.Fatalf("unexpected critical mailbox item: %+v", item)
+			}
+		}
+	}
+	if !foundCritical {
+		t.Fatalf("expected critical mailbox item %q in unnotified list", critID)
 	}
 	if err := s.MarkMailboxItemNotified(ctx, critID); err != nil {
 		t.Fatalf("mark notified: %v", err)
