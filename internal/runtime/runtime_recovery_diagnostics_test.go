@@ -48,6 +48,41 @@ func (startupRecoveryManagerStore) ListPendingSubscribedEvents(context.Context, 
 	return nil, nil
 }
 
+type startupRecoveryFlakyManagerStore struct {
+	remainingFailures int
+	loadErr           error
+}
+
+func (s *startupRecoveryFlakyManagerStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
+	return nil
+}
+
+func (s *startupRecoveryFlakyManagerStore) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
+	if s.remainingFailures > 0 {
+		s.remainingFailures--
+		if s.loadErr != nil {
+			return nil, s.loadErr
+		}
+	}
+	return nil, nil
+}
+
+func (*startupRecoveryFlakyManagerStore) MarkAgentTerminated(context.Context, string) error {
+	return nil
+}
+func (*startupRecoveryFlakyManagerStore) EnsureEntitySchema(context.Context, string) error {
+	return nil
+}
+func (*startupRecoveryFlakyManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, string) error {
+	return nil
+}
+func (*startupRecoveryFlakyManagerStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+func (*startupRecoveryFlakyManagerStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+
 type startupRecoveryCapabilityEventStore struct{}
 
 func (startupRecoveryCapabilityEventStore) CanonicalRuntimeLogCapability(context.Context) (bool, bool, error) {
@@ -634,5 +669,122 @@ func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartu
 	}
 	if !detailBool(detail["manager_recovery_attempted"]) {
 		t.Fatalf("manager_recovery_attempted = %#v, want true", detail["manager_recovery_attempted"])
+	}
+}
+
+func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndDrop(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	scheduleStore := &recordingRuntimeScheduleStore{
+		active: []runtimepipeline.Schedule{
+			{
+				AgentID:   "runtime",
+				EventType: "timer.skip",
+				Mode:      "once",
+				At:        time.Now().Add(2 * time.Minute),
+				TaskID:    "skip-me",
+			},
+			{
+				AgentID:   "runtime",
+				EventType: "timer.drop",
+				Mode:      "once",
+				At:        time.Now().Add(3 * time.Minute),
+				TaskID:    "drop-me",
+			},
+		},
+		claims: []recordedScheduleClaim{
+			{Claimed: false},
+			{Err: errors.New("claim failed")},
+		},
+	}
+	managerStore := &startupRecoveryFlakyManagerStore{
+		remainingFailures: 1,
+		loadErr:           errors.New("load agents failed"),
+	}
+
+	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(true), Stores{
+		SQLDB:         db,
+		EventStore:    startupRecoveryCapabilityEventStore{},
+		ManagerStore:  managerStore,
+		ScheduleStore: scheduleStore,
+	}, RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}()
+
+	level, _, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	if level != "error" {
+		t.Fatalf("log level = %q, want error", level)
+	}
+	if !strings.Contains(errorText, "inspect recoverable manager state: load persisted agents: load agents failed") {
+		t.Fatalf("log error = %q, want preserved inspection failure detail", errorText)
+	}
+	if strings.Contains(errorText, "claim failed") {
+		t.Fatalf("log error = %q, want timer restore failure kept out of decision error", errorText)
+	}
+	if got := detailString(detail["decision_outcome"]); got != "degraded" {
+		t.Fatalf("decision_outcome = %q, want degraded", got)
+	}
+	if got := detailString(detail["decision_reason_code"]); got != string(startupRecoveryReasonInspectFailed) {
+		t.Fatalf("decision_reason_code = %q, want %q", got, startupRecoveryReasonInspectFailed)
+	}
+	if got := detailBool(detail["recovery_inspection_complete"]); got {
+		t.Fatalf("recovery_inspection_complete = %#v, want false", detail["recovery_inspection_complete"])
+	}
+	if got := detailString(detail["recovery_inspection_error"]); !strings.Contains(got, "inspect recoverable manager state: load persisted agents: load agents failed") {
+		t.Fatalf("recovery_inspection_error = %q, want preserved inspection failure detail", got)
+	}
+	if !detailBool(detail["manager_recovery_attempted"]) {
+		t.Fatalf("manager_recovery_attempted = %#v, want true", detail["manager_recovery_attempted"])
+	}
+	if got := detailInt(detail["schedule_replayed_count"]); got != 0 {
+		t.Fatalf("schedule_replayed_count = %d, want 0", got)
+	}
+	if got := detailInt(detail["schedule_skipped_count"]); got != 1 {
+		t.Fatalf("schedule_skipped_count = %d, want 1", got)
+	}
+	if got := detailInt(detail["schedule_dropped_count"]); got != 1 {
+		t.Fatalf("schedule_dropped_count = %d, want 1", got)
+	}
+
+	logs := listRuntimeLogsByAction(t, db, startupTimerRecoveryAction)
+	if len(logs) != 2 {
+		t.Fatalf("timer recovery runtime logs = %d, want 2", len(logs))
+	}
+	findByEventType := func(eventType string) runtimeAftermathLog {
+		t.Helper()
+		for _, entry := range logs {
+			if strings.TrimSpace(entry.eventType) == eventType {
+				return entry
+			}
+		}
+		t.Fatalf("missing timer recovery log for event type %q in %#v", eventType, logs)
+		return runtimeAftermathLog{}
+	}
+
+	skipped := findByEventType("timer.skip")
+	if got := detailString(skipped.detail["decision_outcome"]); got != "skipped" {
+		t.Fatalf("skipped decision_outcome = %q, want skipped", got)
+	}
+	dropped := findByEventType("timer.drop")
+	if got := detailString(dropped.detail["decision_outcome"]); got != "dropped" {
+		t.Fatalf("dropped decision_outcome = %q, want dropped", got)
+	}
+	if !strings.Contains(dropped.errorText, "claim failed") {
+		t.Fatalf("dropped error = %q, want claim failed", dropped.errorText)
 	}
 }
