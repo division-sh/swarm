@@ -185,7 +185,7 @@ nodes:
     known_manifestations:
       - gateway auth not fail-closed
       - builder RPC/WebSocket privileged paths unauthenticated
-      - supported helper paths drift from authenticated builder RPC policy and fail after runtime reaches ready
+      - supported helper paths drift across local control-plane auth/readiness gates such as operator-authenticated `/api/health` and builder-authenticated `/api/rpc`, causing the helper to fail after runtime reaches ready
       - delegable privileges not capped on hire/reconfigure
       - dashboard/runtime-control default listener left open
     representative_issues:
