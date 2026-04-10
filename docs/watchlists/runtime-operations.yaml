@@ -85,6 +85,10 @@ active_issues:
     title: Add structured tool-call diagnostics for payload validation, enrichment, and publish outcomes
     maps_to:
       - tool_execution_outcome_diagnostics
+  - id: 127
+    title: Remove or implement the inert post-turn contract enforcement path in the LLM agent
+    maps_to:
+      - inert_execution_boundary_scaffolding
   - id: 218
     title: Eliminate string-based startup tool probe classification with an explicit validation/probe contract
     maps_to:
@@ -248,6 +252,23 @@ nodes:
         - config is confusing
       too_narrow:
         - one flag is inert
+    current_action_pressure: active
+  - id: inert_execution_boundary_scaffolding
+    title: Inert Execution-Boundary Scaffolding
+    parent_class: execution-path ownership drift
+    canonical_owners:
+      - one honest production execution path in the touched runtime family, without dead post-step enforcement or remediation scaffolding
+    why_this_node_exists: execution boundaries drift when production code keeps structurally wired but inert side paths that look live even though they never own any real behavior
+    known_manifestations:
+      - post-step enforcement/remediation path is wired in production but functionally inert
+      - dead remediation loops survive as if they are part of the runtime contract
+    representative_issues:
+      - 127
+    common_framing_mistakes:
+      too_broad:
+        - runtime cleanup is generally needed
+      too_narrow:
+        - one helper returns nil
     current_action_pressure: active
   - id: runtime_lifecycle_observability
     title: Runtime Lifecycle Observability

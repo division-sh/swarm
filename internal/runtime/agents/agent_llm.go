@@ -208,12 +208,6 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 		return nil, err
 	}
 	_ = resp
-	if err := a.enforcePostTurnExpectations(evt, recorder); err != nil {
-		if remediateErr := a.attemptPostTurnContractRemediation(ctx, evt, recorder, err); remediateErr == nil {
-			return nil, nil
-		}
-		return nil, err
-	}
 	return nil, nil
 }
 
@@ -406,23 +400,6 @@ func (a *LLMAgent) shouldRetryAfterTaskScopeFatalCLIError(err error) bool {
 		return false
 	}
 	return llm.ShouldResetTaskScopedConversationOnCLIError(err)
-}
-
-func (a *LLMAgent) attemptPostTurnContractRemediation(ctx context.Context, inbound events.Event, recorder *runtimebus.EmittedEventsRecorder, contractErr error) error {
-	prompt, ok := contractRemediationPrompt(a.cfg, inbound, contractErr)
-	if !ok {
-		return contractErr
-	}
-	if _, err := a.conversation.Step(ctx, prompt); err != nil {
-		return err
-	}
-	return a.enforcePostTurnExpectations(inbound, recorder)
-}
-
-func (a *LLMAgent) enforcePostTurnExpectations(inbound events.Event, recorder *runtimebus.EmittedEventsRecorder) error {
-	_ = inbound
-	_ = recorder
-	return nil
 }
 
 func isHumanTaskOutcomeEvent(t events.EventType) bool {
@@ -794,13 +771,6 @@ func uniqueStrings(in []string) []string {
 		out = append(out, item)
 	}
 	return out
-}
-
-func contractRemediationPrompt(cfg models.AgentConfig, evt events.Event, contractErr error) (string, bool) {
-	_ = cfg
-	_ = evt
-	_ = contractErr
-	return "", false
 }
 
 func transitionContextKey(primary events.Event, fallback events.Event) string {
