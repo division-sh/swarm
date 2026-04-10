@@ -4604,8 +4604,91 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 	if !strings.Contains(configJSON, "session_scope") {
 		t.Fatalf("expected legacy session_scope to remain untouched in opaque config, got %s", configJSON)
 	}
-	if runtimeDescriptorJSON != "{}" {
-		t.Fatalf("expected runtime_descriptor to remain untouched, got %s", runtimeDescriptorJSON)
+	if !strings.Contains(runtimeDescriptorJSON, `"type": "sonnet"`) && !strings.Contains(runtimeDescriptorJSON, `"type":"sonnet"`) {
+		t.Fatalf("expected runtime_descriptor.type backfilled from model_tier, got %s", runtimeDescriptorJSON)
+	}
+}
+
+func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelTierOnColumnUpgrade(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agents CASCADE`); err != nil {
+		t.Fatalf("drop agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agents (
+			agent_id TEXT PRIMARY KEY,
+			flow_instance TEXT,
+			role TEXT NOT NULL,
+			model_tier TEXT NOT NULL,
+			llm_backend TEXT NOT NULL DEFAULT 'api',
+			conversation_mode TEXT NOT NULL,
+			parent_agent_id TEXT,
+			entity_id UUID,
+			config JSONB NOT NULL DEFAULT '{}'::jsonb,
+			subscriptions JSONB NOT NULL DEFAULT '[]'::jsonb,
+			emit_events JSONB NOT NULL DEFAULT '[]'::jsonb,
+			tools JSONB NOT NULL DEFAULT '[]'::jsonb,
+			permissions JSONB NOT NULL DEFAULT '[]'::jsonb,
+			status TEXT NOT NULL DEFAULT 'active',
+			turn_count INTEGER NOT NULL DEFAULT 0,
+			last_active_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agents table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (
+			agent_id, role, model_tier, llm_backend, conversation_mode,
+			config, status, created_at
+		) VALUES (
+			'precolumn-agent', 'worker', 'sonnet', 'api', 'task',
+			'{"system_prompt":"x"}'::jsonb,
+			'active',
+			now()
+		)
+	`); err != nil {
+		t.Fatalf("seed pre-column agent row: %v", err)
+	}
+
+	agents, err := pg.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("LoadAgents: %v", err)
+	}
+	found := false
+	for _, agent := range agents {
+		if agent.Config.ID != "precolumn-agent" {
+			continue
+		}
+		found = true
+		if agent.Config.Type != "sonnet" {
+			t.Fatalf("Type = %q, want sonnet", agent.Config.Type)
+		}
+		if agent.Config.ModelTier != "sonnet" {
+			t.Fatalf("ModelTier = %q, want sonnet", agent.Config.ModelTier)
+		}
+	}
+	if !found {
+		t.Fatal("expected precolumn-agent in LoadAgents result")
+	}
+
+	var runtimeDescriptorRaw []byte
+	if err := db.QueryRowContext(ctx, `
+		SELECT runtime_descriptor
+		FROM agents
+		WHERE agent_id = 'precolumn-agent'
+	`).Scan(&runtimeDescriptorRaw); err != nil {
+		t.Fatalf("query upgraded runtime_descriptor: %v", err)
+	}
+	desc, err := decodePersistedAgentRuntimeDescriptor(runtimeDescriptorRaw)
+	if err != nil {
+		t.Fatalf("decodePersistedAgentRuntimeDescriptor: %v", err)
+	}
+	if desc.Type != "sonnet" {
+		t.Fatalf("runtime_descriptor.type = %q, want sonnet", desc.Type)
 	}
 }
 
