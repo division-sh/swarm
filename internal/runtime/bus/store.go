@@ -67,6 +67,20 @@ type RunLifecyclePersistence interface {
 	MarkRunTerminal(ctx context.Context, runID, status, errorSummary string, endedAt time.Time) error
 }
 
+type RunLifecycleSnapshot struct {
+	RunID        string
+	Status       string
+	EventCount   int
+	EntityCount  int
+	ErrorSummary string
+	StartedAt    time.Time
+	EndedAt      *time.Time
+}
+
+type RunLifecycleReadPersistence interface {
+	LoadRunLifecycleSnapshot(ctx context.Context, runID string) (RunLifecycleSnapshot, error)
+}
+
 // AtomicEventPersistence is an optional capability for transactionally
 // persisting an event row and its delivery manifest together.
 type AtomicEventPersistence interface {

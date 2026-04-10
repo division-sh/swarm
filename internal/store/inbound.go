@@ -180,7 +180,7 @@ func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEven
 	`
 	args := []any{entityID, string(payload), provider, idempotencyKey}
 	if caps.Events.LogRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, runID); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, runID, "", ""); err != nil {
 			return false, err
 		}
 		insertQ = `

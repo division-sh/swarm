@@ -15,14 +15,50 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	builderpkg "swarm/internal/builder"
+	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
 )
+
+type delayedRunStatusAgent struct {
+	id            string
+	subscriptions []events.EventType
+	started       chan struct{}
+	release       chan struct{}
+}
+
+func (a delayedRunStatusAgent) ID() string { return a.id }
+func (delayedRunStatusAgent) Type() string { return "test" }
+func (a delayedRunStatusAgent) Subscriptions() []events.EventType {
+	return append([]events.EventType(nil), a.subscriptions...)
+}
+func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
+	select {
+	case a.started <- struct{}{}:
+	default:
+	}
+	select {
+	case <-a.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	out := (events.Event{
+		ID:          uuid.NewString(),
+		RunID:       evt.RunID,
+		Type:        events.EventType("scan.completed"),
+		SourceAgent: a.id,
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(evt.EntityID())
+	return []events.Event{out}, nil
+}
 
 func TestPrintRunStatusReport(t *testing.T) {
 	var buf bytes.Buffer
@@ -406,6 +442,153 @@ func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 		if strings.Contains(heuristic, "runs table still says running") {
 			t.Fatalf("unexpected running heuristic after durable completion: %#v", report.Heuristics)
 		}
+	}
+}
+
+func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	eb, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	agentStarted := make(chan struct{}, 1)
+	releaseAgent := make(chan struct{})
+	testAgent := delayedRunStatusAgent{
+		id:            "agent-1",
+		subscriptions: []events.EventType{"scan.requested"},
+		started:       agentStarted,
+		release:       releaseAgent,
+	}
+	am := runtimemanager.NewAgentManager(eb, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		if cfg.ID != testAgent.id {
+			t.Fatalf("unexpected agent id: %q", cfg.ID)
+		}
+		return testAgent, nil
+	}, pg)
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: testAgent.id}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	am.Run(context.Background())
+	defer func() { _ = am.Shutdown() }()
+
+	rt := &runtimepkg.Runtime{Bus: eb, Manager: am}
+	handler := builderpkg.NewHandler(builderpkg.Options{
+		CurrentRuntime: func() *runtimepkg.Runtime { return rt },
+		AuthToken:      "builder-test-token",
+	})
+
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	reqBody, err := json.Marshal(builderpkg.Request{
+		JSONRPC: "2.0",
+		ID:      "run-start-1",
+		Method:  "run.start",
+		Params: map[string]any{
+			"run_id": runID,
+			"inputs": map[string]any{
+				"scan.requested": map[string]any{
+					"entity_id": entityID,
+					"topic":     "sample",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal run.start request: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer builder-test-token")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case <-agentStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for agent work to start")
+	}
+
+	ctx := context.Background()
+	var (
+		status           string
+		eventCount       int
+		entityCount      int
+		activeDeliveries int
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), event_count, entity_count
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&status, &eventCount, &entityCount); err != nil {
+		t.Fatalf("load in-flight run row: %v", err)
+	}
+	if status != "running" {
+		t.Fatalf("in-flight run status = %q, want running", status)
+	}
+	if eventCount != 1 {
+		t.Fatalf("in-flight event_count = %d, want 1 root event", eventCount)
+	}
+	if entityCount != 1 {
+		t.Fatalf("in-flight entity_count = %d, want 1", entityCount)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND status IN ('pending', 'in_progress')
+	`, runID).Scan(&activeDeliveries); err != nil {
+		t.Fatalf("count active deliveries: %v", err)
+	}
+	if activeDeliveries == 0 {
+		t.Fatal("expected active delivery while agent work is blocked")
+	}
+
+	close(releaseAgent)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(status, ''), event_count, entity_count
+			FROM runs
+			WHERE run_id = $1::uuid
+		`, runID).Scan(&status, &eventCount, &entityCount)
+		if err == nil && status == "completed" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %s did not reach coherent completed state: last err=%v status=%q event_count=%d entity_count=%d", runID, err, status, eventCount, entityCount)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if eventCount < 2 {
+		t.Fatalf("completed event_count = %d, want downstream event activity", eventCount)
+	}
+	if entityCount != 1 {
+		t.Fatalf("completed entity_count = %d, want 1", entityCount)
+	}
+	var extraRunningRows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM runs
+		WHERE run_id <> $1::uuid
+		  AND status = 'running'
+	`, runID).Scan(&extraRunningRows); err != nil {
+		t.Fatalf("count extra running rows: %v", err)
+	}
+	if extraRunningRows != 0 {
+		t.Fatalf("extra running rows = %d, want 0", extraRunningRows)
+	}
+
+	report, err := loadRunStatusReport(ctx, db, runID, runStatusOptions{})
+	if err != nil {
+		t.Fatalf("loadRunStatusReport: %v", err)
+	}
+	if report.RunTableStatus != "completed" {
+		t.Fatalf("RunTableStatus = %q, want completed", report.RunTableStatus)
 	}
 }
 

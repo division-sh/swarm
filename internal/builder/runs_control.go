@@ -367,11 +367,11 @@ func (h *runHub) awaitCompletion(runID string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), runCompletionTimeout)
 	defer cancel()
-	if err := session.runtime.Bus.WaitForQuiescence(ctx); err != nil {
+	if err := session.runtime.WaitForQuiescence(ctx); err != nil {
 		if h.isTerminal(runID) {
 			return
 		}
-		if persistErr := h.persistTerminalState(runID, "failed", err.Error(), time.Now().UTC()); persistErr != nil {
+		if _, persistErr := h.persistTerminalState(runID, "failed", err.Error(), time.Now().UTC()); persistErr != nil {
 			h.markTerminal(runID)
 			h.emit(runID, map[string]any{
 				"id":        uuid.NewString(),
@@ -397,7 +397,8 @@ func (h *runHub) awaitCompletion(runID string) {
 	if h.isTerminal(runID) {
 		return
 	}
-	if err := h.persistTerminalState(runID, "completed", "", time.Now().UTC()); err != nil {
+	snapshot, err := h.persistTerminalState(runID, "completed", "", time.Now().UTC())
+	if err != nil {
 		h.markTerminal(runID)
 		h.emit(runID, map[string]any{
 			"id":        uuid.NewString(),
@@ -416,7 +417,14 @@ func (h *runHub) awaitCompletion(runID string) {
 		"id":        uuid.NewString(),
 		"type":      "run.completed",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"payload":   map[string]any{"run_id": runID, "summary": map[string]any{"duration_ms": 0, "total_events": 0}},
+		"payload": map[string]any{
+			"run_id": runID,
+			"summary": map[string]any{
+				"duration_ms":  durationMillis(snapshot),
+				"total_events": snapshot.EventCount,
+				"entity_count": snapshot.EntityCount,
+			},
+		},
 	})
 }
 
@@ -437,16 +445,37 @@ func (h *runHub) markTerminal(runID string) {
 	}
 }
 
-func (h *runHub) persistTerminalState(runID, status, errorSummary string, endedAt time.Time) error {
+func (h *runHub) persistTerminalState(runID, status, errorSummary string, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
 	session := h.session(runID)
 	if session == nil || session.runtime == nil || session.runtime.Bus == nil {
-		return fmt.Errorf("run terminal persistence is not configured")
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence is not configured")
 	}
 	writer, ok := session.runtime.Bus.Store().(runtimebus.RunLifecyclePersistence)
 	if !ok || writer == nil {
-		return fmt.Errorf("run terminal persistence is not supported")
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run terminal persistence is not supported")
 	}
-	return writer.MarkRunTerminal(context.Background(), runID, status, errorSummary, endedAt)
+	if err := writer.MarkRunTerminal(context.Background(), runID, status, errorSummary, endedAt); err != nil {
+		return runtimebus.RunLifecycleSnapshot{}, err
+	}
+	reader, ok := session.runtime.Bus.Store().(runtimebus.RunLifecycleReadPersistence)
+	if !ok || reader == nil {
+		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run lifecycle snapshot persistence is not supported")
+	}
+	return reader.LoadRunLifecycleSnapshot(context.Background(), runID)
+}
+
+func durationMillis(snapshot runtimebus.RunLifecycleSnapshot) int64 {
+	if snapshot.StartedAt.IsZero() {
+		return 0
+	}
+	endedAt := time.Now().UTC()
+	if snapshot.EndedAt != nil && !snapshot.EndedAt.IsZero() {
+		endedAt = snapshot.EndedAt.UTC()
+	}
+	if endedAt.Before(snapshot.StartedAt) {
+		return 0
+	}
+	return endedAt.Sub(snapshot.StartedAt).Milliseconds()
 }
 
 func (h *runHub) isTerminal(runID string) bool {
