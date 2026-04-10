@@ -56,11 +56,24 @@ Default process:
 3. Pre-audit happens before coding
 - this is the real gate for starting implementation
 - the implementer must test whether the issue framing is too narrow
+- the implementer must not let the observed failing step define the failure class by itself
 - the implementer must identify the broadest plausible failure class
 - the implementer must explicitly state the chosen working failure class for the PR, as broad as possible while still naming one coherent owner and one honest implementation scope
 - if a broader parent failure class exists above the chosen working failure class, the implementer must state that parent class explicitly
+- the implementer must explicitly state the class chain:
+  - observed symptom
+  - chosen working failure class
+  - immediate parent failure class
+  - broadest plausible parent failure class
+  - and the reason the class stops where it stops
 - the implementer must identify the canonical owner(s), the repo-wide consumer set, the manifestation table, and the intended closure level
 - after identifying the parent failure class, the implementer must probe sibling seams under that parent strongly enough to assess whether the parent is still live, already clean, a different class, or still unproven
+- if the issue concerns a multi-step user-visible flow, the implementer must enumerate the full relevant execution path in order before choosing the working class
+  - include earlier gates on that path such as startup, readiness, auth, routing, and action endpoints when they exist
+  - for each gate on that path, classify it as exactly one of:
+    - same chosen class
+    - different semantic concept, with proof
+    - explicitly split / tracked separately
 - a PR may take a child slice of a broader parent failure class, but once the working failure class for the PR is chosen, the PR must aim to eliminate that chosen class entirely rather than only improve one manifestation inside it
 - immediately after the pre-audit, before implementation starts, the implementer must make an explicit action decision for the parent failure class:
   - absorb the parent class now
@@ -895,6 +908,39 @@ Broad-first pre-audit rule:
 - “nearby files checked” is not sufficient
 - the purpose of the pre-audit is to discover every currently known consumer of the concept before code shape narrows the thinking
 - the watchlist should be used as a starting semantic map for that sweep when relevant, but never as a substitute for doing the sweep
+- when the issue concerns a multi-step user-visible flow, the broadest plausible concept must be tested against the full relevant execution path, not only the first failing endpoint
+- ask explicitly:
+  - what must succeed before the observed failing step is reachable?
+  - what earlier or adjacent gates on that same path can still fail the same user-visible flow?
+  - if the observed endpoint were fixed, could the user still fail earlier on that same path?
+- if yes, the working class must absorb that broader path or explicitly split and track it
+
+Entry-point rule:
+
+- the reproducer, failing line, failing helper, or error spot is an entry point, not the audit boundary
+- pre-audit must treat that entry point as the starting coordinate for mapping the surrounding semantic territory
+- do not mistake “I inspected the code around the error spot” for an honest pre-audit
+
+Semantic-territory audit rule:
+
+- pre-audit must audit all of the following, not just the local code section where the error surfaced:
+  - failure-class selection
+  - parent-chain selection
+  - relevant execution path
+  - repo-wide consumers / interpreters of the same concept
+  - currently known manifestations
+  - proof surface required for honest closure
+  - tracker state
+- if any of those are missing, the pre-audit is incomplete even when the local code section is well understood
+
+Owner-boundary and closure-feasibility rule:
+
+- pre-audit must ask explicitly:
+  - is the chosen owner a real semantic owner or only the first helper/file encountered near the error?
+  - can the chosen working failure class actually be closed in one PR?
+  - if the local endpoint were fixed, would another live interpreter of the same concept still remain?
+  - is the current remediation mostly code movement, or mostly a better narrative around unchanged ownership?
+- if the answer shows the chosen owner is fake, the class cannot be closed, or another same-concept interpreter would remain live, widen, split, or escalate before coding
 
 Adversarial review rule:
 
@@ -943,12 +989,20 @@ Required issue-comment format:
   - for each named owner, list any old helpers, readers, writers, or interpreters that become invalid, non-canonical, or removal candidates
 - `Failure class`
   - state the broader generic failure class, not just the first symptom
+  - state the observed symptom separately from the chosen class
   - state the chosen working failure class for the PR
+  - if a broader immediate parent exists between the chosen class and the broadest plausible parent, state that immediate parent explicitly
   - if a broader parent exists, state the parent failure class above the chosen class
   - explicitly say whether the current issue framing is:
     - already broad enough
     - narrower than the true class but still acceptable as a first slice
     - too narrow to implement honestly without widening or splitting
+  - if the issue concerns a multi-step user-visible flow:
+    - enumerate the full relevant execution path in order
+    - classify each gate on that path as:
+      - same chosen class
+      - different semantic concept, with proof
+      - explicitly split / tracked separately
 - `Intended closure level`
   - state exactly one intended closure target for this work:
     - local symptom fixed
@@ -974,6 +1028,7 @@ Required issue-comment format:
     - exact proof planned
     - required supported-surface or end-to-end proof, if any
     - whether it is being treated as the same class or explicitly split as a separate class
+  - if the issue concerns a multi-step user-visible flow, include one row for each gate on the relevant execution path that can fail the same user-visible flow unless it is explicitly proven to be a different concept
 - for each manifestation, provide exactly one planned coverage status:
   - direct reproducer and fix
   - execution proof through the same corrected path
@@ -1010,6 +1065,17 @@ Required issue-comment format:
     - open or update a dedicated follow-up stream
     - leave the parent explicitly open as still unproven
   - if not absorbing now, state exactly where the remaining parent-class obligation is tracked
+- `Tracker-state decision`
+  - state whether the current issue still matches the audited class model
+  - choose exactly one:
+    - current issue remains correct as written
+    - current issue must be updated before coding
+    - new child issue required before coding
+    - parent issue / umbrella issue must be updated before coding
+    - older issue / stream superseded and must be marked accordingly before coding
+    - watchlist-only refinement is sufficient
+  - if the audited class understanding changed, repair the affected issue / parent / follow-up / watchlist record before implementation starts
+  - do not leave tracker repair only in comments while the canonical issue text remains stale
 - `Independent pre-audit gate status`
   - for failure-class, parity, semantic-drift, and other high-risk semantic work, record the reviewer/lead gate outcome on the issue thread before coding starts
   - valid outcomes:
@@ -1025,6 +1091,7 @@ Required issue-comment format:
   - list the focused proof required
   - list the supported-surface or end-to-end proof required
   - if this is a parity issue, name each surface that must be exercised before closure
+  - if this is a multi-step user-visible flow, name the upstream gates on the relevant execution path that the proof preserves rather than stubbing away
 - `Unsafe assumptions you are NOT making`
   - explicitly name anything that might look “probably covered” but is not yet proven
   - do not say “same seam” without naming the execution proof that will show it
@@ -1040,6 +1107,7 @@ Absolute rules:
 - do not begin implementation if the repo-wide consumer sweep is missing, shallow, or not credible
 - do not begin implementation if the audit does not include an exhaustive systematic-consumption audit for the currently known sibling seams of each named owner
 - do not begin implementation if any currently known consuming seam is unclassified
+- do not begin implementation on multi-step user-visible flow issues if the pre-audit does not enumerate the full relevant execution path and classify every gate on that path
 - do not narrow a seam out of scope without explicit proof that it consumes a different semantic concept
 - do not begin implementation if any currently known manifestation is missing from the audit
 - do not begin implementation on failure-class work if the pre-audit does not include a manifestation coverage table
@@ -1050,6 +1118,8 @@ Absolute rules:
 - do not begin implementation if the PR is only planning to improve one manifestation inside its own chosen working failure class rather than close that chosen class entirely
 - do not begin implementation if a broader parent failure class exists and there is no explicit post-pre-audit action decision for that parent
 - do not begin implementation if a concrete remaining same-class seam is discovered but no follow-up issue/stream was created or updated when the work is not absorbing it now
+- do not begin implementation if the pre-audit changed the audited class model but the tracker-state decision is missing
+- do not begin implementation if the tracker-state decision requires issue / parent / follow-up repair before coding and that repair was not completed
 - do not begin implementation on failure-class / parity / semantic-drift / high-risk semantic work if the required independent pre-audit gate outcome is not explicitly recorded on the issue thread
 - do not begin implementation on failure-class / parity / semantic-drift / high-risk semantic work if there is no explicit watchlist decision:
   - maps to existing node
@@ -1063,6 +1133,7 @@ Absolute rules:
 - if a manifestation is not directly reproduced, the audit must explain exactly how it will be execution-proven through the same corrected path
 - if that proof cannot be named before coding starts, mark the manifestation as split / escalate instead
 - for parity issues, supported-surface proof is mandatory; synthetic agreement tests alone are not enough if the issue was discovered through a supported surface
+- for multi-step user-visible flow issues, synthetic tests that force earlier gates on the same path to unconditional success may prove a local fix, but they cannot bear closure for the whole path
 
 Broad-refactor escalation rule:
 
@@ -1230,6 +1301,7 @@ Surface-parity closure rule:
 - for verify-vs-boot, boot-vs-runtime, reader-vs-writer, or other surface-parity issues, closure requires at least one proof at each relevant surface
 - targeted verify proof alone is never sufficient for a verify-vs-boot issue
 - synthetic unit agreement tests are useful but do not replace a supported end-to-end or supported-surface smoke when the issue was discovered through a supported surface
+- for multi-step user-visible flows, relevant surfaces include earlier readiness/auth gates on the same path, not only the final action endpoint
 - if the issue names multiple semantic classes or manifestations in scope, each one must have explicit closure evidence
 
 Minimum spec-reference block:

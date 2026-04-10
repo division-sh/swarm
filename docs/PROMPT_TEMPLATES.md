@@ -37,11 +37,22 @@ Mandatory before implementation:
 
 That issue comment must state:
 - the issue category
+- the observed symptom
 - the exact semantic concept or concepts being changed
 - the chosen working failure class for the PR
+- the immediate parent failure class above it, if any
 - the parent failure class above it, if any
 - whether the issue framing is broad enough, narrower-but-acceptable as a first slice, or too narrow
+- confirmation that the observed failing line / helper / reproducer was treated as an entry point rather than the audit boundary
+- if the issue concerns a multi-step user-visible flow:
+  - the full relevant execution path in order
+  - what must succeed before the observed failing step is reachable
+  - every gate on that path, each marked as:
+    - same chosen class
+    - different semantic concept, with proof
+    - explicitly split / tracked separately
 - every relevant canonical owner for those concepts
+- whether the chosen owner is a real semantic owner or only the first local helper/file encountered
 - the touched consumers of each owner
 - an exhaustive systematic-consumption audit for every currently known sibling seam that should consume each owner, with each seam marked as:
   - already consumes the canonical owner
@@ -53,6 +64,13 @@ That issue comment must state:
 - every currently known manifestation in scope
 - the exact proof planned for each manifestation
 - the parent-class sibling probe and post-pre-audit parent action decision
+- the tracker-state decision:
+  - current issue remains correct as written
+  - current issue must be updated before coding
+  - new child issue required before coding
+  - parent issue / umbrella issue must be updated before coding
+  - older issue / stream superseded and must be marked accordingly before coding
+  - watchlist-only refinement is sufficient
 - the watchlist-backed promotion check:
   - what broader class is already tracked in the mapped watchlist node
   - whether that node suggests additional live sibling manifestations or consumer families beyond the proposed slice
@@ -61,6 +79,9 @@ That issue comment must state:
 - the watchlist mapping or refinement decision
 - the intended closure level
 - the chosen-class closure commitment: this PR aims to eliminate its chosen working failure class entirely
+- explicit closure-feasibility check:
+  - can this chosen class actually be closed in one PR?
+  - if the local endpoint were fixed, would another same-concept interpreter still remain live?
 - required supported-surface / end-to-end proof if this is a parity issue
 - any deeper architecture issue / type-model smell noticed and the long-run better direction, if any
 - explicit tracking decision for that architecture feedback:
@@ -74,11 +95,15 @@ Do not start implementation if:
 - the systematic-consumption audit is not exhaustive
 - any manifestation is labeled “same seam” without named execution proof
 - a broader parent exists but sibling probing or the parent action decision is missing
+- the pre-audit changed the audited class model but the tracker-state decision is missing
+- the tracker-state decision requires issue / parent / follow-up repair before coding and that repair was not completed
 - a broader parent exists but the watchlist-backed promotion check was not done
 - a required watchlist decision is missing
 - a required independent pre-audit gate outcome is not explicitly recorded on the issue thread
 - the intended closure level is not stated
 - supported-surface proof is required but not named
+- a multi-step user-visible flow issue names only the final endpoint and not the full relevant execution path
+- the pre-audit is only an audit of the local error spot rather than the surrounding semantic territory
 
 If the pre-audit shows broad duplication and a narrow fix would be dishonest:
 - pause
@@ -160,12 +185,13 @@ Required process:
    - if none is true, treat the review/gate as incomplete until the tracking record is repaired
    - start from the default presumption that complete closure is the right answer and require explicit justification for any first-slice / follow-up story
 8. Do a lead-level framing check:
-   - what is the broadest plausible semantic concept or concepts in play?
-   - what chosen working failure class did the PR actually take?
-   - what parent failure class does that chosen class belong to, if any?
-   - what repo-wide consumers or sibling contexts use that same concept?
-   - does the issue describe the full class or only the first visible symptom?
-   - did the implementer narrow scope only by proof, or merely by local code proximity?
+  - what is the broadest plausible semantic concept or concepts in play?
+  - what chosen working failure class did the PR actually take?
+  - what parent failure class does that chosen class belong to, if any?
+  - what repo-wide consumers or sibling contexts use that same concept?
+  - does the issue describe the full class or only the first visible symptom?
+  - did the implementer narrow scope only by proof, or merely by local code proximity?
+  - for multi-step user-visible flows, what is the full relevant execution path and what gates must succeed before the failing endpoint is reachable?
 9. Verify the issue-level `Pre-Implementation Coverage Audit` exists when required.
 10. In that pre-audit, verify:
    - the chosen working failure class is explicit
@@ -176,6 +202,8 @@ Required process:
    - every known manifestation is listed
    - sibling seams under the parent were probed enough to assess parent state
    - the post-pre-audit parent action decision is explicit
+   - the tracker-state decision is explicit
+   - if the audited class model changed, the issue / parent / follow-up / watchlist record was repaired before coding
    - the watchlist decision is explicit
    - the mapped watchlist node was checked as active evidence when deciding whether broader parent closure should be required now
    - the intended closure level is explicit
@@ -227,12 +255,13 @@ Required process:
 19. Do not accept “shared owner introduced”, “same seam”, “same validator”, or “cleaner architecture” as closure evidence by themselves.
 20. For parity issues, require proof at each relevant surface.
 21. If the issue was discovered through a supported helper or supported boot/runtime surface, require supported-surface closure evidence before saying the failure class is unlikely to reproduce.
-22. Do not approve semantic work merely because the touched seam is better; approve only if the PR materially reduces semantic drift for the concept in scope.
-23. After every review pass, leave both required GitHub artifacts on the PR:
+22. On multi-step user-visible flows, do not accept closure proof that stubs earlier gates on the same path to unconditional success unless separate proof preserves the real gate behavior at those earlier surfaces.
+23. Do not approve semantic work merely because the touched seam is better; approve only if the PR materially reduces semantic drift for the concept in scope.
+24. After every review pass, leave both required GitHub artifacts on the PR:
    - one human-readable substantive review comment
    - one short checklist-style PR comment with guideline checks, residual risk, risk level, and merge recommendation
-24. If review reveals worthwhile follow-up work, do not leave it as chat-only commentary.
-25. On approval, explicitly state:
+25. If review reveals worthwhile follow-up work, do not leave it as chat-only commentary.
+26. On approval, explicitly state:
    - spec compliance assessment
    - failure-class coverage assessment
    - closure level assessment

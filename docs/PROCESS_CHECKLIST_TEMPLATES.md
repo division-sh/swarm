@@ -26,21 +26,37 @@ Pre-Implementation Coverage Audit
 Category:
 - <local | failure-class | parity | semantic-drift | high-risk maintenance>
 
+Observed symptom:
+- <what visibly failed first>
+
 Concept:
 - <exact semantic concept(s) being changed>
 
 Failure class:
 - broader failure class: <...>
 - chosen working failure class for this PR: <...>
+- immediate parent failure class above it, if any: <...>
 - parent failure class above it, if any: <...>
+- was the observed failing line / helper / reproducer treated as an entry point rather than the audit boundary?: <yes/no>
 - issue framing assessment:
   - broad enough
   - narrower-but-acceptable as first slice
   - too narrow
 
+Relevant execution path, if this issue concerns a multi-step user-visible flow:
+- step 1: <...>
+- step 2: <...>
+- step 3: <...>
+
+Gate classification along that path, if applicable:
+- <gate/surface> -> same chosen class
+- <gate/surface> -> different semantic concept, with proof
+- <gate/surface> -> explicitly split / tracked separately
+
 Canonical owner(s):
 - <owner 1>
 - <owner 2 if any>
+- chosen owner is a real semantic owner rather than only the first local helper/file encountered: <yes/no and why>
 
 Consumers of each owner:
 - <owner> -> <consumers/surfaces>
@@ -84,6 +100,10 @@ Parent-class sibling probe:
   - leave parent explicitly open as still unproven
 - remaining parent obligation tracked at: <issue/watchlist/follow-up>
 
+Tracker-state decision:
+- <current issue remains correct as written | current issue must be updated before coding | new child issue required before coding | parent issue / umbrella issue must be updated before coding | older issue / stream superseded and must be marked accordingly before coding | watchlist-only refinement is sufficient>
+- if tracker repair is required, what was updated before coding?: <issue/body/title/parent/follow-up/watchlist>
+
 Watchlist decision:
 - <maps to existing node | existing node refined | new manifestation added | new node needed>
 - node: <...>
@@ -94,9 +114,15 @@ Intended closure level:
 Chosen-class closure commitment:
 - this PR aims to eliminate the chosen working failure class entirely
 
+Closure-feasibility check:
+- can this chosen class actually be closed in one PR?: <yes/no and why>
+- if the local endpoint were fixed, would another same-concept interpreter still remain live?: <yes/no and where>
+- is the remediation changing real ownership/codepaths rather than only reconciling narrative around them?: <yes/no and how>
+
 Required closure proof:
 - focused proof: <...>
 - supported-surface / end-to-end proof: <...>
+- if this is a multi-step user-visible flow, what upstream gates on the relevant execution path must that proof preserve?: <...>
 
 Architecture feedback:
 - deeper architecture issue or type-model smell noticed: <... or none>
