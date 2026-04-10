@@ -103,9 +103,15 @@ func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 type recordingRuntimeScheduleStore struct {
 	schedules  []runtimepipeline.Schedule
 	active     []runtimepipeline.Schedule
+	claims     []recordedScheduleClaim
 	firedExact atomic.Int32
 	firedOwned atomic.Int32
 	fired      chan runtimepipeline.Schedule
+}
+
+type recordedScheduleClaim struct {
+	Claimed bool
+	Err     error
 }
 
 func (s *recordingRuntimeScheduleStore) UpsertSchedule(_ context.Context, sc runtimepipeline.Schedule) error {
@@ -125,8 +131,13 @@ func (s *recordingRuntimeScheduleStore) LoadActiveSchedules(context.Context) ([]
 	return append([]runtimepipeline.Schedule(nil), s.active...), nil
 }
 
-func (*recordingRuntimeScheduleStore) ClaimSchedule(context.Context, runtimepipeline.Schedule) (bool, error) {
-	return true, nil
+func (s *recordingRuntimeScheduleStore) ClaimSchedule(context.Context, runtimepipeline.Schedule) (bool, error) {
+	if len(s.claims) == 0 {
+		return true, nil
+	}
+	claim := s.claims[0]
+	s.claims = s.claims[1:]
+	return claim.Claimed, claim.Err
 }
 
 func (*recordingRuntimeScheduleStore) ReleaseSchedule(context.Context, runtimepipeline.Schedule) error {

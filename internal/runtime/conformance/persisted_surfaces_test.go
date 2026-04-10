@@ -364,6 +364,77 @@ func (conformanceNoopLLMRuntime) ContinueSession(context.Context, *runtimellm.Se
 	return &runtimellm.Response{}, nil
 }
 
+type conformanceScheduleClaim struct {
+	claimed bool
+	err     error
+}
+
+type conformanceTimerRecoveryScheduleStore struct {
+	active []runtimepipeline.Schedule
+	claims []conformanceScheduleClaim
+}
+
+func (*conformanceTimerRecoveryScheduleStore) UpsertSchedule(context.Context, runtimepipeline.Schedule) error {
+	return nil
+}
+
+func (*conformanceTimerRecoveryScheduleStore) CancelScheduleExact(context.Context, runtimepipeline.Schedule) error {
+	return nil
+}
+
+func (*conformanceTimerRecoveryScheduleStore) CancelScheduleExactTerminal(context.Context, runtimepipeline.Schedule) error {
+	return nil
+}
+
+func (s *conformanceTimerRecoveryScheduleStore) LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error) {
+	return append([]runtimepipeline.Schedule(nil), s.active...), nil
+}
+
+func (s *conformanceTimerRecoveryScheduleStore) ClaimSchedule(context.Context, runtimepipeline.Schedule) (bool, error) {
+	if len(s.claims) == 0 {
+		return true, nil
+	}
+	claim := s.claims[0]
+	s.claims = s.claims[1:]
+	return claim.claimed, claim.err
+}
+
+func (*conformanceTimerRecoveryScheduleStore) ReleaseSchedule(context.Context, runtimepipeline.Schedule) error {
+	return nil
+}
+
+func (*conformanceTimerRecoveryScheduleStore) ReleaseScheduleClaims(context.Context) error {
+	return nil
+}
+
+func (*conformanceTimerRecoveryScheduleStore) MarkScheduleFiredExact(context.Context, runtimepipeline.Schedule) error {
+	return nil
+}
+
+func (*conformanceTimerRecoveryScheduleStore) CompleteScheduleFireExact(context.Context, runtimepipeline.Schedule) error {
+	return nil
+}
+
+type conformanceTimerRecoveryEventStore struct{}
+
+func (conformanceTimerRecoveryEventStore) CanonicalRuntimeLogCapability(context.Context) (bool, bool, error) {
+	return true, true, nil
+}
+
+func (conformanceTimerRecoveryEventStore) AppendEvent(context.Context, events.Event) error {
+	return nil
+}
+
+func (conformanceTimerRecoveryEventStore) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+
+func (conformanceTimerRecoveryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
+func (conformanceTimerRecoveryEventStore) SupportsPersistedReplay() bool { return false }
+
 func loadConformanceRuntimeWorkflowModule(t *testing.T) conformanceSemanticOnlyWorkflowRuntime {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
@@ -455,6 +526,136 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	classes, _ := detail["recoverable_work_classes"].([]any)
 	if len(classes) != 1 || readString(classes[0]) != "active schedules" {
 		t.Fatalf("detail.recoverable_work_classes = %#v, want [active schedules]", detail["recoverable_work_classes"])
+	}
+}
+
+func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalRuntimeLogSurface(t, ctx, pg)
+
+	scheduleStore := &conformanceTimerRecoveryScheduleStore{
+		active: []runtimepipeline.Schedule{
+			{
+				AgentID:   "runtime",
+				EventType: "timer.replay",
+				Mode:      "once",
+				At:        time.Now().Add(time.Minute),
+				TaskID:    "replay-me",
+			},
+			{
+				AgentID:   "runtime",
+				EventType: "timer.skip",
+				Mode:      "once",
+				At:        time.Now().Add(2 * time.Minute),
+				TaskID:    "skip-me",
+			},
+			{
+				AgentID:   "runtime",
+				EventType: "timer.drop",
+				Mode:      "once",
+				At:        time.Now().Add(3 * time.Minute),
+				TaskID:    "drop-me",
+			},
+		},
+		claims: []conformanceScheduleClaim{
+			{claimed: true},
+			{claimed: false},
+			{err: fmt.Errorf("claim failed")},
+		},
+	}
+
+	rt, err := runtimepkg.NewRuntime(ctx, &config.Config{
+		Runtime: config.RuntimeConfig{
+			RecoveryOnStartup: true,
+		},
+		LLM: config.LLMConfig{
+			RuntimeMode: "api",
+		},
+	}, runtimepkg.Stores{
+		SQLDB:         db,
+		EventStore:    conformanceTimerRecoveryEventStore{},
+		ManagerStore:  pg,
+		ScheduleStore: scheduleStore,
+	}, runtimepkg.RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: loadConformanceRuntimeWorkflowModule(t),
+		LLMRuntime:     conformanceNoopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}()
+
+	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
+	if reader == nil {
+		t.Fatal("NewSQLObservabilityReader returned nil")
+	}
+	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
+		Component: "scheduler",
+		Type:      "startup_recovery_timer_aftermath",
+	}, 10)
+	if err != nil {
+		t.Fatalf("ListRuntimeLogs: %v", err)
+	}
+	if len(logs) != 3 {
+		t.Fatalf("runtime log rows = %d, want 3: %#v", len(logs), logs)
+	}
+	findByEventType := func(eventType string) int {
+		t.Helper()
+		for idx, log := range logs {
+			if strings.TrimSpace(log.EventType) == eventType {
+				return idx
+			}
+		}
+		t.Fatalf("missing runtime log for event type %q in %#v", eventType, logs)
+		return -1
+	}
+
+	replayed := logs[findByEventType("timer.replay")]
+	if replayed.Action != "startup_recovery_timer_aftermath" {
+		t.Fatalf("replayed action = %q, want startup_recovery_timer_aftermath", replayed.Action)
+	}
+	replayedDetail, _ := replayed.Detail.(map[string]any)
+	if got := readString(replayedDetail["decision_outcome"]); got != "replayed" {
+		t.Fatalf("replayed detail.decision_outcome = %q, want replayed", got)
+	}
+	if got := readString(replayedDetail["decision_reason_code"]); got != "persisted_schedule_restored" {
+		t.Fatalf("replayed detail.decision_reason_code = %q, want persisted_schedule_restored", got)
+	}
+
+	skipped := logs[findByEventType("timer.skip")]
+	skippedDetail, _ := skipped.Detail.(map[string]any)
+	if got := readString(skippedDetail["decision_outcome"]); got != "skipped" {
+		t.Fatalf("skipped detail.decision_outcome = %q, want skipped", got)
+	}
+	if got := readString(skippedDetail["decision_reason_code"]); got != "schedule_claim_not_acquired" {
+		t.Fatalf("skipped detail.decision_reason_code = %q, want schedule_claim_not_acquired", got)
+	}
+
+	dropped := logs[findByEventType("timer.drop")]
+	droppedDetail, _ := dropped.Detail.(map[string]any)
+	if got := readString(droppedDetail["decision_outcome"]); got != "dropped" {
+		t.Fatalf("dropped detail.decision_outcome = %q, want dropped", got)
+	}
+	if got := readString(droppedDetail["decision_reason_code"]); got != "schedule_restore_failed" {
+		t.Fatalf("dropped detail.decision_reason_code = %q, want schedule_restore_failed", got)
+	}
+	if readString(droppedDetail["error_code"]) != "schedule_restore_failed" {
+		t.Fatalf("dropped detail.error_code = %q, want schedule_restore_failed", readString(droppedDetail["error_code"]))
+	}
+	if strings.TrimSpace(dropped.Error) == "" {
+		t.Fatal("dropped timer recovery log missing explicit error text")
 	}
 }
 

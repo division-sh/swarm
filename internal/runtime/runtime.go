@@ -580,20 +580,8 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			return fmt.Errorf("load schedules failed: %w", err)
 		}
 		startupRecoveryDecision.ScheduleRestoreAttempted = len(schedules) > 0
-		for _, sc := range schedules {
-			if _, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, rt.Stores.ScheduleStore, rt.Scheduler, sc); err != nil {
-				startupRecoveryDecision.ScheduleRestoreFailures++
-				if rt.Logger != nil {
-					handleRuntimeLogPersistenceError("scheduler", "restore_schedule_failed", rt.Logger.Error(ctx, "scheduler", "restore_schedule_failed", map[string]any{
-						"agent_id":   sc.AgentID,
-						"event_type": sc.EventType,
-						"entity_id":  sc.EffectiveEntityID(),
-					}, err))
-				}
-				continue
-			}
-			startupRecoveryDecision.ScheduleRestoreSuccesses++
-		}
+		results := restoreStartupTimerSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Logger, schedules)
+		startupRecoveryDecision.ScheduleReplayCount, startupRecoveryDecision.ScheduleSkipCount, startupRecoveryDecision.ScheduleDropCount, startupRecoveryDecision.ErrorText = summarizeStartupTimerRecovery(results)
 		if err := ensureLifecycleWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
 			if rt.Logger != nil {
 				handleRuntimeLogPersistenceError("scheduler", "ensure_lifecycle_failed", rt.Logger.Error(ctx, "scheduler", "ensure_lifecycle_failed", nil, err))
@@ -657,10 +645,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			}
 		}
 	}
-	if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ScheduleRestoreFailures > 0 {
+	if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ScheduleDropCount > 0 {
 		startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
 		startupRecoveryDecision.ReasonCode = startupRecoveryReasonScheduleRestore
-		startupRecoveryDecision.ErrorText = fmt.Sprintf("failed to restore %d active schedule(s)", startupRecoveryDecision.ScheduleRestoreFailures)
+		if strings.TrimSpace(startupRecoveryDecision.ErrorText) == "" {
+			startupRecoveryDecision.ErrorText = fmt.Sprintf("failed to restore %d active schedule(s)", startupRecoveryDecision.ScheduleDropCount)
+		}
 	}
 	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
 	if rt.Bus != nil {
