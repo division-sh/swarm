@@ -332,15 +332,15 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) mcpExecutionContext(r *http.Request, _ string) (context.Context, error) {
-	turn, err := g.runtimeTurnContextForRequest(r, "mcp.context.resolve")
-	if err != nil {
-		return nil, err
-	}
-	return g.contextForResolvedTurn(context.Background(), turn), nil
+	return g.transportExecutionContext(r, "mcp.context.resolve")
 }
 
 func (g *Gateway) toolExecutionContext(r *http.Request, _ string) (context.Context, error) {
-	turn, err := g.runtimeTurnContextForRequest(r, "tool.context.resolve")
+	return g.transportExecutionContext(r, "tool.context.resolve")
+}
+
+func (g *Gateway) transportExecutionContext(r *http.Request, operation string) (context.Context, error) {
+	turn, err := g.runtimeTurnContextForRequest(r, operation)
 	if err != nil {
 		return nil, err
 	}
