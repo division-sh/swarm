@@ -15,6 +15,34 @@ func (noopMonitorWriter) WriteStderr([]byte)         {}
 func (noopMonitorWriter) WriteNotice(string, ...any) {}
 func (noopMonitorWriter) Close() error               { return nil }
 
+type noopMonitorWriterPtr struct{}
+
+func (*noopMonitorWriterPtr) WriteStdout([]byte)         {}
+func (*noopMonitorWriterPtr) WriteStderr([]byte)         {}
+func (*noopMonitorWriterPtr) WriteNotice(string, ...any) {}
+func (*noopMonitorWriterPtr) Close() error               { return nil }
+
+type blockingWatchdogStore struct {
+	started chan struct{}
+}
+
+func (s *blockingWatchdogStore) UpsertConversation(context.Context, ConversationRecord) error {
+	return nil
+}
+
+func (s *blockingWatchdogStore) LoadActiveConversation(context.Context, string, string, string, string) (ConversationRecord, bool, error) {
+	return ConversationRecord{}, false, nil
+}
+
+func (s *blockingWatchdogStore) UpdateLiveSessionWatchdog(ctx context.Context, _ ConversationWatchdogUpdate) error {
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func waitForWatchdogUpdate(t *testing.T, store *captureConversationStore) ConversationWatchdogUpdate {
 	t.Helper()
 	deadline := time.Now().Add(500 * time.Millisecond)
@@ -64,6 +92,22 @@ func TestSessionWatchdogMonitorWriter_PersistsHealthyLongRunningStateAfterOutput
 	}
 }
 
+func TestSessionWatchdogMonitorWriter_SkipsStatelessModes(t *testing.T) {
+	base := &noopMonitorWriterPtr{}
+	writer := newSessionWatchdogMonitorWriter(context.Background(), base, &captureConversationStore{}, nil, MonitorTurnMeta{
+		AgentID:                  "agent-1",
+		SessionID:                "sess-1",
+		ScopeKey:                 "task-1",
+		SessionScope:             "",
+		ConversationMode:         sessions.RuntimeModeTask.String(),
+		WatchdogLongRunningAfter: 20 * time.Millisecond,
+		WatchdogNoOutputAfter:    20 * time.Millisecond,
+	})
+	if writer != base {
+		t.Fatalf("expected stateless mode to return base writer, got %T", writer)
+	}
+}
+
 func TestSessionWatchdogMonitorWriter_PersistsNoOutputStateWithoutStdout(t *testing.T) {
 	prevPoll := sessionWatchdogPollInterval
 	sessionWatchdogPollInterval = 5 * time.Millisecond
@@ -96,5 +140,40 @@ func TestSessionWatchdogMonitorWriter_PersistsNoOutputStateWithoutStdout(t *test
 	}
 	if update.Watchdog.LastOutputAt != "" {
 		t.Fatalf("last_output_at = %q, want empty", update.Watchdog.LastOutputAt)
+	}
+}
+
+func TestSessionWatchdogMonitorWriter_CloseCancelsBlockedWatchdogPersistence(t *testing.T) {
+	prevPoll := sessionWatchdogPollInterval
+	sessionWatchdogPollInterval = 5 * time.Millisecond
+	defer func() { sessionWatchdogPollInterval = prevPoll }()
+
+	store := &blockingWatchdogStore{started: make(chan struct{}, 1)}
+	writer := newSessionWatchdogMonitorWriter(context.Background(), noopMonitorWriter{}, store, nil, MonitorTurnMeta{
+		AgentID:                  "agent-1",
+		SessionID:                "sess-1",
+		ScopeKey:                 "global",
+		SessionScope:             "global",
+		ConversationMode:         sessions.RuntimeModeSession.String(),
+		WatchdogLongRunningAfter: 20 * time.Millisecond,
+		WatchdogNoOutputAfter:    20 * time.Millisecond,
+	})
+
+	select {
+	case <-store.started:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for watchdog persistence to start")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_ = writer.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Close did not unblock after canceling watchdog persistence")
 	}
 }
