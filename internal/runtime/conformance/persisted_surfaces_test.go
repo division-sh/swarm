@@ -415,6 +415,131 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	}
 }
 
+func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalRuntimeLogSurface(t, ctx, pg)
+
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-on-complete-rollback")
+	module := loadConformanceWorkflowFixtureModule(t, fixtureRoot)
+
+	entityID := "11111111-1111-4111-8111-111111111111"
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	if err := workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    module.SemanticSource().WorkflowName(),
+		WorkflowVersion: module.SemanticSource().WorkflowVersion(),
+		CurrentState:    "collecting",
+		Metadata: map[string]any{
+			"subject_id":     entityID,
+			"expected_count": 3,
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	rt, err := runtimepkg.NewRuntime(ctx, &config.Config{
+		Runtime: config.RuntimeConfig{},
+		LLM:     config.LLMConfig{RuntimeMode: "api"},
+	}, runtimepkg.Stores{
+		SQLDB:         db,
+		EventStore:    pg,
+		ManagerStore:  pg,
+		ScheduleStore: pg,
+	}, runtimepkg.RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     conformanceNoopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}()
+
+	for idx, score := range []int{80, 90, 70} {
+		payload, err := json.Marshal(map[string]any{"entity_id": entityID, "score": score})
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		if err := rt.Bus.Publish(ctx, (events.Event{
+			ID:        uuid.NewString(),
+			Type:      events.EventType("score.received"),
+			Payload:   payload,
+			CreatedAt: time.Now().UTC().Add(time.Duration(idx) * time.Millisecond),
+		}).WithEntityID(entityID)); err != nil {
+			t.Fatalf("Publish(%d): %v", idx, err)
+		}
+	}
+	if err := rt.Bus.WaitForQuiescence(ctx); err != nil {
+		t.Fatalf("WaitForQuiescence: %v", err)
+	}
+
+	instance, ok, err := workflowStore.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("Load workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance to persist")
+	}
+	if got := strings.TrimSpace(instance.CurrentState); got != "verified" {
+		t.Fatalf("current_state = %q, want verified", got)
+	}
+
+	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
+	if reader == nil {
+		t.Fatal("NewSQLObservabilityReader returned nil")
+	}
+	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
+		Component: "workflow-runtime",
+		Type:      "accumulator_completion_outcome",
+	}, 10)
+	if err != nil {
+		t.Fatalf("ListRuntimeLogs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("runtime log rows = %d, want 1: %#v", len(logs), logs)
+	}
+	log := logs[0]
+	if log.Action != "accumulator_completion_outcome" {
+		t.Fatalf("log action = %q, want accumulator_completion_outcome", log.Action)
+	}
+	detail, _ := log.Detail.(map[string]any)
+	if got := readString(detail["decision_outcome"]); got != "completed" {
+		t.Fatalf("detail.decision_outcome = %q, want completed", got)
+	}
+	if got := readString(detail["decision_reason_code"]); got != "completion_committed" {
+		t.Fatalf("detail.decision_reason_code = %q, want completion_committed", got)
+	}
+	if got := readString(detail["evaluation_outcome"]); got != "succeeded" {
+		t.Fatalf("detail.evaluation_outcome = %q, want succeeded", got)
+	}
+	if got := readString(detail["commit_outcome"]); got != "committed" {
+		t.Fatalf("detail.commit_outcome = %q, want committed", got)
+	}
+	if got := readString(detail["selected_rule_id"]); got != "" {
+		t.Fatalf("detail.selected_rule_id = %q, want empty for anonymous true branch", got)
+	}
+	if got, _ := detail["received_count"].(float64); int(got) != 3 {
+		t.Fatalf("detail.received_count = %v, want 3", detail["received_count"])
+	}
+	if got, _ := detail["expected_count"].(float64); int(got) != 3 {
+		t.Fatalf("detail.expected_count = %v, want 3", detail["expected_count"])
+	}
+}
+
 type conformanceSemanticOnlyWorkflowRuntime struct {
 	source runtimesemanticview.Source
 }
@@ -435,6 +560,34 @@ func (conformanceSemanticOnlyWorkflowRuntime) GuardRegistry() runtimepipeline.Gu
 }
 func (conformanceSemanticOnlyWorkflowRuntime) ActionRegistry() runtimepipeline.ActionRegistry {
 	return nil
+}
+
+type conformanceLoadedWorkflowModule struct {
+	source   runtimesemanticview.Source
+	workflow *runtimepipeline.WorkflowDefinition
+	nodes    []runtimepipeline.WorkflowNode
+	guards   runtimepipeline.GuardRegistry
+	actions  runtimepipeline.ActionRegistry
+}
+
+func (m conformanceLoadedWorkflowModule) SemanticSource() runtimesemanticview.Source {
+	return m.source
+}
+
+func (m conformanceLoadedWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
+	return m.workflow
+}
+
+func (m conformanceLoadedWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
+	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
+}
+
+func (m conformanceLoadedWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
+	return m.guards
+}
+
+func (m conformanceLoadedWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
+	return m.actions
 }
 
 type conformanceNoopLLMRuntime struct{}
@@ -582,6 +735,31 @@ func loadConformanceRuntimeWorkflowModule(t *testing.T) conformanceSemanticOnlyW
 		t.Fatalf("load bundle: %v", err)
 	}
 	return conformanceSemanticOnlyWorkflowRuntime{source: runtimesemanticview.Wrap(bundle)}
+}
+
+func loadConformanceWorkflowFixtureModule(t *testing.T, fixtureRoot string) conformanceLoadedWorkflowModule {
+	t.Helper()
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	source := runtimesemanticview.Wrap(bundle)
+	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowDefinition: %v", err)
+	}
+	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowNodes: %v", err)
+	}
+	return conformanceLoadedWorkflowModule{
+		source:   source,
+		workflow: workflow,
+		nodes:    nodes,
+		guards:   runtimepipeline.NewContractGuardRegistry(source),
+		actions:  runtimepipeline.NewContractActionRegistry(source),
+	}
 }
 
 func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *testing.T) {

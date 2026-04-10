@@ -219,6 +219,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		})
 	})
 	if err != nil {
+		if result.AccumulatorCompletionDiagnostics.Relevant {
+			result.AccumulatorCompletionDiagnostics.CommitOutcome = AccumulatorCompletionCommitRolledBack
+		}
 		if errors.Is(err, ErrEmitPersistencePrerequisite) {
 			result.Status = OutcomeRejected
 		}
@@ -226,6 +229,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 			result.Status = OutcomeRejected
 		}
 		return result, err
+	}
+	if result.AccumulatorCompletionDiagnostics.Relevant {
+		result.AccumulatorCompletionDiagnostics.CommitOutcome = AccumulatorCompletionCommitCommitted
 	}
 	if len(intents) > 0 {
 		if err := e.deps.Dispatcher.DispatchPostCommit(ctx, intents); err != nil {
@@ -468,6 +474,10 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if spec == nil {
 		return false, nil
 	}
+	frame.result.AccumulatorCompletionDiagnostics.Relevant = true
+	frame.result.AccumulatorCompletionDiagnostics.CompletionMode = spec.Completion.String()
+	frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = len(frame.req.Handler.OnComplete) > 0 || len(spec.OnComplete) > 0
+	frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationNotAttempted
 	bucketRef := timeridentity.NewAccumulatorBucketRef(frame.req.NodeID.String(), string(frame.req.Event.Type))
 	if isAccumulationTimeoutEvent(frame.req.Event.Type) {
 		parsed, ok := accumulationTimeoutBucketRefFromPayload(frame.payload)
@@ -513,6 +523,11 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	acc.LastEventType = strings.TrimSpace(string(frame.req.Event.Type))
 	acc.LastSource = strings.TrimSpace(frame.req.Event.SourceAgent)
 	acc.LastReceivedAt = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
+	frame.result.AccumulatorCompletionDiagnostics.ReceivedCount = len(acc.Received)
+	frame.result.AccumulatorCompletionDiagnostics.ExpectedCount = acc.ExpectedCount
+	if len(acc.Expected) > 0 {
+		frame.result.AccumulatorCompletionDiagnostics.ExpectedCount = len(acc.Expected)
+	}
 	storeAccumulatorForBucket(&frame.state.State, bucketRef, acc)
 	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
 	frame.state.Accumulated = accumulatorExpressionValue(acc)
@@ -538,6 +553,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 		frame.result.Status = OutcomeWaiting
 		return true, nil
 	}
+	frame.result.AccumulatorCompletionDiagnostics.CompletionReached = true
 	return false, nil
 }
 
@@ -711,9 +727,18 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 	if len(rules) == 0 && frame.req.Handler.Accumulate != nil {
 		rules = frame.req.Handler.Accumulate.OnComplete
 	}
+	if frame.result.AccumulatorCompletionDiagnostics.Relevant && len(rules) > 0 {
+		frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = true
+	}
 	rule, err := e.selectRule(frame, rules)
 	if err != nil {
+		if frame.result.AccumulatorCompletionDiagnostics.Relevant {
+			frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationFailed
+		}
 		return err
+	}
+	if frame.result.AccumulatorCompletionDiagnostics.Relevant && len(rules) > 0 {
+		frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationSucceeded
 	}
 	if rule != nil {
 		frame.rule = rule
@@ -1292,6 +1317,9 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	}
 	if id := strings.TrimSpace(rule.ID); id != "" {
 		frame.result.RuleID = id
+		if frame.result.AccumulatorCompletionDiagnostics.Relevant {
+			frame.result.AccumulatorCompletionDiagnostics.SelectedRuleID = id
+		}
 	}
 }
 

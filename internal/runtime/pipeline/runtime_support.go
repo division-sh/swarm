@@ -273,6 +273,7 @@ func asObject(v any) (map[string]any, bool) {
 
 type sqlTxContextKey struct{}
 type pipelinePostCommitActionsKey struct{}
+type pipelineAfterPublishActionsKey struct{}
 type pipelineReceiptOverrideKey struct{}
 
 type PipelineReceiptOverride struct {
@@ -347,6 +348,45 @@ func flushPipelinePostCommitActions(actions []func()) {
 
 func FlushPipelinePostCommitActions(actions []func()) {
 	flushPipelinePostCommitActions(actions)
+}
+
+func withPipelineAfterPublishActions(ctx context.Context, actions *[]func()) context.Context {
+	if actions == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, pipelineAfterPublishActionsKey{}, actions)
+}
+
+func WithPipelineAfterPublishActions(ctx context.Context, actions *[]func()) context.Context {
+	return withPipelineAfterPublishActions(ctx, actions)
+}
+
+func queuePipelineAfterPublishAction(ctx context.Context, fn func()) bool {
+	if ctx == nil || fn == nil {
+		return false
+	}
+	actions, ok := ctx.Value(pipelineAfterPublishActionsKey{}).(*[]func())
+	if !ok || actions == nil {
+		return false
+	}
+	*actions = append(*actions, fn)
+	return true
+}
+
+func QueuePipelineAfterPublishAction(ctx context.Context, fn func()) bool {
+	return queuePipelineAfterPublishAction(ctx, fn)
+}
+
+func flushPipelineAfterPublishActions(actions []func()) {
+	for _, fn := range actions {
+		if fn != nil {
+			fn()
+		}
+	}
+}
+
+func FlushPipelineAfterPublishActions(actions []func()) {
+	flushPipelineAfterPublishActions(actions)
 }
 
 func withPipelineReceiptOverride(ctx context.Context, override *PipelineReceiptOverride) context.Context {

@@ -322,6 +322,34 @@ func (m *StateMutation) SetStateBuckets(raw map[string]map[string]any) {
 	m.StateCarrier.StateBuckets = cloneStateBucketSet(raw)
 }
 
+type AccumulatorCompletionEvaluationOutcome string
+
+const (
+	AccumulatorCompletionEvaluationNotAttempted AccumulatorCompletionEvaluationOutcome = "not_attempted"
+	AccumulatorCompletionEvaluationSucceeded    AccumulatorCompletionEvaluationOutcome = "succeeded"
+	AccumulatorCompletionEvaluationFailed       AccumulatorCompletionEvaluationOutcome = "failed"
+)
+
+type AccumulatorCompletionCommitOutcome string
+
+const (
+	AccumulatorCompletionCommitUnknown    AccumulatorCompletionCommitOutcome = "unknown"
+	AccumulatorCompletionCommitCommitted  AccumulatorCompletionCommitOutcome = "committed"
+	AccumulatorCompletionCommitRolledBack AccumulatorCompletionCommitOutcome = "rolled_back"
+)
+
+type AccumulatorCompletionDiagnostics struct {
+	Relevant           bool
+	CompletionReached  bool
+	ReceivedCount      int
+	ExpectedCount      int
+	CompletionMode     string
+	OnCompleteDeclared bool
+	EvaluationOutcome  AccumulatorCompletionEvaluationOutcome
+	SelectedRuleID     string
+	CommitOutcome      AccumulatorCompletionCommitOutcome
+}
+
 type RuleMatch struct {
 	ID         string
 	AdvancesTo string
@@ -347,6 +375,7 @@ type ExecutionResult struct {
 	EmitIntents       []EmitIntent
 	DeadLetterIntents []EmitIntent
 	ChainDepth        int
+	AccumulatorCompletionDiagnostics AccumulatorCompletionDiagnostics
 }
 
 func (r ExecutionResult) ComputedBucket() values.Bucket {

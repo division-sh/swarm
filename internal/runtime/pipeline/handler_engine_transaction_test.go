@@ -20,6 +20,7 @@ import (
 type recordingPipelineBus struct {
 	mu         sync.Mutex
 	publishes  []events.Event
+	runtimeLogs []RuntimeLogEntry
 	publishErr error
 }
 
@@ -43,7 +44,12 @@ func (*recordingPipelineBus) Subscribe(string, ...events.EventType) <-chan event
 
 func (*recordingPipelineBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
 func (*recordingPipelineBus) ResolveSubscribedRecipients(string) []string                 { return nil }
-func (*recordingPipelineBus) LogRuntime(context.Context, RuntimeLogEntry) error           { return nil }
+func (b *recordingPipelineBus) LogRuntime(_ context.Context, entry RuntimeLogEntry) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.runtimeLogs = append(b.runtimeLogs, entry)
+	return nil
+}
 func (*recordingPipelineBus) EngineOutbox() runtimeengine.OutboxWriter                    { return noOpEngineOutbox{} }
 func (b *recordingPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return recordingPipelineDispatcher{bus: b}
@@ -77,6 +83,14 @@ func (b *recordingPipelineBus) publishedEvent(i int) events.Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.publishes[i]
+}
+
+func (b *recordingPipelineBus) runtimeLogEntries() []RuntimeLogEntry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]RuntimeLogEntry, len(b.runtimeLogs))
+	copy(out, b.runtimeLogs)
+	return out
 }
 
 func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
@@ -368,6 +382,219 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 	}
 }
 
+func TestExecuteNodeContractHandlerLogsAccumulatorCompletionCommittedOutcome(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, bus := newAccumulatorOutcomeTestCoordinator(db)
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "validation",
+		WorkflowVersion: "v-test",
+		CurrentState:    "researching",
+		Metadata: map[string]any{
+			"subject_id":     entityID,
+			"expected_count": 2,
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			ExpectedFrom: "entity.expected_count",
+			Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
+		},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "business_brief"}},
+		},
+		OnComplete: []runtimecontracts.HandlerRuleEntry{
+			{ID: "complete", Condition: "true", AdvancesTo: "mvp_speccing", Emits: runtimecontracts.EventEmission{Single: "spec.requested"}},
+		},
+	}
+
+	for idx := 0; idx < 2; idx++ {
+		payload := map[string]any{"item_id": idx + 1}
+		if idx == 1 {
+			payload["business_brief"] = map[string]any{"summary": "validated"}
+		}
+		result, err := pc.executeNodeContractHandler(context.Background(), "node-a", handler, workflowTriggerContext{
+			Event: events.Event{
+				Type:    events.EventType("research.completed"),
+				Payload: mustJSON(payload),
+			}.WithEntityID(entityID),
+			State: pc.currentWorkflowState(context.Background(), entityID),
+		}, false)
+		if err != nil {
+			t.Fatalf("executeNodeContractHandler(%d): %v", idx, err)
+		}
+		if !result.Handled {
+			t.Fatalf("expected handled result for event %d", idx)
+		}
+	}
+
+	logs := bus.runtimeLogEntries()
+	entry := findRuntimeLogByAction(t, logs, accumulatorCompletionOutcomeAction)
+	if strings.TrimSpace(entry.Level.String()) != "info" {
+		t.Fatalf("log level = %q, want info", entry.Level.String())
+	}
+	detail, _ := entry.Detail.(map[string]any)
+	if got := runtimeLogDetailString(detail["decision_reason_code"]); got != "completion_committed" {
+		t.Fatalf("decision_reason_code = %q, want completion_committed", got)
+	}
+	if got := runtimeLogDetailString(detail["evaluation_outcome"]); got != "succeeded" {
+		t.Fatalf("evaluation_outcome = %q, want succeeded", got)
+	}
+	if got := runtimeLogDetailString(detail["commit_outcome"]); got != "committed" {
+		t.Fatalf("commit_outcome = %q, want committed", got)
+	}
+	if got := detail["received_count"]; got != 2 && got != float64(2) {
+		t.Fatalf("received_count = %#v, want 2", got)
+	}
+
+	instance, ok, err := pc.workflowStore.Load(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance to persist")
+	}
+	if got := strings.TrimSpace(instance.CurrentState); got != "mvp_speccing" {
+		t.Fatalf("current_state = %q, want mvp_speccing", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerLogsAccumulatorCompletionEvaluationFailure(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, bus := newAccumulatorOutcomeTestCoordinator(db)
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "validation",
+		WorkflowVersion: "v-test",
+		CurrentState:    "researching",
+		Metadata: map[string]any{
+			"subject_id":     entityID,
+			"expected_count": 1,
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			ExpectedFrom: "entity.expected_count",
+			Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
+		},
+		OnComplete: []runtimecontracts.HandlerRuleEntry{
+			{ID: "bad", Condition: `entity.branch_target == "go"`, AdvancesTo: "mvp_speccing"},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("research.completed"),
+			Payload: mustJSON(map[string]any{"item_id": 1}),
+		}.WithEntityID(entityID),
+		State: pc.currentWorkflowState(context.Background(), entityID),
+	}, false)
+	if err == nil {
+		t.Fatal("expected executeNodeContractHandler to fail on on_complete evaluation error")
+	}
+
+	entry := findRuntimeLogByAction(t, bus.runtimeLogEntries(), accumulatorCompletionOutcomeAction)
+	detail, _ := entry.Detail.(map[string]any)
+	if got := runtimeLogDetailString(detail["decision_reason_code"]); got != "on_complete_evaluation_failed" {
+		t.Fatalf("decision_reason_code = %q, want on_complete_evaluation_failed", got)
+	}
+	if got := runtimeLogDetailString(detail["evaluation_outcome"]); got != "failed" {
+		t.Fatalf("evaluation_outcome = %q, want failed", got)
+	}
+	if got := runtimeLogDetailString(detail["commit_outcome"]); got != "rolled_back" {
+		t.Fatalf("commit_outcome = %q, want rolled_back", got)
+	}
+
+	instance, ok, loadErr := pc.workflowStore.Load(context.Background(), entityID)
+	if loadErr != nil {
+		t.Fatalf("load workflow instance: %v", loadErr)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance to remain available")
+	}
+	if got := strings.TrimSpace(instance.CurrentState); got != "researching" {
+		t.Fatalf("current_state = %q, want researching after rollback", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerLogsAccumulatorCompletionCommitFailure(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, bus := newAccumulatorOutcomeTestCoordinator(db)
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "validation",
+		WorkflowVersion: "v-test",
+		CurrentState:    "researching",
+		Metadata: map[string]any{
+			"subject_id":     entityID,
+			"expected_count": 1,
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			ExpectedFrom: "entity.expected_count",
+			Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
+		},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "business_brief"}},
+		},
+		OnComplete: []runtimecontracts.HandlerRuleEntry{
+			{ID: "complete", Condition: "true", AdvancesTo: "mvp_speccing", Emits: runtimecontracts.EventEmission{Single: "spec.requested"}},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("research.completed"),
+			Payload: mustJSON(map[string]any{"item_id": 1}),
+		}.WithEntityID(entityID),
+		State: pc.currentWorkflowState(context.Background(), entityID),
+	}, false)
+	if !errors.Is(err, runtimeengine.ErrEmitPersistencePrerequisite) {
+		t.Fatalf("executeNodeContractHandler error = %v, want %v", err, runtimeengine.ErrEmitPersistencePrerequisite)
+	}
+
+	entry := findRuntimeLogByAction(t, bus.runtimeLogEntries(), accumulatorCompletionOutcomeAction)
+	detail, _ := entry.Detail.(map[string]any)
+	if got := runtimeLogDetailString(detail["decision_reason_code"]); got != "transaction_commit_failed" {
+		t.Fatalf("decision_reason_code = %q, want transaction_commit_failed", got)
+	}
+	if got := runtimeLogDetailString(detail["evaluation_outcome"]); got != "succeeded" {
+		t.Fatalf("evaluation_outcome = %q, want succeeded", got)
+	}
+	if got := runtimeLogDetailString(detail["commit_outcome"]); got != "rolled_back" {
+		t.Fatalf("commit_outcome = %q, want rolled_back", got)
+	}
+
+	instance, ok, loadErr := pc.workflowStore.Load(context.Background(), entityID)
+	if loadErr != nil {
+		t.Fatalf("load workflow instance: %v", loadErr)
+	}
+	if !ok {
+		t.Fatal("expected seeded workflow instance to remain available")
+	}
+	if got := strings.TrimSpace(instance.CurrentState); got != "researching" {
+		t.Fatalf("current_state = %q, want researching after rollback", got)
+	}
+}
+
 func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -647,6 +874,64 @@ func newEmitPersistenceTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recor
 		},
 	}
 	return pc, bus
+}
+
+func newAccumulatorOutcomeTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recordingPipelineBus) {
+	bus := &recordingPipelineBus{}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "validation",
+			Version: "v-test",
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{
+					{
+						Name: "validation_phase",
+						Fields: []runtimecontracts.EntitySchemaField{
+							{Name: "expected_count", Type: "integer"},
+							{Name: "business_brief", Type: "jsonb"},
+						},
+					},
+				},
+			},
+		},
+	}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		db:             db,
+		workflowStore:  NewWorkflowInstanceStore(db),
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module: &previewWorkflowModule{
+			bundle: bundle,
+			workflow: NewWorkflowDefinition("validation", []WorkflowStage{
+				{Name: "researching"},
+				{Name: "mvp_speccing"},
+			}, []WorkflowTransition{
+				{
+					Name: "research_to_spec",
+					From: []WorkflowStateID{"researching"},
+					To:   "mvp_speccing",
+				},
+			}),
+		},
+	}
+	return pc, bus
+}
+
+func findRuntimeLogByAction(t *testing.T, logs []RuntimeLogEntry, action string) RuntimeLogEntry {
+	t.Helper()
+	for _, entry := range logs {
+		if strings.TrimSpace(entry.Action) == strings.TrimSpace(action) {
+			return entry
+		}
+	}
+	t.Fatalf("missing runtime log action %q in %#v", action, logs)
+	return RuntimeLogEntry{}
+}
+
+func runtimeLogDetailString(v any) string {
+	text, _ := v.(string)
+	return strings.TrimSpace(text)
 }
 
 func TestResolveHandlerEntityIDForFlowPreservesCrossFlowEntityWithoutCreateEntity(t *testing.T) {

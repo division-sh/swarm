@@ -213,6 +213,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		Preview:    preview,
 		State:      stateSnapshot,
 	})
+	if !preview {
+		logAccumulatorCompletionOutcome(ctx, pc.bus, nodeID, triggerCtx.Event, result.AccumulatorCompletionDiagnostics, err)
+	}
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
