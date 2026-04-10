@@ -65,7 +65,7 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	}
 
 	runID := normalizeRunID(runtimecorrelation.RunIDFromContext(ctx))
-	if err := storerunlifecycle.EnsureActive(ctx, db, runID, "", ""); err != nil {
+	if err := storerunlifecycle.EnsureActive(ctx, db, runID, "", "", storerunlifecycle.EnsureActiveOptions{}); err != nil {
 		return err
 	}
 

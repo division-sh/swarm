@@ -23,6 +23,14 @@ type Snapshot struct {
 	EndedAt      *time.Time
 }
 
+type EnsureActiveOptions struct {
+	ReopenCompleted bool
+	HasStartedAtCol bool
+	HasTriggerCols  bool
+	HasCounterCols  bool
+	HasTerminalCols bool
+}
+
 func CanonicalTerminalStatus(raw string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "completed":
@@ -38,7 +46,7 @@ func CanonicalTerminalStatus(raw string) (string, error) {
 	}
 }
 
-func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEventType string) error {
+func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEventType string, opts EnsureActiveOptions) error {
 	if db == nil {
 		return nil
 	}
@@ -48,29 +56,65 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	}
 	triggerEventID = strings.TrimSpace(triggerEventID)
 	triggerEventType = strings.TrimSpace(triggerEventType)
-	_, err := db.ExecContext(ctx, `
+	reopenStatus := "runs.status"
+	reopenErrorSummary := ""
+	reopenEndedAt := ""
+	if opts.ReopenCompleted {
+		reopenStatus = "CASE WHEN runs.status = 'completed' THEN 'running' ELSE runs.status END"
+		if opts.HasTerminalCols {
+			reopenErrorSummary = "CASE WHEN runs.status = 'completed' THEN NULL ELSE runs.error_summary END"
+			reopenEndedAt = "CASE WHEN runs.status = 'completed' THEN NULL ELSE runs.ended_at END"
+		}
+	} else if opts.HasTerminalCols {
+		reopenErrorSummary = "runs.error_summary"
+		reopenEndedAt = "runs.ended_at"
+	}
+	insertCols := "run_id, status"
+	insertVals := "$1::uuid, 'running'"
+	if opts.HasStartedAtCol {
+		insertCols += ", started_at"
+		insertVals += ", now()"
+	}
+	query := `
+		INSERT INTO runs (` + insertCols + `)
+		VALUES (` + insertVals + `)
+		ON CONFLICT (run_id) DO UPDATE SET
+			status = ` + reopenStatus
+	if opts.HasTerminalCols {
+		query += `,
+			error_summary = ` + reopenErrorSummary + `,
+			ended_at = ` + reopenEndedAt
+	}
+	args := []any{runID}
+	if opts.HasTriggerCols {
+		query = `
 		INSERT INTO runs (
-			run_id, status, trigger_event_id, trigger_event_type, started_at
+			run_id, status, trigger_event_id, trigger_event_type`
+		if opts.HasStartedAtCol {
+			query += `, started_at`
+		}
+		query += `
 		)
 		VALUES (
-			$1::uuid, 'running', NULLIF($2,'')::uuid, NULLIF($3,''), now()
+			$1::uuid, 'running', NULLIF($2,'')::uuid, NULLIF($3,'')`
+		if opts.HasStartedAtCol {
+			query += `, now()`
+		}
+		query += `
 		)
 		ON CONFLICT (run_id) DO UPDATE SET
-			status = CASE
-				WHEN runs.status = 'completed' THEN 'running'
-				ELSE runs.status
-			END,
-			error_summary = CASE
-				WHEN runs.status = 'completed' THEN NULL
-				ELSE runs.error_summary
-			END,
-			ended_at = CASE
-				WHEN runs.status = 'completed' THEN NULL
-				ELSE runs.ended_at
-			END,
+			status = ` + reopenStatus
+		if opts.HasTerminalCols {
+			query += `,
+			error_summary = ` + reopenErrorSummary + `,
+			ended_at = ` + reopenEndedAt
+		}
+		query += `,
 			trigger_event_id = COALESCE(runs.trigger_event_id, NULLIF($2,'')::uuid),
-			trigger_event_type = COALESCE(NULLIF(runs.trigger_event_type, ''), NULLIF($3, ''))
-	`, runID, triggerEventID, triggerEventType)
+			trigger_event_type = COALESCE(NULLIF(runs.trigger_event_type, ''), NULLIF($3, ''))`
+		args = append(args, triggerEventID, triggerEventType)
+	}
+	_, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("ensure run row: %w", err)
 	}

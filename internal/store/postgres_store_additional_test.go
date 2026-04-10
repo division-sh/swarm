@@ -272,6 +272,131 @@ func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(
 	}
 }
 
+func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	completedAt := time.Now().UTC().Add(-time.Minute).Round(time.Second)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, ended_at, event_count, entity_count)
+		VALUES ($1::uuid, 'completed', $2, 1, 1)
+	`, runID, completedAt); err != nil {
+		t.Fatalf("seed completed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'scan.completed', $3::uuid, 'entity', '{}'::jsonb, 'agent-1', 'agent', now()
+		)
+	`, eventID, runID, entityID); err != nil {
+		t.Fatalf("seed duplicate event: %v", err)
+	}
+
+	evt := events.Event{
+		ID:          eventID,
+		RunID:       runID,
+		Type:        events.EventType("scan.completed"),
+		SourceAgent: "agent-1",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEntityID(entityID)
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent(duplicate): %v", err)
+	}
+
+	var (
+		status      string
+		eventCount  int
+		entityCount int
+		endedAt     sql.NullTime
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), event_count, entity_count, ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&status, &eventCount, &entityCount, &endedAt); err != nil {
+		t.Fatalf("load run row: %v", err)
+	}
+	if status != "completed" {
+		t.Fatalf("run status = %q, want completed", status)
+	}
+	if eventCount != 1 {
+		t.Fatalf("event_count = %d, want 1", eventCount)
+	}
+	if entityCount != 1 {
+		t.Fatalf("entity_count = %d, want 1", entityCount)
+	}
+	if !endedAt.Valid || !endedAt.Time.Equal(completedAt) {
+		t.Fatalf("ended_at = %#v, want preserved %s", endedAt, completedAt)
+	}
+}
+
+func TestPostgresStore_AppendEvent_AllowsRunsWithoutTriggerColumns(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	for _, ddl := range []string{
+		`DROP TABLE IF EXISTS event_deliveries CASCADE`,
+		`DROP TABLE IF EXISTS events CASCADE`,
+		`DROP TABLE IF EXISTS runs CASCADE`,
+		`CREATE TABLE runs (
+			run_id UUID PRIMARY KEY,
+			status TEXT NOT NULL,
+			started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE events (
+			event_id UUID PRIMARY KEY,
+			run_id UUID REFERENCES runs(run_id),
+			event_name TEXT NOT NULL,
+			entity_id UUID,
+			flow_instance TEXT,
+			scope TEXT NOT NULL,
+			payload JSONB NOT NULL,
+			chain_depth INTEGER NOT NULL DEFAULT 0,
+			produced_by TEXT,
+			produced_by_type TEXT NOT NULL,
+			source_event_id UUID,
+			created_at TIMESTAMPTZ NOT NULL
+		)`,
+	} {
+		if _, err := db.ExecContext(ctx, ddl); err != nil {
+			t.Fatalf("exec schema ddl %q: %v", ddl, err)
+		}
+	}
+
+	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+		t.Fatalf("BindSchemaCapabilities: %v", err)
+	}
+
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	evt := events.Event{
+		ID:          uuid.NewString(),
+		RunID:       runID,
+		Type:        events.EventType("scan.requested"),
+		SourceAgent: "builder",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEntityID(entityID)
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
+		t.Fatalf("load run row: %v", err)
+	}
+	if status != "running" {
+		t.Fatalf("run status = %q, want running", status)
+	}
+}
+
 func TestPostgresStore_EnsureSchemaTables_PhasesAgentSessionCompatibilityBeforeDependentDDL(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
