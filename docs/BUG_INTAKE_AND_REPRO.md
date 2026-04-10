@@ -73,6 +73,41 @@ That artifact should record:
   - stale closure
   - more repro needed
 
+## Repro Protocol
+
+The repro stream should move from highest-fidelity plausible path to lower-fidelity fallback only when necessary.
+
+Required order:
+
+1. identify the best current candidate for the observed live path
+2. attempt repro on that path first
+3. if exact-path repro is not yet possible, step down one level and record the downgrade explicitly
+4. stop lowering fidelity once path identity becomes too weak to support closure claims
+
+Recommended fidelity ladder:
+
+- `L1` live supported entry surface
+  - real endpoint / helper / operator flow / runtime mode that the report most likely used
+- `L2` integration path with real runtime wiring
+  - same owner chain with real routing, but inside a focused harness
+- `L3` in-process owner-path harness
+  - direct exercise of the likely canonical owner chain
+- `L4` narrow unit seam
+  - local helper / synthetic seam only
+
+Hard rule:
+
+- lower-fidelity repro can falsify a closure story or narrow the hypothesis set
+- lower-fidelity repro cannot, by itself, close a higher-fidelity bug report unless path equivalence is made explicit and defensible
+
+Every repro pass should state:
+
+- target path
+- actual exercised path
+- fidelity level
+- result
+- next best repro step if still unresolved
+
 ## Path Identity Rule
 
 For bug work, three paths matter:

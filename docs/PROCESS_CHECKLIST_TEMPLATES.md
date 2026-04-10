@@ -20,6 +20,12 @@ Default rule:
 
 Use on bug-intake issues before implementation gating.
 
+Repro protocol:
+
+- try the highest-fidelity plausible supported path first
+- if you step down to a lower-fidelity harness, say so explicitly
+- lower-fidelity proof may narrow hypotheses, but it does not close a higher-fidelity bug report unless path equivalence is explicit
+
 ```text
 Bug Repro / Identification
 
