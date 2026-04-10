@@ -127,22 +127,24 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		if !equalSortedStrings(actualNames, expectedNames) {
 			return fmt.Errorf("mcp tools/list returned unexpected tool surface for agent %s: expected [%s], got [%s]", agentID, strings.Join(expectedNames, ", "), strings.Join(actualNames, ", "))
 		}
-		if probeName, ok := selectStartupCallableTool(actualTools, capabilities); ok {
-			binding, enabled, err = llm.BuildMCPHTTPBinding(agentCtx, cfg, turnStore, &llm.Session{
-				AgentID: agentID,
-				Tools:   sessionTools,
-			}, gatewayURL, gatewayToken)
-			if err != nil {
-				return fmt.Errorf("build mcp startup call probe transport for agent %s: %w", agentID, err)
-			}
-			if !enabled || strings.TrimSpace(binding.ContextToken) == "" {
-				return fmt.Errorf("mcp startup call probe missing transport binding for agent %s", agentID)
-			}
-			err = startupProbeMCPToolsCall(agentCtx, client, binding, probeName)
-			turnStore.UnregisterTurnContext(binding.ContextToken)
-			if err != nil {
-				return fmt.Errorf("mcp tools/call startup probe failed for agent %s tool %s: %w", agentID, probeName, err)
-			}
+		probeName, ok := selectStartupCallableTool(actualTools, capabilities)
+		if !ok {
+			return fmt.Errorf("mcp startup probe found no probe-safe callable non-emit tool for agent %s", agentID)
+		}
+		binding, enabled, err = llm.BuildMCPHTTPBinding(agentCtx, cfg, turnStore, &llm.Session{
+			AgentID: agentID,
+			Tools:   sessionTools,
+		}, gatewayURL, gatewayToken)
+		if err != nil {
+			return fmt.Errorf("build mcp startup call probe transport for agent %s: %w", agentID, err)
+		}
+		if !enabled || strings.TrimSpace(binding.ContextToken) == "" {
+			return fmt.Errorf("mcp startup call probe missing transport binding for agent %s", agentID)
+		}
+		err = startupProbeMCPToolsCall(agentCtx, client, binding, probeName)
+		turnStore.UnregisterTurnContext(binding.ContextToken)
+		if err != nil {
+			return fmt.Errorf("mcp tools/call startup probe failed for agent %s tool %s: %w", agentID, probeName, err)
 		}
 	}
 	return nil
