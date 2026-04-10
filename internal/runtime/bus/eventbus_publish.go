@@ -73,7 +73,9 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	ictx = runtimepipeline.WithPipelinePostCommitActions(ictx, &postCommitActions)
 	ictx = runtimepipeline.WithPipelineAfterPublishActions(ictx, &afterPublishActions)
 	ictx = runtimepipeline.WithPipelineReceiptOverride(ictx, receiptOverride)
-	defer runtimepipeline.FlushPipelineAfterPublishActions(afterPublishActions)
+	defer func() {
+		runtimepipeline.FlushPipelineAfterPublishActions(afterPublishActions)
+	}()
 	if txStore, ok := eb.store.(TransactionalEventStore); ok {
 		return eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore)
 	}

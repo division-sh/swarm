@@ -21,10 +21,10 @@ const (
 type accumulatorCompletionDecisionReason string
 
 const (
-	accumulatorCompletionReasonCommitted         accumulatorCompletionDecisionReason = "completion_committed"
-	accumulatorCompletionReasonEvaluationFailed  accumulatorCompletionDecisionReason = "on_complete_evaluation_failed"
-	accumulatorCompletionReasonCommitFailed      accumulatorCompletionDecisionReason = "transaction_commit_failed"
-	accumulatorCompletionReasonPreCommitFailed   accumulatorCompletionDecisionReason = "pre_commit_failure"
+	accumulatorCompletionReasonCommitted        accumulatorCompletionDecisionReason = "completion_committed"
+	accumulatorCompletionReasonEvaluationFailed accumulatorCompletionDecisionReason = "on_complete_evaluation_failed"
+	accumulatorCompletionReasonCommitFailed     accumulatorCompletionDecisionReason = "transaction_commit_failed"
+	accumulatorCompletionReasonPreCommitFailed  accumulatorCompletionDecisionReason = "pre_commit_failure"
 )
 
 type accumulatorCompletionRuntimeRecord struct {

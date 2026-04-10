@@ -18,10 +18,10 @@ import (
 )
 
 type recordingPipelineBus struct {
-	mu         sync.Mutex
-	publishes  []events.Event
+	mu          sync.Mutex
+	publishes   []events.Event
 	runtimeLogs []RuntimeLogEntry
-	publishErr error
+	publishErr  error
 }
 
 type recordingPipelineDispatcher struct {
@@ -50,7 +50,7 @@ func (b *recordingPipelineBus) LogRuntime(_ context.Context, entry RuntimeLogEnt
 	b.runtimeLogs = append(b.runtimeLogs, entry)
 	return nil
 }
-func (*recordingPipelineBus) EngineOutbox() runtimeengine.OutboxWriter                    { return noOpEngineOutbox{} }
+func (*recordingPipelineBus) EngineOutbox() runtimeengine.OutboxWriter { return noOpEngineOutbox{} }
 func (b *recordingPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return recordingPipelineDispatcher{bus: b}
 }

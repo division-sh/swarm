@@ -358,23 +358,23 @@ type RuleMatch struct {
 }
 
 type ExecutionResult struct {
-	Status            OutcomeStatus
-	FailureClass      FailureClass
-	ExecutedSteps     []Step
-	CurrentState      string
-	NextState         string
-	GuardsEvaluated   []string
-	ActionsExecuted   []string
-	ClearGates        []string
-	SetsGate          string
-	RuleID            string
-	FanOutCount       int
-	Computed          map[string]any
-	StateMutation     StateMutation
-	TimerIntents      []TimerIntent
-	EmitIntents       []EmitIntent
-	DeadLetterIntents []EmitIntent
-	ChainDepth        int
+	Status                           OutcomeStatus
+	FailureClass                     FailureClass
+	ExecutedSteps                    []Step
+	CurrentState                     string
+	NextState                        string
+	GuardsEvaluated                  []string
+	ActionsExecuted                  []string
+	ClearGates                       []string
+	SetsGate                         string
+	RuleID                           string
+	FanOutCount                      int
+	Computed                         map[string]any
+	StateMutation                    StateMutation
+	TimerIntents                     []TimerIntent
+	EmitIntents                      []EmitIntent
+	DeadLetterIntents                []EmitIntent
+	ChainDepth                       int
 	AccumulatorCompletionDiagnostics AccumulatorCompletionDiagnostics
 }
 
