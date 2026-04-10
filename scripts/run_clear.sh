@@ -23,6 +23,9 @@ DIRECTIVE_MESSAGE="${DIRECTIVE_MESSAGE:-}"
 CORPUS_PATH="${CORPUS_PATH:-/data/test-signals-25.jsonl}"
 CORPUS_MODE="${CORPUS_MODE:-corpus}"
 CORPUS_GEOGRAPHY="${CORPUS_GEOGRAPHY:-US}"
+SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
+
+export SWARM_BUILDER_AUTH_TOKEN
 
 kill_swarm_processes() {
   local pids=""
@@ -88,7 +91,7 @@ SQL
 echo "Starting Swarm with contracts ${CONTRACTS_ROOT}..."
 : > "${LOG_FILE}"
 launcher_pid="$(
-  LOG_FILE="${LOG_FILE}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" python3 - <<'PY'
+  LOG_FILE="${LOG_FILE}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN}" python3 - <<'PY'
 import os
 import subprocess
 import sys
@@ -140,6 +143,7 @@ run_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 echo "Starting default corpus run ${run_id}..."
 run_response="$(curl -sS "http://${HEALTH_ADDR}/api/rpc" \
   -H 'content-type: application/json' \
+  -H "Authorization: Bearer ${SWARM_BUILDER_AUTH_TOKEN}" \
   --data-binary "{\"jsonrpc\":\"2.0\",\"id\":\"run-clear\",\"method\":\"run.start\",\"params\":{\"run_id\":\"${run_id}\",\"inputs\":{\"scan.requested\":{\"mode\":\"${CORPUS_MODE}\",\"geography\":\"${CORPUS_GEOGRAPHY}\",\"corpus_path\":\"${CORPUS_PATH}\"}}}}")"
 echo "${run_response}"
 if ! grep -q '"status":"started"' <<<"${run_response}"; then

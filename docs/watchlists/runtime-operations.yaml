@@ -49,6 +49,10 @@ active_issues:
     title: Require authentication for dashboard and runtime-control surfaces on the default listener
     maps_to:
       - privileged_control_plane_auth
+  - id: 326
+    title: Align the supported run helper with builder RPC auth requirements
+    maps_to:
+      - privileged_control_plane_auth
   - id: 143
     title: Drain in-flight work before runtime shutdown tears down dependencies
     maps_to:
@@ -179,6 +183,7 @@ nodes:
     known_manifestations:
       - gateway auth not fail-closed
       - builder RPC/WebSocket privileged paths unauthenticated
+      - supported helper paths drift from authenticated builder RPC policy and fail after runtime reaches ready
       - delegable privileges not capped on hire/reconfigure
       - dashboard/runtime-control default listener left open
     representative_issues:
@@ -186,6 +191,7 @@ nodes:
       - 140
       - 141
       - 142
+      - 326
     common_framing_mistakes:
       too_broad:
         - auth needs work
