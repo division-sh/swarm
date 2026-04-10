@@ -377,6 +377,34 @@ func (r *boardTestRuntime) ContinueSession(_ context.Context, s *llm.Session, me
 	return resp, nil
 }
 
+func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
+	rt := &boardTestRuntime{
+		steps: []*llm.Response{
+			{Message: llm.Message{Role: "assistant", Content: "Handled."}},
+		},
+	}
+	agent := mustNewLLMAgent(t,
+		models.AgentConfig{ID: "analysis-1", Role: "analysis"},
+		rt,
+		nil,
+		nil,
+	)
+
+	evt := (events.Event{
+		ID:          "evt-1",
+		Type:        "analysis/requested",
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"entity_id":"ent-1"}`),
+	}).WithEntityID("ent-1")
+
+	if _, err := agent.OnEvent(context.Background(), evt); err != nil {
+		t.Fatalf("OnEvent: %v", err)
+	}
+	if rt.call != 1 {
+		t.Fatalf("runtime call count = %d, want 1", rt.call)
+	}
+}
+
 type boardEmitExecutor struct{}
 
 func (boardEmitExecutor) Execute(ctx context.Context, name string, input any) (any, error) {
