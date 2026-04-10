@@ -160,6 +160,7 @@ if [[ -n "${DIRECTIVE_AGENT}" && -n "${DIRECTIVE_MESSAGE}" ]]; then
   ruby -rjson -e 'print JSON.generate({message: ARGV[0], kill_previous: true})' "${DIRECTIVE_MESSAGE}" | \
     curl -sS "http://${HEALTH_ADDR}/api/agents/${DIRECTIVE_AGENT}/actions/directive" \
       -H 'content-type: application/json' \
+      -H "Authorization: Bearer ${SWARM_OPERATOR_AUTH_TOKEN}" \
       --data-binary @-
   echo
 fi
