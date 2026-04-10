@@ -244,6 +244,83 @@ func putTestTurnContext(t testing.TB, registry *TurnContextRegistry, token strin
 	})
 }
 
+type gatewayCtxProbeKey string
+
+type gatewayCtxObservation struct {
+	value       string
+	hasDeadline bool
+	deadline    time.Time
+	err         error
+}
+
+func runGatewayTransportPair(t *testing.T, reqCtx context.Context) (gatewayCtxObservation, gatewayCtxObservation) {
+	t.Helper()
+
+	registry := newTestTurnContextRegistry()
+	observations := make([]gatewayCtxObservation, 0, 2)
+	g := NewGateway(testToolExecutor(func(ctx context.Context, name string, input any) (any, error) {
+		t.Helper()
+		if name != "query_entities" {
+			t.Fatalf("tool name = %q, want query_entities", name)
+		}
+		value, _ := ctx.Value(gatewayCtxProbeKey("probe")).(string)
+		deadline, hasDeadline := ctx.Deadline()
+		observations = append(observations, gatewayCtxObservation{
+			value:       value,
+			hasDeadline: hasDeadline,
+			deadline:    deadline,
+			err:         ctx.Err(),
+		})
+		return map[string]any{"ok": true}, nil
+	}), testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-transport-probe", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	mcpBody, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "query_entities",
+			"arguments": map[string]any{"query": "kind = 'vertical'"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal mcp request: %v", err)
+	}
+	mcpReq := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(mcpBody))), "ctx-transport-probe").WithContext(reqCtx)
+	authorizeGatewayRequest(mcpReq)
+	mcpRec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(mcpRec, mcpReq)
+	if mcpRec.Code != http.StatusOK {
+		t.Fatalf("mcp status = %d body=%s", mcpRec.Code, mcpRec.Body.String())
+	}
+
+	toolBody, err := json.Marshal(ToolGatewayRequest{
+		Input: map[string]any{"query": "kind = 'vertical'"},
+	})
+	if err != nil {
+		t.Fatalf("marshal tool request: %v", err)
+	}
+	toolReq := withContextToken(httptest.NewRequest(http.MethodPost, "/tools/query_entities", strings.NewReader(string(toolBody))), "ctx-transport-probe").WithContext(reqCtx)
+	authorizeGatewayRequest(toolReq)
+	toolRec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(toolRec, toolReq)
+	if toolRec.Code != http.StatusOK {
+		t.Fatalf("tool status = %d body=%s", toolRec.Code, toolRec.Body.String())
+	}
+
+	if len(observations) != 2 {
+		t.Fatalf("observation count = %d, want 2", len(observations))
+	}
+	return observations[0], observations[1]
+}
+
 func TestGatewayHydrateActor_PrefersResolvedRuntimeConfig(t *testing.T) {
 	g := NewGateway(nil, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
@@ -1449,6 +1526,56 @@ func TestGatewayTransports_AlignReadOnlyToolSuccessWithResolvedTurnContext(t *te
 	}
 	if strings.Contains(toolRec.Body.String(), "missing or invalid mcp context token") {
 		t.Fatalf("tool body = %s", toolRec.Body.String())
+	}
+}
+
+func TestGatewayTransports_PreserveRequestContextValueAfterResolvedTurn(t *testing.T) {
+	base := context.WithValue(context.Background(), gatewayCtxProbeKey("probe"), "value-from-request")
+	mcpObs, toolObs := runGatewayTransportPair(t, base)
+
+	if mcpObs.value != "value-from-request" {
+		t.Fatalf("mcp context value = %q, want propagated request value", mcpObs.value)
+	}
+	if toolObs.value != "value-from-request" {
+		t.Fatalf("tool context value = %q, want propagated request value", toolObs.value)
+	}
+	if mcpObs.value != toolObs.value {
+		t.Fatalf("transport value mismatch: mcp=%q tool=%q", mcpObs.value, toolObs.value)
+	}
+}
+
+func TestGatewayTransports_PreserveRequestDeadlineAfterResolvedTurn(t *testing.T) {
+	wantDeadline := time.Now().UTC().Add(5 * time.Minute).Round(0)
+	base, cancel := context.WithDeadline(context.WithValue(context.Background(), gatewayCtxProbeKey("probe"), "deadline"), wantDeadline)
+	defer cancel()
+
+	mcpObs, toolObs := runGatewayTransportPair(t, base)
+
+	if !mcpObs.hasDeadline {
+		t.Fatal("mcp context missing propagated deadline")
+	}
+	if !toolObs.hasDeadline {
+		t.Fatal("tool context missing propagated deadline")
+	}
+	if !mcpObs.deadline.Equal(wantDeadline) {
+		t.Fatalf("mcp deadline = %s, want %s", mcpObs.deadline, wantDeadline)
+	}
+	if !toolObs.deadline.Equal(wantDeadline) {
+		t.Fatalf("tool deadline = %s, want %s", toolObs.deadline, wantDeadline)
+	}
+}
+
+func TestGatewayTransports_PreserveRequestCancellationAfterResolvedTurn(t *testing.T) {
+	base, cancel := context.WithCancel(context.WithValue(context.Background(), gatewayCtxProbeKey("probe"), "cancel"))
+	cancel()
+
+	mcpObs, toolObs := runGatewayTransportPair(t, base)
+
+	if mcpObs.err != context.Canceled {
+		t.Fatalf("mcp ctx err = %v, want %v", mcpObs.err, context.Canceled)
+	}
+	if toolObs.err != context.Canceled {
+		t.Fatalf("tool ctx err = %v, want %v", toolObs.err, context.Canceled)
 	}
 }
 
