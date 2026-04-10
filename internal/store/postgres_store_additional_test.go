@@ -143,6 +143,135 @@ func TestPostgresStore_AgentSessionTerminationMetadataMigrationBackfillsLegacyRo
 	}
 }
 
+func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeliveries(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'scan.requested', $3::uuid, 'entity', '{}'::jsonb, 'builder', 'platform', now()
+		)
+	`, eventID, runID, entityID); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', now()
+		)
+	`, runID, eventID); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+
+	if err := pg.MarkRunTerminal(ctx, runID, "completed", "", time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "active deliveries") {
+		t.Fatalf("MarkRunTerminal(active delivery) error = %v, want active delivery rejection", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET status = 'delivered', delivered_at = now()
+		WHERE run_id = $1::uuid
+	`, runID); err != nil {
+		t.Fatalf("deliver completion: %v", err)
+	}
+
+	if err := pg.MarkRunTerminal(ctx, runID, "completed", "", time.Now().UTC()); err != nil {
+		t.Fatalf("MarkRunTerminal(completed): %v", err)
+	}
+
+	var (
+		status      string
+		eventCount  int
+		entityCount int
+		endedAt     time.Time
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), event_count, entity_count, ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&status, &eventCount, &entityCount, &endedAt); err != nil {
+		t.Fatalf("load run row: %v", err)
+	}
+	if status != "completed" {
+		t.Fatalf("run status = %q, want completed", status)
+	}
+	if eventCount != 1 {
+		t.Fatalf("event_count = %d, want 1", eventCount)
+	}
+	if entityCount != 1 {
+		t.Fatalf("entity_count = %d, want 1", entityCount)
+	}
+	if endedAt.IsZero() {
+		t.Fatal("ended_at not persisted")
+	}
+}
+
+func TestPostgresStore_AppendEvent_ReopensPrematureCompletedRunAndSyncsCounters(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, ended_at, event_count, entity_count)
+		VALUES ($1::uuid, 'completed', now(), 0, 0)
+	`, runID); err != nil {
+		t.Fatalf("seed completed run: %v", err)
+	}
+
+	evt := events.Event{
+		ID:          uuid.NewString(),
+		RunID:       runID,
+		Type:        events.EventType("scan.completed"),
+		SourceAgent: "agent-1",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEntityID(entityID)
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	var (
+		status      string
+		eventCount  int
+		entityCount int
+		endedAt     sql.NullTime
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), event_count, entity_count, ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&status, &eventCount, &entityCount, &endedAt); err != nil {
+		t.Fatalf("load run row: %v", err)
+	}
+	if status != "running" {
+		t.Fatalf("run status = %q, want running", status)
+	}
+	if eventCount != 1 {
+		t.Fatalf("event_count = %d, want 1", eventCount)
+	}
+	if entityCount != 1 {
+		t.Fatalf("entity_count = %d, want 1", entityCount)
+	}
+	if endedAt.Valid {
+		t.Fatalf("ended_at valid = %v, want cleared after reopening", endedAt.Time)
+	}
+}
+
 func TestPostgresStore_EnsureSchemaTables_PhasesAgentSessionCompatibilityBeforeDependentDDL(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

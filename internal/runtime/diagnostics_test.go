@@ -152,10 +152,13 @@ func TestRuntimeLogger_Log_EnsuresRunRowBeforePersistingRunScopedEntry(t *testin
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 
 	mock.ExpectExec(`INSERT INTO runs`).
-		WithArgs(runID).
+		WithArgs(runID, "", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO events`).
 		WithArgs(runID, sqlmock.AnyArg(), "").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE runs`).
+		WithArgs(runID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})

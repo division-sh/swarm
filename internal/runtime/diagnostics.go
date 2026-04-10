@@ -11,6 +11,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/diaglog"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 // RuntimeLogEntry is a structured runtime operation record (spec v2.0.14).
@@ -248,7 +249,10 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 				0, 'runtime', 'platform', NULLIF($3,'')::uuid, now()
 			)
 		`, runID, string(encoded), parentEventID)
-		return err
+		if err != nil {
+			return err
+		}
+		return storerunlifecycle.SyncCounts(ctx, db, runID)
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO events (
@@ -277,12 +281,7 @@ func ensureRuntimeLogRunRow(ctx context.Context, db *sql.DB, runID string) error
 	if _, err := uuid.Parse(runID); err != nil {
 		return err
 	}
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', now())
-		ON CONFLICT (run_id) DO NOTHING
-	`, runID)
-	return err
+	return storerunlifecycle.EnsureActive(ctx, db, runID, "", "")
 }
 
 func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detailMap map[string]any, runID, parentEventID, handlerID string) map[string]any {

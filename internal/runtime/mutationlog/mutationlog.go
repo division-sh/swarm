@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 var syntheticRunNamespace = uuid.MustParse("7e7e89e6-0d4f-4eeb-a8a0-99a3e8ec2ef1")
@@ -20,6 +21,7 @@ func ErrInvalidMutationLogWriter(message string) error {
 
 type DBTX interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 type Record struct {
@@ -63,11 +65,7 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	}
 
 	runID := normalizeRunID(runtimecorrelation.RunIDFromContext(ctx))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id)
-		VALUES ($1::uuid)
-		ON CONFLICT (run_id) DO NOTHING
-	`, runID); err != nil {
+	if err := storerunlifecycle.EnsureActive(ctx, db, runID, "", ""); err != nil {
 		return err
 	}
 

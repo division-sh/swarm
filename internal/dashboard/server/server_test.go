@@ -121,6 +121,9 @@ func (stubBuilderRunStore) ListEventDeliveryRecipients(context.Context, string) 
 func (stubBuilderRunStore) MarkRunTerminal(context.Context, string, string, string, time.Time) error {
 	return nil
 }
+func (stubBuilderRunStore) LoadRunLifecycleSnapshot(context.Context, string) (runtimebus.RunLifecycleSnapshot, error) {
+	return runtimebus.RunLifecycleSnapshot{}, nil
+}
 
 type stubConversationCaps struct {
 	caps store.StoreSchemaCapabilities

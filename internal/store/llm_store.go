@@ -105,7 +105,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		rec.Error,
 	}
 	if hasConversationRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, runID); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, runID, "", ""); err != nil {
 			return err
 		}
 		updateQ = fmt.Sprintf(`
@@ -159,7 +159,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			rec.SessionID,
 		}
 		if hasConversationRunID {
-			if err := s.ensureRunRow(ctx, caps, tx, runID); err != nil {
+			if err := s.ensureRunRow(ctx, caps, tx, runID, "", ""); err != nil {
 				return err
 			}
 			updateQ = `
@@ -320,7 +320,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		}
 	}
 	if hasRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, runID); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, runID, "", ""); err != nil {
 			return err
 		}
 		insertTurn = `
@@ -473,7 +473,7 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 	}
 	scopeKey := strings.TrimSpace(rec.ScopeKey)
 	if caps.Conversations.AuditRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, rec.RunID); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, rec.RunID, "", ""); err != nil {
 			return err
 		}
 	}
@@ -791,7 +791,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			status,
 		}
 		if caps.Conversations.AuditRunID {
-			if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
+			if err := s.ensureRunRow(ctx, caps, nil, runID, "", ""); err != nil {
 				return err
 			}
 			q = `
@@ -878,7 +878,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		mode.String(),
 	}
 	if caps.Conversations.SessionRunID {
-		if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
+		if err := s.ensureRunRow(ctx, caps, nil, runID, "", ""); err != nil {
 			return err
 		}
 		q = `

@@ -11,9 +11,11 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 const (
@@ -24,6 +26,11 @@ const (
 )
 
 type rowQueryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+type execQueryer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
@@ -423,7 +430,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	`
 	args := []any{id, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
 	if caps.Events.LogRunID {
-		if err := s.ensureRunRow(ctx, caps, tx, runID); err != nil {
+		if err := s.ensureRunRow(ctx, caps, tx, runID, id, name); err != nil {
 			return err
 		}
 		q = `
@@ -441,6 +448,11 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCap
 	}
 	if _, err := execFn(ctx, q, args...); err != nil {
 		return fmt.Errorf("append event: %w", err)
+	}
+	if caps.Events.LogRunID {
+		if err := storerunlifecycle.SyncCounts(ctx, chooseExecQueryer(s.DB, tx), runID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -750,6 +762,13 @@ func chooseRowQueryer(db *sql.DB, tx *sql.Tx) rowQueryer {
 	return db
 }
 
+func chooseExecQueryer(db *sql.DB, tx *sql.Tx) execQueryer {
+	if tx != nil {
+		return tx
+	}
+	return db
+}
+
 func lookupEventRunID(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, eventID string) string {
 	eventID = strings.TrimSpace(eventID)
 	if q == nil || eventID == "" || caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID {
@@ -767,38 +786,32 @@ func lookupEventRunID(ctx context.Context, caps StoreSchemaCapabilities, q rowQu
 	return strings.TrimSpace(runID)
 }
 
-func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, runID string) error {
+func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {
 	runID = nullUUIDString(runID)
 	if runID == "" || !caps.Events.HasRuns {
 		return nil
 	}
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
-	}
-	if _, err := execFn(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', now())
-		ON CONFLICT (run_id) DO NOTHING
-	`, runID); err != nil {
-		return fmt.Errorf("ensure run row: %w", err)
-	}
-	return nil
+	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType)
 }
 
 func canonicalRunTerminalStatus(raw string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "completed":
-		return "completed", nil
-	case "failed":
-		return "failed", nil
-	case "cancelled":
-		return "cancelled", nil
-	case "forked":
-		return "forked", nil
-	default:
-		return "", fmt.Errorf("unsupported terminal run status %q", raw)
+	return storerunlifecycle.CanonicalTerminalStatus(raw)
+}
+
+func (s *PostgresStore) LoadRunLifecycleSnapshot(ctx context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error) {
+	snap, err := storerunlifecycle.LoadSnapshot(ctx, s.DB, nullUUIDString(runID))
+	if err != nil {
+		return runtimebus.RunLifecycleSnapshot{}, err
 	}
+	return runtimebus.RunLifecycleSnapshot{
+		RunID:        snap.RunID,
+		Status:       snap.Status,
+		EventCount:   snap.EventCount,
+		EntityCount:  snap.EntityCount,
+		ErrorSummary: snap.ErrorSummary,
+		StartedAt:    snap.StartedAt,
+		EndedAt:      snap.EndedAt,
+	}, nil
 }
 
 func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status, errorSummary string, endedAt time.Time) error {
@@ -824,38 +837,8 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status, erro
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
 	}
-	result, err := s.DB.ExecContext(ctx, `
-		UPDATE runs
-		SET status = $2,
-		    error_summary = NULLIF($3, ''),
-		    ended_at = COALESCE(ended_at, $4)
-		WHERE run_id = $1::uuid
-		  AND (status IN ('running', 'paused') OR status = $2)
-	`, runID, status, errorSummary, endedAt.UTC())
-	if err != nil {
-		return fmt.Errorf("mark run terminal: %w", err)
-	}
-	if rows, err := result.RowsAffected(); err == nil && rows > 0 {
-		return nil
-	}
-
-	var currentStatus string
-	err = s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(status, '')
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&currentStatus)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("run %s not found", runID)
-		}
-		return fmt.Errorf("load run terminal state: %w", err)
-	}
-	currentStatus = strings.TrimSpace(currentStatus)
-	if currentStatus == status {
-		return nil
-	}
-	return fmt.Errorf("run %s already terminal with status %s", runID, currentStatus)
+	_, err = storerunlifecycle.MarkTerminal(ctx, s.DB, runID, status, errorSummary, endedAt)
+	return err
 }
 
 func runIDOrEventID(runID, eventID string) string {
