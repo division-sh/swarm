@@ -108,6 +108,18 @@ func (deferredChainInterceptor) Intercept(_ context.Context, evt events.Event) (
 	}).WithEntityID(evt.EntityID())}, nil
 }
 
+type singleDeferredInterceptor struct{}
+
+func (singleDeferredInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+	if evt.Type != events.EventType("custom.root") {
+		return true, nil, nil
+	}
+	return false, []events.Event{(events.Event{
+		Type:      events.EventType("custom.middle"),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID(evt.EntityID())}, nil
+}
+
 type eventVisibleInTxInterceptor struct {
 	t       *testing.T
 	eventID string
@@ -613,6 +625,52 @@ func TestEventBusPublish_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning
 		t.Fatal("agent did not receive event")
 	}
 	waitForNoEvent(t, missingCh)
+
+	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
+}
+
+func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *testing.T) {
+	store := &descriptorAwareEventStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{
+			{AgentID: "agent-a"},
+			{AgentID: "agent-b", EntityID: "ent-2"},
+		},
+	}
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{singleDeferredInterceptor{}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	workflowCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.middle"))
+	agentCh := eb.Subscribe("agent-a", events.EventType("custom.middle"))
+	otherCh := eb.Subscribe("agent-b", events.EventType("custom.middle"))
+
+	if err := eb.Publish(context.Background(), (events.Event{
+		Type:      events.EventType("custom.root"),
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-1")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case evt := <-workflowCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("workflow-runtime event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("workflow-runtime did not receive deferred event")
+	}
+	select {
+	case evt := <-agentCh:
+		if got := evt.EntityID(); got != "ent-1" {
+			t.Fatalf("agent event entity_id = %q, want ent-1", got)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("agent did not receive deferred event")
+	}
+	waitForNoEvent(t, otherCh)
 
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
 }
