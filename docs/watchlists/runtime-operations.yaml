@@ -97,6 +97,10 @@ active_issues:
     title: Align request-context propagation across /mcp and /tools transport execution paths
     maps_to:
       - transport_policy_and_surface_parity
+  - id: 347
+    title: Keep directive turns aligned with actor-scoped emit-tool availability
+    maps_to:
+      - transport_policy_and_surface_parity
   - id: 179
     title: Expose recovery and restart decisions through canonical diagnostics
     maps_to:
@@ -119,12 +123,14 @@ nodes:
       - startup reachability probe conflates tool-call transport proof with tool-specific required-input validity
       - startup callable proof lacks an explicit typed probe outcome contract
       - agent-visible tool availability differs between prompt and transport
+      - directive turns can omit actor-authorized emit tools after the correct active agent turn is resolved
     representative_issues:
       - 111
       - 136
       - 137
       - 218
       - 342
+      - 347
       - 305
     common_framing_mistakes:
       too_broad:
