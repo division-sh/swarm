@@ -468,13 +468,23 @@ func (am *AgentManager) Run(ctx context.Context) {
 }
 
 func (am *AgentManager) Recover(ctx context.Context) error {
+	_, err := am.recover(ctx, false)
+	return err
+}
+
+func (am *AgentManager) RecoverWithStartupReplayDiagnostics(ctx context.Context) (StartupReplaySummary, error) {
+	return am.recover(ctx, true)
+}
+
+func (am *AgentManager) recover(ctx context.Context, startupReplayDiagnostics bool) (StartupReplaySummary, error) {
+	summary := StartupReplaySummary{}
 	if am.store == nil {
-		return nil
+		return summary, nil
 	}
 
 	agents, err := am.store.LoadAgents(ctx)
 	if err != nil {
-		return fmt.Errorf("load agents: %w", err)
+		return summary, fmt.Errorf("load agents: %w", err)
 	}
 	sort.SliceStable(agents, func(i, j int) bool {
 		return agents[i].StartedAt.Before(agents[j].StartedAt)
@@ -484,21 +494,23 @@ func (am *AgentManager) Recover(ctx context.Context) error {
 			continue
 		}
 		if err := am.spawnAgentInternal(ctx, rec, false); err != nil && !strings.Contains(err.Error(), "already exists") {
-			return fmt.Errorf("hydrate agent %s: %w", rec.Config.ID, err)
+			return summary, fmt.Errorf("hydrate agent %s: %w", rec.Config.ID, err)
 		}
 	}
 	if err := am.restoreFlowInstanceRoutes(ctx); err != nil {
-		return err
+		return summary, err
 	}
 
 	if err := runtimepipeline.NewRecoveryManagerWith(am.bus.Store(), am.bus).Recover(ctx); err != nil {
-		return fmt.Errorf("recover pipeline receipts: %w", err)
+		return summary, fmt.Errorf("recover pipeline receipts: %w", err)
 	}
 
-	if err := am.replayPendingEvents(ctx); err != nil {
-		return err
+	if startupReplayDiagnostics {
+		ctx = withStartupManagerReplayDiagnostics(ctx)
 	}
-	return nil
+	replaySummary, err := am.replayPendingEventsDetailed(ctx)
+	summary.merge(replaySummary)
+	return summary, err
 }
 
 type RecoverableStateSnapshot struct {
@@ -621,11 +633,17 @@ func (am *AgentManager) retryLoop(ctx context.Context) {
 }
 
 func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
+	_, err := am.replayPendingEventsDetailed(ctx)
+	return err
+}
+
+func (am *AgentManager) replayPendingEventsDetailed(ctx context.Context) (StartupReplaySummary, error) {
+	summary := StartupReplaySummary{}
 	if am.store == nil {
-		return nil
+		return summary, nil
 	}
 	if am.isAuthBreakerTripped() {
-		return nil
+		return summary, nil
 	}
 
 	am.mu.RLock()
@@ -637,16 +655,18 @@ func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
 
 	for _, id := range ids {
 		if am.shutdownAdmissionClosed() {
-			return nil
+			return summary, nil
 		}
 		if am.isAuthBreakerTripped() {
-			return nil
+			return summary, nil
 		}
-		if err := am.ReplayAgentBacklog(ctx, id); err != nil {
+		backlogSummary, err := am.replayAgentBacklogDetailed(ctx, id)
+		summary.merge(backlogSummary)
+		if err != nil {
 			if errors.Is(err, errRuntimeShuttingDown) {
-				return nil
+				return summary, nil
 			}
-			if am.bus != nil {
+			if !startupManagerReplayDiagnosticsEnabled(ctx) && am.bus != nil {
 				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
 					Component: "agent-manager",
@@ -657,22 +677,28 @@ func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
 			}
 		}
 	}
-	return nil
+	return summary, nil
 }
 
 func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) error {
+	_, err := am.replayAgentBacklogDetailed(ctx, agentID)
+	return err
+}
+
+func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID string) (StartupReplaySummary, error) {
+	summary := StartupReplaySummary{}
 	if am.shutdownAdmissionClosed() {
-		return errRuntimeShuttingDown
+		return summary, errRuntimeShuttingDown
 	}
 	if am.store == nil {
-		return fmt.Errorf("manager store unavailable")
+		return summary, fmt.Errorf("manager store unavailable")
 	}
 	if am.isAuthBreakerTripped() {
-		return nil
+		return summary, nil
 	}
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
-		return errors.New("agent id is required")
+		return summary, errors.New("agent id is required")
 	}
 	am.mu.RLock()
 	agent := am.agents[agentID]
@@ -683,18 +709,34 @@ func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) 
 	}
 	am.mu.RUnlock()
 	if !ok || agent == nil {
-		return fmt.Errorf("agent not found: %s", agentID)
+		return summary, fmt.Errorf("agent not found: %s", agentID)
 	}
 	pending, err := am.pendingEventsForAgent(ctx, agentID, cfg, agent, since)
 	if err != nil {
-		return err
+		if startupManagerReplayDiagnosticsEnabled(ctx) {
+			record := startupManagerReplayRecord{
+				AgentID:    agentID,
+				Outcome:    startupManagerReplayOutcomeDropped,
+				ReasonCode: startupManagerReplayReasonBacklogLoadFailed,
+				ErrorText:  err.Error(),
+			}
+			summary.observe(record)
+			logStartupManagerReplayAftermath(ctx, am.bus, record)
+			return summary, nil
+		}
+		return summary, err
 	}
 	for _, evt := range pending {
 		if am.isAuthBreakerTripped() {
-			return nil
+			return summary, nil
 		}
-		if err := am.processEvent(ctx, agent, evt); err != nil {
-			if am.bus != nil {
+		result := am.processEventDetailed(ctx, agent, evt)
+		if startupManagerReplayDiagnosticsEnabled(ctx) {
+			summary.observe(result.record)
+			logStartupManagerReplayAftermath(ctx, am.bus, result.record)
+		}
+		if result.err != nil {
+			if !startupManagerReplayDiagnosticsEnabled(ctx) && am.bus != nil {
 				evtCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
 				evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID))
 				am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
@@ -705,15 +747,15 @@ func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) 
 					EventType: strings.TrimSpace(string(evt.Type)),
 					AgentID:   agentID,
 					EntityID:  strings.TrimSpace(evt.EntityID()),
-					Error:     strings.TrimSpace(err.Error()),
+					Error:     strings.TrimSpace(result.err.Error()),
 				})
 			}
-			if isClaudeAuthError(err) {
-				return nil
+			if isClaudeAuthError(result.err) {
+				return summary, nil
 			}
 		}
 	}
-	return nil
+	return summary, nil
 }
 
 func (am *AgentManager) pendingEventsForAgent(

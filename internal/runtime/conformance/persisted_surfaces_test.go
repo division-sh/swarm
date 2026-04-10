@@ -518,6 +518,61 @@ func (conformanceTimerRecoveryEventStore) ListEventDeliveryRecipients(context.Co
 
 func (conformanceTimerRecoveryEventStore) SupportsPersistedReplay() bool { return false }
 
+type conformanceManagerReplayStore struct {
+	agents   []runtimemanager.PersistedAgent
+	pending  map[string][]events.Event
+	receipts map[string]runtimemanager.EventReceipt
+}
+
+func (*conformanceManagerReplayStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
+	return nil
+}
+
+func (s *conformanceManagerReplayStore) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
+	return append([]runtimemanager.PersistedAgent(nil), s.agents...), nil
+}
+
+func (*conformanceManagerReplayStore) MarkAgentTerminated(context.Context, string) error { return nil }
+func (*conformanceManagerReplayStore) EnsureEntitySchema(context.Context, string) error  { return nil }
+func (s *conformanceManagerReplayStore) UpsertEventReceipt(_ context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+	if s.receipts == nil {
+		s.receipts = map[string]runtimemanager.EventReceipt{}
+	}
+	s.receipts[strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)] = runtimemanager.EventReceipt{
+		EventID: eventID,
+		AgentID: agentID,
+		Status:  status,
+		Error:   errText,
+	}
+	return nil
+}
+func (s *conformanceManagerReplayStore) ListPendingEventsForAgent(_ context.Context, agentID string, _ time.Time, _ int) ([]events.Event, error) {
+	return append([]events.Event(nil), s.pending[strings.TrimSpace(agentID)]...), nil
+}
+func (*conformanceManagerReplayStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+func (s *conformanceManagerReplayStore) GetEventReceipt(_ context.Context, eventID, agentID string) (runtimemanager.EventReceipt, bool, error) {
+	receipt, ok := s.receipts[strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)]
+	return receipt, ok, nil
+}
+
+type conformanceManagerReplayAgent struct{ id string }
+
+func (a conformanceManagerReplayAgent) ID() string                      { return a.id }
+func (conformanceManagerReplayAgent) Type() string                      { return "generic" }
+func (conformanceManagerReplayAgent) Subscriptions() []events.EventType { return nil }
+func (conformanceManagerReplayAgent) OnEvent(_ context.Context, evt events.Event) ([]events.Event, error) {
+	switch evt.Type {
+	case events.EventType("support.replay.drop"):
+		return nil, fmt.Errorf("boom")
+	case events.EventType("support.replay.leased"):
+		return nil, fmt.Errorf("session currently leased")
+	default:
+		return nil, nil
+	}
+}
+
 func loadConformanceRuntimeWorkflowModule(t *testing.T) conformanceSemanticOnlyWorkflowRuntime {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
@@ -869,6 +924,133 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	}
 	if terminationDetail != "builder_api" {
 		t.Fatalf("termination_detail = %q, want builder_api", terminationDetail)
+	}
+}
+
+func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalRuntimeLogSurface(t, ctx, pg)
+	module := loadConformanceRuntimeWorkflowModule(t)
+	managerStore := &conformanceManagerReplayStore{
+		agents: []runtimemanager.PersistedAgent{{
+			Config:    runtimeactors.AgentConfig{ID: "agent-a"},
+			StartedAt: time.Now().UTC(),
+		}},
+		pending: map[string][]events.Event{
+			"agent-a": {
+				{ID: "evt-replay", Type: events.EventType("support.replay.ok"), CreatedAt: time.Now().Add(-4 * time.Minute).UTC()},
+				{ID: "evt-skip", Type: events.EventType("support.replay.skip"), CreatedAt: time.Now().Add(-3 * time.Minute).UTC()},
+				{ID: "evt-leased", Type: events.EventType("support.replay.leased"), CreatedAt: time.Now().Add(-2 * time.Minute).UTC()},
+				{ID: "evt-drop", Type: events.EventType("support.replay.drop"), CreatedAt: time.Now().Add(-time.Minute).UTC()},
+			},
+		},
+		receipts: map[string]runtimemanager.EventReceipt{
+			"evt-skip|agent-a": {
+				EventID: "evt-skip",
+				AgentID: "agent-a",
+				Status:  runtimemanager.ReceiptStatusProcessed,
+			},
+		},
+	}
+
+	rt, err := runtimepkg.NewRuntime(ctx, &config.Config{
+		Runtime: config.RuntimeConfig{
+			RecoveryOnStartup: true,
+		},
+		LLM: config.LLMConfig{
+			RuntimeMode: "api",
+		},
+	}, runtimepkg.Stores{
+		SQLDB:        db,
+		EventStore:   conformanceTimerRecoveryEventStore{},
+		ManagerStore: managerStore,
+	}, runtimepkg.RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     conformanceNoopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	rt.Manager = runtimemanager.NewAgentManager(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return conformanceManagerReplayAgent{id: cfg.ID}, nil
+	}, managerStore)
+
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}()
+
+	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
+	if reader == nil {
+		t.Fatal("NewSQLObservabilityReader returned nil")
+	}
+	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
+		Component: "agent-manager",
+		Type:      "startup_recovery_manager_replay_aftermath",
+	}, 10)
+	if err != nil {
+		t.Fatalf("ListRuntimeLogs: %v", err)
+	}
+	if len(logs) != 4 {
+		t.Fatalf("runtime log rows = %d, want 4: %#v", len(logs), logs)
+	}
+	findByEventID := func(eventID string) int {
+		t.Helper()
+		for idx, log := range logs {
+			if strings.TrimSpace(log.EventID) == strings.TrimSpace(eventID) {
+				return idx
+			}
+		}
+		t.Fatalf("missing runtime log for event %q in %#v", eventID, logs)
+		return -1
+	}
+
+	replayed := logs[findByEventID("evt-replay")]
+	replayedDetail, _ := replayed.Detail.(map[string]any)
+	if got := readString(replayedDetail["decision_outcome"]); got != "replayed" {
+		t.Fatalf("replayed detail.decision_outcome = %q, want replayed", got)
+	}
+	if got := readString(replayedDetail["decision_reason_code"]); got != "persisted_event_replayed" {
+		t.Fatalf("replayed detail.decision_reason_code = %q, want persisted_event_replayed", got)
+	}
+
+	skippedReceipt := logs[findByEventID("evt-skip")]
+	skippedReceiptDetail, _ := skippedReceipt.Detail.(map[string]any)
+	if got := readString(skippedReceiptDetail["decision_outcome"]); got != "skipped" {
+		t.Fatalf("receipt skip detail.decision_outcome = %q, want skipped", got)
+	}
+	if got := readString(skippedReceiptDetail["decision_reason_code"]); got != "event_receipt_already_processed" {
+		t.Fatalf("receipt skip detail.decision_reason_code = %q, want event_receipt_already_processed", got)
+	}
+
+	skippedLeased := logs[findByEventID("evt-leased")]
+	skippedLeasedDetail, _ := skippedLeased.Detail.(map[string]any)
+	if got := readString(skippedLeasedDetail["decision_reason_code"]); got != "session_currently_leased" {
+		t.Fatalf("leased skip detail.decision_reason_code = %q, want session_currently_leased", got)
+	}
+
+	dropped := logs[findByEventID("evt-drop")]
+	droppedDetail, _ := dropped.Detail.(map[string]any)
+	if got := readString(droppedDetail["decision_outcome"]); got != "dropped" {
+		t.Fatalf("dropped detail.decision_outcome = %q, want dropped", got)
+	}
+	if got := readString(droppedDetail["decision_reason_code"]); got != "event_processing_failed" {
+		t.Fatalf("dropped detail.decision_reason_code = %q, want event_processing_failed", got)
+	}
+	if readString(droppedDetail["error_code"]) != "event_processing_failed" {
+		t.Fatalf("dropped detail.error_code = %q, want event_processing_failed", readString(droppedDetail["error_code"]))
+	}
+	if strings.TrimSpace(dropped.Error) == "" {
+		t.Fatal("dropped startup manager replay log missing explicit error text")
 	}
 }
 
