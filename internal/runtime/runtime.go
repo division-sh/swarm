@@ -581,7 +581,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 		startupRecoveryDecision.ScheduleRestoreAttempted = len(schedules) > 0
 		results := restoreStartupTimerSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Logger, schedules)
-		startupRecoveryDecision.ScheduleReplayCount, startupRecoveryDecision.ScheduleSkipCount, startupRecoveryDecision.ScheduleDropCount, startupRecoveryDecision.ErrorText = summarizeStartupTimerRecovery(results)
+		timerReplayCount, timerSkipCount, timerDropCount, timerRecoveryErrText := summarizeStartupTimerRecovery(results)
+		startupRecoveryDecision.ScheduleReplayCount = timerReplayCount
+		startupRecoveryDecision.ScheduleSkipCount = timerSkipCount
+		startupRecoveryDecision.ScheduleDropCount = timerDropCount
 		if err := ensureLifecycleWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
 			if rt.Logger != nil {
 				handleRuntimeLogPersistenceError("scheduler", "ensure_lifecycle_failed", rt.Logger.Error(ctx, "scheduler", "ensure_lifecycle_failed", nil, err))
@@ -590,6 +593,15 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		if err := ensureRecurringWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
 			if rt.Logger != nil {
 				handleRuntimeLogPersistenceError("scheduler", "ensure_recurring_failed", rt.Logger.Error(ctx, "scheduler", "ensure_recurring_failed", nil, err))
+			}
+		}
+		if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ScheduleDropCount > 0 {
+			startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
+			startupRecoveryDecision.ReasonCode = startupRecoveryReasonScheduleRestore
+			if strings.TrimSpace(timerRecoveryErrText) != "" {
+				startupRecoveryDecision.ErrorText = timerRecoveryErrText
+			} else {
+				startupRecoveryDecision.ErrorText = fmt.Sprintf("failed to restore %d active schedule(s)", startupRecoveryDecision.ScheduleDropCount)
 			}
 		}
 	}
@@ -643,13 +655,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 					handleRuntimeLogPersistenceError("runtime", "recovery_failed_publish_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed_publish_failed", nil, publishErr))
 				}
 			}
-		}
-	}
-	if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ScheduleDropCount > 0 {
-		startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
-		startupRecoveryDecision.ReasonCode = startupRecoveryReasonScheduleRestore
-		if strings.TrimSpace(startupRecoveryDecision.ErrorText) == "" {
-			startupRecoveryDecision.ErrorText = fmt.Sprintf("failed to restore %d active schedule(s)", startupRecoveryDecision.ScheduleDropCount)
 		}
 	}
 	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
