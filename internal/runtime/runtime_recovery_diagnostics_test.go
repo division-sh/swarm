@@ -10,6 +10,7 @@ import (
 
 	"swarm/internal/config"
 	"swarm/internal/events"
+	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -81,6 +82,65 @@ func (*startupRecoveryFlakyManagerStore) ListPendingEventsForAgent(context.Conte
 }
 func (*startupRecoveryFlakyManagerStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
 	return nil, nil
+}
+
+type startupManagerReplayRuntimeStore struct {
+	agents   []runtimemanager.PersistedAgent
+	pending  map[string][]events.Event
+	receipts map[string]runtimemanager.EventReceipt
+}
+
+func (*startupManagerReplayRuntimeStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
+	return nil
+}
+
+func (s *startupManagerReplayRuntimeStore) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
+	return append([]runtimemanager.PersistedAgent(nil), s.agents...), nil
+}
+
+func (*startupManagerReplayRuntimeStore) MarkAgentTerminated(context.Context, string) error {
+	return nil
+}
+func (*startupManagerReplayRuntimeStore) EnsureEntitySchema(context.Context, string) error {
+	return nil
+}
+func (s *startupManagerReplayRuntimeStore) UpsertEventReceipt(_ context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+	if s.receipts == nil {
+		s.receipts = map[string]runtimemanager.EventReceipt{}
+	}
+	s.receipts[strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)] = runtimemanager.EventReceipt{
+		EventID: eventID,
+		AgentID: agentID,
+		Status:  status,
+		Error:   errText,
+	}
+	return nil
+}
+func (s *startupManagerReplayRuntimeStore) ListPendingEventsForAgent(_ context.Context, agentID string, _ time.Time, _ int) ([]events.Event, error) {
+	return append([]events.Event(nil), s.pending[strings.TrimSpace(agentID)]...), nil
+}
+func (*startupManagerReplayRuntimeStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+func (s *startupManagerReplayRuntimeStore) GetEventReceipt(_ context.Context, eventID, agentID string) (runtimemanager.EventReceipt, bool, error) {
+	receipt, ok := s.receipts[strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)]
+	return receipt, ok, nil
+}
+
+type startupManagerReplayRuntimeAgent struct{ id string }
+
+func (a startupManagerReplayRuntimeAgent) ID() string                      { return a.id }
+func (startupManagerReplayRuntimeAgent) Type() string                      { return "generic" }
+func (startupManagerReplayRuntimeAgent) Subscriptions() []events.EventType { return nil }
+func (startupManagerReplayRuntimeAgent) OnEvent(_ context.Context, evt events.Event) ([]events.Event, error) {
+	switch evt.Type {
+	case events.EventType("support.replay.drop"):
+		return nil, errors.New("boom")
+	case events.EventType("support.replay.leased"):
+		return nil, errors.New("session currently leased")
+	default:
+		return nil, nil
+	}
 }
 
 type startupRecoveryCapabilityEventStore struct{}
@@ -563,6 +623,119 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 	}
 	if !strings.Contains(dropped.errorText, "claim failed") {
 		t.Fatalf("dropped error = %q, want claim failed", dropped.errorText)
+	}
+}
+
+func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	managerStore := &startupManagerReplayRuntimeStore{
+		agents: []runtimemanager.PersistedAgent{{
+			Config:    runtimeactors.AgentConfig{ID: "agent-a"},
+			StartedAt: time.Now().UTC(),
+		}},
+		pending: map[string][]events.Event{
+			"agent-a": {
+				{ID: "evt-replay", Type: events.EventType("support.replay.ok"), CreatedAt: time.Now().Add(-4 * time.Minute).UTC()},
+				{ID: "evt-skip", Type: events.EventType("support.replay.skip"), CreatedAt: time.Now().Add(-3 * time.Minute).UTC()},
+				{ID: "evt-leased", Type: events.EventType("support.replay.leased"), CreatedAt: time.Now().Add(-2 * time.Minute).UTC()},
+				{ID: "evt-drop", Type: events.EventType("support.replay.drop"), CreatedAt: time.Now().Add(-time.Minute).UTC()},
+			},
+		},
+		receipts: map[string]runtimemanager.EventReceipt{
+			"evt-skip|agent-a": {
+				EventID: "evt-skip",
+				AgentID: "agent-a",
+				Status:  runtimemanager.ReceiptStatusProcessed,
+			},
+		},
+	}
+
+	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(true), Stores{
+		SQLDB:        db,
+		EventStore:   startupRecoveryCapabilityEventStore{},
+		ManagerStore: managerStore,
+	}, RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return startupManagerReplayRuntimeAgent{id: cfg.ID}, nil
+	}, runtimemanager.AgentManagerOptions{
+		SemanticSource:                 module.SemanticSource(),
+		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+	}, managerStore)
+
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}()
+
+	level, _, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	if level != "error" {
+		t.Fatalf("log level = %q, want error", level)
+	}
+	if !strings.Contains(errorText, "boom") {
+		t.Fatalf("log error = %q, want boom", errorText)
+	}
+	if got := detailString(detail["decision_outcome"]); got != "degraded" {
+		t.Fatalf("decision_outcome = %q, want degraded", got)
+	}
+	if got := detailString(detail["decision_reason_code"]); got != string(startupRecoveryReasonRecoverFailed) {
+		t.Fatalf("decision_reason_code = %q, want %q", got, startupRecoveryReasonRecoverFailed)
+	}
+	if got := detailInt(detail["manager_replayed_count"]); got != 1 {
+		t.Fatalf("manager_replayed_count = %d, want 1", got)
+	}
+	if got := detailInt(detail["manager_skipped_count"]); got != 2 {
+		t.Fatalf("manager_skipped_count = %d, want 2", got)
+	}
+	if got := detailInt(detail["manager_dropped_count"]); got != 1 {
+		t.Fatalf("manager_dropped_count = %d, want 1", got)
+	}
+
+	logs := listRuntimeLogsByAction(t, db, "startup_recovery_manager_replay_aftermath")
+	if len(logs) != 4 {
+		t.Fatalf("manager replay runtime logs = %d, want 4", len(logs))
+	}
+	findByEventType := func(eventType string) runtimeAftermathLog {
+		t.Helper()
+		for _, entry := range logs {
+			if strings.TrimSpace(entry.eventType) == eventType {
+				return entry
+			}
+		}
+		t.Fatalf("missing manager replay log for event type %q in %#v", eventType, logs)
+		return runtimeAftermathLog{}
+	}
+	replayed := findByEventType("support.replay.ok")
+	if got := detailString(replayed.detail["decision_outcome"]); got != "replayed" {
+		t.Fatalf("replayed decision_outcome = %q, want replayed", got)
+	}
+	skippedReceipt := findByEventType("support.replay.skip")
+	if got := detailString(skippedReceipt.detail["decision_reason_code"]); got != "event_receipt_already_processed" {
+		t.Fatalf("receipt skip decision_reason_code = %q, want event_receipt_already_processed", got)
+	}
+	skippedLeased := findByEventType("support.replay.leased")
+	if got := detailString(skippedLeased.detail["decision_reason_code"]); got != "session_currently_leased" {
+		t.Fatalf("leased skip decision_reason_code = %q, want session_currently_leased", got)
+	}
+	dropped := findByEventType("support.replay.drop")
+	if got := detailString(dropped.detail["decision_outcome"]); got != "dropped" {
+		t.Fatalf("dropped decision_outcome = %q, want dropped", got)
+	}
+	if !strings.Contains(dropped.errorText, "boom") {
+		t.Fatalf("dropped error = %q, want boom", dropped.errorText)
 	}
 }
 

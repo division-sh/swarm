@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,43 @@ func (s *recoveryTestStore) ListPendingEventsForAgent(context.Context, string, t
 }
 func (s *recoveryTestStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
 	return nil, nil
+}
+
+type startupReplayTestStore struct {
+	recoveryTestStore
+	pending  map[string][]events.Event
+	receipts map[string]EventReceipt
+}
+
+func (s *startupReplayTestStore) ListPendingEventsForAgent(_ context.Context, agentID string, _ time.Time, _ int) ([]events.Event, error) {
+	out := append([]events.Event(nil), s.pending[strings.TrimSpace(agentID)]...)
+	return out, nil
+}
+
+func (*startupReplayTestStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+
+func (s *startupReplayTestStore) GetEventReceipt(_ context.Context, eventID, agentID string) (EventReceipt, bool, error) {
+	key := strings.TrimSpace(eventID) + "|" + strings.TrimSpace(agentID)
+	receipt, ok := s.receipts[key]
+	return receipt, ok, nil
+}
+
+type startupReplayTestAgent struct{ id string }
+
+func (a startupReplayTestAgent) ID() string                      { return a.id }
+func (startupReplayTestAgent) Type() string                      { return "generic" }
+func (startupReplayTestAgent) Subscriptions() []events.EventType { return nil }
+func (startupReplayTestAgent) OnEvent(_ context.Context, evt events.Event) ([]events.Event, error) {
+	switch evt.Type {
+	case events.EventType("system.recover.drop"):
+		return nil, errors.New("boom")
+	case events.EventType("system.recover.leased"):
+		return nil, errors.New("session currently leased")
+	default:
+		return nil, nil
+	}
 }
 
 func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
@@ -209,6 +247,121 @@ func TestRecover_UsesCanonicalPipelineReplayAftermathDiagnostics(t *testing.T) {
 	entry := findManagerRecoveryAftermathLog(t, bus.runtimeLogs, childID, "replayed", "persisted_recipients_replayed")
 	if strings.TrimSpace(entry.Component) != "pipeline-recovery" {
 		t.Fatalf("runtime log component = %q, want pipeline-recovery", entry.Component)
+	}
+}
+
+func TestRecoverWithStartupReplayDiagnostics_LogsCanonicalManagerReplayAftermath(t *testing.T) {
+	now := time.Now().UTC()
+	store := &startupReplayTestStore{
+		recoveryTestStore: recoveryTestStore{
+			agents: []PersistedAgent{{
+				Config: models.AgentConfig{
+					ID: "agent-a",
+				},
+				StartedAt: now,
+			}},
+		},
+		pending: map[string][]events.Event{
+			"agent-a": {
+				{ID: "evt-replay", Type: events.EventType("system.recover.ok"), CreatedAt: now.Add(-5 * time.Minute)},
+				{ID: "evt-receipt", Type: events.EventType("system.recover.receipt"), CreatedAt: now.Add(-4 * time.Minute)},
+				{ID: "evt-inflight", Type: events.EventType("system.recover.inflight"), CreatedAt: now.Add(-3 * time.Minute)},
+				{ID: "evt-leased", Type: events.EventType("system.recover.leased"), CreatedAt: now.Add(-2 * time.Minute)},
+				{ID: "evt-drop", Type: events.EventType("system.recover.drop"), CreatedAt: now.Add(-time.Minute)},
+			},
+		},
+		receipts: map[string]EventReceipt{
+			"evt-receipt|agent-a": {
+				EventID: "evt-receipt",
+				AgentID: "agent-a",
+				Status:  ReceiptStatusProcessed,
+			},
+		},
+	}
+	bus := &recoveryTestBus{}
+	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+		return startupReplayTestAgent{id: cfg.ID}, nil
+	}, store)
+	am.inFlight["agent-a|evt-inflight"] = struct{}{}
+
+	summary, err := am.RecoverWithStartupReplayDiagnostics(context.Background())
+	if err != nil {
+		t.Fatalf("RecoverWithStartupReplayDiagnostics: %v", err)
+	}
+	if summary.ReplayedCount != 1 || summary.SkippedCount != 3 || summary.DroppedCount != 1 {
+		t.Fatalf("summary = %#v, want replayed=1 skipped=3 dropped=1", summary)
+	}
+	if !strings.Contains(summary.FirstDroppedError, "boom") {
+		t.Fatalf("summary.FirstDroppedError = %q, want boom", summary.FirstDroppedError)
+	}
+	if len(bus.runtimeLogs) != 5 {
+		t.Fatalf("runtime log count = %d, want 5", len(bus.runtimeLogs))
+	}
+	assertReplayAftermathLog := func(eventID, outcome, reason string) {
+		t.Helper()
+		for _, entry := range bus.runtimeLogs {
+			if strings.TrimSpace(entry.Action) != startupManagerReplayAction {
+				continue
+			}
+			if strings.TrimSpace(entry.EventID) != strings.TrimSpace(eventID) {
+				continue
+			}
+			detail, _ := entry.Detail.(map[string]any)
+			if got := strings.TrimSpace(detail["decision_outcome"].(string)); got != outcome {
+				t.Fatalf("event %s decision_outcome = %q, want %q", eventID, got, outcome)
+			}
+			if got := strings.TrimSpace(detail["decision_reason_code"].(string)); got != reason {
+				t.Fatalf("event %s decision_reason_code = %q, want %q", eventID, got, reason)
+			}
+			return
+		}
+		t.Fatalf("missing startup manager replay log for %s in %#v", eventID, bus.runtimeLogs)
+	}
+	assertReplayAftermathLog("evt-replay", "replayed", string(startupManagerReplayReasonReplayed))
+	assertReplayAftermathLog("evt-receipt", "skipped", string(startupManagerReplayReasonReceiptProcessed))
+	assertReplayAftermathLog("evt-inflight", "skipped", string(startupManagerReplayReasonDuplicateInFlight))
+	assertReplayAftermathLog("evt-leased", "skipped", string(startupManagerReplayReasonSessionLeased))
+	assertReplayAftermathLog("evt-drop", "dropped", string(startupManagerReplayReasonProcessFailed))
+	for _, entry := range bus.runtimeLogs {
+		if strings.TrimSpace(entry.Action) == "pending_replay_failed" || strings.TrimSpace(entry.Action) == "pending_replay_event_failed" {
+			t.Fatalf("unexpected legacy startup replay action %q in %#v", entry.Action, bus.runtimeLogs)
+		}
+	}
+}
+
+func TestReplayAgentBacklog_DoesNotEmitStartupAftermathOutsideStartupRecovery(t *testing.T) {
+	now := time.Now().UTC()
+	store := &startupReplayTestStore{
+		pending: map[string][]events.Event{
+			"agent-a": {
+				{ID: "evt-drop", Type: events.EventType("system.recover.drop"), CreatedAt: now.Add(-time.Minute)},
+			},
+		},
+	}
+	bus := &recoveryTestBus{}
+	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+		return startupReplayTestAgent{id: cfg.ID}, nil
+	}, store)
+	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+		Config: models.AgentConfig{ID: "agent-a"},
+	}, false); err != nil {
+		t.Fatalf("spawnAgentInternal: %v", err)
+	}
+
+	if err := am.ReplayAgentBacklog(context.Background(), "agent-a"); err != nil {
+		t.Fatalf("ReplayAgentBacklog: %v", err)
+	}
+	foundLegacyFailure := false
+	for _, entry := range bus.runtimeLogs {
+		if strings.TrimSpace(entry.Action) == startupManagerReplayAction {
+			t.Fatalf("unexpected startup replay aftermath action on direct ReplayAgentBacklog: %#v", bus.runtimeLogs)
+		}
+		if strings.TrimSpace(entry.Action) == "pending_replay_event_failed" {
+			foundLegacyFailure = true
+		}
+	}
+	if !foundLegacyFailure {
+		t.Fatalf("runtime logs = %#v, want legacy pending_replay_event_failed outside startup recovery", bus.runtimeLogs)
 	}
 }
 

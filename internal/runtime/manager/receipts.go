@@ -29,20 +29,42 @@ type deliveryProgressWriter interface {
 }
 
 func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt events.Event) error {
+	result := am.processEventDetailed(ctx, agent, evt)
+	return result.err
+}
+
+type eventProcessResult struct {
+	record startupManagerReplayRecord
+	err    error
+}
+
+func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, evt events.Event) eventProcessResult {
+	record := startupManagerReplayRecord{
+		Event:   evt,
+		AgentID: agent.ID(),
+	}
 	if !am.markEventInFlight(agent.ID(), evt.ID) {
-		return nil
+		record.Outcome = startupManagerReplayOutcomeSkipped
+		record.ReasonCode = startupManagerReplayReasonDuplicateInFlight
+		return eventProcessResult{record: record}
 	}
 	defer am.unmarkEventInFlight(agent.ID(), evt.ID)
-	if am.shouldSkipEvent(agent.ID(), evt.ID) {
-		return nil
+	if skip, reason := am.shouldSkipEventDetailed(agent.ID(), evt.ID); skip {
+		record.Outcome = startupManagerReplayOutcomeSkipped
+		record.ReasonCode = reason
+		return eventProcessResult{record: record}
 	}
 	if suppress, reason := am.shouldSuppressForBudget(agent.ID(), evt); suppress {
 		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusProcessed, reason)
-		return nil
+		record.Outcome = startupManagerReplayOutcomeSkipped
+		record.ReasonCode = startupManagerReplayReasonBudgetSuppressed
+		return eventProcessResult{record: record}
 	}
 	if am.shouldInterceptDirective(agent.ID(), evt) {
 		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusProcessed, "intercepted simple directive (runtime-handled)")
-		return nil
+		record.Outcome = startupManagerReplayOutcomeSkipped
+		record.ReasonCode = startupManagerReplayReasonDirectiveIntercepted
+		return eventProcessResult{record: record}
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
@@ -84,7 +106,9 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 	if err != nil {
 		if isTransientAgentError(err) {
 			// Transient lock/contention errors should be retried without poisoning receipts.
-			return nil
+			record.Outcome = startupManagerReplayOutcomeSkipped
+			record.ReasonCode = transientReplayReason(err)
+			return eventProcessResult{record: record}
 		}
 		agentErr := runtimerterr.WrapRuntimeError(
 			"agent_on_event_failed",
@@ -99,7 +123,10 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 		)
 		am.maybeTripAuthCircuitBreaker(agent.ID(), evt.ID, err)
 		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusError, runtimerterr.FormatRuntimeError(agentErr))
-		return agentErr
+		record.Outcome = startupManagerReplayOutcomeDropped
+		record.ReasonCode = startupManagerReplayReasonProcessFailed
+		record.ErrorText = agentErr.Error()
+		return eventProcessResult{record: record, err: agentErr}
 	}
 	for idx, e := range out {
 		if strings.TrimSpace(e.ID) == "" {
@@ -121,11 +148,16 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 				agent.ID(),
 			)
 			am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusError, runtimerterr.FormatRuntimeError(pubErr))
-			return pubErr
+			record.Outcome = startupManagerReplayOutcomeDropped
+			record.ReasonCode = startupManagerReplayReasonPublishFailed
+			record.ErrorText = pubErr.Error()
+			return eventProcessResult{record: record, err: pubErr}
 		}
 	}
 	am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusProcessed, "")
-	return nil
+	record.Outcome = startupManagerReplayOutcomeReplayed
+	record.ReasonCode = startupManagerReplayReasonReplayed
+	return eventProcessResult{record: record}
 }
 
 func (am *AgentManager) shouldInterceptDirective(agentID string, evt events.Event) bool {
@@ -192,21 +224,33 @@ func (am *AgentManager) unmarkEventInFlight(agentID, eventID string) {
 }
 
 func (am *AgentManager) shouldSkipEvent(agentID, eventID string) bool {
+	skip, _ := am.shouldSkipEventDetailed(agentID, eventID)
+	return skip
+}
+
+func (am *AgentManager) shouldSkipEventDetailed(agentID, eventID string) (bool, startupManagerReplayReasonCode) {
 	reader, ok := am.store.(eventReceiptReader)
 	if !ok || reader == nil {
-		return false
+		return false, ""
 	}
 	eventID = strings.TrimSpace(eventID)
 	agentID = strings.TrimSpace(agentID)
 	if eventID == "" || agentID == "" {
-		return false
+		return false, ""
 	}
 	receipt, found, err := reader.GetEventReceipt(am.runtimeContext(), eventID, agentID)
 	if err != nil || !found {
-		return false
+		return false, ""
 	}
 	status := ReceiptStatus(strings.TrimSpace(string(receipt.Status)))
-	return status == ReceiptStatusProcessed || status == ReceiptStatusDeadLetter
+	switch status {
+	case ReceiptStatusProcessed:
+		return true, startupManagerReplayReasonReceiptProcessed
+	case ReceiptStatusDeadLetter:
+		return true, startupManagerReplayReasonReceiptDeadLettered
+	default:
+		return false, ""
+	}
 }
 
 func isTransientAgentError(err error) bool {

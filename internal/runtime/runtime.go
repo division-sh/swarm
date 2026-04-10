@@ -607,7 +607,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	if rt.Config.Runtime.RecoveryOnStartup && rt.Manager != nil {
 		startupRecoveryDecision.ManagerRecoveryAttempted = true
-		if err := rt.Manager.Recover(ctx); err != nil {
+		managerReplaySummary, err := rt.Manager.RecoverWithStartupReplayDiagnostics(ctx)
+		startupRecoveryDecision.ManagerReplayCount = managerReplaySummary.ReplayedCount
+		startupRecoveryDecision.ManagerSkipCount = managerReplaySummary.SkippedCount
+		startupRecoveryDecision.ManagerDropCount = managerReplaySummary.DroppedCount
+		if err != nil {
 			startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
 			startupRecoveryDecision.ReasonCode = startupRecoveryReasonRecoverFailed
 			startupRecoveryDecision.ErrorText = err.Error()
@@ -654,6 +658,14 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("runtime", "recovery_failed_publish_failed", rt.Logger.Error(ctx, "runtime", "recovery_failed_publish_failed", nil, publishErr))
 				}
+			}
+		} else if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ManagerDropCount > 0 {
+			startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
+			startupRecoveryDecision.ReasonCode = startupRecoveryReasonRecoverFailed
+			if strings.TrimSpace(managerReplaySummary.FirstDroppedError) != "" {
+				startupRecoveryDecision.ErrorText = strings.TrimSpace(managerReplaySummary.FirstDroppedError)
+			} else {
+				startupRecoveryDecision.ErrorText = fmt.Sprintf("failed to replay %d pending event(s) during startup recovery", startupRecoveryDecision.ManagerDropCount)
 			}
 		}
 	}

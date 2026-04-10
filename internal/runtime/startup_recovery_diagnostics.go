@@ -78,6 +78,9 @@ type startupRecoveryDecisionReport struct {
 	ScheduleSkipCount        int
 	ScheduleDropCount        int
 	ManagerRecoveryAttempted bool
+	ManagerReplayCount       int
+	ManagerSkipCount         int
+	ManagerDropCount         int
 	ManagerResetAttempted    bool
 	ManagerResetError        string
 	InspectionError          string
@@ -140,6 +143,9 @@ func (r startupRecoveryDecisionReport) detail() map[string]any {
 	detail["schedule_skipped_count"] = r.ScheduleSkipCount
 	detail["schedule_dropped_count"] = r.ScheduleDropCount
 	detail["manager_recovery_attempted"] = r.ManagerRecoveryAttempted
+	detail["manager_replayed_count"] = r.ManagerReplayCount
+	detail["manager_skipped_count"] = r.ManagerSkipCount
+	detail["manager_dropped_count"] = r.ManagerDropCount
 	detail["manager_reset_attempted"] = r.ManagerResetAttempted
 	if errText := strings.TrimSpace(r.ErrorText); errText != "" {
 		detail["error"] = errText
