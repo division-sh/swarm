@@ -595,7 +595,7 @@ func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *
 		t.Fatalf("extra running rows = %d, want 0", extraRunningRows)
 	}
 
-	report, err := loadRunStatusReport(ctx, db, runID, runStatusOptions{})
+	report, err := loadRunStatusReport(ctx, pg, runID, runStatusOptions{})
 	if err != nil {
 		t.Fatalf("loadRunStatusReport: %v", err)
 	}
@@ -710,7 +710,7 @@ func TestLoadRunStatusReport_PreservesRunningTruthAcrossBuilderQuiescenceTimeout
 		t.Fatal("expected live in-flight manager work after builder timeout window")
 	}
 
-	report, err := loadRunStatusReport(ctx, db, runID, runStatusOptions{})
+	report, err := loadRunStatusReport(ctx, pg, runID, runStatusOptions{})
 	if err != nil {
 		t.Fatalf("loadRunStatusReport: %v", err)
 	}
