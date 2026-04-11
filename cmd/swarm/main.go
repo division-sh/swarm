@@ -22,7 +22,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lib/pq"
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/config"
 	dashboardserver "swarm/internal/dashboard/server"
@@ -250,6 +249,7 @@ type runStatusReport struct {
 	EventCounts       []runStatusEventCount     `json:"event_counts"`
 	Deliveries        []runStatusDeliveryCount  `json:"deliveries"`
 	RecentEvents      []runStatusEvent          `json:"recent_events"`
+	Mutations         []runStatusMutation       `json:"mutations,omitempty"`
 	DeadLetters       []runStatusDeadLetter     `json:"dead_letters,omitempty"`
 	AgentTurns        []runStatusAgentTurn      `json:"agent_turns,omitempty"`
 	Heuristics        []string                  `json:"heuristics,omitempty"`
@@ -311,6 +311,19 @@ type runStatusRuntimeSummary struct {
 	Count     int    `json:"count"`
 }
 
+type runStatusMutation struct {
+	MutationID    string          `json:"mutation_id,omitempty"`
+	EntityID      string          `json:"entity_id,omitempty"`
+	Field         string          `json:"field"`
+	OldValue      json.RawMessage `json:"old_value,omitempty"`
+	NewValue      json.RawMessage `json:"new_value,omitempty"`
+	WriterType    string          `json:"writer_type,omitempty"`
+	WriterID      string          `json:"writer_id,omitempty"`
+	HandlerStep   string          `json:"handler_step,omitempty"`
+	CausedByEvent string          `json:"caused_by_event,omitempty"`
+	CreatedAt     time.Time       `json:"created_at"`
+}
+
 type runStatusOptions struct {
 	LogsOnly      bool
 	LogsAllLevels bool
@@ -360,7 +373,13 @@ func runStatusCommand(ctx context.Context, repo string, args []string, out io.Wr
 		}
 		return 1
 	}
-	report, err := loadRunStatusReport(ctx, stores.SQLDB, strings.TrimSpace(*runID), runStatusOptions{
+	if stores.Postgres == nil {
+		if out != nil {
+			fmt.Fprintln(out, "status failed: postgres store required")
+		}
+		return 1
+	}
+	report, err := loadRunStatusReport(ctx, stores.Postgres, strings.TrimSpace(*runID), runStatusOptions{
 		LogsOnly:      *logsOnly,
 		LogsAllLevels: *logsAll,
 		Component:     strings.TrimSpace(*component),
@@ -384,192 +403,33 @@ func runStatusCommand(ctx context.Context, repo string, args []string, out io.Wr
 	return 0
 }
 
-func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string, opts runStatusOptions) (runStatusReport, error) {
-	if db == nil {
-		return runStatusReport{}, errors.New("db is required")
+func loadRunStatusReport(ctx context.Context, pg *store.PostgresStore, runID string, opts runStatusOptions) (runStatusReport, error) {
+	if pg == nil || pg.DB == nil {
+		return runStatusReport{}, errors.New("postgres store is required")
 	}
-	report := runStatusReport{}
 	if strings.TrimSpace(runID) == "" {
-		if err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(run_id::text, '')
-			FROM events
-			WHERE event_name = 'scan.requested'
-			  AND run_id IS NOT NULL
-			ORDER BY created_at DESC
-			LIMIT 1
-		`).Scan(&runID); err != nil {
-			if err == sql.ErrNoRows {
-				return runStatusReport{}, errors.New("no current run found")
-			}
-			return runStatusReport{}, fmt.Errorf("resolve latest run: %w", err)
-		}
-	}
-	report.RunID = strings.TrimSpace(runID)
-	if report.RunID == "" {
-		return runStatusReport{}, errors.New("run_id is required")
-	}
-
-	var (
-		runStatus string
-		trigger   string
-		started   sql.NullTime
-		ended     sql.NullTime
-	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(trigger_event_type, ''), started_at, ended_at
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, report.RunID).Scan(&runStatus, &trigger, &started, &ended); err == nil {
-		report.RunTableStatus = strings.TrimSpace(runStatus)
-		if started.Valid {
-			report.StartedAt = started.Time
-		}
-		if ended.Valid {
-			tm := ended.Time
-			report.EndedAt = &tm
-		}
-		_ = trigger
-	}
-
-	if err := db.QueryRowContext(ctx, `
-		SELECT event_id::text, event_name, created_at
-		FROM events
-		WHERE run_id = $1::uuid
-		ORDER BY created_at ASC
-		LIMIT 1
-	`, report.RunID).Scan(&report.RootEventID, &report.RootEventType, &report.StartedAt); err != nil {
-		return runStatusReport{}, fmt.Errorf("load root event: %w", err)
-	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*), MAX(created_at)
-		FROM events
-		WHERE run_id = $1::uuid
-	`, report.RunID).Scan(&report.EventCount, &report.LastEventAt); err != nil {
-		return runStatusReport{}, fmt.Errorf("load event summary: %w", err)
-	}
-
-	eventRows, err := db.QueryContext(ctx, `
-		SELECT event_name, COUNT(*)
-		FROM events
-		WHERE run_id = $1::uuid
-		GROUP BY event_name
-		ORDER BY event_name
-	`, report.RunID)
-	if err != nil {
-		return runStatusReport{}, fmt.Errorf("load event counts: %w", err)
-	}
-	defer eventRows.Close()
-	for eventRows.Next() {
-		var item runStatusEventCount
-		if err := eventRows.Scan(&item.EventName, &item.Count); err != nil {
-			return runStatusReport{}, fmt.Errorf("scan event counts: %w", err)
-		}
-		report.EventCounts = append(report.EventCounts, item)
-	}
-	if err := eventRows.Err(); err != nil {
-		return runStatusReport{}, fmt.Errorf("read event counts: %w", err)
-	}
-
-	deliveryRows, err := db.QueryContext(ctx, `
-		SELECT COALESCE(subscriber_id, ''), COALESCE(status, ''), COUNT(*)
-		FROM event_deliveries
-		WHERE run_id = $1::uuid
-		GROUP BY subscriber_id, status
-		ORDER BY subscriber_id, status
-	`, report.RunID)
-	if err != nil {
-		return runStatusReport{}, fmt.Errorf("load deliveries: %w", err)
-	}
-	defer deliveryRows.Close()
-	for deliveryRows.Next() {
-		var item runStatusDeliveryCount
-		if err := deliveryRows.Scan(&item.SubscriberID, &item.Status, &item.Count); err != nil {
-			return runStatusReport{}, fmt.Errorf("scan deliveries: %w", err)
-		}
-		report.Deliveries = append(report.Deliveries, item)
-	}
-	if err := deliveryRows.Err(); err != nil {
-		return runStatusReport{}, fmt.Errorf("read deliveries: %w", err)
-	}
-
-	recentRows, err := db.QueryContext(ctx, `
-		SELECT event_name, COALESCE(entity_id::text, ''), created_at
-		FROM events
-		WHERE run_id = $1::uuid
-		ORDER BY created_at DESC
-		LIMIT 15
-	`, report.RunID)
-	if err != nil {
-		return runStatusReport{}, fmt.Errorf("load recent events: %w", err)
-	}
-	defer recentRows.Close()
-	for recentRows.Next() {
-		var item runStatusEvent
-		if err := recentRows.Scan(&item.EventName, &item.EntityID, &item.CreatedAt); err != nil {
-			return runStatusReport{}, fmt.Errorf("scan recent events: %w", err)
-		}
-		report.RecentEvents = append(report.RecentEvents, item)
-	}
-	if err := recentRows.Err(); err != nil {
-		return runStatusReport{}, fmt.Errorf("read recent events: %w", err)
-	}
-
-	deadRows, err := db.QueryContext(ctx, `
-		SELECT
-			COALESCE(dl.original_event, ''),
-			COALESCE(dl.entity_id::text, ''),
-			COALESCE(dl.failure_type, ''),
-			COALESCE(dl.error_message, ''),
-			COALESCE(dl.handler_node, ''),
-			dl.created_at
-		FROM dead_letters dl
-		INNER JOIN events e ON e.event_id = dl.original_event_id
-		WHERE e.run_id = $1::uuid
-		ORDER BY dl.created_at DESC
-		LIMIT 10
-	`, report.RunID)
-	if err != nil {
-		return runStatusReport{}, fmt.Errorf("load dead letters: %w", err)
-	}
-	defer deadRows.Close()
-	for deadRows.Next() {
-		var item runStatusDeadLetter
-		if err := deadRows.Scan(&item.OriginalEvent, &item.EntityID, &item.FailureType, &item.ErrorMessage, &item.HandlerNode, &item.CreatedAt); err != nil {
-			return runStatusReport{}, fmt.Errorf("scan dead letters: %w", err)
-		}
-		report.DeadLetters = append(report.DeadLetters, item)
-	}
-	if err := deadRows.Err(); err != nil {
-		return runStatusReport{}, fmt.Errorf("read dead letters: %w", err)
-	}
-
-	turnRows, err := db.QueryContext(ctx, `
-		SELECT agent_id, COUNT(*), COUNT(*) FILTER (WHERE COALESCE(error, '') <> ''), MAX(created_at)
-		FROM agent_turns
-		WHERE run_id = $1::uuid
-		GROUP BY agent_id
-		ORDER BY agent_id
-	`, report.RunID)
-	if err != nil {
-		return runStatusReport{}, fmt.Errorf("load agent turns: %w", err)
-	}
-	defer turnRows.Close()
-	for turnRows.Next() {
-		var item runStatusAgentTurn
-		if err := turnRows.Scan(&item.AgentID, &item.Turns, &item.ErrorCount, &item.LastAt); err != nil {
-			return runStatusReport{}, fmt.Errorf("scan agent turns: %w", err)
-		}
-		report.AgentTurns = append(report.AgentTurns, item)
-	}
-	if err := turnRows.Err(); err != nil {
-		return runStatusReport{}, fmt.Errorf("read agent turns: %w", err)
-	}
-
-	if report.RunID != "" {
-		if err := loadRunStatusRuntimeLogs(ctx, db, report.RunID, opts, &report); err != nil {
+		resolvedRunID, err := pg.ResolveLatestRunDebugRunID(ctx)
+		if err != nil {
 			return runStatusReport{}, err
 		}
+		runID = resolvedRunID
 	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return runStatusReport{}, errors.New("run_id is required")
+	}
+	detail, err := pg.LoadRunDebugReport(ctx, runID, store.RunDebugQueryOptions{
+		LogsAllLevels:   opts.LogsAllLevels,
+		Component:       opts.Component,
+		EventLimit:      15,
+		MutationLimit:   20,
+		RuntimeLogLimit: logLimitForStatus(opts),
+		DeadLetterLimit: 10,
+	})
+	if err != nil {
+		return runStatusReport{}, err
+	}
+	report := runStatusReportFromStore(detail)
 	operational := projectRunOperationalStatus(report)
 	report.OperationalState = operational.State
 	report.BlockingLayer = operational.BlockingLayer
@@ -577,89 +437,6 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string, opts run
 	report.Heuristics = deriveRunStatusHeuristics(report)
 
 	return report, nil
-}
-
-func loadRunStatusRuntimeLogs(ctx context.Context, db *sql.DB, runID string, opts runStatusOptions, report *runStatusReport) error {
-	if db == nil {
-		return errors.New("db is required")
-	}
-	if report == nil {
-		return errors.New("report is required")
-	}
-	logLevels := []string{"warn", "error"}
-	if opts.LogsAllLevels {
-		logLevels = []string{"info", "warn", "error"}
-	}
-	componentFilter := strings.TrimSpace(opts.Component)
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE event_name = 'platform.runtime_log'
-		  AND run_id = $1::uuid
-		  AND payload->>'log_level' = ANY($2::text[])
-		  AND ($3 = '' OR payload->'details'->>'component' = $3)
-	`, runID, pq.Array(logLevels), componentFilter).Scan(&report.WarnErrorLogCount); err != nil {
-		return fmt.Errorf("load runtime log summary: %w", err)
-	}
-	logSummaryRows, err := db.QueryContext(ctx, `
-		SELECT
-			COALESCE(payload->>'log_level', ''),
-			COALESCE(payload->'details'->>'component', ''),
-			COALESCE(payload->'details'->>'action', ''),
-			COUNT(*)
-		FROM events
-		WHERE event_name = 'platform.runtime_log'
-		  AND run_id = $1::uuid
-		  AND payload->>'log_level' = ANY($2::text[])
-		  AND ($3 = '' OR payload->'details'->>'component' = $3)
-		GROUP BY payload->>'log_level', payload->'details'->>'component', payload->'details'->>'action'
-		ORDER BY COUNT(*) DESC, payload->'details'->>'component', payload->'details'->>'action'
-		LIMIT 12
-	`, runID, pq.Array(logLevels), componentFilter)
-	if err != nil {
-		return fmt.Errorf("load runtime log rollup: %w", err)
-	}
-	defer logSummaryRows.Close()
-	for logSummaryRows.Next() {
-		var item runStatusRuntimeSummary
-		if err := logSummaryRows.Scan(&item.Level, &item.Component, &item.Action, &item.Count); err != nil {
-			return fmt.Errorf("scan runtime log rollup: %w", err)
-		}
-		report.RuntimeLogSummary = append(report.RuntimeLogSummary, item)
-	}
-	if err := logSummaryRows.Err(); err != nil {
-		return fmt.Errorf("read runtime log rollup: %w", err)
-	}
-	logRows, err := db.QueryContext(ctx, `
-		SELECT
-			COALESCE(payload->>'log_level', ''),
-			COALESCE(payload->'details'->>'component', ''),
-			COALESCE(payload->'details'->>'action', ''),
-			COALESCE(payload->'details'->>'error', ''),
-			created_at
-		FROM events
-		WHERE event_name = 'platform.runtime_log'
-		  AND run_id = $1::uuid
-		  AND payload->>'log_level' = ANY($2::text[])
-		  AND ($3 = '' OR payload->'details'->>'component' = $3)
-		ORDER BY created_at DESC
-		LIMIT $4
-	`, runID, pq.Array(logLevels), componentFilter, logLimitForStatus(opts))
-	if err != nil {
-		return fmt.Errorf("load runtime logs: %w", err)
-	}
-	defer logRows.Close()
-	for logRows.Next() {
-		var item runStatusRuntimeLog
-		if err := logRows.Scan(&item.Level, &item.Component, &item.Action, &item.Error, &item.CreatedAt); err != nil {
-			return fmt.Errorf("scan runtime logs: %w", err)
-		}
-		report.RuntimeLogs = append(report.RuntimeLogs, item)
-	}
-	if err := logRows.Err(); err != nil {
-		return fmt.Errorf("read runtime logs: %w", err)
-	}
-	return nil
 }
 
 func logLimitForStatus(opts runStatusOptions) int {
@@ -773,6 +550,19 @@ func printRunStatusReport(w io.Writer, report runStatusReport) {
 			fmt.Fprintf(w, "  %s  turns=%d errors=%d last=%s\n", item.AgentID, item.Turns, item.ErrorCount, item.LastAt.Format(time.RFC3339))
 		}
 	}
+	if len(report.Mutations) > 0 {
+		fmt.Fprintln(w, "\nRecent Mutations:")
+		for _, item := range report.Mutations {
+			fmt.Fprintf(w, "  %s  entity=%s  writer=%s/%s  step=%s  at=%s\n",
+				item.Field,
+				item.EntityID,
+				item.WriterType,
+				item.WriterID,
+				item.HandlerStep,
+				item.CreatedAt.Format(time.RFC3339),
+			)
+		}
+	}
 	if len(report.DeadLetters) > 0 {
 		fmt.Fprintln(w, "\nDead Letters:")
 		for _, item := range report.DeadLetters {
@@ -823,6 +613,57 @@ func printRunStatusReport(w io.Writer, report runStatusReport) {
 			)
 		}
 	}
+}
+
+func runStatusReportFromStore(detail store.RunDebugReport) runStatusReport {
+	report := runStatusReport{
+		RunID:             detail.RunID,
+		RunTableStatus:    detail.RunTableStatus,
+		RootEventID:       detail.RootEventID,
+		RootEventType:     detail.RootEventType,
+		StartedAt:         detail.StartedAt,
+		LastEventAt:       detail.LastEventAt,
+		EndedAt:           detail.EndedAt,
+		EventCount:        detail.EventCount,
+		WarnErrorLogCount: detail.WarnErrorLogCount,
+		RuntimeLogSummary: make([]runStatusRuntimeSummary, 0, len(detail.RuntimeLogSummary)),
+		RuntimeLogs:       make([]runStatusRuntimeLog, 0, len(detail.RuntimeLogs)),
+		EventCounts:       make([]runStatusEventCount, 0, len(detail.EventCounts)),
+		Deliveries:        make([]runStatusDeliveryCount, 0, len(detail.Deliveries)),
+		RecentEvents:      make([]runStatusEvent, 0, len(detail.Events)),
+		Mutations:         make([]runStatusMutation, 0, len(detail.Mutations)),
+		DeadLetters:       make([]runStatusDeadLetter, 0, len(detail.DeadLetters)),
+		AgentTurns:        make([]runStatusAgentTurn, 0, len(detail.AgentTurns)),
+	}
+	for _, item := range detail.RuntimeLogSummary {
+		report.RuntimeLogSummary = append(report.RuntimeLogSummary, runStatusRuntimeSummary(item))
+	}
+	for _, item := range detail.RuntimeLogs {
+		report.RuntimeLogs = append(report.RuntimeLogs, runStatusRuntimeLog(item))
+	}
+	for _, item := range detail.EventCounts {
+		report.EventCounts = append(report.EventCounts, runStatusEventCount(item))
+	}
+	for _, item := range detail.Deliveries {
+		report.Deliveries = append(report.Deliveries, runStatusDeliveryCount(item))
+	}
+	for _, item := range detail.Events {
+		report.RecentEvents = append(report.RecentEvents, runStatusEvent{
+			EventName: item.EventName,
+			EntityID:  item.EntityID,
+			CreatedAt: item.CreatedAt,
+		})
+	}
+	for _, item := range detail.Mutations {
+		report.Mutations = append(report.Mutations, runStatusMutation(item))
+	}
+	for _, item := range detail.DeadLetters {
+		report.DeadLetters = append(report.DeadLetters, runStatusDeadLetter(item))
+	}
+	for _, item := range detail.AgentTurns {
+		report.AgentTurns = append(report.AgentTurns, runStatusAgentTurn(item))
+	}
+	return report
 }
 
 func verifyBundle(ctx context.Context, source semanticview.Source) error {

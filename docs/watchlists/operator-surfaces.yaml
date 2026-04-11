@@ -41,6 +41,10 @@ active_issues:
     title: Add completeness invariants for canonical mutation surfaces and touched conformance/read-model seams
     maps_to:
       - typed_persisted_operator_reads
+  - id: 344
+    title: Add one canonical run-debug read surface for runs, events, mutations, and runtime logs
+    maps_to:
+      - run_scoped_operator_identity
 nodes:
   - id: canonical_operator_projection_truth
     title: Canonical Operator Projection Truth
@@ -108,6 +112,7 @@ nodes:
       - API/dashboard query ownership not aligned on the same run-scoped identity
     representative_issues:
       - 148
+      - 344
     common_framing_mistakes:
       too_broad:
         - run scoping is inconsistent

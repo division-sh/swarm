@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/events"
@@ -24,6 +23,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimedeadletters "swarm/internal/runtime/deadletters"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -103,6 +103,9 @@ func TestPrintRunStatusReport(t *testing.T) {
 		RecentEvents: []runStatusEvent{
 			{EventName: "vertical.discovered", EntityID: "ent-1", CreatedAt: last},
 		},
+		Mutations: []runStatusMutation{
+			{Field: "current_state", EntityID: "ent-1", WriterType: "workflow", WriterID: "router", HandlerStep: "step-1", CreatedAt: last},
+		},
 	}
 
 	printRunStatusReport(&buf, report)
@@ -125,6 +128,8 @@ func TestPrintRunStatusReport(t *testing.T) {
 		"WARN  mcp-gateway/mcp.context.fallback_used",
 		"Recent Events:",
 		"vertical.discovered  entity=ent-1",
+		"Recent Mutations:",
+		"current_state  entity=ent-1  writer=workflow/router  step=step-1",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status output missing %q:\n%s", want, out)
@@ -222,62 +227,15 @@ func TestProjectRunOperationalStatus_PreservesHealthyRunningWhenActiveDeliveries
 	}
 }
 
-func TestLoadRunStatusRuntimeLogs_UsesSpecShapedPayload(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	summaryCount := sqlmock.NewRows([]string{"count"}).AddRow(2)
-	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM events`).
-		WithArgs("run-123", sqlmock.AnyArg(), "tool-executor").
-		WillReturnRows(summaryCount)
-
-	rollupRows := sqlmock.NewRows([]string{"log_level", "component", "action", "count"}).
-		AddRow("warn", "tool-executor", "tool_execution_denied", 2)
-	mock.ExpectQuery(`SELECT\s+COALESCE\(payload->>'log_level', ''\)`).
-		WithArgs("run-123", sqlmock.AnyArg(), "tool-executor").
-		WillReturnRows(rollupRows)
-
-	logRows := sqlmock.NewRows([]string{"log_level", "component", "action", "error", "created_at"}).
-		AddRow("warn", "tool-executor", "tool_execution_denied", "tool not allowed", time.Unix(1700000000, 0).UTC())
-	mock.ExpectQuery(`SELECT\s+COALESCE\(payload->>'log_level', ''\)`).
-		WithArgs("run-123", sqlmock.AnyArg(), "tool-executor", 100).
-		WillReturnRows(logRows)
-
-	var report runStatusReport
-	err = loadRunStatusRuntimeLogs(context.Background(), db, "run-123", runStatusOptions{
-		LogsOnly:  true,
-		Component: "tool-executor",
-	}, &report)
-	if err != nil {
-		t.Fatalf("loadRunStatusRuntimeLogs: %v", err)
-	}
-	if report.WarnErrorLogCount != 2 {
-		t.Fatalf("WarnErrorLogCount = %d, want 2", report.WarnErrorLogCount)
-	}
-	if len(report.RuntimeLogSummary) != 1 {
-		t.Fatalf("RuntimeLogSummary len = %d, want 1", len(report.RuntimeLogSummary))
-	}
-	if got := report.RuntimeLogSummary[0]; got.Level != "warn" || got.Component != "tool-executor" || got.Action != "tool_execution_denied" || got.Count != 2 {
-		t.Fatalf("RuntimeLogSummary[0] = %#v", got)
-	}
-	if len(report.RuntimeLogs) != 1 {
-		t.Fatalf("RuntimeLogs len = %d, want 1", len(report.RuntimeLogs))
-	}
-	if got := report.RuntimeLogs[0]; got.Level != "warn" || got.Component != "tool-executor" || got.Action != "tool_execution_denied" || got.Error != "tool not allowed" {
-		t.Fatalf("RuntimeLogs[0] = %#v", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
-	}
-}
-
-func TestLoadRunStatusRuntimeLogs_UsesCanonicalPersistedRunID(t *testing.T) {
+func TestLoadRunStatusReport_UsesCanonicalPersistedRunIDForRuntimeLogsAndMutations(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
 	targetRunID := uuid.NewString()
 	otherRunID := uuid.NewString()
+	targetEntityID := uuid.NewString()
+	otherEntityID := uuid.NewString()
+	targetEventID := uuid.NewString()
+	otherEventID := uuid.NewString()
 	now := time.Unix(1700000000, 0).UTC()
 
 	insertRuntimeLog := func(runID string, payloadRunID string, component string, action string, createdAt time.Time) {
@@ -296,13 +254,6 @@ func TestLoadRunStatusRuntimeLogs_UsesCanonicalPersistedRunID(t *testing.T) {
 			t.Fatalf("marshal runtime log payload: %v", err)
 		}
 		if _, err := db.Exec(`
-			INSERT INTO runs (run_id, status)
-			VALUES ($1::uuid, 'running')
-			ON CONFLICT (run_id) DO NOTHING
-		`, runID); err != nil {
-			t.Fatalf("insert run %s: %v", runID, err)
-		}
-		if _, err := db.Exec(`
 			INSERT INTO events (
 				run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 			)
@@ -314,16 +265,63 @@ func TestLoadRunStatusRuntimeLogs_UsesCanonicalPersistedRunID(t *testing.T) {
 		}
 	}
 
+	for _, runID := range []string{targetRunID, otherRunID} {
+		if _, err := db.Exec(`
+			INSERT INTO runs (run_id, status, started_at)
+			VALUES ($1::uuid, 'running', $2)
+			ON CONFLICT (run_id) DO NOTHING
+		`, runID, now.Add(-5*time.Minute)); err != nil {
+			t.Fatalf("insert run %s: %v", runID, err)
+		}
+	}
+	if _, err := db.Exec(`
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'scan.requested', $3::uuid, NULL, 'global', '{}'::jsonb, 'test', 'agent', $4),
+			($5::uuid, $6::uuid, 'scan.requested', $7::uuid, NULL, 'global', '{}'::jsonb, 'test', 'agent', $8)
+	`, targetRunID, targetEventID, targetEntityID, now.Add(-4*time.Minute), otherRunID, otherEventID, otherEntityID, now.Add(-3*time.Minute)); err != nil {
+		t.Fatalf("insert root events: %v", err)
+	}
 	insertRuntimeLog(targetRunID, otherRunID, "scheduler", "canonical-owner", now)
 	insertRuntimeLog(otherRunID, targetRunID, "scheduler", "payload-only", now.Add(1*time.Minute))
+	if _, err := db.Exec(`
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', $4::jsonb, $5::jsonb, $3::uuid, 'platform', 'runner', 'step-a', $6),
+			($7::uuid, $8::uuid, 'current_state', $10::jsonb, $11::jsonb, $9::uuid, 'platform', 'runner', 'step-b', $12)
+	`, targetRunID, targetEntityID, targetEventID, `"queued"`, `"running"`, now.Add(2*time.Minute), otherRunID, otherEntityID, otherEventID, `"queued"`, `"failed"`, now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("insert mutations: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, delivered_at, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-1', 'delivered', $3, $4)
+	`, targetRunID, targetEventID, now.Add(10*time.Second), now.Add(5*time.Second)); err != nil {
+		t.Fatalf("insert delivery: %v", err)
+	}
+	if err := runtimedeadletters.Insert(context.Background(), db, runtimedeadletters.Record{
+		OriginalEventID: targetEventID,
+		OriginalEvent:   "scan.requested",
+		EntityID:        targetEntityID,
+		FailureType:     "handler_error",
+		ErrorMessage:    "boom",
+		HandlerNode:     "node-a",
+		Timestamp:       now.Add(4 * time.Minute).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("insert dead letter: %v", err)
+	}
 
-	var report runStatusReport
-	err := loadRunStatusRuntimeLogs(context.Background(), db, targetRunID, runStatusOptions{
+	report, err := loadRunStatusReport(context.Background(), pg, targetRunID, runStatusOptions{
 		LogsOnly:  true,
 		Component: "scheduler",
-	}, &report)
+	})
 	if err != nil {
-		t.Fatalf("loadRunStatusRuntimeLogs: %v", err)
+		t.Fatalf("loadRunStatusReport: %v", err)
 	}
 	if report.WarnErrorLogCount != 1 {
 		t.Fatalf("WarnErrorLogCount = %d, want 1", report.WarnErrorLogCount)
@@ -339,6 +337,15 @@ func TestLoadRunStatusRuntimeLogs_UsesCanonicalPersistedRunID(t *testing.T) {
 	}
 	if got := report.RuntimeLogs[0]; got.Component != "scheduler" || got.Action != "canonical-owner" || got.Error != "canonical-owner-error" {
 		t.Fatalf("RuntimeLogs[0] = %#v", got)
+	}
+	if len(report.Mutations) != 1 {
+		t.Fatalf("Mutations len = %d, want 1", len(report.Mutations))
+	}
+	if got := report.Mutations[0]; got.EntityID != targetEntityID || got.Field != "current_state" || got.WriterType != "platform" || got.WriterID != "runner" {
+		t.Fatalf("Mutations[0] = %#v", got)
+	}
+	if len(report.DeadLetters) != 1 {
+		t.Fatalf("DeadLetters len = %d, want 1", len(report.DeadLetters))
 	}
 }
 
@@ -433,7 +440,7 @@ func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	report, err := loadRunStatusReport(ctx, db, runID, runStatusOptions{})
+	report, err := loadRunStatusReport(ctx, pg, runID, runStatusOptions{})
 	if err != nil {
 		t.Fatalf("loadRunStatusReport: %v", err)
 	}
@@ -757,6 +764,7 @@ func TestLoadRunStatusReport_PreservesRunningTruthAcrossBuilderQuiescenceTimeout
 
 func TestLoadRunStatusReport_ProjectsExplicitStalledRunState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 
 	runID := uuid.NewString()
@@ -789,7 +797,7 @@ func TestLoadRunStatusReport_ProjectsExplicitStalledRunState(t *testing.T) {
 		t.Fatalf("seed delivery: %v", err)
 	}
 
-	report, err := loadRunStatusReport(ctx, db, runID, runStatusOptions{})
+	report, err := loadRunStatusReport(ctx, pg, runID, runStatusOptions{})
 	if err != nil {
 		t.Fatalf("loadRunStatusReport: %v", err)
 	}
@@ -814,6 +822,7 @@ func TestLoadRunStatusReport_ProjectsExplicitStalledRunState(t *testing.T) {
 
 func TestLoadRunStatusReport_ProjectsScoringOutcomeStall(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
 
 	runID := uuid.NewString()
@@ -835,7 +844,7 @@ func TestLoadRunStatusReport_ProjectsScoringOutcomeStall(t *testing.T) {
 		t.Fatalf("seed events: %v", err)
 	}
 
-	report, err := loadRunStatusReport(ctx, db, runID, runStatusOptions{})
+	report, err := loadRunStatusReport(ctx, pg, runID, runStatusOptions{})
 	if err != nil {
 		t.Fatalf("loadRunStatusReport: %v", err)
 	}
