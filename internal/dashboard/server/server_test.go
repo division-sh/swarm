@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -17,10 +18,16 @@ import (
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
+	runtimeagents "swarm/internal/runtime/agents"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolcapabilities"
+	"swarm/internal/runtime/flowmodel"
+	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 	runtimesessions "swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
@@ -212,6 +219,88 @@ func (stubAgentControl) ReplayAgentBacklog(context.Context, string) error { retu
 func (s *stubAgentControl) ChatWithAgent(_ context.Context, _, _ string, killPrevious bool) (string, error) {
 	s.lastKillPrevious = killPrevious
 	return "ok", nil
+}
+
+type directiveSurfaceRuntime struct {
+	requiredTool string
+}
+
+func (r *directiveSurfaceRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	return &runtimellm.Session{
+		ID:               "sess-1",
+		AgentID:          agentID,
+		RuntimeMode:      "api",
+		ConversationMode: "session",
+		SessionScope:     "flow",
+		SystemPrompt:     systemPrompt,
+		Tools:            tools,
+	}, nil
+}
+
+func (r *directiveSurfaceRuntime) ContinueSession(_ context.Context, s *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+	if strings.TrimSpace(message.Role) == "tool" {
+		if testToolsContainName(s.Tools, r.requiredTool) {
+			return &runtimellm.Response{Message: runtimellm.Message{Role: "assistant", Content: "workflow dispatched"}}, nil
+		}
+		return &runtimellm.Response{Message: runtimellm.Message{Role: "assistant", Content: "The required emit_scan_requested tool is not registered as a callable function in the runtime tool environment."}}, nil
+	}
+	if testToolsContainName(s.Tools, r.requiredTool) {
+		return &runtimellm.Response{
+			Message: runtimellm.Message{Role: "assistant", Content: "Dispatching workflow now."},
+			ToolCalls: []runtimellm.ToolCall{{
+				Name:      r.requiredTool,
+				Arguments: map[string]any{"entity_id": "entity-1"},
+			}},
+		}, nil
+	}
+	return &runtimellm.Response{
+		Message: runtimellm.Message{Role: "assistant", Content: "Checking state before acting."},
+		ToolCalls: []runtimellm.ToolCall{{
+			Name:      "query_entities",
+			Arguments: map[string]any{"entity_id": "entity-1"},
+		}},
+	}, nil
+}
+
+type directiveSurfaceToolExecutor struct {
+	defs     *runtimetools.Executor
+	executed []string
+}
+
+func (e *directiveSurfaceToolExecutor) Execute(ctx context.Context, name string, input any) (any, error) {
+	set, ok := toolcapabilities.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing tool capabilities")
+	}
+	cap, ok := set.Capability(name)
+	if !ok || !cap.Callable {
+		return nil, errors.New("tool not callable in this turn")
+	}
+	e.executed = append(e.executed, strings.TrimSpace(name))
+	if strings.HasPrefix(strings.TrimSpace(name), "emit_") {
+		if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
+			rec.Append(events.Event{Type: events.EventType(strings.TrimPrefix(strings.TrimSpace(name), "emit_"))})
+		}
+		return map[string]any{"status": "published"}, nil
+	}
+	return map[string]any{"ok": true, "input": input}, nil
+}
+
+func (e *directiveSurfaceToolExecutor) ToolDefinitionsForActor(cfg runtimeactors.AgentConfig) []runtimellm.ToolDefinition {
+	return e.defs.ToolDefinitionsForActor(cfg)
+}
+
+func (e *directiveSurfaceToolExecutor) ToolCapabilitiesForActor(actor runtimeactors.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	return e.defs.ToolCapabilitiesForActor(actor, names, requestAllowed)
+}
+
+func testToolsContainName(tools []runtimellm.ToolDefinition, want string) bool {
+	for _, tool := range tools {
+		if strings.TrimSpace(tool.Name) == strings.TrimSpace(want) {
+			return true
+		}
+	}
+	return false
 }
 
 type stubRuntimeControl struct {
@@ -560,6 +649,77 @@ func TestHandler_ConversationDetail_PreservesParseOKFalse(t *testing.T) {
 	}
 	if got, ok := lastTurn["parse_ok"].(bool); !ok || got {
 		t.Fatalf("last_turn.parse_ok = %#v, want false", lastTurn["parse_ok"])
+	}
+}
+
+func TestHandler_AgentDirective_UsesLiveFactoryCreatedEmitToolSurface(t *testing.T) {
+	reviewFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "review",
+			Flow: "review",
+		},
+		Path: "review",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+					Required: []string{"entity_id"},
+				},
+			},
+		},
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{reviewFlow},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"review": &reviewFlow,
+			},
+		},
+	})
+	exec := &directiveSurfaceToolExecutor{
+		defs: runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+			WorkflowSource: source,
+			EmitRegistry:   runtimetools.NewEmitRegistry(source, nil),
+		}),
+	}
+	factory := runtimeagents.NewLLMAgentFactory(&directiveSurfaceRuntime{requiredTool: "emit_scan_requested"}, exec, nil, runtimeagents.LLMAgentOptions{})
+	manager := runtimemanager.NewAgentManager(nil, factory)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
+		ID:         "review-coordinator-inst-1",
+		Role:       "review_coordinator",
+		Mode:       "review",
+		FlowPath:   "review/inst-1",
+		EmitEvents: []string{"review/inst-1/scan.requested"},
+		Config:     runtimemanager.MustJSON(map[string]any{"system_prompt": "Coordinate review startup."}),
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+
+	handler := NewHandler(Options{
+		AuthToken:    testOperatorAuthToken,
+		AgentControl: manager,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/review-coordinator-inst-1/actions/directive", strings.NewReader(`{"message":"start the review workflow"}`))
+	setOperatorAuth(req)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("directive status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !slices.Contains(exec.executed, "emit_scan_requested") {
+		t.Fatalf("executed tools = %#v, want emit_scan_requested", exec.executed)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal directive response: %v", err)
+	}
+	if ok, _ := payload["ok"].(bool); !ok {
+		t.Fatalf("directive response = %#v, want ok=true", payload)
 	}
 }
 

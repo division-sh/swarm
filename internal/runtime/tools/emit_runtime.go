@@ -12,6 +12,7 @@ import (
 )
 
 type EmitRegistry struct {
+	source           semanticview.Source
 	provider         runtimeauthority.Provider
 	activeSchemas    map[string]EmitSchema
 	generatedSchemas map[string]struct{}
@@ -66,6 +67,7 @@ func NewEmitRegistry(source semanticview.Source, provider runtimeauthority.Provi
 	}
 
 	return &EmitRegistry{
+		source:           source,
 		provider:         provider,
 		activeSchemas:    activeSchemas,
 		generatedSchemas: generatedSchemas,
@@ -128,9 +130,60 @@ func (r *EmitRegistry) GenerateEmitToolsForActor(actor models.AgentConfig, warn 
 		return nil
 	}
 	if configured := UniqueNonEmpty(actor.EmitEvents); len(configured) > 0 {
-		return r.GenerateEmitToolsForEvents(configured, warn)
+		tools := make([]llm.ToolDefinition, 0, len(configured))
+		for _, eventType := range configured {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" {
+				continue
+			}
+			schema, ok := r.schemaForActorEvent(actor, eventType)
+			if !ok {
+				if warn != nil {
+					warn(
+						"emit-tool-missing-schema-"+eventType,
+						"event-schema-registry",
+						"skipping emit tool generation for %q because no explicit schema exists",
+						eventType,
+					)
+				}
+				continue
+			}
+			tools = append(tools, llm.ToolDefinition{
+				Name:        EmitToolName(eventType),
+				Description: schema.Description,
+				Schema:      schema.Schema,
+			})
+		}
+		sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+		return tools
 	}
 	return r.GenerateEmitToolsForRole(actor.Role, warn)
+}
+
+func (r *EmitRegistry) schemaForActorEvent(actor models.AgentConfig, eventType string) (EmitSchema, bool) {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return EmitSchema{}, false
+	}
+	if schema, ok := emitSchemaForEventType(r.activeSchemas, eventType); ok {
+		return schema, true
+	}
+	if r.source == nil {
+		return EmitSchema{}, false
+	}
+	flowID := strings.TrimSpace(actor.Mode)
+	if flowID == "" {
+		return EmitSchema{}, false
+	}
+	proof := semanticview.ResolveFlowEventProof(r.source, flowID, eventType)
+	if !proof.HasSchema {
+		return EmitSchema{}, false
+	}
+	registry := runtimecontracts.EventSchemaRegistryFromCatalog(map[string]runtimecontracts.EventCatalogEntry{
+		proof.CatalogKey: proof.Entry,
+	})
+	schema, ok := registry[proof.CatalogKey]
+	return schema, ok
 }
 
 func (r *EmitRegistry) GeneratedEmitSchemasForAgentRoles() []string {
