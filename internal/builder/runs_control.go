@@ -3,6 +3,7 @@ package builder
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 )
 
-const runCompletionTimeout = 30 * time.Second
+var runCompletionTimeout = 30 * time.Second
 
 func newRunHub(runtimeProvider func() *runtimepkg.Runtime, resetRuntime func() error, pauseRuntime func() error, resumeRuntime func() error) *runHub {
 	if runtimeProvider == nil {
@@ -361,17 +362,52 @@ func (h *runHub) emit(runID string, event RunEventEnvelope) {
 }
 
 func (h *runHub) awaitCompletion(runID string) {
-	session := h.session(runID)
-	if session == nil || session.runtime == nil || session.runtime.Bus == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), runCompletionTimeout)
-	defer cancel()
-	if err := session.runtime.WaitForQuiescence(ctx); err != nil {
+	for {
+		session := h.session(runID)
+		if session == nil || session.runtime == nil || session.runtime.Bus == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), runCompletionTimeout)
+		err := session.runtime.WaitForQuiescence(ctx)
+		cancel()
+		if err != nil {
+			if h.isTerminal(runID) {
+				return
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				// A local quiescence timeout is not authoritative proof that the
+				// accepted run should become terminal while same-run work may still
+				// be active. Keep waiting until authoritative quiescence is true.
+				continue
+			}
+			if _, persistErr := h.persistTerminalState(runID, "failed", err.Error(), time.Now().UTC()); persistErr != nil {
+				h.markTerminal(runID)
+				h.emit(runID, map[string]any{
+					"id":        uuid.NewString(),
+					"type":      "run.failed",
+					"timestamp": time.Now().UTC().Format(time.RFC3339),
+					"payload": map[string]any{
+						"run_id":            runID,
+						"error":             err.Error(),
+						"persistence_error": persistErr.Error(),
+					},
+				})
+				return
+			}
+			h.markTerminal(runID)
+			h.emit(runID, map[string]any{
+				"id":        uuid.NewString(),
+				"type":      "run.failed",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+				"payload":   map[string]any{"run_id": runID, "error": err.Error()},
+			})
+			return
+		}
 		if h.isTerminal(runID) {
 			return
 		}
-		if _, persistErr := h.persistTerminalState(runID, "failed", err.Error(), time.Now().UTC()); persistErr != nil {
+		snapshot, err := h.persistTerminalState(runID, "completed", "", time.Now().UTC())
+		if err != nil {
 			h.markTerminal(runID)
 			h.emit(runID, map[string]any{
 				"id":        uuid.NewString(),
@@ -379,8 +415,8 @@ func (h *runHub) awaitCompletion(runID string) {
 				"timestamp": time.Now().UTC().Format(time.RFC3339),
 				"payload": map[string]any{
 					"run_id":            runID,
-					"error":             err.Error(),
-					"persistence_error": persistErr.Error(),
+					"error":             "persisting canonical run completion failed",
+					"persistence_error": err.Error(),
 				},
 			})
 			return
@@ -388,44 +424,19 @@ func (h *runHub) awaitCompletion(runID string) {
 		h.markTerminal(runID)
 		h.emit(runID, map[string]any{
 			"id":        uuid.NewString(),
-			"type":      "run.failed",
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
-			"payload":   map[string]any{"run_id": runID, "error": err.Error()},
-		})
-		return
-	}
-	if h.isTerminal(runID) {
-		return
-	}
-	snapshot, err := h.persistTerminalState(runID, "completed", "", time.Now().UTC())
-	if err != nil {
-		h.markTerminal(runID)
-		h.emit(runID, map[string]any{
-			"id":        uuid.NewString(),
-			"type":      "run.failed",
+			"type":      "run.completed",
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 			"payload": map[string]any{
-				"run_id":            runID,
-				"error":             "persisting canonical run completion failed",
-				"persistence_error": err.Error(),
+				"run_id": runID,
+				"summary": map[string]any{
+					"duration_ms":  durationMillis(snapshot),
+					"total_events": snapshot.EventCount,
+					"entity_count": snapshot.EntityCount,
+				},
 			},
 		})
 		return
 	}
-	h.markTerminal(runID)
-	h.emit(runID, map[string]any{
-		"id":        uuid.NewString(),
-		"type":      "run.completed",
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"payload": map[string]any{
-			"run_id": runID,
-			"summary": map[string]any{
-				"duration_ms":  durationMillis(snapshot),
-				"total_events": snapshot.EventCount,
-				"entity_count": snapshot.EntityCount,
-			},
-		},
-	})
 }
 
 func (h *runHub) deleteRun(runID string) {

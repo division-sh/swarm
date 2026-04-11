@@ -285,7 +285,7 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary stri
 			return Snapshot{}, err
 		}
 	}
-	if status == "completed" {
+	if status == "completed" || status == "failed" {
 		active, err := HasActiveDeliveries(ctx, db, runID)
 		if err != nil {
 			return Snapshot{}, err
