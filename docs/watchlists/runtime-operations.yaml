@@ -109,6 +109,10 @@ active_issues:
     title: Reconcile run lifecycle ownership and accounting across builder, store, and runtime writers
     maps_to:
       - run_lifecycle_and_accounting_coherence
+  - id: 355
+    title: Keep accepted run terminal-failed state aligned with same-run delivery and live work truth
+    maps_to:
+      - run_lifecycle_and_accounting_coherence
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -330,12 +334,14 @@ nodes:
     why_this_node_exists: run correctness drifts when builder quiescence, persisted events/deliveries, runtime-log bootstrap activity, and operator readers each carry partial run lifecycle truth
     known_manifestations:
       - runs can be marked terminal while same-run work, events, or deliveries are still active
+      - accepted runs can persist terminal `failed` while same-run deliveries, live agent work, or later same-run activity remain active
       - run-scoped counters can stay zero because no canonical persisted accounting owner updates them
       - bootstrap or diagnostics-side run row creation can leave extra running rows outside the authoritative accepted run lifecycle
       - reader/report surfaces compensate after the fact instead of consuming one canonical lifecycle owner
     representative_issues:
       - 120
       - 346
+      - 355
     common_framing_mistakes:
       too_broad:
         - run status is inconsistent
