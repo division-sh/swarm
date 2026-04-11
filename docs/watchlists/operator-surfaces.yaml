@@ -45,6 +45,10 @@ active_issues:
     title: Add one canonical run-debug read surface for runs, events, mutations, and runtime logs
     maps_to:
       - run_scoped_operator_identity
+  - id: 345
+    title: Move builder run event streams onto canonical run-bound diagnostics
+    maps_to:
+      - run_scoped_operator_identity
 nodes:
   - id: canonical_operator_projection_truth
     title: Canonical Operator Projection Truth
@@ -110,9 +114,11 @@ nodes:
     known_manifestations:
       - run_id drift across replay and diagnostics
       - API/dashboard query ownership not aligned on the same run-scoped identity
+      - builder live run/debug streams reconstruct operator-visible run truth from in-memory state and fresh timestamps instead of consuming canonical run-bound diagnostics
     representative_issues:
       - 148
       - 344
+      - 345
     common_framing_mistakes:
       too_broad:
         - run scoping is inconsistent
