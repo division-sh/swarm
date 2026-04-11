@@ -78,6 +78,10 @@ active_issues:
     title: Align targeted verify and runtime boot on event-schema and tool-registry validation
     maps_to:
       - verify_vs_boot_contract_acceptance_drift
+  - id: 356
+    title: Verify can pass while runtime boot emits missing-tool warnings on the same startup
+    maps_to:
+      - verify_vs_boot_contract_acceptance_drift
   - id: 181
     title: Expose accumulator completion and on_complete transaction outcomes together
     maps_to:
@@ -167,6 +171,8 @@ nodes:
     known_manifestations:
       - event-schema validation drift between targeted verify and runtime boot
       - tool-registry validation drift between targeted verify and runtime boot
+      - boot warns that builtin runtime tools are missing because validation only counts contract tool entries
+      - operator-visible boot diagnostics report tools=0 even when the generic runtime ships callable builtin tools
       - future supported-surface agreement gaps in shared contract validation ownership
     representative_issues:
       - 270
