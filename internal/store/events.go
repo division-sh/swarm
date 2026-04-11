@@ -801,13 +801,9 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabi
 	if runID == "" || !caps.Events.HasRuns {
 		return nil
 	}
-	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType, storerunlifecycle.EnsureActiveOptions{
-		ReopenCompleted: reopenCompleted,
-		HasStartedAtCol: caps.Events.RunStartedAt,
-		HasTriggerCols:  caps.Events.RunTriggerColumns,
-		HasCounterCols:  caps.Events.RunCounterColumns,
-		HasTerminalCols: caps.Events.RunTerminalFields,
-	})
+	opts := runLifecycleOptions(caps)
+	opts.ReopenCompleted = reopenCompleted
+	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType, opts)
 }
 
 func canonicalRunTerminalStatus(raw string) (string, error) {
@@ -815,7 +811,11 @@ func canonicalRunTerminalStatus(raw string) (string, error) {
 }
 
 func (s *PostgresStore) LoadRunLifecycleSnapshot(ctx context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error) {
-	snap, err := storerunlifecycle.LoadSnapshot(ctx, s.DB, nullUUIDString(runID))
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return runtimebus.RunLifecycleSnapshot{}, err
+	}
+	snap, err := storerunlifecycle.LoadSnapshot(ctx, s.DB, nullUUIDString(runID), runLifecycleOptions(caps))
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
@@ -853,8 +853,17 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status, erro
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
 	}
-	_, err = storerunlifecycle.MarkTerminal(ctx, s.DB, runID, status, errorSummary, endedAt)
+	_, err = storerunlifecycle.MarkTerminal(ctx, s.DB, runID, status, errorSummary, endedAt, runLifecycleOptions(caps))
 	return err
+}
+
+func runLifecycleOptions(caps StoreSchemaCapabilities) storerunlifecycle.EnsureActiveOptions {
+	return storerunlifecycle.EnsureActiveOptions{
+		HasStartedAtCol: caps.Events.RunStartedAt,
+		HasTriggerCols:  caps.Events.RunTriggerColumns,
+		HasCounterCols:  caps.Events.RunCounterColumns,
+		HasTerminalCols: caps.Events.RunTerminalFields,
+	}
 }
 
 func runIDOrEventID(runID, eventID string) string {

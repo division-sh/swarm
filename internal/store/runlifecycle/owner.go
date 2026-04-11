@@ -171,34 +171,76 @@ func HasActiveDeliveries(ctx context.Context, db DBTX, runID string) (bool, erro
 	return active, nil
 }
 
-func LoadSnapshot(ctx context.Context, db DBTX, runID string) (Snapshot, error) {
+func LoadSnapshot(ctx context.Context, db DBTX, runID string, opts EnsureActiveOptions) (Snapshot, error) {
 	runID = strings.TrimSpace(runID)
 	if db == nil || runID == "" {
 		return Snapshot{}, fmt.Errorf("run_id is required")
 	}
 	var (
-		snap  Snapshot
-		ended sql.NullTime
+		snap      Snapshot
+		startedAt sql.NullTime
+		endedAt   sql.NullTime
 	)
-	if err := db.QueryRowContext(ctx, `
+	query := `
 		SELECT
 			run_id::text,
 			COALESCE(status, ''),
-			COALESCE(event_count, 0),
-			COALESCE(entity_count, 0),
-			COALESCE(error_summary, ''),
-			started_at,
-			ended_at
+			0,
+			0,
+			'',
+			NULL::timestamptz,
+			NULL::timestamptz
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(
+	`
+	if opts.HasCounterCols || opts.HasTerminalCols || opts.HasStartedAtCol {
+		query = `
+		SELECT
+			run_id::text,
+			COALESCE(status, ''), `
+		if opts.HasCounterCols {
+			query += `
+			COALESCE(event_count, 0),
+			COALESCE(entity_count, 0),`
+		} else {
+			query += `
+			0,
+			0,`
+		}
+		if opts.HasTerminalCols {
+			query += `
+			COALESCE(error_summary, ''),`
+		} else {
+			query += `
+			'',`
+		}
+		if opts.HasStartedAtCol {
+			query += `
+			started_at,`
+		} else {
+			query += `
+			NULL::timestamptz,`
+		}
+		if opts.HasTerminalCols {
+			query += `
+			ended_at`
+		} else {
+			query += `
+			NULL::timestamptz`
+		}
+		query += `
+		FROM runs
+		WHERE run_id = $1::uuid
+	`
+	}
+	if err := db.QueryRowContext(ctx, query, runID).Scan(
 		&snap.RunID,
 		&snap.Status,
 		&snap.EventCount,
 		&snap.EntityCount,
 		&snap.ErrorSummary,
-		&snap.StartedAt,
-		&ended,
+		&startedAt,
+		&endedAt,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return Snapshot{}, fmt.Errorf("run %s not found", runID)
@@ -208,14 +250,17 @@ func LoadSnapshot(ctx context.Context, db DBTX, runID string) (Snapshot, error) 
 	snap.RunID = strings.TrimSpace(snap.RunID)
 	snap.Status = strings.TrimSpace(snap.Status)
 	snap.ErrorSummary = strings.TrimSpace(snap.ErrorSummary)
-	if ended.Valid {
-		tm := ended.Time
+	if startedAt.Valid {
+		snap.StartedAt = startedAt.Time
+	}
+	if endedAt.Valid {
+		tm := endedAt.Time
 		snap.EndedAt = &tm
 	}
 	return snap, nil
 }
 
-func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary string, endedAt time.Time) (Snapshot, error) {
+func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary string, endedAt time.Time, opts EnsureActiveOptions) (Snapshot, error) {
 	if db == nil {
 		return Snapshot{}, fmt.Errorf("run lifecycle persistence is not configured")
 	}
@@ -235,8 +280,10 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary stri
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
 	}
-	if err := SyncCounts(ctx, db, runID); err != nil {
-		return Snapshot{}, err
+	if opts.HasCounterCols {
+		if err := SyncCounts(ctx, db, runID); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	if status == "completed" {
 		active, err := HasActiveDeliveries(ctx, db, runID)
@@ -247,19 +294,26 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary stri
 			return Snapshot{}, fmt.Errorf("run %s still has active deliveries", runID)
 		}
 	}
+	setClauses := []string{"status = $2"}
+	args := []any{runID, status}
+	if opts.HasTerminalCols {
+		setClauses = append(setClauses,
+			"error_summary = NULLIF($3, '')",
+			"ended_at = COALESCE(ended_at, $4)",
+		)
+		args = append(args, errorSummary, endedAt.UTC())
+	}
 	result, err := db.ExecContext(ctx, `
 		UPDATE runs
-		SET status = $2,
-		    error_summary = NULLIF($3, ''),
-		    ended_at = COALESCE(ended_at, $4)
+		SET `+strings.Join(setClauses, ", ")+`
 		WHERE run_id = $1::uuid
 		  AND (status IN ('running', 'paused') OR status = $2)
-	`, runID, status, errorSummary, endedAt.UTC())
+	`, args...)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("mark run terminal: %w", err)
 	}
 	if rows, err := result.RowsAffected(); err == nil && rows == 0 {
-		current, loadErr := LoadSnapshot(ctx, db, runID)
+		current, loadErr := LoadSnapshot(ctx, db, runID, opts)
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
@@ -268,5 +322,5 @@ func MarkTerminal(ctx context.Context, db DBTX, runID, status, errorSummary stri
 		}
 		return current, nil
 	}
-	return LoadSnapshot(ctx, db, runID)
+	return LoadSnapshot(ctx, db, runID, opts)
 }

@@ -397,6 +397,76 @@ func TestPostgresStore_AppendEvent_AllowsRunsWithoutTriggerColumns(t *testing.T)
 	}
 }
 
+func TestPostgresStore_MarkRunTerminal_AllowsRunsWithoutCounterOrTerminalColumns(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	for _, ddl := range []string{
+		`DROP TABLE IF EXISTS event_deliveries CASCADE`,
+		`DROP TABLE IF EXISTS runs CASCADE`,
+		`CREATE TABLE runs (
+			run_id UUID PRIMARY KEY,
+			status TEXT NOT NULL,
+			started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE event_deliveries (
+			delivery_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			run_id UUID,
+			status TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+	} {
+		if _, err := db.ExecContext(ctx, ddl); err != nil {
+			t.Fatalf("exec schema ddl %q: %v", ddl, err)
+		}
+	}
+
+	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+		t.Fatalf("BindSchemaCapabilities: %v", err)
+	}
+
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := pg.MarkRunTerminal(ctx, runID, "completed", "", time.Now().UTC()); err != nil {
+		t.Fatalf("MarkRunTerminal: %v", err)
+	}
+
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
+		t.Fatalf("load run status: %v", err)
+	}
+	if status != "completed" {
+		t.Fatalf("run status = %q, want completed", status)
+	}
+
+	snap, err := pg.LoadRunLifecycleSnapshot(ctx, runID)
+	if err != nil {
+		t.Fatalf("LoadRunLifecycleSnapshot: %v", err)
+	}
+	if snap.Status != "completed" {
+		t.Fatalf("snapshot status = %q, want completed", snap.Status)
+	}
+	if snap.EventCount != 0 {
+		t.Fatalf("snapshot event_count = %d, want 0", snap.EventCount)
+	}
+	if snap.EntityCount != 0 {
+		t.Fatalf("snapshot entity_count = %d, want 0", snap.EntityCount)
+	}
+	if snap.ErrorSummary != "" {
+		t.Fatalf("snapshot error_summary = %q, want empty", snap.ErrorSummary)
+	}
+	if snap.EndedAt != nil {
+		t.Fatalf("snapshot ended_at = %#v, want nil without terminal columns", snap.EndedAt)
+	}
+}
+
 func TestPostgresStore_EnsureSchemaTables_PhasesAgentSessionCompatibilityBeforeDependentDDL(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
