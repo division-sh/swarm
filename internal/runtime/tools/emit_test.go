@@ -6,6 +6,7 @@ import (
 	runtimeauthority "swarm/internal/runtime/authority"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/flowmodel"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -100,5 +101,52 @@ func TestEmitRegistry_KeepsRuntimeSourcesIsolated(t *testing.T) {
 	}
 	if len(toolsB) != 1 || toolsB[0].Name != "emit_review_requested" {
 		t.Fatalf("toolsB = %#v, want emit_review_requested only", toolsB)
+	}
+}
+
+func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOwningFlowProof(t *testing.T) {
+	reviewFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "review",
+			Flow: "review",
+		},
+		Path: "review",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+					Required: []string{"entity_id"},
+				},
+			},
+		},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{reviewFlow},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"review": &reviewFlow,
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
+
+	tools := registry.GenerateEmitToolsForActor(models.AgentConfig{
+		ID:         "review-coordinator-inst-1",
+		Role:       "review_coordinator",
+		Mode:       "review",
+		FlowPath:   "review/inst-1",
+		EmitEvents: []string{"review/inst-1/scan.requested"},
+	}, nil)
+
+	if len(tools) != 1 {
+		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
+	}
+	if tools[0].Name != "emit_scan_requested" {
+		t.Fatalf("tool name = %q, want emit_scan_requested", tools[0].Name)
 	}
 }
