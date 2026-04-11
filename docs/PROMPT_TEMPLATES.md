@@ -15,8 +15,11 @@ Pick up issue `#NNN`.
 
 Before coding:
 - read the full issue body/thread
-- re-read the exact cited spec section(s) and treat them as binding
-- if the issue says there are no exact spec refs, treat the issue body/thread as binding context
+- re-read the exact cited spec section(s) and treat them as binding when they exist
+- if no exact governing spec section exists, explicitly identify the binding governing context:
+  - issue body/thread
+  - repro / classification artifact when present
+  - nearest adjacent contract/spec sections if they help constrain the seam
 - follow:
   - `docs/IMPLEMENTER_GUIDELINES.md`
   - `docs/SEMANTIC_DRIFT.md`
@@ -160,7 +163,9 @@ Required workflow:
 - include the correct issue link in the PR body:
   - `Closes #NNN` only if this PR actually completes issue `#NNN`
   - otherwise use `Part of #NNN` or `Related to #NNN`
-- include spec refs in the PR body
+- include governing refs/context in the PR body:
+  - exact spec references when they exist
+  - otherwise an explicit statement that no exact governing spec section exists, plus the binding issue/repro context and any adjacent contract sections used
 - report back with the PR number
 
 Deliverable is not complete until the PR is open and both audit artifacts exist.

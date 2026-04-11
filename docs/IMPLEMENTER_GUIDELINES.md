@@ -839,7 +839,12 @@ Issue and PR spec-reference rule:
 - every implementation issue should cite the exact governing spec section(s) for the touched semantic seam
 - every implementation PR should repeat those exact spec references in the PR body
 - if the change is non-semantic maintenance, the PR may explicitly say that no platform spec section governs it and justify that claim
-- if a semantic/runtime seam has no exact spec section, the issue and PR must say so explicitly and treat the work as a spec-gap / ambiguity escalation rather than normal implementation
+- if a semantic/runtime seam has no exact governing spec section, the issue and PR must say so explicitly and name the binding governing context:
+  - issue body/thread
+  - repro / classification artifact when present
+  - nearest adjacent contract/spec sections if they constrain the seam
+- absence of one exact governing section is not by itself a merge blocker or mandatory spec-gap escalation
+- treat the work as a spec-gap / ambiguity escalation only when the semantics are actually ambiguous, contradictory, or underdetermined enough that issue/repro context plus adjacent contract sections are not sufficient to govern the change honestly
 - if implementation reveals that the current code already violates the cited spec and that drift is not already captured in the issue, stop and escalate instead of silently absorbing the mismatch into the current change
 - do not rely on issue prose alone when the platform spec already defines the semantics
 
@@ -861,9 +866,13 @@ Issue readiness vs implementation readiness rule:
 
 Pre-implementation rule:
 
-- before writing code, re-read the exact spec section(s) cited in the issue
-- treat those cited sections as the binding semantic contract for the work
-- if the current code, tests, or issue wording disagree with the cited spec, stop and escalate before implementation
+- before writing code, re-read the exact spec section(s) cited in the issue when they exist
+- treat those cited sections as the binding semantic contract for the work when they exist
+- if no exact governing section exists, explicitly use the named binding governing context for the work:
+  - issue body/thread
+  - repro / classification artifact when present
+  - adjacent contract/spec sections cited for constraint
+- if the current code, tests, issue wording, or cited adjacent contract sections disagree in a way that leaves semantics ambiguous, stop and escalate before implementation
 - do not rely on memory of the spec or on the issue summary alone for semantic changes
 
 Symptom vs failure-class rule:

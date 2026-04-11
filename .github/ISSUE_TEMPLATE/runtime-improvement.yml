@@ -10,6 +10,7 @@ body:
     attributes:
       value: |
         Use this for runtime architecture improvements and refactor initiatives.
+        Do not use it for operator-facing feature requests or investigation-surface requests; those should use the dedicated feature request template.
 
         This template is intended for items derived from:
         - [RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md)
@@ -71,6 +72,30 @@ body:
       required: true
 
   - type: textarea
+    id: parent_failure_class
+    attributes:
+      label: Parent Failure Class
+      description: If this issue is likely a child slice of a broader parent failure class, name that parent. Otherwise write `none known yet`.
+      placeholder: |
+        Example:
+        typed persisted operator reads should never infer missing schema capabilities locally
+    validations:
+      required: true
+
+  - type: dropdown
+    id: process_status
+    attributes:
+      label: Process Status
+      description: Is this issue directly assignable, or is it mainly an umbrella/watchpoint that should not be assigned as-is?
+      options:
+        - direct-assignable
+        - umbrella / watchpoint
+        - blocked on prerequisite
+        - unknown yet
+    validations:
+      required: true
+
+  - type: textarea
     id: known_manifestations
     attributes:
       label: Known Manifestations
@@ -114,6 +139,32 @@ body:
         - touched seam canonicalized
         - failure class eliminated
         - unknown yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: watchlist_mapping
+    attributes:
+      label: Watchlist Mapping
+      description: Name the existing watchlist node this issue belongs to, or write `needs node/refinement`.
+      placeholder: |
+        Example:
+        operator-surfaces.yaml -> typed_persisted_operator_reads
+    validations:
+      required: true
+
+  - type: textarea
+    id: likely_parent_action
+    attributes:
+      label: Likely Parent-Class Action After Pre-Audit
+      description: If a broader parent class exists, what is the most likely action after pre-audit?
+      placeholder: |
+        One of:
+        - absorb parent now
+        - keep first-slice scope
+        - open or update dedicated follow-up stream
+        - leave parent explicitly open as still unproven
+        - none known yet
     validations:
       required: true
 

@@ -171,14 +171,19 @@ Review the work against this process, in order:
   - either:
     - exact governing spec references for the touched seam
     - or an explicit statement that this PR is non-semantic maintenance and why no platform spec section governs it
+    - or, when no exact governing section exists for a semantic/runtime seam, an explicit governing-context statement naming:
+      - issue body/thread
+      - repro / classification artifact when present
+      - nearest adjacent contract/spec sections used to constrain the change
   - what changed
   - why this is needed
   - scope boundaries
   - exact tests run
   - residual risk
   - follow-up or explicitly not-in-scope items
-- If the issue or PR does not cite an exact spec section, did it explicitly state that the seam is a spec gap / ambiguity instead of presenting local issue wording as authoritative?
-- Before implementation, did the implementer re-read the cited spec section(s) rather than relying on issue prose or memory?
+- If the issue or PR does not cite an exact spec section, did it explicitly state the binding governing context rather than presenting local issue wording as unexplained authority?
+- If the seam is claimed to be a spec gap / ambiguity, did the record explain why issue/repro context plus adjacent contract sections were insufficient to govern it normally?
+- Before implementation, did the implementer re-read the cited spec section(s) when they exist rather than relying on issue prose or memory?
 - If the PR cites spec references, did the reviewer compare the implementation against the cited spec section(s), not just against the issue summary?
 - For semantic/runtime/spec-governed work, did the reviewer explicitly ask:
   - what is the broadest plausible semantic concept, not just the local failing seam

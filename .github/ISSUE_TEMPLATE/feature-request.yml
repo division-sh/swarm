@@ -1,0 +1,268 @@
+name: Feature Request
+description: Propose an operator-facing runtime feature, investigation surface, or productivity improvement.
+title: "[feature request] "
+labels:
+  - enhancement
+  - runtime
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for operator-facing runtime features, investigation-surface requests, debugging ergonomics, and other improvements where the user problem is clear but the canonical owner may still need shaping.
+
+        This issue only needs to be good enough to assign for shaping or pre-audit.
+
+        It is not automatically ready for direct implementation.
+
+  - type: dropdown
+    id: suggested_category
+    attributes:
+      label: Suggested Category
+      description: Suggest the process category. Lead/triage assigns the final category.
+      options:
+        - runtime improvement
+        - high-risk maintenance
+        - parity
+        - semantic-drift
+        - local
+    validations:
+      required: true
+
+  - type: input
+    id: source_backlog_item
+    attributes:
+      label: Source Backlog Item
+      description: Which investigation note, repeated incident, watchlist item, or backlog source does this come from?
+      placeholder: |
+        Example:
+        EPO runtime investigation surfaces / repeated live debugging incidents
+    validations:
+      required: true
+
+  - type: textarea
+    id: user_problem
+    attributes:
+      label: User / Operator Problem
+      description: Describe the concrete operator, investigator, or developer problem in plain terms.
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem_statement
+    attributes:
+      label: Problem Statement
+      description: State the runtime/platform problem this request is actually about.
+    validations:
+      required: true
+
+  - type: textarea
+    id: generic_problem_class
+    attributes:
+      label: Generic Problem Class
+      description: Describe the broader platform-level problem class. Do not describe only the first symptom or one incident.
+    validations:
+      required: true
+
+  - type: textarea
+    id: parent_failure_class
+    attributes:
+      label: Parent Failure Class
+      description: If this issue is likely a child slice of a broader parent stream, name that parent. Otherwise write `none known yet`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: process_status
+    attributes:
+      label: Process Status
+      description: Is this issue directly assignable, or is it mainly a parent/watchpoint that should not be coded as-is?
+      options:
+        - direct-assignable
+        - umbrella / watchpoint
+        - blocked on prerequisite
+        - unknown yet
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build_readiness
+    attributes:
+      label: Build Readiness
+      description: Is this issue ready to start implementation, or does it still need shaping first?
+      options:
+        - ready for pre-audit
+        - needs parent/child shaping
+        - blocked on adjacent owner / issue
+        - blocked on prerequisite
+        - unknown yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: related_existing_owner
+    attributes:
+      label: Related Existing Owner / Issue / PR
+      description: Name any existing canonical owner, active issue, merged PR, or adjacent stream this work should build on, avoid duplicating, or explicitly supersede. Write `none known yet` if nothing relevant is known.
+      placeholder: |
+        Example:
+        - canonical owner: `#344` run-debug read surface
+        - related PR: `#361`
+        - adjacent stream: `#131` operator observability contract
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_workaround
+    attributes:
+      label: Current Workaround
+      description: What do users/operators do today to get the missing information or capability?
+      placeholder: |
+        Example:
+        - inspect provider transcript files inside the container
+        - manually join runs, events, event_deliveries, sessions, and turns
+    validations:
+      required: true
+
+  - type: textarea
+    id: known_manifestations
+    attributes:
+      label: Known Manifestations
+      description: List the known manifestations as extensively as current evidence supports.
+      placeholder: |
+        - manifestation 1
+        - manifestation 2
+        - manifestation 3
+    validations:
+      required: true
+
+  - type: textarea
+    id: why_now
+    attributes:
+      label: Why This Matters
+      description: Why should this be prioritized now? Tie it to real incidents, debugging cost, or operator pain.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: suggested_pre_audit_gate
+    attributes:
+      label: Suggested Pre-Audit Gate
+      description: Suggest whether independent pre-audit review should be required before coding. Lead/triage makes the final call.
+      options:
+        - required
+        - likely required
+        - maybe
+        - not expected
+    validations:
+      required: true
+
+  - type: dropdown
+    id: intended_closure_level
+    attributes:
+      label: Intended Closure Level
+      description: What is the honest target if this issue is solved as written?
+      options:
+        - local symptom fixed
+        - touched seam canonicalized
+        - failure class eliminated
+        - unknown yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: watchlist_mapping
+    attributes:
+      label: Watchlist Mapping
+      description: Name the existing watchlist node this issue belongs to, or write `needs node/refinement`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: likely_parent_action
+    attributes:
+      label: Likely Parent-Class Action After Pre-Audit
+      description: If a broader parent class exists, what is the most likely action after pre-audit?
+      placeholder: |
+        One of:
+        - absorb parent now
+        - keep first-slice scope
+        - open or update dedicated follow-up stream
+        - leave parent explicitly open as still unproven
+        - none known yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: target_canonical_owner
+    attributes:
+      label: Target Canonical Owner
+      description: What module, abstraction, API, or persisted diagnostic surface should own this after the work is done?
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired_workflow
+    attributes:
+      label: Desired User Workflow
+      description: What should a user/operator be able to do after this feature exists?
+      placeholder: |
+        Example:
+        - run one command or call one API and understand current run progress without raw SQL or transcript inspection
+    validations:
+      required: true
+
+  - type: textarea
+    id: platform_spec_reference
+    attributes:
+      label: Platform Spec Reference
+      description: Link the authoritative platform spec section(s), or write `spec update required`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proof_plan
+    attributes:
+      label: Generic Reproducer / Proof Plan
+      description: State the minimal generic reproducer, before/after workflow, or invariant bundle that will prove the feature request is actually satisfied.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is in scope and what is explicitly out of scope?
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Define concrete done conditions.
+      placeholder: |
+        - one canonical owner/surface exists
+        - no duplicate aggregate surface remains in the touched seam
+        - targeted tests are green
+        - full suite is green
+    validations:
+      required: true
+
+  - type: textarea
+    id: forbidden_shortcuts
+    attributes:
+      label: Forbidden Shortcuts
+      description: State what would count as a fake or misleading implementation.
+      placeholder: |
+        Example:
+        - reader-only cosmetic patch
+        - adding a second aggregate owner beside the canonical one
+        - relying on provider transcripts as the primary truth path
+    validations:
+      required: false

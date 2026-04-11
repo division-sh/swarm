@@ -2328,9 +2328,10 @@ flow_model:
       subscribes_to: Events the agent must subscribe to
       emits: Events the agent must emit
       description: What the agent does in this flow
-    fulfillment: An agent fulfills a role if its subscriptions include the required subscribes_to events (after namespace
-      substitution) and its emit_events include the required emits. The flow author maps agents to roles — the platform enforces
-      the contract.
+    fulfillment: 'An agent fulfills a role if BOTH conditions hold: (1) the agent YAML map key in agents.yaml
+      matches the role name in required_agents (canonical identity binding), AND (2) the agent''s subscriptions
+      include all required subscribes_to events and its emit_events include all required emits. Both checks
+      run at boot. Identity binding is by name; behavioral fulfillment is by subscription/emit coverage.'
   schema_merging:
     description: When a root flow installs multiple flows, the platform merges their schemas. All output data pins become
       entity table columns. Input data pins are validated against available outputs. Two flows writing the same field is a
@@ -3028,9 +3029,11 @@ platform_events:
     - Event names in agent emit_events declarations
     - Event names in node handler emits fields
     - Event names in node produces lists
+    - Event names in flow schema.yaml pins.outputs.events (platform.* events are produced by the engine, not by flows)
     not_violations:
     - Agent subscriptions to platform.* events (subscribing is allowed — products SHOULD subscribe to platform events)
     - Wildcard subscriptions that match platform.* events (e.g., platform.* subscription pattern)
+    - Flow schema.yaml pins.inputs.events listing platform.* events (flows MAY declare them as inputs to receive routing)
   catalog:
     platform.dead_letter:
       description: Failed event after retry exhaustion or chain depth overflow.

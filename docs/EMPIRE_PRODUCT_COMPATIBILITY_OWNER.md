@@ -114,6 +114,7 @@ The Empire Product Compatibility Owner is expected to produce:
   - full Empire run:
     - `swarm --contract .`
 - Do not default to the full run when targeted verify is sufficient to catch the class of failure.
+- Investigation surfaces and evidence sources are documented in [`docs/EPO_INVESTIGATION_SURFACES.md`](/Users/youmew/dev/swarm/docs/EPO_INVESTIGATION_SURFACES.md).
 
 ### Required Per-Failure Record
 
