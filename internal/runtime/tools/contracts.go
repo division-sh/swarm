@@ -2,6 +2,8 @@ package tools
 
 import (
 	"encoding/json"
+	"sort"
+	"strings"
 
 	llm "swarm/internal/runtime/llm"
 	"swarm/internal/runtime/semanticview"
@@ -51,6 +53,36 @@ func LoadContractSchemasForSource(source semanticview.Source) (map[string]Contra
 		}
 	}
 	return parsed, nil
+}
+
+func RuntimeAvailableToolNamesForSource(source semanticview.Source) []string {
+	names := make(map[string]struct{})
+	for name := range supportedRuntimeToolNames {
+		name = strings.TrimSpace(name)
+		if name == "" || runtimeToolHiddenFromAgents(name) {
+			continue
+		}
+		names[name] = struct{}{}
+	}
+	if source != nil {
+		for name, entry := range source.ToolEntries() {
+			name = strings.TrimSpace(name)
+			if name == "" || runtimeToolHiddenFromAgents(name) {
+				continue
+			}
+			handlerType := normalizeImplementationClass(name, entry)
+			if handlerType == "" || handlerType == implementationMCP {
+				continue
+			}
+			names[name] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func ContractDefinitionsForSource(source semanticview.Source) ([]llm.ToolDefinition, error) {

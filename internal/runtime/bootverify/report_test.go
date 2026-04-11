@@ -28,6 +28,25 @@ func TestRun_MapsMissingToolToToolResolutionWarning(t *testing.T) {
 	}
 }
 
+func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{}
+	bundle.Platform.Platform.Name = "swarm"
+	bundle.Platform.Platform.Version = "test"
+	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+		"agent-1": {ID: "agent-1", Tools: []string{"schedule"}, Permissions: []string{"schedule"}},
+	}
+	source := semanticview.Wrap(bundle)
+
+	report := Run(context.Background(), source, Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "tool_resolution", "schedule") {
+		t.Fatalf("unexpected tool_resolution warning for builtin runtime tool, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_MapsMissingDiscoveredMCPToolToToolResolutionWarning(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any

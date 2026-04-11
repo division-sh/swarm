@@ -37,6 +37,7 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
+	runtimetools "swarm/internal/runtime/tools"
 	workspace "swarm/internal/runtime/workspace"
 	"swarm/internal/store"
 )
@@ -1184,6 +1185,7 @@ func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath
 	for _, finding := range report.Warnings() {
 		warningCounts[strings.TrimSpace(finding.CheckID)]++
 	}
+	availableToolNames := runtimetools.RuntimeAvailableToolNamesForSource(source)
 	steps := []struct {
 		index int
 		name  string
@@ -1193,7 +1195,7 @@ func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath
 		{2, "walk_flow_tree", fmt.Sprintf("discovered %d flow(s)", len(source.FlowSchemaEntries()))},
 		{3, "construct_paths", "constructed hierarchical contract paths from package tree"},
 		{4, "register_templates", fmt.Sprintf("registered %d template flow(s)", templateFlowCount(source))},
-		{5, "build_registries", fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(source.AgentEntries()), len(source.ResolvedEventCatalog()), len(source.ToolEntries()))},
+		{5, "build_registries", fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(source.AgentEntries()), len(source.ResolvedEventCatalog()), len(availableToolNames))},
 		{6, "resolve_subscriptions", "subscription resolution skeleton in place; full validation lands in CP4"},
 		{7, "validate_pins", fmt.Sprintf("validated flow pins and event wiring; warnings=%d", warningCounts["event_chain_integrity"]+warningCounts["event_consumer_exists"]+warningCounts["event_producer_exists"])},
 		{8, "validate_required_agents", "validated required_agents coverage and state-machine targets"},
