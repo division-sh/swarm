@@ -51,6 +51,9 @@ type checkerContext struct {
 	toolLoaded   bool
 	toolFindings []Finding
 
+	runtimeToolNamesLoaded bool
+	runtimeToolNames       map[string]struct{}
+
 	policyLoaded   bool
 	policyFindings []Finding
 
@@ -399,6 +402,7 @@ func (c *checkerContext) toolResolution() []Finding {
 	c.toolLoaded = true
 	mcpPrefixes := declaredMCPPrefixes(c.source)
 	discoveredTools := c.mcpDiscovered()
+	runtimeToolNames := c.runtimeAvailableToolNames()
 	for agentID, agent := range c.source.AgentEntries() {
 		agentID = strings.TrimSpace(agentID)
 		for _, toolID := range agent.ConfiguredTools() {
@@ -420,6 +424,9 @@ func (c *checkerContext) toolResolution() []Finding {
 			if toolReferenceAllowedByMCPCatalog(toolID, discoveredTools, mcpPrefixes) {
 				continue
 			}
+			if _, ok := runtimeToolNames[toolID]; ok {
+				continue
+			}
 			c.toolFindings = append(c.toolFindings, Finding{
 				CheckID:  "tool_resolution",
 				Severity: "warning",
@@ -429,6 +436,18 @@ func (c *checkerContext) toolResolution() []Finding {
 		}
 	}
 	return c.toolFindings
+}
+
+func (c *checkerContext) runtimeAvailableToolNames() map[string]struct{} {
+	if c.runtimeToolNamesLoaded {
+		return c.runtimeToolNames
+	}
+	c.runtimeToolNamesLoaded = true
+	c.runtimeToolNames = make(map[string]struct{})
+	for _, name := range runtimetools.RuntimeAvailableToolNamesForSource(c.source) {
+		c.runtimeToolNames[strings.TrimSpace(name)] = struct{}{}
+	}
+	return c.runtimeToolNames
 }
 
 func (c *checkerContext) policyConflicts() []Finding {

@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,12 +19,14 @@ import (
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
+	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
+	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
 )
@@ -786,6 +790,17 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 			wantErr: false,
 		},
 		{
+			name: "builtin runtime tool reference",
+			bundle: func() *runtimecontracts.WorkflowContractBundle {
+				bundle := testWorkflowValidationBundle()
+				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+					"agent-1": {ID: "agent-1", Tools: []string{"schedule"}, Permissions: []string{"schedule"}},
+				}
+				return bundle
+			}(),
+			wantErr: false,
+		},
+		{
 			name: "missing emitted event schema warning",
 			bundle: func() *runtimecontracts.WorkflowContractBundle {
 				bundle := testWorkflowValidationBundle()
@@ -835,10 +850,47 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 			if runtimeErr != nil {
 				t.Fatalf("ValidateWorkflowContractSurface error = %v, want nil", runtimeErr)
 			}
-			if warnings := result.BootReport.Warnings(); len(warnings) == 0 || !strings.Contains(warnings[0].Message, "missing tool missing_tool") {
-				t.Fatalf("BootReport warnings = %#v, want tool_resolution warning", warnings)
+			switch tc.name {
+			case "missing tool reference":
+				if warnings := result.BootReport.Warnings(); len(warnings) == 0 || !strings.Contains(warnings[0].Message, "missing tool missing_tool") {
+					t.Fatalf("BootReport warnings = %#v, want tool_resolution warning", warnings)
+				}
+			case "builtin runtime tool reference":
+				for _, warning := range result.BootReport.Warnings() {
+					if strings.TrimSpace(warning.CheckID) == "tool_resolution" && strings.Contains(warning.Message, "schedule") {
+						t.Fatalf("BootReport warnings = %#v, unexpected builtin tool_resolution warning", result.BootReport.Warnings())
+					}
+				}
 			}
 		})
+	}
+}
+
+func TestLogBootSkeleton_UsesRuntimeToolInventoryCount(t *testing.T) {
+	source := semanticview.Wrap(testWorkflowValidationBundle())
+	wantTools := len(runtimetools.RuntimeAvailableToolNamesForSource(source))
+	if wantTools == 0 {
+		t.Fatal("runtime tool inventory unexpectedly empty")
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	previous := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(previous)
+
+	logBootSkeleton(source, "/tmp/contracts", "/tmp/platform-spec.yaml", runtimebootverify.Report{}, "state stores ready")
+
+	out := buf.String()
+	want := "name=build_registries"
+	if !strings.Contains(out, want) {
+		t.Fatalf("log output missing %q:\n%s", want, out)
+	}
+	if !strings.Contains(out, "tools="+strconv.Itoa(wantTools)) {
+		t.Fatalf("log output missing runtime tool count %d:\n%s", wantTools, out)
+	}
+	if strings.Contains(out, "tools=0") {
+		t.Fatalf("log output still reports zero tools:\n%s", out)
 	}
 }
 
