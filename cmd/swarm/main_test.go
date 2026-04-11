@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -593,6 +594,164 @@ func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *
 	}
 	if report.RunTableStatus != "completed" {
 		t.Fatalf("RunTableStatus = %q, want completed", report.RunTableStatus)
+	}
+}
+
+func TestLoadRunStatusReport_PreservesRunningTruthAcrossBuilderQuiescenceTimeout(t *testing.T) {
+	restore := builderpkg.SetRunCompletionTimeoutForTest(25 * time.Millisecond)
+	defer restore()
+
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	eb, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	agentStarted := make(chan struct{}, 1)
+	releaseAgent := make(chan struct{})
+	testAgent := delayedRunStatusAgent{
+		id:            "agent-1",
+		subscriptions: []events.EventType{"scan.requested"},
+		started:       agentStarted,
+		release:       releaseAgent,
+	}
+	am := runtimemanager.NewAgentManager(eb, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		if cfg.ID != testAgent.id {
+			t.Fatalf("unexpected agent id: %q", cfg.ID)
+		}
+		return testAgent, nil
+	}, pg)
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: testAgent.id}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	am.Run(context.Background())
+	defer func() { _ = am.Shutdown() }()
+
+	rt := &runtimepkg.Runtime{Bus: eb, Manager: am}
+	handler := builderpkg.NewHandler(builderpkg.Options{
+		CurrentRuntime: func() *runtimepkg.Runtime { return rt },
+		AuthToken:      "builder-test-token",
+	})
+
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	reqBody, err := json.Marshal(builderpkg.Request{
+		JSONRPC: "2.0",
+		ID:      "run-start-timeout-1",
+		Method:  "run.start",
+		Params: map[string]any{
+			"run_id": runID,
+			"inputs": map[string]any{
+				"scan.requested": map[string]any{
+					"entity_id": entityID,
+					"topic":     "sample",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal run.start request: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer builder-test-token")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case <-agentStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for agent work to start")
+	}
+
+	time.Sleep(120 * time.Millisecond)
+
+	ctx := context.Background()
+	var (
+		status           string
+		activeDeliveries int
+		endedAt          sql.NullTime
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&status, &endedAt); err != nil {
+		t.Fatalf("load timed-out run row: %v", err)
+	}
+	if status != "running" {
+		t.Fatalf("timed-out run status = %q, want running", status)
+	}
+	if endedAt.Valid {
+		t.Fatalf("timed-out run ended_at = %s, want NULL while same-run work remains active", endedAt.Time)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND status IN ('pending', 'in_progress')
+	`, runID).Scan(&activeDeliveries); err != nil {
+		t.Fatalf("count active deliveries after timeout window: %v", err)
+	}
+	if activeDeliveries == 0 {
+		t.Fatal("expected same-run active delivery after builder timeout window")
+	}
+	if got := am.InFlightCount(); got == 0 {
+		t.Fatal("expected live in-flight manager work after builder timeout window")
+	}
+
+	report, err := loadRunStatusReport(ctx, db, runID, runStatusOptions{})
+	if err != nil {
+		t.Fatalf("loadRunStatusReport: %v", err)
+	}
+	if report.RunTableStatus != "running" {
+		t.Fatalf("RunTableStatus after timeout window = %q, want running", report.RunTableStatus)
+	}
+	if report.OperationalState != "running" {
+		t.Fatalf("OperationalState after timeout window = %q, want running", report.OperationalState)
+	}
+	foundActiveDelivery := false
+	for _, item := range report.Deliveries {
+		if item.SubscriberID == "agent-1" && item.Status == "in_progress" && item.Count > 0 {
+			foundActiveDelivery = true
+			break
+		}
+	}
+	if !foundActiveDelivery {
+		t.Fatalf("expected supported status report to preserve active same-run delivery, got %#v", report.Deliveries)
+	}
+
+	close(releaseAgent)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(status, ''), ended_at
+			FROM runs
+			WHERE run_id = $1::uuid
+		`, runID).Scan(&status, &endedAt)
+		if err == nil && status == "completed" && endedAt.Valid {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %s did not reach coherent completed state after release: last err=%v status=%q ended_at_valid=%v", runID, err, status, endedAt.Valid)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	var lastEventAt time.Time
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(created_at), '-infinity'::timestamptz)
+		FROM events
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&lastEventAt); err != nil {
+		t.Fatalf("load last event timestamp: %v", err)
+	}
+	if !endedAt.Time.IsZero() && lastEventAt.After(endedAt.Time) {
+		t.Fatalf("last same-run event at %s is after ended_at %s", lastEventAt, endedAt.Time)
 	}
 }
 

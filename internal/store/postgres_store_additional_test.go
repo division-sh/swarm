@@ -176,8 +176,11 @@ func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeli
 		t.Fatalf("seed delivery: %v", err)
 	}
 
-	if err := pg.MarkRunTerminal(ctx, runID, "completed", "", time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "active deliveries") {
-		t.Fatalf("MarkRunTerminal(active delivery) error = %v, want active delivery rejection", err)
+	for _, status := range []string{"completed", "failed"} {
+		err := pg.MarkRunTerminal(ctx, runID, status, "quiescence timeout", time.Now().UTC())
+		if err == nil || !strings.Contains(err.Error(), "active deliveries") {
+			t.Fatalf("MarkRunTerminal(%s active delivery) error = %v, want active delivery rejection", status, err)
+		}
 	}
 
 	if _, err := db.ExecContext(ctx, `

@@ -194,6 +194,14 @@ func SetHealthHeartbeatIntervalForTest(d time.Duration) func() {
 	}
 }
 
+func SetRunCompletionTimeoutForTest(d time.Duration) func() {
+	old := runCompletionTimeout
+	runCompletionTimeout = d
+	return func() {
+		runCompletionTimeout = old
+	}
+}
+
 func HandleRuntimeLogForTest(h http.Handler, entry runtimepkg.RuntimeLogEntry) bool {
 	typed, ok := h.(*handler)
 	if !ok || typed == nil || typed.runHub == nil {
