@@ -711,6 +711,11 @@ func TestListPendingSubscribedEvents_UsesCanonicalMatcherParity(t *testing.T) {
 	segment := seedEvent(t, ctx, pg, entityID, "review.ready")
 	tooDeep := seedEvent(t, ctx, pg, entityID, "scoring/a/b")
 	invalidPattern := seedEvent(t, ctx, pg, entityID, "budget.alert")
+	for _, eventID := range []string{deep.ID, segment.ID, tooDeep.ID, invalidPattern.ID} {
+		if err := pg.InsertEventDeliveries(ctx, eventID, []string{agentID}); err != nil {
+			t.Fatalf("insert deliveries for %s: %v", eventID, err)
+		}
+	}
 
 	since := time.Now().Add(-2 * time.Hour)
 	tests := []struct {

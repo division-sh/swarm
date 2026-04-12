@@ -420,19 +420,12 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 			AND r.subscriber_type = 'agent'
 			AND r.subscriber_id = $1
 		WHERE e.created_at >= $2
-		  AND (
-				NOT EXISTS (
-					SELECT 1
-					FROM event_deliveries d_any
-					WHERE d_any.event_id = e.event_id
-				)
-				OR EXISTS (
-					SELECT 1
-					FROM event_deliveries d_me
-					WHERE d_me.event_id = e.event_id
-					  AND d_me.subscriber_type = 'agent'
-					  AND d_me.subscriber_id = $1
-				)
+		  AND EXISTS (
+				SELECT 1
+				FROM event_deliveries d_me
+				WHERE d_me.event_id = e.event_id
+				  AND d_me.subscriber_type = 'agent'
+				  AND d_me.subscriber_id = $1
 			)
 		  AND `+canonicalPendingDeliveryPredicateSQL("d", "r")+`
 		ORDER BY e.created_at ASC
