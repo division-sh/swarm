@@ -3011,7 +3011,8 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 	broadcastID := uuid.NewString()
 	directOtherID := uuid.NewString()
 	directSelfID := uuid.NewString()
-	for idx, id := range []string{broadcastID, directOtherID, directSelfID} {
+	noDeliveryID := uuid.NewString()
+	for idx, id := range []string{broadcastID, directOtherID, directSelfID, noDeliveryID} {
 		if err := pg.AppendEvent(ctx, events.Event{
 			ID:          id,
 			Type:        "inbound.alert",
@@ -3026,9 +3027,10 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, created_at)
 		VALUES
-			($1::uuid, 'agent', 'a2', now()),
-			($2::uuid, 'agent', 'a1', now())
-	`, directOtherID, directSelfID); err != nil {
+			($1::uuid, 'agent', 'a1', now()),
+			($2::uuid, 'agent', 'a2', now()),
+			($3::uuid, 'agent', 'a1', now())
+	`, broadcastID, directOtherID, directSelfID); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
 	}
 
@@ -3054,6 +3056,9 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 	}
 	if _, ok := gotSet[directOtherID]; ok {
 		t.Fatalf("did not expect direct-other event %s in subscribed backlog, got=%v", directOtherID, gotSet)
+	}
+	if _, ok := gotSet[noDeliveryID]; ok {
+		t.Fatalf("did not expect delivery-less event %s in subscribed backlog, got=%v", noDeliveryID, gotSet)
 	}
 }
 
