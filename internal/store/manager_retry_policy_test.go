@@ -24,6 +24,9 @@ func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_upsert")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+		t.Fatalf("insert deliveries: %v", err)
+	}
 
 	for i := 1; i <= 2; i++ {
 		if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, "error", "boom"); err != nil {
@@ -119,101 +122,19 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 	}
 }
 
-func TestUpsertEventReceipt_AlignsRetryOwnershipAcrossDeliveryBackedAndReceiptOnly_V2(t *testing.T) {
-	tests := []struct {
-		name           string
-		insertDelivery bool
-	}{
-		{name: "delivery_backed", insertDelivery: true},
-		{name: "receipt_only_normalized_to_delivery", insertDelivery: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pg, cleanup := newTestPostgresStore(t)
-			defer cleanup()
-
-			ctx := context.Background()
-			entityID, agentID := seedEntityAndAgent(t, ctx, pg)
-			evt := seedEvent(t, ctx, pg, entityID, "test.retry_alignment."+tt.name)
-			if tt.insertDelivery {
-				if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
-					t.Fatalf("insert deliveries: %v", err)
-				}
-			}
-
-			if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
-				t.Fatalf("upsert retryable error: %v", err)
-			}
-
-			var (
-				deliveryStatus string
-				deliveryRetry  int
-				reasonCode     string
-				managerStatus  string
-				receiptRetry   int
-			)
-			if err := pg.DB.QueryRowContext(ctx, `
-				SELECT
-					COALESCE(d.status, ''),
-					COALESCE(d.retry_count, 0),
-					COALESCE(d.reason_code, ''),
-					COALESCE(r.side_effects->>'manager_status', ''),
-					COALESCE((r.side_effects->>'retry_count')::int, 0)
-				FROM event_deliveries d
-				INNER JOIN event_receipts r
-					ON r.event_id = d.event_id
-					AND r.subscriber_type = 'agent'
-					AND r.subscriber_id = d.subscriber_id
-				WHERE d.event_id = $1::uuid
-				  AND d.subscriber_type = 'agent'
-				  AND d.subscriber_id = $2
-			`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
-				t.Fatalf("query retryable aligned state: %v", err)
-			}
-			if deliveryStatus != "failed" || deliveryRetry != 1 || reasonCode != "handler_error" || managerStatus != "error" || receiptRetry != 1 {
-				t.Fatalf("retryable aligned state mismatch: delivery=%q retry=%d reason=%q manager=%q receiptRetry=%d", deliveryStatus, deliveryRetry, reasonCode, managerStatus, receiptRetry)
-			}
-
-			if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
-				t.Fatalf("upsert exhausted error: %v", err)
-			}
-			if err := pg.DB.QueryRowContext(ctx, `
-				SELECT
-					COALESCE(d.status, ''),
-					COALESCE(d.retry_count, 0),
-					COALESCE(d.reason_code, ''),
-					COALESCE(r.side_effects->>'manager_status', ''),
-					COALESCE((r.side_effects->>'retry_count')::int, 0)
-				FROM event_deliveries d
-				INNER JOIN event_receipts r
-					ON r.event_id = d.event_id
-					AND r.subscriber_type = 'agent'
-					AND r.subscriber_id = d.subscriber_id
-				WHERE d.event_id = $1::uuid
-				  AND d.subscriber_type = 'agent'
-				  AND d.subscriber_id = $2
-			`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
-				t.Fatalf("query exhausted aligned state: %v", err)
-			}
-			if deliveryStatus != "dead_letter" || deliveryRetry != 2 || reasonCode != "retry_exhausted" || managerStatus != "dead_letter" || receiptRetry != 2 {
-				t.Fatalf("exhausted aligned state mismatch: delivery=%q retry=%d reason=%q manager=%q receiptRetry=%d", deliveryStatus, deliveryRetry, reasonCode, managerStatus, receiptRetry)
-			}
-		})
-	}
-}
-
-func TestUpsertEventReceipt_PreservesLegacyReceiptOnlyRetryHistory_V2(t *testing.T) {
+func TestUpsertEventReceipt_AlignsRetryOwnershipOnCanonicalDelivery_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
-	evt := seedEvent(t, ctx, pg, entityID, "test.retry_legacy_receipt_only")
-	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID, agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
+	evt := seedEvent(t, ctx, pg, entityID, "test.retry_alignment.delivery_backed")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+		t.Fatalf("insert deliveries: %v", err)
+	}
 
 	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
-		t.Fatalf("upsert exhausted legacy receipt-only error: %v", err)
+		t.Fatalf("upsert retryable error: %v", err)
 	}
 
 	var (
@@ -239,10 +160,85 @@ func TestUpsertEventReceipt_PreservesLegacyReceiptOnlyRetryHistory_V2(t *testing
 		  AND d.subscriber_type = 'agent'
 		  AND d.subscriber_id = $2
 	`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
-		t.Fatalf("query legacy exhausted aligned state: %v", err)
+		t.Fatalf("query retryable aligned state: %v", err)
+	}
+	if deliveryStatus != "failed" || deliveryRetry != 1 || reasonCode != "handler_error" || managerStatus != "error" || receiptRetry != 1 {
+		t.Fatalf("retryable aligned state mismatch: delivery=%q retry=%d reason=%q manager=%q receiptRetry=%d", deliveryStatus, deliveryRetry, reasonCode, managerStatus, receiptRetry)
+	}
+
+	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+		t.Fatalf("upsert exhausted error: %v", err)
+	}
+
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(d.status, ''),
+			COALESCE(d.retry_count, 0),
+			COALESCE(d.reason_code, ''),
+			COALESCE(r.side_effects->>'manager_status', ''),
+			COALESCE((r.side_effects->>'retry_count')::int, 0)
+		FROM event_deliveries d
+		INNER JOIN event_receipts r
+			ON r.event_id = d.event_id
+			AND r.subscriber_type = 'agent'
+			AND r.subscriber_id = d.subscriber_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'agent'
+		  AND d.subscriber_id = $2
+	`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
+		t.Fatalf("query exhausted aligned state: %v", err)
 	}
 	if deliveryStatus != "dead_letter" || deliveryRetry != 2 || reasonCode != "retry_exhausted" || managerStatus != "dead_letter" || receiptRetry != 2 {
-		t.Fatalf("legacy exhausted aligned state mismatch: delivery=%q retry=%d reason=%q manager=%q receiptRetry=%d", deliveryStatus, deliveryRetry, reasonCode, managerStatus, receiptRetry)
+		t.Fatalf("exhausted aligned state mismatch: delivery=%q retry=%d reason=%q manager=%q receiptRetry=%d", deliveryStatus, deliveryRetry, reasonCode, managerStatus, receiptRetry)
+	}
+}
+
+func TestUpsertEventReceipt_FailsClosedOnLegacyReceiptOnlyRetryHistory_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.retry_legacy_receipt_only")
+	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID, agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
+
+	err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "boom")
+	if err == nil {
+		t.Fatal("expected legacy receipt-only retry history write to fail closed")
+	}
+	if !strings.Contains(err.Error(), "delivery row required") {
+		t.Fatalf("upsert legacy receipt-only error = %v, want delivery row required", err)
+	}
+
+	var deliveryCount int
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, evt.ID, agentID).Scan(&deliveryCount); err != nil {
+		t.Fatalf("query delivery count: %v", err)
+	}
+	if deliveryCount != 0 {
+		t.Fatalf("delivery_count = %d, want 0", deliveryCount)
+	}
+
+	var managerStatus string
+	var receiptRetry int
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(side_effects->>'manager_status', ''),
+			COALESCE((side_effects->>'retry_count')::int, 0)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, evt.ID, agentID).Scan(&managerStatus, &receiptRetry); err != nil {
+		t.Fatalf("query receipt after fail-closed write: %v", err)
+	}
+	if managerStatus != "error" || receiptRetry != 1 {
+		t.Fatalf("legacy receipt mutated after fail-closed write: status=%q retry=%d", managerStatus, receiptRetry)
 	}
 }
 
@@ -466,6 +462,9 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 	ctx := context.Background()
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.pending_subscribed")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+		t.Fatalf("insert deliveries: %v", err)
+	}
 
 	since := time.Now().Add(-2 * time.Hour)
 	subs := []events.EventType{evt.Type}
@@ -502,7 +501,7 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 	}
 }
 
-func TestPendingAgentEvents_NormalizesLegacyReceiptOnlyRetryOwner_V2(t *testing.T) {
+func TestPendingAgentEvents_IgnoreLegacyReceiptOnlyRetryOwner_V2(t *testing.T) {
 	tests := []struct {
 		name       string
 		subscribed bool
@@ -534,31 +533,57 @@ func TestPendingAgentEvents_NormalizesLegacyReceiptOnlyRetryOwner_V2(t *testing.
 			if err != nil {
 				t.Fatalf("list pending legacy receipt-only event: %v", err)
 			}
-			if len(evts) != 1 || evts[0].ID != evt.ID {
-				t.Fatalf("pending legacy receipt-only event mismatch: got %d events, want 1 (%s)", len(evts), evt.ID)
+			if len(evts) != 0 {
+				t.Fatalf("pending legacy receipt-only event mismatch: got %d events, want 0", len(evts))
 			}
 
-			var (
-				deliveryStatus string
-				deliveryRetry  int
-				reasonCode     string
-			)
+			var deliveryCount int
 			if err := pg.DB.QueryRowContext(ctx, `
-				SELECT
-					COALESCE(status, ''),
-					COALESCE(retry_count, 0),
-					COALESCE(reason_code, '')
+				SELECT COUNT(*)
 				FROM event_deliveries
 				WHERE event_id = $1::uuid
 				  AND subscriber_type = 'agent'
 				  AND subscriber_id = $2
-			`, evt.ID, agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode); err != nil {
-				t.Fatalf("query normalized legacy delivery: %v", err)
+			`, evt.ID, agentID).Scan(&deliveryCount); err != nil {
+				t.Fatalf("query delivery count: %v", err)
 			}
-			if deliveryStatus != "failed" || deliveryRetry != 1 || reasonCode != "handler_error" {
-				t.Fatalf("normalized legacy delivery mismatch: status=%q retry=%d reason=%q", deliveryStatus, deliveryRetry, reasonCode)
+			if deliveryCount != 0 {
+				t.Fatalf("delivery_count = %d, want 0", deliveryCount)
 			}
 		})
+	}
+}
+
+func TestListPendingAgentDeliveryFacts_IgnoresLegacyReceiptOnlyRetryOwner_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.pending_facts.legacy_receipt_only")
+	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID, agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
+
+	factsByAgent, err := pg.ListPendingAgentDeliveryFacts(ctx, []string{agentID}, time.Now().Add(-2*time.Hour))
+	if err != nil {
+		t.Fatalf("ListPendingAgentDeliveryFacts: %v", err)
+	}
+	facts := factsByAgent[agentID]
+	if facts.PendingCount != 0 || facts.OldestPendingAgeSec != 0 {
+		t.Fatalf("legacy receipt-only pending facts = %+v, want zero", facts)
+	}
+
+	var deliveryCount int
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, evt.ID, agentID).Scan(&deliveryCount); err != nil {
+		t.Fatalf("query delivery count: %v", err)
+	}
+	if deliveryCount != 0 {
+		t.Fatalf("delivery_count = %d, want 0", deliveryCount)
 	}
 }
 

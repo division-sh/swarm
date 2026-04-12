@@ -147,11 +147,6 @@ func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, agent
 	if len(normalized) == 0 {
 		return map[string]PendingAgentDeliveryFacts{}, nil
 	}
-	for _, agentID := range normalized {
-		if err := s.normalizeLegacyAgentRetryOwners(ctx, agentID, since); err != nil {
-			return nil, err
-		}
-	}
 	records, err := s.listPendingAgentDeliveryFactRecordsSpec(ctx, normalized, since)
 	if err != nil {
 		return nil, err
