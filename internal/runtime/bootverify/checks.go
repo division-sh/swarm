@@ -72,6 +72,9 @@ type checkerContext struct {
 	payloadCoverageLoaded   bool
 	payloadCoverageFindings []Finding
 
+	payloadCompletenessLoaded   bool
+	payloadCompletenessFindings []Finding
+
 	dialectLoaded   bool
 	dialectFindings []Finding
 
@@ -162,6 +165,7 @@ var bootCheckRegistry = []Check{
 	{ID: "event_consumer_exists", Severity: "warning", Run: checkEventConsumerExists},
 	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},
 	{ID: "payload_field_coverage", Severity: "error", Run: checkPayloadFieldCoverage},
+	{ID: "semantic_drift_payload_completeness", Severity: "warning", Run: checkSemanticDriftPayloadCompleteness},
 	{ID: "condition_payload_alignment", Severity: "error", Run: checkConditionPayloadAlignment},
 	{ID: "condition_policy_alignment", Severity: "warning", Run: checkConditionPolicyAlignment},
 	{ID: "state_machine_coherence", Severity: "error", Run: checkStateMachineCoherence},

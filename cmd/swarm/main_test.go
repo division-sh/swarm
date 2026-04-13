@@ -1160,3 +1160,76 @@ func TestVerifyBundle_CreateEntityDynamicComputeProofReturnsWarningSurface(t *te
 		t.Fatalf("verifyBundle error = %v, want dynamic expected_from degradation detail", err)
 	}
 }
+
+func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "default",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "scan_id", Type: "string"},
+						{Name: "geography", Type: "string"},
+					},
+				}},
+			},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"dispatcher": {
+					"scan.corpus_dispatch": {
+						Emits: runtimecontracts.EventEmission{Single: "market_research.scan_assigned"},
+					},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"dispatcher": {
+				SubscribesTo: []string{"scan.corpus_dispatch"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"scan.corpus_dispatch": {
+						Emits: runtimecontracts.EventEmission{Single: "market_research.scan_assigned"},
+					},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.corpus_dispatch": {
+				Source: "external",
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"scan_id":   {Type: "string"},
+						"geography": {Type: "string"},
+					},
+				},
+				Required: []string{"scan_id", "geography"},
+			},
+			"market_research.scan_assigned": {
+				ConsumerType: []string{"dashboard"},
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id":          {Type: "string"},
+						"current_state":      {Type: "string"},
+						"trigger_event_type": {Type: "string"},
+						"scan_id":            {Type: "string"},
+					},
+				},
+				Required: []string{"entity_id", "scan_id"},
+			},
+		},
+	}
+	bundle.Platform.Platform.Name = "test"
+	bundle.Platform.Platform.Version = "1.0.0"
+
+	err := verifyBundle(context.Background(), semanticview.Wrap(bundle))
+	if err == nil {
+		t.Fatal("verifyBundle error = nil, want warning-only failure from emitted payload completeness")
+	}
+	if !strings.Contains(err.Error(), "scan_id is not statically provable") {
+		t.Fatalf("verifyBundle error = %v, want emitted payload completeness warning", err)
+	}
+	if strings.Contains(err.Error(), "definitely missing") {
+		t.Fatalf("verifyBundle error = %v, want approved warning wording only", err)
+	}
+}
