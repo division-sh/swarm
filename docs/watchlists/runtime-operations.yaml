@@ -96,10 +96,13 @@ nodes:
       - context-token policy differs across transport surfaces
       - startup validation does not prove the real filtered transport path
       - agent-visible tool availability differs between prompt and transport
+      - supported agent turns can persist a canonical visible tool surface that is broader than the provider-callable surface actually available on that turn
+      - fallback relay on a supported turn can degrade file-backed work by clamping large relayed tool results to preview-only text
     representative_issues:
       - 111
       - 136
       - 137
+      - 368
     common_framing_mistakes:
       too_broad:
         - tool transport is inconsistent

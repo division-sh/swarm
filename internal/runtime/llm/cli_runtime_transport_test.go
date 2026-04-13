@@ -96,7 +96,9 @@ func TestClaudeAllowedToolsArgForActor_IncludesPostCompositionAndNativeTools(t *
 	for _, name := range []string{
 		"emit_category_assessed",
 		"emit_market_research_scan_complete",
-		"query_entities",
+		"mcp__runtime-tools__emit_category_assessed",
+		"mcp__runtime-tools__emit_market_research_scan_complete",
+		"mcp__runtime-tools__query_entities",
 		"Read",
 		"Write",
 		"Edit",
@@ -106,7 +108,7 @@ func TestClaudeAllowedToolsArgForActor_IncludesPostCompositionAndNativeTools(t *
 			t.Fatalf("expected %q in allowed tools %q", name, got)
 		}
 	}
-	for _, name := range []string{"Bash", "WebSearch", "ToolSearch"} {
+	for _, name := range []string{"Bash", "WebSearch", "ToolSearch", "query_entities"} {
 		if slices.Contains(gotNames, name) {
 			t.Fatalf("did not expect %q in allowed tools %q", name, got)
 		}
@@ -129,12 +131,19 @@ func TestClaudeToolSurface_PrefersFallbackRuntimeToolsOverNativeBuiltins(t *test
 
 	allowed := claudeAllowedToolsArgForActor(actor, tools)
 	allowedNames := strings.Split(allowed, ",")
-	for _, name := range []string{"read_file", "write_file", "bash", "emit_category_assessed", "ExitPlanMode"} {
+	for _, name := range []string{
+		"mcp__runtime-tools__read_file",
+		"mcp__runtime-tools__write_file",
+		"mcp__runtime-tools__bash",
+		"mcp__runtime-tools__emit_category_assessed",
+		"emit_category_assessed",
+		"ExitPlanMode",
+	} {
 		if !slices.Contains(allowedNames, name) {
 			t.Fatalf("expected %q in allowed tools %q", name, allowed)
 		}
 	}
-	for _, name := range []string{"Read", "Write", "Edit", "Bash"} {
+	for _, name := range []string{"Read", "Write", "Edit", "Bash", "read_file", "write_file", "bash"} {
 		if slices.Contains(allowedNames, name) {
 			t.Fatalf("did not expect native builtin %q in allowed tools %q", name, allowed)
 		}
@@ -153,11 +162,16 @@ func TestClaudeToolSurface_PrefersFallbackRuntimeToolsOverNativeBuiltins(t *test
 		t.Fatalf("expected runtime tool prompt section, got %q", prompt)
 	}
 	if !strings.Contains(prompt, "emit_category_assessed") {
-		t.Fatalf("expected non-native runtime tools in prompt, got %q", prompt)
+		t.Fatalf("expected emit fallback tool in prompt, got %q", prompt)
 	}
 	for _, name := range []string{"read_file", "write_file", "bash"} {
-		if strings.Contains(prompt, name) {
+		if strings.Contains(prompt, "\n- "+name+"\n") {
 			t.Fatalf("did not expect native capability tool %q in prompt, got %q", name, prompt)
+		}
+	}
+	for _, name := range []string{"mcp__runtime-tools__read_file", "mcp__runtime-tools__write_file", "mcp__runtime-tools__bash"} {
+		if !strings.Contains(prompt, name) {
+			t.Fatalf("expected provider-visible MCP tool %q in prompt, got %q", name, prompt)
 		}
 	}
 	if strings.Contains(prompt, "Claude CLI native tools available in this turn") {
@@ -181,6 +195,12 @@ func TestCLIExecutionToolSurface_CanonicalizesProviderBuiltins(t *testing.T) {
 	if !slices.Equal(surface.ProviderBuiltinTools, []string{"Edit", "Read", "WebSearch", "Write"}) {
 		t.Fatalf("provider builtin tools = %#v", surface.ProviderBuiltinTools)
 	}
+	if !slices.Equal(surface.ProviderMCPTools, []string{"mcp__runtime-tools__emit_category_assessed"}) {
+		t.Fatalf("provider mcp tools = %#v", surface.ProviderMCPTools)
+	}
+	if !slices.Equal(surface.LocalFallbackTools, []string{"emit_category_assessed"}) {
+		t.Fatalf("local fallback tools = %#v", surface.LocalFallbackTools)
+	}
 	if !slices.Equal(surface.PromptRuntimeTools, []string{"emit_category_assessed"}) {
 		t.Fatalf("prompt runtime tools = %#v", surface.PromptRuntimeTools)
 	}
@@ -201,6 +221,12 @@ func TestCLIExecutionToolSurface_FileIOMixedFallbacksStayExecutable(t *testing.T
 	}
 	if !slices.Equal(surface.ProviderBuiltinTools, []string{"Edit", "Write"}) {
 		t.Fatalf("provider builtin tools = %#v", surface.ProviderBuiltinTools)
+	}
+	if !slices.Equal(surface.ProviderMCPTools, []string{"mcp__runtime-tools__emit_category_assessed", "mcp__runtime-tools__read_file"}) {
+		t.Fatalf("provider mcp tools = %#v", surface.ProviderMCPTools)
+	}
+	if !slices.Equal(surface.LocalFallbackTools, []string{"emit_category_assessed"}) {
+		t.Fatalf("local fallback tools = %#v", surface.LocalFallbackTools)
 	}
 }
 
@@ -285,5 +311,52 @@ func TestBuildMCPConfigArg_FailsClosedWithoutTurnContextStore(t *testing.T) {
 	_, _, _, err := r.buildMCPConfigArg(ctx, s)
 	if err == nil || !strings.Contains(err.Error(), "mcp turn context store is required") {
 		t.Fatalf("buildMCPConfigArg err = %v, want missing store error", err)
+	}
+}
+
+func TestValidateCLIResponseToolCallsForTurn_FailsClosedForNonEmitToolOutsideObservedSurface(t *testing.T) {
+	actor := models.AgentConfig{
+		ID:          "market-research-agent",
+		NativeTools: models.NativeToolConfig{FileIO: true},
+	}
+	err := validateCLIResponseToolCallsForTurn(actor, []ToolDefinition{
+		{Name: "emit_category_assessed"},
+		{Name: "read_file"},
+	}, &Response{
+		MCPServers: map[string]string{
+			"runtime-tools": "failed",
+		},
+		ToolCalls: []ToolCall{
+			{Name: "read_file", Arguments: map[string]any{"path": "/workspace/corpus.json"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "read_file") {
+		t.Fatalf("validateCLIResponseToolCallsForTurn err = %v, want read_file visibility failure", err)
+	}
+}
+
+func TestValidateCLIResponseToolCallsForTurn_AllowsObservedMCPToolAndEmitFallback(t *testing.T) {
+	actor := models.AgentConfig{
+		ID:          "market-research-agent",
+		NativeTools: models.NativeToolConfig{FileIO: true},
+	}
+	err := validateCLIResponseToolCallsForTurn(actor, []ToolDefinition{
+		{Name: "emit_category_assessed"},
+		{Name: "read_file"},
+	}, &Response{
+		MCPServers: map[string]string{
+			"runtime-tools": "connected",
+		},
+		VisibleTools: []string{
+			"emit_category_assessed",
+			"read_file",
+		},
+		ToolCalls: []ToolCall{
+			{Name: "read_file", Arguments: map[string]any{"path": "/workspace/corpus.json"}},
+			{Name: "emit_category_assessed", Arguments: map[string]any{"category": "x"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateCLIResponseToolCallsForTurn: %v", err)
 	}
 }
