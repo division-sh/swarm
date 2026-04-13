@@ -25,7 +25,7 @@ func TestProjectCanonicalRunDebugReplay_PreservesCanonicalEventPayloadAndTimesta
 		}},
 	}
 
-	replay := projectCanonicalRunDebugReplay(report)
+	replay, _ := projectCanonicalRunDebugReplay(report)
 	if len(replay) != 2 {
 		t.Fatalf("replay len = %d, want 2", len(replay))
 	}
@@ -69,7 +69,7 @@ func TestProjectCanonicalRunDebugReplay_PreservesCanonicalRuntimeLogDetailAndTim
 		}},
 	}
 
-	replay := projectCanonicalRunDebugReplay(report)
+	replay, _ := projectCanonicalRunDebugReplay(report)
 	if len(replay) != 1 {
 		t.Fatalf("replay len = %d, want 1", len(replay))
 	}
