@@ -937,6 +937,42 @@ func loadWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *run
 	return bundle
 }
 
+func firstWorkflowValidationFlowHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) (string, string, string, runtimecontracts.SystemNodeEventHandler) {
+	t.Helper()
+	for _, view := range bundle.FlowViews() {
+		flowID := strings.TrimSpace(view.Paths.ID)
+		for nodeID, node := range view.Nodes {
+			for eventType, handler := range node.EventHandlers {
+				return flowID, nodeID, eventType, handler
+			}
+		}
+	}
+	t.Fatal("expected fixture to include at least one flow handler")
+	return "", "", "", runtimecontracts.SystemNodeEventHandler{}
+}
+
+func writeWorkflowValidationFlowHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) {
+	t.Helper()
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	node := flowView.Nodes[nodeID]
+	node.EventHandlers[eventType] = handler
+	flowView.Nodes[nodeID] = node
+	if bundle.Nodes == nil {
+		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
+	}
+	bundle.Nodes[nodeID] = node
+	if bundle.Semantics.NodeHandlers == nil {
+		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	if bundle.Semantics.NodeHandlers[nodeID] == nil {
+		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
+}
+
 func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
@@ -1086,5 +1122,41 @@ func TestVerifyBundle_DoesNotWarnForFlowOwnedAgentOutputEvents(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "'analysis.done' emitted but nobody subscribes") {
 		t.Fatalf("unexpected flow-owned agent output warning: %v", err)
+	}
+}
+
+func TestVerifyBundle_CreateEntityDynamicComputeProofReturnsWarningSurface(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-missing-pin"))
+	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
+		Groups: []runtimecontracts.EntitySchemaGroup{{
+			Name: "tracking",
+			Fields: []runtimecontracts.EntitySchemaField{
+				{Name: "expected_count", Type: "integer", Initial: 1},
+				{Name: "composite_score", Type: "number"},
+			},
+		}},
+	}
+	flowID, nodeID, eventType, handler := firstWorkflowValidationFlowHandler(t, bundle)
+	handler.CreateEntity = true
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{ExpectedFrom: "entity.expected_count"}
+	handler.Compute = &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpCount,
+		StoreAs:   "entity.composite_score",
+	}
+	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
+		Condition: "entity.composite_score >= 0",
+	}}
+	writeWorkflowValidationFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	err := verifyBundle(context.Background(), semanticview.Wrap(bundle))
+	if err == nil {
+		t.Fatal("verifyBundle error = nil, want warning-only failure from degraded compute proof")
+	}
+	if !strings.Contains(err.Error(), "entity.composite_score") {
+		t.Fatalf("verifyBundle error = %v, want composite_score warning", err)
+	}
+	if !strings.Contains(err.Error(), "dynamic") {
+		t.Fatalf("verifyBundle error = %v, want dynamic expected_from degradation detail", err)
 	}
 }

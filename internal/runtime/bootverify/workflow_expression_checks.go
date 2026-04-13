@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepaths "swarm/internal/runtime/core/paths"
 	runtimeengine "swarm/internal/runtime/engine"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/workflowexpr"
@@ -160,6 +161,17 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						if _, ok := schemaInitials[field]; ok {
 							continue
 						}
+						if handler.CreateEntity {
+							if finding := createEntityFieldInitializationFinding(flowID, nodeID, eventType, handler, expr, field); finding != nil {
+								key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, field, finding.Severity}, "|")
+								if _, ok := seen[key]; ok {
+									continue
+								}
+								seen[key] = struct{}{}
+								c.entityRefFindings = append(c.entityRefFindings, *finding)
+							}
+							continue
+						}
 						key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, field}, "|")
 						if _, ok := seen[key]; ok {
 							continue
@@ -202,6 +214,74 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 	}
 
 	return c.entityRefFindings
+}
+
+func createEntityFieldInitializationFinding(flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler, expr expressionReference, field string) *Finding {
+	if createEntityTopLevelDataAccumulationWritesField(handler, field) && createEntityTopLevelDataAccumulationMakesFieldAvailable(expr.Phase) {
+		return nil
+	}
+	if createEntityComputeStoresField(handler, field) && createEntityComputeMakesFieldAvailable(expr.Phase) {
+		if createEntityDynamicExpectedFrom(handler.Accumulate) {
+			return &Finding{
+				CheckID:  "expression_field_reference_validation",
+				Severity: "warning",
+				Message:  fmt.Sprintf("flow %s node %s handler %s references entity.%s in %s through same-handler compute.store_as, but accumulate.expected_from %q is dynamic so initialization proof degrades on the create_entity slice", flowID, nodeID, eventType, field, expr.Kind, strings.TrimSpace(handler.Accumulate.ExpectedFrom)),
+				Location: nodeID,
+			}
+		}
+		return nil
+	}
+	return &Finding{
+		CheckID:  "expression_field_reference_validation",
+		Severity: "error",
+		Message:  fmt.Sprintf("flow %s node %s handler %s references entity.%s in %s but the create_entity handler does not provably initialize %s before that position", flowID, nodeID, eventType, field, expr.Kind, field),
+		Location: nodeID,
+	}
+}
+
+func createEntityTopLevelDataAccumulationWritesField(handler runtimecontracts.SystemNodeEventHandler, field string) bool {
+	for _, write := range handler.DataAccumulation.Writes {
+		targetField, ok := runtimepipeline.WorkflowEntityFieldNameFromTarget(write.Target())
+		if ok && targetField == field {
+			return true
+		}
+	}
+	return false
+}
+
+func createEntityComputeStoresField(handler runtimecontracts.SystemNodeEventHandler, field string) bool {
+	if handler.Compute == nil {
+		return false
+	}
+	targetField, ok := runtimepipeline.WorkflowEntityFieldNameFromTarget(handler.Compute.StoreAs)
+	return ok && targetField == field
+}
+
+func createEntityTopLevelDataAccumulationMakesFieldAvailable(phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) bool {
+	return phase == runtimepipeline.WorkflowEntityFieldLifecyclePayloadTransform
+}
+
+func createEntityComputeMakesFieldAvailable(phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) bool {
+	switch phase {
+	case runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
+		runtimepipeline.WorkflowEntityFieldLifecycleRule,
+		runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation,
+		runtimepipeline.WorkflowEntityFieldLifecyclePayloadTransform:
+		return true
+	default:
+		return false
+	}
+}
+
+func createEntityDynamicExpectedFrom(spec *runtimecontracts.AccumulateSpec) bool {
+	if spec == nil {
+		return false
+	}
+	path := spec.ExpectedPath
+	if path.IsZero() {
+		path = runtimepaths.Parse(spec.ExpectedFrom)
+	}
+	return path.Root == runtimepaths.RootEntity
 }
 
 type expressionReference struct {

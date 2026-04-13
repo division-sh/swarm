@@ -3328,3 +3328,56 @@ workspace_model:
       /opt/swarm/contracts: Read-only volume from deployment artifact.
     portability_rule: A product contract that works on local dev MUST work on Docker and production without contract changes.
       Mount paths are invariant. Only the backing storage implementation changes.
+static_analyzer:
+  description: Accepted static analyzer slices promoted from review drafts into the authoritative platform contract spec.
+    These slices are verify-owned and must not be widened beyond their recorded scope without a spec change.
+  slice_1_create_entity_field_initialization:
+    id: semantic_validity_create_entity_field_initialization
+    domain: semantic_validity
+    authority: hard_invalidity
+    severity: error
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - handler_specification.expression_context.boot_validation
+    - handler_specification.expression_context.namespaces.entity
+    - handler_specification.handler_fields.create_entity
+    - handler_specification.dependency_graph
+    scope:
+      description: 'For handlers with create_entity: true, every entity.X value read must be provably initialized before the
+        read position using only the accepted slice-1 proof carriers.
+        '
+      applies_to:
+      - 'create_entity: true handlers only'
+      - 'entity.X value reads only'
+      excludes:
+      - full reaching-definitions across handlers or flows
+      - agent write proof via save_entity_field
+      - declared event/timer dead-surface drift
+    proof_carriers:
+      schema_initial_value:
+        valid_for: all create_entity read positions
+      same_handler_unconditional_top_level_data_accumulation:
+        valid_for: positions strictly after top-level data_accumulation in the same handler
+        not_valid_for:
+        - guard
+        - filter
+        - reduce
+        - count
+        - compute
+        - on_complete.condition
+        - rules.condition
+        - same-handler data_accumulation.expression
+      same_handler_compute_store_as:
+        valid_for: positions that run after compute in the same handler
+        degradation: If the proof depends on accumulate.expected_from resolving from a dynamic entity field, degrade the
+          finding to warning with an explicit assumption instead of claiming hard proof.
+      presence_check_positions:
+      - has(entity.X)
+      - entity.X == null
+      - entity.X != null
+    rule: A create_entity handler value read of entity.X is invalid unless one of the accepted proof carriers proves X is initialized
+      before that read position.
+    authority_notes:
+      hard_invalidity: Missing proof is error-level semantic invalidity on the verify surface.
+      degraded_warning: Same-handler compute.store_as proof becomes warning-grade only when it depends on dynamic expected_from.
