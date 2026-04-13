@@ -1185,6 +1185,7 @@ func TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs(t *testi
 func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.CreateEntity = false
 	handler.Condition = "entity.missing_score >= 70"
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
@@ -1653,6 +1654,7 @@ func TestRun_PreservesSiblingWriteErrorWhenGuardAlsoReadsSparseField(t *testing.
 func TestRun_AllowsTopLevelDataAccumulationExpressionToReadRuleProducedField(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.CreateEntity = false
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
 		Condition: "payload.score >= 70",
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -1694,6 +1696,74 @@ func TestRun_SuppressesExpressionFieldReferenceFindingWhenComputeMakesFieldAvail
 	}
 	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.composite_score") {
 		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_WarnsWhenCreateEntityComputeProofDependsOnDynamicExpectedFrom(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
+		Groups: []runtimecontracts.EntitySchemaGroup{{
+			Name: "tracking",
+			Fields: []runtimecontracts.EntitySchemaField{
+				{Name: "expected_count", Type: "integer", Initial: 1},
+				{Name: "composite_score", Type: "number"},
+			},
+		}},
+	}
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.CreateEntity = true
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{ExpectedFrom: "entity.expected_count"}
+	handler.Compute = &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpCount,
+		StoreAs:   "entity.composite_score",
+	}
+	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
+		Condition: "entity.composite_score >= 0",
+	}}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.composite_score") {
+		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "expression_field_reference_validation", "entity.composite_score") {
+		t.Fatalf("expected degraded compute/store_as warning, got %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "expression_field_reference_validation", "dynamic") {
+		t.Fatalf("expected dynamic expected_from warning detail, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_AllowsCreateEntityComputeProofWhenExpectedFromIsNotDynamicEntityField(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
+		Groups: []runtimecontracts.EntitySchemaGroup{{
+			Name: "tracking",
+			Fields: []runtimecontracts.EntitySchemaField{
+				{Name: "composite_score", Type: "number"},
+			},
+		}},
+	}
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.CreateEntity = true
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Threshold: 1}
+	handler.Compute = &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpCount,
+		StoreAs:   "entity.composite_score",
+	}
+	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
+		Condition: "entity.composite_score >= 0",
+	}}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.composite_score") {
+		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.composite_score") {
+		t.Fatalf("unexpected degraded warning for non-dynamic expected_from, got %#v", report.Warnings())
 	}
 }
 
