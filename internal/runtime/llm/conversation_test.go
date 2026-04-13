@@ -319,6 +319,35 @@ func TestConversation_ExecuteToolCalls_TruncatesLargeResult(t *testing.T) {
 	}
 }
 
+func TestConversation_ExecuteToolCalls_PreservesLargeReadFileResultOnSupportedRelayPath(t *testing.T) {
+	huge := strings.Repeat("x", maxToolMessageBytes+8*1024)
+	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, &fakeRuntime{})
+	c.SetToolExecutor(largeToolExec{payload: map[string]any{
+		"content":    huge,
+		"size_bytes": len(huge),
+	}})
+
+	raw, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/workspace/corpus.json"}}})
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	if len(arr) != 1 || arr[0]["ok"] != true {
+		t.Fatalf("expected successful tool payload, got %#v", arr)
+	}
+	resultMap, _ := arr[0]["result"].(map[string]any)
+	if resultMap == nil {
+		t.Fatalf("expected result map, got %#v", arr[0]["result"])
+	}
+	if truncated, _ := resultMap["truncated"].(bool); truncated {
+		t.Fatalf("expected supported read_file relay to preserve full content, got %#v", resultMap)
+	}
+	content, _ := resultMap["content"].(string)
+	if len(content) != len(huge) {
+		t.Fatalf("content length = %d, want %d", len(content), len(huge))
+	}
+}
+
 func TestConversationStep_TerminatesAfterSuccessfulEmitToolCalls(t *testing.T) {
 	rt := &scriptedRuntime{
 		responses: []*Response{{

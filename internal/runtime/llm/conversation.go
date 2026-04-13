@@ -9,6 +9,7 @@ import (
 
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
+	"swarm/internal/runtime/core/toolidentity"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -25,6 +26,8 @@ const defaultMaxToolRounds = 8
 const (
 	maxToolResultBytes        = 16 * 1024
 	maxToolMessageBytes       = 64 * 1024
+	maxReadFileResultBytes    = 256 * 1024
+	maxReadFileMessageBytes   = 256 * 1024
 	maxToolErrorTextRunes     = 600
 	maxToolResultPreviewRunes = 1200
 )
@@ -222,7 +225,7 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 			entry["error"] = clampRunes(err.Error(), maxToolErrorTextRunes)
 		} else {
 			entry["ok"] = true
-			entry["result"] = clampToolResult(out)
+			entry["result"] = clampToolResult(tc.Name, out)
 		}
 		results = append(results, entry)
 		executed = append(executed, executedToolCall{
@@ -238,11 +241,11 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 	if err != nil {
 		return fmt.Sprintf(`[%q]`, err.Error()), executed
 	}
-	if len(b) > maxToolMessageBytes {
+	if len(b) > toolRelayMessageLimit(calls) {
 		overflow := []map[string]any{{
 			"name":  "__runtime_guardrail__",
 			"ok":    false,
-			"error": fmt.Sprintf("tool output exceeded %d bytes and was truncated", maxToolMessageBytes),
+			"error": fmt.Sprintf("tool output exceeded %d bytes and was truncated", toolRelayMessageLimit(calls)),
 		}}
 		guarded, gerr := json.Marshal(overflow)
 		if gerr != nil {
@@ -313,7 +316,7 @@ func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context
 	return toolcapabilities.WithContext(ctx, c.toolExecutor.ToolCapabilitiesForActor(actor, names, nil))
 }
 
-func clampToolResult(result any) any {
+func clampToolResult(name string, result any) any {
 	if result == nil {
 		return nil
 	}
@@ -324,7 +327,8 @@ func clampToolResult(result any) any {
 			"error":     "marshal tool result",
 		}
 	}
-	if len(b) <= maxToolResultBytes {
+	limit := toolRelayResultLimit(name)
+	if len(b) <= limit {
 		return result
 	}
 	return map[string]any{
@@ -332,6 +336,26 @@ func clampToolResult(result any) any {
 		"bytes":     len(b),
 		"preview":   clampRunes(string(b), maxToolResultPreviewRunes),
 	}
+}
+
+func toolRelayResultLimit(name string) int {
+	if toolIsLargeRelayFileRead(name) {
+		return maxReadFileResultBytes
+	}
+	return maxToolResultBytes
+}
+
+func toolRelayMessageLimit(calls []ToolCall) int {
+	for _, call := range calls {
+		if toolIsLargeRelayFileRead(call.Name) {
+			return maxReadFileMessageBytes
+		}
+	}
+	return maxToolMessageBytes
+}
+
+func toolIsLargeRelayFileRead(name string) bool {
+	return toolidentity.CanonicalName(name) == "read_file"
 }
 
 func clampRunes(s string, maxRunes int) string {
