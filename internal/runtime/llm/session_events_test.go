@@ -262,7 +262,7 @@ func TestEnrichTurnRecord_UsesCanonicalVisibleToolsForNativeCapabilities(t *test
 		SessionID:   "session-1",
 	}, nil)
 
-	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed"}) {
+	if !slices.Equal(rec.AvailableTools, []string{"bash", "emit_category_assessed", "read_file", "write_file"}) {
 		t.Fatalf("available_tools = %#v", rec.AvailableTools)
 	}
 }
@@ -288,6 +288,59 @@ func TestEnrichTurnRecord_FiltersCLIControlToolsFromObservedVisibleTools(t *test
 	})
 
 	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed", "read_file", "write_file"}) {
+		t.Fatalf("available_tools = %#v", rec.AvailableTools)
+	}
+}
+
+func TestEnrichTurnRecord_UsesEmitFallbackWhenObservedCLISurfaceExistsWithoutVisibleNonEmitTools(t *testing.T) {
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID: "analysis-agent",
+		NativeTools: runtimeactors.NativeToolConfig{
+			FileIO: true,
+		},
+	})
+	rec := enrichTurnRecord(ctx, &Session{
+		ID: "session-1",
+		Tools: []ToolDefinition{
+			{Name: "emit_category_assessed"},
+			{Name: "read_file"},
+		},
+	}, AgentTurnRecord{
+		AgentID:     "analysis-agent",
+		RuntimeMode: sessions.RuntimeModeTask.String(),
+		SessionID:   "session-1",
+	}, &Response{
+		MCPServers: map[string]string{
+			"runtime-tools": "failed",
+		},
+	})
+
+	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed"}) {
+		t.Fatalf("available_tools = %#v", rec.AvailableTools)
+	}
+}
+
+func TestEnrichTurnRecord_UsesPlannedConfiguredSurfaceWhenObservedMetadataIsAbsent(t *testing.T) {
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID: "analysis-agent",
+	})
+	rec := enrichTurnRecord(ctx, &Session{
+		ID: "session-1",
+		Tools: []ToolDefinition{
+			{Name: "emit_category_assessed"},
+			{Name: "query_entities"},
+		},
+	}, AgentTurnRecord{
+		AgentID:     "analysis-agent",
+		RuntimeMode: sessions.RuntimeModeTask.String(),
+		SessionID:   "session-1",
+	}, &Response{
+		ToolCalls: []ToolCall{
+			{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}},
+		},
+	})
+
+	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed", "query_entities"}) {
 		t.Fatalf("available_tools = %#v", rec.AvailableTools)
 	}
 }

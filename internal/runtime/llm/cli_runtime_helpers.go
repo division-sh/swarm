@@ -553,9 +553,21 @@ func observedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []Too
 	return filterCanonicalVisibleToolsForActor(actor, tools, observed)
 }
 
+func plannedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
+	surface := cliExecutionToolSurfaceForActor(actor, tools)
+	return append([]string(nil), surface.CanonicalVisibleTools...)
+}
+
 func cliLocalFallbackVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
 	surface := cliExecutionToolSurfaceForActor(actor, tools)
 	return append([]string(nil), surface.LocalFallbackTools...)
+}
+
+func hasObservedCLIExecutionSurface(resp *Response) bool {
+	if resp == nil {
+		return false
+	}
+	return len(resp.VisibleTools) > 0 || len(resp.MCPVisibleTools) > 0 || len(resp.MCPServers) > 0
 }
 
 func cliToolCallAllowedForTurn(actor models.AgentConfig, tools []ToolDefinition, resp *Response, name string) bool {
@@ -569,6 +581,14 @@ func cliToolCallAllowedForTurn(actor models.AgentConfig, tools []ToolDefinition,
 		}
 	}
 	for _, visible := range observedCanonicalVisibleToolsForActor(actor, tools, resp) {
+		if visible == name {
+			return true
+		}
+	}
+	if hasObservedCLIExecutionSurface(resp) {
+		return false
+	}
+	for _, visible := range plannedCanonicalVisibleToolsForActor(actor, tools) {
 		if visible == name {
 			return true
 		}
