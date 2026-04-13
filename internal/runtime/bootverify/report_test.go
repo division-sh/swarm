@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -1178,6 +1179,56 @@ func TestRun_DoesNotWarnWhenTransformAndPlatformForcedFieldsCoverRequiredPayload
 
 	if reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
 		t.Fatalf("unexpected payload completeness warning when transform covers required fields, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnWhenNormalizedTransformTargetsCoverRequiredPayload(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		body      string
+		transform *runtimecontracts.PayloadTransformSpec
+	}{
+		{
+			name: "mappings",
+			body: "payload_transform:\n  mappings:\n    scan_id: payload.scan_id\n",
+		},
+		{
+			name: "entries",
+			transform: &runtimecontracts.PayloadTransformSpec{
+				Entries: []runtimecontracts.TransformSpec{{
+					Target: "scan_id",
+					Value:  runtimecontracts.CELExpression("payload.scan_id"),
+				}},
+			},
+		},
+		{
+			name: "shorthand",
+			body: "payload_transform:\n  scan_id: payload.scan_id\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := bootverifyPayloadCompletenessBundle()
+			node := bundle.Nodes["dispatcher"]
+			handler := node.EventHandlers["scan.corpus_dispatch"]
+			if tc.transform != nil {
+				handler.PayloadTransform = tc.transform
+			} else {
+				handler.PayloadTransform = mustPayloadCompletenessTransform(t, tc.body)
+			}
+			node.EventHandlers["scan.corpus_dispatch"] = handler
+			bundle.Nodes["dispatcher"] = node
+			bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+				t.Fatalf("unexpected payload completeness warning for %s transform form, got %#v", tc.name, report.Warnings())
+			}
+		})
 	}
 }
 
@@ -2793,6 +2844,18 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
 	return bundle
+}
+
+func mustPayloadCompletenessTransform(t *testing.T, body string) *runtimecontracts.PayloadTransformSpec {
+	t.Helper()
+
+	var decoded struct {
+		PayloadTransform runtimecontracts.PayloadTransformSpec `yaml:"payload_transform"`
+	}
+	if err := yaml.Unmarshal([]byte(body), &decoded); err != nil {
+		t.Fatalf("unmarshal payload_transform: %v", err)
+	}
+	return &decoded.PayloadTransform
 }
 
 func reportContains(items []Finding, checkID, contains string) bool {
