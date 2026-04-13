@@ -285,12 +285,56 @@ func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t
 		t.Fatalf("context header = %#v, want %q", got, contextToken)
 	}
 	urlRaw := runtimeTools["url"].(string)
+	if urlRaw != "http://host.docker.internal:18082/mcp" {
+		t.Fatalf("url = %q, want container-reachable host MCP endpoint", urlRaw)
+	}
 	legacyTraceQuery := "trace" + "_id="
 	if strings.Contains(urlRaw, legacyTraceQuery) {
 		t.Fatalf("url %q should not propagate legacy trace query params", urlRaw)
 	}
 	if strings.Contains(urlRaw, "ctx_token=") {
 		t.Fatalf("url %q should not propagate context token query", urlRaw)
+	}
+}
+
+func TestBuildMCPConfigArg_PreservesNonLoopbackGatewayURLForContainerExecution(t *testing.T) {
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://orchestrator:8090")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
+
+	r := &ClaudeCLIRuntime{
+		cfg: &config.Config{},
+		mcpTurns: mcpTurnContextStoreStub{
+			register:   func(_ context.Context, _ time.Duration, _ []string) string { return "ctx-token-456" },
+			unregister: func(string) {},
+		},
+	}
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:   "market-research-agent",
+		Role: "market_research",
+		Mode: "discovery",
+	})
+	s := &Session{
+		AgentID: "market-research-agent",
+		Tools:   []ToolDefinition{{Name: "query_entities"}},
+	}
+
+	cfgJSON, _, enabled, err := r.buildMCPConfigArg(ctx, s)
+	if err != nil {
+		t.Fatalf("buildMCPConfigArg: %v", err)
+	}
+	if !enabled {
+		t.Fatal("expected MCP config to be enabled")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(cfgJSON), &payload); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	servers := payload["mcpServers"].(map[string]any)
+	runtimeTools := servers["runtime-tools"].(map[string]any)
+	if got := runtimeTools["url"]; got != "http://orchestrator:8090/mcp" {
+		t.Fatalf("url = %#v, want orchestrator MCP endpoint preserved", got)
 	}
 }
 

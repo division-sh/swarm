@@ -266,10 +266,7 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 			dockerBin = "docker"
 		}
 		dockerArgs := []string{"exec", "-i"}
-		gatewayURL := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
-		if gatewayURL == "" {
-			gatewayURL = "http://orchestrator:8090"
-		}
+		gatewayURL := runtimeMCPGatewayURLForContainerExecution()
 		if gatewayURL != "" {
 			dockerArgs = append(dockerArgs, "-e", "SWARM_TOOL_GATEWAY_URL="+gatewayURL)
 		}

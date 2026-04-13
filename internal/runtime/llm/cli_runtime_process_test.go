@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"swarm/internal/config"
@@ -60,4 +61,22 @@ func TestClaudeCLIRuntimeContinueSession_RejectsHostFallbackWhenTargetMissing(t 
 	}
 
 	_ = session
+}
+
+func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *testing.T) {
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:8081")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	runtime.cfg.LLM.ClaudeCLI.Command = "claude"
+
+	cmd := runtime.buildCommand(context.Background(), []string{"--print", "hello"}, &workspace.Target{
+		Container: "swarm-agent-market-research",
+		Workdir:   "/workspace",
+	})
+	got := strings.Join(cmd.Args, " ")
+	if !strings.Contains(got, "SWARM_TOOL_GATEWAY_URL=http://host.docker.internal:8081/mcp") {
+		t.Fatalf("docker args = %q, want container-reachable MCP gateway URL", got)
+	}
 }
