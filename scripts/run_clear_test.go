@@ -94,10 +94,28 @@ func TestRunClear_UsesOperatorBearerForDirective(t *testing.T) {
 	}
 }
 
+func TestRunClear_DerivesToolGatewayURLFromHealthAddrByDefault(t *testing.T) {
+	result := runRunClear(t, runClearConfig{})
+
+	if got := strings.TrimSpace(result.toolGatewayURL); got != "http://127.0.0.1:8081" {
+		t.Fatalf("tool gateway url = %q, want helper-derived default from HEALTH_ADDR", got)
+	}
+}
+
+func TestRunClear_PreservesExplicitToolGatewayURLOverride(t *testing.T) {
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://gateway.internal:8090")
+	result := runRunClear(t, runClearConfig{})
+
+	if got := strings.TrimSpace(result.toolGatewayURL); got != "http://gateway.internal:8090" {
+		t.Fatalf("tool gateway url = %q, want explicit override preserved", got)
+	}
+}
+
 type runClearResult struct {
 	stdout           string
 	operatorToken    string
 	builderToken     string
+	toolGatewayURL   string
 	healthHeaders    string
 	healthURL        string
 	rpcHeaders       string
@@ -117,6 +135,7 @@ func runRunClear(t *testing.T, cfg runClearConfig) runClearResult {
 	pidFile := filepath.Join(t.TempDir(), "swarm.pid")
 	operatorTokenSink := filepath.Join(t.TempDir(), "operator-token.txt")
 	builderTokenSink := filepath.Join(t.TempDir(), "builder-token.txt")
+	toolGatewayURLSink := filepath.Join(t.TempDir(), "tool-gateway-url.txt")
 	healthHeadersSink := filepath.Join(t.TempDir(), "api-health-headers.txt")
 	healthURLSink := filepath.Join(t.TempDir(), "api-health-url.txt")
 	rpcHeadersSink := filepath.Join(t.TempDir(), "rpc-headers.txt")
@@ -135,6 +154,7 @@ func runRunClear(t *testing.T, cfg runClearConfig) runClearResult {
 set -euo pipefail
 printf '%s' "${SWARM_OPERATOR_AUTH_TOKEN:-}" > "${PYTHON_OPERATOR_TOKEN_SINK}"
 printf '%s' "${SWARM_BUILDER_AUTH_TOKEN:-}" > "${PYTHON_ENV_SINK}"
+printf '%s' "${SWARM_TOOL_GATEWAY_URL:-}" > "${PYTHON_TOOL_GATEWAY_URL_SINK}"
 printf '4242\n'
 `)
 	writeExecutable(t, binDir, "curl", `#!/usr/bin/env bash
@@ -252,6 +272,7 @@ printf '{}'
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"PYTHON_OPERATOR_TOKEN_SINK=" + operatorTokenSink,
 		"PYTHON_ENV_SINK=" + builderTokenSink,
+		"PYTHON_TOOL_GATEWAY_URL_SINK=" + toolGatewayURLSink,
 		"CURL_API_HEALTH_HEADERS_SINK=" + healthHeadersSink,
 		"CURL_API_HEALTH_URL_SINK=" + healthURLSink,
 		"CURL_HEADERS_SINK=" + rpcHeadersSink,
@@ -288,6 +309,7 @@ printf '{}'
 		stdout:           string(out),
 		operatorToken:    readFileTrimmed(t, operatorTokenSink),
 		builderToken:     readFileTrimmed(t, builderTokenSink),
+		toolGatewayURL:   readFileTrimmed(t, toolGatewayURLSink),
 		healthHeaders:    readFileTrimmed(t, healthHeadersSink),
 		healthURL:        readFileTrimmed(t, healthURLSink),
 		rpcHeaders:       readFileTrimmed(t, rpcHeadersSink),

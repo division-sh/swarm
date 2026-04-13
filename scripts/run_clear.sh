@@ -7,6 +7,7 @@ HEALTH_URL="http://${HEALTH_ADDR}/healthz"
 READY_URL="http://${HEALTH_ADDR}/readyz"
 API_HEALTH_URL="http://${HEALTH_ADDR}/api/health"
 HEALTH_PORT="${HEALTH_ADDR##*:}"
+SWARM_TOOL_GATEWAY_URL="${SWARM_TOOL_GATEWAY_URL:-http://${HEALTH_ADDR}}"
 
 SWARM_DB_HOST="${SWARM_DB_HOST:-127.0.0.1}"
 SWARM_DB_PORT="${SWARM_DB_PORT:-5432}"
@@ -28,6 +29,7 @@ SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN:-$(uuidgen | tr '[:upper:]'
 
 export SWARM_OPERATOR_AUTH_TOKEN
 export SWARM_BUILDER_AUTH_TOKEN
+export SWARM_TOOL_GATEWAY_URL
 
 kill_swarm_processes() {
   local pids=""
