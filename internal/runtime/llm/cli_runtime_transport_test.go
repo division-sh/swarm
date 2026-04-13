@@ -360,3 +360,19 @@ func TestValidateCLIResponseToolCallsForTurn_AllowsObservedMCPToolAndEmitFallbac
 		t.Fatalf("validateCLIResponseToolCallsForTurn: %v", err)
 	}
 }
+
+func TestValidateCLIResponseToolCallsForTurn_AllowsPlannedNonEmitSurfaceWhenObservedMetadataIsAbsent(t *testing.T) {
+	actor := models.AgentConfig{
+		ID: "market-research-agent",
+	}
+	err := validateCLIResponseToolCallsForTurn(actor, []ToolDefinition{
+		{Name: "query_entities"},
+	}, &Response{
+		ToolCalls: []ToolCall{
+			{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateCLIResponseToolCallsForTurn: %v", err)
+	}
+}
