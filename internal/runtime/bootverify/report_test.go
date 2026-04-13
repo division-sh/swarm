@@ -1108,6 +1108,92 @@ func TestRun_DoesNotWarnForPhantomProducesWhenDeclaredEventsMatchEmits(t *testin
 	}
 }
 
+func TestRun_WarnsWhenPayloadTransformOmitsRequiredEmittedField(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.PayloadTransform = &runtimecontracts.PayloadTransformSpec{
+		Fields: map[string]string{
+			"geography": "payload.geography",
+			"mode":      "payload.mode",
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("expected payload completeness warning for scan_id, got %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "payload_transform: present") {
+		t.Fatalf("expected payload completeness warning to mention payload_transform presence, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_WarnsWithoutPayloadTransformEvenWhenContextSuggestsPassthrough(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Required = []string{"entity_id", "scan_id"}
+	bundle.Events["market_research.scan_assigned"] = entry
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("expected payload completeness warning for scan_id, got %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "payload_transform: absent") {
+		t.Fatalf("expected payload completeness warning to mention missing payload_transform, got %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "trigger schema declares scan_id: yes (required)") {
+		t.Fatalf("expected payload completeness warning to mention trigger schema context, got %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "entity schema declares scan_id: yes") {
+		t.Fatalf("expected payload completeness warning to mention entity schema context, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnWhenTransformAndPlatformForcedFieldsCoverRequiredPayload(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.PayloadTransform = &runtimecontracts.PayloadTransformSpec{
+		Fields: map[string]string{
+			"scan_id":   "payload.scan_id",
+			"geography": "payload.geography",
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("unexpected payload completeness warning when transform covers required fields, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnWhenOnlyPlatformForcedFieldsAreRequired(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Required = []string{"entity_id", "current_state"}
+	bundle.Events["market_research.scan_assigned"] = entry
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "semantic_drift_payload_completeness", "not statically provable") {
+		t.Fatalf("unexpected payload completeness warning for platform-forced-only schema, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-missing-pin")
 
@@ -2012,8 +2098,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 38 {
-		t.Fatalf("bootCheckRegistry count = %d, want 38", got)
+	if got := len(bootCheckRegistry); got != 39 {
+		t.Fatalf("bootCheckRegistry count = %d, want 39", got)
 	}
 	if got := len(supplementalChecks); got != 2 {
 		t.Fatalf("supplementalChecks count = %d, want 2", got)
@@ -2639,6 +2725,69 @@ func bootverifyDeclarationDriftBundle() *runtimecontracts.WorkflowContractBundle
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.start": {Source: "external"},
 			"task.done":  {ConsumerType: []string{"dashboard"}},
+		},
+	}
+	bundle.Platform.Platform.Name = "test"
+	bundle.Platform.Platform.Version = "1.0.0"
+	return bundle
+}
+
+func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBundle {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "default",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "scan_id"},
+						{Name: "geography"},
+					},
+				}},
+			},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"dispatcher": {
+					"scan.corpus_dispatch": {
+						Emits: runtimecontracts.EventEmission{Single: "market_research.scan_assigned"},
+					},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"dispatcher": {
+				SubscribesTo: []string{"scan.corpus_dispatch"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"scan.corpus_dispatch": {
+						Emits: runtimecontracts.EventEmission{Single: "market_research.scan_assigned"},
+					},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.corpus_dispatch": {
+				Source: "external",
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"scan_id":   {Type: "string"},
+						"geography": {Type: "string"},
+						"mode":      {Type: "string"},
+					},
+				},
+				Required: []string{"scan_id", "geography"},
+			},
+			"market_research.scan_assigned": {
+				ConsumerType: []string{"dashboard"},
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id":          {Type: "string"},
+						"current_state":      {Type: "string"},
+						"trigger_event_type": {Type: "string"},
+						"scan_id":            {Type: "string"},
+						"geography":          {Type: "string"},
+					},
+				},
+				Required: []string{"entity_id", "scan_id"},
+			},
 		},
 	}
 	bundle.Platform.Platform.Name = "test"

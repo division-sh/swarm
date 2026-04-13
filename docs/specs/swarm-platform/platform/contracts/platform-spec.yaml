@@ -3381,3 +3381,41 @@ static_analyzer:
     authority_notes:
       hard_invalidity: Missing proof is error-level semantic invalidity on the verify surface.
       degraded_warning: Same-handler compute.store_as proof becomes warning-grade only when it depends on dynamic expected_from.
+  slice_2_emitted_event_payload_completeness:
+    id: semantic_drift_payload_completeness
+    domain: semantic_drift
+    authority: semantic_drift_warning
+    severity: warning
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - handler_specification.handler_fields.emits
+    - handler_specification.handler_fields.payload_transform
+    - contract_formats.event_schema
+    - observation_model.emitted_events.payload_rules
+    scope:
+      description: For every event emitted by a system node handler, verify that the emitted payload statically covers all required
+        event-schema fields using only the accepted slice-2 proof carriers.
+      applies_to:
+      - all system-node emitted events
+      excludes:
+      - cross-handler reaching-definitions
+      - prompt lint / provenance / handoff audit work
+      - lower-authority heuristic checks
+      - agent write proof via save_entity_field
+    proof_carriers:
+      platform_forced_fields:
+        valid_fields:
+        - entity_id
+        - trigger_event_type
+        - current_state
+      explicit_payload_transform_fields:
+        valid_for: keys explicitly declared in payload_transform.fields
+      transform_replacement_rule:
+        description: When payload_transform is present, implicit passthrough does not count. Only payload_transform.fields keys plus
+          platform-forced fields are provable.
+    no_transform_rule:
+      description: When payload_transform is absent, trigger-schema context and entity-schema context may enrich the finding message
+        but do not clear the finding. Only platform-forced fields are provable in this slice.
+    rule: For each required emitted-event field, emit semantic_drift_warning unless the field is platform-forced or explicitly covered
+      by payload_transform.fields. The finding message must say the field is not statically provable.
