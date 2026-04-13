@@ -242,6 +242,8 @@ type CLIExecutionToolSurface struct {
 	RuntimeToolNames      []string
 	PromptRuntimeTools    []string
 	ProviderBuiltinTools  []string
+	ProviderMCPTools      []string
+	LocalFallbackTools    []string
 }
 
 func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefinition) CLIExecutionToolSurface {
@@ -311,22 +313,38 @@ func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefin
 	}
 
 	promptRuntime := make([]string, 0, len(runtimeNames))
+	providerMCPTools := make([]string, 0, len(runtimeNames))
+	localFallbackTools := make([]string, 0, len(runtimeNames))
 	for _, name := range runtimeNames {
-		if _, ok := nativeCapabilityTools[name]; ok {
+		canonical := toolidentity.CanonicalName(name)
+		if canonical == "" {
 			continue
 		}
-		promptRuntime = append(promptRuntime, name)
+		providerMCPTools = append(providerMCPTools, toolidentity.RuntimeToolsMCPPrefix+canonical)
+		if strings.HasPrefix(canonical, "emit_") {
+			localFallbackTools = append(localFallbackTools, canonical)
+			promptRuntime = append(promptRuntime, canonical)
+			continue
+		}
+		if _, ok := nativeCapabilityTools[canonical]; ok {
+			continue
+		}
+		promptRuntime = append(promptRuntime, toolidentity.RuntimeToolsMCPPrefix+canonical)
 	}
 
 	slices.Sort(providerBuiltins)
 	slices.Sort(canonicalVisible)
 	slices.Sort(promptRuntime)
+	slices.Sort(providerMCPTools)
+	slices.Sort(localFallbackTools)
 
 	return CLIExecutionToolSurface{
 		CanonicalVisibleTools: canonicalVisible,
 		RuntimeToolNames:      runtimeNames,
 		PromptRuntimeTools:    promptRuntime,
 		ProviderBuiltinTools:  providerBuiltins,
+		ProviderMCPTools:      providerMCPTools,
+		LocalFallbackTools:    localFallbackTools,
 	}
 }
 
@@ -410,7 +428,7 @@ func filterCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolD
 
 func claudeAllowedToolNamesForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
 	surface := cliExecutionToolSurfaceForActor(actor, tools)
-	allowed := make([]string, 0, len(surface.RuntimeToolNames)+len(surface.ProviderBuiltinTools)+len(claudeControlToolNames()))
+	allowed := make([]string, 0, len(surface.ProviderMCPTools)+len(surface.LocalFallbackTools)+len(surface.ProviderBuiltinTools)+len(claudeControlToolNames()))
 	seen := make(map[string]struct{}, cap(allowed))
 	addAllowed := func(name string) {
 		name = strings.TrimSpace(name)
@@ -423,7 +441,10 @@ func claudeAllowedToolNamesForActor(actor models.AgentConfig, tools []ToolDefini
 		seen[name] = struct{}{}
 		allowed = append(allowed, name)
 	}
-	for _, name := range surface.RuntimeToolNames {
+	for _, name := range surface.ProviderMCPTools {
+		addAllowed(name)
+	}
+	for _, name := range surface.LocalFallbackTools {
 		addAllowed(name)
 	}
 	for _, name := range surface.ProviderBuiltinTools {
@@ -482,23 +503,77 @@ func augmentCLISystemPrompt(systemPrompt string, actor models.AgentConfig, tools
 	b.WriteString(cliToolInvocationMarker)
 	b.WriteString("\n")
 	if len(surface.PromptRuntimeTools) > 0 {
-		b.WriteString("Call Swarm runtime tools by these exact names when you need them:\n")
+		b.WriteString("Call Swarm runtime tools by these exact names when they are available in this turn:\n")
 		for _, name := range surface.PromptRuntimeTools {
 			b.WriteString("- ")
 			b.WriteString(name)
 			b.WriteString("\n")
 		}
-		b.WriteString("If Claude CLI also shows MCP-prefixed variants like `mcp__runtime-tools__...`, they map to the same Swarm runtime tools.\n")
+	}
+	nonEmitProviderTools := make([]string, 0, len(surface.ProviderMCPTools))
+	localFallbackSet := make(map[string]struct{}, len(surface.LocalFallbackTools))
+	for _, name := range surface.LocalFallbackTools {
+		localFallbackSet[strings.TrimSpace(name)] = struct{}{}
+	}
+	for _, name := range surface.ProviderMCPTools {
+		canonical := toolidentity.CanonicalName(name)
+		if _, ok := localFallbackSet[canonical]; ok {
+			continue
+		}
+		nonEmitProviderTools = append(nonEmitProviderTools, name)
+	}
+	if len(nonEmitProviderTools) > 0 {
+		b.WriteString("Provider-callable non-emit workflow tools are exposed through these exact MCP names:\n")
+		for _, name := range nonEmitProviderTools {
+			b.WriteString("- ")
+			b.WriteString(name)
+			b.WriteString("\n")
+		}
+	}
+	if len(surface.PromptRuntimeTools) > 0 || len(nonEmitProviderTools) > 0 {
+		b.WriteString("Non-emit workflow tools are exposed through MCP-prefixed names like `mcp__runtime-tools__...`. Raw `emit_*` calls remain local runtime fallbacks.\n")
 	}
 	if len(controlTools) > 0 {
 		b.WriteString("Claude CLI control tools available in this turn: ")
 		b.WriteString(strings.Join(controlTools, ", "))
 		b.WriteString(".\n")
 	}
-	if hasToolPrefix(surface.PromptRuntimeTools, "emit_") {
+	if hasToolPrefix(surface.LocalFallbackTools, "emit_") {
 		b.WriteString("When you need to publish an event, call the matching `emit_*` tool directly. Emit tools may not appear as MCP-prefixed variants in Claude CLI; Swarm will execute the exact `emit_*` call locally. Do not write JSON files under `/workspace/events` as a substitute for emission.\n")
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func observedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
+	if resp == nil {
+		return nil
+	}
+	observed := append([]string(nil), resp.VisibleTools...)
+	observed = append(observed, resp.MCPVisibleTools...)
+	return filterCanonicalVisibleToolsForActor(actor, tools, observed)
+}
+
+func cliLocalFallbackVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
+	surface := cliExecutionToolSurfaceForActor(actor, tools)
+	return append([]string(nil), surface.LocalFallbackTools...)
+}
+
+func cliToolCallAllowedForTurn(actor models.AgentConfig, tools []ToolDefinition, resp *Response, name string) bool {
+	name = toolidentity.CanonicalName(name)
+	if name == "" {
+		return false
+	}
+	for _, allowed := range cliLocalFallbackVisibleToolsForActor(actor, tools) {
+		if allowed == name {
+			return true
+		}
+	}
+	for _, visible := range observedCanonicalVisibleToolsForActor(actor, tools, resp) {
+		if visible == name {
+			return true
+		}
+	}
+	return false
 }
 
 func hasToolPrefix(names []string, prefix string) bool {

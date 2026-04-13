@@ -434,6 +434,25 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 		return nil, err
 	}
+	if err := validateCLIResponseToolCallsForTurn(actor, s.Tools, resp); err != nil {
+		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
+			AgentID:     s.AgentID,
+			RuntimeMode: resolved.RuntimeMode.String(),
+			SessionID:   s.ID,
+			RequestPayload: jsonBytes(map[string]any{
+				"args":                          args,
+				"message":                       message,
+				"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
+				"prompt_arg_fallback_attempted": transportFallback.Attempted,
+				"prompt_arg_fallback_used":      transportFallback.Used,
+			}),
+			ResponseRaw: resp.Raw,
+			ParseOK:     true,
+			Latency:     latency,
+			Error:       err.Error(),
+		}, resp))
+		return nil, err
+	}
 
 	s.Messages = append(s.Messages, message, resp.Message)
 	if sid := strings.TrimSpace(resp.SessionID); sid != "" && sid != s.ProviderSessionID {
@@ -494,4 +513,17 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	}
 	return resp, nil
+}
+
+func validateCLIResponseToolCallsForTurn(actor runtimeactors.AgentConfig, tools []ToolDefinition, resp *Response) error {
+	if resp == nil || len(resp.ToolCalls) == 0 {
+		return nil
+	}
+	for _, call := range resp.ToolCalls {
+		if cliToolCallAllowedForTurn(actor, tools, resp, call.Name) {
+			continue
+		}
+		return fmt.Errorf("tool %q was not provider-visible or locally allowed on this turn", strings.TrimSpace(call.Name))
+	}
+	return nil
 }

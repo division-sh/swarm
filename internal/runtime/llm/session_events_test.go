@@ -200,8 +200,11 @@ func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *test
 	if !strings.Contains(s.SystemPrompt, "emit_market_research_scan_complete") {
 		t.Fatalf("expected emit tool name in system prompt, got %q", s.SystemPrompt)
 	}
-	if !strings.Contains(s.SystemPrompt, "read_file") {
-		t.Fatalf("expected runtime tool name in system prompt, got %q", s.SystemPrompt)
+	if !strings.Contains(s.SystemPrompt, "mcp__runtime-tools__read_file") {
+		t.Fatalf("expected provider-visible runtime tool name in system prompt, got %q", s.SystemPrompt)
+	}
+	if strings.Contains(s.SystemPrompt, "\n- read_file\n") {
+		t.Fatalf("did not expect raw non-emit runtime tool fallback in system prompt, got %q", s.SystemPrompt)
 	}
 	if strings.Contains(s.SystemPrompt, "Claude CLI native tools available in this turn") {
 		t.Fatalf("did not expect native builtin prompt section, got %q", s.SystemPrompt)
@@ -259,10 +262,7 @@ func TestEnrichTurnRecord_UsesCanonicalVisibleToolsForNativeCapabilities(t *test
 		SessionID:   "session-1",
 	}, nil)
 
-	if len(rec.AvailableTools) != 4 {
-		t.Fatalf("available_tools = %#v", rec.AvailableTools)
-	}
-	if !slices.Equal(rec.AvailableTools, []string{"bash", "emit_category_assessed", "read_file", "write_file"}) {
+	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed"}) {
 		t.Fatalf("available_tools = %#v", rec.AvailableTools)
 	}
 }
@@ -311,8 +311,13 @@ func TestClaudeCLIRuntimePrompt_HidesNativeCapabilityFallbackToolsFromPostamble(
 		t.Fatalf("expected non-native runtime tool in prompt, got %q", prompt)
 	}
 	for _, name := range []string{"read_file", "write_file", "bash"} {
-		if strings.Contains(prompt, name) {
+		if strings.Contains(prompt, "\n- "+name+"\n") {
 			t.Fatalf("did not expect native capability tool %q in prompt, got %q", name, prompt)
+		}
+	}
+	for _, name := range []string{"mcp__runtime-tools__read_file", "mcp__runtime-tools__write_file", "mcp__runtime-tools__bash"} {
+		if !strings.Contains(prompt, name) {
+			t.Fatalf("expected provider-visible MCP tool %q in prompt, got %q", name, prompt)
 		}
 	}
 	if strings.Contains(prompt, "Claude CLI native tools available in this turn") {
@@ -604,7 +609,7 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	if rec.EntityID != "22222222-2222-2222-2222-222222222222" {
 		t.Fatalf("entity_id = %q", rec.EntityID)
 	}
-	if len(rec.AvailableTools) != 2 || rec.AvailableTools[0] != "emit_category_assessed" || rec.AvailableTools[1] != "read_file" {
+	if len(rec.AvailableTools) != 1 || rec.AvailableTools[0] != "emit_category_assessed" {
 		t.Fatalf("available_tools = %#v", rec.AvailableTools)
 	}
 	if len(rec.ToolCalls) != 1 || rec.ToolCalls[0].Name != "emit_category_assessed" {
