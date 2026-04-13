@@ -104,8 +104,8 @@ func payloadCompletenessTransformTargets(handler runtimecontracts.SystemNodeEven
 	if handler.PayloadTransform == nil {
 		return out
 	}
-	for target := range handler.PayloadTransform.Fields {
-		target = strings.TrimSpace(target)
+	for _, entry := range handler.PayloadTransform.TransformEntries() {
+		target := strings.TrimSpace(entry.Target)
 		if target == "" {
 			continue
 		}
