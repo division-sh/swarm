@@ -402,6 +402,8 @@ func (c *checkerContext) toolResolution() []Finding {
 	c.toolLoaded = true
 	mcpPrefixes := declaredMCPPrefixes(c.source)
 	discoveredTools := c.mcpDiscovered()
+	// Boot tool warnings must consume the same runtime inventory truth that the
+	// generic runtime ships, then layer MCP discovery on top of it.
 	runtimeToolNames := c.runtimeAvailableToolNames()
 	for agentID, agent := range c.source.AgentEntries() {
 		agentID = strings.TrimSpace(agentID)

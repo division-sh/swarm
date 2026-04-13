@@ -55,6 +55,9 @@ func LoadContractSchemasForSource(source semanticview.Source) (map[string]Contra
 	return parsed, nil
 }
 
+// This is the canonical builtin/non-MCP runtime tool inventory for supported
+// verify, boot-warning, and operator-diagnostic surfaces. Authored ToolEntries
+// alone are not the full runtime-available tool truth.
 func RuntimeAvailableToolNamesForSource(source semanticview.Source) []string {
 	names := make(map[string]struct{})
 	for name := range supportedRuntimeToolNames {
