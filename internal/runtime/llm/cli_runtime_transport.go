@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -68,10 +69,7 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 }
 
 func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (configJSON string, contextToken string, enabled bool, err error) {
-	gatewayURL := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
-	if gatewayURL == "" {
-		gatewayURL = "http://orchestrator:8090"
-	}
+	gatewayURL := runtimeMCPGatewayURLForContainerExecution()
 	binding, enabled, err := BuildMCPHTTPBinding(ctx, r.cfg, r.mcpTurns, s, gatewayURL, strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")))
 	if err != nil || !enabled {
 		return "", "", enabled, err
@@ -149,6 +147,47 @@ func normalizeMCPServerURL(raw string) string {
 		// Respect explicit path when operator already targets a specific endpoint.
 	}
 	return strings.TrimSpace(u.String())
+}
+
+func runtimeMCPGatewayURLForContainerExecution() string {
+	raw := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
+	if raw == "" {
+		raw = "http://orchestrator:8090"
+	}
+	return normalizeContainerExecutionMCPServerURL(raw)
+}
+
+func normalizeContainerExecutionMCPServerURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return normalizeMCPServerURL("http://orchestrator:8090")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || strings.TrimSpace(u.Host) == "" {
+		return normalizeMCPServerURL(raw)
+	}
+	if isLoopbackMCPHost(u.Hostname()) {
+		port := strings.TrimSpace(u.Port())
+		if port != "" {
+			u.Host = "host.docker.internal:" + port
+		} else {
+			u.Host = "host.docker.internal"
+		}
+		return normalizeMCPServerURL(u.String())
+	}
+	return normalizeMCPServerURL(raw)
+}
+
+func isLoopbackMCPHost(host string) bool {
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, promptTransportFallback, error) {
