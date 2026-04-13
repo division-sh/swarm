@@ -10,6 +10,7 @@ import (
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/store"
 )
 
 type HealthChecker func(ctx context.Context) (map[string]any, error)
@@ -28,6 +29,10 @@ type RuntimeController interface {
 type SourceProvider func() semanticview.Source
 
 type RuntimeProvider func() *runtimepkg.Runtime
+
+type RunDebugReader interface {
+	LoadRunDebugReport(ctx context.Context, runID string, opts store.RunDebugQueryOptions) (store.RunDebugReport, error)
+}
 
 type ProjectStatus struct {
 	ProjectDir      string `json:"project_dir,omitempty"`
@@ -55,6 +60,7 @@ type Options struct {
 	CurrentSource  SourceProvider
 	CurrentRuntime RuntimeProvider
 	ProjectControl ProjectController
+	RunDebug       RunDebugReader
 }
 
 type Request struct {
@@ -181,6 +187,7 @@ func NewHandler(opts Options) http.Handler {
 				h.runtime.ResumeIngress()
 				return nil
 			},
+			opts.RunDebug,
 		)
 	}
 	return h

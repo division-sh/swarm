@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,6 +40,19 @@ type builderWSEventFrame = builderpkg.WSEventFrame
 
 const testBuilderAuthToken = "builder-test-token"
 const testOperatorAuthToken = "operator-secret"
+
+func asString(v any) string {
+	switch typed := v.(type) {
+	case string:
+		return typed
+	case []byte:
+		return string(typed)
+	default:
+		return ""
+	}
+}
+
+func ptrTime(v time.Time) *time.Time { return &v }
 
 func canonicalEventAndConversationCaps() store.StoreSchemaCapabilities {
 	return store.StoreSchemaCapabilities{
@@ -116,20 +130,149 @@ type stubObservability struct {
 	incidents   []incidentRecord
 }
 
-type stubBuilderRunStore struct{}
+type stubBuilderRunStore struct {
+	mu        sync.Mutex
+	events    []events.Event
+	snapshots map[string]runtimebus.RunLifecycleSnapshot
+}
 
-func (stubBuilderRunStore) AppendEvent(context.Context, events.Event) error { return nil }
-func (stubBuilderRunStore) InsertEventDeliveries(context.Context, string, []string) error {
+func (s *stubBuilderRunStore) AppendEvent(_ context.Context, evt events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, evt)
 	return nil
 }
-func (stubBuilderRunStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+func (*stubBuilderRunStore) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+func (*stubBuilderRunStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return []string{}, nil
 }
-func (stubBuilderRunStore) MarkRunTerminal(context.Context, string, string, string, time.Time) error {
+func (s *stubBuilderRunStore) MarkRunTerminal(_ context.Context, runID, status, errorSummary string, endedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.snapshots == nil {
+		s.snapshots = map[string]runtimebus.RunLifecycleSnapshot{}
+	}
+	snap := s.snapshots[runID]
+	snap.RunID = runID
+	snap.Status = status
+	snap.ErrorSummary = errorSummary
+	ended := endedAt
+	snap.EndedAt = &ended
+	seenEntities := map[string]struct{}{}
+	eventCount := 0
+	var startedAt time.Time
+	for _, evt := range s.events {
+		if strings.TrimSpace(evt.RunID) != strings.TrimSpace(runID) {
+			continue
+		}
+		eventCount++
+		if startedAt.IsZero() || evt.CreatedAt.Before(startedAt) {
+			startedAt = evt.CreatedAt
+		}
+		if entityID := strings.TrimSpace(evt.EntityID()); entityID != "" {
+			seenEntities[entityID] = struct{}{}
+		}
+	}
+	snap.EventCount = eventCount
+	snap.EntityCount = len(seenEntities)
+	snap.StartedAt = startedAt
+	s.snapshots[runID] = snap
 	return nil
 }
-func (stubBuilderRunStore) LoadRunLifecycleSnapshot(context.Context, string) (runtimebus.RunLifecycleSnapshot, error) {
-	return runtimebus.RunLifecycleSnapshot{}, nil
+func (s *stubBuilderRunStore) LoadRunLifecycleSnapshot(_ context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.snapshots[runID], nil
+}
+
+func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string, _ store.RunDebugQueryOptions) (store.RunDebugReport, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	report := store.RunDebugReport{
+		RunID:             strings.TrimSpace(runID),
+		EventCounts:       []store.RunDebugEventCount{},
+		Deliveries:        []store.RunDebugDeliveryCount{},
+		Events:            []store.RunDebugEvent{},
+		DeadLetters:       []store.RunDebugDeadLetter{},
+		AgentTurns:        []store.RunDebugAgentTurn{},
+		Mutations:         []store.RunDebugMutation{},
+		RuntimeLogs:       []store.RunDebugRuntimeLog{},
+		RuntimeLogSummary: []store.RunDebugRuntimeSummary{},
+	}
+	if snap, ok := s.snapshots[runID]; ok {
+		report.RunTableStatus = snap.Status
+		report.ErrorSummary = snap.ErrorSummary
+		report.EntityCount = snap.EntityCount
+		if snap.EndedAt != nil {
+			ended := snap.EndedAt.UTC()
+			report.EndedAt = &ended
+		}
+		if !snap.StartedAt.IsZero() {
+			report.StartedAt = snap.StartedAt.UTC()
+		}
+	}
+	counts := map[string]int{}
+	for _, evt := range s.events {
+		if strings.TrimSpace(evt.RunID) != report.RunID {
+			continue
+		}
+		report.EventCount++
+		if report.StartedAt.IsZero() || evt.CreatedAt.Before(report.StartedAt) {
+			report.StartedAt = evt.CreatedAt.UTC()
+		}
+		if evt.CreatedAt.After(report.LastEventAt) {
+			report.LastEventAt = evt.CreatedAt.UTC()
+		}
+		counts[string(evt.Type)]++
+		if report.RootEventID == "" || evt.CreatedAt.Before(report.StartedAt) {
+			report.RootEventID = strings.TrimSpace(evt.ID)
+			report.RootEventType = strings.TrimSpace(string(evt.Type))
+		}
+		if evt.Type == events.EventType("platform.runtime_log") {
+			payload := map[string]any{}
+			_ = json.Unmarshal(evt.Payload, &payload)
+			details, _ := payload["details"].(map[string]any)
+			detailJSON, _ := json.Marshal(details)
+			report.RuntimeLogs = append(report.RuntimeLogs, store.RunDebugRuntimeLog{
+				EventID:   strings.TrimSpace(evt.ID),
+				Level:     strings.TrimSpace(asString(payload["log_level"])),
+				Message:   strings.TrimSpace(asString(payload["message"])),
+				Component: strings.TrimSpace(asString(details["component"])),
+				Action:    strings.TrimSpace(asString(details["action"])),
+				EventType: strings.TrimSpace(asString(details["event_type"])),
+				AgentID:   strings.TrimSpace(asString(details["agent_id"])),
+				EntityID:  strings.TrimSpace(asString(details["entity_id"])),
+				Error:     strings.TrimSpace(asString(details["error"])),
+				Detail:    append(json.RawMessage(nil), detailJSON...),
+				CreatedAt: evt.CreatedAt.UTC(),
+			})
+			continue
+		}
+		payload := append(json.RawMessage(nil), evt.Payload...)
+		report.Events = append(report.Events, store.RunDebugEvent{
+			EventID:    strings.TrimSpace(evt.ID),
+			EventName:  strings.TrimSpace(string(evt.Type)),
+			EntityID:   strings.TrimSpace(evt.EntityID()),
+			CreatedAt:  evt.CreatedAt.UTC(),
+			Source:     strings.TrimSpace(evt.SourceAgent),
+			SourceType: "agent",
+			Payload:    payload,
+		})
+	}
+	for eventName, count := range counts {
+		report.EventCounts = append(report.EventCounts, store.RunDebugEventCount{EventName: eventName, Count: count})
+	}
+	slices.SortFunc(report.Events, func(a, b store.RunDebugEvent) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	slices.SortFunc(report.RuntimeLogs, func(a, b store.RunDebugRuntimeLog) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	slices.SortFunc(report.EventCounts, func(a, b store.RunDebugEventCount) int { return strings.Compare(a.EventName, b.EventName) })
+	if report.RootEventID == "" && len(report.Events) > 0 {
+		root := report.Events[len(report.Events)-1]
+		report.RootEventID = root.EventID
+		report.RootEventType = root.EventName
+	}
+	return report, nil
 }
 
 type stubConversationCaps struct {
@@ -356,8 +499,12 @@ func newBuilderHandlerForTest(
 	projectCtl builderpkg.ProjectController,
 ) http.Handler {
 	var runtimeProvider builderpkg.RuntimeProvider
+	var runDebug builderpkg.RunDebugReader
 	if rt != nil {
 		runtimeProvider = func() *runtimepkg.Runtime { return rt }
+		if typed, ok := rt.Bus.Store().(*stubBuilderRunStore); ok {
+			runDebug = typed
+		}
 	}
 	return builderpkg.NewHandler(builderpkg.Options{
 		Health:         builderpkg.HealthChecker(health),
@@ -367,6 +514,7 @@ func newBuilderHandlerForTest(
 		Version:        version,
 		CurrentRuntime: runtimeProvider,
 		ProjectControl: projectCtl,
+		RunDebug:       runDebug,
 	})
 }
 
@@ -2675,7 +2823,7 @@ func TestHandler_HealthzAliases(t *testing.T) {
 }
 
 func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
+	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2768,8 +2916,237 @@ func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
 	}
 }
 
+func TestHandler_RunEventReplayUsesCanonicalPersistedRunDebugOwner(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	runID := "run_replay_001"
+	rootEvent := (events.Event{
+		ID:          "evt-root",
+		RunID:       runID,
+		Type:        events.EventType("scan.requested"),
+		SourceAgent: "builder",
+		Payload:     json.RawMessage(`{"topic":"sample"}`),
+		CreatedAt:   now,
+	}).WithEntityID(runID)
+	storeStub := &stubBuilderRunStore{
+		events: []events.Event{
+			rootEvent,
+			{
+				ID:          "evt-log",
+				RunID:       runID,
+				Type:        events.EventType("platform.runtime_log"),
+				SourceAgent: "runtime",
+				Payload:     json.RawMessage(`{"log_level":"warn","message":"runtime log","details":{"component":"scheduler","action":"checkpoint","error":"boom"}}`),
+				CreatedAt:   now.Add(2 * time.Second),
+			},
+		},
+		snapshots: map[string]runtimebus.RunLifecycleSnapshot{
+			runID: {
+				RunID:       runID,
+				Status:      "completed",
+				EventCount:  2,
+				EntityCount: 1,
+				StartedAt:   now,
+				EndedAt:     ptrTime(now.Add(3 * time.Second)),
+			},
+		},
+	}
+	bus, err := runtimebus.NewEventBus(storeStub)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version: "swarm-test",
+		Runtime: &stubRuntimeControl{},
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"swarm-test",
+			nil,
+			rt,
+			nil,
+		),
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{"type": "subscribe", "channel": "run:events:" + runID}); err != nil {
+		t.Fatalf("subscribe run events: %v", err)
+	}
+
+	gotTypes := map[string]map[string]any{}
+	deadline := time.After(1 * time.Second)
+	for len(gotTypes) < 4 {
+		_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for canonical replay, got %#v", gotTypes)
+		default:
+		}
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, _ := frame.Data.(map[string]any)
+		eventType, _ := payload["type"].(string)
+		if eventType != "" {
+			gotTypes[eventType] = payload
+		}
+	}
+
+	if gotTypes["run.started"]["timestamp"] != now.Format(time.RFC3339) {
+		t.Fatalf("run.started timestamp = %#v, want %q", gotTypes["run.started"]["timestamp"], now.Format(time.RFC3339))
+	}
+	if gotTypes["event.fired"]["timestamp"] != now.Format(time.RFC3339) {
+		t.Fatalf("event.fired timestamp = %#v, want %q", gotTypes["event.fired"]["timestamp"], now.Format(time.RFC3339))
+	}
+	if gotTypes["runtime.log"]["timestamp"] != now.Add(2*time.Second).Format(time.RFC3339) {
+		t.Fatalf("runtime.log timestamp = %#v, want %q", gotTypes["runtime.log"]["timestamp"], now.Add(2*time.Second).Format(time.RFC3339))
+	}
+	runtimePayload, _ := gotTypes["runtime.log"]["payload"].(map[string]any)
+	if runtimePayload["component"] != "scheduler" || runtimePayload["action"] != "checkpoint" {
+		t.Fatalf("runtime.log payload = %#v", runtimePayload)
+	}
+	donePayload, _ := gotTypes["run.completed"]["payload"].(map[string]any)
+	summary, _ := donePayload["summary"].(map[string]any)
+	if summary["entity_count"] != float64(1) && summary["entity_count"] != 1 {
+		t.Fatalf("run.completed summary = %#v", summary)
+	}
+}
+
+func TestHandler_RunEventStreamPreservesCanonicalRuntimeLogWithoutEntityID(t *testing.T) {
+	now := time.Unix(1700000100, 0).UTC()
+	runID := "run_live_001"
+	storeStub := &stubBuilderRunStore{}
+	bus, err := runtimebus.NewEventBus(storeStub)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version: "swarm-test",
+		Runtime: runtimeCtl,
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"swarm-test",
+			runtimeCtl,
+			rt,
+			nil,
+		),
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, builderAuthHeader())
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{"type": "subscribe", "channel": "run:events:" + runID}); err != nil {
+		t.Fatalf("subscribe run events: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := builderAuthRequest(http.MethodPost, "/rpc", `{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_live_001","inputs":{"intake.requested":{"topic":"sample"}}}}`)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	deadline := time.After(1 * time.Second)
+	for {
+		_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		select {
+		case <-deadline:
+			t.Fatal("timed out draining initial run events")
+		default:
+		}
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read initial run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, _ := frame.Data.(map[string]any)
+		if payload["type"] == "run.completed" {
+			break
+		}
+	}
+
+	logPayload := json.RawMessage(`{"log_level":"warn","message":"runtime log","details":{"component":"scheduler","action":"canonical-owner","error":"boom"}}`)
+	if err := storeStub.AppendEvent(context.Background(), events.Event{
+		ID:          "evt-runtime-log",
+		RunID:       runID,
+		Type:        events.EventType("platform.runtime_log"),
+		SourceAgent: "runtime",
+		Payload:     logPayload,
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("append canonical runtime log: %v", err)
+	}
+
+	typedHandler, ok := handler.(*Handler)
+	if !ok || !builderpkg.HandleRuntimeLogForTest(typedHandler.builder, runtimepkg.RuntimeLogEntry{
+		Level:     "warn",
+		Component: "scheduler",
+		Action:    "canonical-owner",
+	}) {
+		t.Fatalf("expected typed handler with builder runtime-log hook")
+	}
+
+	deadline = time.After(1 * time.Second)
+	for {
+		_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for canonical runtime.log event")
+		default:
+		}
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, _ := frame.Data.(map[string]any)
+		if payload["type"] != "runtime.log" {
+			continue
+		}
+		if payload["timestamp"] != now.Format(time.RFC3339) {
+			t.Fatalf("runtime.log timestamp = %#v, want %q", payload["timestamp"], now.Format(time.RFC3339))
+		}
+		return
+	}
+}
+
 func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
+	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2852,7 +3229,7 @@ func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
 }
 
 func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
+	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -2952,7 +3329,7 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 }
 
 func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
+	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -3061,7 +3438,7 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 }
 
 func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
+	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -3158,7 +3535,7 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 }
 
 func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
+	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -3294,7 +3671,7 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 }
 
 func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
+	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}
@@ -3404,7 +3781,7 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 }
 
 func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(stubBuilderRunStore{})
+	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
 	}

@@ -16,7 +16,7 @@ import (
 
 var runCompletionTimeout = 30 * time.Second
 
-func newRunHub(runtimeProvider func() *runtimepkg.Runtime, resetRuntime func() error, pauseRuntime func() error, resumeRuntime func() error) *runHub {
+func newRunHub(runtimeProvider func() *runtimepkg.Runtime, resetRuntime func() error, pauseRuntime func() error, resumeRuntime func() error, runDebug RunDebugReader) *runHub {
 	if runtimeProvider == nil {
 		return nil
 	}
@@ -25,6 +25,7 @@ func newRunHub(runtimeProvider func() *runtimepkg.Runtime, resetRuntime func() e
 		resetRuntime:    resetRuntime,
 		pauseRuntime:    pauseRuntime,
 		resumeRuntime:   resumeRuntime,
+		runDebug:        runDebug,
 		sessions:        map[string]*runSession{},
 	}
 }
@@ -49,7 +50,11 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 		breakpoints:        stringSet(breakpoints),
 		trippedBreakpoints: map[string]struct{}{},
 		subs:               map[string]func(RunEventEnvelope){},
-		events:             []RunEventEnvelope{},
+		controlEvents:      []RunEventEnvelope{},
+		debug: runDebugStreamState{
+			eventIDs:      map[string]struct{}{},
+			runtimeLogIDs: map[string]struct{}{},
+		},
 	}
 	h.mu.Lock()
 	if existing := h.sessions[runID]; existing != nil {
@@ -59,7 +64,8 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 		for entityID := range existing.entityIDs {
 			session.entityIDs[entityID] = struct{}{}
 		}
-		session.events = append(session.events, existing.events...)
+		session.controlEvents = append(session.controlEvents, existing.controlEvents...)
+		session.debug = existing.debug.clone()
 	}
 	h.sessions[runID] = session
 	h.mu.Unlock()
@@ -89,7 +95,7 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 			CreatedAt:   time.Now().UTC(),
 		}.WithEntityID(entityID)
 		if err := rt.Bus.Publish(ctx, evt); err != nil {
-			h.emit(runID, map[string]any{
+			h.emitControl(runID, map[string]any{
 				"id":        uuid.NewString(),
 				"type":      "run.failed",
 				"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -98,24 +104,8 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 			h.deleteRun(runID)
 			return err
 		}
-		h.emit(runID, map[string]any{
-			"id":          evt.ID,
-			"type":        "event.fired",
-			"timestamp":   evt.CreatedAt.Format(time.RFC3339),
-			"instance_id": entityID,
-			"payload": map[string]any{
-				"event_name": eventName,
-				"source":     evt.SourceAgent,
-				"payload":    payload,
-			},
-		})
 	}
-	h.emit(runID, map[string]any{
-		"id":        uuid.NewString(),
-		"type":      "run.started",
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"payload":   map[string]any{"run_id": runID},
-	})
+	h.syncCanonical(context.Background(), runID)
 	go h.awaitCompletion(runID)
 	return nil
 }
@@ -137,7 +127,7 @@ func (h *runHub) stopRun(runID string) error {
 			return err
 		}
 	}
-	h.emit(runID, map[string]any{
+	h.emitControl(runID, map[string]any{
 		"id":        uuid.NewString(),
 		"type":      "run.stopped",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -163,7 +153,7 @@ func (h *runHub) pauseRun(runID string) error {
 	if err := h.pauseRuntime(); err != nil {
 		return err
 	}
-	h.emit(runID, map[string]any{
+	h.emitControl(runID, map[string]any{
 		"id":        uuid.NewString(),
 		"type":      "run.paused",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -199,7 +189,7 @@ func (h *runHub) continueRun(runID string, instanceIDs []string, decision string
 	if decision = strings.TrimSpace(decision); decision != "" {
 		payload["decision"] = decision
 	}
-	h.emit(runID, map[string]any{
+	h.emitControl(runID, map[string]any{
 		"id":        uuid.NewString(),
 		"type":      "run.resumed",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -241,7 +231,7 @@ func (h *runHub) stepRun(runID string, nodeID string, instanceID string) error {
 		event["instance_id"] = instanceID
 		payload["instance_ids"] = []string{instanceID}
 	}
-	h.emit(runID, event)
+	h.emitControl(runID, event)
 	return nil
 }
 
@@ -286,7 +276,7 @@ func (h *runHub) resumeNodeAction(runID string, actionKind string, nodeID string
 		actionEvent["instance_id"] = instanceID
 		actionEvent["payload"].(map[string]any)["instance_id"] = instanceID
 	}
-	h.emit(runID, actionEvent)
+	h.emitControl(runID, actionEvent)
 	if err := h.resumeRuntime(); err != nil {
 		return err
 	}
@@ -301,7 +291,7 @@ func (h *runHub) resumeNodeAction(runID string, actionKind string, nodeID string
 	if instanceID != "" {
 		resumeEvent["instance_id"] = instanceID
 	}
-	h.emit(runID, resumeEvent)
+	h.emitControl(runID, resumeEvent)
 	return nil
 }
 
@@ -317,13 +307,25 @@ func (h *runHub) subscribe(runID string, listener func(RunEventEnvelope)) func()
 	h.mu.Lock()
 	session, ok := h.sessions[runID]
 	if !ok {
-		session = &runSession{runID: runID, entityIDs: map[string]struct{}{}, subs: map[string]func(RunEventEnvelope){}, events: []RunEventEnvelope{}}
+		session = &runSession{
+			runID:         runID,
+			entityIDs:     map[string]struct{}{},
+			subs:          map[string]func(RunEventEnvelope){},
+			controlEvents: []RunEventEnvelope{},
+			debug: runDebugStreamState{
+				eventIDs:      map[string]struct{}{},
+				runtimeLogIDs: map[string]struct{}{},
+			},
+		}
 		h.sessions[runID] = session
 	}
 	session.subs[subID] = listener
-	replay := append([]RunEventEnvelope(nil), session.events...)
+	controlReplay := append([]RunEventEnvelope(nil), session.controlEvents...)
 	h.mu.Unlock()
-	for _, event := range replay {
+	for _, event := range h.canonicalReplay(context.Background(), runID) {
+		listener(event)
+	}
+	for _, event := range controlReplay {
 		listener(event)
 	}
 	return func() {
@@ -340,16 +342,16 @@ func (h *runHub) subscribe(runID string, listener func(RunEventEnvelope)) func()
 	}
 }
 
-func (h *runHub) emit(runID string, event RunEventEnvelope) {
+func (h *runHub) emitControl(runID string, event RunEventEnvelope) {
 	h.mu.Lock()
 	session := h.sessions[runID]
 	if session == nil {
 		h.mu.Unlock()
 		return
 	}
-	session.events = append(session.events, cloneRunEvent(event))
-	if len(session.events) > 128 {
-		session.events = append([]RunEventEnvelope(nil), session.events[len(session.events)-128:]...)
+	session.controlEvents = append(session.controlEvents, cloneRunEvent(event))
+	if len(session.controlEvents) > 128 {
+		session.controlEvents = append([]RunEventEnvelope(nil), session.controlEvents[len(session.controlEvents)-128:]...)
 	}
 	listeners := make([]func(RunEventEnvelope), 0, len(session.subs))
 	for _, listener := range session.subs {
@@ -382,7 +384,7 @@ func (h *runHub) awaitCompletion(runID string) {
 			}
 			if _, persistErr := h.persistTerminalState(runID, "failed", err.Error(), time.Now().UTC()); persistErr != nil {
 				h.markTerminal(runID)
-				h.emit(runID, map[string]any{
+				h.emitControl(runID, map[string]any{
 					"id":        uuid.NewString(),
 					"type":      "run.failed",
 					"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -395,12 +397,7 @@ func (h *runHub) awaitCompletion(runID string) {
 				return
 			}
 			h.markTerminal(runID)
-			h.emit(runID, map[string]any{
-				"id":        uuid.NewString(),
-				"type":      "run.failed",
-				"timestamp": time.Now().UTC().Format(time.RFC3339),
-				"payload":   map[string]any{"run_id": runID, "error": err.Error()},
-			})
+			h.syncCanonical(context.Background(), runID)
 			return
 		}
 		if h.isTerminal(runID) {
@@ -409,7 +406,7 @@ func (h *runHub) awaitCompletion(runID string) {
 		snapshot, err := h.persistTerminalState(runID, "completed", "", time.Now().UTC())
 		if err != nil {
 			h.markTerminal(runID)
-			h.emit(runID, map[string]any{
+			h.emitControl(runID, map[string]any{
 				"id":        uuid.NewString(),
 				"type":      "run.failed",
 				"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -422,19 +419,8 @@ func (h *runHub) awaitCompletion(runID string) {
 			return
 		}
 		h.markTerminal(runID)
-		h.emit(runID, map[string]any{
-			"id":        uuid.NewString(),
-			"type":      "run.completed",
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
-			"payload": map[string]any{
-				"run_id": runID,
-				"summary": map[string]any{
-					"duration_ms":  durationMillis(snapshot),
-					"total_events": snapshot.EventCount,
-					"entity_count": snapshot.EntityCount,
-				},
-			},
-		})
+		_ = snapshot
+		h.syncCanonical(context.Background(), runID)
 		return
 	}
 }

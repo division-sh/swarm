@@ -18,68 +18,13 @@ func (h *runHub) handleRuntimeLog(entry runtimepkg.RuntimeLogEntry) {
 	if h == nil {
 		return
 	}
-	entityID := strings.TrimSpace(entry.EffectiveEntityID())
-	if entityID == "" {
-		return
-	}
-	runIDs := make([]string, 0, 2)
-	h.mu.RLock()
-	for runID, session := range h.sessions {
-		if _, ok := session.entityIDs[entityID]; ok {
-			runIDs = append(runIDs, runID)
-		}
-	}
-	h.mu.RUnlock()
-	if len(runIDs) == 0 {
-		return
-	}
-	event := h.toRunEvent(entry)
+	runIDs := h.runIDsForRuntimeEntry(entry)
 	for _, runID := range runIDs {
-		if event != nil {
-			h.emit(runID, event)
-		}
-		h.maybeEmitBreakpointHit(runID, strings.TrimSpace(entry.AgentID), entityID)
+		h.maybeEmitBreakpointHit(runID, entry.AgentID, entry.EffectiveEntityID())
 		h.maybeEmitHumanTaskWaiting(runID, entry)
-		h.maybePauseAfterStep(runID, strings.TrimSpace(entry.AgentID), entityID)
+		h.maybePauseAfterStep(runID, entry.AgentID, entry.EffectiveEntityID())
+		h.syncCanonical(context.Background(), runID)
 	}
-}
-
-func (h *runHub) toRunEvent(entry runtimepkg.RuntimeLogEntry) RunEventEnvelope {
-	if strings.TrimSpace(entry.Component) == "eventbus" && strings.TrimSpace(entry.Action) == "published" {
-		event := map[string]any{
-			"id":          strings.TrimSpace(entry.EventID),
-			"type":        "event.fired",
-			"timestamp":   time.Now().UTC().Format(time.RFC3339),
-			"instance_id": strings.TrimSpace(entry.EntityID),
-			"payload": map[string]any{
-				"event_name": strings.TrimSpace(entry.EventType),
-				"source":     payloadMap(entry.Detail)["source"],
-			},
-		}
-		if nodeID := strings.TrimSpace(entry.AgentID); nodeID != "" {
-			event["node_id"] = nodeID
-		}
-		return event
-	}
-	event := map[string]any{
-		"id":          nonEmptyOrUUID(strings.TrimSpace(entry.EventID)),
-		"type":        "runtime.log",
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"instance_id": strings.TrimSpace(entry.EntityID),
-		"payload": map[string]any{
-			"level":      entry.Level.String(),
-			"component":  strings.TrimSpace(entry.Component),
-			"action":     strings.TrimSpace(entry.Action),
-			"event_type": strings.TrimSpace(entry.EventType),
-			"agent_id":   strings.TrimSpace(entry.AgentID),
-			"detail":     payloadMap(entry.Detail),
-			"error":      strings.TrimSpace(entry.Error),
-		},
-	}
-	if nodeID := strings.TrimSpace(entry.AgentID); nodeID != "" {
-		event["node_id"] = nodeID
-	}
-	return event
 }
 
 func (h *runHub) maybeEmitBreakpointHit(runID string, nodeID string, instanceID string) {
@@ -115,7 +60,7 @@ func (h *runHub) maybeEmitBreakpointHit(runID string, nodeID string, instanceID 
 		event["instance_id"] = instanceID
 		event["payload"].(map[string]any)["instance_id"] = instanceID
 	}
-	h.emit(runID, event)
+	h.emitControl(runID, event)
 }
 
 func (h *runHub) maybeEmitHumanTaskWaiting(runID string, entry runtimepkg.RuntimeLogEntry) {
@@ -141,7 +86,7 @@ func (h *runHub) maybeEmitHumanTaskWaiting(runID string, entry runtimepkg.Runtim
 	if h.pauseRuntime != nil {
 		_ = h.pauseRuntime()
 	}
-	h.emit(runID, map[string]any{
+	h.emitControl(runID, map[string]any{
 		"id":          uuid.NewString(),
 		"type":        "human.task_waiting",
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
@@ -149,7 +94,7 @@ func (h *runHub) maybeEmitHumanTaskWaiting(runID string, entry runtimepkg.Runtim
 		"instance_id": instanceID,
 		"payload":     map[string]any{"decision_options": []string{"approved", "rejected", "deferred"}},
 	})
-	h.emit(runID, map[string]any{
+	h.emitControl(runID, map[string]any{
 		"id":          uuid.NewString(),
 		"type":        "run.paused",
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
@@ -200,7 +145,7 @@ func (h *runHub) submitPendingHumanDecision(ctx context.Context, runID string, d
 	}).WithEntityID(pending.instanceID)); err != nil {
 		return err
 	}
-	h.emit(runID, map[string]any{
+	h.emitControl(runID, map[string]any{
 		"id":          uuid.NewString(),
 		"type":        "human.task_submitted",
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
@@ -247,7 +192,7 @@ func (h *runHub) maybePauseAfterStep(runID string, nodeID string, instanceID str
 		event["instance_id"] = instanceID
 		event["payload"].(map[string]any)["instance_id"] = instanceID
 	}
-	h.emit(runID, event)
+	h.emitControl(runID, event)
 }
 
 func (h *runHub) attachRuntime(rt *runtimepkg.Runtime) {
