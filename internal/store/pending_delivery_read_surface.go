@@ -50,6 +50,8 @@ func (r pendingAgentDeliveryRecord) isPending(now time.Time) bool {
 	return !r.ReceiptFound
 }
 
+// Pending truth is delivery-backed. Receipts can only confirm that a delivery-backed
+// attempt already completed; they must not become a substitute ownership source.
 func canonicalPendingDeliveryPredicateSQL(deliveryAlias, receiptAlias string) string {
 	return fmt.Sprintf(`(
 		(

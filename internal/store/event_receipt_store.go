@@ -140,6 +140,8 @@ type deliveryBackedTerminalTransitionRequest struct {
 	retryAdvance int
 }
 
+// Receipts are outcome-only for an existing agent delivery. This write path must
+// never mint or repair delivery ownership from receipt state.
 func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
 	return withEventStoreRetry(ctx, nil, func() error {
 		tx, err := s.DB.BeginTx(ctx, nil)
