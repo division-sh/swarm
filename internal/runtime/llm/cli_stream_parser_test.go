@@ -62,10 +62,29 @@ func TestCLIStreamAccumulator_ReconstructsStreamedToolInput(t *testing.T) {
 	if got := resp.MCPServers["runtime-tools"]; got != "connected" {
 		t.Fatalf("mcp servers = %#v", resp.MCPServers)
 	}
-	if len(resp.VisibleTools) != 3 || resp.VisibleTools[0] != "emit_category_assessed" || resp.VisibleTools[1] != "query_metrics" || resp.VisibleTools[2] != "read_file" {
+	if len(resp.VisibleTools) != 2 || resp.VisibleTools[0] != "query_metrics" || resp.VisibleTools[1] != "read_file" {
 		t.Fatalf("visible tools = %#v", resp.VisibleTools)
 	}
-	if len(resp.MCPVisibleTools) != 2 || resp.MCPVisibleTools[0] != "mcp__runtime-tools__emit_category_assessed" || resp.MCPVisibleTools[1] != "mcp__runtime-tools__query_metrics" {
+	if len(resp.MCPVisibleTools) != 1 || resp.MCPVisibleTools[0] != "mcp__runtime-tools__query_metrics" {
+		t.Fatalf("mcp visible tools = %#v", resp.MCPVisibleTools)
+	}
+}
+
+func TestCLIStreamAccumulator_DoesNotPromoteAttemptedStreamedToolUseIntoVisibleSurface(t *testing.T) {
+	acc := newCLIStreamAccumulator()
+	acc.AddLine([]byte(`{"type":"system","subtype":"init","session_id":"sess-attempted","mcp_servers":[{"name":"runtime-tools","status":"failed"}],"tools":["ExitPlanMode"]}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","name":"mcp__runtime-tools__read_file","input":{}}},"session_id":"sess-attempted"}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"/workspace/corpus.json\"}"}},"session_id":"sess-attempted"}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_stop","index":2},"session_id":"sess-attempted"}`))
+
+	resp := acc.Response()
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "read_file" {
+		t.Fatalf("tool calls = %#v", resp.ToolCalls)
+	}
+	if len(resp.VisibleTools) != 0 {
+		t.Fatalf("visible tools = %#v", resp.VisibleTools)
+	}
+	if len(resp.MCPVisibleTools) != 0 {
 		t.Fatalf("mcp visible tools = %#v", resp.MCPVisibleTools)
 	}
 }

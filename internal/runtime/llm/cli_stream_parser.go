@@ -185,7 +185,6 @@ func (a *cliStreamAccumulator) mergeStreamEvent(obj map[string]any) {
 			}
 		}
 		if strings.TrimSpace(call.Name) != "" {
-			a.appendVisibleTool(call.Name)
 			a.streamedCalls = append(a.streamedCalls, cliRecordedToolCall{
 				ID: strings.TrimSpace(call.ID),
 				Call: ToolCall{
