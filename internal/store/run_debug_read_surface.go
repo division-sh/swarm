@@ -29,6 +29,7 @@ type RunDebugRunSummary struct {
 	LastEventAt    time.Time  `json:"last_event_at,omitempty"`
 	EndedAt        *time.Time `json:"ended_at,omitempty"`
 	EventCount     int        `json:"event_count"`
+	EntityCount    int        `json:"entity_count"`
 }
 
 type RunDebugEventCount struct {
@@ -43,11 +44,13 @@ type RunDebugDeliveryCount struct {
 }
 
 type RunDebugEvent struct {
-	EventID    string    `json:"event_id,omitempty"`
-	EventName  string    `json:"event_name"`
-	EntityID   string    `json:"entity_id,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	SourceType string    `json:"source_type,omitempty"`
+	EventID    string          `json:"event_id,omitempty"`
+	EventName  string          `json:"event_name"`
+	EntityID   string          `json:"entity_id,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+	Source     string          `json:"source,omitempty"`
+	SourceType string          `json:"source_type,omitempty"`
+	Payload    json.RawMessage `json:"payload,omitempty"`
 }
 
 type RunDebugMutation struct {
@@ -80,11 +83,17 @@ type RunDebugAgentTurn struct {
 }
 
 type RunDebugRuntimeLog struct {
-	Level     string    `json:"level"`
-	Component string    `json:"component"`
-	Action    string    `json:"action"`
-	Error     string    `json:"error,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	EventID   string          `json:"event_id,omitempty"`
+	Level     string          `json:"level"`
+	Message   string          `json:"message,omitempty"`
+	Component string          `json:"component"`
+	Action    string          `json:"action"`
+	EventType string          `json:"event_type,omitempty"`
+	AgentID   string          `json:"agent_id,omitempty"`
+	EntityID  string          `json:"entity_id,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	Detail    json.RawMessage `json:"detail,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 type RunDebugRuntimeSummary struct {
@@ -99,10 +108,12 @@ type RunDebugReport struct {
 	RunTableStatus    string                   `json:"run_table_status,omitempty"`
 	RootEventID       string                   `json:"root_event_id,omitempty"`
 	RootEventType     string                   `json:"root_event_type,omitempty"`
+	ErrorSummary      string                   `json:"error_summary,omitempty"`
 	StartedAt         time.Time                `json:"started_at,omitempty"`
 	LastEventAt       time.Time                `json:"last_event_at,omitempty"`
 	EndedAt           *time.Time               `json:"ended_at,omitempty"`
 	EventCount        int                      `json:"event_count"`
+	EntityCount       int                      `json:"entity_count"`
 	WarnErrorLogCount int                      `json:"warn_error_log_count"`
 	EventCounts       []RunDebugEventCount     `json:"event_counts,omitempty"`
 	Deliveries        []RunDebugDeliveryCount  `json:"deliveries,omitempty"`
@@ -147,7 +158,7 @@ func RequireCanonicalRunDebugCapabilities(caps StoreSchemaCapabilities, catalog 
 		return fmt.Errorf("run debug read surface requires canonical agent_turns.run_id")
 	}
 	required := map[string][]string{
-		"runs":             {"run_id", "status", "started_at", "ended_at"},
+		"runs":             {"run_id", "status", "error_summary", "started_at", "ended_at", "entity_count"},
 		"dead_letters":     {"original_event_id", "original_event", "entity_id", "failure_type", "error_message", "handler_node", "created_at"},
 		"entity_mutations": {"mutation_id", "run_id", "entity_id", "field", "old_value", "new_value", "caused_by_event", "writer_type", "writer_id", "handler_step", "created_at"},
 	}
@@ -219,7 +230,8 @@ func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]RunD
 			COALESCE(root.created_at, r.started_at, now()),
 			summary.last_event_at,
 			r.ended_at,
-			COALESCE(summary.event_count, 0)
+			COALESCE(summary.event_count, 0),
+			COALESCE(r.entity_count, 0)
 		FROM runs r
 		LEFT JOIN LATERAL (
 			SELECT e.event_id, e.event_name, e.created_at
@@ -257,6 +269,7 @@ func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]RunD
 			&lastEvent,
 			&endedAt,
 			&item.EventCount,
+			&item.EntityCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan run debug summary: %w", err)
 		}
@@ -290,22 +303,28 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	report := RunDebugReport{RunID: runID}
 
 	var (
-		runStatus string
-		started   sql.NullTime
-		ended     sql.NullTime
+		runStatus    string
+		errorSummary string
+		started      sql.NullTime
+		ended        sql.NullTime
+		entityCount  sql.NullInt64
 	)
 	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), started_at, ended_at
+		SELECT COALESCE(status, ''), COALESCE(error_summary, ''), started_at, ended_at, COALESCE(entity_count, 0)
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, report.RunID).Scan(&runStatus, &started, &ended); err == nil {
+	`, report.RunID).Scan(&runStatus, &errorSummary, &started, &ended, &entityCount); err == nil {
 		report.RunTableStatus = strings.TrimSpace(runStatus)
+		report.ErrorSummary = strings.TrimSpace(errorSummary)
 		if started.Valid {
 			report.StartedAt = started.Time
 		}
 		if ended.Valid {
 			tm := ended.Time
 			report.EndedAt = &tm
+		}
+		if entityCount.Valid {
+			report.EntityCount = int(entityCount.Int64)
 		}
 	} else if err != sql.ErrNoRows {
 		return RunDebugReport{}, fmt.Errorf("load run row: %w", err)
@@ -373,7 +392,14 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	}
 
 	eventRows, err := s.DB.QueryContext(ctx, `
-		SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), created_at, COALESCE(produced_by_type, '')
+		SELECT
+			event_id::text,
+			event_name,
+			COALESCE(entity_id::text, ''),
+			created_at,
+			COALESCE(produced_by, ''),
+			COALESCE(produced_by_type, ''),
+			COALESCE(payload, '{}'::jsonb)
 		FROM events
 		WHERE run_id = $1::uuid
 		ORDER BY created_at DESC, event_id DESC
@@ -385,9 +411,11 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	defer eventRows.Close()
 	for eventRows.Next() {
 		var item RunDebugEvent
-		if err := eventRows.Scan(&item.EventID, &item.EventName, &item.EntityID, &item.CreatedAt, &item.SourceType); err != nil {
+		var payload []byte
+		if err := eventRows.Scan(&item.EventID, &item.EventName, &item.EntityID, &item.CreatedAt, &item.Source, &item.SourceType, &payload); err != nil {
 			return RunDebugReport{}, fmt.Errorf("scan run events: %w", err)
 		}
+		item.Payload = append(json.RawMessage(nil), payload...)
 		report.Events = append(report.Events, item)
 	}
 	if err := eventRows.Err(); err != nil {
@@ -553,10 +581,16 @@ func (s *PostgresStore) loadRunDebugRuntimeLogs(ctx context.Context, runID strin
 	}
 	logRows, err := s.DB.QueryContext(ctx, `
 		SELECT
+			event_id::text,
 			COALESCE(payload->>'log_level', ''),
+			COALESCE(payload->>'message', ''),
 			COALESCE(payload->'details'->>'component', ''),
 			COALESCE(payload->'details'->>'action', ''),
+			COALESCE(payload->'details'->>'event_type', ''),
+			COALESCE(payload->'details'->>'agent_id', ''),
+			COALESCE(payload->'details'->>'entity_id', ''),
 			COALESCE(payload->'details'->>'error', ''),
+			COALESCE(payload->'details', '{}'::jsonb),
 			created_at
 		FROM events
 		WHERE event_name = 'platform.runtime_log'
@@ -572,9 +606,11 @@ func (s *PostgresStore) loadRunDebugRuntimeLogs(ctx context.Context, runID strin
 	defer logRows.Close()
 	for logRows.Next() {
 		var item RunDebugRuntimeLog
-		if err := logRows.Scan(&item.Level, &item.Component, &item.Action, &item.Error, &item.CreatedAt); err != nil {
+		var detail []byte
+		if err := logRows.Scan(&item.EventID, &item.Level, &item.Message, &item.Component, &item.Action, &item.EventType, &item.AgentID, &item.EntityID, &item.Error, &detail, &item.CreatedAt); err != nil {
 			return fmt.Errorf("scan runtime logs: %w", err)
 		}
+		item.Detail = append(json.RawMessage(nil), detail...)
 		report.RuntimeLogs = append(report.RuntimeLogs, item)
 	}
 	if err := logRows.Err(); err != nil {

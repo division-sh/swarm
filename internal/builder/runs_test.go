@@ -7,6 +7,7 @@ import (
 
 	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
+	"swarm/internal/store"
 )
 
 type snapshotRunStore struct {
@@ -27,13 +28,29 @@ func (s *snapshotRunStore) LoadRunLifecycleSnapshot(context.Context, string) (ru
 	return s.snapshot, nil
 }
 
+func (s *snapshotRunStore) LoadRunDebugReport(_ context.Context, runID string, _ store.RunDebugQueryOptions) (store.RunDebugReport, error) {
+	report := store.RunDebugReport{
+		RunID:          runID,
+		RunTableStatus: s.snapshot.Status,
+		ErrorSummary:   s.snapshot.ErrorSummary,
+		StartedAt:      s.snapshot.StartedAt,
+		EventCount:     s.snapshot.EventCount,
+		EntityCount:    s.snapshot.EntityCount,
+	}
+	if s.snapshot.EndedAt != nil {
+		ended := s.snapshot.EndedAt.UTC()
+		report.EndedAt = &ended
+	}
+	return report, nil
+}
+
 func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	rt := &runtimepkg.Runtime{Bus: eb}
-	hub := newRunHub(func() *runtimepkg.Runtime { return rt }, nil, nil, nil)
+	hub := newRunHub(func() *runtimepkg.Runtime { return rt }, nil, nil, nil, nil)
 	ch := eb.Subscribe("observer", "review.requested")
 
 	if err := hub.startRun(context.Background(), "run-123", map[string]any{
@@ -64,10 +81,10 @@ func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCompletionPersistenceFail
 	hub := &runHub{
 		sessions: map[string]*runSession{
 			"run-123": {
-				runID:   "run-123",
-				runtime: rt,
-				subs:    map[string]func(RunEventEnvelope){},
-				events:  []RunEventEnvelope{},
+				runID:         "run-123",
+				runtime:       rt,
+				subs:          map[string]func(RunEventEnvelope){},
+				controlEvents: []RunEventEnvelope{},
 			},
 		},
 	}
@@ -81,10 +98,10 @@ func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCompletionPersistenceFail
 	if session == nil {
 		t.Fatal("expected run session to remain addressable")
 	}
-	if len(session.events) == 0 {
+	if len(session.controlEvents) == 0 {
 		t.Fatal("expected terminal failure event to be emitted")
 	}
-	last := session.events[len(session.events)-1]
+	last := session.controlEvents[len(session.controlEvents)-1]
 	if got, _ := last["type"].(string); got != "run.failed" {
 		t.Fatalf("last event type = %q, want run.failed", got)
 	}
@@ -108,24 +125,33 @@ func TestRunHubAwaitCompletion_EmitsAuthoritativeRunSummary(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	rt := &runtimepkg.Runtime{Bus: eb}
+	var observed []RunEventEnvelope
 	hub := &runHub{
+		runDebug: store,
 		sessions: map[string]*runSession{
 			"run-123": {
 				runID:   "run-123",
 				runtime: rt,
-				subs:    map[string]func(RunEventEnvelope){},
-				events:  []RunEventEnvelope{},
+				subs: map[string]func(RunEventEnvelope){
+					"test": func(event RunEventEnvelope) {
+						observed = append(observed, cloneRunEvent(event))
+					},
+				},
+				controlEvents: []RunEventEnvelope{},
+				debug: runDebugStreamState{
+					eventIDs:      map[string]struct{}{},
+					runtimeLogIDs: map[string]struct{}{},
+				},
 			},
 		},
 	}
 
 	hub.awaitCompletion("run-123")
 
-	session := hub.session("run-123")
-	if session == nil || len(session.events) == 0 {
+	if len(observed) == 0 {
 		t.Fatal("expected terminal event to be emitted")
 	}
-	last := session.events[len(session.events)-1]
+	last := observed[len(observed)-1]
 	if got, _ := last["type"].(string); got != "run.completed" {
 		t.Fatalf("last event type = %q, want run.completed", got)
 	}

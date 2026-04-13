@@ -11,6 +11,7 @@ type runHub struct {
 	resetRuntime    func() error
 	pauseRuntime    func() error
 	resumeRuntime   func() error
+	runDebug        RunDebugReader
 
 	mu       sync.RWMutex
 	sessions map[string]*runSession
@@ -26,8 +27,16 @@ type runSession struct {
 	pendingHuman       *pendingHumanDecision
 	pendingStep        *pendingNodeAction
 	subs               map[string]func(RunEventEnvelope)
-	events             []RunEventEnvelope
+	controlEvents      []RunEventEnvelope
 	terminal           bool
+	debug              runDebugStreamState
+}
+
+type runDebugStreamState struct {
+	startedKey    string
+	terminalKey   string
+	eventIDs      map[string]struct{}
+	runtimeLogIDs map[string]struct{}
 }
 
 type pendingHumanDecision struct {

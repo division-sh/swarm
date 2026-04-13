@@ -639,7 +639,13 @@ func runStatusReportFromStore(detail store.RunDebugReport) runStatusReport {
 		report.RuntimeLogSummary = append(report.RuntimeLogSummary, runStatusRuntimeSummary(item))
 	}
 	for _, item := range detail.RuntimeLogs {
-		report.RuntimeLogs = append(report.RuntimeLogs, runStatusRuntimeLog(item))
+		report.RuntimeLogs = append(report.RuntimeLogs, runStatusRuntimeLog{
+			Level:     item.Level,
+			Component: item.Component,
+			Action:    item.Action,
+			Error:     item.Error,
+			CreatedAt: item.CreatedAt,
+		})
 	}
 	for _, item := range detail.EventCounts {
 		report.EventCounts = append(report.EventCounts, runStatusEventCount(item))
@@ -1188,6 +1194,7 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		CurrentSource:  sourceProvider,
 		CurrentRuntime: runtimeProvider,
 		ProjectControl: projectControl,
+		RunDebug:       stores.Postgres,
 	})
 	return dashboardserver.Options{
 		Health:        healthFn,

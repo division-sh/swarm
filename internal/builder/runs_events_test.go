@@ -1,66 +1,90 @@
 package builder
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
-	runtimepkg "swarm/internal/runtime"
+	"swarm/internal/store"
 )
 
-func TestRunHubToRunEvent_PublishedEntryMapsToEventFired(t *testing.T) {
-	hub := &runHub{}
-	event := hub.toRunEvent(runtimepkg.RuntimeLogEntry{
-		Component: "eventbus",
-		Action:    "published",
-		EventID:   "evt-1",
-		EventType: "workflow.started",
-		AgentID:   "node-1",
-		EntityID:  "entity-1",
-		Detail:    map[string]any{"source": "builder"},
-	})
+func TestProjectCanonicalRunDebugReplay_PreservesCanonicalEventPayloadAndTimestamp(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	report := store.RunDebugReport{
+		RunID:      "run-123",
+		StartedAt:  now,
+		EventCount: 1,
+		Events: []store.RunDebugEvent{{
+			EventID:    "evt-1",
+			EventName:  "workflow.started",
+			EntityID:   "entity-1",
+			CreatedAt:  now,
+			Source:     "builder",
+			SourceType: "agent",
+			Payload:    json.RawMessage(`{"topic":"sample"}`),
+		}},
+	}
 
-	if event["type"] != "event.fired" {
-		t.Fatalf("event.type = %#v", event["type"])
+	replay := projectCanonicalRunDebugReplay(report)
+	if len(replay) != 2 {
+		t.Fatalf("replay len = %d, want 2", len(replay))
 	}
-	if event["id"] != "evt-1" {
-		t.Fatalf("event.id = %#v", event["id"])
+	if replay[0]["type"] != "run.started" {
+		t.Fatalf("replay[0].type = %#v, want run.started", replay[0]["type"])
 	}
-	if event["node_id"] != "node-1" {
-		t.Fatalf("event.node_id = %#v", event["node_id"])
+	if replay[1]["type"] != "event.fired" {
+		t.Fatalf("replay[1].type = %#v, want event.fired", replay[1]["type"])
 	}
-	payload, _ := event["payload"].(map[string]any)
+	if got := replay[1]["timestamp"]; got != now.Format(time.RFC3339) {
+		t.Fatalf("event timestamp = %#v, want %q", got, now.Format(time.RFC3339))
+	}
+	payload, _ := replay[1]["payload"].(map[string]any)
 	if payload["event_name"] != "workflow.started" {
 		t.Fatalf("payload.event_name = %#v", payload["event_name"])
 	}
 	if payload["source"] != "builder" {
 		t.Fatalf("payload.source = %#v", payload["source"])
 	}
+	rawPayload, _ := payload["payload"].(map[string]any)
+	if rawPayload["topic"] != "sample" {
+		t.Fatalf("payload.payload = %#v", rawPayload)
+	}
 }
 
-func TestRunHubToRunEvent_RuntimeLogEntryMapsDetailAndFallbackID(t *testing.T) {
-	hub := &runHub{}
-	event := hub.toRunEvent(runtimepkg.RuntimeLogEntry{
-		Level:     "warn",
-		Component: "runtime",
-		Action:    "retrying",
-		EventType: "workflow.started",
-		AgentID:   "node-1",
-		EntityID:  "entity-1",
-		Error:     "boom",
-		Detail:    "ignored",
-	})
+func TestProjectCanonicalRunDebugReplay_PreservesCanonicalRuntimeLogDetailAndTimestamp(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	report := store.RunDebugReport{
+		RunID: "run-123",
+		RuntimeLogs: []store.RunDebugRuntimeLog{{
+			EventID:   "evt-log-1",
+			Level:     "warn",
+			Component: "runtime",
+			Action:    "retrying",
+			EventType: "workflow.started",
+			AgentID:   "node-1",
+			EntityID:  "entity-1",
+			Error:     "boom",
+			Detail:    json.RawMessage(`{"component":"runtime","action":"retrying","error":"boom"}`),
+			CreatedAt: now,
+		}},
+	}
 
-	if event["type"] != "runtime.log" {
-		t.Fatalf("event.type = %#v", event["type"])
+	replay := projectCanonicalRunDebugReplay(report)
+	if len(replay) != 1 {
+		t.Fatalf("replay len = %d, want 1", len(replay))
 	}
-	if event["id"] == "" {
-		t.Fatal("expected generated event id")
+	if replay[0]["type"] != "runtime.log" {
+		t.Fatalf("replay[0].type = %#v, want runtime.log", replay[0]["type"])
 	}
-	payload, _ := event["payload"].(map[string]any)
+	if got := replay[0]["timestamp"]; got != now.Format(time.RFC3339) {
+		t.Fatalf("runtime log timestamp = %#v, want %q", got, now.Format(time.RFC3339))
+	}
+	payload, _ := replay[0]["payload"].(map[string]any)
 	if payload["level"] != "warn" || payload["component"] != "runtime" || payload["action"] != "retrying" {
 		t.Fatalf("payload = %#v", payload)
 	}
 	detail, _ := payload["detail"].(map[string]any)
-	if len(detail) != 0 {
-		t.Fatalf("detail = %#v, want empty map", detail)
+	if detail["error"] != "boom" {
+		t.Fatalf("detail = %#v", detail)
 	}
 }
