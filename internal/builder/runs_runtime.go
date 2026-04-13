@@ -18,11 +18,14 @@ func (h *runHub) handleRuntimeLog(entry runtimepkg.RuntimeLogEntry) {
 	if h == nil {
 		return
 	}
-	runIDs := h.runIDsForRuntimeEntry(entry)
-	for _, runID := range runIDs {
+	controlRunIDs := h.correlatedRunIDsForRuntimeEntry(entry)
+	for _, runID := range controlRunIDs {
 		h.maybeEmitBreakpointHit(runID, entry.AgentID, entry.EffectiveEntityID())
 		h.maybeEmitHumanTaskWaiting(runID, entry)
 		h.maybePauseAfterStep(runID, entry.AgentID, entry.EffectiveEntityID())
+	}
+	runIDs := h.runIDsForRuntimeEntry(entry)
+	for _, runID := range runIDs {
 		h.syncCanonical(context.Background(), runID)
 	}
 }

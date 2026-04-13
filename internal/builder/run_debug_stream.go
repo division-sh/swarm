@@ -64,10 +64,21 @@ func (h *runHub) runIDsForRuntimeEntry(entry interface{ EffectiveEntityID() stri
 	return runIDs
 }
 
-func (h *runHub) canonicalReplay(ctx context.Context, runID string) []RunEventEnvelope {
+func (h *runHub) correlatedRunIDsForRuntimeEntry(entry interface{ EffectiveEntityID() string }) []string {
+	if h == nil {
+		return nil
+	}
+	entityID := strings.TrimSpace(entry.EffectiveEntityID())
+	if entityID == "" {
+		return nil
+	}
+	return h.runIDsForRuntimeEntry(entry)
+}
+
+func (h *runHub) canonicalReplay(ctx context.Context, runID string) ([]RunEventEnvelope, runDebugStreamState) {
 	report, ok := h.loadRunDebugReport(ctx, runID)
 	if !ok {
-		return nil
+		return nil, runDebugStreamState{}
 	}
 	return projectCanonicalRunDebugReplay(report)
 }
@@ -113,12 +124,12 @@ func (h *runHub) loadRunDebugReport(ctx context.Context, runID string) (store.Ru
 	return report, true
 }
 
-func projectCanonicalRunDebugReplay(report store.RunDebugReport) []RunEventEnvelope {
+func projectCanonicalRunDebugReplay(report store.RunDebugReport) ([]RunEventEnvelope, runDebugStreamState) {
 	state := runDebugStreamState{
 		eventIDs:      map[string]struct{}{},
 		runtimeLogIDs: map[string]struct{}{},
 	}
-	return projectCanonicalRunDebugDelta(report, &state)
+	return projectCanonicalRunDebugDelta(report, &state), state
 }
 
 func projectCanonicalRunDebugDelta(report store.RunDebugReport, state *runDebugStreamState) []RunEventEnvelope {

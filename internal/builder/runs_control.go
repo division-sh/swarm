@@ -321,8 +321,10 @@ func (h *runHub) subscribe(runID string, listener func(RunEventEnvelope)) func()
 	}
 	session.subs[subID] = listener
 	controlReplay := append([]RunEventEnvelope(nil), session.controlEvents...)
+	canonicalReplay, primedState := h.canonicalReplay(context.Background(), runID)
+	session.debug = primedState
 	h.mu.Unlock()
-	for _, event := range h.canonicalReplay(context.Background(), runID) {
+	for _, event := range canonicalReplay {
 		listener(event)
 	}
 	for _, event := range controlReplay {

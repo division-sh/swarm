@@ -2,6 +2,7 @@ package builder
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 type snapshotRunStore struct {
 	runtimebus.InMemoryEventStore
 	snapshot runtimebus.RunLifecycleSnapshot
+	report   store.RunDebugReport
 }
 
 func (s *snapshotRunStore) MarkRunTerminal(_ context.Context, runID, status, errorSummary string, endedAt time.Time) error {
@@ -29,6 +31,9 @@ func (s *snapshotRunStore) LoadRunLifecycleSnapshot(context.Context, string) (ru
 }
 
 func (s *snapshotRunStore) LoadRunDebugReport(_ context.Context, runID string, _ store.RunDebugQueryOptions) (store.RunDebugReport, error) {
+	if strings.TrimSpace(s.report.RunID) != "" {
+		return s.report, nil
+	}
 	report := store.RunDebugReport{
 		RunID:          runID,
 		RunTableStatus: s.snapshot.Status,
@@ -42,6 +47,13 @@ func (s *snapshotRunStore) LoadRunDebugReport(_ context.Context, runID string, _
 		report.EndedAt = &ended
 	}
 	return report, nil
+}
+
+type counterPause struct{ calls int }
+
+func (c *counterPause) pause() error {
+	c.calls++
+	return nil
 }
 
 func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
@@ -165,5 +177,85 @@ func TestRunHubAwaitCompletion_EmitsAuthoritativeRunSummary(t *testing.T) {
 	}
 	if got, ok := summary["duration_ms"].(int64); !ok || got <= 0 {
 		t.Fatalf("summary.duration_ms = %#v, want positive int64", summary["duration_ms"])
+	}
+}
+
+func TestRunHubHandleRuntimeLog_NoEntityDoesNotTriggerControlHooksAcrossRuns(t *testing.T) {
+	pause := &counterPause{}
+	hub := &runHub{
+		pauseRuntime: pause.pause,
+		sessions: map[string]*runSession{
+			"run-a": {
+				runID:       "run-a",
+				breakpoints: map[string]struct{}{"node-1": {}},
+				subs:        map[string]func(RunEventEnvelope){},
+				debug: runDebugStreamState{
+					eventIDs:      map[string]struct{}{},
+					runtimeLogIDs: map[string]struct{}{},
+				},
+			},
+			"run-b": {
+				runID:       "run-b",
+				breakpoints: map[string]struct{}{"node-1": {}},
+				subs:        map[string]func(RunEventEnvelope){},
+				debug: runDebugStreamState{
+					eventIDs:      map[string]struct{}{},
+					runtimeLogIDs: map[string]struct{}{},
+				},
+			},
+		},
+	}
+
+	hub.handleRuntimeLog(runtimepkg.RuntimeLogEntry{
+		Component: "scheduler",
+		Action:    "checkpoint",
+		AgentID:   "node-1",
+	})
+
+	if pause.calls != 0 {
+		t.Fatalf("pause calls = %d, want 0", pause.calls)
+	}
+	for runID, session := range hub.sessions {
+		if _, ok := session.trippedBreakpoints["node-1"]; ok {
+			t.Fatalf("%s unexpectedly tripped breakpoint on no-entity log", runID)
+		}
+	}
+}
+
+func TestRunHubSubscribe_PrimesCanonicalReplayDedupeState(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	debugStore := &snapshotRunStore{
+		report: store.RunDebugReport{
+			RunID:      "run-123",
+			StartedAt:  now,
+			EventCount: 1,
+			Events: []store.RunDebugEvent{{
+				EventID:    "evt-1",
+				EventName:  "scan.requested",
+				EntityID:   "entity-1",
+				CreatedAt:  now.Add(1 * time.Second),
+				Source:     "builder",
+				SourceType: "agent",
+			}},
+		},
+	}
+	hub := &runHub{
+		runDebug: debugStore,
+		sessions: map[string]*runSession{},
+	}
+	var seen []RunEventEnvelope
+	cancel := hub.subscribe("run-123", func(event RunEventEnvelope) {
+		seen = append(seen, cloneRunEvent(event))
+	})
+	defer cancel()
+
+	if len(seen) != 2 {
+		t.Fatalf("initial replay len = %d, want 2", len(seen))
+	}
+
+	hub.syncCanonical(context.Background(), "run-123")
+
+	if len(seen) != 2 {
+		t.Fatalf("post-sync len = %d, want 2", len(seen))
 	}
 }
