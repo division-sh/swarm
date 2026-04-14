@@ -157,6 +157,31 @@ func runtimeMCPGatewayURLForContainerExecution() string {
 	return normalizeContainerExecutionMCPServerURL(raw)
 }
 
+func RuntimeMCPGatewayURLForHostExecution() string {
+	raw := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
+	return normalizeHostExecutionMCPServerURL(raw)
+}
+
+func normalizeHostExecutionMCPServerURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || strings.TrimSpace(u.Host) == "" {
+		return normalizeMCPServerURL(raw)
+	}
+	if isContainerOnlyMCPHost(u.Hostname()) || isUnspecifiedMCPHost(u.Hostname()) {
+		port := strings.TrimSpace(u.Port())
+		if port != "" {
+			u.Host = "127.0.0.1:" + port
+		} else {
+			u.Host = "127.0.0.1"
+		}
+	}
+	return normalizeMCPServerURL(u.String())
+}
+
 func normalizeContainerExecutionMCPServerURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -178,6 +203,11 @@ func normalizeContainerExecutionMCPServerURL(raw string) string {
 	return normalizeMCPServerURL(raw)
 }
 
+func isContainerOnlyMCPHost(host string) bool {
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	return strings.EqualFold(host, "host.docker.internal") || strings.EqualFold(host, "host.containers.internal")
+}
+
 func isLoopbackMCPHost(host string) bool {
 	host = strings.TrimSpace(strings.Trim(host, "[]"))
 	if host == "" {
@@ -188,6 +218,15 @@ func isLoopbackMCPHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func isUnspecifiedMCPHost(host string) bool {
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if host == "" {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
 }
 
 func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, promptTransportFallback, error) {
