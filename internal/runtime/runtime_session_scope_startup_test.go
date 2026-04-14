@@ -95,7 +95,6 @@ name: support
 initial_state: waiting
 states:
   - waiting
-  - done
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "prompts", "backend.md"), "Handle support events.\n")
@@ -166,7 +165,6 @@ name: support
 initial_state: waiting
 states:
   - waiting
-  - done
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `

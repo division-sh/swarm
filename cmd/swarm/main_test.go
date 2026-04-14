@@ -1255,3 +1255,22 @@ func TestVerifyBundle_InputPinProducerPathReturnsWarningSurface(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifyBundle_UnreachableStateReturnsWarningSurface(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+
+	err := verifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-state-machine-unreachable"))))
+	if err == nil {
+		t.Fatal("verifyBundle error = nil, want warning-only failure from unreachable declared state")
+	}
+	for _, want := range []string{
+		"semantic_drift_unreachable_state",
+		"declares state review but no transition path from initial_state waiting reaches review",
+		"Reachable states: active, done, waiting",
+		"Unreachable states: review",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("verifyBundle error = %v, want substring %q", err, want)
+		}
+	}
+}

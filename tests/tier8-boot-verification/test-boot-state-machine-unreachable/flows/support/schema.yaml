@@ -1,0 +1,4 @@
+name: support
+initial_state: waiting
+terminal_states: [done]
+states: [waiting, active, review, done]
