@@ -82,6 +82,10 @@ active_issues:
     title: Expose accumulator completion and on_complete transaction outcomes together
     maps_to:
       - accumulator_completion_and_atomic_outcome_visibility
+  - id: 393
+    title: Enforce create_entity + accumulate prohibition at canonical boot validation
+    maps_to:
+      - startup_validation_missing_prohibited_handler_enforcement
 nodes:
   - id: boot_verification_false_negative_validation
     title: Boot/Verification False-Negative Validation
@@ -195,6 +199,25 @@ nodes:
       too_narrow:
         - one final-item bug
         - one missing log line
+    current_action_pressure: active
+  - id: startup_validation_missing_prohibited_handler_enforcement
+    title: Startup Validation Missing Prohibited-Handler Enforcement
+    parent_class: semantic correctness drift between authored contracts and startup validation
+    canonical_owners:
+      - internal/runtime/bootverify
+      - internal/runtime/workflow_validation.go
+    why_this_node_exists: authored contracts that the authoritative spec prohibits can still be admitted at boot because startup validation does not encode the prohibition at the canonical owner boundary
+    known_manifestations:
+      - create_entity plus accumulate on the same handler is accepted at startup even though the spec says it must be a boot error
+      - adjacent spec-prohibited handler combinations could drift into runtime-only rejection if boot validation does not own them explicitly
+    representative_issues:
+      - 393
+    common_framing_mistakes:
+      too_broad:
+        - bootverify is incomplete
+      too_narrow:
+        - one stale tier8 fixture
+        - one missing if statement in a helper
     current_action_pressure: active
 reserve_backlog:
   - ordinal: 7
