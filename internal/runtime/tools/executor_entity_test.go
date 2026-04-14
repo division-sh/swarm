@@ -214,6 +214,120 @@ func TestEntityTools_SaveEntityField_JSONBRoundTripsPlainTextWithoutBase64(t *te
 	}
 }
 
+func TestEntityTools_CreateEntityAcceptsAnnotatedJSONBFields(t *testing.T) {
+	ctx, exec := newAnnotatedEntityToolExecutor(t)
+	entityID := uuid.NewString()
+
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"flow_instance": "validation/inst-1",
+		"fields": map[string]any{
+			"business_brief": map[string]any{"summary": "validated"},
+			"validation_kit": map[string]any{"checklist": []any{"ux", "brand"}},
+		},
+	}); err != nil {
+		t.Fatalf("create_entity annotated jsonb fields: %v", err)
+	}
+
+	got, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+	if err != nil {
+		t.Fatalf("get_entity: %v", err)
+	}
+	entity, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("expected entity map, got %#v", got)
+	}
+	fields, ok := entity["fields"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fields map, got %#v", entity["fields"])
+	}
+	brief, ok := fields["business_brief"].(map[string]any)
+	if !ok || strings.TrimSpace(asString(brief["summary"])) != "validated" {
+		t.Fatalf("business_brief = %#v, want persisted annotated jsonb object", fields["business_brief"])
+	}
+	kit, ok := fields["validation_kit"].(map[string]any)
+	if !ok {
+		t.Fatalf("validation_kit = %#v, want persisted annotated jsonb object", fields["validation_kit"])
+	}
+	checklist, ok := kit["checklist"].([]any)
+	if !ok || len(checklist) != 2 {
+		t.Fatalf("validation_kit.checklist = %#v, want persisted array", kit["checklist"])
+	}
+}
+
+func TestEntityTools_SaveEntityFieldAcceptsAnnotatedJSONBFields(t *testing.T) {
+	ctx, exec := newAnnotatedEntityToolExecutor(t)
+	entityID := uuid.NewString()
+
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"flow_instance": "validation/inst-1",
+	}); err != nil {
+		t.Fatalf("create_entity: %v", err)
+	}
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "mvp_spec",
+		"value":     map[string]any{"headline": "launch fast", "approved": true},
+	}); err != nil {
+		t.Fatalf("save_entity_field annotated jsonb: %v", err)
+	}
+
+	got, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+	if err != nil {
+		t.Fatalf("get_entity: %v", err)
+	}
+	entity, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("expected entity map, got %#v", got)
+	}
+	fields, ok := entity["fields"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fields map, got %#v", entity["fields"])
+	}
+	spec, ok := fields["mvp_spec"].(map[string]any)
+	if !ok || strings.TrimSpace(asString(spec["headline"])) != "launch fast" {
+		t.Fatalf("mvp_spec = %#v, want persisted annotated jsonb object", fields["mvp_spec"])
+	}
+}
+
+func TestEntityTools_SearchEntitiesAcceptsAnnotatedJSONBFilter(t *testing.T) {
+	ctx, exec := newAnnotatedEntityToolExecutor(t)
+	entityID := uuid.NewString()
+	kit := map[string]any{"checklist": []any{"ux", "brand"}}
+
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"flow_instance": "validation/inst-1",
+		"fields": map[string]any{
+			"validation_kit": kit,
+		},
+	}); err != nil {
+		t.Fatalf("create_entity: %v", err)
+	}
+
+	out, err := exec.Execute(ctx, "search_entities", map[string]any{
+		"flow_instance": "validation/inst-1",
+		"filter": map[string]any{
+			"validation_kit": kit,
+		},
+	})
+	if err != nil {
+		t.Fatalf("search_entities annotated jsonb filter: %v", err)
+	}
+	result, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected search result map, got %#v", out)
+	}
+	results, ok := result["results"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected search results slice, got %#v", result["results"])
+	}
+	if len(results) != 1 || strings.TrimSpace(asString(results[0]["entity_id"])) != entityID {
+		t.Fatalf("unexpected search results: %#v", results)
+	}
+}
+
 func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarness(t)
 	entityID := uuid.NewString()
@@ -961,6 +1075,29 @@ func newEntityToolTestExecutorWithBundle(t *testing.T, actor models.AgentConfig,
 	t.Helper()
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 	return ctx, exec
+}
+
+func newAnnotatedEntityToolExecutor(t *testing.T) (context.Context, *runtimetools.Executor) {
+	t.Helper()
+	return newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities"},
+	}, &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			InitialStage: "queued",
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "validation",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "business_brief", Type: "jsonb (from research.completed)", Nullable: true},
+						{Name: "mvp_spec", Type: "jsonb (from spec.approved)", Nullable: true},
+						{Name: "validation_kit", Type: "jsonb (accumulated validation artifacts)", Nullable: true},
+					},
+				}},
+			},
+		},
+	})
 }
 
 func newEntityToolTestHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB) {
