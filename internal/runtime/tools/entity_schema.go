@@ -256,7 +256,13 @@ func normalizeEntityFieldType(raw string) string {
 		return raw
 	}
 	for _, base := range []string{"text", "string", "integer", "boolean", "jsonb", "timestamp", "uuid"} {
-		if raw == base || strings.HasPrefix(raw, base+" ") || strings.HasPrefix(raw, base+"(") {
+		if raw == base {
+			return base
+		}
+		if strings.HasPrefix(raw, base+"(") {
+			return base
+		}
+		if strings.HasPrefix(raw, base+" ") && strings.HasPrefix(strings.TrimPrefix(raw, base), " (") {
 			return base
 		}
 	}
