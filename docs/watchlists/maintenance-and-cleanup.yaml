@@ -52,6 +52,10 @@ active_issues:
     title: Remove task-conversation mixed-rollout compatibility between agent_sessions and agent_conversation_audits
     maps_to:
       - legacy_compatibility_removal
+  - id: 411
+    title: Collapse residual schema-capability branching toward a narrower canonical store schema
+    maps_to:
+      - legacy_compatibility_removal
   - id: 173
     title: Completed-seam hygiene with canonical-owner notes and reusable invariant suites
     maps_to:
@@ -101,6 +105,7 @@ nodes:
       - 159
       - 360
       - 403
+      - 411
     common_framing_mistakes:
       too_broad:
         - delete all legacy code
