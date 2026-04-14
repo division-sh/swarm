@@ -1607,8 +1607,7 @@ engine:
     - id: state_machine_coherence
       severity: error
       scope: per-flow
-      trigger: An advances_to target is not in the flow's declared states list. Or a state has no inbound transition (unreachable).
-        Or initial_state is not in states.
+      trigger: An advances_to target is not in the flow's declared states list. Or initial_state is not in states.
       when: boot-only
     - id: required_agents_match
       severity: error
@@ -3459,3 +3458,41 @@ static_analyzer:
         rule: A timer declared within the consuming flow fires the same event.
     rule: Emit warning when none of the accepted producer-path forms are found. The finding message must say no producer path
       was found in the authored bundle and list the checked producer-path forms.
+  slice_4_state_machine_reachability:
+    id: semantic_drift_unreachable_state
+    domain: semantic_drift
+    authority: semantic_drift_warning
+    severity: warning
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - flow_model.state_composition
+    - handler_specification.handler_fields.advances_to
+    - handler_specification.handler_fields.on_complete
+    - handler_specification.handler_fields.rules
+    - contract_formats.flow_schema
+    scope:
+      description: For every stateful flow, verify that each declared state is reachable from initial_state in the authored
+        transition graph built from the accepted slice-4 transition carriers.
+      applies_to:
+      - stateful flows only
+      excludes:
+      - structural invalid target validation
+      - missing terminal-path reasoning
+      - runtime liveness or temporal behavior claims
+    transition_carriers:
+      handler_advances_to:
+        rule: Handler-level advances_to contributes a possible edge.
+      on_complete_branches:
+        rule: on_complete branches with advances_to contribute possible edges.
+      rules_branches:
+        rule: rules branches with advances_to contribute possible edges.
+    source_state_derivation:
+      create_entity_handlers:
+        rule: create_entity handlers source from initial_state only.
+      non_create_entity_handlers:
+        rule: non-create_entity handlers source from all non-terminal declared states.
+      terminal_states:
+        rule: terminal states are sinks in this slice.
+    rule: Emit warning when a declared state is unreachable from initial_state in the authored transition graph. Keep invalid
+      undeclared advances_to targets on hard-invalid state_machine_coherence.

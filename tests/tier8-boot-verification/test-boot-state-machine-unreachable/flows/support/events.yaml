@@ -1,0 +1,6 @@
+ticket.opened:
+  payload:
+    entity_id: string
+ticket.closed:
+  payload:
+    entity_id: string

@@ -571,6 +571,90 @@ func TestRun_MapsStateMachineMismatchToNamedError(t *testing.T) {
 	}
 }
 
+func TestRun_WarnsWhenDeclaredStateIsUnreachable(t *testing.T) {
+	root := writeStateReachabilityFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_unreachable_state", "declares state review but no transition path from initial_state waiting reaches review") {
+		t.Fatalf("expected semantic_drift_unreachable_state warning, got %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_unreachable_state", "Reachable states: active, done, waiting") {
+		t.Fatalf("expected reachable-state summary, got %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_unreachable_state", "Unreachable states: review") {
+		t.Fatalf("expected unreachable-state summary, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
+	root := writeStateReachabilityFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	node := bundle.Nodes["support-node"]
+	handler := node.EventHandlers["ticket.closed"]
+	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
+		Condition:  "true",
+		AdvancesTo: "review",
+	}}
+	node.EventHandlers["ticket.closed"] = handler
+	bundle.Nodes["support-node"] = node
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
+		t.Fatalf("unexpected semantic_drift_unreachable_state warning when on_complete reaches review, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
+	root := writeStateReachabilityFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	node := bundle.Nodes["support-node"]
+	handler := node.EventHandlers["ticket.closed"]
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+		Condition:  "true",
+		AdvancesTo: "review",
+	}}
+	node.EventHandlers["ticket.closed"] = handler
+	bundle.Nodes["support-node"] = node
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
+		t.Fatalf("unexpected semantic_drift_unreachable_state warning when rules reach review, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testing.T) {
+	root := writeStateReachabilityFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	node := bundle.Nodes["support-node"]
+	handler := node.EventHandlers["ticket.closed"]
+	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
+		Condition:  "true",
+		AdvancesTo: "review",
+	}}
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+		Condition:  "true",
+		AdvancesTo: "bogus_state",
+	}}
+	node.EventHandlers["ticket.closed"] = handler
+	bundle.Nodes["support-node"] = node
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "state_machine_coherence", "bogus_state") {
+		t.Fatalf("expected state_machine_coherence error, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
+		t.Fatalf("unexpected semantic_drift_unreachable_state warning when declared states remain reachable, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_MapsDialectDualToNamedError(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-success")
 	nodeID, eventType, handler, ok := firstBundleHandler(bundle)
@@ -2301,8 +2385,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 39 {
-		t.Fatalf("bootCheckRegistry count = %d, want 39", got)
+	if got := len(bootCheckRegistry); got != 40 {
+		t.Fatalf("bootCheckRegistry count = %d, want 40", got)
 	}
 	if got := len(supplementalChecks); got != 2 {
 		t.Fatalf("supplementalChecks count = %d, want 2", got)
@@ -2858,6 +2942,64 @@ consumer-node:
   event_handlers:
     ticket.ready:
       create_entity: true
+      advances_to: done
+`)
+
+	return root
+}
+
+func writeStateReachabilityFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: state-reachability
+version: "1.0.0"
+platform: ">=1.6.0"
+entity_schema:
+  groups:
+    - name: ticket
+      fields:
+        - name: ticket_id
+          type: string
+flows:
+  - id: support
+    flow: support
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-reachability\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+name: support
+initial_state: waiting
+terminal_states: [done]
+states: [waiting, active, review, done]
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+ticket.opened:
+  payload:
+    entity_id: string
+ticket.closed:
+  payload:
+    entity_id: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
+support-node:
+  id: support-node
+  execution_type: system_node
+  subscribes_to:
+    - ticket.opened
+    - ticket.closed
+  event_handlers:
+    ticket.opened:
+      create_entity: true
+      advances_to: active
+    ticket.closed:
       advances_to: done
 `)
 

@@ -93,6 +93,9 @@ type checkerContext struct {
 	stateLoaded   bool
 	stateFindings []Finding
 
+	stateReachabilityLoaded   bool
+	stateReachabilityFindings []Finding
+
 	producesDriftLoaded   bool
 	producesDriftFindings []Finding
 
@@ -169,6 +172,7 @@ var bootCheckRegistry = []Check{
 	{ID: "condition_payload_alignment", Severity: "error", Run: checkConditionPayloadAlignment},
 	{ID: "condition_policy_alignment", Severity: "warning", Run: checkConditionPolicyAlignment},
 	{ID: "state_machine_coherence", Severity: "error", Run: checkStateMachineCoherence},
+	{ID: "semantic_drift_unreachable_state", Severity: "warning", Run: checkSemanticDriftUnreachableState},
 	{ID: "required_agents_match", Severity: "error", Run: checkRequiredAgentsMatch},
 	{ID: "handler_field_compliance", Severity: "error", Run: checkHandlerFieldCompliance},
 	{ID: "tool_resolution", Severity: "warning", Run: checkToolResolution},

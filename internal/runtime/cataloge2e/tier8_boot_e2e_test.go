@@ -64,6 +64,7 @@ var tier8SupportedFixtures = []string{
 var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
 	"test-boot-create-entity-plus-accumulate":          {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
 	"test-boot-on-complete-and-rules-mutual-exclusion": {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
+	"test-boot-state-machine-unreachable":              {reason: "supported verify warning fixture for analyzer slice 4; not a runtime boot catalog fixture"},
 }
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
