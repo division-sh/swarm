@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	runtime "swarm/internal/runtime"
 	runtimebootverify "swarm/internal/runtime/bootverify"
 	"swarm/internal/runtime/semanticview"
 )
@@ -45,6 +46,16 @@ func runBootCatalogFixture(t *testing.T, fixtureRoot string) {
 		}
 		if !findingsContain(report.Warnings(), expected.Expected.ErrorCategory, expected.Expected.ErrorContains) {
 			t.Fatalf("expected warning %s containing %q, got %#v", expected.Expected.ErrorCategory, expected.Expected.ErrorContains, report.Warnings())
+		}
+		strictCatalogFixtureStartupPolicy().apply(t)
+		_, validationErr := runtime.ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), runtime.DefaultWorkflowContractValidationOptions(nil))
+		if validationErr != nil {
+			if _, err := newTier8Runtime(t, bundle); err == nil {
+				t.Fatal("expected NewRuntime to fail when authoritative startup validation fails")
+			} else if !strings.Contains(err.Error(), validationErr.Error()) {
+				t.Fatalf("newTier8Runtime error = %q, want authoritative validation error substring %q", err.Error(), validationErr.Error())
+			}
+			return
 		}
 		rt, err := newTier8Runtime(t, bundle)
 		if err != nil {
