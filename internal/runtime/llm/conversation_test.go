@@ -433,14 +433,48 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedReadFileResultsForHelperRu
 	if resultMap == nil {
 		t.Fatalf("expected result map, got %#v", arr[0]["result"])
 	}
+	if rt.toolName != "read_file" {
+		t.Fatalf("relay tool name = %q, want read_file", rt.toolName)
+	}
+	if resultMap["truncated"] != true {
+		t.Fatalf("expected relayed read_file metadata, got %#v", resultMap)
+	}
+	followUp, _ := resultMap["follow_up"].(map[string]any)
+	if followUp == nil || followUp["path"] != rt.relayPath || followUp["tool"] != "read_file" {
+		t.Fatalf("follow_up = %#v, want relay path/tool", followUp)
+	}
+}
+
+func TestConversation_ExecuteToolCalls_PreservesRelayReadFileResultsForHelperRuntime(t *testing.T) {
+	huge := strings.Repeat("x", maxToolResultBytes+1024)
+	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/read-file-1.json"}
+	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test"}
+	c.SetToolExecutor(largeToolExec{payload: map[string]any{
+		"content":    huge,
+		"size_bytes": len(huge),
+	}})
+
+	raw, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": rt.relayPath}}})
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	if len(arr) != 1 || arr[0]["ok"] != true {
+		t.Fatalf("expected successful tool payload, got %#v", arr)
+	}
+	resultMap, _ := arr[0]["result"].(map[string]any)
+	if resultMap == nil {
+		t.Fatalf("expected result map, got %#v", arr[0]["result"])
+	}
 	if _, ok := resultMap["follow_up"]; ok {
-		t.Fatalf("did not expect helper relay follow_up for read_file within existing allowance, got %#v", resultMap)
+		t.Fatalf("did not expect helper relay follow_up when reading runtime relay path, got %#v", resultMap)
 	}
 	if content, _ := resultMap["content"].(string); len(content) != len(huge) {
 		t.Fatalf("content length = %d, want %d", len(content), len(huge))
 	}
 	if len(rt.raw) != 0 {
-		t.Fatalf("did not expect relay writer to run, got raw=%q", string(rt.raw))
+		t.Fatalf("did not expect relay writer to run for runtime relay path read, got raw=%q", string(rt.raw))
 	}
 }
 
