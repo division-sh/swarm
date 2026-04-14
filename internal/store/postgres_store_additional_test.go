@@ -4271,6 +4271,142 @@ func TestManagerStore_AppendAgentTurn_TaskCreatesAuditRowIfMissing(t *testing.T)
 	}
 }
 
+func TestManagerStore_AppendAgentTurn_TaskDoesNotAdoptLegacySessionRow(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+		) VALUES (
+			$1::uuid,
+			'a1',
+			'',
+			'global',
+			'[{"role":"assistant","content":"legacy task"}]'::jsonb,
+			3,
+			'task',
+			'{"summary":"legacy task"}'::jsonb,
+			'active',
+			now() - interval '5 minutes',
+			now() - interval '5 minutes'
+		)
+	`, sessionID); err != nil {
+		t.Fatalf("seed legacy task session row: %v", err)
+	}
+
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "task",
+		SessionID:      sessionID,
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn(task legacy row): %v", err)
+	}
+
+	var turnCount int
+	var conversation string
+	var summary string
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			turn_count,
+			COALESCE(conversation::text, '[]'),
+			COALESCE(runtime_state->>'summary', '')
+		FROM agent_conversation_audits
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&turnCount, &conversation, &summary); err != nil {
+		t.Fatalf("load synthesized task audit row: %v", err)
+	}
+	if turnCount != 0 {
+		t.Fatalf("expected synthesized audit row to start with canonical turn_count 0, got %d", turnCount)
+	}
+	if conversation != "[]" {
+		t.Fatalf("expected synthesized audit conversation to stay canonical empty array, got %s", conversation)
+	}
+	if summary != "" {
+		t.Fatalf("expected synthesized audit summary to stay empty, got %q", summary)
+	}
+}
+
+func TestPostgresStore_EnsureConversationAuditTable_DoesNotMigrateLegacyTaskSessionRows(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_conversation_audits CASCADE`); err != nil {
+		t.Fatalf("drop agent_conversation_audits: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE`); err != nil {
+		t.Fatalf("drop agent_sessions: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agent_sessions (
+			session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			agent_id TEXT NOT NULL,
+			entity_id UUID,
+			flow_instance TEXT,
+			scope_key TEXT NOT NULL,
+			scope TEXT NOT NULL DEFAULT 'global',
+			conversation JSONB NOT NULL DEFAULT '[]'::jsonb,
+			turn_count INTEGER NOT NULL DEFAULT 0,
+			runtime_mode TEXT NOT NULL DEFAULT 'task',
+			runtime_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agent_sessions: %v", err)
+	}
+
+	sessionID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+		) VALUES (
+			$1::uuid,
+			'a1',
+			'',
+			'global',
+			'[{"role":"assistant","content":"legacy task"}]'::jsonb,
+			1,
+			'task',
+			'{"summary":"legacy task"}'::jsonb,
+			'active',
+			now() - interval '5 minutes',
+			now() - interval '5 minutes'
+		)
+	`, sessionID); err != nil {
+		t.Fatalf("seed legacy task session row: %v", err)
+	}
+
+	if err := pg.ensureConversationAuditTable(ctx); err != nil {
+		t.Fatalf("ensureConversationAuditTable: %v", err)
+	}
+
+	var legacyCount, auditCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM agent_sessions WHERE session_id = $1::uuid AND runtime_mode = 'task'),
+			(SELECT COUNT(*) FROM agent_conversation_audits WHERE session_id = $1::uuid)
+	`, sessionID).Scan(&legacyCount, &auditCount); err != nil {
+		t.Fatalf("count task conversation rows after ensureConversationAuditTable: %v", err)
+	}
+	if legacyCount != 1 {
+		t.Fatalf("expected legacy task session row to remain untouched, got %d", legacyCount)
+	}
+	if auditCount != 0 {
+		t.Fatalf("expected ensureConversationAuditTable to stop migrating legacy task rows, got %d audit rows", auditCount)
+	}
+}
+
 func TestManagerStore_AppendAgentTurn_FailsOnMalformedCanonicalRuntimeLogTurnBlock(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

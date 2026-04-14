@@ -242,7 +242,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	}
 }
 
-func TestTaskConversationReader_ShowsLegacyTaskRowsDuringMixedRollout(t *testing.T) {
+func TestTaskConversationReader_HidesLegacyTaskRowsWithoutCanonicalAudit(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -282,22 +282,16 @@ func TestTaskConversationReader_ShowsLegacyTaskRowsDuringMixedRollout(t *testing
 	if err != nil {
 		t.Fatalf("List conversations: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("conversation count = %d, want 1", len(items))
-	}
-	if items[0].Kind != "turn_audit" || items[0].SessionID != sessionID || items[0].Summary != "legacy task" {
-		t.Fatalf("unexpected mixed-rollout summary: %+v", items[0])
+	if len(items) != 0 {
+		t.Fatalf("conversation count = %d, want 0", len(items))
 	}
 
 	item, ok, err := reader.Get(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Get conversation: %v", err)
 	}
-	if !ok {
-		t.Fatalf("conversation %s not found", sessionID)
-	}
-	if item.Kind != "turn_audit" || len(item.Messages) != 1 || item.Messages[0].Content != "legacy task" {
-		t.Fatalf("unexpected mixed-rollout detail: %+v", item)
+	if ok {
+		t.Fatalf("expected legacy-only task conversation %s to stay hidden, got %+v", sessionID, item)
 	}
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
@@ -322,7 +316,7 @@ func TestTaskConversationReader_ShowsLegacyTaskRowsDuringMixedRollout(t *testing
 		t.Fatalf("conversation count after canonical write = %d, want 1", len(items))
 	}
 	if items[0].SessionID != sessionID || items[0].Summary != "canonical task" {
-		t.Fatalf("unexpected canonical mixed-rollout summary: %+v", items[0])
+		t.Fatalf("unexpected canonical summary: %+v", items[0])
 	}
 
 	item, ok, err = reader.Get(ctx, sessionID)
@@ -333,7 +327,7 @@ func TestTaskConversationReader_ShowsLegacyTaskRowsDuringMixedRollout(t *testing
 		t.Fatalf("canonical conversation %s not found", sessionID)
 	}
 	if len(item.Messages) != 1 || item.Messages[0].Content != "canonical task" || item.TurnCount != 2 {
-		t.Fatalf("unexpected canonical mixed-rollout detail: %+v", item)
+		t.Fatalf("unexpected canonical detail: %+v", item)
 	}
 }
 
