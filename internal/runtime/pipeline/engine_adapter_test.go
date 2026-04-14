@@ -1022,6 +1022,51 @@ func TestPipelineEnginePayloadShaper_ValidationOutputBoundaryKeepsTargetEntityFo
 	}
 }
 
+func TestPipelineEnginePayloadShaper_ScoringOutputsRemainParentTargetedDespiteSameFlowConsumers(t *testing.T) {
+	source := loadScoringSameFlowConsumerOutputSource(t)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected scoring same-flow-consumer bundle")
+	}
+	shaper := pipelineEnginePayloadShaper{
+		coordinator: &PipelineCoordinator{
+			module: &previewWorkflowModule{
+				bundle: bundle,
+			},
+		},
+	}
+
+	req := runtimeengine.ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("ent-scoring"),
+		FlowID:   identity.NormalizeFlowID("scoring"),
+		Event: events.Event{
+			Type:    events.EventType("scoring/scoring.requested"),
+			Payload: json.RawMessage(`{"entity_id":"ent-scoring"}`),
+		}.WithEntityID("ent-scoring"),
+		State: runtimeengine.StateSnapshot{
+			EntityID: identity.NormalizeEntityID("ent-scoring"),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{
+				"flow_path":        "scoring/inst-1",
+				"subject_id":       "ent-parent",
+				"parent_entity_id": "ent-parent",
+			}, nil, nil),
+		},
+	}
+
+	for _, eventType := range []string{
+		"scoring/scoring.requested",
+		"scoring/scoring.derived_ready",
+	} {
+		out, err := shaper.ShapeEmitPayload(context.Background(), req, eventType, map[string]any{"entity_id": "ent-scoring"})
+		if err != nil {
+			t.Fatalf("ShapeEmitPayload(%s): %v", eventType, err)
+		}
+		if got := out["entity_id"]; got != "ent-parent" {
+			t.Fatalf("%s entity_id = %#v, want ent-parent", eventType, got)
+		}
+	}
+}
+
 func TestPipelineEnginePayloadShaper_TrimsUndeclaredFieldsAcrossCrossFlowOutputRetarget(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
 	bundle, ok := semanticview.Bundle(source)

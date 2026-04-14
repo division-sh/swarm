@@ -162,6 +162,28 @@ func TestFlowInstanceIdentity_ResolveEmittedEntityID_ValidationOutputBoundaryKee
 	}
 }
 
+func TestFlowInstanceIdentity_ResolveEmittedEntityID_ScoringOutputsRemainParentTargetedDespiteSameFlowConsumers(t *testing.T) {
+	source := loadScoringSameFlowConsumerOutputSource(t)
+	childState := WorkflowState{
+		EntityID: "ent-scoring",
+		Metadata: map[string]any{
+			"flow_path":        "scoring/inst-1",
+			"subject_id":       "ent-parent",
+			"parent_entity_id": "ent-parent",
+		},
+	}
+	trigger := mustEvent("scoring/scoring.requested", "ent-scoring")
+
+	for _, eventType := range []string{
+		"scoring/scoring.requested",
+		"scoring/scoring.derived_ready",
+	} {
+		if got := resolveEmittedEntityID(source, "scoring", eventType, childState, trigger, "ent-scoring", "ent-scoring"); got != "ent-parent" {
+			t.Fatalf("%s emitted entity_id = %q, want ent-parent", eventType, got)
+		}
+	}
+}
+
 func TestWorkflowInstanceCoordinates_SeparateStaticScopeFromGenericStorageRef(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-gates-in-child-flow")
 

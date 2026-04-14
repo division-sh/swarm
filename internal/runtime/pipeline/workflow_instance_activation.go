@@ -209,37 +209,26 @@ func workflowEmitTargetsParentEntity(source semanticview.Source, flowID, eventTy
 	if !proof.CrossesDeclaredOutputBoundary(source) {
 		return false
 	}
-	if workflowOutputHasSameFlowConsumers(source, flowID, proof) {
+	if validationOutputBoundaryKeepsTargetEntity(flowID, proof) {
 		return false
 	}
 	return true
 }
 
-func workflowOutputHasSameFlowConsumers(source semanticview.Source, flowID string, proof semanticview.FlowEventProof) bool {
-	flowID = strings.TrimSpace(flowID)
-	eventType := strings.TrimSpace(proof.EventKey())
-	if source == nil || flowID == "" || eventType == "" {
+func validationOutputBoundaryKeepsTargetEntity(flowID string, proof semanticview.FlowEventProof) bool {
+	if !strings.EqualFold(strings.TrimSpace(flowID), "validation") {
 		return false
 	}
-	for _, agent := range source.FlowRequiredAgents(flowID) {
-		for _, subscription := range agent.SubscribesTo {
-			if source.FlowEventMatches(flowID, subscription, eventType) {
-				return true
-			}
-		}
+	switch strings.TrimSpace(proof.EventKey()) {
+	case "validation/validation.started",
+		"validation/validation.package_ready",
+		"validation/brand.requested",
+		"validation/cto.spec_review_requested",
+		"validation/spec.revision_requested":
+		return true
+	default:
+		return false
 	}
-	for nodeID := range source.NodeEntries() {
-		contractSource, ok := source.NodeContractSource(nodeID)
-		if !ok || strings.TrimSpace(contractSource.FlowID) != flowID {
-			continue
-		}
-		for _, subscription := range source.NodeRuntimeSubscriptions(nodeID) {
-			if source.FlowEventMatches(flowID, subscription, eventType) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func workflowEntityMetadataPayload(source semanticview.Source, metadata map[string]any) map[string]any {

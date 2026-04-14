@@ -220,6 +220,18 @@ func TestWorkflowEmitTargetsParentEntity_ValidationOutputsSplitTargetEntityAndBa
 	}
 }
 
+func TestWorkflowEmitTargetsParentEntity_ScoringOutputsRemainParentTargetedDespiteSameFlowConsumers(t *testing.T) {
+	source := loadScoringSameFlowConsumerOutputSource(t)
+	for _, eventType := range []string{
+		"scoring/scoring.requested",
+		"scoring/scoring.derived_ready",
+	} {
+		if !workflowEmitTargetsParentEntity(source, "scoring", eventType) {
+			t.Fatalf("expected %s to remain parent-targeted outside the validation-only child", eventType)
+		}
+	}
+}
+
 func loadValidationOutputBoundarySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadWorkflowTempSource(t, map[string]string{
@@ -299,6 +311,56 @@ vertical.resumed:
     research.vertical_rejected:
       emits:
         - vertical.killed_backprop
+`,
+	})
+}
+
+func loadScoringSameFlowConsumerOutputSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	return loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `name: test
+version: 1.0.0
+flows:
+  - id: scoring
+    flow: scoring
+    mode: template
+`,
+		"flows/scoring/schema.yaml": `name: scoring
+pins:
+  inputs:
+    events:
+      - vertical.discovered
+  outputs:
+    events:
+      - scoring.requested
+      - scoring.derived_ready
+required_agents:
+  - role: scorer
+    subscribes_to:
+      - scoring.requested
+  - role: scoring-followup
+    subscribes_to:
+      - scoring.derived_ready
+`,
+		"flows/scoring/events.yaml": `scoring.requested:
+  payload:
+    entity_id: string
+scoring.derived_ready:
+  payload:
+    entity_id: string
+vertical.discovered:
+  payload:
+    entity_id: string
+`,
+		"flows/scoring/nodes.yaml": `scoring-orchestrator:
+  id: scoring-orchestrator
+  execution_type: system_node
+  subscribes_to:
+    - scoring.requested
+  event_handlers:
+    scoring.requested:
+      emits:
+        - scoring.derived_ready
 `,
 	})
 }
