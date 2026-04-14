@@ -1268,6 +1268,35 @@ func TestRun_DoesNotWarnForExternalInputPinWithoutEmitter(t *testing.T) {
 	}
 }
 
+func TestRun_ConstrainsExternalInputProducerPathToConsumingScope(t *testing.T) {
+	root := writeInputPinExternalScopeFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	var (
+		externalCleared bool
+		plainWarned     bool
+	)
+	for _, finding := range report.Warnings() {
+		if finding.CheckID != "input_pin_wiring" || !strings.Contains(finding.Message, "ticket.ready") {
+			continue
+		}
+		switch finding.Location {
+		case "external_consumer":
+			externalCleared = true
+		case "plain_consumer":
+			plainWarned = true
+		}
+	}
+	if externalCleared {
+		t.Fatalf("unexpected input_pin_wiring warning for external_consumer, got %#v", report.Warnings())
+	}
+	if !plainWarned {
+		t.Fatalf("expected input_pin_wiring warning for plain_consumer, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_DoesNotWarnForSiblingFlowOutputPinInputProducerPath(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
@@ -2687,6 +2716,54 @@ consumer-node:
       advances_to: done
       emits: consumer.started
 `)
+
+	return root
+}
+
+func writeInputPinExternalScopeFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: input-pin-external-scope
+version: "1.0.0"
+platform: ">=1.6.0"
+flows:
+  - id: external_consumer
+    flow: external_consumer
+    mode: static
+  - id: plain_consumer
+    flow: plain_consumer
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: input-pin-external-scope\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+
+	for _, flowID := range []string{"external_consumer", "plain_consumer"} {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), `
+name: `+flowID+`
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events:
+      - ticket.ready
+  outputs:
+    events: []
+`)
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
+		entry := "ticket.ready:\n  payload:\n    entity_id: string\n"
+		if flowID == "external_consumer" {
+			entry = "ticket.ready:\n  _source: external (manual handoff)\n  payload:\n    entity_id: string\n"
+		}
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), entry)
+	}
 
 	return root
 }
