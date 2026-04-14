@@ -104,7 +104,7 @@ func authoredStateGraphEdges(source semanticview.Source, flowID, initial string,
 		}
 		for _, handler := range node.EventHandlers {
 			sources := authoredHandlerSourceStates(initial, nonTerminalStates, handler)
-			for _, target := range handlerAdvanceTargets(handler) {
+			for _, target := range authoredReachabilityTargets(handler) {
 				target = strings.TrimSpace(target)
 				if target == "" {
 					continue
@@ -126,6 +126,24 @@ func authoredStateGraphEdges(source semanticview.Source, flowID, initial string,
 		}
 	}
 	return edges
+}
+
+func authoredReachabilityTargets(handler runtimecontracts.SystemNodeEventHandler) []string {
+	out := make([]string, 0, len(handler.Rules)+len(handler.OnComplete)+1)
+	if target := strings.TrimSpace(handler.AdvancesTo); target != "" {
+		out = append(out, target)
+	}
+	for _, rule := range handler.OnComplete {
+		if target := strings.TrimSpace(rule.AdvancesTo); target != "" {
+			out = append(out, target)
+		}
+	}
+	for _, rule := range handler.Rules {
+		if target := strings.TrimSpace(rule.AdvancesTo); target != "" {
+			out = append(out, target)
+		}
+	}
+	return out
 }
 
 func authoredNonTerminalStates(source semanticview.Source, flowID string, declaredStates map[string]struct{}) []string {

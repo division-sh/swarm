@@ -629,6 +629,27 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 	}
 }
 
+func TestRun_DoesNotUseAccumulateOnCompleteAsReachabilityProof(t *testing.T) {
+	root := writeStateReachabilityFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	node := bundle.Nodes["support-node"]
+	handler := node.EventHandlers["ticket.closed"]
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{
+		OnComplete: []runtimecontracts.HandlerRuleEntry{{
+			Condition:  "true",
+			AdvancesTo: "review",
+		}},
+	}
+	node.EventHandlers["ticket.closed"] = handler
+	bundle.Nodes["support-node"] = node
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
+		t.Fatalf("expected semantic_drift_unreachable_state warning when only accumulate.on_complete reaches review, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testing.T) {
 	root := writeStateReachabilityFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
