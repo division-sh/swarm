@@ -139,13 +139,13 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 			}
 		}
 	}
+	if err := s.ensureAgentSessionTerminationMetadata(ctx); err != nil {
+		return err
+	}
 	if catalog.hasTable("agent_conversation_audits") || catalog.hasTable("agent_turns") {
 		if err := s.ensureConversationAuditTable(ctx); err != nil {
 			return err
 		}
-	}
-	if err := s.ensureAgentSessionTerminationMetadata(ctx); err != nil {
-		return err
 	}
 	if err := s.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
 		return err
@@ -336,6 +336,39 @@ func (s *PostgresStore) ensureAgentSessionTerminationMetadata(ctx context.Contex
 		EXECUTE FUNCTION enforce_agent_session_termination_invariants();
 	`); err != nil {
 		return fmt.Errorf("ensure agent_sessions invariant trigger: %w", err)
+	}
+	if err := s.neutralizeLegacyTaskConversationSessions(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *PostgresStore) neutralizeLegacyTaskConversationSessions(ctx context.Context) error {
+	if s == nil || s.DB == nil {
+		return nil
+	}
+	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
+		return err
+	}
+	if !catalog.hasTable("agent_sessions") || !catalog.hasTable("agent_conversation_audits") {
+		return nil
+	}
+	if !catalog.hasColumns("agent_sessions", "termination_reason", "terminated_at") {
+		return nil
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET status = 'terminated',
+		    termination_reason = COALESCE(NULLIF(termination_reason, ''), 'orphaned'),
+		    terminated_at = COALESCE(terminated_at, updated_at, created_at, now()),
+		    lease_holder = NULL,
+		    lease_expires_at = NULL,
+		    updated_at = now()
+		WHERE runtime_mode = 'task'
+		  AND status <> 'terminated'
+	`); err != nil {
+		return fmt.Errorf("neutralize legacy task conversation sessions: %w", err)
 	}
 	return nil
 }

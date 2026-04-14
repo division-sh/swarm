@@ -4407,6 +4407,163 @@ func TestPostgresStore_EnsureConversationAuditTable_DoesNotMigrateLegacyTaskSess
 	}
 }
 
+func TestPostgresStore_EnsureSchemaTables_NeutralizesLegacyTaskSessionRowsBeforeLiveSessionAcquire(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_conversation_audits CASCADE`); err != nil {
+		t.Fatalf("drop agent_conversation_audits: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_turns CASCADE`); err != nil {
+		t.Fatalf("drop agent_turns: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE`); err != nil {
+		t.Fatalf("drop agent_sessions: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agent_sessions (
+			session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			agent_id TEXT NOT NULL,
+			entity_id UUID,
+			flow_instance TEXT,
+			scope_key TEXT NOT NULL,
+			scope TEXT NOT NULL DEFAULT 'global',
+			conversation JSONB NOT NULL DEFAULT '[]'::jsonb,
+			turn_count INTEGER NOT NULL DEFAULT 0,
+			runtime_mode TEXT NOT NULL DEFAULT 'task',
+			runtime_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+			lease_holder TEXT,
+			lease_expires_at TIMESTAMPTZ,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			UNIQUE (agent_id, scope_key)
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agent_sessions: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agent_turns (
+			turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			agent_id TEXT NOT NULL,
+			session_id UUID NOT NULL,
+			runtime_mode TEXT NOT NULL DEFAULT 'task',
+			scope_key TEXT,
+			entity_id UUID,
+			trigger_event_id UUID,
+			trigger_event_type TEXT,
+			task_id TEXT,
+			available_tools JSONB NOT NULL DEFAULT '[]'::jsonb,
+			tool_calls JSONB NOT NULL DEFAULT '[]'::jsonb,
+			emitted_events JSONB NOT NULL DEFAULT '[]'::jsonb,
+			mcp_servers JSONB NOT NULL DEFAULT '{}'::jsonb,
+			mcp_tools_listed JSONB NOT NULL DEFAULT '[]'::jsonb,
+			mcp_tools_visible JSONB NOT NULL DEFAULT '[]'::jsonb,
+			request_payload JSONB,
+			response_payload JSONB,
+			parse_ok BOOLEAN NOT NULL DEFAULT FALSE,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			error TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agent_turns: %v", err)
+	}
+
+	sessionID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, runtime_mode, status,
+			lease_holder, lease_expires_at, created_at, updated_at
+		) VALUES (
+			$1::uuid,
+			'a1',
+			'global',
+			'global',
+			'task',
+			'active',
+			'legacy-worker',
+			now() + interval '1 minute',
+			now() - interval '5 minutes',
+			now() - interval '2 minutes'
+		)
+	`, sessionID); err != nil {
+		t.Fatalf("seed legacy task session row: %v", err)
+	}
+
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agent_sessions": {
+			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'global',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'session',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+		},
+		"agent_turns": {
+			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables: %v", err)
+	}
+
+	var (
+		status       string
+		reason       string
+		terminatedAt time.Time
+		leaseHolder  sql.NullString
+		leaseExpires sql.NullTime
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(status, ''),
+			COALESCE(termination_reason, ''),
+			terminated_at,
+			lease_holder,
+			lease_expires_at
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&status, &reason, &terminatedAt, &leaseHolder, &leaseExpires); err != nil {
+		t.Fatalf("load neutralized legacy task session row: %v", err)
+	}
+	if status != "terminated" {
+		t.Fatalf("status = %q, want terminated", status)
+	}
+	if reason != "orphaned" {
+		t.Fatalf("termination_reason = %q, want orphaned", reason)
+	}
+	if terminatedAt.IsZero() {
+		t.Fatal("terminated_at is zero")
+	}
+	if leaseHolder.Valid || leaseExpires.Valid {
+		t.Fatalf("expected neutralized legacy task session row lease to be cleared, got holder=%q expires=%v", leaseHolder.String, leaseExpires)
+	}
+
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
+
+	var activeSessionCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agent_sessions
+		WHERE agent_id = 'a1'
+		  AND scope_key = 'global'
+		  AND runtime_mode = 'session'
+		  AND status = 'active'
+	`).Scan(&activeSessionCount); err != nil {
+		t.Fatalf("count live session rows after acquire: %v", err)
+	}
+	if activeSessionCount != 1 {
+		t.Fatalf("expected one active live session row after acquire, got %d", activeSessionCount)
+	}
+}
+
 func TestManagerStore_AppendAgentTurn_FailsOnMalformedCanonicalRuntimeLogTurnBlock(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
