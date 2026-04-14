@@ -1040,6 +1040,19 @@ func TestRun_MapsDialectDualToNamedError(t *testing.T) {
 	}
 }
 
+func TestRun_MapsCreateEntityPlusAccumulateToNamedError(t *testing.T) {
+	source := loadTier8Fixture(t, "test-boot-create-entity-plus-accumulate")
+
+	report := Run(context.Background(), source, Options{})
+
+	if !report.HasErrors() {
+		t.Fatalf("expected error report, got %#v", report.Findings)
+	}
+	if !reportContains(report.Errors(), "dialect_compliance", "declares both create_entity and accumulate") {
+		t.Fatalf("expected dialect_compliance create_entity/accumulate error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsInvalidFieldDetectionToNamedError(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Platform: runtimecontracts.PlatformSpecDocument{},
@@ -2434,7 +2447,7 @@ func TestRun_SuppressesExpressionFieldReferenceFindingWhenComputeMakesFieldAvail
 	}
 }
 
-func TestRun_WarnsWhenCreateEntityComputeProofDependsOnDynamicExpectedFrom(t *testing.T) {
+func TestRun_RejectsCreateEntityAccumulateWhenDynamicComputeProofWouldOtherwiseWarn(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
@@ -2459,18 +2472,12 @@ func TestRun_WarnsWhenCreateEntityComputeProofDependsOnDynamicExpectedFrom(t *te
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.composite_score") {
-		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Warnings(), "expression_field_reference_validation", "entity.composite_score") {
-		t.Fatalf("expected degraded compute/store_as warning, got %#v", report.Warnings())
-	}
-	if !reportContains(report.Warnings(), "expression_field_reference_validation", "dynamic") {
-		t.Fatalf("expected dynamic expected_from warning detail, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "dialect_compliance", "declares both create_entity and accumulate") {
+		t.Fatalf("expected dialect_compliance create_entity/accumulate error, got %#v", report.Errors())
 	}
 }
 
-func TestRun_AllowsCreateEntityComputeProofWhenExpectedFromIsNotDynamicEntityField(t *testing.T) {
+func TestRun_RejectsCreateEntityAccumulateWhenExpectedFromIsNotDynamicEntityField(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
@@ -2494,11 +2501,8 @@ func TestRun_AllowsCreateEntityComputeProofWhenExpectedFromIsNotDynamicEntityFie
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.composite_score") {
-		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
-	}
-	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.composite_score") {
-		t.Fatalf("unexpected degraded warning for non-dynamic expected_from, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "dialect_compliance", "declares both create_entity and accumulate") {
+		t.Fatalf("expected dialect_compliance create_entity/accumulate error, got %#v", report.Errors())
 	}
 }
 
