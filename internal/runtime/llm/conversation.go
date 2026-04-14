@@ -221,7 +221,7 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 			"name": tc.Name,
 		}
 		if err == nil {
-			projected, projectErr := c.projectToolResult(ctx, tc.Name, out)
+			projected, projectErr := c.projectToolResult(ctx, tc.Name, tc.Arguments, out)
 			if projectErr != nil {
 				err = projectErr
 			} else {
@@ -262,7 +262,7 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 	return strings.TrimSpace(string(b)), executed
 }
 
-func (c *Conversation) projectToolResult(ctx context.Context, name string, result any) (any, error) {
+func (c *Conversation) projectToolResult(ctx context.Context, name string, input any, result any) (any, error) {
 	if result == nil {
 		return nil, nil
 	}
@@ -273,7 +273,7 @@ func (c *Conversation) projectToolResult(ctx context.Context, name string, resul
 			"error":     "marshal tool result",
 		}, nil
 	}
-	limit := toolRelayResultLimitForRuntime(c.runtime, name)
+	limit := toolRelayResultLimitForRuntime(c.runtime, name, input)
 	if len(b) <= limit {
 		return result, nil
 	}
@@ -393,12 +393,19 @@ func relayOversizedToolResult(ctx context.Context, runtime Runtime, session *Ses
 	return relay, true, err
 }
 
-func toolRelayResultLimitForRuntime(runtime Runtime, name string) int {
+func toolRelayResultLimitForRuntime(runtime Runtime, name string, input any) int {
 	limit := toolRelayResultLimit(name)
-	if _, ok := runtime.(oversizedToolResultRelayWriter); ok {
-		return limit
+	if _, ok := runtime.(oversizedToolResultRelayWriter); ok && helperReadFileShouldUseGenericRelayLimit(name, input) {
+		return maxToolResultBytes
 	}
 	return limit
+}
+
+func helperReadFileShouldUseGenericRelayLimit(name string, input any) bool {
+	if !toolIsLargeRelayFileRead(name) {
+		return false
+	}
+	return !toolInputTargetsRuntimeRelayPath(input)
 }
 
 func toolRelayResultLimit(name string) int {
@@ -419,6 +426,40 @@ func toolRelayMessageLimit(calls []ToolCall) int {
 
 func toolIsLargeRelayFileRead(name string) bool {
 	return toolidentity.CanonicalName(name) == "read_file"
+}
+
+func toolInputTargetsRuntimeRelayPath(input any) bool {
+	rawPath := strings.TrimSpace(toolInputPath(input))
+	if rawPath == "" {
+		return false
+	}
+	cleaned := strings.TrimSpace(rawPath)
+	if strings.HasPrefix(cleaned, "/"+workspaceToolResultRelayDir+"/") {
+		return true
+	}
+	return strings.Contains(cleaned, "/"+workspaceToolResultRelayDir+"/")
+}
+
+func toolInputPath(input any) string {
+	switch v := input.(type) {
+	case map[string]any:
+		if path, ok := v["path"].(string); ok {
+			return strings.TrimSpace(path)
+		}
+	case map[string]string:
+		return strings.TrimSpace(v["path"])
+	}
+	var pathCarrier struct {
+		Path string `json:"path"`
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return ""
+	}
+	if err := json.Unmarshal(raw, &pathCarrier); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(pathCarrier.Path)
 }
 
 func clampRunes(s string, maxRunes int) string {
