@@ -20,11 +20,10 @@ var tier6EventLoopFixtures = []string{
 	"test-event-persisted-before-delivery",
 	"test-event-validation",
 	"test-guards-pre-handler-state",
+	"test-on-complete-atomicity-chain",
 }
 
-var tier6ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-on-complete-atomicity-chain": {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
-}
+var tier6ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

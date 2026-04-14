@@ -15,6 +15,7 @@ var tier2AccumulationFixtures = []string{
 	"test-accumulate-expected-from-entity",
 	"test-accumulate-from-filter",
 	"test-accumulate-idempotent",
+	"test-accumulate-on-complete-rollback",
 	"test-accumulate-on-timeout",
 	"test-accumulate-partial",
 	"test-accumulate-threshold",
@@ -22,9 +23,7 @@ var tier2AccumulationFixtures = []string{
 	"test-accumulate-with-compute",
 }
 
-var tier2ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-accumulate-on-complete-rollback": {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
-}
+var tier2ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier2AccumulationCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)
