@@ -220,12 +220,18 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 		entry := map[string]any{
 			"name": tc.Name,
 		}
+		if err == nil {
+			projected, projectErr := c.projectToolResult(ctx, tc.Name, out)
+			if projectErr != nil {
+				err = projectErr
+			} else {
+				entry["ok"] = true
+				entry["result"] = projected
+			}
+		}
 		if err != nil {
 			entry["ok"] = false
 			entry["error"] = clampRunes(err.Error(), maxToolErrorTextRunes)
-		} else {
-			entry["ok"] = true
-			entry["result"] = clampToolResult(tc.Name, out)
 		}
 		results = append(results, entry)
 		executed = append(executed, executedToolCall{
@@ -254,6 +260,46 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 		return strings.TrimSpace(string(guarded)), executed
 	}
 	return strings.TrimSpace(string(b)), executed
+}
+
+func (c *Conversation) projectToolResult(ctx context.Context, name string, result any) (any, error) {
+	if result == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(result)
+	if err != nil {
+		return map[string]any{
+			"truncated": false,
+			"error":     "marshal tool result",
+		}, nil
+	}
+	limit := toolRelayResultLimitForRuntime(c.runtime, name)
+	if len(b) <= limit {
+		return result, nil
+	}
+	if relay, ok, err := relayOversizedToolResult(ctx, c.runtime, c.Session, name, b); ok {
+		if err != nil {
+			return nil, fmt.Errorf("persist oversized tool result relay for %s: %w", strings.TrimSpace(name), err)
+		}
+		return map[string]any{
+			"truncated": true,
+			"bytes":     len(b),
+			"preview":   clampRunes(string(b), maxToolResultPreviewRunes),
+			"follow_up": map[string]any{
+				"kind":        "runtime_read_file",
+				"tool":        relay.ReadTool,
+				"path":        relay.Path,
+				"format":      relay.Format,
+				"visibility":  relay.Visibility,
+				"description": "full tool result stored in a runtime-accessible workspace file",
+			},
+		}, nil
+	}
+	return map[string]any{
+		"truncated": true,
+		"bytes":     len(b),
+		"preview":   clampRunes(string(b), maxToolResultPreviewRunes),
+	}, nil
 }
 
 func shouldTerminateAfterToolCalls(calls []executedToolCall) bool {
@@ -336,6 +382,22 @@ func clampToolResult(name string, result any) any {
 		"bytes":     len(b),
 		"preview":   clampRunes(string(b), maxToolResultPreviewRunes),
 	}
+}
+
+func relayOversizedToolResult(ctx context.Context, runtime Runtime, session *Session, name string, rawJSON []byte) (toolResultRelayRef, bool, error) {
+	writer, ok := runtime.(oversizedToolResultRelayWriter)
+	if !ok {
+		return toolResultRelayRef{}, false, nil
+	}
+	relay, err := writer.PersistOversizedToolResultRelay(ctx, session, name, rawJSON)
+	return relay, true, err
+}
+
+func toolRelayResultLimitForRuntime(runtime Runtime, name string) int {
+	if _, ok := runtime.(oversizedToolResultRelayWriter); ok {
+		return maxToolResultBytes
+	}
+	return toolRelayResultLimit(name)
 }
 
 func toolRelayResultLimit(name string) int {

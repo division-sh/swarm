@@ -141,6 +141,35 @@ func (l largeToolExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []st
 	return toolcapabilities.NewSet(caps)
 }
 
+type relayRuntime struct {
+	relayPath string
+	relayErr  error
+	toolName  string
+	raw       []byte
+}
+
+func (r *relayRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
+	return &Session{ID: "sess-relay", AgentID: agentID, RuntimeMode: "cli_test"}, nil
+}
+
+func (r *relayRuntime) ContinueSession(_ context.Context, _ *Session, message Message) (*Response, error) {
+	return &Response{Message: Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
+}
+
+func (r *relayRuntime) PersistOversizedToolResultRelay(_ context.Context, _ *Session, toolName string, rawJSON []byte) (toolResultRelayRef, error) {
+	r.toolName = toolName
+	r.raw = append([]byte(nil), rawJSON...)
+	if r.relayErr != nil {
+		return toolResultRelayRef{}, r.relayErr
+	}
+	return toolResultRelayRef{
+		Path:       r.relayPath,
+		ReadTool:   "read_file",
+		Format:     "json",
+		Visibility: "workspace_mount",
+	}, nil
+}
+
 type capabilityAwareToolExec struct {
 	captured toolcapabilities.Set
 }
@@ -345,6 +374,88 @@ func TestConversation_ExecuteToolCalls_PreservesLargeReadFileResultOnSupportedRe
 	content, _ := resultMap["content"].(string)
 	if len(content) != len(huge) {
 		t.Fatalf("content length = %d, want %d", len(content), len(huge))
+	}
+}
+
+func TestConversation_ExecuteToolCalls_RelaysOversizedResultsForHelperRuntime(t *testing.T) {
+	huge := strings.Repeat("x", maxToolResultBytes+1024)
+	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/sql-execute-1.json"}
+	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test"}
+	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
+
+	raw, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	if len(arr) != 1 || arr[0]["ok"] != true {
+		t.Fatalf("expected successful tool payload, got %#v", arr)
+	}
+	if rt.toolName != "sql_execute" {
+		t.Fatalf("relay tool name = %q, want sql_execute", rt.toolName)
+	}
+	resultMap, _ := arr[0]["result"].(map[string]any)
+	if resultMap == nil || resultMap["truncated"] != true {
+		t.Fatalf("expected relayed oversized result metadata, got %#v", arr[0]["result"])
+	}
+	followUp, _ := resultMap["follow_up"].(map[string]any)
+	if followUp == nil {
+		t.Fatalf("expected follow_up metadata, got %#v", resultMap)
+	}
+	if followUp["path"] != rt.relayPath || followUp["tool"] != "read_file" {
+		t.Fatalf("follow_up = %#v, want relay path/tool", followUp)
+	}
+	if strings.Contains(string(rt.raw), "...(truncated)") {
+		t.Fatalf("relay payload should keep full raw json, got %q", string(rt.raw))
+	}
+}
+
+func TestConversation_ExecuteToolCalls_RelaysOversizedReadFileResultsForHelperRuntime(t *testing.T) {
+	huge := strings.Repeat("x", maxToolResultBytes+1024)
+	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/read-file-1.json"}
+	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test"}
+	c.SetToolExecutor(largeToolExec{payload: map[string]any{
+		"content":    huge,
+		"size_bytes": len(huge),
+	}})
+
+	raw, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/data/test-signals-25.jsonl"}}})
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	if len(arr) != 1 || arr[0]["ok"] != true {
+		t.Fatalf("expected successful tool payload, got %#v", arr)
+	}
+	resultMap, _ := arr[0]["result"].(map[string]any)
+	followUp, _ := resultMap["follow_up"].(map[string]any)
+	if followUp == nil || followUp["path"] != rt.relayPath {
+		t.Fatalf("follow_up = %#v, want relay path", followUp)
+	}
+}
+
+func TestConversation_ExecuteToolCalls_FailsClosedWhenHelperRelayWriteFails(t *testing.T) {
+	huge := strings.Repeat("x", maxToolResultBytes+1024)
+	rt := &relayRuntime{relayErr: errors.New("workspace boom")}
+	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test"}
+	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
+
+	raw, executed := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	if len(arr) != 1 || arr[0]["ok"] != false {
+		t.Fatalf("expected failed tool payload, got %#v", arr)
+	}
+	if !strings.Contains(testAsString(arr[0]["error"]), "workspace boom") {
+		t.Fatalf("tool relay error = %#v, want workspace boom", arr[0]["error"])
+	}
+	if len(executed) != 1 || executed[0].OK {
+		t.Fatalf("executed = %#v, want failed tool execution record", executed)
 	}
 }
 
