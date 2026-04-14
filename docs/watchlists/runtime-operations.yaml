@@ -98,11 +98,13 @@ nodes:
       - agent-visible tool availability differs between prompt and transport
       - supported agent turns can persist a canonical visible tool surface that is broader than the provider-callable surface actually available on that turn
       - fallback relay on a supported turn can degrade file-backed work by clamping large relayed tool results to preview-only text
+      - oversized file-backed tool results on supported Claude helper turns can leak provider scratch paths back into later runtime read_file calls
     representative_issues:
       - 111
       - 136
       - 137
       - 368
+      - 381
     common_framing_mistakes:
       too_broad:
         - tool transport is inconsistent

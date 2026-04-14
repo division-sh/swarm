@@ -26,6 +26,7 @@ type ClaudeCLIRuntime struct {
 	monitor       MonitorSink
 	events        EventPublisher
 	mcpTurns      MCPTurnContextStore
+	execWorkspaceFn func(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error)
 }
 
 var ErrClaudeAuthRequired = errors.New("claude auth required")

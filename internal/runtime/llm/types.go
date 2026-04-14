@@ -67,6 +67,17 @@ type Runtime interface {
 	ContinueSession(ctx context.Context, session *Session, message Message) (*Response, error)
 }
 
+type toolResultRelayRef struct {
+	Path       string
+	ReadTool   string
+	Format     string
+	Visibility string
+}
+
+type oversizedToolResultRelayWriter interface {
+	PersistOversizedToolResultRelay(ctx context.Context, session *Session, toolName string, rawJSON []byte) (toolResultRelayRef, error)
+}
+
 type NativeToolCapabilities struct {
 	Bash      bool
 	WebSearch bool
