@@ -865,6 +865,9 @@ type PlatformSpecDocument struct {
 		Name    string `yaml:"name"`
 		Version string `yaml:"version"`
 	} `yaml:"platform"`
+	PlatformEvents struct {
+		Catalog map[string]yaml.Node `yaml:"catalog"`
+	} `yaml:"platform_events"`
 	PermissionsModel struct {
 		Permissions []string `yaml:"permissions"`
 	} `yaml:"permissions_model"`
