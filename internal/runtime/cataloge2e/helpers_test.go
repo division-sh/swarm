@@ -104,11 +104,41 @@ func testRuntimeConfig() *config.Config {
 	}
 }
 
-func relaxCatalogFixtureBootStrictness(t testing.TB) {
+type catalogFixtureStartupPolicy struct {
+	FatalBootWarnings bool
+	StrictEmitSchemas bool
+}
+
+func (p catalogFixtureStartupPolicy) apply(t testing.TB) {
 	t.Helper()
 	if setter, ok := any(t).(interface{ Setenv(string, string) }); ok {
-		setter.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
-		setter.Setenv("SWARM_EMIT_SCHEMA_STRICT", "false")
+		if p.FatalBootWarnings {
+			setter.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+		} else {
+			setter.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
+		}
+		if p.StrictEmitSchemas {
+			setter.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+		} else {
+			setter.Setenv("SWARM_EMIT_SCHEMA_STRICT", "false")
+		}
+	}
+}
+
+func strictCatalogFixtureStartupPolicy() catalogFixtureStartupPolicy {
+	return catalogFixtureStartupPolicy{
+		FatalBootWarnings: true,
+		StrictEmitSchemas: true,
+	}
+}
+
+func runtimeCatalogHarnessStartupPolicy() catalogFixtureStartupPolicy {
+	// Runtime-backed catalog fixtures still exercise post-boot runtime semantics for
+	// flows that intentionally carry boot warnings, so only emit-schema strictness
+	// stays forced here; "real runtime boot" fixtures use the strict policy instead.
+	return catalogFixtureStartupPolicy{
+		FatalBootWarnings: false,
+		StrictEmitSchemas: true,
 	}
 }
 

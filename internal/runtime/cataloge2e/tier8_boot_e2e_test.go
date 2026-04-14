@@ -67,8 +67,6 @@ var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
 }
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
-	relaxCatalogFixtureBootStrictness(t)
-
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier8SupportedFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", fixtureName)
@@ -106,11 +104,7 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 				if !findingsContain(report.Warnings(), expected.Expected.ErrorCategory, expected.Expected.ErrorContains) {
 					t.Fatalf("expected warning %s containing %q, got %#v", expected.Expected.ErrorCategory, expected.Expected.ErrorContains, report.Warnings())
 				}
-				rt, err := newTier8Runtime(t, bundle)
-				if err != nil {
-					t.Fatalf("NewRuntime: %v", err)
-				}
-				startRuntimeForBootTest(t, rt)
+				assertTier8RuntimeBootMatchesAuthoritativeStartupTruth(t, bundle, expected)
 			case "error":
 				if !report.HasErrors() {
 					t.Fatal("expected validation error")
@@ -165,7 +159,7 @@ func TestTier8BootCatalogFixtures_AreExplicitlyClassified(t *testing.T) {
 
 func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) (*runtime.Runtime, error) {
 	t.Helper()
-	relaxCatalogFixtureBootStrictness(t)
+	strictCatalogFixtureStartupPolicy().apply(t)
 	module, err := newFixtureWorkflowModule(bundle)
 	if err != nil {
 		return nil, err
@@ -174,6 +168,26 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 		SelfCheck:      false,
 		WorkflowModule: module,
 	})
+}
+
+func assertTier8RuntimeBootMatchesAuthoritativeStartupTruth(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, expected tier8ExpectedDocument) {
+	t.Helper()
+	strictCatalogFixtureStartupPolicy().apply(t)
+	source := semanticview.Wrap(bundle)
+	_, validationErr := runtime.ValidateWorkflowContractSurface(context.Background(), source, runtime.DefaultWorkflowContractValidationOptions(nil))
+	if validationErr != nil {
+		if _, err := newTier8Runtime(t, bundle); err == nil {
+			t.Fatal("expected NewRuntime to fail when authoritative startup validation fails")
+		} else if !strings.Contains(err.Error(), validationErr.Error()) {
+			t.Fatalf("newTier8Runtime error = %q, want authoritative validation error substring %q", err.Error(), validationErr.Error())
+		}
+		return
+	}
+	rt, err := newTier8Runtime(t, bundle)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	startRuntimeForBootTest(t, rt)
 }
 
 func startRuntimeForBootTest(t testing.TB, rt *runtime.Runtime) {
