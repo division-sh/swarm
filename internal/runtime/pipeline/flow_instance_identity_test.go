@@ -134,6 +134,34 @@ func TestFlowInstanceIdentity_ResolveEmittedEntityID(t *testing.T) {
 	}
 }
 
+func TestFlowInstanceIdentity_ResolveEmittedEntityID_ValidationOutputBoundaryKeepsTargetEntityForSameFlowConsumers(t *testing.T) {
+	source := loadValidationOutputBoundarySource(t)
+	childState := WorkflowState{
+		EntityID: "ent-validation",
+		Metadata: map[string]any{
+			"flow_path":        "validation/inst-1",
+			"subject_id":       "ent-parent",
+			"parent_entity_id": "ent-parent",
+		},
+	}
+	trigger := mustEvent("validation/validation.started", "ent-validation")
+
+	for _, eventType := range []string{
+		"validation/validation.started",
+		"validation/validation.package_ready",
+		"validation/brand.requested",
+		"validation/cto.spec_review_requested",
+		"validation/spec.revision_requested",
+	} {
+		if got := resolveEmittedEntityID(source, "validation", eventType, childState, trigger, "ent-validation", "ent-validation"); got != "ent-validation" {
+			t.Fatalf("%s emitted entity_id = %q, want ent-validation", eventType, got)
+		}
+	}
+	if got := resolveEmittedEntityID(source, "validation", "validation/vertical.killed_backprop", childState, trigger, "ent-validation", "ent-validation"); got != "ent-parent" {
+		t.Fatalf("validation/vertical.killed_backprop emitted entity_id = %q, want ent-parent", got)
+	}
+}
+
 func TestWorkflowInstanceCoordinates_SeparateStaticScopeFromGenericStorageRef(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-gates-in-child-flow")
 

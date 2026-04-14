@@ -82,6 +82,10 @@ active_issues:
     title: Align entity-tool schema normalization with authored entity schema annotations
     maps_to:
       - entity_tool_schema_annotation_normalization_drift
+  - id: 401
+    title: Validation revision loop can target source-flow entities and dead-letter with cross_flow_write_forbidden
+    maps_to:
+      - cross_flow_create_entity_handoff_identity
   - id: 181
     title: Expose accumulator completion and on_complete transaction outcomes together
     maps_to:
@@ -165,6 +169,29 @@ nodes:
         - CEL validation is wrong
       too_narrow:
         - one field writer/reader pair in one helper
+    current_action_pressure: active
+  - id: cross_flow_create_entity_handoff_identity
+    title: Cross-Flow Create-Entity Handoff Identity
+    parent_class: semantic entity-identity drift across cross-flow create-entity handoff, emitted event shaping, and downstream flow ownership
+    canonical_owners:
+      - cross-flow emitted-event entity identity shaping for create_entity handoff via resolveEmittedEntityID and pipelineEnginePayloadShaper
+    why_this_node_exists: target-flow entities can be created correctly while emitted child-flow output events still surface the parent/source entity identity, causing downstream turns and flow-scoped writes to operate on the wrong owner.
+    known_manifestations:
+      - create_entity handoff emits the parent/source entity_id instead of the newly created target-flow entity_id on child-flow outputs that semantically need the target entity
+      - validation.started persists the same UUID in entity_id and source_scoring_entity_id even though a distinct validation entity exists
+      - validation.package_ready can expose the wrong entity identity on the child-flow output surface
+      - brand.requested can expose the wrong entity identity on the child-flow output surface
+      - cto.spec_review_requested can expose the wrong entity identity on the child-flow output surface
+      - downstream revision-loop events such as spec.revision_requested inherit the source-flow entity_id and dead-letter with cross_flow_write_forbidden
+    representative_issues:
+      - 401
+    common_framing_mistakes:
+      too_broad:
+        - cross-flow writes are broken
+      too_narrow:
+        - one validation dead letter
+        - one payload field is wrong
+        - only validation.started is affected
     current_action_pressure: active
   - id: verify_vs_boot_contract_acceptance_drift
     title: Verify-vs-Boot Contract Acceptance Drift

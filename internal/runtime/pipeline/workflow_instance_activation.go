@@ -205,7 +205,41 @@ func workflowEmitTargetsParentEntity(source semanticview.Source, flowID, eventTy
 	if source == nil || flowID == "" {
 		return false
 	}
-	return semanticview.ResolveFlowEventProof(source, flowID, eventType).CrossesDeclaredOutputBoundary(source)
+	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
+	if !proof.CrossesDeclaredOutputBoundary(source) {
+		return false
+	}
+	if workflowOutputHasSameFlowConsumers(source, flowID, proof) {
+		return false
+	}
+	return true
+}
+
+func workflowOutputHasSameFlowConsumers(source semanticview.Source, flowID string, proof semanticview.FlowEventProof) bool {
+	flowID = strings.TrimSpace(flowID)
+	eventType := strings.TrimSpace(proof.EventKey())
+	if source == nil || flowID == "" || eventType == "" {
+		return false
+	}
+	for _, agent := range source.FlowRequiredAgents(flowID) {
+		for _, subscription := range agent.SubscribesTo {
+			if source.FlowEventMatches(flowID, subscription, eventType) {
+				return true
+			}
+		}
+	}
+	for nodeID := range source.NodeEntries() {
+		contractSource, ok := source.NodeContractSource(nodeID)
+		if !ok || strings.TrimSpace(contractSource.FlowID) != flowID {
+			continue
+		}
+		for _, subscription := range source.NodeRuntimeSubscriptions(nodeID) {
+			if source.FlowEventMatches(flowID, subscription, eventType) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func workflowEntityMetadataPayload(source semanticview.Source, metadata map[string]any) map[string]any {

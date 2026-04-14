@@ -202,6 +202,107 @@ pins:
 	}
 }
 
+func TestWorkflowEmitTargetsParentEntity_ValidationOutputsSplitTargetEntityAndBackprop(t *testing.T) {
+	source := loadValidationOutputBoundarySource(t)
+	for _, eventType := range []string{
+		"validation/validation.started",
+		"validation/validation.package_ready",
+		"validation/brand.requested",
+		"validation/cto.spec_review_requested",
+		"validation/spec.revision_requested",
+	} {
+		if workflowEmitTargetsParentEntity(source, "validation", eventType) {
+			t.Fatalf("did not expect %s to retarget to the parent entity", eventType)
+		}
+	}
+	if !workflowEmitTargetsParentEntity(source, "validation", "validation/vertical.killed_backprop") {
+		t.Fatal("expected validation/vertical.killed_backprop to remain parent-targeted")
+	}
+}
+
+func loadValidationOutputBoundarySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	return loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `name: test
+version: 1.0.0
+flows:
+  - id: validation
+    flow: validation
+    mode: template
+`,
+		"flows/validation/schema.yaml": `name: validation
+pins:
+  inputs:
+    events:
+      - vertical.shortlisted
+      - vertical.resumed
+  outputs:
+    events:
+      - brand.requested
+      - cto.spec_review_requested
+      - spec.revision_requested
+      - validation.package_ready
+      - validation.started
+      - vertical.killed_backprop
+required_agents:
+  - role: validation-coordinator
+    subscribes_to:
+      - validation.package_ready
+  - role: business-research-agent
+    subscribes_to:
+      - validation.started
+  - role: factory-cto
+    subscribes_to:
+      - cto.spec_review_requested
+  - role: pre-brand-agent
+    subscribes_to:
+      - brand.requested
+`,
+		"flows/validation/events.yaml": `brand.requested:
+  payload:
+    entity_id: string
+cto.spec_review_requested:
+  payload:
+    entity_id: string
+spec.requested:
+  payload:
+    entity_id: string
+spec.revision_requested:
+  payload:
+    entity_id: string
+validation.package_ready:
+  payload:
+    entity_id: string
+validation.started:
+  payload:
+    entity_id: string
+    source_scoring_entity_id: string
+vertical.killed_backprop:
+  payload:
+    entity_id: string
+    vertical_id: string
+vertical.shortlisted:
+  payload:
+    entity_id: string
+vertical.resumed:
+  payload:
+    entity_id: string
+`,
+		"flows/validation/nodes.yaml": `validation-orchestrator:
+  id: validation-orchestrator
+  execution_type: system_node
+  subscribes_to:
+    - spec.revision_requested
+  event_handlers:
+    spec.revision_requested:
+      emits: spec.requested
+    research.vertical_rejected:
+      emits:
+        - vertical.killed_backprop
+`,
+	})
+}
+
 func loadWorkflowFixtureSource(t *testing.T, fixture string) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadWorkflowFixtureBundle(t, fixture))

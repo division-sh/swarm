@@ -966,6 +966,62 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 	}
 }
 
+func TestPipelineEnginePayloadShaper_ValidationOutputBoundaryKeepsTargetEntityForSameFlowConsumers(t *testing.T) {
+	source := loadValidationOutputBoundarySource(t)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected validation output boundary bundle")
+	}
+	shaper := pipelineEnginePayloadShaper{
+		coordinator: &PipelineCoordinator{
+			module: &previewWorkflowModule{
+				bundle: bundle,
+			},
+		},
+	}
+
+	req := runtimeengine.ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("ent-validation"),
+		FlowID:   identity.NormalizeFlowID("validation"),
+		Event: events.Event{
+			Type:    events.EventType("validation/validation.started"),
+			Payload: json.RawMessage(`{"entity_id":"ent-validation","source_scoring_entity_id":"ent-source"}`),
+		}.WithEntityID("ent-validation"),
+		State: runtimeengine.StateSnapshot{
+			EntityID: identity.NormalizeEntityID("ent-validation"),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{
+				"flow_path":        "validation/inst-1",
+				"subject_id":       "ent-parent",
+				"parent_entity_id": "ent-parent",
+			}, nil, nil),
+		},
+	}
+
+	for _, eventType := range []string{
+		"validation/validation.started",
+		"validation/validation.package_ready",
+		"validation/brand.requested",
+		"validation/cto.spec_review_requested",
+		"validation/spec.revision_requested",
+	} {
+		out, err := shaper.ShapeEmitPayload(context.Background(), req, eventType, map[string]any{"entity_id": "ent-validation"})
+		if err != nil {
+			t.Fatalf("ShapeEmitPayload(%s): %v", eventType, err)
+		}
+		if got := out["entity_id"]; got != "ent-validation" {
+			t.Fatalf("%s entity_id = %#v, want ent-validation", eventType, got)
+		}
+	}
+
+	backprop, err := shaper.ShapeEmitPayload(context.Background(), req, "validation/vertical.killed_backprop", map[string]any{"entity_id": "ent-validation", "vertical_id": "v-1"})
+	if err != nil {
+		t.Fatalf("ShapeEmitPayload(validation/vertical.killed_backprop): %v", err)
+	}
+	if got := backprop["entity_id"]; got != "ent-parent" {
+		t.Fatalf("validation/vertical.killed_backprop entity_id = %#v, want ent-parent", got)
+	}
+}
+
 func TestPipelineEnginePayloadShaper_TrimsUndeclaredFieldsAcrossCrossFlowOutputRetarget(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
 	bundle, ok := semanticview.Bundle(source)
