@@ -1323,7 +1323,6 @@ func TestVerifyBundle_UnreachableStateReturnsWarningSurface(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestVerifyBundle_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
