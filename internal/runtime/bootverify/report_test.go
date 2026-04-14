@@ -381,6 +381,60 @@ fanout-node:
 			},
 		},
 		{
+			name:   "accumulate on_complete emit",
+			target: "support/ticket.ready",
+			opts: deadEventSchemaFixtureOptions{
+				name: "dead-event-schema-accumulate-on-complete-emit",
+				flows: map[string]deadEventSchemaFlowFiles{
+					"support": {
+						events: "ticket.ready: {}\nstart: {}\n",
+						nodes: `
+accumulate-node:
+  id: accumulate-node
+  execution_type: system_node
+  subscribes_to:
+    - start
+  event_handlers:
+    start:
+      accumulate:
+        expected_from: payload.items
+        threshold: 1
+        on_complete:
+          - emits: ticket.ready
+`,
+					},
+				},
+			},
+		},
+		{
+			name:   "accumulate on_timeout fan-out",
+			target: "support/ticket.ready",
+			opts: deadEventSchemaFixtureOptions{
+				name: "dead-event-schema-accumulate-on-timeout-fanout",
+				flows: map[string]deadEventSchemaFlowFiles{
+					"support": {
+						events: "ticket.ready: {}\nstart: {}\n",
+						nodes: `
+accumulate-timeout-node:
+  id: accumulate-timeout-node
+  execution_type: system_node
+  subscribes_to:
+    - start
+  event_handlers:
+    start:
+      accumulate:
+        expected_from: payload.items
+        threshold: 2
+        timeout_ms: 1000
+        on_timeout:
+          fan_out:
+            emit_per_item: ticket.ready
+`,
+					},
+				},
+			},
+		},
+		{
 			name:   "auto emit on create",
 			target: "support/ticket.ready",
 			opts: deadEventSchemaFixtureOptions{
