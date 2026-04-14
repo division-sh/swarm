@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -210,6 +211,292 @@ func TestRun_MapsEventNoProducerToNamedWarning(t *testing.T) {
 	}
 	if !reportContains(report.Warnings(), "event_producer_exists", "task.requested") {
 		t.Fatalf("expected event_producer_exists warning, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
+	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
+		name:       "dead-event-schema-warning",
+		rootEvents: "root.unused: {}\n",
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "root.unused") {
+		t.Fatalf("expected semantic_drift_dead_event_schema warning for root.unused, got %#v", report.Warnings())
+	}
+	for _, want := range []string{
+		"has no active role in the authored bundle",
+		"Handler emits: 0",
+		"External source annotation (_source): no",
+	} {
+		if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", want) {
+			t.Fatalf("expected semantic_drift_dead_event_schema warning containing %q, got %#v", want, report.Warnings())
+		}
+	}
+}
+
+func TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		target string
+		opts   deadEventSchemaFixtureOptions
+	}{
+		{
+			name:   "same-flow handler emit",
+			target: "support/ticket.ready",
+			opts: deadEventSchemaFixtureOptions{
+				name: "dead-event-schema-same-flow-handler",
+				flows: map[string]deadEventSchemaFlowFiles{
+					"support": {
+						events: "ticket.ready: {}\n",
+						nodes: `
+support-node:
+  id: support-node
+  execution_type: system_node
+  subscribes_to:
+    - start
+  event_handlers:
+    start:
+      emits: ticket.ready
+`,
+					},
+				},
+			},
+		},
+		{
+			name:   "cross-flow qualified usage",
+			target: "producer/ticket.ready",
+			opts: deadEventSchemaFixtureOptions{
+				name: "dead-event-schema-cross-flow-qualified",
+				flows: map[string]deadEventSchemaFlowFiles{
+					"producer": {
+						events: "ticket.ready: {}\n",
+					},
+					"consumer": {
+						nodes: `
+consumer-node:
+  id: consumer-node
+  execution_type: system_node
+  subscribes_to:
+    - producer/ticket.ready
+  event_handlers:
+    producer/ticket.ready: {}
+`,
+					},
+				},
+			},
+		},
+		{
+			name:   "root-local root declaration",
+			target: "ticket.ready",
+			opts: deadEventSchemaFixtureOptions{
+				name:       "dead-event-schema-root-local",
+				rootEvents: "ticket.ready: {}\n",
+				rootNodes: `
+root-node:
+  id: root-node
+  execution_type: system_node
+  subscribes_to:
+    - ticket.ready
+  event_handlers:
+    ticket.ready: {}
+`,
+			},
+		},
+		{
+			name:   "external source annotation",
+			target: "support/ticket.ready",
+			opts: deadEventSchemaFixtureOptions{
+				name: "dead-event-schema-external-source",
+				flows: map[string]deadEventSchemaFlowFiles{
+					"support": {
+						events: "ticket.ready:\n  _source: external (manual handoff)\n",
+					},
+				},
+			},
+		},
+		{
+			name:   "external consumer annotation",
+			target: "support/ticket.ready",
+			opts: deadEventSchemaFixtureOptions{
+				name: "dead-event-schema-external-consumer",
+				flows: map[string]deadEventSchemaFlowFiles{
+					"support": {
+						events: "ticket.ready:\n  _consumer: mailbox_system\n",
+					},
+				},
+			},
+		},
+		{
+			name:   "same-flow timer reference",
+			target: "support/ticket.ready",
+			opts: deadEventSchemaFixtureOptions{
+				name: "dead-event-schema-timer-reference",
+				flows: map[string]deadEventSchemaFlowFiles{
+					"support": {
+						events: "ticket.ready: {}\nstart.signal: {}\n",
+						nodes: `
+timer-owner:
+  id: timer-owner
+  execution_type: system_node
+  timers:
+    - id: reminder
+      owner: timer-owner
+      event: ticket.ready
+      start_on: event:start.signal
+      cancel_on: event:ticket.ready
+`,
+					},
+				},
+			},
+		},
+		{
+			name:   "fan-out emit_per_item",
+			target: "support/ticket.ready",
+			opts: deadEventSchemaFixtureOptions{
+				name: "dead-event-schema-fanout",
+				flows: map[string]deadEventSchemaFlowFiles{
+					"support": {
+						events: "ticket.ready: {}\nstart: {}\n",
+						nodes: `
+fanout-node:
+  id: fanout-node
+  execution_type: system_node
+  subscribes_to:
+    - start
+  event_handlers:
+    start:
+      fan_out:
+        emit_per_item: ticket.ready
+`,
+					},
+				},
+			},
+		},
+		{
+			name:   "auto emit on create",
+			target: "support/ticket.ready",
+			opts: deadEventSchemaFixtureOptions{
+				name: "dead-event-schema-auto-emit",
+				flows: map[string]deadEventSchemaFlowFiles{
+					"support": {
+						schema: `
+name: support
+mode: template
+auto_emit_on_create:
+  event: ticket.ready
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events: []
+  outputs:
+    events: []
+`,
+						events: "ticket.ready: {}\n",
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeDeadEventSchemaFixture(t, tc.opts)
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", tc.target) {
+				t.Fatalf("unexpected semantic_drift_dead_event_schema warning for %s, got %#v", tc.target, report.Warnings())
+			}
+		})
+	}
+}
+
+func TestRun_DoesNotUseSameLocalNameAcrossFlowsByCoincidenceForDeadEventSchema(t *testing.T) {
+	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
+		name: "dead-event-schema-coincidental-name",
+		flows: map[string]deadEventSchemaFlowFiles{
+			"alpha": {
+				events: "task.completed: {}\n",
+			},
+			"beta": {
+				events: "task.completed: {}\n",
+				nodes: `
+beta-node:
+  id: beta-node
+  execution_type: system_node
+  subscribes_to:
+    - task.completed
+  event_handlers:
+    task.completed: {}
+`,
+			},
+		},
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "alpha/task.completed") {
+		t.Fatalf("expected semantic_drift_dead_event_schema warning for alpha/task.completed, got %#v", report.Warnings())
+	}
+	if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "beta/task.completed") {
+		t.Fatalf("unexpected semantic_drift_dead_event_schema warning for beta/task.completed, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotUseRootLocalReferenceAsProofForChildFlowDeadEventSchema(t *testing.T) {
+	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
+		name: "dead-event-schema-root-local-child-flow",
+		rootNodes: `
+root-node:
+  id: root-node
+  execution_type: system_node
+  subscribes_to:
+    - ticket.ready
+  event_handlers:
+    ticket.ready: {}
+`,
+		flows: map[string]deadEventSchemaFlowFiles{
+			"scoring": {
+				events: "ticket.ready: {}\n",
+			},
+		},
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "scoring/ticket.ready") {
+		t.Fatalf("expected semantic_drift_dead_event_schema warning for scoring/ticket.ready, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotUsePlatformCatalogOverlapAsProofForDeadEventSchema(t *testing.T) {
+	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
+		name:       "dead-event-schema-platform-overlap",
+		rootEvents: "platform.runtime_log: {}\n",
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "platform.runtime_log") {
+		t.Fatalf("expected semantic_drift_dead_event_schema warning for platform.runtime_log, got %#v", report.Warnings())
+	}
+	if !reportContains(report.Errors(), "platform_namespace_violation", "platform.runtime_log") {
+		t.Fatalf("expected platform_namespace_violation error for platform.runtime_log, got %#v", report.Errors())
 	}
 }
 
@@ -2406,8 +2693,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 40 {
-		t.Fatalf("bootCheckRegistry count = %d, want 40", got)
+	if got := len(bootCheckRegistry); got != 41 {
+		t.Fatalf("bootCheckRegistry count = %d, want 41", got)
 	}
 	if got := len(supplementalChecks); got != 2 {
 		t.Fatalf("supplementalChecks count = %d, want 2", got)
@@ -3207,6 +3494,87 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
 	return bundle
+}
+
+type deadEventSchemaFlowFiles struct {
+	schema string
+	events string
+	agents string
+	nodes  string
+	policy string
+}
+
+type deadEventSchemaFixtureOptions struct {
+	name       string
+	rootSchema string
+	rootEvents string
+	rootAgents string
+	rootNodes  string
+	rootPolicy string
+	flows      map[string]deadEventSchemaFlowFiles
+}
+
+func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOptions) string {
+	t.Helper()
+	root := t.TempDir()
+	name := strings.TrimSpace(opts.name)
+	if name == "" {
+		name = "dead-event-schema"
+	}
+
+	flowIDs := make([]string, 0, len(opts.flows))
+	for flowID := range opts.flows {
+		flowID = strings.TrimSpace(flowID)
+		if flowID != "" {
+			flowIDs = append(flowIDs, flowID)
+		}
+	}
+	sort.Strings(flowIDs)
+
+	packageYAML := "name: " + name + "\nversion: \"1.0.0\"\nplatform: \">=1.6.0\"\n"
+	if len(flowIDs) > 0 {
+		packageYAML += "flows:\n"
+		for _, flowID := range flowIDs {
+			packageYAML += "  - id: " + flowID + "\n    flow: " + flowID + "\n    mode: static\n"
+		}
+	}
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), packageYAML)
+	rootSchema := strings.TrimSpace(opts.rootSchema)
+	if rootSchema == "" {
+		rootSchema = "name: " + name
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema+"\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), defaultFixtureYAML(opts.rootPolicy))
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), defaultFixtureYAML(opts.rootAgents))
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), defaultFixtureYAML(opts.rootEvents))
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), defaultFixtureYAML(opts.rootNodes))
+
+	for _, flowID := range flowIDs {
+		files := opts.flows[flowID]
+		schema := strings.TrimSpace(files.schema)
+		if schema == "" {
+			schema = "name: " + flowID + "\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: []\n  outputs:\n    events: []"
+		}
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), schema+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), defaultFixtureYAML(files.policy))
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), defaultFixtureYAML(files.agents))
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), defaultFixtureYAML(files.events))
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), defaultFixtureYAML(files.nodes))
+	}
+
+	return root
+}
+
+func defaultFixtureYAML(contents string) string {
+	if strings.TrimSpace(contents) == "" {
+		return "{}\n"
+	}
+	if strings.HasSuffix(contents, "\n") {
+		return contents
+	}
+	return contents + "\n"
 }
 
 func mustPayloadCompletenessTransform(t *testing.T, body string) *runtimecontracts.PayloadTransformSpec {

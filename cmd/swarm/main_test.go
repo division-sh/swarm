@@ -937,6 +937,46 @@ func loadWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *run
 	return bundle
 }
 
+func loadWorkflowValidationBundleAt(t *testing.T, fixtureRoot string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
+	}
+	return bundle
+}
+
+func writeWorkflowValidationFixtureFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func writeWorkflowValidationDeadEventSchemaFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: dead-event-schema
+version: "1.0.0"
+platform: ">=1.6.0"
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: dead-event-schema\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+root.unused: {}
+`)
+	return root
+}
+
 func firstWorkflowValidationFlowHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) (string, string, string, runtimecontracts.SystemNodeEventHandler) {
 	t.Helper()
 	for _, view := range bundle.FlowViews() {
@@ -1272,5 +1312,42 @@ func TestVerifyBundle_UnreachableStateReturnsWarningSurface(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("verifyBundle error = %v, want substring %q", err, want)
 		}
+	}
+}
+
+func TestVerifyBundle_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+
+	source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeWorkflowValidationDeadEventSchemaFixture(t)))
+
+	verifyErr := verifyBundle(context.Background(), source)
+	if verifyErr == nil {
+		t.Fatal("verifyBundle error = nil, want warning-only failure from dead declared event schema")
+	}
+	for _, want := range []string{
+		"semantic_drift_dead_event_schema",
+		"root.unused",
+		"has no active role in the authored bundle",
+	} {
+		if !strings.Contains(verifyErr.Error(), want) {
+			t.Fatalf("verifyBundle error = %v, want substring %q", verifyErr, want)
+		}
+	}
+
+	result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil))
+	if runtimeErr == nil {
+		t.Fatal("ValidateWorkflowContractSurface error = nil, want warning-only failure from dead declared event schema")
+	}
+	for _, want := range []string{
+		"semantic_drift_dead_event_schema",
+		"root.unused",
+		"has no active role in the authored bundle",
+	} {
+		if !strings.Contains(runtimeErr.Error(), want) {
+			t.Fatalf("ValidateWorkflowContractSurface error = %v, want substring %q", runtimeErr, want)
+		}
+	}
+	if !strings.Contains(strings.TrimSpace(result.BootReport.Warnings()[0].CheckID), "semantic_drift_dead_event_schema") {
+		t.Fatalf("BootReport warnings = %#v, want semantic_drift_dead_event_schema", result.BootReport.Warnings())
 	}
 }
