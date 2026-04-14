@@ -18,10 +18,6 @@ active_issues:
     title: Wire the three harness-ready excluded catalog fixtures into runtime e2e execution
     maps_to:
       - invariant_suite_coverage
-  - id: 393
-    title: Resolve stale or missing boot-owner coverage for test-boot-create-entity-plus-accumulate
-    maps_to:
-      - invariant_suite_coverage
   - id: 126
     title: Split boot verification into boundary-owned modules and close major test gaps
     maps_to:
