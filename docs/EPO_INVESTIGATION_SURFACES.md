@@ -66,7 +66,9 @@ Use this when verify is green or when the suspected issue is runtime-only.
 Command:
 
 ```bash
-SWARM_TOOL_GATEWAY_URL=http://127.0.0.1:8081 make run-clear
+SWARM_TOOL_GATEWAY_URL=http://127.0.0.1:8081 \
+SWARM_TOOL_GATEWAY_CONTAINER_URL=http://host.docker.internal:8081 \
+make run-clear
 ```
 
 Best for:

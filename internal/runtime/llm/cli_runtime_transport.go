@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -150,83 +149,13 @@ func normalizeMCPServerURL(raw string) string {
 }
 
 func runtimeMCPGatewayURLForContainerExecution() string {
-	raw := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
-	if raw == "" {
-		raw = "http://orchestrator:8090"
-	}
-	return normalizeContainerExecutionMCPServerURL(raw)
+	raw := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"))
+	return normalizeMCPServerURL(raw)
 }
 
 func RuntimeMCPGatewayURLForHostExecution() string {
 	raw := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
-	return normalizeHostExecutionMCPServerURL(raw)
-}
-
-func normalizeHostExecutionMCPServerURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	u, err := url.Parse(raw)
-	if err != nil || strings.TrimSpace(u.Host) == "" {
-		return normalizeMCPServerURL(raw)
-	}
-	if isContainerOnlyMCPHost(u.Hostname()) || isUnspecifiedMCPHost(u.Hostname()) {
-		port := strings.TrimSpace(u.Port())
-		if port != "" {
-			u.Host = "127.0.0.1:" + port
-		} else {
-			u.Host = "127.0.0.1"
-		}
-	}
-	return normalizeMCPServerURL(u.String())
-}
-
-func normalizeContainerExecutionMCPServerURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return normalizeMCPServerURL("http://orchestrator:8090")
-	}
-	u, err := url.Parse(raw)
-	if err != nil || strings.TrimSpace(u.Host) == "" {
-		return normalizeMCPServerURL(raw)
-	}
-	if isLoopbackMCPHost(u.Hostname()) {
-		port := strings.TrimSpace(u.Port())
-		if port != "" {
-			u.Host = "host.docker.internal:" + port
-		} else {
-			u.Host = "host.docker.internal"
-		}
-		return normalizeMCPServerURL(u.String())
-	}
 	return normalizeMCPServerURL(raw)
-}
-
-func isContainerOnlyMCPHost(host string) bool {
-	host = strings.TrimSpace(strings.Trim(host, "[]"))
-	return strings.EqualFold(host, "host.docker.internal") || strings.EqualFold(host, "host.containers.internal")
-}
-
-func isLoopbackMCPHost(host string) bool {
-	host = strings.TrimSpace(strings.Trim(host, "[]"))
-	if host == "" {
-		return false
-	}
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
-func isUnspecifiedMCPHost(host string) bool {
-	host = strings.TrimSpace(strings.Trim(host, "[]"))
-	if host == "" {
-		return false
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsUnspecified()
 }
 
 func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, promptTransportFallback, error) {
