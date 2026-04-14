@@ -313,8 +313,25 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		if g.hooks.AfterToolSuccess != nil {
 			g.hooks.AfterToolSuccess(ctx, r, toolName)
 		}
+		resultText, err := projectToolCallSuccessText(ctx, g.executor, toolName, req.Params["arguments"], out)
+		if err != nil {
+			err = g.newRuntimeError(ErrCodeToolExecFailed, "mcp.tools.call.result_project", false, err, "tool result continuation failed: %s", toolName)
+			g.logMCP(r, "warn", "mcp.tools.call.exec_error", err, map[string]any{
+				"method":    "tools/call",
+				"tool_name": toolName,
+			})
+			payload := map[string]any{
+				"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
+				"isError": true,
+			}
+			if runtimeErr := RuntimeErrorPayloadFromError(err); runtimeErr != nil {
+				payload["runtimeError"] = runtimeErr
+			}
+			WriteRPCResult(w, req.ID, payload)
+			return
+		}
 		result := map[string]any{
-			"content": []map[string]any{{"type": "text", "text": ToolResultText(out)}},
+			"content": []map[string]any{{"type": "text", "text": resultText}},
 			"isError": false,
 		}
 		if startupProbe != nil {
@@ -329,6 +346,107 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		WriteRPCError(w, req.ID, -32601, "method not found")
 		return
 	}
+}
+
+func projectToolCallSuccessText(ctx context.Context, executor runtimeGatewayExecutor, toolName string, input any, out any) (string, error) {
+	if out == nil {
+		return ToolResultText(nil), nil
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return ToolResultText(out), nil
+	}
+	if len(raw) <= toolCallRelayResultLimit(toolName, input) {
+		return ToolResultText(out), nil
+	}
+	writer, ok := executor.(OversizedToolResultRelayWriter)
+	if !ok {
+		return ToolResultText(out), nil
+	}
+	relay, err := writer.PersistOversizedToolResultRelay(ctx, toolName, raw)
+	if err != nil {
+		return "", err
+	}
+	followUp := map[string]any{
+		"kind":        "runtime_read_file",
+		"tool":        relay.ReadTool,
+		"format":      relay.Format,
+		"visibility":  relay.Visibility,
+		"description": "full tool result stored in a runtime-accessible workspace file",
+	}
+	if len(relay.Chunks) > 0 {
+		followUp["kind"] = "runtime_read_file_chunks"
+		followUp["chunks"] = relay.Chunks
+		followUp["description"] = "full tool result stored across runtime-accessible workspace chunk files; read chunks in order"
+	} else {
+		followUp["path"] = relay.Path
+	}
+	return ToolResultText(map[string]any{
+		"truncated": true,
+		"bytes":     len(raw),
+		"preview":   clampRunes(string(raw), maxToolResultPreviewRunes),
+		"follow_up": followUp,
+	}), nil
+}
+
+func toolCallRelayResultLimit(toolName string, input any) int {
+	if toolIsLargeRelayFileRead(toolName) && !toolInputTargetsRuntimeRelayPath(input) {
+		return maxToolResultBytes
+	}
+	if toolIsLargeRelayFileRead(toolName) {
+		return maxReadFileResultBytes
+	}
+	return maxToolResultBytes
+}
+
+func toolIsLargeRelayFileRead(name string) bool {
+	return toolidentity.CanonicalName(name) == "read_file"
+}
+
+func toolInputTargetsRuntimeRelayPath(input any) bool {
+	rawPath := strings.TrimSpace(toolInputPath(input))
+	if rawPath == "" {
+		return false
+	}
+	cleaned := strings.TrimSpace(rawPath)
+	if strings.HasPrefix(cleaned, "/.swarm/tool-results/") || strings.HasPrefix(cleaned, "/workspace/.swarm/tool-results/") {
+		return true
+	}
+	return strings.Contains(cleaned, "/.swarm/tool-results/")
+}
+
+func toolInputPath(input any) string {
+	switch v := input.(type) {
+	case map[string]any:
+		if path, ok := v["path"].(string); ok {
+			return strings.TrimSpace(path)
+		}
+	case map[string]string:
+		return strings.TrimSpace(v["path"])
+	}
+	var pathCarrier struct {
+		Path string `json:"path"`
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return ""
+	}
+	if err := json.Unmarshal(raw, &pathCarrier); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(pathCarrier.Path)
+}
+
+func clampRunes(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "...(truncated)"
 }
 
 func (g *Gateway) mcpExecutionContext(r *http.Request, _ string) (context.Context, error) {

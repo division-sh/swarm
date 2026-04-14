@@ -69,6 +69,7 @@ type Runtime interface {
 
 type toolResultRelayRef struct {
 	Path       string
+	Chunks     []string
 	ReadTool   string
 	Format     string
 	Visibility string

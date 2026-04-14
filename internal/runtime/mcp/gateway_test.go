@@ -105,6 +105,59 @@ func (f testToolExecutor) ToolCapabilitiesForActor(_ models.AgentConfig, names [
 	return toolcapabilities.NewSet(caps)
 }
 
+type relayAwareToolExecutorStub struct {
+	execFn    func(context.Context, string, any) (any, error)
+	relayRef  ToolResultRelayRef
+	relayErr  error
+	relayRaw  []byte
+	relayTool string
+}
+
+func (s *relayAwareToolExecutorStub) Execute(ctx context.Context, name string, input any) (any, error) {
+	if s.execFn != nil {
+		return s.execFn(ctx, name, input)
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+func (s *relayAwareToolExecutorStub) ToolDefinitions() []llm.ToolDefinition {
+	return []llm.ToolDefinition{{Name: "read_file"}, {Name: "query_entities"}}
+}
+
+func (s *relayAwareToolExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
+	return s.ToolDefinitions()
+}
+
+func (s *relayAwareToolExecutorStub) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, raw := range names {
+		name := toolidentity.CanonicalName(raw)
+		if name == "" {
+			continue
+		}
+		visible := true
+		if len(requestAllowed) > 0 {
+			_, visible = requestAllowed[name]
+		}
+		caps = append(caps, toolcapabilities.Capability{
+			Name:               name,
+			Visible:            visible,
+			Callable:           visible,
+			ContextRequirement: toolcapabilities.ContextRequirementTurnContext,
+		})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
+func (s *relayAwareToolExecutorStub) PersistOversizedToolResultRelay(_ context.Context, toolName string, rawJSON []byte) (ToolResultRelayRef, error) {
+	s.relayTool = strings.TrimSpace(toolName)
+	s.relayRaw = append([]byte(nil), rawJSON...)
+	if s.relayErr != nil {
+		return ToolResultRelayRef{}, s.relayErr
+	}
+	return s.relayRef, nil
+}
+
 type actorScopedToolExecutorStub struct {
 	defs      []llm.ToolDefinition
 	actorDefs []llm.ToolDefinition
@@ -904,6 +957,155 @@ func TestGatewayHandleMCP_ToolsCallIncludesStructuredRuntimeErrorPayload(t *test
 	}
 	if runtimeErr.Cause == nil || runtimeErr.Cause.Code != "invalid_tool_input" {
 		t.Fatalf("runtimeError.cause = %#v, want invalid_tool_input", runtimeErr.Cause)
+	}
+}
+
+func TestGatewayHandleMCP_ToolsCallRelaysOversizedReadFileResultsForHelperPath(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	exec := &relayAwareToolExecutorStub{
+		execFn: func(_ context.Context, _ string, _ any) (any, error) {
+			return map[string]any{
+				"content":    strings.Repeat("a", maxToolResultBytes+512),
+				"size_bytes": maxToolResultBytes + 512,
+			}, nil
+		},
+		relayRef: ToolResultRelayRef{
+			Chunks:     []string{"/workspace/.swarm/tool-results/agent/read-file-chunk-001.txt", "/workspace/.swarm/tool-results/agent/read-file-chunk-002.txt"},
+			ReadTool:   "read_file",
+			Format:     "text",
+			Visibility: "workspace_mount",
+		},
+	}
+	g := NewGateway(exec, testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-relay-read-file", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "read_file",
+			"arguments": map[string]any{"path": "/data/big.json"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-relay-read-file")
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	resp := mustRPCResponse(t, rec)
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", resp.Result)
+	}
+	content, ok := result["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("content = %#v, want single text entry", result["content"])
+	}
+	entry, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("content[0] = %#v, want map", content[0])
+	}
+	text, _ := entry["text"].(string)
+	var projected map[string]any
+	if err := json.Unmarshal([]byte(text), &projected); err != nil {
+		t.Fatalf("unmarshal projected text: %v", err)
+	}
+	if truncated, _ := projected["truncated"].(bool); !truncated {
+		t.Fatalf("truncated = %#v, want true", projected["truncated"])
+	}
+	followUp, _ := projected["follow_up"].(map[string]any)
+	if followUp == nil || followUp["tool"] != "read_file" {
+		t.Fatalf("follow_up = %#v, want read_file chunk metadata", followUp)
+	}
+	chunks, _ := followUp["chunks"].([]any)
+	if len(chunks) != len(exec.relayRef.Chunks) {
+		t.Fatalf("chunks = %#v, want %d chunk paths", followUp["chunks"], len(exec.relayRef.Chunks))
+	}
+	if exec.relayTool != "read_file" {
+		t.Fatalf("relay tool = %q, want read_file", exec.relayTool)
+	}
+	if len(exec.relayRaw) == 0 {
+		t.Fatalf("expected raw relay payload to be persisted")
+	}
+}
+
+func TestGatewayHandleMCP_ToolsCallPreservesLargeRelayPathReadInline(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	exec := &relayAwareToolExecutorStub{
+		execFn: func(_ context.Context, _ string, _ any) (any, error) {
+			return map[string]any{
+				"content":    strings.Repeat("b", maxToolResultBytes+1024),
+				"size_bytes": maxToolResultBytes + 1024,
+			}, nil
+		},
+		relayRef: ToolResultRelayRef{
+			Path:       "/workspace/.swarm/tool-results/agent/read-file-1.json",
+			ReadTool:   "read_file",
+			Format:     "json",
+			Visibility: "workspace_mount",
+		},
+	}
+	g := NewGateway(exec, testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-read-relay-file", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "read_file",
+			"arguments": map[string]any{"path": "/workspace/.swarm/tool-results/agent/read-file-1.json"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-read-relay-file")
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	resp := mustRPCResponse(t, rec)
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", resp.Result)
+	}
+	content, ok := result["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("content = %#v, want single text entry", result["content"])
+	}
+	entry, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("content[0] = %#v, want map", content[0])
+	}
+	text, _ := entry["text"].(string)
+	if strings.Contains(text, "\"follow_up\"") {
+		t.Fatalf("did not expect relay follow_up when reading runtime relay path, got %s", text)
+	}
+	if exec.relayTool != "" {
+		t.Fatalf("did not expect relay writer call, got %q", exec.relayTool)
 	}
 }
 
