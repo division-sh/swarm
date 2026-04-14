@@ -1763,10 +1763,19 @@ engine:
         node handler emits, exact platform_events catalog matches, _source values starting with external, and same-flow timer
         declarations. It does not use produces or _status: planned as proof.'
       when: boot-only
+    - id: semantic_drift_dead_event_schema
+      severity: warning
+      scope: per-event
+      trigger: A product-declared event schema entry in `events.yaml` has no active authored role on the static verify surface.
+        Active roles are limited to intra-flow local usage, explicit cross-flow qualified usage, root-local usage for root-declared
+        events only, external `_source` / `_consumer` annotations, same-flow timer fire/start/cancel references, same-flow
+        `fan_out.emit_per_item`, and same-flow `auto_emit_on_create`. It does not treat platform catalog membership, root-local
+        references into child-flow declarations, or coincidental same local names in other flows as proof.
+      when: boot-only
     severity_behavior:
       error: Boot aborts. System does not start.
       warning: Boot continues. Warning logged with finding details.
-    check_count: 33 checks (21 error, 12 warning)
+    check_count: 34 checks (21 error, 13 warning)
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, and location (flow, node, agent, or event name). The boot sequence runs
@@ -3496,3 +3505,56 @@ static_analyzer:
         rule: terminal states are sinks in this slice.
     rule: Emit warning when a declared state is unreachable from initial_state in the authored transition graph. Keep invalid
       undeclared advances_to targets on hard-invalid state_machine_coherence.
+  slice_5_dead_declared_event_schema_surface:
+    id: semantic_drift_dead_event_schema
+    domain: semantic_drift
+    authority: semantic_drift_warning
+    severity: warning
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - contract_formats.event_schema
+    - engine.event_identity
+    - engine.timer_model
+    - engine.agent_session_management.emit_tool_convention
+    - handler_specification.handler_fields.emits
+    scope:
+      description: For every product-declared event schema entry in `events.yaml`, verify that at least one accepted active
+        authored role exists on the supported static verify path.
+      applies_to:
+      - declared `events.yaml` entries only
+      excludes:
+      - timer-fired-no-consumer ownership
+      - runtime delivery correctness
+      - payload completeness
+      - input-pin producer satisfaction
+      - state reachability
+      - platform catalog membership as proof
+    active_role_carriers:
+      intra_flow_local_usage:
+        rule: Handlers or agents within the same flow as the declaration reference the event by local name or same-flow resolved
+          identity.
+      root_local_usage_for_root_declared_events:
+        rule: Root-level handlers or agents referencing a root-declared event by local name keep only the root declaration alive.
+      cross_flow_qualified_usage:
+        rule: Another flow or root participant references the declaration via an explicitly qualified event name that resolves
+          to the declaring flow.
+      external_annotations:
+        rule: "`_source` beginning with external or `_consumer` metadata on the declared event entry counts as an active external role."
+      same_flow_timer_references:
+        rule: "Timers in the same scope keep the declaration alive through `event`, `start_on: event:...`, or `cancel_on: event:...`."
+      same_flow_fan_out_emit_per_item:
+        rule: "`fan_out.emit_per_item` in the same scope keeps the declaration alive."
+      same_flow_auto_emit_on_create:
+        rule: "`auto_emit_on_create` in the same scope keeps the declaration alive."
+    non_proof_carriers:
+      platform_catalog_membership:
+        rule: "Product-declared `events.yaml` entries are not kept alive by `platform_events.catalog` overlap."
+      root_local_reference_into_child_flow:
+        rule: A root-local reference does not keep a child-flow declaration alive.
+      coincidental_same_local_name:
+        rule: The same local event name in another flow is not proof by coincidence.
+      produces:
+        rule: "Node `produces` lists are not active-role proof."
+    rule: Emit warning when a declared event-schema entry has zero accepted active-role carriers. The message must describe the
+      event as having no active role in the authored bundle, not as definitely unreachable at runtime.
