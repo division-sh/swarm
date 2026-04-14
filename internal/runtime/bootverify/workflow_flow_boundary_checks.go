@@ -255,31 +255,57 @@ func inputPinPlatformEventPath(platform runtimecontracts.PlatformSpecDocument, l
 }
 
 func (c *checkerContext) inputPinExternalSourcePath(flowID, eventType string) string {
-	if entry, ok := c.source.EventEntry(eventType); ok && inputPinExternalSourceMatch(entry.Source) {
+	bundle, ok := semanticview.Bundle(c.source)
+	if !ok || bundle == nil {
+		return "not found"
+	}
+	if entry, ok := inputPinRootEventEntry(bundle, flowID, eventType); ok && inputPinExternalSourceMatch(entry.Source) {
 		return "found"
 	}
-	candidates := map[string]struct{}{}
-	for _, candidate := range []string{
-		eventidentity.Normalize(eventType),
-		eventidentity.Normalize(c.source.ResolveFlowEventReference(flowID, eventType)),
-	} {
-		if candidate != "" {
-			candidates[candidate] = struct{}{}
-		}
-	}
-	for eventName, entry := range c.source.ResolvedEventCatalog() {
-		if _, ok := candidates[eventidentity.Normalize(eventName)]; !ok {
-			continue
-		}
-		if inputPinExternalSourceMatch(entry.Source) {
-			return "found"
-		}
+	if entry, ok := inputPinFlowEventEntry(bundle, flowID, eventType); ok && inputPinExternalSourceMatch(entry.Source) {
+		return "found"
 	}
 	return "not found"
 }
 
 func inputPinExternalSourceMatch(source string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(source)), "external")
+}
+
+func inputPinRootEventEntry(bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType string) (runtimecontracts.EventCatalogEntry, bool) {
+	if bundle == nil {
+		return runtimecontracts.EventCatalogEntry{}, false
+	}
+	for _, candidate := range []string{
+		eventidentity.Normalize(eventType),
+		eventidentity.Normalize(bundle.ResolveFlowEventReference(flowID, eventType)),
+	} {
+		if candidate == "" {
+			continue
+		}
+		if entry, ok := bundle.Events[candidate]; ok {
+			return entry, true
+		}
+	}
+	return runtimecontracts.EventCatalogEntry{}, false
+}
+
+func inputPinFlowEventEntry(bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType string) (runtimecontracts.EventCatalogEntry, bool) {
+	if bundle == nil {
+		return runtimecontracts.EventCatalogEntry{}, false
+	}
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		return runtimecontracts.EventCatalogEntry{}, false
+	}
+	candidate := eventidentity.Normalize(eventType)
+	if candidate == "" {
+		return runtimecontracts.EventCatalogEntry{}, false
+	}
+	if entry, ok := flowView.Events[candidate]; ok {
+		return entry, true
+	}
+	return runtimecontracts.EventCatalogEntry{}, false
 }
 
 func (c *checkerContext) inputPinSameFlowTimerPath(flowID, eventType, canonicalEvent string) string {
