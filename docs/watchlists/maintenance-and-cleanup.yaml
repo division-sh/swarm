@@ -15,7 +15,11 @@ active_issues:
     maps_to:
       - invariant_suite_coverage
   - id: 387
-    title: Wire the four harness-ready excluded catalog fixtures into runtime e2e execution
+    title: Wire the three harness-ready excluded catalog fixtures into runtime e2e execution
+    maps_to:
+      - invariant_suite_coverage
+  - id: 393
+    title: Resolve stale or missing boot-owner coverage for test-boot-create-entity-plus-accumulate
     maps_to:
       - invariant_suite_coverage
   - id: 126
