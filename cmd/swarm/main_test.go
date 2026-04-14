@@ -1165,9 +1165,9 @@ func TestVerifyBundle_DoesNotWarnForFlowOwnedAgentOutputEvents(t *testing.T) {
 	}
 }
 
-func TestVerifyBundle_CreateEntityDynamicComputeProofReturnsWarningSurface(t *testing.T) {
+func TestVerifyBundle_CreateEntityAccumulatePreemptsDynamicComputeWarningSurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-missing-pin"))
+	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
 			Name: "tracking",
@@ -1177,7 +1177,13 @@ func TestVerifyBundle_CreateEntityDynamicComputeProofReturnsWarningSurface(t *te
 			},
 		}},
 	}
-	flowID, nodeID, eventType, handler := firstWorkflowValidationFlowHandler(t, bundle)
+	nodeID := "complete-task"
+	eventType := "task.requested"
+	node, ok := bundle.Nodes[nodeID]
+	if !ok {
+		t.Fatalf("node %s missing from test fixture bundle", nodeID)
+	}
+	handler := node.EventHandlers[eventType]
 	handler.CreateEntity = true
 	handler.Accumulate = &runtimecontracts.AccumulateSpec{ExpectedFrom: "entity.expected_count"}
 	handler.Compute = &runtimecontracts.ComputeSpec{
@@ -1187,17 +1193,19 @@ func TestVerifyBundle_CreateEntityDynamicComputeProofReturnsWarningSurface(t *te
 	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{
 		Condition: "entity.composite_score >= 0",
 	}}
-	writeWorkflowValidationFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+	node.EventHandlers[eventType] = handler
+	bundle.Nodes[nodeID] = node
+	if bundle.Semantics.NodeHandlers == nil {
+		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	if bundle.Semantics.NodeHandlers[nodeID] == nil {
+		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
 
 	err := verifyBundle(context.Background(), semanticview.Wrap(bundle))
-	if err == nil {
-		t.Fatal("verifyBundle error = nil, want warning-only failure from degraded compute proof")
-	}
-	if !strings.Contains(err.Error(), "entity.composite_score") {
-		t.Fatalf("verifyBundle error = %v, want composite_score warning", err)
-	}
-	if !strings.Contains(err.Error(), "dynamic") {
-		t.Fatalf("verifyBundle error = %v, want dynamic expected_from degradation detail", err)
+	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
+		t.Fatalf("verifyBundle error = %v, want create_entity/accumulate boot error", err)
 	}
 }
 
@@ -1315,6 +1323,7 @@ func TestVerifyBundle_UnreachableStateReturnsWarningSurface(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func TestVerifyBundle_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
@@ -1349,5 +1358,17 @@ func TestVerifyBundle_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T)
 	}
 	if !strings.Contains(strings.TrimSpace(result.BootReport.Warnings()[0].CheckID), "semantic_drift_dead_event_schema") {
 		t.Fatalf("BootReport warnings = %#v, want semantic_drift_dead_event_schema", result.BootReport.Warnings())
+	}
+}
+
+func TestVerifyBundle_CreateEntityAccumulateReturnsBootError(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+
+	err := verifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate"))))
+	if err == nil {
+		t.Fatal("verifyBundle error = nil, want create_entity/accumulate boot error")
+	}
+	if !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
+		t.Fatalf("verifyBundle error = %v, want create_entity/accumulate boot error", err)
 	}
 }

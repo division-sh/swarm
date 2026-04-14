@@ -36,6 +36,7 @@ var tier8SupportedFixtures = []string{
 	"test-boot-cel-parse-error",
 	"test-boot-condition-payload-mismatch",
 	"test-boot-condition-policy",
+	"test-boot-create-entity-plus-accumulate",
 	"test-boot-deprecated-field",
 	"test-boot-dialect-dual",
 	"test-boot-dialect-guard",
@@ -63,7 +64,6 @@ var tier8SupportedFixtures = []string{
 }
 
 var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
-	"test-boot-create-entity-plus-accumulate": {reason: "split to issue #393: expected boot error no longer reproduces on canonical tier8 path"},
 	"test-boot-state-machine-unreachable":     {reason: "supported verify warning fixture for analyzer slice 4; not a runtime boot catalog fixture"},
 }
 

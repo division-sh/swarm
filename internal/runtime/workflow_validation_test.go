@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -125,4 +127,27 @@ func TestValidateWorkflowContractSurface_FatalToolImplementationWarningsFollowSh
 	if err == nil || !strings.Contains(err.Error(), "tool implementation warnings") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want tool implementation warning failure", err)
 	}
+}
+
+func TestValidateWorkflowContractSurface_RejectsCreateEntityWithAccumulate(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+
+	source := semanticview.Wrap(loadRuntimeWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate")))
+
+	_, err := ValidateWorkflowContractSurface(context.Background(), source, DefaultWorkflowContractValidationOptions(nil))
+	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want create_entity/accumulate boot error", err)
+	}
+}
+
+func loadRuntimeWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	fixtureRoot := filepath.Join(repoRoot, relativeRoot)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
+	}
+	return bundle
 }

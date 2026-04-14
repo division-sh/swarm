@@ -560,6 +560,14 @@ func (c *checkerContext) dialectCompliance() []Finding {
 					Location: nodeID,
 				})
 			}
+			if handlerDeclaresConflictingCreateEntityAccumulation(handler) {
+				c.dialectFindings = append(c.dialectFindings, Finding{
+					CheckID:  "dialect_compliance",
+					Severity: "error",
+					Message:  fmt.Sprintf("node %s handler %s declares both create_entity and accumulate", nodeID, eventType),
+					Location: nodeID,
+				})
+			}
 			if strings.TrimSpace(handler.Condition) != "" {
 				c.dialectFindings = append(c.dialectFindings, Finding{
 					CheckID:  "dialect_compliance",
@@ -2111,6 +2119,10 @@ func gateNameLocal(v any) string {
 
 func handlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {
 	return len(handler.Rules) > 0 && handlerHasOnComplete(handler)
+}
+
+func handlerDeclaresConflictingCreateEntityAccumulation(handler runtimecontracts.SystemNodeEventHandler) bool {
+	return handler.CreateEntity && handler.Accumulate != nil
 }
 
 func handlerHasOnComplete(handler runtimecontracts.SystemNodeEventHandler) bool {
