@@ -53,6 +53,10 @@ active_issues:
     title: Improve local lifecycle and harness reliability so tooling stops hiding runtime semantics
     maps_to:
       - harness_reliability_and_local_smoke
+  - id: 391
+    title: Strengthen supported local startup smoke for run_clear and builder project-open
+    maps_to:
+      - harness_reliability_and_local_smoke
 nodes:
   - id: boundary_owned_decomposition
     title: Boundary-Owned Decomposition
@@ -144,6 +148,7 @@ nodes:
       - optional infrastructure gaps are unclear during local startup
     representative_issues:
       - 182
+      - 391
     common_framing_mistakes:
       too_broad:
         - the harness is flaky
