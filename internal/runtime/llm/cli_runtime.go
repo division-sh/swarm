@@ -16,16 +16,16 @@ import (
 )
 
 type ClaudeCLIRuntime struct {
-	cfg           *config.Config
-	sessions      sessions.Registry
-	turns         TurnPersistence
-	conversations ConversationPersistence
-	budget        BudgetGuard
-	lockOwner     string
-	workspaces    workspace.Resolver
-	monitor       MonitorSink
-	events        EventPublisher
-	mcpTurns      MCPTurnContextStore
+	cfg             *config.Config
+	sessions        sessions.Registry
+	turns           TurnPersistence
+	conversations   ConversationPersistence
+	budget          BudgetGuard
+	lockOwner       string
+	workspaces      workspace.Resolver
+	monitor         MonitorSink
+	events          EventPublisher
+	mcpTurns        MCPTurnContextStore
 	execWorkspaceFn func(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error)
 }
 
