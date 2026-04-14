@@ -68,7 +68,7 @@ func (s entityToolSchema) field(name string) (runtimecontracts.EntitySchemaField
 }
 
 func normalizeEntityFieldValue(field runtimecontracts.EntitySchemaField, value any) (any, error) {
-	fieldType := strings.ToLower(strings.TrimSpace(field.Type))
+	fieldType := normalizeEntityFieldType(field.Type)
 	if fieldType == "" {
 		return value, nil
 	}
@@ -178,7 +178,7 @@ func parseEntityFilterValue(field runtimecontracts.EntitySchemaField, raw string
 	if unquoted, ok := unquoteEntityFilterValue(raw); ok {
 		return normalizeEntityFieldValue(field, unquoted)
 	}
-	switch strings.ToLower(strings.TrimSpace(field.Type)) {
+	switch normalizeEntityFieldType(field.Type) {
 	case "boolean":
 		switch strings.ToLower(raw) {
 		case "true":
@@ -192,7 +192,7 @@ func parseEntityFilterValue(field runtimecontracts.EntitySchemaField, raw string
 			return v, nil
 		}
 	default:
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(field.Type)), "numeric(") {
+		if strings.HasPrefix(normalizeEntityFieldType(field.Type), "numeric(") {
 			if f, ok := runtimesharedjson.AsFloat64(parseLooseNumeric(raw)); ok {
 				return normalizeEntityFieldValue(field, f)
 			}
@@ -229,19 +229,38 @@ func metricExpression(metric string, field runtimecontracts.EntitySchemaField) (
 	case "count":
 		return "COUNT(*)", nil
 	case "sum", "avg":
-		fieldType := strings.ToLower(strings.TrimSpace(field.Type))
+		fieldType := normalizeEntityFieldType(field.Type)
 		if fieldType != "integer" && !strings.HasPrefix(fieldType, "numeric(") {
 			return "", fmt.Errorf("metric %s requires numeric field, got %s", metric, field.Type)
 		}
 		return strings.ToUpper(metric) + "(" + entityQuoteIdent(strings.TrimSpace(field.Name)) + ")", nil
 	case "min", "max":
-		if strings.EqualFold(strings.TrimSpace(field.Type), "jsonb") {
+		if normalizeEntityFieldType(field.Type) == "jsonb" {
 			return "", fmt.Errorf("metric %s does not support jsonb field %s", metric, strings.TrimSpace(field.Name))
 		}
 		return strings.ToUpper(metric) + "(" + entityQuoteIdent(strings.TrimSpace(field.Name)) + ")", nil
 	default:
 		return "", fmt.Errorf("unsupported metric %q", metric)
 	}
+}
+
+func normalizeEntityFieldType(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "numeric(") {
+		if end := strings.Index(raw, ")"); end >= 0 {
+			return strings.TrimSpace(raw[:end+1])
+		}
+		return raw
+	}
+	for _, base := range []string{"text", "string", "integer", "boolean", "jsonb", "timestamp", "uuid"} {
+		if raw == base || strings.HasPrefix(raw, base+" ") || strings.HasPrefix(raw, base+"(") {
+			return base
+		}
+	}
+	return raw
 }
 
 func defaultEntitySearchLimit(value int) int {
