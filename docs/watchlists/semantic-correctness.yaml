@@ -78,6 +78,10 @@ active_issues:
     title: Align targeted verify and runtime boot on event-schema and tool-registry validation
     maps_to:
       - verify_vs_boot_contract_acceptance_drift
+  - id: 402
+    title: Align entity-tool schema normalization with authored entity schema annotations
+    maps_to:
+      - entity_tool_schema_annotation_normalization_drift
   - id: 181
     title: Expose accumulator completion and on_complete transaction outcomes together
     maps_to:
@@ -218,6 +222,25 @@ nodes:
       too_narrow:
         - one stale tier8 fixture
         - one missing if statement in a helper
+  - id: entity_tool_schema_annotation_normalization_drift
+    title: Entity-Tool Schema Annotation Normalization Drift
+    parent_class: runtime entity-tool semantics drift from authored entity_schema type annotations
+    canonical_owners:
+      - shared entity-tool schema type normalization in internal/runtime/tools/entity_schema.go
+    why_this_node_exists: entity_schema annotations are authored as human-readable notes, but runtime entity-tool validation can still interpret annotated type strings literally or inconsistently across tool surfaces
+    known_manifestations:
+      - save_entity_field rejects schema-declared annotated jsonb fields on supported runtime paths
+      - create_entity initial field writes and search_entities field filters would reject the same annotated entity types through the shared normalizer
+      - adjacent entity-tool surfaces either bypass shared type normalization entirely or carry stale local interpreters of schema type handling
+    representative_issues:
+      - 402
+    common_framing_mistakes:
+      too_broad:
+        - entity tools are broken
+        - all schema handling is inconsistent
+      too_narrow:
+        - one save_entity_field error string
+        - one validation-agent transcript line
     current_action_pressure: active
 reserve_backlog:
   - ordinal: 7
