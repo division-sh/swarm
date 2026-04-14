@@ -430,9 +430,17 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedReadFileResultsForHelperRu
 		t.Fatalf("expected successful tool payload, got %#v", arr)
 	}
 	resultMap, _ := arr[0]["result"].(map[string]any)
-	followUp, _ := resultMap["follow_up"].(map[string]any)
-	if followUp == nil || followUp["path"] != rt.relayPath {
-		t.Fatalf("follow_up = %#v, want relay path", followUp)
+	if resultMap == nil {
+		t.Fatalf("expected result map, got %#v", arr[0]["result"])
+	}
+	if _, ok := resultMap["follow_up"]; ok {
+		t.Fatalf("did not expect helper relay follow_up for read_file within existing allowance, got %#v", resultMap)
+	}
+	if content, _ := resultMap["content"].(string); len(content) != len(huge) {
+		t.Fatalf("content length = %d, want %d", len(content), len(huge))
+	}
+	if len(rt.raw) != 0 {
+		t.Fatalf("did not expect relay writer to run, got raw=%q", string(rt.raw))
 	}
 }
 

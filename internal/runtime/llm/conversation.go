@@ -394,10 +394,11 @@ func relayOversizedToolResult(ctx context.Context, runtime Runtime, session *Ses
 }
 
 func toolRelayResultLimitForRuntime(runtime Runtime, name string) int {
+	limit := toolRelayResultLimit(name)
 	if _, ok := runtime.(oversizedToolResultRelayWriter); ok {
-		return maxToolResultBytes
+		return limit
 	}
-	return toolRelayResultLimit(name)
+	return limit
 }
 
 func toolRelayResultLimit(name string) int {
