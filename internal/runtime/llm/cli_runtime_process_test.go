@@ -64,7 +64,7 @@ func TestClaudeCLIRuntimeContinueSession_RejectsHostFallbackWhenTargetMissing(t 
 }
 
 func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *testing.T) {
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:8081")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
@@ -77,7 +77,7 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 	})
 	got := strings.Join(cmd.Args, " ")
 	if !strings.Contains(got, "SWARM_TOOL_GATEWAY_URL=http://host.docker.internal:8081/mcp") {
-		t.Fatalf("docker args = %q, want container-reachable MCP gateway URL", got)
+		t.Fatalf("docker args = %q, want explicit container MCP gateway URL", got)
 	}
 }
 

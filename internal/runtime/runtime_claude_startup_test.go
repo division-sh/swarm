@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
-	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -45,6 +44,7 @@ func TestValidateClaudeStartupConfig_RequiresWorkspaceAndGateway(t *testing.T) {
 	cfg.LLM.RuntimeMode = "cli_test"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:8081")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
@@ -221,38 +221,6 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesRealFilteredTransport(t *tes
 		caps: startupProbeCaps(),
 	}
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
-
-	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager); err != nil {
-		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
-	}
-	if !slices.Equal(exec.executed, []string{"health_check"}) {
-		t.Fatalf("executed = %#v, want health_check tools/call smoke", exec.executed)
-	}
-}
-
-func TestValidateClaudeMCPToolsForManagedAgents_RewritesContainerOnlyGatewayAliasForHostProbe(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.LLM.RuntimeMode = "cli_test"
-	manager := runtimemanager.NewAgentManager(nil, nil)
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
-		ID:     "campaign-coordinator",
-		Role:   "campaign_coordinator",
-		Config: json.RawMessage(`{}`),
-	}); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
-	exec := &startupProbeToolExecutor{
-		defs: startupProbeDefs(),
-		caps: startupProbeCaps(),
-	}
-	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
-
-	serverURL, err := url.Parse(strings.TrimSpace(llm.RuntimeMCPGatewayURLForHostExecution()))
-	if err != nil {
-		t.Fatalf("parse host gateway url: %v", err)
-	}
-	serverURL.Host = "host.docker.internal:" + serverURL.Port()
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", serverURL.String())
 
 	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)

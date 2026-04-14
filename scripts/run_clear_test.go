@@ -14,6 +14,8 @@ type runClearConfig struct {
 	builderToken     string
 	directiveAgent   string
 	directiveMessage string
+	hostGatewayURL   string
+	containerURL     string
 }
 
 func TestRunClear_ProvisionsBuilderAuthTokenAndUsesBearerForRPC(t *testing.T) {
@@ -94,18 +96,58 @@ func TestRunClear_UsesOperatorBearerForDirective(t *testing.T) {
 	}
 }
 
+func TestRunClear_DerivesExplicitGatewayURLsByDefault(t *testing.T) {
+	result := runRunClear(t, runClearConfig{})
+
+	if got := strings.TrimSpace(result.hostGatewayURL); got != "http://127.0.0.1:8081" {
+		t.Fatalf("host gateway url = %q, want explicit host loopback default", got)
+	}
+	if got := strings.TrimSpace(result.containerGatewayURL); got != "http://host.docker.internal:8081" {
+		t.Fatalf("container gateway url = %q, want explicit container host alias default", got)
+	}
+}
+
+func TestRunClear_PreservesExplicitGatewayURLOverrides(t *testing.T) {
+	result := runRunClear(t, runClearConfig{
+		hostGatewayURL: "http://127.0.0.1:18090",
+		containerURL:   "http://orchestrator:18090",
+	})
+
+	if got := strings.TrimSpace(result.hostGatewayURL); got != "http://127.0.0.1:18090" {
+		t.Fatalf("host gateway url = %q, want explicit override", got)
+	}
+	if got := strings.TrimSpace(result.containerGatewayURL); got != "http://orchestrator:18090" {
+		t.Fatalf("container gateway url = %q, want explicit override", got)
+	}
+}
+
+func TestRunClear_IgnoresPartialGatewayOverrideAndDerivesCoherentPair(t *testing.T) {
+	result := runRunClear(t, runClearConfig{
+		hostGatewayURL: "http://host.docker.internal:18090",
+	})
+
+	if got := strings.TrimSpace(result.hostGatewayURL); got != "http://127.0.0.1:8081" {
+		t.Fatalf("host gateway url = %q, want derived local default when pair is incomplete", got)
+	}
+	if got := strings.TrimSpace(result.containerGatewayURL); got != "http://host.docker.internal:8081" {
+		t.Fatalf("container gateway url = %q, want derived local default when pair is incomplete", got)
+	}
+}
+
 type runClearResult struct {
-	stdout           string
-	operatorToken    string
-	builderToken     string
-	healthHeaders    string
-	healthURL        string
-	rpcHeaders       string
-	rpcBody          string
-	rpcURL           string
-	directiveHeaders string
-	directiveBody    string
-	directiveURL     string
+	stdout              string
+	operatorToken       string
+	builderToken        string
+	hostGatewayURL      string
+	containerGatewayURL string
+	healthHeaders       string
+	healthURL           string
+	rpcHeaders          string
+	rpcBody             string
+	rpcURL              string
+	directiveHeaders    string
+	directiveBody       string
+	directiveURL        string
 }
 
 func runRunClear(t *testing.T, cfg runClearConfig) runClearResult {
@@ -117,6 +159,8 @@ func runRunClear(t *testing.T, cfg runClearConfig) runClearResult {
 	pidFile := filepath.Join(t.TempDir(), "swarm.pid")
 	operatorTokenSink := filepath.Join(t.TempDir(), "operator-token.txt")
 	builderTokenSink := filepath.Join(t.TempDir(), "builder-token.txt")
+	hostGatewayURLSink := filepath.Join(t.TempDir(), "host-gateway-url.txt")
+	containerGatewayURLSink := filepath.Join(t.TempDir(), "container-gateway-url.txt")
 	healthHeadersSink := filepath.Join(t.TempDir(), "api-health-headers.txt")
 	healthURLSink := filepath.Join(t.TempDir(), "api-health-url.txt")
 	rpcHeadersSink := filepath.Join(t.TempDir(), "rpc-headers.txt")
@@ -135,6 +179,8 @@ func runRunClear(t *testing.T, cfg runClearConfig) runClearResult {
 set -euo pipefail
 printf '%s' "${SWARM_OPERATOR_AUTH_TOKEN:-}" > "${PYTHON_OPERATOR_TOKEN_SINK}"
 printf '%s' "${SWARM_BUILDER_AUTH_TOKEN:-}" > "${PYTHON_ENV_SINK}"
+printf '%s' "${SWARM_TOOL_GATEWAY_URL:-}" > "${PYTHON_HOST_GATEWAY_URL_SINK}"
+printf '%s' "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" > "${PYTHON_CONTAINER_GATEWAY_URL_SINK}"
 printf '4242\n'
 `)
 	writeExecutable(t, binDir, "curl", `#!/usr/bin/env bash
@@ -252,6 +298,8 @@ printf '{}'
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"PYTHON_OPERATOR_TOKEN_SINK=" + operatorTokenSink,
 		"PYTHON_ENV_SINK=" + builderTokenSink,
+		"PYTHON_HOST_GATEWAY_URL_SINK=" + hostGatewayURLSink,
+		"PYTHON_CONTAINER_GATEWAY_URL_SINK=" + containerGatewayURLSink,
 		"CURL_API_HEALTH_HEADERS_SINK=" + healthHeadersSink,
 		"CURL_API_HEALTH_URL_SINK=" + healthURLSink,
 		"CURL_HEADERS_SINK=" + rpcHeadersSink,
@@ -278,6 +326,12 @@ printf '{}'
 	if cfg.directiveMessage != "" {
 		cmd.Env = append(cmd.Env, "DIRECTIVE_MESSAGE="+cfg.directiveMessage)
 	}
+	if cfg.hostGatewayURL != "" {
+		cmd.Env = append(cmd.Env, "SWARM_TOOL_GATEWAY_URL="+cfg.hostGatewayURL)
+	}
+	if cfg.containerURL != "" {
+		cmd.Env = append(cmd.Env, "SWARM_TOOL_GATEWAY_CONTAINER_URL="+cfg.containerURL)
+	}
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -285,17 +339,19 @@ printf '{}'
 	}
 
 	return runClearResult{
-		stdout:           string(out),
-		operatorToken:    readFileTrimmed(t, operatorTokenSink),
-		builderToken:     readFileTrimmed(t, builderTokenSink),
-		healthHeaders:    readFileTrimmed(t, healthHeadersSink),
-		healthURL:        readFileTrimmed(t, healthURLSink),
-		rpcHeaders:       readFileTrimmed(t, rpcHeadersSink),
-		rpcBody:          readFileTrimmed(t, bodySink),
-		rpcURL:           readFileTrimmed(t, urlSink),
-		directiveHeaders: readFileTrimmedOptional(t, directiveHeadersSink),
-		directiveBody:    readFileTrimmedOptional(t, directiveBodySink),
-		directiveURL:     readFileTrimmedOptional(t, directiveURLSink),
+		stdout:              string(out),
+		operatorToken:       readFileTrimmed(t, operatorTokenSink),
+		builderToken:        readFileTrimmed(t, builderTokenSink),
+		hostGatewayURL:      readFileTrimmed(t, hostGatewayURLSink),
+		containerGatewayURL: readFileTrimmed(t, containerGatewayURLSink),
+		healthHeaders:       readFileTrimmed(t, healthHeadersSink),
+		healthURL:           readFileTrimmed(t, healthURLSink),
+		rpcHeaders:          readFileTrimmed(t, rpcHeadersSink),
+		rpcBody:             readFileTrimmed(t, bodySink),
+		rpcURL:              readFileTrimmed(t, urlSink),
+		directiveHeaders:    readFileTrimmedOptional(t, directiveHeadersSink),
+		directiveBody:       readFileTrimmedOptional(t, directiveBodySink),
+		directiveURL:        readFileTrimmedOptional(t, directiveURLSink),
 	}
 }
 

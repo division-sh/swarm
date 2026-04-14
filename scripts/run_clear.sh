@@ -3,10 +3,18 @@ set -euo pipefail
 
 CONTRACTS_ROOT="${CONTRACTS_ROOT:-/Users/youmew/swarm/empire/contracts}"
 HEALTH_ADDR="${HEALTH_ADDR:-127.0.0.1:8081}"
-HEALTH_URL="http://${HEALTH_ADDR}/healthz"
-READY_URL="http://${HEALTH_ADDR}/readyz"
-API_HEALTH_URL="http://${HEALTH_ADDR}/api/health"
 HEALTH_PORT="${HEALTH_ADDR##*:}"
+HEALTH_HOST="${HEALTH_ADDR%:*}"
+if [[ "${HEALTH_HOST}" == "${HEALTH_ADDR}" ]]; then
+  HEALTH_HOST="127.0.0.1"
+fi
+if [[ -z "${HEALTH_HOST}" || "${HEALTH_HOST}" == "0.0.0.0" || "${HEALTH_HOST}" == "::" ]]; then
+  HEALTH_HOST="127.0.0.1"
+fi
+HOST_HTTP_ADDR="${HEALTH_HOST}:${HEALTH_PORT}"
+HEALTH_URL="http://${HOST_HTTP_ADDR}/healthz"
+READY_URL="http://${HOST_HTTP_ADDR}/readyz"
+API_HEALTH_URL="http://${HOST_HTTP_ADDR}/api/health"
 
 SWARM_DB_HOST="${SWARM_DB_HOST:-127.0.0.1}"
 SWARM_DB_PORT="${SWARM_DB_PORT:-5432}"
@@ -25,9 +33,18 @@ CORPUS_MODE="${CORPUS_MODE:-corpus}"
 CORPUS_GEOGRAPHY="${CORPUS_GEOGRAPHY:-US}"
 SWARM_OPERATOR_AUTH_TOKEN="${SWARM_OPERATOR_AUTH_TOKEN:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
 SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
+if [[ -n "${SWARM_TOOL_GATEWAY_URL:-}" && -n "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" ]]; then
+  SWARM_TOOL_GATEWAY_URL="${SWARM_TOOL_GATEWAY_URL}"
+  SWARM_TOOL_GATEWAY_CONTAINER_URL="${SWARM_TOOL_GATEWAY_CONTAINER_URL}"
+else
+  SWARM_TOOL_GATEWAY_URL="http://${HOST_HTTP_ADDR}"
+  SWARM_TOOL_GATEWAY_CONTAINER_URL="http://host.docker.internal:${HEALTH_PORT}"
+fi
 
 export SWARM_OPERATOR_AUTH_TOKEN
 export SWARM_BUILDER_AUTH_TOKEN
+export SWARM_TOOL_GATEWAY_URL
+export SWARM_TOOL_GATEWAY_CONTAINER_URL
 
 kill_swarm_processes() {
   local pids=""
@@ -140,11 +157,11 @@ if [[ -n "${serving_pid}" ]]; then
   echo "${serving_pid}" > "${PID_FILE}"
 fi
 
-echo "Swarm ready at http://${HEALTH_ADDR}"
+echo "Swarm ready at http://${HOST_HTTP_ADDR}"
 
 run_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 echo "Starting default corpus run ${run_id}..."
-run_response="$(curl -sS "http://${HEALTH_ADDR}/api/rpc" \
+run_response="$(curl -sS "http://${HOST_HTTP_ADDR}/api/rpc" \
   -H 'content-type: application/json' \
   -H "Authorization: Bearer ${SWARM_BUILDER_AUTH_TOKEN}" \
   --data-binary "{\"jsonrpc\":\"2.0\",\"id\":\"run-clear\",\"method\":\"run.start\",\"params\":{\"run_id\":\"${run_id}\",\"inputs\":{\"scan.requested\":{\"mode\":\"${CORPUS_MODE}\",\"geography\":\"${CORPUS_GEOGRAPHY}\",\"corpus_path\":\"${CORPUS_PATH}\"}}}}")"
@@ -158,7 +175,7 @@ fi
 if [[ -n "${DIRECTIVE_AGENT}" && -n "${DIRECTIVE_MESSAGE}" ]]; then
   echo "Sending directive to ${DIRECTIVE_AGENT}..."
   ruby -rjson -e 'print JSON.generate({message: ARGV[0], kill_previous: true})' "${DIRECTIVE_MESSAGE}" | \
-    curl -sS "http://${HEALTH_ADDR}/api/agents/${DIRECTIVE_AGENT}/actions/directive" \
+    curl -sS "http://${HOST_HTTP_ADDR}/api/agents/${DIRECTIVE_AGENT}/actions/directive" \
       -H 'content-type: application/json' \
       -H "Authorization: Bearer ${SWARM_OPERATOR_AUTH_TOKEN}" \
       --data-binary @-
