@@ -1759,8 +1759,10 @@ engine:
     - id: input_pin_wiring
       severity: warning
       scope: per-flow
-      trigger: A flow's required input event pin (from schema.yaml pins.inputs.events) has no emitter — no other flow's node
-        or agent produces this event. The flow cannot be triggered.
+      trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs.events) has no satisfiable authored producer
+        path on the static verify surface. The warning checks only sibling flow output pins, root agent emit_events, root
+        node handler emits, exact platform_events catalog matches, _source values starting with external, and same-flow timer
+        declarations. It does not use produces or _status: planned as proof.'
       when: boot-only
     severity_behavior:
       error: Boot aborts. System does not start.
@@ -3419,3 +3421,41 @@ static_analyzer:
         but do not clear the finding. Only platform-forced fields are provable in this slice.
     rule: For each required emitted-event field, emit semantic_drift_warning unless the field is platform-forced or explicitly covered
       by payload_transform.fields. The finding message must say the field is not statically provable.
+  slice_3_input_pin_producer_path_satisfaction:
+    id: input_pin_wiring
+    domain: semantic_drift
+    authority: semantic_drift_warning
+    severity: warning
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - flow_model.state_composition.cross_flow_handoff
+    - engine.cross_flow_routing.auto_wiring
+    - engine.event_identity
+    - contract_formats.event_schema
+    scope:
+      description: For every flow input pin event declared in schema.yaml pins.inputs.events, verify that at least one accepted
+        producer path exists in the authored bundle on the static verify surface.
+      applies_to:
+      - schema.yaml pins.inputs.events
+      excludes:
+      - runtime routing correctness
+      - payload compatibility
+      - multi-hop reachability or liveness
+      - produces-based proof
+      - _status-based lifecycle suppression
+    accepted_producer_paths:
+      sibling_flow_output_pin:
+        rule: Another flow declares the same local event name in schema.yaml pins.outputs.events.
+      root_agent_emit_events:
+        rule: A root-level agent declares the event in emit_events.
+      root_node_handler_emits:
+        rule: A root-level system node emits the event from handler emits, rules emits, on_complete emits, or fan_out emit_per_item.
+      platform_event_catalog:
+        rule: The input pin event exactly matches a platform_events.catalog key.
+      external_source_annotation:
+        rule: The consuming flow or root event entry for the event has _source beginning with external.
+      same_flow_timer_declaration:
+        rule: A timer declared within the consuming flow fires the same event.
+    rule: Emit warning when none of the accepted producer-path forms are found. The finding message must say no producer path
+      was found in the authored bundle and list the checked producer-path forms.

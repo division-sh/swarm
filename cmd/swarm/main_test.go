@@ -1233,3 +1233,25 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 		t.Fatalf("verifyBundle error = %v, want approved warning wording only", err)
 	}
 }
+
+func TestVerifyBundle_InputPinProducerPathReturnsWarningSurface(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+
+	err := verifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-missing-pin"))))
+	if err == nil {
+		t.Fatal("verifyBundle error = nil, want warning-only failure from missing producer path")
+	}
+	for _, want := range []string{
+		"no producer path was found in the authored bundle",
+		"Sibling flow output pin: not found",
+		"Root agent emit_events: not found",
+		"Root node handler emits: not found",
+		"Platform event catalog: not matched",
+		"External source annotation (_source): not found",
+		"Same-flow timer declaration: not found",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("verifyBundle error = %v, want substring %q", err, want)
+		}
+	}
+}

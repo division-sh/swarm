@@ -1268,6 +1268,129 @@ func TestRun_DoesNotWarnForExternalInputPinWithoutEmitter(t *testing.T) {
 	}
 }
 
+func TestRun_DoesNotWarnForSiblingFlowOutputPinInputProducerPath(t *testing.T) {
+	root := writeCrossFlowPinAmbiguityFixture(t, false)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+	bundle.Semantics.FlowOutputs["producer_b"] = nil
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "input_pin_wiring", "ticket.ready") {
+		t.Fatalf("unexpected input_pin_wiring warning for sibling output pin proof, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnForRootAgentEmitInputProducerPath(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	bundle.Agents["lifecycle-coordinator"] = runtimecontracts.AgentRegistryEntry{
+		ID:         "lifecycle-coordinator",
+		EmitEvents: []string{"task.feedback"},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unexpected input_pin_wiring warning for root agent emit proof, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnForRootNodeHandlerEmitInputProducerPath(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	node := bundle.Nodes["dispatcher"]
+	node.EventHandlers["task.requested"] = runtimecontracts.SystemNodeEventHandler{
+		Emits: runtimecontracts.EventEmission{Single: "child/task.feedback"},
+	}
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["task.requested"] = node.EventHandlers["task.requested"]
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unexpected input_pin_wiring warning for root handler emit proof, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnForPlatformEventCatalogInputProducerPath(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
+		"platform.runtime_log": {},
+	}
+	renameFlowHandlerEvent(t, bundle, "child", "worker", "task.feedback", "platform.runtime_log", runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		AdvancesTo:   "done",
+		Emits:        runtimecontracts.EventEmission{Single: "task.result"},
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "input_pin_wiring", "platform.runtime_log") {
+		t.Fatalf("unexpected input_pin_wiring warning for platform event proof, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnForSameFlowTimerInputProducerPath(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	node := bundle.Nodes["worker"]
+	node.Timers = append(node.Timers, runtimecontracts.WorkflowTimerContract{
+		ID:     "feedback-timeout",
+		Event:  "task.feedback",
+		FlowID: "child",
+		NodeID: "worker",
+	})
+	bundle.Nodes["worker"] = node
+	bundle.Semantics.Timers = append(bundle.Semantics.Timers, runtimecontracts.WorkflowTimerContract{
+		ID:     "feedback-timeout",
+		Event:  "task.feedback",
+		FlowID: "child",
+		NodeID: "worker",
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unexpected input_pin_wiring warning for same-flow timer proof, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotUseProducesOrPlannedAsInputProducerPathProof(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		mutate func(*runtimecontracts.WorkflowContractBundle)
+	}{
+		{
+			name: "produces only",
+			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
+				node := bundle.Nodes["dispatcher"]
+				node.Produces = append(node.Produces, "child/task.feedback")
+				bundle.Nodes["dispatcher"] = node
+			},
+		},
+		{
+			name: "planned status",
+			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
+				entry := bundle.Events["task.feedback"]
+				entry.Status = "planned"
+				bundle.Events["task.feedback"] = entry
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+			tc.mutate(bundle)
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if !reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
+				t.Fatalf("expected input_pin_wiring warning for %s, got %#v", tc.name, report.Warnings())
+			}
+		})
+	}
+}
+
 func TestRun_ReportsConflictingWritePinOwners(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
@@ -2943,6 +3066,31 @@ func renameFlowHandlerEvent(t *testing.T, bundle *runtimecontracts.WorkflowContr
 		}
 		bundle.Semantics.FlowInputs[flowID] = inputs
 	}
+}
+
+func flowEventEntry(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType string) runtimecontracts.EventCatalogEntry {
+	t.Helper()
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	entry, ok := flowView.Events[eventType]
+	if !ok {
+		t.Fatalf("flow %s event %s missing", flowID, eventType)
+	}
+	return entry
+}
+
+func writeFlowEventEntry(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType string, entry runtimecontracts.EventCatalogEntry) {
+	t.Helper()
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	if flowView.Events == nil {
+		flowView.Events = map[string]runtimecontracts.EventCatalogEntry{}
+	}
+	flowView.Events[eventType] = entry
 }
 
 func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) {
