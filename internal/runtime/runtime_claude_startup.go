@@ -151,7 +151,7 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 }
 
 func runtimeConfiguredMCPGatewayURL() string {
-	return strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
+	return strings.TrimSpace(llm.RuntimeMCPGatewayURLForHostExecution())
 }
 
 func runtimeConfiguredMCPGatewayToken() string {

@@ -338,6 +338,24 @@ func TestBuildMCPConfigArg_PreservesNonLoopbackGatewayURLForContainerExecution(t
 	}
 }
 
+func TestRuntimeMCPGatewayURLForHostExecution_RewritesContainerOnlyHostAlias(t *testing.T) {
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://host.docker.internal:18082")
+
+	got := RuntimeMCPGatewayURLForHostExecution()
+	if got != "http://127.0.0.1:18082/mcp" {
+		t.Fatalf("gateway url = %q, want host-safe loopback MCP endpoint", got)
+	}
+}
+
+func TestRuntimeMCPGatewayURLForHostExecution_RewritesUnspecifiedHost(t *testing.T) {
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://0.0.0.0:18082")
+
+	got := RuntimeMCPGatewayURLForHostExecution()
+	if got != "http://127.0.0.1:18082/mcp" {
+		t.Fatalf("gateway url = %q, want host-safe loopback MCP endpoint", got)
+	}
+}
+
 func TestBuildMCPConfigArg_FailsClosedWithoutTurnContextStore(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:18082")
