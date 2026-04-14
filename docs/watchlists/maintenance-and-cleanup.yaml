@@ -14,6 +14,10 @@ active_issues:
     title: Wire excluded runtime catalog conformance fixtures into e2e execution
     maps_to:
       - invariant_suite_coverage
+  - id: 387
+    title: Wire the four harness-ready excluded catalog fixtures into runtime e2e execution
+    maps_to:
+      - invariant_suite_coverage
   - id: 126
     title: Split boot verification into boundary-owned modules and close major test gaps
     maps_to:
