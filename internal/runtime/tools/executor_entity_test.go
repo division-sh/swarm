@@ -328,6 +328,46 @@ func TestEntityTools_SearchEntitiesAcceptsAnnotatedJSONBFilter(t *testing.T) {
 	}
 }
 
+func TestEntityTools_SaveEntityFieldRejectsMalformedAnnotatedTypeSuffix(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "save_entity_field"},
+	}, &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			InitialStage: "queued",
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "validation",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "mvp_spec", Type: "jsonb from spec.approved", Nullable: true},
+					},
+				}},
+			},
+		},
+	})
+	entityID := uuid.NewString()
+
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"flow_instance": "validation/inst-1",
+	}); err != nil {
+		t.Fatalf("create_entity: %v", err)
+	}
+
+	_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "mvp_spec",
+		"value":     map[string]any{"headline": "launch fast"},
+	})
+	if err == nil {
+		t.Fatal("expected malformed annotated type suffix to be rejected")
+	}
+	if !strings.Contains(err.Error(), "unsupported schema type jsonb from spec.approved") {
+		t.Fatalf("err = %v, want unsupported malformed suffix rejection", err)
+	}
+}
+
 func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarness(t)
 	entityID := uuid.NewString()
