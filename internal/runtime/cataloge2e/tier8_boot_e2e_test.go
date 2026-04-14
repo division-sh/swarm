@@ -46,6 +46,7 @@ var tier8SupportedFixtures = []string{
 	"test-boot-event-no-schema",
 	"test-boot-handler-field-undefined",
 	"test-boot-missing-pin",
+	"test-boot-on-complete-and-rules-mutual-exclusion",
 	"test-boot-on-complete-state-invalid",
 	"test-boot-on-complete-dict",
 	"test-boot-payload-mismatch",
@@ -62,9 +63,8 @@ var tier8SupportedFixtures = []string{
 }
 
 var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
-	"test-boot-create-entity-plus-accumulate":          {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
-	"test-boot-on-complete-and-rules-mutual-exclusion": {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
-	"test-boot-state-machine-unreachable":              {reason: "supported verify warning fixture for analyzer slice 4; not a runtime boot catalog fixture"},
+	"test-boot-create-entity-plus-accumulate": {reason: "split to issue #393: expected boot error no longer reproduces on canonical tier8 path"},
+	"test-boot-state-machine-unreachable":     {reason: "supported verify warning fixture for analyzer slice 4; not a runtime boot catalog fixture"},
 }
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
