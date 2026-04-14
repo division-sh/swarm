@@ -12,10 +12,11 @@ import (
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/config"
 	"swarm/internal/runtime"
-	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
+	workspace "swarm/internal/runtime/workspace"
 )
 
 type runtimeProjectSupervisor struct {
@@ -26,6 +27,11 @@ type runtimeProjectSupervisor struct {
 	ready            *atomic.Bool
 	startRuntime     func(context.Context, *runtime.Runtime) error
 	shutdownRuntime  func(context.Context, *runtime.Runtime) error
+	loadWorkflow     func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
+	validateSource   func(context.Context, semanticview.Source) error
+	initStateStores  func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
+	newWorkspaces    func(storeBundle, string, string, semanticview.Source) workspace.Lifecycle
+	createRuntime    func(context.Context, *config.Config, runtime.Stores, runtime.RuntimeOptions) (*runtime.Runtime, error)
 
 	mu            sync.RWMutex
 	currentRoot   string
@@ -56,6 +62,19 @@ func newRuntimeProjectSupervisor(
 		},
 		shutdownRuntime: func(_ context.Context, rt *runtime.Runtime) error {
 			return rt.Shutdown()
+		},
+		loadWorkflow: func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+			return newSwarmWorkflowModule(repoRoot, contractsRoot, platformSpecPath)
+		},
+		validateSource: func(ctx context.Context, source semanticview.Source) error {
+			return verifyBundle(ctx, source)
+		},
+		initStateStores: initializeStateStores,
+		newWorkspaces: func(stores storeBundle, repoRoot, contractsRoot string, source semanticview.Source) workspace.Lifecycle {
+			return configuredWorkspaceLifecycle(stores.SQLDB, repoRoot, contractsRoot, source)
+		},
+		createRuntime: func(ctx context.Context, cfg *config.Config, stores runtime.Stores, opts runtime.RuntimeOptions) (*runtime.Runtime, error) {
+			return runtime.NewRuntime(ctx, cfg, stores, opts)
 		},
 		currentRoot:   strings.TrimSpace(initialRoot),
 		currentSource: initialSource,
@@ -116,22 +135,18 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, err
 	}
 
-	module, bundle, err := newSwarmWorkflowModule(s.repoRoot, resolvedRoot, s.platformSpecPath)
+	module, bundle, err := s.loadWorkflow(s.repoRoot, resolvedRoot, s.platformSpecPath)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("load project: %w", err)
 	}
-	if err := runtimecontracts.ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
-		return builderpkg.ProjectStatus{}, err
-	}
 	source := semanticview.Wrap(bundle)
-	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
-	if report.HasErrors() {
-		return builderpkg.ProjectStatus{}, fmt.Errorf("%s", report.Errors()[0].Message)
-	}
-	if _, err := initializeStateStores(ctx, s.stores, bundle); err != nil {
+	if err := s.validateSource(ctx, source); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
-	workspaces := configuredWorkspaceLifecycle(s.stores.SQLDB, s.repoRoot, resolvedRoot, source)
+	if _, err := s.initStateStores(ctx, s.stores, bundle); err != nil {
+		return builderpkg.ProjectStatus{}, err
+	}
+	workspaces := s.newWorkspaces(s.stores, s.repoRoot, resolvedRoot, source)
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
@@ -142,7 +157,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, err
 	}
 
-	newRT, err := runtime.NewRuntime(ctx, s.cfg, s.stores.runtimeStores(), runtime.RuntimeOptions{
+	newRT, err := s.createRuntime(ctx, s.cfg, s.stores.runtimeStores(), runtime.RuntimeOptions{
 		SelfCheck:          false,
 		WorkflowModule:     module,
 		WorkspaceLifecycle: workspaces,
