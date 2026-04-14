@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,10 @@ import (
 
 const (
 	contextTokenHeader = "X-SWARM-Context-Token"
+
+	maxToolResultBytes        = 16 * 1024
+	maxReadFileResultBytes    = 256 * 1024
+	maxToolResultPreviewRunes = 1200
 )
 
 type ToolGatewayRequest struct {
@@ -46,6 +51,18 @@ type ToolDef struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	InputSchema any    `json:"inputSchema"`
+}
+
+type ToolResultRelayRef struct {
+	Path       string   `json:"path"`
+	Chunks     []string `json:"chunks,omitempty"`
+	ReadTool   string   `json:"read_tool"`
+	Format     string   `json:"format"`
+	Visibility string   `json:"visibility"`
+}
+
+type OversizedToolResultRelayWriter interface {
+	PersistOversizedToolResultRelay(ctx context.Context, toolName string, rawJSON []byte) (ToolResultRelayRef, error)
 }
 
 func ParseToolListHeader(raw string) map[string]struct{} {

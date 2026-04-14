@@ -281,18 +281,25 @@ func (c *Conversation) projectToolResult(ctx context.Context, name string, input
 		if err != nil {
 			return nil, fmt.Errorf("persist oversized tool result relay for %s: %w", strings.TrimSpace(name), err)
 		}
+		followUp := map[string]any{
+			"kind":        "runtime_read_file",
+			"tool":        relay.ReadTool,
+			"format":      relay.Format,
+			"visibility":  relay.Visibility,
+			"description": "full tool result stored in a runtime-accessible workspace file",
+		}
+		if len(relay.Chunks) > 0 {
+			followUp["kind"] = "runtime_read_file_chunks"
+			followUp["chunks"] = relay.Chunks
+			followUp["description"] = "full tool result stored across runtime-accessible workspace chunk files; read chunks in order"
+		} else {
+			followUp["path"] = relay.Path
+		}
 		return map[string]any{
 			"truncated": true,
 			"bytes":     len(b),
 			"preview":   clampRunes(string(b), maxToolResultPreviewRunes),
-			"follow_up": map[string]any{
-				"kind":        "runtime_read_file",
-				"tool":        relay.ReadTool,
-				"path":        relay.Path,
-				"format":      relay.Format,
-				"visibility":  relay.Visibility,
-				"description": "full tool result stored in a runtime-accessible workspace file",
-			},
+			"follow_up": followUp,
 		}, nil
 	}
 	return map[string]any{
