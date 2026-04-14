@@ -133,8 +133,47 @@ PY
 )"
 echo "${launcher_pid}" > "${PID_FILE}"
 
+launcher_process_signature() {
+  local pid="${1:-}"
+  [[ -n "${pid}" ]] || return 1
+  local state start command
+  state="$(ps -o state= -p "${pid}" 2>/dev/null | head -n 1 | sed 's/^ *//')"
+  start="$(ps -o lstart= -p "${pid}" 2>/dev/null | head -n 1 | sed 's/^ *//')"
+  command="$(ps -o command= -p "${pid}" 2>/dev/null | head -n 1 | sed 's/^ *//')"
+  if [[ -z "${state}" || -z "${start}" || -z "${command}" ]]; then
+    return 1
+  fi
+  printf '%s\t%s\t%s\n' "${state}" "${start}" "${command}"
+}
+
+launcher_signature="$(launcher_process_signature "${launcher_pid}" || true)"
+
+launcher_exited_before_ready() {
+  local pid="${1:-}"
+  local expected_signature="${2:-}"
+  [[ -n "${pid}" && -n "${expected_signature}" ]] || return 1
+  local current_signature current_state
+  current_signature="$(launcher_process_signature "${pid}" || true)"
+  if [[ -z "${current_signature}" ]]; then
+    return 0
+  fi
+  current_state="${current_signature%%$'\t'*}"
+  if [[ "${current_state}" == *Z* ]]; then
+    return 0
+  fi
+  if [[ "${current_signature}" != "${expected_signature}" ]]; then
+    return 0
+  fi
+  return 1
+}
+
 ready=0
 for _ in $(seq 1 "${START_TIMEOUT}"); do
+  if launcher_exited_before_ready "${launcher_pid}" "${launcher_signature}"; then
+    echo "Swarm exited before becoming ready. Current log:"
+    tail -n 200 "${LOG_FILE}"
+    exit 1
+  fi
   health_code="$(curl -s -o /tmp/swarm-healthz.json -w '%{http_code}' "${HEALTH_URL}" || true)"
   ready_code="$(curl -s -o /tmp/swarm-readyz.json -w '%{http_code}' "${READY_URL}" || true)"
   api_code="$(curl -s -o /tmp/swarm-api-health.json -w '%{http_code}' "${API_HEALTH_URL}" \

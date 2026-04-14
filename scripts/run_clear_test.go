@@ -16,6 +16,11 @@ type runClearConfig struct {
 	directiveMessage string
 	hostGatewayURL   string
 	containerURL     string
+	launcherMode     string
+	launcherLogText  string
+	readyCode        string
+	apiHealthCode    string
+	startTimeout     string
 }
 
 func TestRunClear_ProvisionsBuilderAuthTokenAndUsesBearerForRPC(t *testing.T) {
@@ -134,6 +139,28 @@ func TestRunClear_IgnoresPartialGatewayOverrideAndDerivesCoherentPair(t *testing
 	}
 }
 
+func TestRunClear_FailsFastWhenSwarmExitsBeforeReady(t *testing.T) {
+	result, err := runRunClearResult(t, runClearConfig{
+		launcherMode:    "exit_fast",
+		launcherLogText: "workspace validation failed: workspace image is required",
+		readyCode:       "503",
+		apiHealthCode:   "503",
+		startTimeout:    "5",
+	})
+	if err == nil {
+		t.Fatalf("run_clear.sh err = nil, want startup failure\n%s", result.stdout)
+	}
+	if !strings.Contains(result.stdout, "Swarm exited before becoming ready. Current log:") {
+		t.Fatalf("stdout = %q, want early-exit startup failure text", result.stdout)
+	}
+	if !strings.Contains(result.stdout, "workspace validation failed: workspace image is required") {
+		t.Fatalf("stdout = %q, want startup failure log detail", result.stdout)
+	}
+	if strings.TrimSpace(result.rpcBody) != "" {
+		t.Fatalf("rpc body = %q, want no run.start after startup failure", result.rpcBody)
+	}
+}
+
 type runClearResult struct {
 	stdout              string
 	operatorToken       string
@@ -151,6 +178,15 @@ type runClearResult struct {
 }
 
 func runRunClear(t *testing.T, cfg runClearConfig) runClearResult {
+	t.Helper()
+	result, err := runRunClearResult(t, cfg)
+	if err != nil {
+		t.Fatalf("run_clear.sh failed: %v\n%s", err, result.stdout)
+	}
+	return result
+}
+
+func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error) {
 	t.Helper()
 
 	scriptDir := testScriptDir(t)
@@ -181,7 +217,25 @@ printf '%s' "${SWARM_OPERATOR_AUTH_TOKEN:-}" > "${PYTHON_OPERATOR_TOKEN_SINK}"
 printf '%s' "${SWARM_BUILDER_AUTH_TOKEN:-}" > "${PYTHON_ENV_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_URL:-}" > "${PYTHON_HOST_GATEWAY_URL_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" > "${PYTHON_CONTAINER_GATEWAY_URL_SINK}"
-printf '4242\n'
+mode="${PYTHON_LAUNCHER_MODE:-steady}"
+case "$mode" in
+  exit_fast)
+    if [[ -n "${PYTHON_LAUNCHER_LOG_TEXT:-}" ]]; then
+      printf '%s\n' "${PYTHON_LAUNCHER_LOG_TEXT}" >> "${LOG_FILE}"
+    fi
+    (sleep 0.2 >/dev/null 2>&1 </dev/null) &
+    pid="$!"
+    (
+      sleep 0.3
+      kill "${pid}" >/dev/null 2>&1 || true
+    ) >/dev/null 2>&1 </dev/null &
+    printf '%s\n' "${pid}"
+    ;;
+  *)
+    (sleep 30 >/dev/null 2>&1 </dev/null) &
+    printf '%s\n' "$!"
+    ;;
+esac
 `)
 	writeExecutable(t, binDir, "curl", `#!/usr/bin/env bash
 set -euo pipefail
@@ -221,11 +275,18 @@ while (($#)); do
       ;;
   esac
 done
-if [[ "$url" == *"/healthz" || "$url" == *"/readyz" ]]; then
+if [[ "$url" == *"/healthz" ]]; then
   if [[ -n "$out" ]]; then
     printf '{}' > "$out"
   fi
-  printf '200'
+  printf '%s' "${CURL_HEALTHZ_CODE:-200}"
+  exit 0
+fi
+if [[ "$url" == *"/readyz" ]]; then
+  if [[ -n "$out" ]]; then
+    printf '{}' > "$out"
+  fi
+  printf '%s' "${CURL_READYZ_CODE:-200}"
   exit 0
 fi
 if [[ "$url" == *"/api/health" ]]; then
@@ -241,7 +302,7 @@ if [[ "$url" == *"/api/health" ]]; then
       if [[ -n "$out" ]]; then
         printf '{}' > "$out"
       fi
-      printf '200'
+      printf '%s' "${CURL_API_HEALTH_CODE:-200}"
       exit 0
     fi
   done
@@ -294,14 +355,21 @@ printf '{}'
 	cmd.Env = append(filteredEnv(
 		"SWARM_OPERATOR_AUTH_TOKEN",
 		"SWARM_BUILDER_AUTH_TOKEN",
+		"SWARM_TOOL_GATEWAY_URL",
+		"SWARM_TOOL_GATEWAY_CONTAINER_URL",
 	), []string{
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"PYTHON_OPERATOR_TOKEN_SINK=" + operatorTokenSink,
 		"PYTHON_ENV_SINK=" + builderTokenSink,
 		"PYTHON_HOST_GATEWAY_URL_SINK=" + hostGatewayURLSink,
 		"PYTHON_CONTAINER_GATEWAY_URL_SINK=" + containerGatewayURLSink,
+		"PYTHON_LAUNCHER_MODE=" + defaultString(cfg.launcherMode, "steady"),
+		"PYTHON_LAUNCHER_LOG_TEXT=" + cfg.launcherLogText,
 		"CURL_API_HEALTH_HEADERS_SINK=" + healthHeadersSink,
 		"CURL_API_HEALTH_URL_SINK=" + healthURLSink,
+		"CURL_HEALTHZ_CODE=200",
+		"CURL_READYZ_CODE=" + defaultString(cfg.readyCode, "200"),
+		"CURL_API_HEALTH_CODE=" + defaultString(cfg.apiHealthCode, "200"),
 		"CURL_HEADERS_SINK=" + rpcHeadersSink,
 		"CURL_BODY_SINK=" + bodySink,
 		"CURL_URL_SINK=" + urlSink,
@@ -312,7 +380,7 @@ printf '{}'
 		"HEALTH_ADDR=127.0.0.1:8081",
 		"LOG_FILE=" + logFile,
 		"PID_FILE=" + pidFile,
-		"START_TIMEOUT=1",
+		"START_TIMEOUT=" + defaultString(cfg.startTimeout, "1"),
 	}...)
 	if cfg.operatorToken != "" {
 		cmd.Env = append(cmd.Env, "SWARM_OPERATOR_AUTH_TOKEN="+cfg.operatorToken)
@@ -334,8 +402,8 @@ printf '{}'
 	}
 
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("run_clear.sh failed: %v\n%s", err, out)
+	if pid := readFileTrimmedOptional(t, pidFile); strings.TrimSpace(pid) != "" {
+		_ = exec.Command("kill", pid).Run()
 	}
 
 	return runClearResult{
@@ -346,13 +414,13 @@ printf '{}'
 		containerGatewayURL: readFileTrimmed(t, containerGatewayURLSink),
 		healthHeaders:       readFileTrimmed(t, healthHeadersSink),
 		healthURL:           readFileTrimmed(t, healthURLSink),
-		rpcHeaders:          readFileTrimmed(t, rpcHeadersSink),
-		rpcBody:             readFileTrimmed(t, bodySink),
-		rpcURL:              readFileTrimmed(t, urlSink),
+		rpcHeaders:          readFileTrimmedOptional(t, rpcHeadersSink),
+		rpcBody:             readFileTrimmedOptional(t, bodySink),
+		rpcURL:              readFileTrimmedOptional(t, urlSink),
 		directiveHeaders:    readFileTrimmedOptional(t, directiveHeadersSink),
 		directiveBody:       readFileTrimmedOptional(t, directiveBodySink),
 		directiveURL:        readFileTrimmedOptional(t, directiveURLSink),
-	}
+	}, err
 }
 
 func filteredEnv(removeKeys ...string) []string {
@@ -411,4 +479,11 @@ func readFileTrimmedOptional(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return strings.TrimSpace(string(data))
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
