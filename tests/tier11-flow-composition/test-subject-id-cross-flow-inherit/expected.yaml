@@ -7,6 +7,8 @@ trigger:
 expected:
   handler_outcome: success
   entity_state: dispatched
+  emitted_events:
+    - score.requested
   flow_entities:
     scoring:
       entity_state: scored

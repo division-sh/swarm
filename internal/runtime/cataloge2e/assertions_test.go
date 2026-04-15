@@ -2,12 +2,14 @@ package cataloge2e
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
 )
@@ -150,6 +152,26 @@ func TestAssertCatalogRuntimeOutcome_IgnoresEntityNonSuccessPreviewProof(t *test
 	}
 
 	assertCatalogRuntimeOutcome(t, h, expected)
+}
+
+func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testing.T) {
+	h := newCatalogAssertionHarness(t)
+	entityID := "11111111-1111-1111-1111-111111111111"
+	bundle := loadFixtureBundle(t, filepath.Join(repoRootFromCatalogE2E(t), "tests", "tier11-flow-composition", "test-subject-id-cross-flow-inherit"))
+	h.bundle = bundle
+
+	insertCatalogAssertionEntityState(t, h, entityID, "dispatched")
+	if err := h.pg.AppendEvent(context.Background(), (events.Event{
+		ID:          uuid.NewString(),
+		Type:        "score.requested",
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"entity_id":"` + entityID + `"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(entityID)); err != nil {
+		t.Fatalf("append score.requested event: %v", err)
+	}
+
+	assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, []string{"score.requested"}, "", semanticview.Wrap(bundle))
 }
 
 func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
