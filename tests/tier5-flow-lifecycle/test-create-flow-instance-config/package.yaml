@@ -2,4 +2,7 @@ name: test-create-flow-instance-config
 version: 1.0.0
 description: Create flow instance with config_from to pass configuration.
 platform_version: ">=1.1.0"
-flows: []
+flows:
+  - id: worker-flow
+    flow: worker-flow
+    mode: template

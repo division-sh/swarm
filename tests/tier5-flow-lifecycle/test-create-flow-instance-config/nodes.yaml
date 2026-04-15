@@ -5,13 +5,11 @@ test-node:
   produces: [flow.spawned]
   event_handlers:
     flow.spawn_with_config:
-      action:
-        type: create_flow_instance
-        flow_template: worker-flow
-        instance_id: "{{payload.instance_id}}"
-        config_from:
-          threshold: "{{payload.threshold}}"
-          mode: "{{payload.mode}}"
-          limit: "{{payload.limit}}"
+      action: create_flow_instance
+      template: worker-flow
+      instance_id_from: payload.instance_id
+      config_from:
+        max_retries: payload.config.max_retries
+        timeout_ms: payload.config.timeout_ms
       emits: flow.spawned
       advances_to: spawned

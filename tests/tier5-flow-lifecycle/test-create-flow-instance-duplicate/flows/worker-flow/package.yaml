@@ -1,0 +1,5 @@
+name: worker-flow
+version: 1.0.0
+description: Minimal template flow for duplicate create_flow_instance coverage.
+platform_version: ">=1.1.0"
+flows: []
