@@ -182,7 +182,18 @@ printf '%s\n' '{"type":"result","result":"done"}'
 	if len(turns.records) == 0 {
 		t.Fatal("expected persisted turn records")
 	}
-	first := turns.records[0]
+	first := AgentTurnRecord{}
+	found := false
+	for _, rec := range turns.records {
+		if got := rec.MCPServers["runtime-tools"]; got == "connected" {
+			first = rec
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no provider-observed first-turn record found in %#v", turns.records)
+	}
 	if !slices.Equal(first.AvailableTools, []string{"emit_category_assessed", "read_file"}) {
 		t.Fatalf("first turn available_tools = %#v", first.AvailableTools)
 	}
