@@ -12,7 +12,7 @@ func CanonicalName(name string) string {
 	switch name {
 	case "Bash":
 		return "bash"
-	case "WebSearch":
+	case "WebSearch", "WebFetch":
 		return "web_search"
 	case "Read":
 		return "read_file"

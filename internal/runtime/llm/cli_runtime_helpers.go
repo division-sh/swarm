@@ -316,7 +316,7 @@ func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefin
 		addNativeCapabilityTool("bash")
 	}
 	if actor.NativeTools.WebSearch {
-		providerBuiltins = append(providerBuiltins, "WebSearch")
+		providerBuiltins = append(providerBuiltins, "WebFetch", "WebSearch")
 		addNativeCapabilityTool("web_search")
 	}
 	if actor.NativeTools.FileIO {

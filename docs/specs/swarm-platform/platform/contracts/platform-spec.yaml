@@ -1344,7 +1344,12 @@ engine:
           note: Single tool. Same name as the capability.
         web_search:
           tool_name: web_search
-          note: Single tool. Same name as the capability.
+          provider_builtins:
+          - WebSearch
+          - WebFetch
+          note: Canonical Swarm-visible name is `web_search`. On CLI this capability authorizes both provider-native web search
+            and direct page-fetch builtins, but they collapse to the same canonical native capability for authorization and
+            persisted turn-surface truth.
         file_io:
           tool_names:
           - read_file
