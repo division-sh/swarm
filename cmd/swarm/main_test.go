@@ -138,16 +138,16 @@ func TestPrintRunStatusReport(t *testing.T) {
 }
 
 func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationallyStalled(t *testing.T) {
-	report := runStatusReport{
+	report := store.RunDebugReport{
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
-		Deliveries: []runStatusDeliveryCount{
+		Deliveries: []store.RunDebugDeliveryCount{
 			{SubscriberID: "agent-1", Status: "delivered", Count: 2},
 			{SubscriberID: "agent-2", Status: "failed", Count: 1},
 		},
 	}
 
-	got := projectRunOperationalStatus(report)
+	got := store.ProjectRunOperationalStatus(report)
 	if got.State != "stalled" {
 		t.Fatalf("state = %q, want stalled", got.State)
 	}
@@ -160,18 +160,18 @@ func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationally
 }
 
 func TestProjectRunOperationalStatus_UsesScoringOutcomeBlockingLayer(t *testing.T) {
-	report := runStatusReport{
+	report := store.RunDebugReport{
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
-		EventCounts: []runStatusEventCount{
+		EventCounts: []store.RunDebugEventCount{
 			{EventName: "scoring/scoring.requested", Count: 1},
 		},
-		Deliveries: []runStatusDeliveryCount{
+		Deliveries: []store.RunDebugDeliveryCount{
 			{SubscriberID: "agent-1", Status: "delivered", Count: 1},
 		},
 	}
 
-	got := projectRunOperationalStatus(report)
+	got := store.ProjectRunOperationalStatus(report)
 	if got.State != "stalled" {
 		t.Fatalf("state = %q, want stalled", got.State)
 	}
@@ -184,19 +184,19 @@ func TestProjectRunOperationalStatus_UsesScoringOutcomeBlockingLayer(t *testing.
 }
 
 func TestProjectRunOperationalStatus_TreatsScopedShortlistAsTerminalScoringOutcome(t *testing.T) {
-	report := runStatusReport{
+	report := store.RunDebugReport{
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
-		EventCounts: []runStatusEventCount{
+		EventCounts: []store.RunDebugEventCount{
 			{EventName: "scoring/scoring.requested", Count: 1},
 			{EventName: "scoring/vertical.shortlisted", Count: 1},
 		},
-		Deliveries: []runStatusDeliveryCount{
+		Deliveries: []store.RunDebugDeliveryCount{
 			{SubscriberID: "agent-1", Status: "delivered", Count: 1},
 		},
 	}
 
-	got := projectRunOperationalStatus(report)
+	got := store.ProjectRunOperationalStatus(report)
 	if got.State != "stalled" {
 		t.Fatalf("state = %q, want stalled", got.State)
 	}
@@ -209,16 +209,16 @@ func TestProjectRunOperationalStatus_TreatsScopedShortlistAsTerminalScoringOutco
 }
 
 func TestProjectRunOperationalStatus_PreservesHealthyRunningWhenActiveDeliveriesRemain(t *testing.T) {
-	report := runStatusReport{
+	report := store.RunDebugReport{
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
-		Deliveries: []runStatusDeliveryCount{
+		Deliveries: []store.RunDebugDeliveryCount{
 			{SubscriberID: "agent-1", Status: "in_progress", Count: 1},
 			{SubscriberID: "agent-2", Status: "delivered", Count: 1},
 		},
 	}
 
-	got := projectRunOperationalStatus(report)
+	got := store.ProjectRunOperationalStatus(report)
 	if got.State != "running" {
 		t.Fatalf("state = %q, want running", got.State)
 	}

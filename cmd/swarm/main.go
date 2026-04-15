@@ -257,12 +257,6 @@ type runStatusReport struct {
 	RuntimeLogs       []runStatusRuntimeLog     `json:"runtime_logs,omitempty"`
 }
 
-type runOperationalProjection struct {
-	State          string
-	BlockingLayer  string
-	BlockingReason string
-}
-
 type runStatusEventCount struct {
 	EventName string `json:"event_name"`
 	Count     int    `json:"count"`
@@ -430,11 +424,11 @@ func loadRunStatusReport(ctx context.Context, pg *store.PostgresStore, runID str
 		return runStatusReport{}, err
 	}
 	report := runStatusReportFromStore(detail)
-	operational := projectRunOperationalStatus(report)
+	operational := store.ProjectRunOperationalStatus(detail)
 	report.OperationalState = operational.State
 	report.BlockingLayer = operational.BlockingLayer
 	report.BlockingReason = operational.BlockingReason
-	report.Heuristics = deriveRunStatusHeuristics(report)
+	report.Heuristics = append([]string(nil), operational.Heuristics...)
 
 	return report, nil
 }
@@ -444,52 +438,6 @@ func logLimitForStatus(opts runStatusOptions) int {
 		return 100
 	}
 	return 20
-}
-
-func deriveRunStatusHeuristics(report runStatusReport) []string {
-	heuristics := make([]string, 0, 4)
-	if len(report.DeadLetters) > 0 {
-		heuristics = append(heuristics, "dead letters exist for this run")
-	}
-	return heuristics
-}
-
-func projectRunOperationalStatus(report runStatusReport) runOperationalProjection {
-	status := strings.ToLower(strings.TrimSpace(report.RunTableStatus))
-	if status == "" {
-		return runOperationalProjection{}
-	}
-	if status != "running" {
-		return runOperationalProjection{State: status}
-	}
-
-	eventCounts := map[string]int{}
-	for _, item := range report.EventCounts {
-		eventCounts[strings.TrimSpace(item.EventName)] = item.Count
-	}
-	activeDeliveries := 0
-	for _, item := range report.Deliveries {
-		switch strings.ToLower(strings.TrimSpace(item.Status)) {
-		case "pending", "in_progress":
-			activeDeliveries += item.Count
-		}
-	}
-	terminalScoring := eventCounts["scoring/vertical.marginal"] + eventCounts["scoring/vertical.rejected"] + eventCounts["scoring/vertical.shortlisted"]
-	if activeDeliveries == 0 && eventCounts["scoring/scoring.requested"] > 0 && terminalScoring == 0 {
-		return runOperationalProjection{
-			State:          "stalled",
-			BlockingLayer:  "scoring_terminal_outcome",
-			BlockingReason: "terminal_scoring_outcome_missing",
-		}
-	}
-	if activeDeliveries == 0 && !report.LastEventAt.IsZero() {
-		return runOperationalProjection{
-			State:          "stalled",
-			BlockingLayer:  "delivery_lifecycle",
-			BlockingReason: "no_active_deliveries",
-		}
-	}
-	return runOperationalProjection{State: "running"}
 }
 
 func printRunStatusReport(w io.Writer, report runStatusReport) {
