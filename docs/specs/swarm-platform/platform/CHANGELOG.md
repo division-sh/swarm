@@ -1,5 +1,10 @@
 # Swarm Platform Changelog
 
+## Unreleased
+
+### Clarified: CLI native_tools are provider-native only
+The platform spec now makes the shipped CLI rule explicit: `bash`, `web_search`, and `file_io` are provider-native capabilities only. The platform does not inject fallback tools to satisfy `native_tools` on CLI, unsupported capabilities fail closed, and visible native-tool surface must equal callable truth for the same turn.
+
 ## v1.6.0 (2026-04-02)
 
 ### Breaking: Flow-Scoped Entity State (`flow_model.state_composition`)

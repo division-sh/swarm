@@ -1267,7 +1267,7 @@ engine:
       description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
         (omitted = no native capabilities). The native_tools field is the sole authorization gate — no separate permission
         entry is required. Native tools are not part of the tools system. They are provider-level capabilities that the
-        platform either enables natively or provides as local fallback tools.
+        configured runtime must expose natively. The platform does not satisfy native_tools by injecting fallback tools.
       contract_field:
         field: native_tools
         type: object
@@ -1281,13 +1281,14 @@ engine:
           says bash true, the agent gets bash. Boot validation checks that capability names are valid and values are boolean.
       relationship_to_tool_filtering:
         description: Native tools are NOT part of the tools filtering system. tools controls what the platform
-          injects as platform/MCP/HTTP tools. Native tools control what the provider brings to the session or what the platform
-          provides as a local execution shim. They are separate channels. When a fallback tool is injected (because the provider
-          lacks the capability), it fulfills the native_tools contract — it is not subject to tools filtering.
+          injects as platform/MCP/HTTP tools. Native tools control provider-native capabilities only. They are separate channels.
+          The platform must not inject a platform tool, MCP shim, or local fallback execution path to satisfy a native_tools
+          declaration. The visible native-tool surface for a turn must equal callable truth on that same turn.
       capabilities:
         bash:
-          description: Shell command execution. Always runs locally on the platform host, in the agent's workspace directory
-            with workspace mounts active (/workspace read-write, /data read-only, /opt/swarm/contracts read-only).
+          description: Shell command execution. On supporting runtimes, bash runs provider-natively and always executes locally
+            on the platform host, in the agent's workspace directory with workspace mounts active (/workspace read-write, /data
+            read-only, /opt/swarm/contracts read-only).
           tool_schema:
             input:
               command: string — shell command to execute
@@ -1302,8 +1303,8 @@ engine:
             to agents that need host-level operations (e.g., infrastructure management agents). Not appropriate for data-processing
             or analysis agents.
         web_search:
-          description: Internet search. Returns search results as structured data. Executed locally — the platform makes the
-            search API call from the host.
+          description: Internet search. On supporting runtimes, web_search is a provider-native capability. The platform does
+            not satisfy native_tools.web_search through policy-managed search-provider fallback.
           tool_schema:
             input:
               query: string — search query
@@ -1311,66 +1312,12 @@ engine:
             output:
               results: array of objects with title, url, snippet fields
           configuration:
-            description: Search provider configured in policy.yaml under web_search_provider. Only used when the platform
-              provides the fallback (API and local-model backends). CLI backends with native web search do not use this config.
-              The platform ships a generic HTTP-based search executor. The policy entry defines the provider, API endpoint,
-              and credentials.
-            policy_key: web_search_provider
-            schema:
-              provider: string — provider identifier. Supported values are brave, serper, tavily, custom. The platform ships
-                request/response adapters for known providers. Custom uses the http block directly.
-              credentials_key: string — credential store key for the API key
-              max_results_default: integer — optional, default 10. Overridden by agent's max_results parameter if provided.
-            known_providers:
-              brave:
-                description: Brave Search API
-                endpoint: https://api.search.brave.com/res/v1/web/search
-                auth_header: 'X-Subscription-Token: {{credentials.key}}'
-                response_path: web.results
-                field_mapping:
-                  title: title
-                  url: url
-                  snippet: description
-              serper:
-                description: Serper.dev Google Search API
-                endpoint: https://google.serper.dev/search
-                auth_header: 'X-API-KEY: {{credentials.key}}'
-                response_path: organic
-                field_mapping:
-                  title: title
-                  url: link
-                  snippet: snippet
-              tavily:
-                description: Tavily Search API
-                endpoint: https://api.tavily.com/search
-                auth_header: null
-                auth_body_key: api_key
-                response_path: results
-                field_mapping:
-                  title: title
-                  url: url
-                  snippet: content
-              custom:
-                description: User-defined search endpoint. Requires an http block in the policy entry, same format as
-                  http_tool_definition. The platform sends the query and max_results as input, expects the response to contain
-                  an array of results. The field_mapping tells the platform which response fields map to title, url, snippet.
-            example: "web_search_provider:\n  provider: brave\n  credentials_key: brave_search_api_key\n  max_results_default:\
-              \ 5"
-            custom_example: "web_search_provider:\n  provider: custom\n  credentials_key: my_search_key\n  http:\n    method:\
-              \ GET\n    url: \"https://my-search.example.com/api/search?q={{input.query}}&limit={{input.max_results}}\"\n  \
-              \  headers:\n      Authorization: \"Bearer {{credentials.my_search_key}}\"\n  response_path: data.items\n  field_mapping:\n\
-              \    title: name\n    url: link\n    snippet: summary"
-            response_contract:
-              description: Regardless of provider, the platform normalizes the response to this shape before returning to the agent.
-              output:
-                results:
-                  type: array
-                  items:
-                    title: string
-                    url: string
-                    snippet: string
+            description: policy.web_search_provider is not part of the native_tools contract. It does not satisfy, unlock,
+              or downgrade native_tools.web_search. If the configured runtime cannot expose provider-native web_search, startup/runtime
+              validation must fail closed.
         file_io:
-          description: Read and write files within workspace mounts. /workspace is read-write, /data is read-only,
+          description: Read and write files within workspace mounts. On supporting runtimes, file_io is provider-native and
+            maps to callable read_file/write_file operations on the same turn. /workspace is read-write, /data is read-only,
             /opt/swarm/contracts is read-only. Always runs locally.
           tool_schema:
             read_file:
@@ -1386,9 +1333,9 @@ engine:
               output:
                 bytes_written: integer
       tool_names:
-        description: Canonical tool names the agent sees when native capabilities are provided via platform fallback. These
-          names must be consistent across all backends. When the provider handles the capability natively, the provider's own
-          tool name is used (the agent adapts). When the platform injects fallbacks, these are the exact names.
+        description: Canonical tool names the agent sees for native capabilities on the supporting runtime path. These names
+          are authoritative only when the same turn can actually call them. The platform must not advertise speculative or
+          fallback-only native tool names.
         bash:
           tool_name: bash
           note: Single tool. Same name as the capability.
@@ -1399,48 +1346,47 @@ engine:
           tool_names:
           - read_file
           - write_file
-          note: The file_io capability maps to two fallback tools. The contract field is one boolean (file_io), but the agent
-            sees two tools when the platform provides the fallback. Both are injected when file_io is true.
+          note: The file_io capability maps to two callable tools. The contract field is one boolean (file_io), but the agent
+            sees read_file and write_file only when the supporting runtime can actually call them on that turn.
       runtime_resolution:
         description: How the platform resolves native_tools at agent session creation time. All execution is local to the
-          platform host. The only variable is whether the provider handles the tool natively or the platform provides it.
+          platform host. The platform enables only provider-native capability support and fails closed otherwise.
         steps:
         - 1. Read native_tools from agent contract. If absent or empty, no native capabilities — skip.
-        - 2. For each enabled capability (bash, web_search, file_io), check the LLM backend type.
-        - '3. CLI backend (e.g., claude -p): provider has native bash, web search, and file I/O. Enable via provider invocation
-          config. These run locally on the same host — workspace scoping is inherent.'
-        - '4. API backend (e.g., Anthropic API, OpenAI API): provider does not have local execution capabilities. The platform
-          injects fallback tools into the agent''s tool list. Fallback tools execute locally on the platform host.'
-        - '5. Additional backends (e.g., local models) may be added in future versions. They follow the API backend pattern
-          — platform injects fallback tools.'
-        - 6. The agent sees the same tool interface regardless of which path runs. All execution is local.
-        provider_detection: The platform determines provider capabilities from the configured LLM backend (api, cli, local).
-          Each backend adapter declares which native capabilities it supports. The platform does not probe the provider at
-          runtime — capabilities are known at configuration time.
+        - 2. Ask the configured runtime which native capabilities it exposes provider-natively.
+        - 3. For each enabled capability (bash, web_search, file_io), if the runtime does not support it provider-natively,
+          fail closed before the session/turn can advertise or execute that capability.
+        - 4. For supporting CLI runtimes, enable the provider-native capability through provider invocation and transport binding.
+          These run locally on the same host — workspace scoping is inherent.
+        - 5. Do not inject platform fallback tools, MCP shims, or local compatibility paths to satisfy native_tools.
+        - 6. Persisted turn surfaces (for example available_tools and MCP-visible facts) must reflect the same callable truth
+          observed for that turn.
+        provider_detection: The platform determines native-tool support from the configured runtime adapter. Runtime startup
+          probes may further fail closed if a declared capability cannot be bound or called on the shipped runtime path.
       environment:
         description: All native tool execution is local to the platform host and respects the workspace model.
         rules:
         - All native tool execution runs locally on the platform host. There is no remote execution case.
         - bash cwd is /workspace for the agent's workspace class scope
         - file_io is scoped to /workspace (read-write) and /data (read-only). Writes outside /workspace are rejected.
-        - Workspace scoping is guaranteed in all cases — both provider-native (CLI) and platform-fallback (API) run
-          on the same host with the same mounts.
+        - Workspace scoping is guaranteed on the provider-native runtime path. The platform does not satisfy native_tools by
+          switching to a separate fallback execution path.
         - Environment variables from the credential store are NOT exposed to native tools. Agents access credentials through
           platform tools (HTTP tool credential substitution, MCP server auth), not via env vars in bash.
       audit:
         description: All native tool usage is captured for observability. Task-mode agents persist transcripts (write-only)
-          which ensures native tool calls are always recorded regardless of conversation mode.
+          which ensures provider-native tool calls are always recorded regardless of conversation mode.
         provider_native: Provider-native tool usage is captured in the agent session transcript. For task-mode agents, the
           transcript is persisted (write-only) but never reloaded — providing a full audit trail without breaking stateless
           semantics.
-        platform_fallback: Platform-fallback tool usage is logged as a platform tool call in the events table, same as any
-          other platform tool invocation.
+        surface_truth: Persisted available_tools and MCP-visible turn facts must describe only the tools that were actually
+          callable on that turn. The platform must not narrate native-tool fallback availability it cannot execute.
       boot_validation:
         checks:
         - All capability names in native_tools must be recognized (bash, web_search, file_io). Unknown names are a boot error.
         - All values must be boolean. Non-boolean values are a boot error.
-        - If web_search is enabled on any agent AND that agent's LLM backend lacks native web search AND policy.web_search_provider
-          is not configured, log boot warning. If all web_search agents use CLI backends with native support, no config needed.
+        - If any enabled native capability is unsupported by the configured runtime's provider-native capability set, startup/runtime
+          validation fails closed. policy.web_search_provider is not part of native_tools validation or authorization.
   timer_model:
     description: Timers are durable delayed events. The platform schedules them and fires them as regular events entering
       the event loop. Timers are declared in nodes.yaml.
@@ -1682,7 +1628,8 @@ engine:
       severity: error
       scope: per-agent
       trigger: An agent's native_tools field contains an unrecognized capability name (not bash, web_search, file_io) or a
-        non-boolean value.
+        non-boolean value. This check validates declaration shape only; it does not treat policy.web_search_provider or any
+        other fallback path as satisfying a native tool.
       when: boot-only
     - id: mcp_server_reachable
       severity: warning
@@ -1805,6 +1752,7 @@ compliance:
     description: Required test coverage for spec compliance.
     required_tests:
     - Boot validation passes with current contracts (all checks green)
+    - Native tools fail closed when the configured runtime lacks provider-native support for a declared capability
     - Every declared handler has a matching Handle() implementation
     - Every state state_change follows declared advances_to paths
     - Every emitted event has a payload schema in events.yaml
@@ -1812,6 +1760,7 @@ compliance:
     - Permission enforcement blocks unauthorized tool calls
     - Accumulation is idempotent under duplicate event delivery
     - Crash recovery replays undelivered events correctly
+    - Persisted native-tool surfaces match callable turn truth for the supporting runtime path
     - Namespace substitution works for multi-instance flows
   handler_execution:
     description: How the runtime executes event handlers.
@@ -2270,8 +2219,8 @@ prompt_templating:
       required. The exact wording is not normative — the content requirements are. The implementation may rephrase as long as
       the paths and access levels are communicated.
     native_tools_in_postamble: No. Native tools are NOT described in the postamble. They are conveyed via tool definitions
-      in the LLM API call, same as all other tools. CLI-native vs fallback distinction is invisible to the agent — both paths
-      produce the same tool interface.
+      in the LLM API call, same as all other tools. The platform must not hide a fallback/native distinction by advertising
+      native tools the current turn cannot actually call.
     note: The workspace paths are the same for all workspace classes — only the /workspace scope differs (per-agent vs
       per-flow-instance). The postamble does not vary by scope — it tells the agent the paths, the platform enforces the
       scoping.
