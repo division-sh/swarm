@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -605,6 +607,61 @@ func TestClaudeCLIRuntime_StartSessionLoadsRetryLineage(t *testing.T) {
 	}
 	if s.TurnCount != 2 || len(s.Messages) != 1 {
 		t.Fatalf("unexpected restored session: %+v", s)
+	}
+}
+
+func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"claude-test",
+			"usage":{"input_tokens":1,"output_tokens":1},
+			"content":[{"type":"text","text":"ok"}]
+		}`))
+	}))
+	defer server.Close()
+
+	publisher := &eventPublisherStub{}
+	runtime := NewAnthropicAPIRuntime(&config.Config{
+		LLM: config.LLMConfig{
+			ClaudeAPI: config.ClaudeAPIConfig{
+				DefaultModel: "claude-test",
+			},
+		},
+	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
+	runtime.apiURL = server.URL
+	runtime.apiKey = "test-key"
+	runtime.httpClient = server.Client()
+
+	ctx := runtimeactors.WithActor(
+		runtimebus.WithInboundEvent(
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global"),
+			events.Event{ID: "evt-1"},
+		),
+		runtimeactors.AgentConfig{
+			ID:           "agent-1",
+			Type:         "sonnet",
+			SessionScope: sessions.SessionScopeGlobal.String(),
+		},
+	)
+
+	s, err := runtime.StartSession(ctx, "agent-1", "system", nil)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if len(publisher.marks) != 1 {
+		t.Fatalf("start-session marks = %d, want 1", len(publisher.marks))
+	}
+	publisher.marks = nil
+
+	if _, err := runtime.ContinueSession(ctx, s, Message{Role: "user", Content: "hello"}); err != nil {
+		t.Fatalf("ContinueSession: %v", err)
+	}
+	if len(publisher.marks) != 1 {
+		t.Fatalf("continue-session marks = %d, want 1", len(publisher.marks))
+	}
+	if got := publisher.marks[0]; got != "agent-1|"+s.ID {
+		t.Fatalf("continue-session mark = %q, want %q", got, "agent-1|"+s.ID)
 	}
 }
 

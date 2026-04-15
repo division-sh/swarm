@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +20,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimediaglog "swarm/internal/runtime/diaglog"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
@@ -188,6 +191,178 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	if items[0].Metadata.Watchdog.Outcome != "warning_emitted" {
 		t.Fatalf("list watchdog outcome = %q, want warning_emitted", items[0].Metadata.Watchdog.Outcome)
 	}
+}
+
+func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalConversationSurface(t, ctx, pg)
+	requireCanonicalDeliveryLifecycleSurface(t, ctx, pg)
+	seedConformanceAgent(t, ctx, pg, "agent-1")
+
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	event1 := events.Event{
+		ID:          uuid.NewString(),
+		RunID:       runID,
+		Type:        events.EventType("review.requested"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"turn":1}`),
+		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
+	}
+	event2 := events.Event{
+		ID:          uuid.NewString(),
+		RunID:       runID,
+		Type:        events.EventType("review.requested"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"turn":2}`),
+		CreatedAt:   time.Now().Add(-1 * time.Minute).UTC(),
+	}
+	for _, evt := range []events.Event{event1, event2} {
+		if err := pg.AppendEvent(ctx, evt); err != nil {
+			t.Fatalf("AppendEvent(%s): %v", evt.ID, err)
+		}
+		if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{"agent-1"}); err != nil {
+			t.Fatalf("InsertEventDeliveries(%s): %v", evt.ID, err)
+		}
+	}
+
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{
+				"model":"claude-test",
+				"usage":{"input_tokens":1,"output_tokens":1},
+				"content":[{"type":"text","text":"ok"}]
+			}`)),
+			Request: req,
+		}, nil
+	})
+	defer func() {
+		http.DefaultTransport = previousTransport
+	}()
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	runtime := runtimellm.NewAnthropicAPIRuntime(&config.Config{
+		LLM: config.LLMConfig{
+			ClaudeAPI: config.ClaudeAPIConfig{
+				DefaultModel: "claude-test",
+			},
+		},
+	}, registry, "worker-1", nil, pg, nil, bus)
+
+	newTurnContext := func(evt events.Event) context.Context {
+		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeGlobal.String(), "global")
+		base = runtimecorrelation.WithRunID(base, runID)
+		base = runtimebus.WithInboundEvent(base, evt)
+		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
+			ID:               "agent-1",
+			Type:             "stub",
+			SessionScope:     runtimesessions.SessionScopeGlobal.String(),
+			ConversationMode: runtimesessions.RuntimeModeSession.String(),
+		})
+	}
+
+	session, err := runtime.StartSession(newTurnContext(event1), "agent-1", "system", nil)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if _, err := runtime.ContinueSession(newTurnContext(event1), session, runtimellm.Message{Role: "user", Content: "first"}); err != nil {
+		t.Fatalf("ContinueSession(first): %v", err)
+	}
+	if err := pg.UpsertEventReceipt(newTurnContext(event1), event1.ID, "agent-1", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+		t.Fatalf("UpsertEventReceipt(first): %v", err)
+	}
+
+	if err := pg.MarkEventDeliveryInProgress(newTurnContext(event2), event2.ID, "agent-1", ""); err != nil {
+		t.Fatalf("MarkEventDeliveryInProgress(second prelaunch): %v", err)
+	}
+	if _, err := runtime.ContinueSession(newTurnContext(event2), session, runtimellm.Message{Role: "user", Content: "second"}); err != nil {
+		t.Fatalf("ContinueSession(second): %v", err)
+	}
+
+	var (
+		deliveryStatus    string
+		activeSessionID   string
+		sessionStatus     string
+		sessionScopeKey   string
+		liveSessionCount  int
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(active_session_id::text, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'agent-1'
+	`, event2.ID).Scan(&deliveryStatus, &activeSessionID); err != nil {
+		t.Fatalf("load second delivery: %v", err)
+	}
+	if deliveryStatus != "in_progress" {
+		t.Fatalf("second delivery status = %q, want in_progress", deliveryStatus)
+	}
+	if activeSessionID != session.ID {
+		t.Fatalf("second delivery active_session_id = %q, want %q", activeSessionID, session.ID)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(status, ''),
+			COALESCE(scope_key, '')
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, session.ID).Scan(&sessionStatus, &sessionScopeKey); err != nil {
+		t.Fatalf("load live session row: %v", err)
+	}
+	if sessionStatus != "active" {
+		t.Fatalf("session status = %q, want active", sessionStatus)
+	}
+	if sessionScopeKey != "global" {
+		t.Fatalf("session scope_key = %q, want global", sessionScopeKey)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agent_sessions
+		WHERE agent_id = 'agent-1'
+		  AND scope_key = 'global'
+		  AND runtime_mode = 'session'
+		  AND status = 'active'
+	`).Scan(&liveSessionCount); err != nil {
+		t.Fatalf("count live session lineage: %v", err)
+	}
+	if liveSessionCount != 1 {
+		t.Fatalf("live session lineage count = %d, want 1", liveSessionCount)
+	}
+
+	facts, err := pg.ListAgentLifecycleFacts(ctx, []string{"agent-1"})
+	if err != nil {
+		t.Fatalf("ListAgentLifecycleFacts: %v", err)
+	}
+	if got := facts["agent-1"].CurrentState; got != "active" {
+		t.Fatalf("lifecycle current_state = %q, want active", got)
+	}
+	if got := facts["agent-1"].BlockingLayer; got != "session_execution" {
+		t.Fatalf("lifecycle blocking_layer = %q, want session_execution", got)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testing.T) {
