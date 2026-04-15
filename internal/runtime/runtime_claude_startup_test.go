@@ -359,7 +359,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesLiveVisibleSurfaceForNativeB
 	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{
 		resp: &llm.Response{
-			VisibleTools: []string{"Bash", "Read", "Write", "Edit", "WebSearch"},
+			VisibleTools: []string{"Bash", "Read", "Write", "Edit", "WebFetch", "WebSearch"},
 		},
 	}
 

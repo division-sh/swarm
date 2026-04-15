@@ -417,6 +417,7 @@ func TestNormalizeGatewayToolNameCanonicalAliases(t *testing.T) {
 		"bash":                               "bash",
 		"Bash":                               "bash",
 		"web_search":                         "web_search",
+		"WebFetch":                           "web_search",
 		"WebSearch":                          "web_search",
 		"Read":                               "read_file",
 		"read_file":                          "read_file",

@@ -72,7 +72,7 @@ func TestClaudeDisallowedBuiltinToolsArgForActor_MapsNativeCapabilities(t *testi
 		},
 	}, nil)
 	gotNames := strings.Split(got, ",")
-	for _, name := range []string{"Bash", "Read", "Write", "Edit", "WebSearch"} {
+	for _, name := range []string{"Bash", "Read", "Write", "Edit", "WebFetch", "WebSearch"} {
 		if slices.Contains(gotNames, name) {
 			t.Fatalf("did not expect allowed tool %q in disallowed list %q", name, got)
 		}
@@ -137,6 +137,7 @@ func TestClaudeToolSurface_UsesProviderNativeBuiltinsWithoutFallbackInjection(t 
 		"mcp__runtime-tools__emit_category_assessed",
 		"emit_category_assessed",
 		"Bash",
+		"WebFetch",
 		"WebSearch",
 		"Read",
 		"Write",
@@ -164,7 +165,7 @@ func TestClaudeToolSurface_UsesProviderNativeBuiltinsWithoutFallbackInjection(t 
 
 	disallowed := claudeDisallowedBuiltinToolsArgForActor(actor, tools)
 	disallowedNames := strings.Split(disallowed, ",")
-	for _, name := range []string{"Read", "Write", "Edit", "Bash", "WebSearch"} {
+	for _, name := range []string{"Read", "Write", "Edit", "Bash", "WebFetch", "WebSearch"} {
 		if slices.Contains(disallowedNames, name) {
 			t.Fatalf("did not expect provider-native builtin %q in disallowed tools %q", name, disallowed)
 		}
@@ -205,7 +206,7 @@ func TestCLIExecutionToolSurface_CanonicalizesProviderBuiltins(t *testing.T) {
 	if !slices.Equal(surface.CanonicalVisibleTools, []string{"emit_category_assessed", "read_file", "web_search", "write_file"}) {
 		t.Fatalf("canonical visible tools = %#v", surface.CanonicalVisibleTools)
 	}
-	if !slices.Equal(surface.ProviderBuiltinTools, []string{"Edit", "Read", "WebSearch", "Write"}) {
+	if !slices.Equal(surface.ProviderBuiltinTools, []string{"Edit", "Read", "WebFetch", "WebSearch", "Write"}) {
 		t.Fatalf("provider builtin tools = %#v", surface.ProviderBuiltinTools)
 	}
 	if !slices.Equal(surface.ProviderMCPTools, []string{"mcp__runtime-tools__emit_category_assessed"}) {
