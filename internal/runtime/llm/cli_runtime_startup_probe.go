@@ -30,7 +30,7 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 	}
 
 	s := &Session{
-		ID:           "startup-probe-" + strings.TrimSpace(actor.ID),
+		ID:           ensurePlatformSessionID(""),
 		AgentID:      strings.TrimSpace(actor.ID),
 		SystemPrompt: augmentCLISystemPrompt(systemPrompt, actor, tools),
 		Tools:        append([]ToolDefinition(nil), tools...),
