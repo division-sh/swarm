@@ -92,6 +92,10 @@ func (r *ClaudeCLIRuntime) NativeToolCapabilities() NativeToolCapabilities {
 	}
 }
 
+func (r *ClaudeCLIRuntime) EnforceProviderNativeToolSupport() bool {
+	return true
+}
+
 func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *Session) error {
 	if r.conversations == nil || s == nil {
 		return nil

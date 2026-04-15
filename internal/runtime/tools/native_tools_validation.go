@@ -19,6 +19,9 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 	if len(enabled) == 0 {
 		return nil, nil
 	}
+	if !runtimeEnforcesProviderNativeTools(runtime) {
+		return validateFallbackNativeToolBootConfig(ctx, source, store, runtime)
+	}
 	provider, ok := runtime.(llm.NativeToolCapabilityProvider)
 	if !ok || provider == nil {
 		return nil, fmt.Errorf("native tools are enabled but runtime does not expose native tool capabilities")
@@ -42,6 +45,42 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 	return nil, fmt.Errorf("%s enabled but runtime does not support provider-native capability", strings.Join(parts, ", "))
 }
 
+func runtimeEnforcesProviderNativeTools(runtime llm.Runtime) bool {
+	strict, ok := runtime.(llm.NativeToolStrictProvider)
+	return ok && strict != nil && strict.EnforceProviderNativeToolSupport()
+}
+
+func validateFallbackNativeToolBootConfig(ctx context.Context, source semanticview.Source, store runtimecredentials.Store, runtime llm.Runtime) ([]error, error) {
+	if !nativeToolCapabilityEnabled(source, "web_search") {
+		return nil, nil
+	}
+	caps := llm.NativeToolCapabilities{}
+	if provider, ok := runtime.(llm.NativeToolCapabilityProvider); ok && provider != nil {
+		caps = provider.NativeToolCapabilities()
+	}
+	if caps.WebSearch {
+		return nil, nil
+	}
+	if _, ok := semanticview.PolicyValueForFlow(source, "", "web_search_provider"); !ok {
+		return []error{fmt.Errorf("native_tools.web_search is enabled but policy.web_search_provider is not configured")}, nil
+	}
+	cfg, err := resolveWebSearchProviderConfigFromSource(source)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(cfg.CredentialsKey) == "" || store == nil {
+		return nil, nil
+	}
+	_, ok, err := store.Get(ctx, cfg.CredentialsKey)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return nil, nil
+	}
+	return []error{fmt.Errorf("web_search provider credential %q is not present in the credential store", cfg.CredentialsKey)}, nil
+}
+
 func enabledNativeCapabilities(source semanticview.Source) []string {
 	if source == nil {
 		return nil
@@ -63,6 +102,24 @@ func enabledNativeCapabilities(source semanticview.Source) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func nativeToolCapabilityEnabled(source semanticview.Source, capability string) bool {
+	if source == nil {
+		return false
+	}
+	capability = strings.TrimSpace(capability)
+	if capability == "" {
+		return false
+	}
+	for _, agent := range source.AgentEntries() {
+		raw, ok := agent.NativeTools[capability]
+		flag, isBool := raw.(bool)
+		if ok && isBool && flag {
+			return true
+		}
+	}
+	return false
 }
 
 func nativeToolCapabilitySupported(caps llm.NativeToolCapabilities, capability string) bool {

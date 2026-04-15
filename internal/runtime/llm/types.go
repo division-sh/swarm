@@ -89,3 +89,7 @@ type NativeToolCapabilities struct {
 type NativeToolCapabilityProvider interface {
 	NativeToolCapabilities() NativeToolCapabilities
 }
+
+type NativeToolStrictProvider interface {
+	EnforceProviderNativeToolSupport() bool
+}
