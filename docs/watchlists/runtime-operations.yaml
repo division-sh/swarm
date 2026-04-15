@@ -93,6 +93,10 @@ active_issues:
     title: truncated tool-result follow-up files can be advertised on turns that lack a callable read_file tool
     maps_to:
       - transport_policy_and_surface_parity
+  - id: 444
+    title: Enforce CLI native-tools no-fallback session semantics
+    maps_to:
+      - transport_policy_and_surface_parity
   - id: 424
     title: Reconcile stale active agent sessions against the delivery frontier on the supported path
     maps_to:
@@ -112,6 +116,7 @@ nodes:
       - fallback relay on a supported turn can degrade file-backed work by clamping large relayed tool results to preview-only text
       - supported no-read_file turns can emit runtime_read_file follow-up artifacts for oversized tool results even though the same turn surface cannot call read_file
       - oversized file-backed tool results on supported Claude helper turns can leak provider scratch paths back into later runtime read_file calls
+      - CLI native tools can still use mixed provider-plus-platform fallback semantics, so visible turn surface does not equal callable provider-native truth for bash, web_search, and file_io
     representative_issues:
       - 111
       - 136
@@ -119,6 +124,7 @@ nodes:
       - 368
       - 406
       - 381
+      - 444
     common_framing_mistakes:
       too_broad:
         - tool transport is inconsistent

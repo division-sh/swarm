@@ -1557,6 +1557,26 @@ func TestRun_MapsInvalidNativeToolsToNamedCheck(t *testing.T) {
 	}
 }
 
+func TestRun_DoesNotRequireWebSearchFallbackPolicyForNativeTools(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-success")
+	agent := bundle.Agents["intake-agent"]
+	agent.NativeTools = map[string]any{"web_search": true}
+	bundle.Agents["intake-agent"] = agent
+	delete(bundle.Policy.Values, "web_search_provider")
+	source := semanticview.Wrap(bundle)
+
+	report := Run(context.Background(), source, Options{})
+
+	for _, finding := range report.Errors() {
+		if finding.CheckID != "native_tools_valid" {
+			continue
+		}
+		if strings.Contains(finding.Message, "web_search_provider") {
+			t.Fatalf("unexpected fallback policy error: %#v", report.Errors())
+		}
+	}
+}
+
 func TestRun_MapsProducesDriftToNamedWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-produces-drift")
 

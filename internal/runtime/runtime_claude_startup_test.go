@@ -310,6 +310,45 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsOnEmptyVisibleToolSurface(t
 	}
 }
 
+func TestValidateClaudeMCPToolsForManagedAgents_SkipsNativeBuiltinOnlySurface(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
+		ID:   "campaign-coordinator",
+		Role: "campaign_coordinator",
+		NativeTools: runtimeactors.NativeToolConfig{
+			FileIO:    true,
+			Bash:      true,
+			WebSearch: true,
+		},
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: []llm.ToolDefinition{
+			{Name: "read_file", Schema: map[string]any{"type": "object"}},
+			{Name: "write_file", Schema: map[string]any{"type": "object"}},
+			{Name: "bash", Schema: map[string]any{"type": "object"}},
+			{Name: "web_search", Schema: map[string]any{"type": "object"}},
+		},
+		caps: map[string]toolcapabilities.Capability{
+			"read_file":  {Name: "read_file", Visible: true, Callable: true},
+			"write_file": {Name: "write_file", Visible: true, Callable: true},
+			"bash":       {Name: "bash", Visible: true, Callable: true},
+			"web_search": {Name: "web_search", Visible: true, Callable: true},
+		},
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, turns, exec, manager); err != nil {
+		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if len(exec.executed) != 0 {
+		t.Fatalf("executed = %#v, want no MCP startup probe for native-only surface", exec.executed)
+	}
+}
+
 func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenVisibleToolsRequireInput(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.RuntimeMode = "cli_test"

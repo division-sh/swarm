@@ -349,6 +349,38 @@ func TestEnrichTurnRecord_PreservesEmitFallbackAlongsideObservedSupportedReadFil
 	}
 }
 
+func TestEnrichTurnRecord_NativeBuiltinsDoNotLeakIntoMCPToolsListed(t *testing.T) {
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID: "analysis-agent",
+		NativeTools: runtimeactors.NativeToolConfig{
+			FileIO:    true,
+			Bash:      true,
+			WebSearch: true,
+		},
+	})
+	rec := enrichTurnRecord(ctx, &Session{
+		ID: "session-1",
+		Tools: []ToolDefinition{
+			{Name: "emit_category_assessed"},
+			{Name: "read_file"},
+			{Name: "write_file"},
+			{Name: "bash"},
+			{Name: "web_search"},
+		},
+	}, AgentTurnRecord{
+		AgentID:     "analysis-agent",
+		RuntimeMode: sessions.RuntimeModeTask.String(),
+		SessionID:   "session-1",
+	}, nil)
+
+	if !slices.Equal(rec.MCPToolsListed, []string{"mcp__runtime-tools__emit_category_assessed"}) {
+		t.Fatalf("mcp_tools_listed = %#v", rec.MCPToolsListed)
+	}
+	if !slices.Equal(rec.AvailableTools, []string{"bash", "emit_category_assessed", "read_file", "web_search", "write_file"}) {
+		t.Fatalf("available_tools = %#v", rec.AvailableTools)
+	}
+}
+
 func TestEnrichTurnRecord_UsesPlannedConfiguredSurfaceWhenObservedMetadataIsAbsent(t *testing.T) {
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
 		ID: "analysis-agent",
@@ -423,8 +455,8 @@ func TestClaudeCLIRuntimePrompt_HidesNativeCapabilityFallbackToolsFromPostamble(
 		}
 	}
 	for _, name := range []string{"mcp__runtime-tools__read_file", "mcp__runtime-tools__write_file", "mcp__runtime-tools__bash"} {
-		if !strings.Contains(prompt, name) {
-			t.Fatalf("expected provider-visible MCP tool %q in prompt, got %q", name, prompt)
+		if strings.Contains(prompt, name) {
+			t.Fatalf("did not expect fallback MCP tool %q in prompt, got %q", name, prompt)
 		}
 	}
 	if strings.Contains(prompt, "Claude CLI native tools available in this turn") {
