@@ -1647,7 +1647,7 @@ func TestExecuteNodeContractHandlerPayloadTransformEntityPresenceCheckMintsEntit
 	}
 }
 
-func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionAdvancesParentFlow(t *testing.T) {
+func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionEmitsRootCompletion(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1729,14 +1729,14 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionAdvancesParentFl
 	if !found {
 		t.Fatal("expected child instance")
 	}
-	if got := strings.TrimSpace(child.CurrentState); got != "completed" {
-		t.Fatalf("child current_state = %q, want completed", got)
+	if got := strings.TrimSpace(child.CurrentState); got != "waiting" {
+		t.Fatalf("child current_state = %q, want waiting", got)
 	}
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("published count = %d, want 1", got)
 	}
-	if got := string(bus.publishedEvent(0).Type); got != "child/step.result" {
-		t.Fatalf("published type = %q, want child/step.result", got)
+	if got := string(bus.publishedEvent(0).Type); got != "pipeline.complete" {
+		t.Fatalf("published type = %q, want pipeline.complete", got)
 	}
 	if got := bus.publishedEvent(0).EntityID(); got != rootEntityID {
 		t.Fatalf("published entity_id = %q, want %q", got, rootEntityID)

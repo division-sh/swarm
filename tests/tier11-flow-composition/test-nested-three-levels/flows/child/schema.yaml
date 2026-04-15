@@ -5,5 +5,3 @@ states: [waiting, completed]
 pins:
   inputs:
     events: [step.begin]
-  outputs:
-    events: [step.result]

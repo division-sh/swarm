@@ -6,14 +6,5 @@ child-relay:
   event_handlers:
     step.begin:
       create_entity: true
-      emits: grandchild/micro.start
-
-child-aggregator:
-  id: child-aggregator
-  execution_type: system_node
-  subscribes_to: [grandchild/micro.done]
-  produces: [step.result]
-  event_handlers:
-    grandchild/micro.done:
       advances_to: completed
-      emits: step.result
+      emits: grandchild/micro.start
