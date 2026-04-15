@@ -1065,7 +1065,7 @@ func TestResolveHandlerEntityIDForFlowDoesNotRetargetSameFlowInstancePath(t *tes
 	}
 }
 
-func TestResolveHandlerEntityIDForFlowCreateEntitySeedsInitialStateAndSchemaDefaults(t *testing.T) {
+func TestResolveHandlerEntityIDForFlowCreateEntityInheritsPersistedSourceEntityWhenSubjectMissing(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			InitialStage: "queued",
@@ -1087,7 +1087,11 @@ func TestResolveHandlerEntityIDForFlowCreateEntitySeedsInitialStateAndSchemaDefa
 		EntityID: inboundEntityID,
 		Stage:    WorkflowStateID("queued"),
 		Status:   "active",
-		Metadata: map[string]any{"name": "Parent"},
+		Metadata: map[string]any{
+			"name":        "Parent",
+			"instance_id": "root-inst-1",
+			"flow_path":   "root-inst-1",
+		},
 	}
 	inbound := events.Event{
 		Type:    events.EventType("vertical.discovered"),
@@ -1213,6 +1217,42 @@ func TestResolveHandlerEntityIDForFlowCreateEntitySeedsFirstFlowSubjectID(t *tes
 	}
 	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != gotID {
 		t.Fatalf("state subject_id = %q, want %q", got, gotID)
+	}
+}
+
+func TestResolveHandlerEntityIDForFlowCreateEntitySeedsFirstChildFlowSubjectIDFromFreshEntity(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			InitialStage: "queued",
+			FlowInitial:  map[string]string{"intake": "queued"},
+		},
+	})
+	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
+	const inboundEntityID = "11111111-1111-1111-1111-111111111111"
+	state := WorkflowState{}
+	inbound := events.Event{
+		Type: events.EventType("work.assigned"),
+	}.WithEnvelope(events.EventEnvelope{EntityID: inboundEntityID})
+
+	gotID, _ := resolveHandlerEntityIDForFlow(source, "intake", handler, inboundEntityID, inbound, &state)
+
+	if gotID == "" || gotID == inboundEntityID {
+		t.Fatalf("entityID = %q, want fresh child flow entity id", gotID)
+	}
+	if state.EntityID != gotID {
+		t.Fatalf("state entity_id = %q, want %q", state.EntityID, gotID)
+	}
+	if state.Stage != "queued" {
+		t.Fatalf("state stage = %q, want queued", state.Stage)
+	}
+	if state.Metadata == nil {
+		t.Fatal("state metadata = nil, want canonical subject metadata")
+	}
+	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != gotID {
+		t.Fatalf("state subject_id = %q, want self-seeded %q", got, gotID)
+	}
+	if got := strings.TrimSpace(asString(state.Metadata["parent_entity_id"])); got != inboundEntityID {
+		t.Fatalf("state parent_entity_id = %q, want inbound root entity %q", got, inboundEntityID)
 	}
 }
 

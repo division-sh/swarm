@@ -275,10 +275,11 @@ func resolveHandlerEntityIDForFlow(
 		instanceID := uuid.NewString()
 		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
 		instance.ParentEntityID = sourceEntityID
+		sourceEntityKnown := workflowStateCarriesPersistedSourceEntity(source, state)
 		if state != nil && state.Metadata != nil {
 			instance.SubjectID = strings.TrimSpace(asString(state.Metadata["subject_id"]))
 		}
-		if instance.SubjectID == "" {
+		if instance.SubjectID == "" && sourceEntityKnown {
 			instance.SubjectID = sourceEntityID
 		}
 		if instance.SubjectID == "" {
@@ -305,6 +306,13 @@ func resolveHandlerEntityIDForFlow(
 		state.EntityID = entityID
 	}
 	return entityID, evt
+}
+
+func workflowStateCarriesPersistedSourceEntity(source semanticview.Source, state *WorkflowState) bool {
+	if state == nil {
+		return false
+	}
+	return workflowStateIdentity(source, "", *state).HasStoredPath
 }
 
 func workflowCreateEntityMetadata(source semanticview.Source, flowID string, instance FlowInstanceIdentity) map[string]any {

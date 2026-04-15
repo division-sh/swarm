@@ -174,6 +174,45 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 	assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, []string{"score.requested"}, "", semanticview.Wrap(bundle))
 }
 
+func TestCatalogFlowInstanceForExpectedSubject_FallsBackToSelfSeededFlowEntity(t *testing.T) {
+	h := newCatalogAssertionHarness(t)
+	bundle := loadFixtureBundle(t, filepath.Join(repoRootFromCatalogE2E(t), "tests", "tier11-flow-composition", "test-subject-id-first-flow-seeds"))
+	rootEntityID := "11111111-1111-1111-1111-111111111111"
+	childEntityID := uuid.NewString()
+	if err := h.workflow.Upsert(context.Background(), runtimepipeline.WorkflowInstance{
+		InstanceID:      childEntityID,
+		SubjectID:       childEntityID,
+		StorageRef:      "intake/inst-1",
+		WorkflowName:    "intake",
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "processed",
+		Metadata: map[string]any{
+			"entity_id":        childEntityID,
+			"instance_id":      "inst-1",
+			"flow_path":        "intake/inst-1",
+			"storage_ref":      "intake/inst-1",
+			"subject_id":       childEntityID,
+			"parent_entity_id": rootEntityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed self-seeded flow instance: %v", err)
+	}
+
+	wantSelf := true
+	got, found, err := catalogFlowInstanceForExpectedSubject(h.workflow, semanticview.Wrap(bundle), rootEntityID, "intake", catalogEntityExpected{
+		SubjectIDIsSelf: &wantSelf,
+	})
+	if err != nil {
+		t.Fatalf("catalogFlowInstanceForExpectedSubject: %v", err)
+	}
+	if !found {
+		t.Fatal("expected self-seeded flow instance fallback to find intake entity")
+	}
+	if gotEntityID := catalogFlowEntityID(got); gotEntityID != childEntityID {
+		t.Fatalf("entity_id = %q, want %q", gotEntityID, childEntityID)
+	}
+}
+
 func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	t.Helper()
 	_, db, cleanup := testutil.StartPostgres(t)

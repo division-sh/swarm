@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -64,9 +65,10 @@ func assertSubjectFlowEntities(t testing.TB, workflow *runtimepipeline.WorkflowI
 	if len(want) == 0 {
 		return
 	}
+	source := semanticview.Wrap(bundle)
 	for flowID, expected := range want {
 		flowID = strings.TrimSpace(flowID)
-		got, found, err := catalogFlowInstanceForSubject(workflow, semanticview.Wrap(bundle), strings.TrimSpace(subjectID), flowID)
+		got, found, err := catalogFlowInstanceForExpectedSubject(workflow, source, strings.TrimSpace(subjectID), flowID, expected)
 		if err != nil {
 			t.Fatalf("load subject flow instance %s/%s: %v", subjectID, flowID, err)
 		}
@@ -86,7 +88,7 @@ func assertSubjectFlowEntities(t testing.TB, workflow *runtimepipeline.WorkflowI
 		}
 		if expected.SubjectIDIsSelf != nil {
 			gotSubjectID := strings.TrimSpace(got.SubjectID)
-			gotEntityID := strings.TrimSpace(got.InstanceID)
+			gotEntityID := catalogFlowEntityID(got)
 			if *expected.SubjectIDIsSelf && gotSubjectID != gotEntityID {
 				t.Fatalf("subject flow instance %s/%s subject_id = %q, want self entity_id %q", subjectID, flowID, gotSubjectID, gotEntityID)
 			}
@@ -177,7 +179,7 @@ func assertEntitySubjectIDSelf(t testing.TB, workflow *runtimepipeline.WorkflowI
 		t.Fatalf("workflow instance %s not found for subject self assertion", entityID)
 	}
 	gotSubjectID := strings.TrimSpace(instance.SubjectID)
-	gotEntityID := strings.TrimSpace(instance.InstanceID)
+	gotEntityID := catalogFlowEntityID(instance)
 	if *wantSelf && gotSubjectID != gotEntityID {
 		t.Fatalf("entity %s subject_id = %q, want self entity_id %q", entityID, gotSubjectID, gotEntityID)
 	}
@@ -324,50 +326,109 @@ func catalogFlowInstanceForSubject(workflow *runtimepipeline.WorkflowInstanceSto
 	}
 	subjectID = strings.TrimSpace(subjectID)
 	flowID = strings.TrimSpace(flowID)
-	candidates := map[string]struct{}{}
-	if flowID != "" {
-		candidates[flowID] = struct{}{}
-		if source != nil {
-			for _, scope := range source.FlowScopes() {
-				if strings.TrimSpace(scope.ID) == flowID || strings.Trim(strings.TrimSpace(scope.Path), "/") == flowID {
-					if id := strings.TrimSpace(scope.ID); id != "" {
-						candidates[id] = struct{}{}
-					}
-					if path := strings.Trim(strings.TrimSpace(scope.Path), "/"); path != "" {
-						candidates[path] = struct{}{}
-					}
-				}
-			}
-		}
-	}
+	candidates := catalogFlowCandidates(source, flowID)
 	for _, row := range rows {
 		if strings.TrimSpace(row.SubjectID) != subjectID {
 			continue
 		}
-		if len(candidates) > 0 {
-			rowWorkflow := strings.TrimSpace(row.WorkflowName)
-			rowStorage := strings.Trim(strings.TrimSpace(row.StorageRef), "/")
-			matched := false
-			for candidate := range candidates {
-				candidate = strings.Trim(candidate, "/")
-				switch {
-				case candidate == "":
-				case rowWorkflow == candidate:
-					matched = true
-				case rowStorage == candidate:
-					matched = true
-				}
-				if matched {
-					break
-				}
-			}
-			if !matched {
-				continue
-			}
+		if !catalogFlowMatches(row, candidates) {
+			continue
 		}
 		return row, true, nil
 	}
 	return runtimepipeline.WorkflowInstance{}, false, nil
+}
+
+func catalogFlowInstanceForExpectedSubject(workflow *runtimepipeline.WorkflowInstanceStore, source semanticview.Source, subjectID, flowID string, expected catalogEntityExpected) (runtimepipeline.WorkflowInstance, bool, error) {
+	row, found, err := catalogFlowInstanceForSubject(workflow, source, subjectID, flowID)
+	if err != nil || found {
+		return row, found, err
+	}
+	if expected.SubjectIDIsSelf == nil || !*expected.SubjectIDIsSelf || strings.TrimSpace(expected.SubjectID) != "" {
+		return runtimepipeline.WorkflowInstance{}, false, nil
+	}
+	return catalogSelfSeededFlowInstance(workflow, source, flowID)
+}
+
+func catalogSelfSeededFlowInstance(workflow *runtimepipeline.WorkflowInstanceStore, source semanticview.Source, flowID string) (runtimepipeline.WorkflowInstance, bool, error) {
+	if workflow == nil {
+		return runtimepipeline.WorkflowInstance{}, false, nil
+	}
+	rows, err := workflow.List(context.Background())
+	if err != nil {
+		return runtimepipeline.WorkflowInstance{}, false, err
+	}
+	candidates := catalogFlowCandidates(source, flowID)
+	var match runtimepipeline.WorkflowInstance
+	found := false
+	for _, row := range rows {
+		if !catalogFlowMatches(row, candidates) {
+			continue
+		}
+		rowEntityID := catalogFlowEntityID(row)
+		rowSubjectID := strings.TrimSpace(row.SubjectID)
+		if rowEntityID == "" || rowSubjectID != rowEntityID {
+			continue
+		}
+		if found {
+			return runtimepipeline.WorkflowInstance{}, false, fmt.Errorf("ambiguous self-seeded flow instance for %s", strings.TrimSpace(flowID))
+		}
+		match = row
+		found = true
+	}
+	return match, found, nil
+}
+
+func catalogFlowCandidates(source semanticview.Source, flowID string) map[string]struct{} {
+	flowID = strings.TrimSpace(flowID)
+	candidates := map[string]struct{}{}
+	if flowID == "" {
+		return candidates
+	}
+	candidates[flowID] = struct{}{}
+	if source == nil {
+		return candidates
+	}
+	for _, scope := range source.FlowScopes() {
+		if strings.TrimSpace(scope.ID) == flowID || strings.Trim(strings.TrimSpace(scope.Path), "/") == flowID {
+			if id := strings.TrimSpace(scope.ID); id != "" {
+				candidates[id] = struct{}{}
+			}
+			if path := strings.Trim(strings.TrimSpace(scope.Path), "/"); path != "" {
+				candidates[path] = struct{}{}
+			}
+		}
+	}
+	return candidates
+}
+
+func catalogFlowMatches(row runtimepipeline.WorkflowInstance, candidates map[string]struct{}) bool {
+	if len(candidates) == 0 {
+		return true
+	}
+	rowWorkflow := strings.TrimSpace(row.WorkflowName)
+	rowStorage := strings.Trim(strings.TrimSpace(row.StorageRef), "/")
+	rowScope := strings.Trim(strings.TrimSpace(runtimeflowidentity.SemanticScope(rowStorage)), "/")
+	for candidate := range candidates {
+		candidate = strings.Trim(candidate, "/")
+		switch {
+		case candidate == "":
+		case rowWorkflow == candidate:
+			return true
+		case rowStorage == candidate:
+			return true
+		case rowScope == candidate:
+			return true
+		}
+	}
+	return false
+}
+
+func catalogFlowEntityID(row runtimepipeline.WorkflowInstance) string {
+	if entityID := strings.TrimSpace(asString(row.Metadata["entity_id"])); entityID != "" {
+		return entityID
+	}
+	return strings.TrimSpace(row.InstanceID)
 }
 
 func catalogPayloadMap(v any) map[string]any {

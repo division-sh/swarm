@@ -24,6 +24,7 @@ var tier11FlowCompositionFixtures = []string{
 	"test-child-flow-sibling-isolation",
 	"test-multi-level-policy-inherit",
 	"test-subject-id-cross-flow-inherit",
+	"test-subject-id-first-flow-seeds",
 	"test-tool-override",
 	"test-wildcard-deep-subscription",
 }
@@ -31,7 +32,6 @@ var tier11FlowCompositionFixtures = []string{
 var tier11ExcludedFixtures = map[string]catalogExcludedFixture{
 	"test-dynamic-flow-instance":              {reason: "create_flow_instance fixture now fails closed without required config_from; fixture migration belongs to #416"},
 	"test-sibling-both-instantiated-isolated": {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
-	"test-subject-id-first-flow-seeds":        {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
 }
 
 var tier11StartedRuntimeFixtures = map[string]struct{}{
