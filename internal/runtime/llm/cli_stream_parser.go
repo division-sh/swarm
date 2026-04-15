@@ -107,7 +107,7 @@ func (a *cliStreamAccumulator) mergeAssistantObject(obj map[string]any) {
 		a.toolCalls = dedupeToolCalls(append(a.toolCalls, resp.ToolCalls...))
 	}
 	if len(resp.ObservedToolCalls) > 0 {
-		a.observedToolCalls = dedupeToolCalls(append(a.observedToolCalls, resp.ObservedToolCalls...))
+		a.observedToolCalls = append(a.observedToolCalls, resp.ObservedToolCalls...)
 	}
 }
 
@@ -375,7 +375,7 @@ func (a *cliStreamAccumulator) Response() *Response {
 	return &Response{
 		Message:           message,
 		ToolCalls:         dedupeToolCalls(toolCalls),
-		ObservedToolCalls: dedupeToolCalls(observedToolCalls),
+		ObservedToolCalls: observedToolCalls,
 		SessionID:         strings.TrimSpace(a.sessionID),
 		Raw:               bytes.TrimSpace(a.raw.Bytes()),
 		VisibleTools:      append([]string(nil), a.visibleTools...),

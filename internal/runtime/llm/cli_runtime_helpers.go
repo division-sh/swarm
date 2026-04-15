@@ -152,7 +152,6 @@ func finalizeCLIResponse(resp *Response) *Response {
 	if resp == nil {
 		return &Response{}
 	}
-	resp.ToolCalls = dedupeToolCalls(resp.ToolCalls)
 	resp.ObservedToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
 	return resp
 }
