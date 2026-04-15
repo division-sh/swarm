@@ -82,6 +82,10 @@ active_issues:
     title: Align entity-tool schema normalization with authored entity schema annotations
     maps_to:
       - entity_tool_schema_annotation_normalization_drift
+  - id: 416
+    title: Migrate Empire contracts off cross-flow coupling primitives
+    maps_to:
+      - primitive_only_cross_flow_authored_contract_migration
   - id: 181
     title: Expose accumulator completion and on_complete transaction outcomes together
     maps_to:
@@ -241,6 +245,27 @@ nodes:
       too_narrow:
         - one save_entity_field error string
         - one validation-agent transcript line
+    current_action_pressure: active
+  - id: primitive_only_cross_flow_authored_contract_migration
+    title: Primitive-Only Cross-Flow Authored Contract Migration
+    parent_class: authored contract migration away from legacy cross-flow coupling semantics
+    canonical_owners:
+      - authoritative create_flow_instance authored shape in docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
+      - repo-authored contract fixtures and examples that must encode cross-flow handoff through canonical action sibling fields and payload/config carriers
+    why_this_node_exists: runtime fail-closed migration is not durable if repo-authored contracts and fixtures still depend on legacy create_flow_instance shapes or other cross-flow coupling assumptions that the migration is removing.
+    known_manifestations:
+      - repo-authored fixtures still use legacy create_flow_instance action mappings with action.type, flow_template, and instance_id
+      - at least one repo-authored fixture still uses templated config_from values instead of canonical payload-path bindings
+      - broader authored migration pressure still exists for subject_id, back-propagation, and other cross-flow coupling assumptions, but those are a separate authored class unless local evidence proves they belong to the same narrow migration slice
+    representative_issues:
+      - 416
+    common_framing_mistakes:
+      too_broad:
+        - migrate every cross-flow authored assumption in one PR
+        - rewrite Empire contracts and local fixtures as one undifferentiated lane
+      too_narrow:
+        - update one stale tier5 fixture
+        - flatten action fields without checking config_from binding form or sibling authored uses
     current_action_pressure: active
 reserve_backlog:
   - ordinal: 7
