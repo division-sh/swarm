@@ -1204,6 +1204,7 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		Instances:     runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
 		Conversations: conversations,
 		Observability: observability,
+		RunTrace:      stores.Postgres,
 		Runtime:       runtimeCtl,
 		AuthToken:     strings.TrimSpace(os.Getenv("SWARM_OPERATOR_AUTH_TOKEN")),
 		Version:       "swarm-dev",

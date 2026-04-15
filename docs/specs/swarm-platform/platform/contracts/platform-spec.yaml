@@ -3013,6 +3013,10 @@ run_model:
       FROM events e LEFT JOIN entity_mutations m ON m.caused_by_event = e.event_id
       WHERE e.run_id = :run_id ORDER BY e.created_at, m.created_at.
       Join with agent_turns on trigger_event_id for agent reasoning context.'
+    joined_trace_surface: 'Operator-facing run trace surfaces should extend canonical persisted run-bound diagnostics,
+      not invent a second observability island. The joined trace projection links event identity, delivery lifecycle,
+      session ownership, and turn activity for a single run by consuming canonical rows from events, event_deliveries,
+      agent_sessions or agent_conversation_audits, and agent_turns.'
     entity_timeline: 'To see one entity''s full history across runs:
       SELECT * FROM entity_mutations WHERE entity_id = :entity_id ORDER BY created_at.
       This shows every field change, who made it, and which event caused it.'
@@ -3022,6 +3026,9 @@ run_model:
     run_detail: 'GET /runs/:run_id — full run metadata including fork lineage.'
     run_events: 'GET /runs/:run_id/events — paginated event stream for the run.'
     run_mutations: 'GET /runs/:run_id/mutations — paginated mutation log for the run.'
+    run_trace: 'GET /runs/:run_id/trace — run-centric joined trace rows linking event, delivery, session, and turn identity
+      for operator debugging. This is a persisted joined trace surface built on canonical run-bound diagnostics, not a
+      separate observability store.'
     run_fork: 'POST /runs/:run_id/fork — fork a run at a specific event. Body: {event_id: uuid}.
       Returns the new run_id.'
     run_pause: 'POST /runs/:run_id/pause — pause a running run.'

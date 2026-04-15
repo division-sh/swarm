@@ -130,6 +130,18 @@ type stubObservability struct {
 	incidents   []incidentRecord
 }
 
+type stubRunTrace struct {
+	rows map[string][]store.RunDebugTraceRow
+	err  error
+}
+
+func (s stubRunTrace) LoadRunDebugTrace(_ context.Context, runID string, _ store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.rows[strings.TrimSpace(runID)], nil
+}
+
 type stubBuilderRunStore struct {
 	mu        sync.Mutex
 	events    []events.Event
@@ -3026,6 +3038,66 @@ func TestHandler_RunEventReplayUsesCanonicalPersistedRunDebugOwner(t *testing.T)
 	summary, _ := donePayload["summary"].(map[string]any)
 	if summary["entity_count"] != float64(1) && summary["entity_count"] != 1 {
 		t.Fatalf("run.completed summary = %#v", summary)
+	}
+}
+
+func TestHandler_RunTraceUsesCanonicalPersistedRunDebugOwner(t *testing.T) {
+	now := time.Unix(1700000200, 0).UTC()
+	runID := "run_trace_001"
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		AuthToken: testOperatorAuthToken,
+		RunTrace: stubRunTrace{rows: map[string][]store.RunDebugTraceRow{
+			runID: {{
+				EventID:              "evt-1",
+				EventName:            "scan.requested",
+				EventCreatedAt:       now,
+				DeliveryID:           "del-1",
+				SubscriberType:       "agent",
+				SubscriberID:         "agent-source",
+				DeliveryStatus:       "in_progress",
+				ActiveSessionID:      "sess-1",
+				SessionID:            "sess-1",
+				SessionKind:          "live_session",
+				SessionRuntimeMode:   "session",
+				SessionStatus:        "active",
+				TurnID:               "turn-1",
+				TurnTriggerEventID:   "evt-1",
+				TurnTriggerEventType: "scan.requested",
+				TurnRuntimeMode:      "session",
+				TurnTaskID:           "task-1",
+				TurnCreatedAt:        ptrTime(now.Add(2 * time.Second)),
+			}},
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/trace", nil)
+	setOperatorAuth(req)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/runs/{runID}/trace status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, _ := body["run_id"].(string); got != runID {
+		t.Fatalf("run_id = %q, want %q", got, runID)
+	}
+	rows, _ := body["trace"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("trace len = %d, want 1", len(rows))
+	}
+	row, _ := rows[0].(map[string]any)
+	if row["event_id"] != "evt-1" || row["delivery_id"] != "del-1" || row["session_id"] != "sess-1" || row["turn_id"] != "turn-1" {
+		t.Fatalf("trace row = %#v", row)
+	}
+	if row["turn_trigger_event_id"] != "evt-1" {
+		t.Fatalf("turn_trigger_event_id = %#v", row["turn_trigger_event_id"])
 	}
 }
 

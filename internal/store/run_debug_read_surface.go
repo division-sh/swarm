@@ -125,6 +125,45 @@ type RunDebugReport struct {
 	RuntimeLogs       []RunDebugRuntimeLog     `json:"runtime_logs,omitempty"`
 }
 
+type RunDebugTraceQueryOptions struct {
+	Limit int
+}
+
+type RunDebugTraceRow struct {
+	EventID              string     `json:"event_id,omitempty"`
+	EventName            string     `json:"event_name,omitempty"`
+	SourceEventID        string     `json:"source_event_id,omitempty"`
+	EntityID             string     `json:"entity_id,omitempty"`
+	EventSource          string     `json:"event_source,omitempty"`
+	EventSourceType      string     `json:"event_source_type,omitempty"`
+	EventCreatedAt       time.Time  `json:"event_created_at"`
+	DeliveryID           string     `json:"delivery_id,omitempty"`
+	SubscriberType       string     `json:"subscriber_type,omitempty"`
+	SubscriberID         string     `json:"subscriber_id,omitempty"`
+	DeliveryStatus       string     `json:"delivery_status,omitempty"`
+	DeliveryReasonCode   string     `json:"delivery_reason_code,omitempty"`
+	ActiveSessionID      string     `json:"active_session_id,omitempty"`
+	DeliveryCreatedAt    *time.Time `json:"delivery_created_at,omitempty"`
+	DeliveryStartedAt    *time.Time `json:"delivery_started_at,omitempty"`
+	DeliveryDeliveredAt  *time.Time `json:"delivery_delivered_at,omitempty"`
+	SessionID            string     `json:"session_id,omitempty"`
+	SessionKind          string     `json:"session_kind,omitempty"`
+	SessionRuntimeMode   string     `json:"session_runtime_mode,omitempty"`
+	SessionStatus        string     `json:"session_status,omitempty"`
+	SessionUpdatedAt     *time.Time `json:"session_updated_at,omitempty"`
+	TurnID               string     `json:"turn_id,omitempty"`
+	TurnTriggerEventID   string     `json:"turn_trigger_event_id,omitempty"`
+	TurnTriggerEventType string     `json:"turn_trigger_event_type,omitempty"`
+	TurnRuntimeMode      string     `json:"turn_runtime_mode,omitempty"`
+	TurnScopeKey         string     `json:"turn_scope_key,omitempty"`
+	TurnEntityID         string     `json:"turn_entity_id,omitempty"`
+	TurnTaskID           string     `json:"turn_task_id,omitempty"`
+	TurnParseOK          bool       `json:"turn_parse_ok,omitempty"`
+	TurnRetryCount       int        `json:"turn_retry_count,omitempty"`
+	TurnError            string     `json:"turn_error,omitempty"`
+	TurnCreatedAt        *time.Time `json:"turn_created_at,omitempty"`
+}
+
 func defaultRunDebugQueryOptions(opts RunDebugQueryOptions) RunDebugQueryOptions {
 	if opts.EventLimit <= 0 {
 		opts.EventLimit = 15
@@ -139,6 +178,13 @@ func defaultRunDebugQueryOptions(opts RunDebugQueryOptions) RunDebugQueryOptions
 		opts.DeadLetterLimit = 10
 	}
 	opts.Component = strings.TrimSpace(opts.Component)
+	return opts
+}
+
+func defaultRunDebugTraceQueryOptions(opts RunDebugTraceQueryOptions) RunDebugTraceQueryOptions {
+	if opts.Limit <= 0 {
+		opts.Limit = 200
+	}
 	return opts
 }
 
@@ -527,6 +573,204 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	}
 
 	return report, nil
+}
+
+func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, error) {
+	if s == nil || s.DB == nil {
+		return nil, fmt.Errorf("postgres store is required")
+	}
+	if err := s.requireRunDebugCapabilities(ctx); err != nil {
+		return nil, err
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, fmt.Errorf("run_id is required")
+	}
+	opts = defaultRunDebugTraceQueryOptions(opts)
+
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sessionSources := runDebugTraceSessionSources(caps)
+	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+		WITH trace_sessions AS (
+			%s
+		)
+		SELECT
+			e.event_id::text,
+			COALESCE(e.event_name, ''),
+			COALESCE(e.source_event_id::text, ''),
+			COALESCE(e.entity_id::text, ''),
+			COALESCE(e.produced_by, ''),
+			COALESCE(e.produced_by_type, ''),
+			e.created_at,
+			COALESCE(d.delivery_id::text, ''),
+			COALESCE(d.subscriber_type, ''),
+			COALESCE(d.subscriber_id, ''),
+			COALESCE(d.status, ''),
+			COALESCE(d.reason_code, ''),
+			COALESCE(d.active_session_id::text, ''),
+			d.created_at,
+			d.started_at,
+			d.delivered_at,
+			COALESCE(sess.session_id::text, ''),
+			COALESCE(sess.session_kind, ''),
+			COALESCE(sess.runtime_mode, ''),
+			COALESCE(sess.status, ''),
+			sess.updated_at,
+			COALESCE(t.turn_id::text, ''),
+			COALESCE(t.trigger_event_id::text, ''),
+			COALESCE(t.trigger_event_type, ''),
+			COALESCE(t.runtime_mode, ''),
+			COALESCE(t.scope_key, ''),
+			COALESCE(t.entity_id::text, ''),
+			COALESCE(t.task_id, ''),
+			COALESCE(t.parse_ok, false),
+			COALESCE(t.retry_count, 0),
+			COALESCE(t.error, ''),
+			t.created_at
+		FROM events e
+		LEFT JOIN event_deliveries d
+			ON d.event_id = e.event_id
+		LEFT JOIN agent_turns t
+			ON t.run_id = e.run_id
+		   AND t.trigger_event_id = e.event_id
+		   AND (
+				d.delivery_id IS NULL
+				OR (
+					COALESCE(d.subscriber_type, '') = 'agent'
+					AND COALESCE(d.subscriber_id, '') <> ''
+					AND t.agent_id = d.subscriber_id
+				)
+		   )
+		LEFT JOIN trace_sessions sess
+			ON sess.session_id = COALESCE(t.session_id, d.active_session_id)
+		   AND (
+				sess.run_id = e.run_id
+				OR sess.run_id IS NULL
+		   )
+		WHERE e.run_id = $1::uuid
+		ORDER BY
+			e.created_at ASC,
+			e.event_id ASC,
+			d.created_at ASC NULLS FIRST,
+			d.delivery_id ASC NULLS FIRST,
+			t.created_at ASC NULLS FIRST,
+			t.turn_id ASC NULLS FIRST
+		LIMIT $2
+	`, sessionSources), runID, opts.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("load run debug trace: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]RunDebugTraceRow, 0, opts.Limit)
+	for rows.Next() {
+		var (
+			item                RunDebugTraceRow
+			deliveryCreatedAt   sql.NullTime
+			deliveryStartedAt   sql.NullTime
+			deliveryDeliveredAt sql.NullTime
+			sessionUpdatedAt    sql.NullTime
+			turnCreatedAt       sql.NullTime
+		)
+		if err := rows.Scan(
+			&item.EventID,
+			&item.EventName,
+			&item.SourceEventID,
+			&item.EntityID,
+			&item.EventSource,
+			&item.EventSourceType,
+			&item.EventCreatedAt,
+			&item.DeliveryID,
+			&item.SubscriberType,
+			&item.SubscriberID,
+			&item.DeliveryStatus,
+			&item.DeliveryReasonCode,
+			&item.ActiveSessionID,
+			&deliveryCreatedAt,
+			&deliveryStartedAt,
+			&deliveryDeliveredAt,
+			&item.SessionID,
+			&item.SessionKind,
+			&item.SessionRuntimeMode,
+			&item.SessionStatus,
+			&sessionUpdatedAt,
+			&item.TurnID,
+			&item.TurnTriggerEventID,
+			&item.TurnTriggerEventType,
+			&item.TurnRuntimeMode,
+			&item.TurnScopeKey,
+			&item.TurnEntityID,
+			&item.TurnTaskID,
+			&item.TurnParseOK,
+			&item.TurnRetryCount,
+			&item.TurnError,
+			&turnCreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan run debug trace: %w", err)
+		}
+		item.DeliveryCreatedAt = nullableTimePtr(deliveryCreatedAt)
+		item.DeliveryStartedAt = nullableTimePtr(deliveryStartedAt)
+		item.DeliveryDeliveredAt = nullableTimePtr(deliveryDeliveredAt)
+		item.SessionUpdatedAt = nullableTimePtr(sessionUpdatedAt)
+		item.TurnCreatedAt = nullableTimePtr(turnCreatedAt)
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read run debug trace: %w", err)
+	}
+	return out, nil
+}
+
+func runDebugTraceSessionSources(caps StoreSchemaCapabilities) string {
+	sources := []string{}
+	if caps.Conversations.Sessions == SchemaFlavorCanonical {
+		sources = append(sources, `
+			SELECT
+				session_id,
+				run_id,
+				'live_session' AS session_kind,
+				COALESCE(runtime_mode, '') AS runtime_mode,
+				COALESCE(status, '') AS status,
+				updated_at
+			FROM agent_sessions
+		`)
+	}
+	if caps.Conversations.Audits == SchemaFlavorCanonical {
+		sources = append(sources, `
+			SELECT
+				session_id,
+				run_id,
+				'turn_audit' AS session_kind,
+				COALESCE(runtime_mode, '') AS runtime_mode,
+				COALESCE(status, '') AS status,
+				updated_at
+			FROM agent_conversation_audits
+		`)
+	}
+	if len(sources) == 0 {
+		return `
+			SELECT
+				NULL::uuid AS session_id,
+				NULL::uuid AS run_id,
+				''::text AS session_kind,
+				''::text AS runtime_mode,
+				''::text AS status,
+				NULL::timestamptz AS updated_at
+			WHERE FALSE
+		`
+	}
+	return strings.Join(sources, "\nUNION ALL\n")
+}
+
+func nullableTimePtr(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	tm := value.Time
+	return &tm
 }
 
 func (s *PostgresStore) loadRunDebugRuntimeLogs(ctx context.Context, runID string, opts RunDebugQueryOptions, report *RunDebugReport) error {

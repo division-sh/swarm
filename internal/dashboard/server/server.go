@@ -14,6 +14,7 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimetools "swarm/internal/runtime/tools"
+	"swarm/internal/store"
 )
 
 type HealthChecker func(ctx context.Context) (map[string]any, error)
@@ -161,6 +162,10 @@ type ObservabilityReader interface {
 	ListIncidents(ctx context.Context, filter IncidentFilter) ([]incidentRecord, error)
 }
 
+type RunTraceReader interface {
+	LoadRunDebugTrace(ctx context.Context, runID string, opts store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, error)
+}
+
 type AgentController interface {
 	RestartAgent(agentID string) error
 	ReplayAgentBacklog(ctx context.Context, agentID string) error
@@ -181,6 +186,7 @@ type Options struct {
 	Instances     InstanceReader
 	Conversations ConversationReader
 	Observability ObservabilityReader
+	RunTrace      RunTraceReader
 	Runtime       RuntimeController
 	AuthToken     string
 	Version       string
@@ -195,6 +201,7 @@ type Handler struct {
 	instances     InstanceReader
 	conversations ConversationReader
 	observability ObservabilityReader
+	runTrace      RunTraceReader
 	runtime       RuntimeController
 	authToken     string
 	version       string
@@ -211,6 +218,7 @@ func NewHandler(opts Options) http.Handler {
 		instances:     opts.Instances,
 		conversations: opts.Conversations,
 		observability: opts.Observability,
+		runTrace:      opts.RunTrace,
 		runtime:       opts.Runtime,
 		authToken:     strings.TrimSpace(opts.AuthToken),
 		version:       strings.TrimSpace(opts.Version),
@@ -238,6 +246,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/runtime/logs", h.handleRuntimeLogs)
 	mux.HandleFunc("GET /api/runtime/incidents", h.handleRuntimeIncidents)
 	mux.HandleFunc("POST /api/runtime/actions", h.handleRuntimeAction)
+	mux.HandleFunc("GET /api/runs/{runID}/trace", h.handleRunTrace)
 	builderHandler := opts.Builder
 	if builderHandler != nil {
 		h.builder = builderHandler
@@ -714,6 +723,29 @@ func (h *Handler) handleRuntimeIncidents(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"incidents": rows})
+}
+
+func (h *Handler) handleRunTrace(w http.ResponseWriter, r *http.Request) {
+	if h.runTrace == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("run trace reader is not configured"))
+		return
+	}
+	runID := strings.TrimSpace(r.PathValue("runID"))
+	if runID == "" {
+		writeJSONError(w, http.StatusBadRequest, errors.New("run id is required"))
+		return
+	}
+	rows, err := h.runTrace.LoadRunDebugTrace(r.Context(), runID, store.RunDebugTraceQueryOptions{
+		Limit: intQuery(r, "limit", 200),
+	})
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"run_id": runID,
+		"trace":  rows,
+	})
 }
 
 func (h *Handler) handleEventStream(w http.ResponseWriter, r *http.Request) {
