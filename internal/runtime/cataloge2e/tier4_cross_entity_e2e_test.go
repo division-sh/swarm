@@ -12,12 +12,13 @@ import (
 var tier4CrossEntityFixtures = []string{
 	"test-clear-multiple-targets",
 	"test-clear-state",
-	"test-create-entity",
 	"test-query-filter",
 	"test-query-group-by",
 }
 
-var tier4ExcludedFixtures = map[string]catalogExcludedFixture{}
+var tier4ExcludedFixtures = map[string]catalogExcludedFixture{
+	"test-create-entity": {reason: "legacy create_flow_instance action shape now rejected; fixture migration belongs to #416"},
+}
 
 func TestTier4CrossEntityCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

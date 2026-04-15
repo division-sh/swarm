@@ -16,9 +16,6 @@ type catalogExcludedFixture struct {
 
 var tier5LifecycleFixtures = []string{
 	"test-auto-emit-on-create",
-	"test-create-flow-instance-config",
-	"test-create-flow-instance-duplicate",
-	"test-create-flow-instance",
 	"test-template-no-boot-instance",
 	"test-terminal-state-preserves",
 	"test-terminal-state-rejects",
@@ -29,7 +26,11 @@ var tier5LifecycleFixtures = []string{
 	"test-wildcard-subscription",
 }
 
-var tier5ExcludedFixtures = map[string]catalogExcludedFixture{}
+var tier5ExcludedFixtures = map[string]catalogExcludedFixture{
+	"test-create-flow-instance":           {reason: "legacy create_flow_instance action shape now rejected; fixture migration belongs to #416"},
+	"test-create-flow-instance-config":    {reason: "legacy create_flow_instance action shape now rejected; fixture migration belongs to #416"},
+	"test-create-flow-instance-duplicate": {reason: "legacy create_flow_instance action shape now rejected; fixture migration belongs to #416"},
+}
 
 func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

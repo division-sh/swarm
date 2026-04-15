@@ -479,6 +479,27 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 		}
 		return ActionSpec{ID: actionID}, nil
 	case yaml.MappingNode:
+		allowed := map[string]struct{}{
+			"id":               {},
+			"template":         {},
+			"instance_id_from": {},
+			"config_from":      {},
+		}
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			if key == "" {
+				continue
+			}
+			if _, ok := allowed[key]; ok {
+				continue
+			}
+			switch key {
+			case "type", "flow_template", "instance_id":
+				return ActionSpec{}, fmt.Errorf("DEPRECATED: legacy action field %q is not supported; use action: create_flow_instance with template, instance_id_from, and config_from siblings", key)
+			default:
+				return ActionSpec{}, fmt.Errorf("UNDEFINED-FIELD: action field %q not in platform spec", key)
+			}
+		}
 		var aux struct {
 			ID             string    `yaml:"id"`
 			Template       string    `yaml:"template"`
@@ -487,6 +508,9 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 		}
 		if err := node.Decode(&aux); err != nil {
 			return ActionSpec{}, err
+		}
+		if strings.TrimSpace(aux.ID) == "" {
+			return ActionSpec{}, fmt.Errorf("action mapping missing id")
 		}
 		actionID, err := ParseHandlerActionID(aux.ID)
 		if err != nil {

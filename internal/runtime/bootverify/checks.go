@@ -948,6 +948,22 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 							Location: nodeID,
 						})
 					}
+					if strings.TrimSpace(handler.Action.InstanceIDFrom) == "" {
+						c.handlerFindings = append(c.handlerFindings, Finding{
+							CheckID:  "handler_field_compliance",
+							Severity: "error",
+							Message:  fmt.Sprintf("node %s handler %s create_flow_instance is missing instance_id_from", nodeID, eventType),
+							Location: nodeID,
+						})
+					}
+					if handler.Action.ConfigFrom == nil || len(handler.Action.ConfigFrom.ConfigEntries()) == 0 {
+						c.handlerFindings = append(c.handlerFindings, Finding{
+							CheckID:  "handler_field_compliance",
+							Severity: "error",
+							Message:  fmt.Sprintf("node %s handler %s create_flow_instance is missing config_from", nodeID, eventType),
+							Location: nodeID,
+						})
+					}
 				}
 				if normalizeWorkflowBuiltinActionID(actionID) == "record_evidence" && strings.TrimSpace(handler.EvidenceTarget) == "" {
 					c.handlerFindings = append(c.handlerFindings, Finding{
