@@ -29,6 +29,18 @@ active_issues:
     title: Canonicalize native capability visibility and recording in CLI execution
     maps_to:
       - shared_observability_contract
+  - id: 362
+    title: Expose live agent turn progress without container transcript spelunking
+    maps_to:
+      - typed_persisted_operator_reads
+  - id: 363
+    title: Make conversation audit and runtime logging reliable enough for first-line investigations
+    maps_to:
+      - shared_observability_contract
+  - id: 364
+    title: Add run-centric trace view across run, event, delivery, session, and turn
+    maps_to:
+      - run_scoped_operator_identity
   - id: 148
     title: Make run_id canonical across replay, diagnostics, API/dashboard scoping, and operator surfaces
     maps_to:
@@ -81,9 +93,11 @@ nodes:
     known_manifestations:
       - CLI, dashboard, and builder observe different canonical facts
       - native capability visibility/recording diverges from the operator contract
+      - first-line investigation surfaces remain too weak, pushing operators to transcript/container spelunking
     representative_issues:
       - 131
       - 138
+      - 363
     common_framing_mistakes:
       too_broad:
         - observability is inconsistent
@@ -99,10 +113,12 @@ nodes:
     known_manifestations:
       - conversation and turn APIs widen typed persisted data
       - summary/runtime-log/mutation completeness may be inferred or silently omitted
+      - first-line latest-turn progress is flattened differently across dashboard/API readers
     representative_issues:
       - 134
       - 224
       - 300
+      - 362
     common_framing_mistakes:
       too_broad:
         - API contracts are messy
