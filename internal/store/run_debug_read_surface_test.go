@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -385,5 +386,27 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	got := rows[0]
 	if got.SessionID != sessionID || got.SessionKind != "turn_audit" || got.SessionRuntimeMode != "task" {
 		t.Fatalf("task audit trace = %#v", got)
+	}
+}
+
+func TestRunDebugTraceSessionSources_NullsMissingRunIDColumnsForCanonicalConversationVariants(t *testing.T) {
+	caps := StoreSchemaCapabilities{
+		Conversations: ConversationSchemaCapabilities{
+			Sessions:     SchemaFlavorCanonical,
+			Audits:       SchemaFlavorCanonical,
+			SessionRunID: false,
+			AuditRunID:   false,
+		},
+	}
+
+	sql := runDebugTraceSessionSources(caps)
+	if strings.Contains(sql, "SELECT\n\t\t\t\tsession_id,\n\t\t\t\trun_id,") {
+		t.Fatalf("session source sql still selects raw run_id without capability guard:\n%s", sql)
+	}
+	if strings.Count(sql, "NULL::uuid") < 2 {
+		t.Fatalf("session source sql = %q, want NULL::uuid projection for both canonical variants", sql)
+	}
+	if !strings.Contains(sql, "FROM agent_sessions") || !strings.Contains(sql, "FROM agent_conversation_audits") {
+		t.Fatalf("session source sql = %q, want both canonical conversation sources", sql)
 	}
 }
