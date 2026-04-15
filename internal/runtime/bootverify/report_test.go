@@ -2662,7 +2662,7 @@ func TestRun_AllowsStatelessFlowInputPinHandlersWithoutCreateEntity(t *testing.T
 	}
 }
 
-func TestRun_AllowsBackpropInputPinHandlersWithoutCreateEntity(t *testing.T) {
+func TestRun_RequiresCreateEntityForBackpropInputPinHandlers(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	flowID := "child"
 	flowView, ok := bundle.FlowViewByID(flowID)
@@ -2696,8 +2696,8 @@ func TestRun_AllowsBackpropInputPinHandlersWithoutCreateEntity(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
-		t.Fatalf("unexpected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
+		t.Fatalf("expected flow_boundary_create_entity_validation error, got %#v", report.Errors())
 	}
 }
 

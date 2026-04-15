@@ -185,41 +185,7 @@ func TestCreateFlowInstanceRejectsEmptyResolvedConfig(t *testing.T) {
 	}
 }
 
-func TestWorkflowEmitTargetsParentEntity_OutputPin(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
-	if !workflowEmitTargetsParentEntity(source, "child", "child/child.done") {
-		t.Fatal("expected child/child.done to target the parent entity")
-	}
-	if !workflowEmitTargetsParentEntity(source, "child", "child.done") {
-		t.Fatal("expected local child.done to target the parent entity through the same canonical proof")
-	}
-	if workflowEmitTargetsParentEntity(source, "child", "child/child.internal") {
-		t.Fatal("did not expect child/child.internal to target the parent entity")
-	}
-	if workflowEmitTargetsParentEntity(source, "child", "child.internal") {
-		t.Fatal("did not expect local child.internal to target the parent entity")
-	}
-
-	pinSource := loadWorkflowFixtureSource(t, "test-child-flow-pin-wiring")
-	if !workflowEmitTargetsParentEntity(pinSource, "child", "child/work.completed") {
-		t.Fatal("expected child/work.completed to target the parent entity")
-	}
-	if !workflowEmitTargetsParentEntity(pinSource, "child", "work.completed") {
-		t.Fatal("expected local work.completed to target the parent entity through the same canonical proof")
-	}
-}
-
-func TestWorkflowEmitTargetsParentEntity_DoesNotScanOtherFlows(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-child-flow-sibling-isolation")
-	if workflowEmitTargetsParentEntity(source, "flow-a", "flow-b/work.done") {
-		t.Fatal("did not expect flow-b output event to retarget when executing inside flow-a")
-	}
-	if workflowEmitTargetsParentEntity(source, "", "flow-a/work.done") {
-		t.Fatal("did not expect root/no-flow context to retarget from a child flow output declaration")
-	}
-}
-
-func TestHandlerEmitPayload_UsesParentEntityForOutputPinsAndLocalEntityForInternalEvents(t *testing.T) {
+func TestHandlerEmitPayload_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T) {
 	bundle := loadWorkflowFixtureBundle(t, "test-child-flow-local-events")
 	module, err := newPipelineFixtureWorkflowModule(bundle)
 	if err != nil {
@@ -247,8 +213,8 @@ func TestHandlerEmitPayload_UsesParentEntityForOutputPinsAndLocalEntityForIntern
 	}
 
 	outputPayload := pc.handlerEmitPayload(withPipelineFlowScope(context.Background(), "child"), trigger, "child/child.done")
-	if got := asString(outputPayload["entity_id"]); got != "ent-parent" {
-		t.Fatalf("output payload entity_id = %q, want ent-parent", got)
+	if got := asString(outputPayload["entity_id"]); got != "ent-child" {
+		t.Fatalf("output payload entity_id = %q, want ent-child", got)
 	}
 
 	pinBundle := loadWorkflowFixtureBundle(t, "test-child-flow-pin-wiring")
@@ -258,8 +224,8 @@ func TestHandlerEmitPayload_UsesParentEntityForOutputPinsAndLocalEntityForIntern
 	}
 	pinPC := &PipelineCoordinator{module: pinModule}
 	pinPayload := pinPC.handlerEmitPayload(withPipelineFlowScope(context.Background(), "child"), trigger, "child/work.completed")
-	if got := asString(pinPayload["entity_id"]); got != "ent-parent" {
-		t.Fatalf("pin output payload entity_id = %q, want ent-parent", got)
+	if got := asString(pinPayload["entity_id"]); got != "ent-child" {
+		t.Fatalf("pin output payload entity_id = %q, want ent-child", got)
 	}
 }
 

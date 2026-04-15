@@ -210,14 +210,6 @@ func (pc *PipelineCoordinator) handlerEmitPayload(ctx context.Context, triggerCt
 	return out
 }
 
-func workflowEmitTargetsParentEntity(source semanticview.Source, flowID, eventType string) bool {
-	flowID = strings.TrimSpace(flowID)
-	if source == nil || flowID == "" {
-		return false
-	}
-	return semanticview.ResolveFlowEventProof(source, flowID, eventType).CrossesDeclaredOutputBoundary(source)
-}
-
 func workflowEntityMetadataPayload(source semanticview.Source, metadata map[string]any) map[string]any {
 	if len(metadata) == 0 {
 		return nil

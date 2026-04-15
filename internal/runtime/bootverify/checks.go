@@ -330,11 +330,6 @@ func (c *checkerContext) gateSchemaValidation() []Finding {
 	return c.gateSchemaFindings
 }
 
-func isBackpropEvent(eventType string) bool {
-	eventType = strings.TrimSpace(eventType)
-	return eventType != "" && strings.HasSuffix(eventType, "_backprop")
-}
-
 func platformVersionAtLeast(raw string, major, minor, patch int) bool {
 	raw = strings.TrimSpace(raw)
 	for _, prefix := range []string{">=", ">", "=", "~", "^"} {

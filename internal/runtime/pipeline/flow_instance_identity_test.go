@@ -108,8 +108,8 @@ func TestFlowInstanceIdentity_ResolveEmittedEntityID(t *testing.T) {
 	if got := resolveEmittedEntityID(source, "child", "child/child.internal", childState, trigger, "ent-child", "ent-child"); got != "ent-child" {
 		t.Fatalf("internal emitted entity_id = %q, want ent-child", got)
 	}
-	if got := resolveEmittedEntityID(source, "child", "child/child.done", childState, trigger, "ent-child", "ent-child"); got != "ent-parent" {
-		t.Fatalf("output emitted entity_id = %q, want ent-parent", got)
+	if got := resolveEmittedEntityID(source, "child", "child/child.done", childState, trigger, "ent-child", "ent-child"); got != "ent-child" {
+		t.Fatalf("output emitted entity_id = %q, want ent-child", got)
 	}
 
 	rootState := WorkflowState{
