@@ -202,25 +202,63 @@ func TestRuntimeLogger_Log_ReturnsPersistenceFailure(t *testing.T) {
 	}
 }
 
-func TestRuntimeLogger_Log_FailsClosedOnMissingCanonicalMessage(t *testing.T) {
+func TestRuntimeLogger_Log_AllowsEmptyCanonicalMessageWhenDetailsExist(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
 
+	mock.ExpectExec(`INSERT INTO events`).
+		WithArgs("", runtimeLogPayloadArg{
+			level:     "info",
+			message:   "",
+			component: "agent-manager",
+			action:    "delivery_lifecycle_transition",
+			eventID:   "evt-1",
+			agentID:   "agent-a",
+			detail: map[string]any{
+				"delivery_state":          "launching",
+				"delivery_transition":     "launching",
+				"delivery_previous_state": "queued",
+				"delivery_reason":         "agent_processing",
+				"subscriber_type":         "agent",
+				"subscriber_id":           "agent-a",
+			},
+		}, "").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
 	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
-	err = logger.Log(context.Background(), RuntimeLogEntry{
-		Level:     "error",
+	if err := logger.Log(context.Background(), RuntimeLogEntry{
+		Level:     "debug",
 		Message:   "",
-		Component: "diagnostics",
-		Action:    "missing_message",
-	})
-	if err == nil || !strings.Contains(err.Error(), "runtime log message is required") {
-		t.Fatalf("logger.Log() error = %v, want missing canonical message failure", err)
+		Component: "agent-manager",
+		Action:    "delivery_lifecycle_transition",
+		EventID:   "evt-1",
+		AgentID:   "agent-a",
+		Detail: map[string]any{
+			"delivery_state":          "launching",
+			"delivery_transition":     "launching",
+			"delivery_previous_state": "queued",
+			"delivery_reason":         "agent_processing",
+			"subscriber_type":         "agent",
+			"subscriber_id":           "agent-a",
+		},
+	}); err != nil {
+		t.Fatalf("logger.Log() error = %v, want nil", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet() error = %v", err)
+	}
+}
+
+func TestDecodeCanonicalRuntimeLogPayload_FailsClosedOnMissingMessageField(t *testing.T) {
+	_, err := DecodeCanonicalRuntimeLogPayload([]byte(`{
+		"log_level":"debug",
+		"details":{"component":"agent-manager","action":"delivery_lifecycle_transition"}
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "runtime log message is required") {
+		t.Fatalf("DecodeCanonicalRuntimeLogPayload() error = %v, want missing message failure", err)
 	}
 }
 

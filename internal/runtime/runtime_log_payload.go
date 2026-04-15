@@ -51,7 +51,7 @@ func DecodeCanonicalRuntimeLogPayload(raw []byte) (CanonicalRuntimeLogPayload, e
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
-	message, err := requiredRuntimeLogString(payload, "message")
+	message, err := requiredRuntimeLogPresentString(payload, "message")
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
@@ -199,6 +199,18 @@ func requiredRuntimeLogString(raw map[string]any, key string) (string, error) {
 		return "", fmt.Errorf("runtime log %s is required", key)
 	}
 	return text, nil
+}
+
+func requiredRuntimeLogPresentString(raw map[string]any, key string) (string, error) {
+	value, ok := raw[key]
+	if !ok {
+		return "", fmt.Errorf("runtime log %s is required", key)
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("runtime log %s must be a string", key)
+	}
+	return strings.TrimSpace(text), nil
 }
 
 func optionalRuntimeLogString(raw map[string]any, key string) (string, error) {
