@@ -163,6 +163,8 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 				%s AS turn_blocks
 			FROM agent_turns
 			WHERE agent_id = a.agent_id
+			  AND sess.session_id IS NOT NULL
+			  AND session_id = sess.session_id
 			ORDER BY created_at DESC, turn_id DESC
 			LIMIT 1
 		) latest_turn ON true
