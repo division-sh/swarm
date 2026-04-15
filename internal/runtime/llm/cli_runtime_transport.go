@@ -47,6 +47,10 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 	if turns == nil {
 		return MCPHTTPBinding{}, false, errors.New("mcp turn context store is required for MCP bridge")
 	}
+	allowedTools := cliTurnContextAllowedToolsForActor(actor, s.Tools)
+	if len(allowedTools) == 0 {
+		return MCPHTTPBinding{}, false, nil
+	}
 	serverURL := normalizeMCPServerURL(gatewayURL)
 	if serverURL == "" {
 		return MCPHTTPBinding{}, false, nil
@@ -55,7 +59,7 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 	if token := strings.TrimSpace(gatewayToken); token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}
-	contextToken := turns.RegisterTurnContextWithAllowedTools(ctx, mcpContextTokenTTLForConfig(ctx, cfg), cliTurnContextAllowedToolsForActor(actor, s.Tools))
+	contextToken := turns.RegisterTurnContextWithAllowedTools(ctx, mcpContextTokenTTLForConfig(ctx, cfg), allowedTools)
 	if contextToken != "" {
 		headers[mcpContextTokenHeader] = contextToken
 	}

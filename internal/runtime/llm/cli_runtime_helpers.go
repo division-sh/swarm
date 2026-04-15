@@ -254,14 +254,36 @@ type CLIExecutionToolSurface struct {
 	LocalFallbackTools    []string
 }
 
-func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefinition) CLIExecutionToolSurface {
-	runtimeNames := toolNames(tools)
-	slices.Sort(runtimeNames)
-
-	runtimeSet := make(map[string]struct{}, len(runtimeNames))
-	for _, name := range runtimeNames {
-		runtimeSet[name] = struct{}{}
+func cliNativeCapabilityToolSet(actor models.AgentConfig) map[string]struct{} {
+	out := map[string]struct{}{}
+	if actor.NativeTools.Bash {
+		out["bash"] = struct{}{}
 	}
+	if actor.NativeTools.WebSearch {
+		out["web_search"] = struct{}{}
+	}
+	if actor.NativeTools.FileIO {
+		out["read_file"] = struct{}{}
+		out["write_file"] = struct{}{}
+	}
+	return out
+}
+
+func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefinition) CLIExecutionToolSurface {
+	rawRuntimeNames := toolNames(tools)
+	nativeCapabilityTools := cliNativeCapabilityToolSet(actor)
+	runtimeNames := make([]string, 0, len(rawRuntimeNames))
+	for _, name := range rawRuntimeNames {
+		canonical := toolidentity.CanonicalName(name)
+		if canonical == "" {
+			continue
+		}
+		if _, ok := nativeCapabilityTools[canonical]; ok {
+			continue
+		}
+		runtimeNames = append(runtimeNames, canonical)
+	}
+	slices.Sort(runtimeNames)
 
 	canonicalVisible := make([]string, 0, len(runtimeNames)+4)
 	visibleSet := make(map[string]struct{}, len(runtimeNames)+4)
@@ -281,43 +303,26 @@ func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefin
 	}
 
 	providerBuiltins := make([]string, 0, 5)
-	nativeCapabilityTools := make(map[string]struct{}, 4)
 	addNativeCapabilityTool := func(name string) {
 		name = toolidentity.CanonicalName(name)
 		if name == "" {
 			return
 		}
-		nativeCapabilityTools[name] = struct{}{}
 		addCanonicalVisible(name)
 	}
 
 	if actor.NativeTools.Bash {
-		if _, ok := runtimeSet["bash"]; !ok {
-			providerBuiltins = append(providerBuiltins, "Bash")
-		}
+		providerBuiltins = append(providerBuiltins, "Bash")
 		addNativeCapabilityTool("bash")
 	}
 	if actor.NativeTools.WebSearch {
-		if _, ok := runtimeSet["web_search"]; !ok {
-			providerBuiltins = append(providerBuiltins, "WebSearch")
-		}
+		providerBuiltins = append(providerBuiltins, "WebSearch")
 		addNativeCapabilityTool("web_search")
 	}
 	if actor.NativeTools.FileIO {
-		_, hasReadFallback := runtimeSet["read_file"]
-		_, hasWriteFallback := runtimeSet["write_file"]
-		if hasReadFallback {
-			addNativeCapabilityTool("read_file")
-		} else {
-			providerBuiltins = append(providerBuiltins, "Read")
-			addNativeCapabilityTool("read_file")
-		}
-		if hasWriteFallback {
-			addNativeCapabilityTool("write_file")
-		} else {
-			providerBuiltins = append(providerBuiltins, "Write", "Edit")
-			addNativeCapabilityTool("write_file")
-		}
+		providerBuiltins = append(providerBuiltins, "Read", "Write", "Edit")
+		addNativeCapabilityTool("read_file")
+		addNativeCapabilityTool("write_file")
 	}
 
 	promptRuntime := make([]string, 0, len(runtimeNames))
@@ -332,9 +337,6 @@ func cliExecutionToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefin
 		if strings.HasPrefix(canonical, "emit_") {
 			localFallbackTools = append(localFallbackTools, canonical)
 			promptRuntime = append(promptRuntime, canonical)
-			continue
-		}
-		if _, ok := nativeCapabilityTools[canonical]; ok {
 			continue
 		}
 		promptRuntime = append(promptRuntime, toolidentity.RuntimeToolsMCPPrefix+canonical)

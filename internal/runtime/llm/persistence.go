@@ -41,6 +41,7 @@ type TurnPersistence interface {
 }
 
 func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp *Response) AgentTurnRecord {
+	actor, _ := runtimeactors.ActorFromContext(ctx)
 	if s != nil {
 		if strings.TrimSpace(rec.SessionID) == "" {
 			rec.SessionID = strings.TrimSpace(s.ID)
@@ -49,7 +50,7 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 			rec.ScopeKey = strings.TrimSpace(s.ScopeKey)
 		}
 		if len(rec.MCPToolsListed) == 0 {
-			rec.MCPToolsListed = mcpListedToolsForSession(s.Tools)
+			rec.MCPToolsListed = mcpListedToolsForSession(actor, s.Tools)
 		}
 	}
 	if strings.TrimSpace(rec.RunID) == "" {
@@ -74,7 +75,6 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		}
 	}
 	if resp != nil && len(rec.AvailableTools) == 0 {
-		actor, _ := runtimeactors.ActorFromContext(ctx)
 		rec.AvailableTools = append([]string(nil), resolvedCLIUsableToolsForTurn(actor, sessionTools(s), resp)...)
 	}
 	if resp != nil && len(rec.MCPToolsVisible) == 0 {
@@ -112,7 +112,6 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		}
 	}
 	if len(rec.AvailableTools) == 0 && s != nil {
-		actor, _ := runtimeactors.ActorFromContext(ctx)
 		rec.AvailableTools = append([]string(nil), plannedCanonicalVisibleToolsForActor(actor, s.Tools)...)
 	}
 	return rec
@@ -125,25 +124,12 @@ func sessionTools(s *Session) []ToolDefinition {
 	return s.Tools
 }
 
-func mcpListedToolsForSession(tools []ToolDefinition) []string {
+func mcpListedToolsForSession(actor runtimeactors.AgentConfig, tools []ToolDefinition) []string {
 	if len(tools) == 0 {
 		return nil
 	}
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(tools))
-	for _, tool := range tools {
-		name := strings.TrimSpace(tool.Name)
-		if name == "" {
-			continue
-		}
-		prefixed := runtimeToolsMCPPrefix + name
-		if _, ok := seen[prefixed]; ok {
-			continue
-		}
-		seen[prefixed] = struct{}{}
-		out = append(out, prefixed)
-	}
-	return out
+	surface := cliExecutionToolSurfaceForActor(actor, tools)
+	return append([]string(nil), surface.ProviderMCPTools...)
 }
 
 const runtimeToolsMCPPrefix = "mcp__runtime-tools__"

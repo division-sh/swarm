@@ -81,8 +81,8 @@ count=$((count + 1))
 printf '%s' "$count" > "$state_file"
 cat > "$capture_dir/$count.stdin"
 if [ "$count" -eq 1 ]; then
-  printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","mcp__runtime-tools__read_file"]}'
-  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"mcp__runtime-tools__read_file","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}'
+  printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
+  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"Read","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool-emit-1","name":"emit_category_assessed","input":{"category":"payments"}}},"session_id":"provider-sess-1"}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":1},"session_id":"provider-sess-1"}'
@@ -176,7 +176,7 @@ printf '%s\n' '{"type":"result","result":"done"}'
 	if relayWrites != 0 {
 		t.Fatalf("relay writes = %d, want 0 on supported read_file turn", relayWrites)
 	}
-	if !slices.Equal(allowedTools, []string{"emit_category_assessed", "read_file"}) {
+	if !slices.Equal(allowedTools, []string{"emit_category_assessed"}) {
 		t.Fatalf("allowed tools = %#v", allowedTools)
 	}
 	if len(turns.records) == 0 {
@@ -194,13 +194,10 @@ printf '%s\n' '{"type":"result","result":"done"}'
 	if !found {
 		t.Fatalf("no provider-observed first-turn record found in %#v", turns.records)
 	}
-	if !slices.Equal(first.AvailableTools, []string{"emit_category_assessed", "read_file"}) {
+	if !slices.Equal(first.AvailableTools, []string{"emit_category_assessed", "read_file", "write_file"}) {
 		t.Fatalf("first turn available_tools = %#v", first.AvailableTools)
 	}
-	if !slices.Equal(first.MCPToolsVisible, []string{
-		"mcp__runtime-tools__emit_category_assessed",
-		"mcp__runtime-tools__read_file",
-	}) {
+	if !slices.Equal(first.MCPToolsVisible, []string{"mcp__runtime-tools__emit_category_assessed"}) {
 		t.Fatalf("first turn mcp_tools_visible = %#v", first.MCPToolsVisible)
 	}
 	if got := first.MCPServers["runtime-tools"]; got != "connected" {

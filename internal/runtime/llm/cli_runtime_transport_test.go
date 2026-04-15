@@ -115,35 +115,48 @@ func TestClaudeAllowedToolsArgForActor_IncludesPostCompositionAndNativeTools(t *
 	}
 }
 
-func TestClaudeToolSurface_PrefersFallbackRuntimeToolsOverNativeBuiltins(t *testing.T) {
+func TestClaudeToolSurface_UsesProviderNativeBuiltinsWithoutFallbackInjection(t *testing.T) {
 	actor := models.AgentConfig{
 		NativeTools: models.NativeToolConfig{
-			FileIO: true,
-			Bash:   true,
+			FileIO:    true,
+			Bash:      true,
+			WebSearch: true,
 		},
 	}
 	tools := []ToolDefinition{
 		{Name: "read_file"},
 		{Name: "write_file"},
 		{Name: "bash"},
+		{Name: "web_search"},
 		{Name: "emit_category_assessed"},
 	}
 
 	allowed := claudeAllowedToolsArgForActor(actor, tools)
 	allowedNames := strings.Split(allowed, ",")
 	for _, name := range []string{
-		"mcp__runtime-tools__read_file",
-		"mcp__runtime-tools__write_file",
-		"mcp__runtime-tools__bash",
 		"mcp__runtime-tools__emit_category_assessed",
 		"emit_category_assessed",
+		"Bash",
+		"WebSearch",
+		"Read",
+		"Write",
+		"Edit",
 		"ExitPlanMode",
 	} {
 		if !slices.Contains(allowedNames, name) {
 			t.Fatalf("expected %q in allowed tools %q", name, allowed)
 		}
 	}
-	for _, name := range []string{"Read", "Write", "Edit", "Bash", "read_file", "write_file", "bash"} {
+	for _, name := range []string{
+		"mcp__runtime-tools__read_file",
+		"mcp__runtime-tools__write_file",
+		"mcp__runtime-tools__bash",
+		"mcp__runtime-tools__web_search",
+		"read_file",
+		"write_file",
+		"bash",
+		"web_search",
+	} {
 		if slices.Contains(allowedNames, name) {
 			t.Fatalf("did not expect native builtin %q in allowed tools %q", name, allowed)
 		}
@@ -151,9 +164,9 @@ func TestClaudeToolSurface_PrefersFallbackRuntimeToolsOverNativeBuiltins(t *test
 
 	disallowed := claudeDisallowedBuiltinToolsArgForActor(actor, tools)
 	disallowedNames := strings.Split(disallowed, ",")
-	for _, name := range []string{"Read", "Write", "Edit", "Bash"} {
-		if !slices.Contains(disallowedNames, name) {
-			t.Fatalf("expected fallback-backed builtin %q in disallowed tools %q", name, disallowed)
+	for _, name := range []string{"Read", "Write", "Edit", "Bash", "WebSearch"} {
+		if slices.Contains(disallowedNames, name) {
+			t.Fatalf("did not expect provider-native builtin %q in disallowed tools %q", name, disallowed)
 		}
 	}
 
@@ -164,14 +177,14 @@ func TestClaudeToolSurface_PrefersFallbackRuntimeToolsOverNativeBuiltins(t *test
 	if !strings.Contains(prompt, "emit_category_assessed") {
 		t.Fatalf("expected emit fallback tool in prompt, got %q", prompt)
 	}
-	for _, name := range []string{"read_file", "write_file", "bash"} {
+	for _, name := range []string{"read_file", "write_file", "bash", "web_search"} {
 		if strings.Contains(prompt, "\n- "+name+"\n") {
 			t.Fatalf("did not expect native capability tool %q in prompt, got %q", name, prompt)
 		}
 	}
-	for _, name := range []string{"mcp__runtime-tools__read_file", "mcp__runtime-tools__write_file", "mcp__runtime-tools__bash"} {
-		if !strings.Contains(prompt, name) {
-			t.Fatalf("expected provider-visible MCP tool %q in prompt, got %q", name, prompt)
+	for _, name := range []string{"mcp__runtime-tools__read_file", "mcp__runtime-tools__write_file", "mcp__runtime-tools__bash", "mcp__runtime-tools__web_search"} {
+		if strings.Contains(prompt, name) {
+			t.Fatalf("did not expect fallback MCP tool %q in prompt, got %q", name, prompt)
 		}
 	}
 	if strings.Contains(prompt, "Claude CLI native tools available in this turn") {
@@ -204,9 +217,12 @@ func TestCLIExecutionToolSurface_CanonicalizesProviderBuiltins(t *testing.T) {
 	if !slices.Equal(surface.PromptRuntimeTools, []string{"emit_category_assessed"}) {
 		t.Fatalf("prompt runtime tools = %#v", surface.PromptRuntimeTools)
 	}
+	if !slices.Equal(surface.RuntimeToolNames, []string{"emit_category_assessed"}) {
+		t.Fatalf("runtime tool names = %#v", surface.RuntimeToolNames)
+	}
 }
 
-func TestCLIExecutionToolSurface_FileIOMixedFallbacksStayExecutable(t *testing.T) {
+func TestCLIExecutionToolSurface_FileIONativeSurfaceRemovesFallbackRuntimeTools(t *testing.T) {
 	surface := cliExecutionToolSurfaceForActor(models.AgentConfig{
 		NativeTools: models.NativeToolConfig{
 			FileIO: true,
@@ -219,14 +235,17 @@ func TestCLIExecutionToolSurface_FileIOMixedFallbacksStayExecutable(t *testing.T
 	if !slices.Equal(surface.CanonicalVisibleTools, []string{"emit_category_assessed", "read_file", "write_file"}) {
 		t.Fatalf("canonical visible tools = %#v", surface.CanonicalVisibleTools)
 	}
-	if !slices.Equal(surface.ProviderBuiltinTools, []string{"Edit", "Write"}) {
+	if !slices.Equal(surface.ProviderBuiltinTools, []string{"Edit", "Read", "Write"}) {
 		t.Fatalf("provider builtin tools = %#v", surface.ProviderBuiltinTools)
 	}
-	if !slices.Equal(surface.ProviderMCPTools, []string{"mcp__runtime-tools__emit_category_assessed", "mcp__runtime-tools__read_file"}) {
+	if !slices.Equal(surface.ProviderMCPTools, []string{"mcp__runtime-tools__emit_category_assessed"}) {
 		t.Fatalf("provider mcp tools = %#v", surface.ProviderMCPTools)
 	}
 	if !slices.Equal(surface.LocalFallbackTools, []string{"emit_category_assessed"}) {
 		t.Fatalf("local fallback tools = %#v", surface.LocalFallbackTools)
+	}
+	if !slices.Equal(surface.RuntimeToolNames, []string{"emit_category_assessed"}) {
+		t.Fatalf("runtime tool names = %#v", surface.RuntimeToolNames)
 	}
 }
 
@@ -294,6 +313,48 @@ func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t
 	}
 	if strings.Contains(urlRaw, "ctx_token=") {
 		t.Fatalf("url %q should not propagate context token query", urlRaw)
+	}
+}
+
+func TestBuildMCPHTTPBinding_DisablesBridgeForNativeBuiltinOnlySurface(t *testing.T) {
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+	registered := false
+	binding, enabled, err := BuildMCPHTTPBinding(
+		models.WithActor(context.Background(), models.AgentConfig{
+			ID: "analysis-agent",
+			NativeTools: models.NativeToolConfig{
+				FileIO:    true,
+				Bash:      true,
+				WebSearch: true,
+			},
+		}),
+		&config.Config{},
+		mcpTurnContextStoreStub{
+			register: func(_ context.Context, _ time.Duration, _ []string) string {
+				registered = true
+				return "ctx-token"
+			},
+		},
+		&Session{
+			AgentID: "analysis-agent",
+			Tools: []ToolDefinition{
+				{Name: "read_file"},
+				{Name: "write_file"},
+				{Name: "bash"},
+				{Name: "web_search"},
+			},
+		},
+		"http://host.docker.internal:18082",
+		"gateway-token",
+	)
+	if err != nil {
+		t.Fatalf("BuildMCPHTTPBinding: %v", err)
+	}
+	if enabled {
+		t.Fatalf("expected native-builtin-only surface to disable MCP bridge, got %#v", binding)
+	}
+	if registered {
+		t.Fatal("did not expect turn context registration for native-builtin-only surface")
 	}
 }
 

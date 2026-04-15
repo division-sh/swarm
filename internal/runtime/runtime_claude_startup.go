@@ -97,6 +97,16 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		if len(sessionTools) == 0 {
 			return fmt.Errorf("managed-agent startup probe found no declared tools for agent %s", agentID)
 		}
+		if len(llm.AgentVisibleToolSurfaceForActor(agentCfg, sessionTools).RuntimeToolNames) == 0 {
+			continue
+		}
+		expectedNames, capabilities, err := expectedStartupMCPTools(agentCfg, tools, sessionTools)
+		if err != nil {
+			return fmt.Errorf("mcp startup probe expected tools for agent %s: %w", agentID, err)
+		}
+		if len(expectedNames) == 0 {
+			return fmt.Errorf("mcp startup probe found no visible tools for agent %s", agentID)
+		}
 		agentCtx := runtimeactors.WithActor(ctx, agentCfg)
 		binding, enabled, err := llm.BuildMCPHTTPBinding(agentCtx, cfg, turnStore, &llm.Session{
 			AgentID: agentID,
@@ -115,13 +125,6 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		turnStore.UnregisterTurnContext(binding.ContextToken)
 		if err != nil {
 			return fmt.Errorf("mcp tools/list startup probe failed for agent %s: %w", agentID, err)
-		}
-		expectedNames, capabilities, err := expectedStartupMCPTools(agentCfg, tools, sessionTools)
-		if err != nil {
-			return fmt.Errorf("mcp startup probe expected tools for agent %s: %w", agentID, err)
-		}
-		if len(expectedNames) == 0 {
-			return fmt.Errorf("mcp startup probe found no visible tools for agent %s", agentID)
 		}
 		actualNames := startupToolNames(actualTools)
 		if !equalSortedStrings(actualNames, expectedNames) {
@@ -159,7 +162,10 @@ func runtimeConfiguredMCPGatewayToken() string {
 }
 
 func expectedStartupMCPTools(agentCfg runtimeactors.AgentConfig, tools claudeStartupToolSource, sessionTools []llm.ToolDefinition) ([]string, toolcapabilities.Set, error) {
-	names := startupSessionToolNames(sessionTools)
+	names := llm.AgentVisibleToolSurfaceForActor(agentCfg, sessionTools).RuntimeToolNames
+	if len(names) == 0 {
+		return nil, toolcapabilities.Set{}, nil
+	}
 	allowed := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		allowed[name] = struct{}{}
