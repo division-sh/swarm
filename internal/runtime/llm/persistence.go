@@ -75,11 +75,7 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 	}
 	if resp != nil && len(rec.AvailableTools) == 0 {
 		actor, _ := runtimeactors.ActorFromContext(ctx)
-		if observed := observedCanonicalVisibleToolsForActor(actor, sessionTools(s), resp); len(observed) > 0 {
-			rec.AvailableTools = append([]string(nil), observed...)
-		} else if hasObservedCLIExecutionSurface(resp) {
-			rec.AvailableTools = append([]string(nil), cliLocalFallbackVisibleToolsForActor(actor, s.Tools)...)
-		}
+		rec.AvailableTools = append([]string(nil), resolvedCLIUsableToolsForTurn(actor, sessionTools(s), resp)...)
 	}
 	if resp != nil && len(rec.MCPToolsVisible) == 0 {
 		rec.MCPToolsVisible = append([]string(nil), resp.MCPVisibleTools...)

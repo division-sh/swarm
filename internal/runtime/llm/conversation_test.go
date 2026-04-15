@@ -457,6 +457,10 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedReadFileResultsForHelperRu
 	}})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx = withCLIUsableToolsForTurn(ctx, tools, &Response{
+		MCPServers:      map[string]string{"runtime-tools": "connected"},
+		MCPVisibleTools: []string{"mcp__runtime-tools__read_file"},
+	})
 	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/data/test-signals-25.jsonl"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
@@ -469,15 +473,17 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedReadFileResultsForHelperRu
 	if resultMap == nil {
 		t.Fatalf("expected result map, got %#v", arr[0]["result"])
 	}
-	if rt.toolName != "read_file" {
-		t.Fatalf("relay tool name = %q, want read_file", rt.toolName)
+	if rt.toolName != "" {
+		t.Fatalf("relay tool name = %q, want no helper relay write on supported read_file turn", rt.toolName)
 	}
-	if resultMap["truncated"] != true {
-		t.Fatalf("expected relayed read_file metadata, got %#v", resultMap)
+	if resultMap["truncated"] == true {
+		t.Fatalf("expected supported read_file turn to preserve full content, got %#v", resultMap)
 	}
-	followUp, _ := resultMap["follow_up"].(map[string]any)
-	if followUp == nil || followUp["path"] != rt.relayPath || followUp["tool"] != "read_file" {
-		t.Fatalf("follow_up = %#v, want relay path/tool", followUp)
+	if _, ok := resultMap["follow_up"]; ok {
+		t.Fatalf("follow_up = %#v, want absent when read_file is supported on this turn", resultMap["follow_up"])
+	}
+	if content, _ := resultMap["content"].(string); len(content) != len(huge) {
+		t.Fatalf("content length = %d, want %d", len(content), len(huge))
 	}
 }
 
@@ -511,6 +517,41 @@ func TestConversation_ExecuteToolCalls_PreservesRelayReadFileResultsForHelperRun
 	}
 	if len(rt.raw) != 0 {
 		t.Fatalf("did not expect relay writer to run for runtime relay path read, got raw=%q", string(rt.raw))
+	}
+}
+
+func TestConversation_ExecuteToolCalls_SuppressesReadFileRelayWhenObservedSurfaceFailed(t *testing.T) {
+	huge := strings.Repeat("x", maxToolResultBytes+1024)
+	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/read-file-1.json"}
+	tools := []ToolDefinition{{Name: "read_file"}}
+	c := NewConversation("a1", "t1", "sys", tools, SessionScoped, 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test", Tools: tools}
+	c.SetToolExecutor(largeToolExec{payload: map[string]any{
+		"content":    huge,
+		"size_bytes": len(huge),
+	}})
+
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx = withCLIUsableToolsForTurn(ctx, tools, &Response{
+		MCPServers: map[string]string{"runtime-tools": "failed"},
+	})
+	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/data/test-signals-25.jsonl"}}})
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	if len(arr) != 1 || arr[0]["ok"] != true {
+		t.Fatalf("expected successful tool payload, got %#v", arr)
+	}
+	resultMap, _ := arr[0]["result"].(map[string]any)
+	if resultMap == nil || resultMap["truncated"] != true {
+		t.Fatalf("expected observed failed surface to clamp helper read_file output, got %#v", arr[0]["result"])
+	}
+	if _, ok := resultMap["follow_up"]; ok {
+		t.Fatalf("follow_up = %#v, want absent when read_file is not usable on the observed turn", resultMap["follow_up"])
+	}
+	if rt.toolName != "" {
+		t.Fatalf("relay tool name = %q, want no relay write when observed turn surface failed", rt.toolName)
 	}
 }
 

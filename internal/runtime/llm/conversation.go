@@ -13,6 +13,12 @@ import (
 	"swarm/internal/runtime/sessions"
 )
 
+type cliUsableToolsContextKey struct{}
+
+type cliUsableToolsContextValue struct {
+	tools []string
+}
+
 type ConversationMode int
 
 const (
@@ -194,6 +200,7 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		if len(resp.ToolCalls) == 0 {
 			return resp, nil
 		}
+		ctx = withCLIUsableToolsForTurn(ctx, c.turnToolDefinitions(), resp)
 		toolPayload, executed := c.executeToolCalls(ctx, resp.ToolCalls)
 		if shouldTerminateAfterToolCalls(executed) {
 			terminal := *resp
@@ -273,7 +280,7 @@ func (c *Conversation) projectToolResult(ctx context.Context, name string, input
 			"error":     "marshal tool result",
 		}, nil
 	}
-	limit := toolRelayResultLimitForRuntime(c.runtime, name, input)
+	limit := toolRelayResultLimitForRuntime(ctx, c.runtime, c.turnToolDefinitions(), name, input)
 	if len(b) <= limit {
 		return result, nil
 	}
@@ -387,6 +394,14 @@ func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context
 }
 
 func runtimeReadFileFollowUpAllowedForTurn(ctx context.Context, tools []ToolDefinition) bool {
+	if usable, ok := cliUsableToolsForTurnFromContext(ctx); ok {
+		for _, name := range usable {
+			if name == "read_file" {
+				return true
+			}
+		}
+		return false
+	}
 	actor, _ := models.ActorFromContext(ctx)
 	for _, name := range plannedCanonicalVisibleToolsForActor(actor, tools) {
 		if name == "read_file" {
@@ -427,19 +442,22 @@ func relayOversizedToolResult(ctx context.Context, runtime Runtime, session *Ses
 	return relay, true, err
 }
 
-func toolRelayResultLimitForRuntime(runtime Runtime, name string, input any) int {
+func toolRelayResultLimitForRuntime(ctx context.Context, runtime Runtime, tools []ToolDefinition, name string, input any) int {
 	limit := toolRelayResultLimit(name)
-	if _, ok := runtime.(oversizedToolResultRelayWriter); ok && helperReadFileShouldUseGenericRelayLimit(name, input) {
+	if _, ok := runtime.(oversizedToolResultRelayWriter); ok && helperReadFileShouldUseGenericRelayLimit(ctx, tools, name, input) {
 		return maxToolResultBytes
 	}
 	return limit
 }
 
-func helperReadFileShouldUseGenericRelayLimit(name string, input any) bool {
+func helperReadFileShouldUseGenericRelayLimit(ctx context.Context, tools []ToolDefinition, name string, input any) bool {
 	if !toolIsLargeRelayFileRead(name) {
 		return false
 	}
-	return !toolInputTargetsRuntimeRelayPath(input)
+	if toolInputTargetsRuntimeRelayPath(input) {
+		return false
+	}
+	return !runtimeReadFileFollowUpAllowedForTurn(ctx, tools)
 }
 
 func toolRelayResultLimit(name string) int {
@@ -494,6 +512,23 @@ func toolInputPath(input any) string {
 		return ""
 	}
 	return strings.TrimSpace(pathCarrier.Path)
+}
+
+func withCLIUsableToolsForTurn(ctx context.Context, tools []ToolDefinition, resp *Response) context.Context {
+	actor, _ := models.ActorFromContext(ctx)
+	usable := resolvedCLIUsableToolsForTurn(actor, tools, resp)
+	return context.WithValue(ctx, cliUsableToolsContextKey{}, cliUsableToolsContextValue{tools: append([]string(nil), usable...)})
+}
+
+func cliUsableToolsForTurnFromContext(ctx context.Context) ([]string, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	v, ok := ctx.Value(cliUsableToolsContextKey{}).(cliUsableToolsContextValue)
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), v.tools...), true
 }
 
 func clampRunes(s string, maxRunes int) string {
