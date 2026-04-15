@@ -184,6 +184,8 @@ The agent field `tools_tier2` is renamed to `tools`. The tier naming was an Empi
 ### New: native_tools — provider-adaptive agent capabilities
 Agents can now declare `native_tools` (bash, web_search, file_io) in their contract. The platform either enables the provider's native implementation or injects a platform fallback tool — the agent sees the same interface either way. All execution respects workspace mounts. Eliminates the need for custom MCP servers for simple infrastructure operations.
 
+Historical note: this `v1.4.0` entry describes the original rollout model. The current authoritative contract for the shipped CLI path is the clarified rule above under `Unreleased`: CLI native tools are provider-native only, the platform does not inject fallback tools to satisfy `native_tools` on CLI, and visible surface must equal callable truth.
+
 ### New: platform.budget_threshold_crossed event
 Budget monitoring is a platform concern — the platform owns spend_ledger and knows the spend. New event in the platform event catalog with level field (warning/throttle/emergency/ok). Thresholds read from policy.yaml. One event, no separate events per level.
 
