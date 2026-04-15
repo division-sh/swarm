@@ -1,0 +1,3 @@
+worker.ready:
+  payload:
+    entity_id: string

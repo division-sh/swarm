@@ -5,9 +5,8 @@ test-node:
   produces: [flow.spawned]
   event_handlers:
     flow.spawn_requested:
-      action:
-        type: create_flow_instance
-        flow_template: worker-flow
-        instance_id: "{{payload.instance_id}}"
+      action: create_flow_instance
+      template: worker-flow
+      instance_id_from: payload.instance_id
       emits: flow.spawned
       advances_to: spawned

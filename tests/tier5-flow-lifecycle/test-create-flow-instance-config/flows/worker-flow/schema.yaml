@@ -1,0 +1,13 @@
+name: worker-flow
+namespace: worker-flow
+initial_state: idle
+terminal_states: [complete]
+states: [idle, complete]
+instance_variables:
+  max_retries: integer
+  timeout_ms: integer
+auto_emit_on_create:
+  event: worker.ready
+pins:
+  outputs:
+    events: [worker.ready]
