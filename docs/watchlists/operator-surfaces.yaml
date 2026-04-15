@@ -45,6 +45,10 @@ active_issues:
     title: Make run_id canonical across replay, diagnostics, API/dashboard scoping, and operator surfaces
     maps_to:
       - run_scoped_operator_identity
+  - id: 409
+    title: Persisted agent_turns can omit real tool calls visible in provider session transcripts
+    maps_to:
+      - shared_observability_contract
   - id: 224
     title: Remove implicit canonical schema defaults from dashboard readers and require explicit capability ownership
     maps_to:
@@ -59,10 +63,6 @@ active_issues:
       - run_scoped_operator_identity
   - id: 345
     title: Move builder run event streams onto canonical run-bound diagnostics
-    maps_to:
-      - run_scoped_operator_identity
-  - id: 364
-    title: Add run-centric trace view across run, event, delivery, session, and turn
     maps_to:
       - run_scoped_operator_identity
 nodes:
@@ -94,10 +94,12 @@ nodes:
       - CLI, dashboard, and builder observe different canonical facts
       - native capability visibility/recording diverges from the operator contract
       - first-line investigation surfaces remain too weak, pushing operators to transcript/container spelunking
+      - persisted turn tool_calls can under-report provider-observed tool activity on supported CLI turns
     representative_issues:
       - 131
       - 138
       - 363
+      - 409
     common_framing_mistakes:
       too_broad:
         - observability is inconsistent

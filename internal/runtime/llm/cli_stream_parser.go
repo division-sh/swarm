@@ -10,17 +10,18 @@ import (
 )
 
 type cliStreamAccumulator struct {
-	raw              bytes.Buffer
-	message          Message
-	toolCalls        []ToolCall
-	streamedCalls    []cliRecordedToolCall
-	sessionID        string
-	resultText       string
-	pending          map[int]*cliPendingToolCall
-	completedToolIDs map[string]struct{}
-	mcpServers       map[string]string
-	visibleTools     []string
-	mcpVisibleTools  []string
+	raw               bytes.Buffer
+	message           Message
+	toolCalls         []ToolCall
+	observedToolCalls []ToolCall
+	streamedCalls     []cliRecordedToolCall
+	sessionID         string
+	resultText        string
+	pending           map[int]*cliPendingToolCall
+	completedToolIDs  map[string]struct{}
+	mcpServers        map[string]string
+	visibleTools      []string
+	mcpVisibleTools   []string
 }
 
 type cliPendingToolCall struct {
@@ -104,6 +105,9 @@ func (a *cliStreamAccumulator) mergeAssistantObject(obj map[string]any) {
 	}
 	if len(resp.ToolCalls) > 0 && !a.hasConnectedRuntimeMCP() {
 		a.toolCalls = dedupeToolCalls(append(a.toolCalls, resp.ToolCalls...))
+	}
+	if len(resp.ObservedToolCalls) > 0 {
+		a.observedToolCalls = dedupeToolCalls(append(a.observedToolCalls, resp.ObservedToolCalls...))
 	}
 }
 
@@ -352,7 +356,9 @@ func (a *cliStreamAccumulator) Response() *Response {
 		message.Content = strings.TrimSpace(a.resultText)
 	}
 	toolCalls := append([]ToolCall(nil), a.toolCalls...)
+	observedToolCalls := append([]ToolCall(nil), a.observedToolCalls...)
 	for _, call := range a.streamedCalls {
+		observedToolCalls = append(observedToolCalls, call.Call)
 		if call.ID != "" {
 			if _, completed := a.completedToolIDs[call.ID]; completed {
 				continue
@@ -367,13 +373,14 @@ func (a *cliStreamAccumulator) Response() *Response {
 		toolCalls = nil
 	}
 	return &Response{
-		Message:         message,
-		ToolCalls:       dedupeToolCalls(toolCalls),
-		SessionID:       strings.TrimSpace(a.sessionID),
-		Raw:             bytes.TrimSpace(a.raw.Bytes()),
-		VisibleTools:    append([]string(nil), a.visibleTools...),
-		MCPServers:      a.mcpServers,
-		MCPVisibleTools: append([]string(nil), a.mcpVisibleTools...),
+		Message:           message,
+		ToolCalls:         dedupeToolCalls(toolCalls),
+		ObservedToolCalls: dedupeToolCalls(observedToolCalls),
+		SessionID:         strings.TrimSpace(a.sessionID),
+		Raw:               bytes.TrimSpace(a.raw.Bytes()),
+		VisibleTools:      append([]string(nil), a.visibleTools...),
+		MCPServers:        a.mcpServers,
+		MCPVisibleTools:   append([]string(nil), a.mcpVisibleTools...),
 	}
 }
 

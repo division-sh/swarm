@@ -21,6 +21,9 @@ func TestCLIStreamAccumulator_Response(t *testing.T) {
 	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "sql_execute" {
 		t.Fatalf("unexpected tool calls: %+v", resp.ToolCalls)
 	}
+	if len(resp.ObservedToolCalls) != 1 || resp.ObservedToolCalls[0].Name != "sql_execute" {
+		t.Fatalf("unexpected observed tool calls: %+v", resp.ObservedToolCalls)
+	}
 	if len(resp.Raw) == 0 {
 		t.Fatal("expected raw stream payload")
 	}
@@ -98,6 +101,9 @@ func TestCLIStreamAccumulator_IgnoresAssistantToolCallsWhenMCPConnected(t *testi
 	if len(resp.ToolCalls) != 0 {
 		t.Fatalf("expected assistant-object tool calls to be ignored when MCP is connected, got %+v", resp.ToolCalls)
 	}
+	if len(resp.ObservedToolCalls) != 1 || resp.ObservedToolCalls[0].Name != "emit_scan_requested" {
+		t.Fatalf("expected observed assistant tool call to remain available for persistence, got %+v", resp.ObservedToolCalls)
+	}
 }
 
 func TestCLIStreamAccumulator_SuppressesCompletedMCPToolCalls(t *testing.T) {
@@ -112,6 +118,9 @@ func TestCLIStreamAccumulator_SuppressesCompletedMCPToolCalls(t *testing.T) {
 	if len(resp.ToolCalls) != 0 {
 		t.Fatalf("expected completed MCP tool call to be suppressed, got %+v", resp.ToolCalls)
 	}
+	if len(resp.ObservedToolCalls) != 1 || resp.ObservedToolCalls[0].Name != "emit_scan_requested" {
+		t.Fatalf("expected completed MCP tool call to remain observed for persistence, got %+v", resp.ObservedToolCalls)
+	}
 }
 
 func TestCLIStreamAccumulator_SuppressesCompletedMCPToolCalls_FromMessageWrappedUserEvent(t *testing.T) {
@@ -125,6 +134,9 @@ func TestCLIStreamAccumulator_SuppressesCompletedMCPToolCalls_FromMessageWrapped
 	resp := acc.Response()
 	if len(resp.ToolCalls) != 0 {
 		t.Fatalf("expected wrapped completed MCP tool call to be suppressed, got %+v", resp.ToolCalls)
+	}
+	if len(resp.ObservedToolCalls) != 1 || resp.ObservedToolCalls[0].Name != "emit_scan_requested" {
+		t.Fatalf("expected wrapped completed MCP tool call to remain observed for persistence, got %+v", resp.ObservedToolCalls)
 	}
 }
 
