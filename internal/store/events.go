@@ -857,6 +857,14 @@ func (s *PostgresStore) MarkRunTerminal(ctx context.Context, runID, status, erro
 	return err
 }
 
+func (s *PostgresStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	return s.convergeStandaloneRuntimePlatformRunByEventID(ctx, s.DB, caps, strings.TrimSpace(evt.ID))
+}
+
 func runLifecycleOptions(caps StoreSchemaCapabilities) storerunlifecycle.EnsureActiveOptions {
 	return storerunlifecycle.EnsureActiveOptions{
 		HasStartedAtCol: caps.Events.RunStartedAt,
@@ -864,6 +872,137 @@ func runLifecycleOptions(caps StoreSchemaCapabilities) storerunlifecycle.EnsureA
 		HasCounterCols:  caps.Events.RunCounterColumns,
 		HasTerminalCols: caps.Events.RunTerminalFields,
 	}
+}
+
+type standaloneRuntimePlatformRunRecord struct {
+	RunID            string
+	RunStatus        string
+	EventID          string
+	EventType        string
+	ProducedBy       string
+	ProducedByType   string
+	SourceEventID    string
+	TriggerEventID   string
+	TriggerEventType string
+}
+
+func isStandaloneRuntimePlatformEventType(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "platform.boot",
+		"platform.recovery_failed",
+		"platform.event_quarantined",
+		"platform.agent_panic",
+		"platform.agent_failed",
+		"platform.auth_required",
+		"platform.paused",
+		"platform.dead_letter_escalation",
+		"platform.budget_threshold_crossed":
+		return true
+	default:
+		return false
+	}
+}
+
+func loadStandaloneRuntimePlatformRunRecord(ctx context.Context, db storerunlifecycle.DBTX, eventID string) (standaloneRuntimePlatformRunRecord, bool, error) {
+	eventID = sanitizeOptionalUUID(eventID)
+	if db == nil || eventID == "" {
+		return standaloneRuntimePlatformRunRecord{}, false, nil
+	}
+	var rec standaloneRuntimePlatformRunRecord
+	err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(r.run_id::text, ''),
+			COALESCE(r.status, ''),
+			COALESCE(e.event_id::text, ''),
+			COALESCE(e.event_name, ''),
+			COALESCE(e.produced_by, ''),
+			COALESCE(e.produced_by_type, ''),
+			COALESCE(e.source_event_id::text, ''),
+			COALESCE(r.trigger_event_id::text, ''),
+			COALESCE(r.trigger_event_type, '')
+		FROM events e
+		INNER JOIN runs r ON r.run_id = e.run_id
+		WHERE e.event_id = $1::uuid
+		LIMIT 1
+	`, eventID).Scan(
+		&rec.RunID,
+		&rec.RunStatus,
+		&rec.EventID,
+		&rec.EventType,
+		&rec.ProducedBy,
+		&rec.ProducedByType,
+		&rec.SourceEventID,
+		&rec.TriggerEventID,
+		&rec.TriggerEventType,
+	)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return standaloneRuntimePlatformRunRecord{}, false, nil
+	case err != nil:
+		return standaloneRuntimePlatformRunRecord{}, false, fmt.Errorf("load standalone runtime platform run candidate: %w", err)
+	default:
+		return rec, true, nil
+	}
+}
+
+func isStandaloneRuntimePlatformRunRecord(rec standaloneRuntimePlatformRunRecord) bool {
+	if strings.TrimSpace(rec.RunID) == "" {
+		return false
+	}
+	if !isStandaloneRuntimePlatformEventType(rec.EventType) {
+		return false
+	}
+	if strings.TrimSpace(rec.ProducedByType) != "platform" {
+		return false
+	}
+	producedBy := strings.TrimSpace(rec.ProducedBy)
+	if producedBy != "" && producedBy != "runtime" {
+		return false
+	}
+	if strings.TrimSpace(rec.SourceEventID) != "" {
+		return false
+	}
+	if strings.TrimSpace(rec.TriggerEventID) != strings.TrimSpace(rec.EventID) {
+		return false
+	}
+	if strings.TrimSpace(rec.TriggerEventType) != strings.TrimSpace(rec.EventType) {
+		return false
+	}
+	return true
+}
+
+func (s *PostgresStore) convergeStandaloneRuntimePlatformRunByEventID(
+	ctx context.Context,
+	db storerunlifecycle.DBTX,
+	caps StoreSchemaCapabilities,
+	eventID string,
+) error {
+	eventID = sanitizeOptionalUUID(eventID)
+	if db == nil || eventID == "" || !caps.Events.HasRuns || caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID {
+		return nil
+	}
+	rec, found, err := loadStandaloneRuntimePlatformRunRecord(ctx, db, eventID)
+	if err != nil || !found || !isStandaloneRuntimePlatformRunRecord(rec) {
+		return err
+	}
+	switch strings.TrimSpace(rec.RunStatus) {
+	case "completed":
+		return nil
+	case "failed", "cancelled", "forked":
+		return fmt.Errorf("standalone runtime platform run %s already terminal with status %s", rec.RunID, strings.TrimSpace(rec.RunStatus))
+	}
+	active, err := storerunlifecycle.HasActiveDeliveries(ctx, db, rec.RunID)
+	if err != nil {
+		return err
+	}
+	if active {
+		return nil
+	}
+	_, err = storerunlifecycle.MarkTerminal(ctx, db, rec.RunID, "completed", "", time.Now().UTC(), runLifecycleOptions(caps))
+	if err != nil {
+		return fmt.Errorf("converge standalone runtime platform run: %w", err)
+	}
+	return nil
 }
 
 func runIDOrEventID(runID, eventID string) string {
