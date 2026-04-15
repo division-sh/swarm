@@ -98,7 +98,31 @@ active_issues:
     title: Align runtime enforcement with primitive-only cross-flow model
     maps_to:
       - primitive_only_cross_flow_runtime_migration
+  - id: 448
+    title: Reconcile payload_field_coverage ownership across bootverify and catalog harness
+    maps_to:
+      - boot_check_definition_drift
 nodes:
+  - id: boot_check_definition_drift
+    title: Boot-Check Definition Drift
+    parent_class: semantic correctness drift between named boot-check definitions and the live interpreters that claim to implement them
+    canonical_owners:
+      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml boot_verification check definitions
+      - the live supported verification surfaces that implement the named check
+    why_this_node_exists: a named boot check stops being trustworthy when spec text, bootverify, harness verification, and locked-in tests implement different semantics under the same check id
+    known_manifestations:
+      - a named boot check drifts from its canonical platform-spec trigger definition
+      - bootverify and a second harness/verification surface keep the same off-spec interpretation alive
+      - direct proof locks in off-spec behavior and makes later correction look like a regression
+    representative_issues:
+      - 448
+    common_framing_mistakes:
+      too_broad:
+        - boot verification is inconsistent
+      too_narrow:
+        - one missing test
+        - one helper in checks.go
+    current_action_pressure: active
   - id: boot_verification_false_negative_validation
     title: Boot/Verification False-Negative Validation
     parent_class: semantic correctness drift between authored contracts and startup validation

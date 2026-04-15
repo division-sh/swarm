@@ -23,6 +23,11 @@ active_issues:
     maps_to:
       - boundary_owned_decomposition
       - invariant_suite_coverage
+  - id: 447
+    title: Extract bootverify gate-schema validation check
+    maps_to:
+      - boundary_owned_decomposition
+      - invariant_suite_coverage
   - id: 127
     title: Remove or implement the inert post-turn contract enforcement path in the LLM agent
     maps_to:
