@@ -487,6 +487,59 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedReadFileResultsForHelperRu
 	}
 }
 
+func TestConversation_ExecuteToolCalls_PreservesNearLimitReadFileResultWithCompanionEmitCall(t *testing.T) {
+	huge := strings.Repeat("x", maxReadFileResultBytes-1024)
+	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/read-file-1.json"}
+	tools := []ToolDefinition{{Name: "read_file"}, {Name: "emit_category_assessed"}}
+	c := NewConversation("a1", "t1", "sys", tools, SessionScoped, 4, rt)
+	c.Session = &Session{ID: "sess-relay", AgentID: "a1", RuntimeMode: "cli_test", Tools: tools}
+	c.SetToolExecutor(&selectiveToolExec{
+		results: map[string]any{
+			"read_file": map[string]any{
+				"content":    huge,
+				"size_bytes": len(huge),
+			},
+			"emit_category_assessed": map[string]any{
+				"event_id": "evt-1",
+				"status":   "published",
+			},
+		},
+	})
+
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	ctx = withCLIUsableToolsForTurn(ctx, tools, &Response{
+		MCPServers:      map[string]string{"runtime-tools": "connected"},
+		MCPVisibleTools: []string{"mcp__runtime-tools__read_file", "mcp__runtime-tools__emit_category_assessed"},
+	})
+	raw, _ := c.executeToolCalls(ctx, []ToolCall{
+		{Name: "read_file", Arguments: map[string]any{"path": "/data/test-signals-25.jsonl"}},
+		{Name: "emit_category_assessed", Arguments: map[string]any{"category": "payments"}},
+	})
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	if len(arr) != 2 {
+		t.Fatalf("tool payload entries = %d, want 2 (%#v)", len(arr), arr)
+	}
+	readResult, _ := arr[0]["result"].(map[string]any)
+	if readResult == nil {
+		t.Fatalf("read result = %#v", arr[0]["result"])
+	}
+	if truncated, _ := readResult["truncated"].(bool); truncated {
+		t.Fatalf("expected near-limit inline read_file result to survive envelope wrapping, got %#v", readResult)
+	}
+	if _, ok := readResult["follow_up"]; ok {
+		t.Fatalf("follow_up = %#v, want absent for supported inline read_file result", readResult["follow_up"])
+	}
+	if content, _ := readResult["content"].(string); len(content) != len(huge) {
+		t.Fatalf("content length = %d, want %d", len(content), len(huge))
+	}
+	if rt.toolName != "" {
+		t.Fatalf("relay tool name = %q, want no helper relay write", rt.toolName)
+	}
+}
+
 func TestConversation_ExecuteToolCalls_PreservesRelayReadFileResultsForHelperRuntime(t *testing.T) {
 	huge := strings.Repeat("x", maxToolResultBytes+1024)
 	rt := &relayRuntime{relayPath: "/workspace/.swarm/tool-results/sess-relay/read-file-1.json"}

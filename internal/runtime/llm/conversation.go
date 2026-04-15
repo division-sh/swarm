@@ -30,12 +30,13 @@ const (
 const defaultMaxToolRounds = 8
 
 const (
-	maxToolResultBytes        = 16 * 1024
-	maxToolMessageBytes       = 64 * 1024
-	maxReadFileResultBytes    = 256 * 1024
-	maxReadFileMessageBytes   = 256 * 1024
-	maxToolErrorTextRunes     = 600
-	maxToolResultPreviewRunes = 1200
+	maxToolResultBytes              = 16 * 1024
+	maxToolMessageBytes             = 64 * 1024
+	maxReadFileResultBytes          = 256 * 1024
+	maxReadFileEnvelopeReserveBytes = 8 * 1024
+	maxReadFileMessageBytes         = maxReadFileResultBytes + maxToolResultBytes + maxReadFileEnvelopeReserveBytes
+	maxToolErrorTextRunes           = 600
+	maxToolResultPreviewRunes       = 1200
 )
 
 type ToolResult struct {
