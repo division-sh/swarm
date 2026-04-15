@@ -555,15 +555,7 @@ func decodeConfigFromSpecNode(node *yaml.Node) (*ConfigFromSpec, error) {
 	}
 	spec := &ConfigFromSpec{Bindings: map[string]string{}}
 	if hasYAMLMappingKey(node, "policy_keys") {
-		type alias ConfigFromSpec
-		var aux alias
-		if err := node.Decode(&aux); err != nil {
-			return nil, err
-		}
-		spec.PolicyKeys = normalizeStrings(aux.PolicyKeys)
-		for key, value := range aux.Bindings {
-			spec.Bindings[key] = value
-		}
+		return nil, fmt.Errorf("UNDEFINED-FIELD: config_from field %q not in platform spec", "policy_keys")
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
