@@ -322,6 +322,33 @@ func TestEnrichTurnRecord_UsesEmitFallbackWhenObservedCLISurfaceExistsWithoutVis
 	}
 }
 
+func TestEnrichTurnRecord_PreservesEmitFallbackAlongsideObservedSupportedReadFileSurface(t *testing.T) {
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID: "analysis-agent",
+		NativeTools: runtimeactors.NativeToolConfig{
+			FileIO: true,
+		},
+	})
+	rec := enrichTurnRecord(ctx, &Session{
+		ID: "session-1",
+		Tools: []ToolDefinition{
+			{Name: "emit_category_assessed"},
+			{Name: "read_file"},
+		},
+	}, AgentTurnRecord{
+		AgentID:     "analysis-agent",
+		RuntimeMode: sessions.RuntimeModeTask.String(),
+		SessionID:   "session-1",
+	}, &Response{
+		MCPServers:      map[string]string{"runtime-tools": "connected"},
+		MCPVisibleTools: []string{"mcp__runtime-tools__read_file"},
+	})
+
+	if !slices.Equal(rec.AvailableTools, []string{"emit_category_assessed", "read_file"}) {
+		t.Fatalf("available_tools = %#v", rec.AvailableTools)
+	}
+}
+
 func TestEnrichTurnRecord_UsesPlannedConfiguredSurfaceWhenObservedMetadataIsAbsent(t *testing.T) {
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
 		ID: "analysis-agent",

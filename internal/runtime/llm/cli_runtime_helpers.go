@@ -561,6 +561,11 @@ func observedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []Too
 	return filterCanonicalVisibleToolsForActor(actor, tools, observed)
 }
 
+func cliTurnContextAllowedToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
+	surface := cliExecutionToolSurfaceForActor(actor, tools)
+	return append([]string(nil), surface.RuntimeToolNames...)
+}
+
 func plannedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
 	surface := cliExecutionToolSurfaceForActor(actor, tools)
 	return append([]string(nil), surface.CanonicalVisibleTools...)
@@ -569,6 +574,17 @@ func plannedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []Tool
 func cliLocalFallbackVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
 	surface := cliExecutionToolSurfaceForActor(actor, tools)
 	return append([]string(nil), surface.LocalFallbackTools...)
+}
+
+func resolvedCLIUsableToolsForTurn(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
+	usable := appendCanonicalToolNames(nil, cliLocalFallbackVisibleToolsForActor(actor, tools))
+	if observed := observedCanonicalVisibleToolsForActor(actor, tools, resp); len(observed) > 0 {
+		return appendCanonicalToolNames(usable, observed)
+	}
+	if hasObservedCLIExecutionSurface(resp) {
+		return usable
+	}
+	return appendCanonicalToolNames(usable, plannedCanonicalVisibleToolsForActor(actor, tools))
 }
 
 func hasObservedCLIExecutionSurface(resp *Response) bool {
@@ -583,25 +599,39 @@ func cliToolCallAllowedForTurn(actor models.AgentConfig, tools []ToolDefinition,
 	if name == "" {
 		return false
 	}
-	for _, allowed := range cliLocalFallbackVisibleToolsForActor(actor, tools) {
-		if allowed == name {
-			return true
-		}
-	}
-	for _, visible := range observedCanonicalVisibleToolsForActor(actor, tools, resp) {
-		if visible == name {
-			return true
-		}
-	}
-	if hasObservedCLIExecutionSurface(resp) {
-		return false
-	}
-	for _, visible := range plannedCanonicalVisibleToolsForActor(actor, tools) {
+	for _, visible := range resolvedCLIUsableToolsForTurn(actor, tools, resp) {
 		if visible == name {
 			return true
 		}
 	}
 	return false
+}
+
+func appendCanonicalToolNames(dst []string, names []string) []string {
+	if len(names) == 0 {
+		return dst
+	}
+	seen := make(map[string]struct{}, len(dst)+len(names))
+	for _, existing := range dst {
+		existing = toolidentity.CanonicalName(existing)
+		if existing == "" {
+			continue
+		}
+		seen[existing] = struct{}{}
+	}
+	for _, name := range names {
+		name = toolidentity.CanonicalName(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		dst = append(dst, name)
+	}
+	slices.Sort(dst)
+	return dst
 }
 
 func hasToolPrefix(names []string, prefix string) bool {

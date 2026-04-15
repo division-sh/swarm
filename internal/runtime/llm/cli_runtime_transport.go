@@ -55,8 +55,7 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 	if token := strings.TrimSpace(gatewayToken); token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}
-	surface := cliExecutionToolSurfaceForActor(actor, s.Tools)
-	contextToken := turns.RegisterTurnContextWithAllowedTools(ctx, mcpContextTokenTTLForConfig(ctx, cfg), surface.RuntimeToolNames)
+	contextToken := turns.RegisterTurnContextWithAllowedTools(ctx, mcpContextTokenTTLForConfig(ctx, cfg), cliTurnContextAllowedToolsForActor(actor, s.Tools))
 	if contextToken != "" {
 		headers[mcpContextTokenHeader] = contextToken
 	}
