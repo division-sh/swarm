@@ -56,6 +56,10 @@ active_issues:
     title: Collapse residual schema-capability branching toward a narrower canonical store schema
     maps_to:
       - legacy_compatibility_removal
+  - id: 417
+    title: Remove subject-link schema and tool remnants after current owners move
+    maps_to:
+      - post_boundary_subject_link_cleanup
   - id: 173
     title: Completed-seam hygiene with canonical-owner notes and reusable invariant suites
     maps_to:
@@ -169,6 +173,25 @@ nodes:
       too_narrow:
         - one test is flaky
         - one script needs cleanup
+    current_action_pressure: active
+  - id: post_boundary_subject_link_cleanup
+    title: Post-Boundary Subject-Link Cleanup
+    parent_class: maintenance cleanup after cross-flow subject-link owners are removed from the canonical runtime and spec
+    canonical_owners:
+      - current canonical spec/runtime/tool owners until #414, #415, and #416 move them
+      - cleanup-only schema/tool/operator aftermath once those owners are removed
+    why_this_node_exists: subject-link removal can look like simple schema and tool cleanup even while current shipped spec, runtime identity, and operator surfaces still own subject semantics
+    known_manifestations:
+      - schema cleanup issues that try to drop entity_state.subject_id while runtime still persists and propagates it
+      - tool cleanup issues that try to remove get_subject_status while the canonical spec still exposes it
+      - operator/read-model cleanup issues that ignore live subject-aware filters or aggregation surfaces
+    representative_issues:
+      - 417
+    common_framing_mistakes:
+      too_broad:
+        - remove all subject-link semantics in one maintenance PR
+      too_narrow:
+        - drop one column or tool while runtime, spec, or operator surfaces still consume the same concept
     current_action_pressure: active
   - id: dead_or_inert_paths
     title: Dead Or Inert Paths
