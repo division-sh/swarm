@@ -727,10 +727,14 @@ func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opt
 func runDebugTraceSessionSources(caps StoreSchemaCapabilities) string {
 	sources := []string{}
 	if caps.Conversations.Sessions == SchemaFlavorCanonical {
+		runIDExpr := "NULL::uuid"
+		if caps.Conversations.SessionRunID {
+			runIDExpr = "run_id"
+		}
 		sources = append(sources, `
 			SELECT
 				session_id,
-				run_id,
+				`+runIDExpr+`,
 				'live_session' AS session_kind,
 				COALESCE(runtime_mode, '') AS runtime_mode,
 				COALESCE(status, '') AS status,
@@ -739,10 +743,14 @@ func runDebugTraceSessionSources(caps StoreSchemaCapabilities) string {
 		`)
 	}
 	if caps.Conversations.Audits == SchemaFlavorCanonical {
+		runIDExpr := "NULL::uuid"
+		if caps.Conversations.AuditRunID {
+			runIDExpr = "run_id"
+		}
 		sources = append(sources, `
 			SELECT
 				session_id,
-				run_id,
+				`+runIDExpr+`,
 				'turn_audit' AS session_kind,
 				COALESCE(runtime_mode, '') AS runtime_mode,
 				COALESCE(status, '') AS status,
