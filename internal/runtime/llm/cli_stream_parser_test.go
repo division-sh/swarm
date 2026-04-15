@@ -164,6 +164,40 @@ func TestParseCLIResponse_NormalizesBuiltinToolCallNames(t *testing.T) {
 	}
 }
 
+func TestParseCLIResponse_PreservesDuplicateToolCalls(t *testing.T) {
+	resp := parseCLIResponse([]byte(`{"content":[{"type":"tool_use","name":"Read","input":{"path":"/tmp/a.txt"}},{"type":"tool_use","name":"Read","input":{"path":"/tmp/a.txt"}}]}`))
+	if resp == nil {
+		t.Fatal("expected response")
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("tool calls = %#v", resp.ToolCalls)
+	}
+	if len(resp.ObservedToolCalls) != 2 {
+		t.Fatalf("observed tool calls = %#v", resp.ObservedToolCalls)
+	}
+}
+
+func TestCLIStreamAccumulator_PreservesDuplicateObservedToolCallsForPersistence(t *testing.T) {
+	acc := newCLIStreamAccumulator()
+	acc.AddLine([]byte(`{"type":"system","subtype":"init","session_id":"sess-dup","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_scan_requested"]}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_1","name":"mcp__runtime-tools__emit_scan_requested","input":{"mode":"corpus"}}},"session_id":"sess-dup"}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_stop","index":2},"session_id":"sess-dup"}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"toolu_2","name":"mcp__runtime-tools__emit_scan_requested","input":{"mode":"corpus"}}},"session_id":"sess-dup"}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_stop","index":3},"session_id":"sess-dup"}`))
+	acc.AddLine([]byte(`{"type":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"{\"event_id\":\"evt-1\"}"}]},{"type":"tool_result","tool_use_id":"toolu_2","content":[{"type":"text","text":"{\"event_id\":\"evt-2\"}"}]}]}`))
+
+	resp := acc.Response()
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("expected completed MCP tool calls to stay suppressed for execution, got %+v", resp.ToolCalls)
+	}
+	if len(resp.ObservedToolCalls) != 2 {
+		t.Fatalf("observed tool calls = %#v", resp.ObservedToolCalls)
+	}
+	if resp.ObservedToolCalls[0].Name != "emit_scan_requested" || resp.ObservedToolCalls[1].Name != "emit_scan_requested" {
+		t.Fatalf("observed tool calls = %#v", resp.ObservedToolCalls)
+	}
+}
+
 func TestCLIStreamAccumulator_IgnoresNestedToolArgumentListsForVisibility(t *testing.T) {
 	acc := newCLIStreamAccumulator()
 	acc.AddLine([]byte(`{"type":"system","subtype":"init","session_id":"sess-nested","tools":["Read"]}`))
