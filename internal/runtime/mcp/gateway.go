@@ -359,6 +359,13 @@ func projectToolCallSuccessText(ctx context.Context, executor runtimeGatewayExec
 	if len(raw) <= toolCallRelayResultLimit(toolName, input) {
 		return ToolResultText(out), nil
 	}
+	if !runtimeReadFileFollowUpAllowedInContext(ctx) {
+		return ToolResultText(map[string]any{
+			"truncated": true,
+			"bytes":     len(raw),
+			"preview":   clampRunes(string(raw), maxToolResultPreviewRunes),
+		}), nil
+	}
 	writer, ok := executor.(OversizedToolResultRelayWriter)
 	if !ok {
 		return ToolResultText(out), nil
@@ -486,6 +493,14 @@ func toolAllowedInContext(ctx context.Context, toolName string) bool {
 		return false
 	}
 	return cap.Callable
+}
+
+func runtimeReadFileFollowUpAllowedInContext(ctx context.Context) bool {
+	cap, ok := toolCapabilityInContext(ctx, "read_file")
+	if !ok {
+		return false
+	}
+	return cap.Visible && cap.Callable
 }
 
 func toolIsKindInContext(ctx context.Context, toolName string, kind toolcapabilities.ToolKind) bool {
