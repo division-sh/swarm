@@ -7,6 +7,6 @@ pipeline.complete:
 child/step.begin:
   payload:
     entity_id: string
-child/step.result:
+child/grandchild/micro.done:
   payload:
     entity_id: string

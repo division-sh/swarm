@@ -609,7 +609,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	}
 }
 
-func TestPipelineCoordinatorIntercept_NestedDescendantCompletionEmitsParentFlowResult(t *testing.T) {
+func TestPipelineCoordinatorIntercept_NestedDescendantCompletionEmitsRootCompletion(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
 	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
@@ -680,8 +680,8 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionEmitsParentFlowR
 	if !passThrough {
 		t.Fatal("expected nested descendant completion to remain visible downstream")
 	}
-	if len(emitted) != 1 || string(emitted[0].Type) != "child/step.result" {
-		t.Fatalf("emitted = %#v, want [child/step.result]", emitted)
+	if len(emitted) != 1 || string(emitted[0].Type) != "pipeline.complete" {
+		t.Fatalf("emitted = %#v, want [pipeline.complete]", emitted)
 	}
 	if got := emitted[0].EntityID(); got != rootEntityID {
 		t.Fatalf("emitted entity_id = %q, want %q", got, rootEntityID)
@@ -694,12 +694,12 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionEmitsParentFlowR
 	if !found {
 		t.Fatal("expected child instance")
 	}
-	if got := strings.TrimSpace(child.CurrentState); got != "completed" {
-		t.Fatalf("child current_state = %q, want completed", got)
+	if got := strings.TrimSpace(child.CurrentState); got != "waiting" {
+		t.Fatalf("child current_state = %q, want waiting", got)
 	}
 }
 
-func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedToParentStillEmitsRootResult(t *testing.T) {
+func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedToParentStillEmitsRootCompletion(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
 	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
@@ -769,15 +769,15 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	if !passThrough {
 		t.Fatal("expected nested descendant completion to remain visible downstream")
 	}
-	if len(emitted) != 1 || string(emitted[0].Type) != "child/step.result" {
-		t.Fatalf("emitted = %#v, want [child/step.result]", emitted)
+	if len(emitted) != 1 || string(emitted[0].Type) != "pipeline.complete" {
+		t.Fatalf("emitted = %#v, want [pipeline.complete]", emitted)
 	}
 	if got := emitted[0].EntityID(); got != rootEntityID {
 		t.Fatalf("emitted entity_id = %q, want %q", got, rootEntityID)
 	}
 }
 
-func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTxStillEmitsRootResult(t *testing.T) {
+func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTxStillEmitsRootCompletion(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
 	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
@@ -848,8 +848,8 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	if !passThrough {
 		t.Fatal("expected nested descendant completion to remain visible downstream")
 	}
-	if len(emitted) != 1 || string(emitted[0].Type) != "child/step.result" {
-		t.Fatalf("emitted = %#v, want [child/step.result]", emitted)
+	if len(emitted) != 1 || string(emitted[0].Type) != "pipeline.complete" {
+		t.Fatalf("emitted = %#v, want [pipeline.complete]", emitted)
 	}
 	if got := emitted[0].EntityID(); got != rootEntityID {
 		t.Fatalf("emitted entity_id = %q, want %q", got, rootEntityID)

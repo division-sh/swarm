@@ -249,6 +249,7 @@ nodes:
     representative_issues:
       - 413
       - 415
+      - 426
       - 416
       - 417
     common_framing_mistakes:
@@ -293,6 +294,7 @@ nodes:
       - broader authored migration pressure still exists for subject_id, back-propagation, and other cross-flow coupling assumptions, but those are a separate authored class unless local evidence proves they belong to the same narrow migration slice
     representative_issues:
       - 416
+      - 431
     common_framing_mistakes:
       too_broad:
         - migrate every cross-flow authored assumption in one PR

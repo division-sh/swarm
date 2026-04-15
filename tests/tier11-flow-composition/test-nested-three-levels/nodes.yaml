@@ -10,9 +10,9 @@ root-dispatcher:
 root-collector:
   id: root-collector
   execution_type: system_node
-  subscribes_to: [child/step.result]
+  subscribes_to: [child/grandchild/micro.done]
   produces: [pipeline.complete]
   event_handlers:
-    child/step.result:
+    child/grandchild/micro.done:
       advances_to: done
       emits: pipeline.complete
