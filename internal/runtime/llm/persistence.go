@@ -67,7 +67,11 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		}
 	}
 	if resp != nil && len(rec.ToolCalls) == 0 {
-		rec.ToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
+		if len(resp.ObservedToolCalls) > 0 {
+			rec.ToolCalls = append([]ToolCall(nil), resp.ObservedToolCalls...)
+		} else {
+			rec.ToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
+		}
 	}
 	if resp != nil && len(rec.AvailableTools) == 0 {
 		actor, _ := runtimeactors.ActorFromContext(ctx)

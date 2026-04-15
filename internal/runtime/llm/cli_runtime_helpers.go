@@ -66,7 +66,7 @@ func parseCLIResponse(raw []byte) *Response {
 		Message: Message{Role: "assistant"},
 	}
 	if len(raw) == 0 {
-		return resp
+		return finalizeCLIResponse(resp)
 	}
 
 	var obj map[string]any
@@ -137,14 +137,23 @@ func parseCLIResponse(raw []byte) *Response {
 		}
 		if len(texts) > 0 {
 			resp.Message.Content = strings.TrimSpace(strings.Join(texts, "\n"))
-			return resp
+			return finalizeCLIResponse(resp)
 		}
 		if len(resp.ToolCalls) > 0 {
-			return resp
+			return finalizeCLIResponse(resp)
 		}
 	}
 
 	resp.Message.Content = strings.TrimSpace(string(raw))
+	return finalizeCLIResponse(resp)
+}
+
+func finalizeCLIResponse(resp *Response) *Response {
+	if resp == nil {
+		return &Response{}
+	}
+	resp.ToolCalls = dedupeToolCalls(resp.ToolCalls)
+	resp.ObservedToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
 	return resp
 }
 

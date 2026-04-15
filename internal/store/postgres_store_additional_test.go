@@ -3441,6 +3441,61 @@ func TestManagerStore_ConversationPersistence_SessionPerEntityUsesActorContext(t
 	}
 }
 
+func TestManagerStore_AppendAgentTurn_PersistsObservedToolCalls(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	sessionID := acquireLiveTestSession(t, ctx, db, "a1", runtimesessions.RuntimeModeSession, runtimesessions.SessionScopeGlobal, "global")
+
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:     "a1",
+		RuntimeMode: "session",
+		SessionID:   sessionID,
+		ToolCalls: []runtimellm.ToolCall{
+			{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}},
+			{Name: "web_search", Arguments: map[string]any{"query": "b2b payments"}},
+		},
+		RequestPayload: []byte(`{"kind":"session"}`),
+		ResponseRaw:    []byte(`{"result":"done"}`),
+		ParseOK:        true,
+		Latency:        10 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn: %v", err)
+	}
+
+	var raw string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(tool_calls::text, '[]')
+		FROM agent_turns
+		WHERE agent_id = 'a1' AND session_id = $1::uuid
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, sessionID).Scan(&raw); err != nil {
+		t.Fatalf("load tool_calls: %v", err)
+	}
+
+	var calls []map[string]any
+	if err := json.Unmarshal([]byte(raw), &calls); err != nil {
+		t.Fatalf("decode tool_calls: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("tool_calls count = %d, want 2 in %s", len(calls), raw)
+	}
+	if calls[0]["name"] != redactName("query_entities") || calls[1]["name"] != redactName("web_search") {
+		t.Fatalf("tool_calls = %#v", calls)
+	}
+	args0, ok := calls[0]["arguments"].(map[string]any)
+	if !ok || args0["entity_type"] != "company" {
+		t.Fatalf("first tool call arguments = %#v", calls[0]["arguments"])
+	}
+	args1, ok := calls[1]["arguments"].(map[string]any)
+	if !ok || args1["query"] != "b2b payments" {
+		t.Fatalf("second tool call arguments = %#v", calls[1]["arguments"])
+	}
+}
+
 func TestManagerStore_LiveConversationPersistenceRequiresCanonicalLiveSession(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

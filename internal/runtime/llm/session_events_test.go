@@ -345,6 +345,31 @@ func TestEnrichTurnRecord_UsesPlannedConfiguredSurfaceWhenObservedMetadataIsAbse
 	}
 }
 
+func TestEnrichTurnRecord_PrefersObservedToolCallsForPersistenceWhenExecutionCallsAreSuppressed(t *testing.T) {
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID: "analysis-agent",
+	})
+	rec := enrichTurnRecord(ctx, &Session{
+		ID: "session-1",
+		Tools: []ToolDefinition{
+			{Name: "emit_category_assessed"},
+		},
+	}, AgentTurnRecord{
+		AgentID:     "analysis-agent",
+		RuntimeMode: sessions.RuntimeModeTask.String(),
+		SessionID:   "session-1",
+	}, &Response{
+		ToolCalls: []ToolCall{},
+		ObservedToolCalls: []ToolCall{
+			{Name: "emit_category_assessed", Arguments: map[string]any{"category": "payments"}},
+		},
+	})
+
+	if len(rec.ToolCalls) != 1 || rec.ToolCalls[0].Name != "emit_category_assessed" {
+		t.Fatalf("tool_calls = %#v", rec.ToolCalls)
+	}
+}
+
 func TestClaudeCLIRuntimePrompt_HidesNativeCapabilityFallbackToolsFromPostamble(t *testing.T) {
 	actor := runtimeactors.AgentConfig{
 		ID: "analysis-agent",
