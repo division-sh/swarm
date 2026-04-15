@@ -1,0 +1,56 @@
+# Review Draft: run_model Joined Trace Surface
+# Status: implementation-aligned review draft
+# Target: platform-spec.yaml →
+#   - run_model.flight_recorder.joined_trace_surface
+#   - run_model.builder_api.run_trace
+#
+# This draft captures the supported run-centric joined trace surface added on the
+# `#364` implementation branch. It is intentionally narrow: one canonical
+# persisted run-trace projection layered on the existing run-debug owner, not a
+# broader observability redesign.
+
+run_trace_surface:
+  concept: 'One canonical persisted run-centric joined trace surface for operator debugging.'
+
+  owner_alignment:
+    canonical_owner: 'internal/store/run_debug_read_surface.go'
+    rule: 'Operator-facing run trace surfaces extend the canonical store-backed run-debug
+      owner. They do not create dashboard-local, builder-local, or other parallel
+      observability islands.'
+
+  projection_scope:
+    description: 'The joined trace projection answers "what is happening in this run right
+      now?" by linking one run through event identity, delivery lifecycle, session ownership,
+      and turn activity.'
+    persisted_sources:
+      - runs
+      - events
+      - event_deliveries
+      - agent_sessions
+      - agent_conversation_audits
+      - agent_turns
+    linkage_requirements:
+      - 'events.run_id anchors the projection to the run.'
+      - 'event_deliveries.event_id links deliveries to events.'
+      - 'event_deliveries.active_session_id may link deliveries to live agent_sessions rows.'
+      - 'agent_turns.session_id may link turns to either live agent_sessions rows or
+        canonical agent_conversation_audits rows.'
+      - 'agent_turns.trigger_event_id links turn activity back to the triggering event.'
+
+  supported_surface:
+    api: 'GET /runs/:run_id/trace'
+    contract: 'Returns run-centric joined trace rows that link event identity, delivery
+      state, session ownership, and turn identity for operator debugging.'
+    non_goal: 'This surface is not a provider-internal reasoning transcript and not a generic
+      observability query endpoint.'
+
+  semantics:
+    delivery_truth: 'Delivery lifecycle is read from canonical event_deliveries rows.'
+    session_truth: 'Session ownership comes from canonical agent_sessions rows when present,
+      with canonical agent_conversation_audits allowed as the persisted fallback lineage for
+      task-style sessions.'
+    turn_truth: 'Turn activity is read from canonical agent_turns rows keyed by run_id,
+      session_id, and trigger_event_id.'
+    consumer_rule: 'CLI, dashboard, and builder operator surfaces should consume this
+      projection via the canonical run-debug owner rather than rebuilding the join locally.'
+
