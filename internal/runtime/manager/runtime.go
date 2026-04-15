@@ -804,6 +804,15 @@ func (am *AgentManager) ResetRuntimeStateWithSource(source string) error {
 	return am.resetRuntimeState(source)
 }
 
+func platformResetSourceAuthorized(source string) bool {
+	switch strings.TrimSpace(source) {
+	case "admin_cli", "builder_api":
+		return true
+	default:
+		return false
+	}
+}
+
 func (am *AgentManager) resetRuntimeState(source string) error {
 	if err := am.Shutdown(); err != nil {
 		return err
@@ -867,7 +876,7 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 		}
 	}
 	source = strings.TrimSpace(source)
-	if source != "" && am.bus != nil {
+	if platformResetSourceAuthorized(source) && am.bus != nil {
 		payload, err := json.Marshal(map[string]any{
 			"source":    source,
 			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
