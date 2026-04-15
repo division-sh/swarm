@@ -66,7 +66,7 @@ type claudeStartupToolSource interface {
 	ToolCapabilitiesForActor(runtimeactors.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
 }
 
-func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
+func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, startupProbe llm.StartupVisibleToolSurfaceProber, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
 	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
 		return nil
 	}
@@ -97,7 +97,22 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		if len(sessionTools) == 0 {
 			return fmt.Errorf("managed-agent startup probe found no declared tools for agent %s", agentID)
 		}
-		if len(llm.AgentVisibleToolSurfaceForActor(agentCfg, sessionTools).RuntimeToolNames) == 0 {
+		surface := llm.AgentVisibleToolSurfaceForActor(agentCfg, sessionTools)
+		if len(surface.NativeBuiltinTools) > 0 {
+			if startupProbe == nil {
+				return fmt.Errorf("provider-native startup probe is required for agent %s", agentID)
+			}
+			probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(ctx, agentCfg, runtimemanager.ExtractSystemPromptFromConfig(agentCfg.Config), sessionTools)
+			if err != nil {
+				return fmt.Errorf("provider-native startup probe failed for agent %s: %w", agentID, err)
+			}
+			expectedVisible := llm.PlannedCanonicalVisibleToolsForActor(agentCfg, sessionTools)
+			actualVisible := llm.ObservedCanonicalVisibleToolsForActor(agentCfg, sessionTools, probeResp)
+			if !equalSortedStrings(actualVisible, expectedVisible) {
+				return fmt.Errorf("provider-native startup probe returned unexpected visible tool surface for agent %s: expected [%s], got [%s]", agentID, strings.Join(expectedVisible, ", "), strings.Join(actualVisible, ", "))
+			}
+		}
+		if len(surface.RuntimeToolNames) == 0 {
 			continue
 		}
 		expectedNames, capabilities, err := expectedStartupMCPTools(agentCfg, tools, sessionTools)

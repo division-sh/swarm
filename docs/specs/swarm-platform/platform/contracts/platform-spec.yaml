@@ -1266,8 +1266,10 @@ engine:
     native_tools:
       description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
         (omitted = no native capabilities). The native_tools field is the sole authorization gate — no separate permission
-        entry is required. Native tools are not part of the tools system. They are provider-level capabilities that the
-        configured runtime must expose natively. The platform does not satisfy native_tools by injecting fallback tools.
+        entry is required. Native tools are not part of the tools system. They are runtime-level capabilities. On the shipped
+        CLI runtime, `bash`, `web_search`, and `file_io` are provider-native only; the platform does not satisfy native_tools
+        by injecting fallback tools, and visible native-tool surface must equal callable truth. Other runtimes may still use
+        runtime-specific fallback paths outside this CLI-specific rule.
       contract_field:
         field: native_tools
         type: object
@@ -1281,9 +1283,9 @@ engine:
           says bash true, the agent gets bash. Boot validation checks that capability names are valid and values are boolean.
       relationship_to_tool_filtering:
         description: Native tools are NOT part of the tools filtering system. tools controls what the platform
-          injects as platform/MCP/HTTP tools. Native tools control provider-native capabilities only. They are separate channels.
-          The platform must not inject a platform tool, MCP shim, or local fallback execution path to satisfy a native_tools
-          declaration. The visible native-tool surface for a turn must equal callable truth on that same turn.
+          injects as platform/MCP/HTTP tools. Native tools control runtime-level capabilities. They are separate channels.
+          On CLI, the platform must not inject a platform tool, MCP shim, or local fallback execution path to satisfy a
+          native_tools declaration. The visible native-tool surface for a turn must equal callable truth on that same turn.
       capabilities:
         bash:
           description: Shell command execution. On supporting runtimes, bash runs provider-natively and always executes locally
@@ -1303,8 +1305,8 @@ engine:
             to agents that need host-level operations (e.g., infrastructure management agents). Not appropriate for data-processing
             or analysis agents.
         web_search:
-          description: Internet search. On supporting runtimes, web_search is a provider-native capability. The platform does
-            not satisfy native_tools.web_search through policy-managed search-provider fallback.
+          description: Internet search. On the shipped CLI runtime, web_search is a provider-native capability. The platform
+            does not satisfy native_tools.web_search through policy-managed search-provider fallback on CLI.
           tool_schema:
             input:
               query: string — search query
@@ -1312,12 +1314,13 @@ engine:
             output:
               results: array of objects with title, url, snippet fields
           configuration:
-            description: policy.web_search_provider is not part of the native_tools contract. It does not satisfy, unlock,
-              or downgrade native_tools.web_search. If the configured runtime cannot expose provider-native web_search, startup/runtime
-              validation must fail closed.
+            description: On CLI, policy.web_search_provider is not part of the native_tools contract. It does not satisfy,
+              unlock, or downgrade native_tools.web_search. If the configured CLI runtime cannot expose provider-native web_search,
+              startup/runtime validation must fail closed. Non-CLI runtimes may still use fallback-aware validation outside
+              this CLI-specific rule.
         file_io:
-          description: Read and write files within workspace mounts. On supporting runtimes, file_io is provider-native and
-            maps to callable read_file/write_file operations on the same turn. /workspace is read-write, /data is read-only,
+          description: Read and write files within workspace mounts. On the shipped CLI runtime, file_io is provider-native
+            and maps to callable read_file/write_file operations on the same turn. /workspace is read-write, /data is read-only,
             /opt/swarm/contracts is read-only. Always runs locally.
           tool_schema:
             read_file:
@@ -1333,9 +1336,9 @@ engine:
               output:
                 bytes_written: integer
       tool_names:
-        description: Canonical tool names the agent sees for native capabilities on the supporting runtime path. These names
-          are authoritative only when the same turn can actually call them. The platform must not advertise speculative or
-          fallback-only native tool names.
+        description: Canonical tool names the agent sees for native capabilities on the CLI supporting-runtime path. These
+          names are authoritative only when the same turn can actually call them. The platform must not advertise speculative
+          or fallback-only native tool names on CLI.
         bash:
           tool_name: bash
           note: Single tool. Same name as the capability.
@@ -1349,28 +1352,29 @@ engine:
           note: The file_io capability maps to two callable tools. The contract field is one boolean (file_io), but the agent
             sees read_file and write_file only when the supporting runtime can actually call them on that turn.
       runtime_resolution:
-        description: How the platform resolves native_tools at agent session creation time. All execution is local to the
-          platform host. The platform enables only provider-native capability support and fails closed otherwise.
+        description: How the platform resolves native_tools at agent session creation time on the shipped CLI runtime. All
+          execution is local to the platform host. CLI enables only provider-native capability support and fails closed otherwise.
+          Other runtimes may use fallback-aware validation and are outside this CLI-specific fail-closed rule.
         steps:
         - 1. Read native_tools from agent contract. If absent or empty, no native capabilities — skip.
-        - 2. Ask the configured runtime which native capabilities it exposes provider-natively.
-        - 3. For each enabled capability (bash, web_search, file_io), if the runtime does not support it provider-natively,
+        - 2. If the configured runtime is CLI-native-strict, ask the runtime which native capabilities it exposes provider-natively.
+        - 3. For each enabled capability (bash, web_search, file_io), if the strict CLI runtime does not support it provider-natively,
           fail closed before the session/turn can advertise or execute that capability.
-        - 4. For supporting CLI runtimes, enable the provider-native capability through provider invocation and transport binding.
+        - 4. On the shipped CLI runtime, enable the provider-native capability through provider invocation and transport binding.
           These run locally on the same host — workspace scoping is inherent.
-        - 5. Do not inject platform fallback tools, MCP shims, or local compatibility paths to satisfy native_tools.
-        - 6. Persisted turn surfaces (for example available_tools and MCP-visible facts) must reflect the same callable truth
+        - 5. On CLI, do not inject platform fallback tools, MCP shims, or local compatibility paths to satisfy native_tools.
+        - 6. Persisted turn surfaces on CLI (for example available_tools and MCP-visible facts) must reflect the same callable truth
           observed for that turn.
-        provider_detection: The platform determines native-tool support from the configured runtime adapter. Runtime startup
-          probes may further fail closed if a declared capability cannot be bound or called on the shipped runtime path.
+        provider_detection: The platform determines CLI native-tool support from the configured runtime adapter. Runtime startup
+          probes may further fail closed if a declared capability cannot be bound or called on the shipped CLI runtime path.
       environment:
         description: All native tool execution is local to the platform host and respects the workspace model.
         rules:
         - All native tool execution runs locally on the platform host. There is no remote execution case.
         - bash cwd is /workspace for the agent's workspace class scope
         - file_io is scoped to /workspace (read-write) and /data (read-only). Writes outside /workspace are rejected.
-        - Workspace scoping is guaranteed on the provider-native runtime path. The platform does not satisfy native_tools by
-          switching to a separate fallback execution path.
+        - On CLI, workspace scoping is guaranteed on the provider-native runtime path. The platform does not satisfy native_tools
+          by switching to a separate fallback execution path.
         - Environment variables from the credential store are NOT exposed to native tools. Agents access credentials through
           platform tools (HTTP tool credential substitution, MCP server auth), not via env vars in bash.
       audit:
@@ -1379,14 +1383,15 @@ engine:
         provider_native: Provider-native tool usage is captured in the agent session transcript. For task-mode agents, the
           transcript is persisted (write-only) but never reloaded — providing a full audit trail without breaking stateless
           semantics.
-        surface_truth: Persisted available_tools and MCP-visible turn facts must describe only the tools that were actually
-          callable on that turn. The platform must not narrate native-tool fallback availability it cannot execute.
+        surface_truth: On CLI, persisted available_tools and MCP-visible turn facts must describe only the tools that were
+          actually callable on that turn. The platform must not narrate native-tool fallback availability it cannot execute.
       boot_validation:
         checks:
         - All capability names in native_tools must be recognized (bash, web_search, file_io). Unknown names are a boot error.
         - All values must be boolean. Non-boolean values are a boot error.
-        - If any enabled native capability is unsupported by the configured runtime's provider-native capability set, startup/runtime
-          validation fails closed. policy.web_search_provider is not part of native_tools validation or authorization.
+        - If any enabled native capability is unsupported by a CLI-native-strict runtime's provider-native capability set, startup/runtime
+          validation fails closed. policy.web_search_provider is not part of CLI native_tools validation or authorization. Non-CLI
+          runtimes may still use fallback-aware validation outside this CLI-specific rule.
   timer_model:
     description: Timers are durable delayed events. The platform schedules them and fires them as regular events entering
       the event loop. Timers are declared in nodes.yaml.
