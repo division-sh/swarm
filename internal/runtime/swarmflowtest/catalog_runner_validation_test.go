@@ -48,9 +48,22 @@ func TestValidateCatalogExpectedDocument_RuntimeOnlyCaseIsNonExecutable(t *testi
 
 func TestCatalogFixtures_UseCanonicalCreateFlowInstanceAuthoring(t *testing.T) {
 	repoRoot := repoRootForTest(t)
-	matches, err := filepath.Glob(filepath.Join(repoRoot, "tests", "*", "*", "nodes.yaml"))
+	var matches []string
+	err := filepath.WalkDir(filepath.Join(repoRoot, "tests"), func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) != "nodes.yaml" {
+			return nil
+		}
+		matches = append(matches, path)
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("glob catalog nodes.yaml: %v", err)
+		t.Fatalf("walk catalog nodes.yaml: %v", err)
 	}
 	for _, path := range matches {
 		t.Run(strings.TrimPrefix(filepath.ToSlash(path), filepath.ToSlash(filepath.Join(repoRoot, "tests"))+"/"), func(t *testing.T) {
