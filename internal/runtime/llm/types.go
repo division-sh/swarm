@@ -1,6 +1,10 @@
 package llm
 
-import "context"
+import (
+	"context"
+
+	models "swarm/internal/runtime/core/actors"
+)
 
 type ToolDefinition struct {
 	Name        string `json:"name"`
@@ -92,4 +96,8 @@ type NativeToolCapabilityProvider interface {
 
 type NativeToolStrictProvider interface {
 	EnforceProviderNativeToolSupport() bool
+}
+
+type StartupVisibleToolSurfaceProber interface {
+	ProbeStartupVisibleToolSurface(ctx context.Context, actor models.AgentConfig, systemPrompt string, tools []ToolDefinition) (*Response, error)
 }

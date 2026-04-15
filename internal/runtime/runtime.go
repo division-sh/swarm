@@ -686,7 +686,8 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if err := validateClaudeManagedAgentWorkspaces(ctx, rt.Config, rt.Workspace, rt.Manager); err != nil {
 		return fmt.Errorf("claude runtime workspace validation failed: %w", err)
 	}
-	if err := validateClaudeMCPToolsForManagedAgents(ctx, rt.Config, rt.MCPTurns, rt.ToolExecutor, rt.Manager); err != nil {
+	startupProbe, _ := rt.LLM.(llm.StartupVisibleToolSurfaceProber)
+	if err := validateClaudeMCPToolsForManagedAgents(ctx, rt.Config, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager); err != nil {
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}
 	if rt.Manager != nil {
