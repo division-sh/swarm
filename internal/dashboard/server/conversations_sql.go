@@ -43,25 +43,48 @@ func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]Conversa
 	if err := requireConversationSurfaceCapabilities(caps); err != nil {
 		return nil, err
 	}
+	if err := requireConversationTurnCapabilities(caps); err != nil {
+		return nil, err
+	}
 	sources := conversationQuerySources(caps)
+	latestTurnBlocksExpr := `'[]'::jsonb`
+	if caps.Conversations.TurnBlocks {
+		latestTurnBlocksExpr = `COALESCE(turn_blocks, '[]'::jsonb)`
+	}
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
-			session_id,
-			agent_id,
-			kind,
-			COALESCE(scope_key, ''),
-			COALESCE(scope, ''),
-			COALESCE(runtime_mode, ''),
-			COALESCE(status, ''),
-			COALESCE(turn_count, 0),
-			COALESCE(runtime_state, '{}'::jsonb),
-			updated_at
+			conversations.session_id,
+			conversations.agent_id,
+			conversations.kind,
+			COALESCE(conversations.scope_key, ''),
+			COALESCE(conversations.scope, ''),
+			COALESCE(conversations.runtime_mode, ''),
+			COALESCE(conversations.status, ''),
+			COALESCE(conversations.turn_count, 0),
+			COALESCE(conversations.runtime_state, '{}'::jsonb),
+			COALESCE(latest_turn.turn_id, ''),
+			COALESCE(latest_turn.task_id, ''),
+			COALESCE(latest_turn.parse_ok, false),
+			COALESCE(latest_turn.turn_blocks, '[]'::jsonb),
+			conversations.updated_at
 		FROM (
 			%s
 		) conversations
+		LEFT JOIN LATERAL (
+			SELECT
+				turn_id::text AS turn_id,
+				COALESCE(task_id, '') AS task_id,
+				parse_ok,
+				%s AS turn_blocks
+			FROM agent_turns
+			WHERE agent_id = conversations.agent_id
+			  AND session_id::text = conversations.session_id
+			ORDER BY created_at DESC, turn_id DESC
+			LIMIT 1
+		) latest_turn ON true
 		ORDER BY updated_at DESC, agent_id ASC
 		LIMIT $1
-	`, strings.Join(sources, "\nUNION ALL\n")), limit)
+	`, strings.Join(sources, "\nUNION ALL\n"), latestTurnBlocksExpr), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
@@ -140,6 +163,10 @@ func scanConversationSummary(scanner rowScanner) (ConversationSummary, error) {
 	var (
 		item            ConversationSummary
 		runtimeStateRaw []byte
+		turnID          string
+		taskID          string
+		parseOK         bool
+		turnBlocksRaw   []byte
 	)
 	if err := scanner.Scan(
 		&item.SessionID,
@@ -151,6 +178,10 @@ func scanConversationSummary(scanner rowScanner) (ConversationSummary, error) {
 		&item.Status,
 		&item.TurnCount,
 		&runtimeStateRaw,
+		&turnID,
+		&taskID,
+		&parseOK,
+		&turnBlocksRaw,
 		&item.UpdatedAt,
 	); err != nil {
 		return ConversationSummary{}, err
@@ -161,6 +192,10 @@ func scanConversationSummary(scanner rowScanner) (ConversationSummary, error) {
 	}
 	item.Summary = runtimeState.Summary
 	item.Metadata = projectConversationSummaryMetadata(runtimeState)
+	item.Metadata.LiveTurn, err = projectLatestTurn(taskID, parseOK, turnID, turnBlocksRaw)
+	if err != nil {
+		return ConversationSummary{}, fmt.Errorf("decode conversation live_turn: %w", err)
+	}
 	return item, nil
 }
 

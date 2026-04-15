@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	runtimellm "swarm/internal/runtime/llm"
 	"swarm/internal/store"
@@ -26,6 +27,33 @@ func projectConversationSummaryMetadata(p store.ConversationRuntimeStateDescript
 		}
 	}
 	return meta
+}
+
+func projectLatestTurn(taskID string, parseOK bool, turnID string, turnBlocksRaw []byte) (*OperatorLiveTurn, error) {
+	taskID = strings.TrimSpace(taskID)
+	turnID = strings.TrimSpace(turnID)
+	summary, ok, err := decodeTurnSummaryProjection(turnBlocksRaw)
+	if err != nil {
+		return nil, err
+	}
+	if !ok && taskID == "" && turnID == "" {
+		return nil, nil
+	}
+	out := &OperatorLiveTurn{
+		TurnID:  turnID,
+		TaskID:  taskID,
+		ParseOK: parseOK,
+	}
+	if ok {
+		out.AssistantVisibleOutput = summary.AssistantVisibleOutput
+		out.Outcome = summary.Outcome
+		out.ProgressUpdates = cloneStringSlice(summary.ProgressUpdates)
+		out.LastTool, err = projectedTurnSummaryLastToolTransport(summary, parseOK)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func projectConversationRuntimeState(p store.ConversationRuntimeStateDescriptor) ConversationRuntimeState {

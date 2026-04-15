@@ -95,8 +95,11 @@ type agentOperatorProjection struct {
 	DeadLetters24h      int
 	TurnCount           int
 	Turns24h            int
+	SessionID           string
+	ProviderSessionID   string
 	CurrentTaskID       string
 	LastTool            *AgentLastTool
+	LiveTurn            *OperatorLiveTurn
 }
 
 type pendingAgentDeliveryFactSource interface {
@@ -123,23 +126,28 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 		SELECT
 			a.agent_id,
 			COALESCE(a.status, 'active'),
+			COALESCE(sess.session_id::text, ''),
 			COALESCE(sess.turn_count, 0),
 			COALESCE(sess.lease_holder, ''),
 			sess.lease_expires_at,
+			COALESCE(sess.runtime_state, '{}'::jsonb),
 			0,
 			0,
 			COALESCE(f.failures_24h, 0),
 			COALESCE(f.dead_letters_24h, 0),
 			0,
+			COALESCE(latest_turn.turn_id, ''),
 			COALESCE(latest_turn.task_id, ''),
 			COALESCE(latest_turn.parse_ok, false),
 			COALESCE(latest_turn.turn_blocks, '[]'::jsonb)
 		FROM agents a
 		LEFT JOIN LATERAL (
 			SELECT
+				session_id,
 				turn_count,
 				lease_holder,
-				lease_expires_at
+				lease_expires_at,
+				runtime_state
 			FROM agent_sessions
 			WHERE agent_id = a.agent_id
 			  AND status = 'active'
@@ -149,6 +157,7 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 		) sess ON true
 		LEFT JOIN LATERAL (
 			SELECT
+				turn_id::text AS turn_id,
 				COALESCE(task_id, '') AS task_id,
 				parse_ok,
 				%s AS turn_blocks
@@ -178,24 +187,29 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 	agentIDs := make([]string, 0)
 	for rows.Next() {
 		var (
-			id            string
-			projection    agentOperatorProjection
-			lockExpiresAt sql.NullTime
-			latestTaskID  string
-			latestParseOK bool
-			latestTurnRaw []byte
+			id              string
+			projection      agentOperatorProjection
+			lockExpiresAt   sql.NullTime
+			runtimeStateRaw []byte
+			latestTurnID    string
+			latestTaskID    string
+			latestParseOK   bool
+			latestTurnRaw   []byte
 		)
 		if err := rows.Scan(
 			&id,
 			&projection.Status,
+			&projection.SessionID,
 			&projection.TurnCount,
 			&projection.LockOwner,
 			&lockExpiresAt,
+			&runtimeStateRaw,
 			&projection.PendingEvents,
 			&projection.OldestPendingAgeSec,
 			&projection.Failures24h,
 			&projection.DeadLetters24h,
 			&projection.Turns24h,
+			&latestTurnID,
 			&latestTaskID,
 			&latestParseOK,
 			&latestTurnRaw,
@@ -208,7 +222,7 @@ func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[strin
 				projection.InFlightTurn = true
 			}
 		}
-		if err := enrichAgentOperatorProjectionFromLatestTurn(&projection, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
+		if err := enrichAgentOperatorProjectionFromLatestTurn(&projection, runtimeStateRaw, latestTurnID, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
 			return nil, err
 		}
 		id = strings.TrimSpace(id)
@@ -275,8 +289,11 @@ func applyOperatorProjection(agent *genericAgent, projection agentOperatorProjec
 	agent.TurnCount = projection.TurnCount
 	agent.TurnLimit = maxInt(turnLimit, 0)
 	agent.Turns24h = maxInt(projection.Turns24h, 0)
+	agent.SessionID = strings.TrimSpace(projection.SessionID)
+	agent.ProviderSessionID = strings.TrimSpace(projection.ProviderSessionID)
 	agent.CurrentTaskID = strings.TrimSpace(projection.CurrentTaskID)
 	agent.LastTool = projection.LastTool
+	agent.LiveTurn = projection.LiveTurn
 	if agent.TurnLimit > 0 {
 		agent.NearBreaker = agent.TurnCount*100 >= agent.TurnLimit*85
 	}
@@ -307,21 +324,25 @@ func (p agentOperatorProjection) blockingLayer() string {
 	return ""
 }
 
-func enrichAgentOperatorProjectionFromLatestTurn(projection *agentOperatorProjection, taskID string, parseOK bool, turnBlocksRaw []byte) error {
+func enrichAgentOperatorProjectionFromLatestTurn(projection *agentOperatorProjection, runtimeStateRaw []byte, turnID, taskID string, parseOK bool, turnBlocksRaw []byte) error {
 	if projection == nil {
 		return nil
 	}
-	projection.CurrentTaskID = strings.TrimSpace(taskID)
-	summary, ok, err := decodeTurnSummaryProjection(turnBlocksRaw)
+	runtimeState, err := store.DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
 	if err != nil {
-		return fmt.Errorf("decode latest agent turn turn_summary: %w", err)
+		return fmt.Errorf("decode latest agent session runtime_state: %w", err)
 	}
-	if ok {
-		projection.LastTool, err = projectedTurnSummaryLastToolTransport(summary, parseOK)
-		if err != nil {
-			return fmt.Errorf("decode latest agent turn last_tool: %w", err)
-		}
+	projection.ProviderSessionID = strings.TrimSpace(runtimeState.ProviderSessionID)
+	projection.LiveTurn, err = projectLatestTurn(taskID, parseOK, turnID, turnBlocksRaw)
+	if err != nil {
+		return fmt.Errorf("decode latest agent turn live_turn: %w", err)
 	}
+	if projection.LiveTurn != nil {
+		projection.CurrentTaskID = strings.TrimSpace(projection.LiveTurn.TaskID)
+		projection.LastTool = projection.LiveTurn.LastTool
+		return nil
+	}
+	projection.CurrentTaskID = strings.TrimSpace(taskID)
 	return nil
 }
 

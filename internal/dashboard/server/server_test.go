@@ -985,20 +985,21 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 		Conversations: store.ConversationSchemaCapabilities{
 			Sessions:   store.SchemaFlavorCanonical,
 			Turns:      store.SchemaFlavorCanonical,
-			TurnBlocks: false,
+			TurnBlocks: true,
 		},
 	}})
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
 	summaryState := `{"summary":"brief","last_turn":{"parse_ok":true},"provider_session_id":"sess-1","retry_reason":"session not found","retries_from_session_id":"sess-0"}`
+	latestTurnSummary := `[{"kind":"turn_summary","data":{"assistant_visible_output":"working","outcome":"in_progress","progress_updates":["thinking"],"tool_results":[{"tool_name":"schedule","tool_use_id":"toolu_1","output":{"status":"scheduled"}}]}}]`
 	messagePayload := `[{"role":"assistant","content":"hello"}]`
 	toolCallsPayload := `[{"name":"schedule","arguments":{"delay_seconds":1209600}}]`
 	responsePayload := `{"result":"14-day review scheduled.","raw":"{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"status\\\":\\\"scheduled\\\"}\"}]}]}}\n{\"type\":\"result\",\"result\":\"14-day review scheduled.\"}"}`
 
-	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*FROM \\(").
+	mock.ExpectQuery("SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.kind,.*FROM \\(").
 		WithArgs(25).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "updated_at",
-		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(summaryState), now))
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "turn_id", "task_id", "parse_ok", "turn_blocks", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(summaryState), "turn-live-1", "task-live-1", true, []byte(latestTurnSummary), now))
 
 	items, err := reader.List(context.Background(), 25)
 	if err != nil {
@@ -1015,6 +1016,18 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	}
 	if items[0].Metadata.RetryReason != "session not found" || items[0].Metadata.RetriesFromSessionID != "sess-0" {
 		t.Fatalf("expected retry lineage metadata, got %+v", items[0].Metadata)
+	}
+	if items[0].Metadata.LiveTurn == nil || items[0].Metadata.LiveTurn.TurnID != "turn-live-1" || items[0].Metadata.LiveTurn.TaskID != "task-live-1" {
+		t.Fatalf("expected latest turn projection, got %+v", items[0].Metadata.LiveTurn)
+	}
+	if items[0].Metadata.LiveTurn.AssistantVisibleOutput != "working" || items[0].Metadata.LiveTurn.Outcome != "in_progress" {
+		t.Fatalf("unexpected latest turn summary: %+v", items[0].Metadata.LiveTurn)
+	}
+	if len(items[0].Metadata.LiveTurn.ProgressUpdates) != 1 || items[0].Metadata.LiveTurn.ProgressUpdates[0] != "thinking" {
+		t.Fatalf("unexpected live_turn progress updates: %+v", items[0].Metadata.LiveTurn)
+	}
+	if items[0].Metadata.LiveTurn.LastTool == nil || items[0].Metadata.LiveTurn.LastTool.Name != "schedule" {
+		t.Fatalf("unexpected live_turn last_tool: %+v", items[0].Metadata.LiveTurn)
 	}
 
 	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
@@ -1071,9 +1084,9 @@ func TestSQLAgentReader_ListGenericAgents_UsesCanonicalTurnSummary(t *testing.T)
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
-			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", "active", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(turnBlocksPayload)))
+			"agent_id", "status", "session_id", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "turn_id", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", "sess-1", 3, "", nil, []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, 0, "turn-1", "task-1", true, []byte(turnBlocksPayload)))
 
 	items, err := reader.ListGenericAgents(context.Background())
 	if err != nil {
@@ -1084,6 +1097,12 @@ func TestSQLAgentReader_ListGenericAgents_UsesCanonicalTurnSummary(t *testing.T)
 	}
 	if items[0].CurrentTaskID != "task-1" {
 		t.Fatalf("current_task_id = %q", items[0].CurrentTaskID)
+	}
+	if items[0].SessionID != "sess-1" || items[0].ProviderSessionID != "provider-sess-1" {
+		t.Fatalf("expected canonical session linkage, got %+v", items[0])
+	}
+	if items[0].LiveTurn == nil || items[0].LiveTurn.TurnID != "turn-1" || items[0].LiveTurn.TaskID != "task-1" {
+		t.Fatalf("live_turn = %#v", items[0].LiveTurn)
 	}
 	if items[0].LastTool == nil || items[0].LastTool.Name != "schedule" {
 		t.Fatalf("last_tool = %#v", items[0].LastTool)
@@ -1129,9 +1148,9 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutCanonicalTurnSummary
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
-			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", "active", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(`[{"kind":"assistant_text","text":"stale fallback text"}]`)))
+			"agent_id", "status", "session_id", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "turn_id", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", "sess-1", 3, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "turn-1", "task-1", true, []byte(`[{"kind":"assistant_text","text":"stale fallback text"}]`)))
 
 	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "missing canonical turn_summary for summary-bearing turn blocks") {
 		t.Fatalf("expected missing canonical summary to fail closed, got %v", err)
@@ -1164,9 +1183,9 @@ func TestSQLAgentReader_ListGenericAgents_FailsOnMalformedCanonicalTurnSummary(t
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
-			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", "active", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(`[{"kind":"turn_summary","data":{"tool_results":"bad"}}]`)))
+			"agent_id", "status", "session_id", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "turn_id", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", "sess-1", 3, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "turn-1", "task-1", true, []byte(`[{"kind":"turn_summary","data":{"tool_results":"bad"}}]`)))
 
 	if _, err := reader.ListGenericAgents(context.Background()); err == nil {
 		t.Fatal("expected malformed canonical turn summary to fail")
@@ -1200,9 +1219,9 @@ func TestSQLAgentReader_ListGenericAgents_FailsOnMalformedCanonicalLastToolResul
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
-			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", "active", 3, "", nil, 0, 0, 0, 0, 0, "task-1", true, []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_name":"","tool_use_id":"toolu_1","output":{"status":"scheduled"}}]}}]`)))
+			"agent_id", "status", "session_id", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "turn_id", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", "sess-1", 3, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "turn-1", "task-1", true, []byte(`[{"kind":"turn_summary","data":{"tool_results":[{"tool_name":"","tool_use_id":"toolu_1","output":{"status":"scheduled"}}]}}]`)))
 
 	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "latest canonical tool_result is missing tool_name") {
 		t.Fatalf("expected malformed canonical last_tool result error, got %v", err)
@@ -1242,9 +1261,9 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
-			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", "active", 7, "lease-owner", time.Now().Add(time.Minute), 2, 45, 0, 0, 0, "task-7", false, []byte(`[]`)))
+			"agent_id", "status", "session_id", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "turn_id", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", "sess-7", 7, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-7"}`), 2, 45, 0, 0, 0, "turn-7", "task-7", false, []byte(`[]`)))
 
 	items, err := reader.ListGenericAgents(context.Background())
 	if err != nil {
@@ -1267,6 +1286,9 @@ func TestSQLAgentReader_ListGenericAgents_UsesOperatorProjectionAsCanonicalOwner
 	}
 	if items[0].CurrentTaskID != "task-7" {
 		t.Fatalf("current_task_id = %q, want task-7", items[0].CurrentTaskID)
+	}
+	if items[0].SessionID != "sess-7" || items[0].ProviderSessionID != "provider-sess-7" {
+		t.Fatalf("session linkage = %+v", items[0])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
@@ -1302,9 +1324,9 @@ func TestSQLAgentReader_GetGenericAgent_UsesCanonicalLifecycleProjection(t *test
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
-			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", "active", 3, "lease-owner", time.Now().Add(time.Minute), 0, 0, 0, 0, 0, "", false, []byte(`[]`)))
+			"agent_id", "status", "session_id", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "turn_id", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", "sess-1", 3, "lease-owner", time.Now().Add(time.Minute), []byte(`{"provider_session_id":"provider-sess-1"}`), 0, 0, 0, 0, 0, "", "", false, []byte(`[]`)))
 
 	item, ok, err := reader.GetGenericAgent(context.Background(), "agent-1")
 	if err != nil {
@@ -1318,6 +1340,9 @@ func TestSQLAgentReader_GetGenericAgent_UsesCanonicalLifecycleProjection(t *test
 	}
 	if item.BlockingLayer != "session_execution" {
 		t.Fatalf("blocking_layer = %q, want session_execution", item.BlockingLayer)
+	}
+	if item.SessionID != "sess-1" || item.ProviderSessionID != "provider-sess-1" {
+		t.Fatalf("session linkage = %+v", item)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
@@ -1353,9 +1378,9 @@ func TestSQLAgentReader_ListGenericAgents_FallsBackToActiveSessionLifecycleWhenD
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
-			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", "active", 2, "lease-owner", time.Now().Add(time.Minute), 0, 0, 0, 0, 0, "", false, []byte(`[]`)))
+			"agent_id", "status", "session_id", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "turn_id", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", "sess-1", 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, []byte(`[]`)))
 
 	items, err := reader.ListGenericAgents(context.Background())
 	if err != nil {
@@ -1401,8 +1426,8 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutOperatorProjection(t
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
-			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
+			"agent_id", "status", "session_id", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "turn_id", "task_id", "parse_ok", "turn_blocks",
 		}))
 
 	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "missing agent operator projection") {
@@ -1523,9 +1548,9 @@ func TestSQLAgentReader_ListGenericAgents_FailsClosedWithoutLifecycleFactOwner(t
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a").
 		WithArgs(runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "status", "turn_count", "lease_holder", "lease_expires_at", "pending_count", "oldest_pending_age_sec",
-			"failures_24h", "dead_letters_24h", "turns_24h", "task_id", "parse_ok", "turn_blocks",
-		}).AddRow("agent-1", "active", 0, "", nil, 0, 0, 0, 0, 0, "", false, []byte(`[]`)))
+			"agent_id", "status", "session_id", "turn_count", "lease_holder", "lease_expires_at", "runtime_state", "pending_count", "oldest_pending_age_sec",
+			"failures_24h", "dead_letters_24h", "turns_24h", "turn_id", "task_id", "parse_ok", "turn_blocks",
+		}).AddRow("agent-1", "active", "", 0, "", nil, []byte(`{}`), 0, 0, 0, 0, 0, "", "", false, []byte(`[]`)))
 
 	if _, err := reader.ListGenericAgents(context.Background()); err == nil || !strings.Contains(err.Error(), "missing agent lifecycle fact source") {
 		t.Fatalf("expected explicit lifecycle fact source error, got %v", err)
@@ -1890,13 +1915,14 @@ func TestSQLConversationReader_ListAndGet_TaskAudit(t *testing.T) {
 	}})
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
 	summaryState := `{"summary":"one-shot","last_turn":{"parse_ok":true}}`
+	latestTurnSummary := `[{"kind":"turn_summary","data":{"assistant_visible_output":"done","outcome":"done","progress_updates":["finalized"]}}]`
 	messagePayload := `[{"role":"assistant","content":"done"}]`
 
-	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*FROM \\(").
+	mock.ExpectQuery("SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.kind,.*FROM \\(").
 		WithArgs(10).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "updated_at",
-		}).AddRow("audit-1", "agent-1", "turn_audit", "", "global", "task", "active", 1, []byte(summaryState), now))
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "turn_id", "task_id", "parse_ok", "turn_blocks", "updated_at",
+		}).AddRow("audit-1", "agent-1", "turn_audit", "", "global", "task", "active", 1, []byte(summaryState), "turn-1", "task-1", true, []byte(latestTurnSummary), now))
 
 	items, err := reader.List(context.Background(), 10)
 	if err != nil {
@@ -1904,6 +1930,9 @@ func TestSQLConversationReader_ListAndGet_TaskAudit(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Kind != "turn_audit" || items[0].RuntimeMode != "task" || items[0].SessionID != "audit-1" {
 		t.Fatalf("unexpected audit summaries: %+v", items)
+	}
+	if items[0].Metadata.LiveTurn == nil || items[0].Metadata.LiveTurn.TurnID != "turn-1" || items[0].Metadata.LiveTurn.Outcome != "done" {
+		t.Fatalf("expected task audit live_turn projection, got %+v", items[0].Metadata.LiveTurn)
 	}
 
 	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
@@ -2091,14 +2120,15 @@ func TestSQLConversationReader_ListFailsOnMalformedCanonicalRuntimeState(t *test
 	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
 		Conversations: store.ConversationSchemaCapabilities{
 			Sessions: store.SchemaFlavorCanonical,
+			Turns:    store.SchemaFlavorCanonical,
 		},
 	}})
 
-	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*FROM \\(").
+	mock.ExpectQuery("SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.kind,.*FROM \\(").
 		WithArgs(10).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "updated_at",
-		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(`{"summary":123}`), time.Now().UTC()))
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "turn_id", "task_id", "parse_ok", "turn_blocks", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(`{"summary":123}`), "", "", false, []byte(`[]`), time.Now().UTC()))
 
 	if _, err := reader.List(context.Background(), 10); err == nil {
 		t.Fatal("expected malformed canonical runtime_state to fail")
@@ -2119,14 +2149,15 @@ func TestSQLConversationReader_ListFailsOnMalformedCanonicalSessionWatchdogState
 	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
 		Conversations: store.ConversationSchemaCapabilities{
 			Sessions: store.SchemaFlavorCanonical,
+			Turns:    store.SchemaFlavorCanonical,
 		},
 	}})
 
-	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*FROM \\(").
+	mock.ExpectQuery("SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.kind,.*FROM \\(").
 		WithArgs(10).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "updated_at",
-		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(`{"summary":"ok","watchdog":{"state":"mystery","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-04-10T12:00:30Z"}}`), time.Now().UTC()))
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "turn_id", "task_id", "parse_ok", "turn_blocks", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(`{"summary":"ok","watchdog":{"state":"mystery","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-04-10T12:00:30Z"}}`), "", "", false, []byte(`[]`), time.Now().UTC()))
 
 	if _, err := reader.List(context.Background(), 10); err == nil {
 		t.Fatal("expected malformed canonical session watchdog state to fail")
@@ -2205,14 +2236,15 @@ func TestSQLConversationReader_ListProjectsCanonicalSessionWatchdogState(t *test
 	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
 		Conversations: store.ConversationSchemaCapabilities{
 			Sessions: store.SchemaFlavorCanonical,
+			Turns:    store.SchemaFlavorCanonical,
 		},
 	}})
 
-	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*FROM \\(").
+	mock.ExpectQuery("SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.kind,.*FROM \\(").
 		WithArgs(10).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "updated_at",
-		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(`{"summary":"ok","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-04-10T12:00:00Z","recorded_at":"2026-04-10T12:00:30Z"}}`), time.Now().UTC()))
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "turn_id", "task_id", "parse_ok", "turn_blocks", "updated_at",
+		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(`{"summary":"ok","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-04-10T12:00:00Z","recorded_at":"2026-04-10T12:00:30Z"}}`), "", "", false, []byte(`[]`), time.Now().UTC()))
 
 	items, err := reader.List(context.Background(), 10)
 	if err != nil {
@@ -2489,6 +2521,24 @@ func TestSQLConversationReader_ListFailsClosedWhenCapabilityOwnerReportsUnavaila
 	}})
 	if _, err := reader.List(context.Background(), 10); err == nil || !strings.Contains(err.Error(), "schema is unavailable at the explicit capability boundary") {
 		t.Fatalf("expected unavailable conversation surface capability error, got %v", err)
+	}
+}
+
+func TestSQLConversationReader_ListFailsClosedWithoutTurnCapability(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions: store.SchemaFlavorCanonical,
+			Turns:    store.SchemaFlavorLegacy,
+		},
+	}})
+	if _, err := reader.List(context.Background(), 10); err == nil || !strings.Contains(err.Error(), "agent_turns schema is unsupported") {
+		t.Fatalf("expected unsupported turn capability error, got %v", err)
 	}
 }
 

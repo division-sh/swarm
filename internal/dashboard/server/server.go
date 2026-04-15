@@ -52,6 +52,7 @@ type ConversationSummaryMetadata struct {
 	RetryReason          string                       `json:"retry_reason,omitempty"`
 	RetriesFromSessionID string                       `json:"retries_from_session_id,omitempty"`
 	Watchdog             *ConversationRuntimeWatchdog `json:"watchdog,omitempty"`
+	LiveTurn             *OperatorLiveTurn            `json:"live_turn,omitempty"`
 }
 
 type ConversationDetail struct {
@@ -122,6 +123,16 @@ type ConversationRuntimeWatchdog struct {
 	Outcome       string `json:"outcome,omitempty"`
 	LastOutputAt  string `json:"last_output_at,omitempty"`
 	RecordedAt    string `json:"recorded_at,omitempty"`
+}
+
+type OperatorLiveTurn struct {
+	TurnID                 string         `json:"turn_id,omitempty"`
+	TaskID                 string         `json:"task_id,omitempty"`
+	ParseOK                bool           `json:"parse_ok"`
+	AssistantVisibleOutput string         `json:"assistant_visible_output,omitempty"`
+	Outcome                string         `json:"outcome,omitempty"`
+	ProgressUpdates        []string       `json:"progress_updates,omitempty"`
+	LastTool               *AgentLastTool `json:"last_tool,omitempty"`
 }
 
 type ConversationMessage struct {
@@ -320,37 +331,40 @@ func (h *Handler) writeAuthError(w http.ResponseWriter, err error) {
 }
 
 type genericAgent struct {
-	ID                  string         `json:"id"`
-	Type                string         `json:"type,omitempty"`
-	Role                string         `json:"role,omitempty"`
-	Mode                string         `json:"mode,omitempty"`
-	Status              string         `json:"status,omitempty"`
-	State               string         `json:"state,omitempty"`
-	BlockingLayer       string         `json:"blocking_layer,omitempty"`
-	EntityID            string         `json:"entity_id,omitempty"`
-	ParentAgentID       string         `json:"parent_agent_id,omitempty"`
-	CoordinatorID       string         `json:"coordinator_id,omitempty"`
-	HiredBy             string         `json:"hired_by,omitempty"`
-	TemplateVersion     string         `json:"template_version,omitempty"`
-	BudgetEnvelope      float64        `json:"budget_envelope,omitempty"`
-	Subscriptions       []string       `json:"subscriptions,omitempty"`
-	Permissions         []string       `json:"permissions,omitempty"`
-	PendingEvents       int            `json:"pending_events,omitempty"`
-	OldestPendingAgeSec int            `json:"oldest_pending_age_sec,omitempty"`
-	InFlightTurn        bool           `json:"in_flight_turn,omitempty"`
-	InFlightSeconds     int            `json:"in_flight_seconds,omitempty"`
-	LockOwner           string         `json:"lock_owner,omitempty"`
-	LockExpiresAt       string         `json:"lock_expires_at,omitempty"`
-	Failures24h         int            `json:"failures_24h,omitempty"`
-	DeadLetters24h      int            `json:"dead_letters_24h,omitempty"`
-	TurnCount           int            `json:"turn_count,omitempty"`
-	TurnLimit           int            `json:"turn_limit,omitempty"`
-	Turns24h            int            `json:"turns_24h,omitempty"`
-	TotalTokens24h      int            `json:"total_tokens_24h,omitempty"`
-	NearBreaker         bool           `json:"near_breaker,omitempty"`
-	CurrentTaskID       string         `json:"current_task_id,omitempty"`
-	LastTool            *AgentLastTool `json:"last_tool,omitempty"`
-	StartedAt           string         `json:"started_at,omitempty"`
+	ID                  string            `json:"id"`
+	Type                string            `json:"type,omitempty"`
+	Role                string            `json:"role,omitempty"`
+	Mode                string            `json:"mode,omitempty"`
+	Status              string            `json:"status,omitempty"`
+	State               string            `json:"state,omitempty"`
+	BlockingLayer       string            `json:"blocking_layer,omitempty"`
+	EntityID            string            `json:"entity_id,omitempty"`
+	ParentAgentID       string            `json:"parent_agent_id,omitempty"`
+	CoordinatorID       string            `json:"coordinator_id,omitempty"`
+	HiredBy             string            `json:"hired_by,omitempty"`
+	TemplateVersion     string            `json:"template_version,omitempty"`
+	BudgetEnvelope      float64           `json:"budget_envelope,omitempty"`
+	Subscriptions       []string          `json:"subscriptions,omitempty"`
+	Permissions         []string          `json:"permissions,omitempty"`
+	PendingEvents       int               `json:"pending_events,omitempty"`
+	OldestPendingAgeSec int               `json:"oldest_pending_age_sec,omitempty"`
+	InFlightTurn        bool              `json:"in_flight_turn,omitempty"`
+	InFlightSeconds     int               `json:"in_flight_seconds,omitempty"`
+	LockOwner           string            `json:"lock_owner,omitempty"`
+	LockExpiresAt       string            `json:"lock_expires_at,omitempty"`
+	Failures24h         int               `json:"failures_24h,omitempty"`
+	DeadLetters24h      int               `json:"dead_letters_24h,omitempty"`
+	TurnCount           int               `json:"turn_count,omitempty"`
+	TurnLimit           int               `json:"turn_limit,omitempty"`
+	Turns24h            int               `json:"turns_24h,omitempty"`
+	TotalTokens24h      int               `json:"total_tokens_24h,omitempty"`
+	NearBreaker         bool              `json:"near_breaker,omitempty"`
+	SessionID           string            `json:"session_id,omitempty"`
+	ProviderSessionID   string            `json:"provider_session_id,omitempty"`
+	CurrentTaskID       string            `json:"current_task_id,omitempty"`
+	LastTool            *AgentLastTool    `json:"last_tool,omitempty"`
+	LiveTurn            *OperatorLiveTurn `json:"live_turn,omitempty"`
+	StartedAt           string            `json:"started_at,omitempty"`
 }
 
 type AgentLastTool struct {
