@@ -4102,6 +4102,73 @@ func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *test
 	}
 }
 
+func TestManagerStore_StatelessConversationFailsClosedWithoutAuditCapabilityAndDoesNotCreateTable(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	pg := &PostgresStore{DB: db}
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_conversation_audits CASCADE`); err != nil {
+		t.Fatalf("drop agent_conversation_audits: %v", err)
+	}
+	pg = &PostgresStore{DB: db}
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: uuid.NewString(),
+		AgentID:   "a1",
+		Mode:      "task",
+		Messages: []llm.Message{
+			{Role: "user", Content: "one-shot"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	})
+	if err == nil || !strings.Contains(err.Error(), "store: agent_conversation_audits schema is unavailable") {
+		t.Fatalf("UpsertConversation(task) error = %v, want unavailable audit capability failure", err)
+	}
+
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.agent_conversation_audits') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatalf("check agent_conversation_audits existence: %v", err)
+	}
+	if exists {
+		t.Fatal("expected task conversation hot path not to recreate agent_conversation_audits")
+	}
+}
+
+func TestManagerStore_TaskAppendTurnFailsClosedWithoutAuditCapabilityAndDoesNotCreateTable(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	pg := &PostgresStore{DB: db}
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_conversation_audits CASCADE`); err != nil {
+		t.Fatalf("drop agent_conversation_audits: %v", err)
+	}
+	pg = &PostgresStore{DB: db}
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "task",
+		SessionID:      uuid.NewString(),
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	})
+	if err == nil || !strings.Contains(err.Error(), "store: agent_conversation_audits schema is unavailable") {
+		t.Fatalf("AppendAgentTurn(task) error = %v, want unavailable audit capability failure", err)
+	}
+
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.agent_conversation_audits') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatalf("check agent_conversation_audits existence: %v", err)
+	}
+	if exists {
+		t.Fatal("expected task turn hot path not to recreate agent_conversation_audits")
+	}
+}
+
 func TestManagerStore_SessionConversationDoesNotPersistAuditRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -4950,6 +5017,65 @@ func TestManagerStore_UpsertAgent_RejectsInvalidConversationModeAtAdmission(t *t
 	}
 }
 
+func TestManagerStore_UpsertAgent_FailsClosedWithoutHotPathSchemaRepair(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agents CASCADE`); err != nil {
+		t.Fatalf("drop agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agents (
+			id TEXT PRIMARY KEY,
+			type TEXT,
+			role TEXT NOT NULL,
+			mode TEXT NOT NULL,
+			entity_id UUID,
+			parent_agent_id TEXT,
+			status TEXT,
+			coordinator_id TEXT,
+			config JSONB NOT NULL DEFAULT '{}'::jsonb,
+			budget_envelope JSONB NOT NULL DEFAULT '{}'::jsonb,
+			hired_by TEXT,
+			template_version TEXT,
+			started_at TIMESTAMPTZ,
+			last_active_at TIMESTAMPTZ
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agents: %v", err)
+	}
+
+	err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "legacy-agent",
+			Role:             "reviewer",
+			Type:             "review-worker",
+			ConversationMode: "task",
+		},
+		Status: "active",
+	})
+	if err == nil || !strings.Contains(err.Error(), "store: agents schema is unsupported by the explicit capability boundary") {
+		t.Fatalf("UpsertAgent error = %v, want unsupported canonical schema failure", err)
+	}
+
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'agents'
+			  AND column_name = 'runtime_descriptor'
+		)
+	`).Scan(&exists); err != nil {
+		t.Fatalf("check agents.runtime_descriptor existence: %v", err)
+	}
+	if exists {
+		t.Fatal("expected UpsertAgent not to backfill agents.runtime_descriptor on the hot path")
+	}
+}
+
 func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeKeys(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -5003,6 +5129,63 @@ func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelTierMissing(t *tes
 	_, err := pg.LoadAgents(ctx)
 	if err == nil || !strings.Contains(err.Error(), "missing model_tier") {
 		t.Fatalf("LoadAgents error = %v, want missing model_tier failure", err)
+	}
+}
+
+func TestManagerStore_LoadAgents_FailsClosedWithoutHotPathSchemaRepair(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agents CASCADE`); err != nil {
+		t.Fatalf("drop agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE agents (
+			id TEXT PRIMARY KEY,
+			type TEXT,
+			role TEXT NOT NULL,
+			mode TEXT NOT NULL,
+			entity_id UUID,
+			parent_agent_id TEXT,
+			status TEXT,
+			coordinator_id TEXT,
+			config JSONB NOT NULL DEFAULT '{}'::jsonb,
+			budget_envelope JSONB NOT NULL DEFAULT '{}'::jsonb,
+			hired_by TEXT,
+			template_version TEXT,
+			started_at TIMESTAMPTZ,
+			last_active_at TIMESTAMPTZ
+		)
+	`); err != nil {
+		t.Fatalf("create legacy agents: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (id, type, role, mode, status, config)
+		VALUES ('legacy-agent', 'review-worker', 'reviewer', 'task', 'active', '{}'::jsonb)
+	`); err != nil {
+		t.Fatalf("seed legacy agent row: %v", err)
+	}
+
+	_, err := pg.LoadAgents(ctx)
+	if err == nil || !strings.Contains(err.Error(), "store: agents schema is unsupported by the explicit capability boundary") {
+		t.Fatalf("LoadAgents error = %v, want unsupported canonical schema failure", err)
+	}
+
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'agents'
+			  AND column_name = 'runtime_descriptor'
+		)
+	`).Scan(&exists); err != nil {
+		t.Fatalf("check agents.runtime_descriptor existence: %v", err)
+	}
+	if exists {
+		t.Fatal("expected LoadAgents not to backfill agents.runtime_descriptor on the hot path")
 	}
 }
 
@@ -5192,9 +5375,6 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	if err := pg.ensureSchemaCompatibilityColumns(ctx); err != nil {
-		t.Fatalf("ensureSchemaCompatibilityColumns: %v", err)
-	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
 			agent_id, role, model_tier, llm_backend, conversation_mode,
@@ -5208,6 +5388,9 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 		)
 	`); err != nil {
 		t.Fatalf("seed legacy agent row: %v", err)
+	}
+	if err := pg.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
+		t.Fatalf("ensureAgentRuntimeDescriptorColumn: %v", err)
 	}
 
 	_, err := pg.LoadAgents(ctx)
@@ -5277,6 +5460,10 @@ func TestPostgresStore_LoadAgents_BackfillsRuntimeDescriptorTypeFromModelTierOnC
 		)
 	`); err != nil {
 		t.Fatalf("seed pre-column agent row: %v", err)
+	}
+
+	if err := pg.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
+		t.Fatalf("ensureAgentRuntimeDescriptorColumn: %v", err)
 	}
 
 	agents, err := pg.LoadAgents(ctx)

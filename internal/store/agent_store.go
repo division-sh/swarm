@@ -13,9 +13,6 @@ import (
 )
 
 func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {
-	if err := s.ensureSchemaCompatibilityColumns(ctx); err != nil {
-		return err
-	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -46,9 +43,6 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 }
 
 func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	if err := s.ensureSchemaCompatibilityColumns(ctx); err != nil {
-		return nil, err
-	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return nil, err

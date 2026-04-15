@@ -29,13 +29,6 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	targetTable := "agent_sessions"
 	hasConversationRunID := caps.Conversations.SessionRunID
 	if runtimeMode.IsStateless() {
-		if err := s.ensureConversationAuditTable(ctx); err != nil {
-			return err
-		}
-		caps, err = s.schemaCapabilities(ctx)
-		if err != nil {
-			return err
-		}
 		if caps.Conversations.Audits != SchemaFlavorCanonical {
 			return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
 		}
@@ -456,18 +449,6 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			return err
 		}
 	}
-	if tx == nil {
-		if err := s.ensureConversationAuditTable(ctx); err != nil {
-			return err
-		}
-		if caps.Conversations.Audits == "" {
-			var err error
-			caps, err = s.schemaCapabilities(ctx)
-			if err != nil {
-				return err
-			}
-		}
-	}
 	if caps.Conversations.Audits != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
 	}
@@ -627,13 +608,6 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if resolved.Stateless {
 		if sessionID == "" {
 			sessionID = uuid.NewString()
-		}
-		if err := s.ensureConversationAuditTable(ctx); err != nil {
-			return err
-		}
-		caps, err = s.schemaCapabilities(ctx)
-		if err != nil {
-			return err
 		}
 		if caps.Conversations.Audits != SchemaFlavorCanonical {
 			return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
