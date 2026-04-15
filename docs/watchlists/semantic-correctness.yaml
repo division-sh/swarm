@@ -291,6 +291,8 @@ nodes:
       - repo-authored fixtures still use legacy create_flow_instance action mappings with action.type, flow_template, and instance_id
       - at least one repo-authored fixture still uses templated config_from values instead of canonical payload-path bindings
       - broader authored migration pressure still exists for subject_id, back-propagation, and other cross-flow coupling assumptions, but those are a separate authored class unless local evidence proves they belong to the same narrow migration slice
+      - executable tier11 expected/package fixtures still assert subject_id lineage or self-origin lifecycle semantics, but that residual is blocked until runtime/spec migration stops making subject_id canonical
+      - remaining authored back-propagation and cross-flow-read assumptions are currently concentrated in docs, proposals, and test-plan surfaces rather than one implementation-ready executable fixture cluster
     representative_issues:
       - 416
     common_framing_mistakes:
