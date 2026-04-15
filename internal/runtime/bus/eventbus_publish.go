@@ -77,7 +77,10 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		runtimepipeline.FlushPipelineAfterPublishActions(afterPublishActions)
 	}()
 	if txStore, ok := eb.store.(TransactionalEventStore); ok {
-		return eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore)
+		if err := eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore); err != nil {
+			return err
+		}
+		return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
 	}
 
 	persisted := false
@@ -119,7 +122,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 			return err
 		}
 	}
-	return nil
+	return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
 }
 
 func (eb *EventBus) pipelineTransitionCapability() func(context.Context) (bool, error) {
@@ -130,6 +133,17 @@ func (eb *EventBus) pipelineTransitionCapability() func(context.Context) (bool, 
 		return provider.CanonicalEventReceiptsCapability
 	}
 	return nil
+}
+
+func (eb *EventBus) convergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error {
+	if eb == nil || eb.store == nil {
+		return nil
+	}
+	converger, ok := eb.store.(StandaloneRuntimePlatformRunConvergencePersistence)
+	if !ok || converger == nil {
+		return nil
+	}
+	return converger.ConvergeStandaloneRuntimePlatformRun(ctx, evt)
 }
 
 func (eb *EventBus) publishTransactional(

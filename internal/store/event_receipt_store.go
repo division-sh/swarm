@@ -47,7 +47,7 @@ func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID
 	}
 	switch caps.Events.Receipts {
 	case SchemaFlavorCanonical:
-		return s.upsertAgentReceiptSpec(ctx, eventID, agentID, status, errText)
+		return s.upsertAgentReceiptSpec(ctx, caps, eventID, agentID, status, errText)
 	default:
 		return unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
 	}
@@ -142,7 +142,7 @@ type deliveryBackedTerminalTransitionRequest struct {
 
 // Receipts are outcome-only for an existing agent delivery. This write path must
 // never mint or repair delivery ownership from receipt state.
-func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSchemaCapabilities, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
 	return withEventStoreRetry(ctx, nil, func() error {
 		tx, err := s.DB.BeginTx(ctx, nil)
 		if err != nil {
@@ -173,6 +173,9 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, age
 			if err := s.upsertAgentReceiptRowTx(ctx, tx, eventID, agentID, state); err != nil {
 				return err
 			}
+		}
+		if err := s.convergeStandaloneRuntimePlatformRunByEventID(ctx, tx, caps, eventID); err != nil {
+			return err
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit event receipt tx: %w", err)

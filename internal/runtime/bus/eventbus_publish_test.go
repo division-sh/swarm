@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -14,11 +15,13 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/diaglog"
 	"swarm/internal/runtime/flowmodel"
+	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	"swarm/internal/runtime/semanticview"
@@ -275,6 +278,73 @@ func assertSortedStringsEqual(t *testing.T, got, want []string) {
 			t.Fatalf("strings = %v, want %v", got, want)
 		}
 	}
+}
+
+func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) {
+	t.Helper()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:     agentID,
+			Role:   "observer",
+			Mode:   "global",
+			Type:   "stub",
+			Config: []byte(`{}`),
+		},
+		Status:    "active",
+		HiredBy:   "test",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
+	}
+}
+
+func loadRunStateForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, string, string) {
+	t.Helper()
+	var runID, runStatus, triggerEventType string
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(r.run_id::text, ''),
+			COALESCE(r.status, ''),
+			COALESCE(r.trigger_event_type, '')
+		FROM events e
+		INNER JOIN runs r ON r.run_id = e.run_id
+		WHERE e.event_id = $1::uuid
+	`, eventID).Scan(&runID, &runStatus, &triggerEventType); err != nil {
+		t.Fatalf("load run state for %s: %v", eventID, err)
+	}
+	return runID, runStatus, triggerEventType
+}
+
+func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+	`, eventID).Scan(&count); err != nil {
+		t.Fatalf("count event deliveries for %s: %v", eventID, err)
+	}
+	return count
+}
+
+func loadAgentDeliveryForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID, agentID string) (string, string) {
+	t.Helper()
+	var status, runStatus string
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(d.status, ''),
+			COALESCE(r.status, '')
+		FROM event_deliveries d
+		INNER JOIN runs r ON r.run_id = d.run_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'agent'
+		  AND d.subscriber_id = $2
+	`, eventID, agentID).Scan(&status, &runStatus); err != nil {
+		t.Fatalf("load delivery state for %s/%s: %v", eventID, agentID, err)
+	}
+	return status, runStatus
 }
 
 func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
@@ -884,6 +954,157 @@ func TestEventBusPublish_RuntimeLogBypassesContradictionRouting(t *testing.T) {
 	got := store.eventTypes()
 	if len(got) != 1 || got[0] != "platform.runtime_log" {
 		t.Fatalf("persisted event types = %v, want [platform.runtime_log]", got)
+	}
+}
+
+func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersistedDeliveries(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	ctx := context.Background()
+	pg := &store.PostgresStore{DB: db}
+	eb, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	testCases := []struct {
+		name      string
+		eventID   string
+		eventType events.EventType
+	}{
+		{
+			name:      "platform.boot",
+			eventID:   "10000000-0000-0000-0000-000000000001",
+			eventType: events.EventType("platform.boot"),
+		},
+		{
+			name:      "platform.recovery_failed",
+			eventID:   "10000000-0000-0000-0000-000000000002",
+			eventType: events.EventType("platform.recovery_failed"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			internal := eb.SubscribeInternal("internal-"+string(tc.eventType), tc.eventType)
+			defer eb.Unsubscribe("internal-" + string(tc.eventType))
+
+			if err := eb.Publish(ctx, events.Event{
+				ID:          tc.eventID,
+				Type:        tc.eventType,
+				SourceAgent: "runtime",
+				Payload:     []byte(`{}`),
+				CreatedAt:   time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("Publish(%s): %v", tc.eventType, err)
+			}
+
+			select {
+			case got := <-internal:
+				if got.ID != tc.eventID {
+					t.Fatalf("internal delivery event_id = %q, want %q", got.ID, tc.eventID)
+				}
+			case <-time.After(250 * time.Millisecond):
+				t.Fatalf("timed out waiting for internal %s delivery", tc.eventType)
+			}
+
+			runID, runStatus, triggerEventType := loadRunStateForEvent(t, ctx, db, tc.eventID)
+			if strings.TrimSpace(runID) == "" {
+				t.Fatalf("run_id missing for %s", tc.eventType)
+			}
+			if runStatus != "completed" {
+				t.Fatalf("run status for %s = %q, want completed", tc.eventType, runStatus)
+			}
+			if triggerEventType != string(tc.eventType) {
+				t.Fatalf("trigger_event_type for %s = %q, want %q", tc.eventType, triggerEventType, tc.eventType)
+			}
+			if got := countEventDeliveriesForEvent(t, ctx, db, tc.eventID); got != 0 {
+				t.Fatalf("event_deliveries for %s = %d, want 0", tc.eventType, got)
+			}
+		})
+	}
+}
+
+func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalReceipt(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	ctx := context.Background()
+	pg := &store.PostgresStore{DB: db}
+	eb, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	agentID := "agent-runtime-owned-platform"
+	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
+
+	testCases := []struct {
+		name      string
+		eventID   string
+		eventType events.EventType
+	}{
+		{
+			name:      "manager platform.agent_failed",
+			eventID:   "20000000-0000-0000-0000-000000000001",
+			eventType: events.EventType("platform.agent_failed"),
+		},
+		{
+			name:      "receipts platform.paused",
+			eventID:   "20000000-0000-0000-0000-000000000002",
+			eventType: events.EventType("platform.paused"),
+		},
+		{
+			name:      "budget platform.budget_threshold_crossed",
+			eventID:   "20000000-0000-0000-0000-000000000003",
+			eventType: events.EventType("platform.budget_threshold_crossed"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			subscription := eb.Subscribe(agentID, tc.eventType)
+			defer eb.Unsubscribe(agentID)
+
+			if err := eb.Publish(ctx, events.Event{
+				ID:          tc.eventID,
+				Type:        tc.eventType,
+				SourceAgent: "runtime",
+				Payload:     []byte(`{}`),
+				CreatedAt:   time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("Publish(%s): %v", tc.eventType, err)
+			}
+
+			select {
+			case got := <-subscription:
+				if got.ID != tc.eventID {
+					t.Fatalf("delivered event_id = %q, want %q", got.ID, tc.eventID)
+				}
+			case <-time.After(250 * time.Millisecond):
+				t.Fatalf("timed out waiting for agent delivery of %s", tc.eventType)
+			}
+
+			if got := countEventDeliveriesForEvent(t, ctx, db, tc.eventID); got != 1 {
+				t.Fatalf("event_deliveries for %s = %d, want 1", tc.eventType, got)
+			}
+			if deliveryStatus, runStatus := loadAgentDeliveryForEvent(t, ctx, db, tc.eventID, agentID); deliveryStatus != "pending" || runStatus != "running" {
+				t.Fatalf("pre-receipt state for %s = delivery:%q run:%q, want pending/running", tc.eventType, deliveryStatus, runStatus)
+			}
+
+			if err := pg.UpsertEventReceipt(ctx, tc.eventID, agentID, runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+				t.Fatalf("UpsertEventReceipt(%s): %v", tc.eventType, err)
+			}
+
+			deliveryStatus, runStatus := loadAgentDeliveryForEvent(t, ctx, db, tc.eventID, agentID)
+			if deliveryStatus != "delivered" {
+				t.Fatalf("delivery status for %s = %q, want delivered", tc.eventType, deliveryStatus)
+			}
+			if runStatus != "completed" {
+				t.Fatalf("run status for %s = %q, want completed", tc.eventType, runStatus)
+			}
+		})
 	}
 }
 

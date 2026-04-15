@@ -67,6 +67,10 @@ type RunLifecyclePersistence interface {
 	MarkRunTerminal(ctx context.Context, runID, status, errorSummary string, endedAt time.Time) error
 }
 
+type StandaloneRuntimePlatformRunConvergencePersistence interface {
+	ConvergeStandaloneRuntimePlatformRun(ctx context.Context, evt events.Event) error
+}
+
 type RunLifecycleSnapshot struct {
 	RunID        string
 	Status       string
