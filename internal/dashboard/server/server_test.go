@@ -1752,6 +1752,84 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	}
 }
 
+func TestSQLAgentReader_ListGenericAgents_ScopesLiveTurnToSelectedActiveSession(t *testing.T) {
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg, err := store.NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:   "agent-1",
+			Role: "researcher",
+			Mode: "entity",
+			Type: "managed",
+		},
+		Status:    "active",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+
+	sessionOlder := uuid.NewString()
+	sessionSelected := uuid.NewString()
+	olderUpdatedAt := time.Date(2026, 4, 15, 3, 0, 0, 0, time.UTC)
+	selectedUpdatedAt := olderUpdatedAt.Add(5 * time.Minute)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, scope_key, scope, conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+		) VALUES
+			($1::uuid, 'agent-1', 'entity-1', 'entity', '[]'::jsonb, 1, 'session_per_entity', '{"provider_session_id":"provider-older"}'::jsonb, 'active', $3, $3),
+			($2::uuid, 'agent-1', 'entity-2', 'entity', '[]'::jsonb, 7, 'session_per_entity', '{"provider_session_id":"provider-selected"}'::jsonb, 'active', $4, $4)
+	`, sessionOlder, sessionSelected, olderUpdatedAt, selectedUpdatedAt); err != nil {
+		t.Fatalf("seed agent_sessions: %v", err)
+	}
+
+	olderTurnBlocks := `[{"kind":"turn_summary","data":{"assistant_visible_output":"older session turn","outcome":"working","tool_results":[{"tool_name":"older_tool","tool_use_id":"toolu-old","output":{"status":"old"}}]}}]`
+	selectedTurnBlocks := `[{"kind":"turn_summary","data":{"assistant_visible_output":"selected session turn","outcome":"waiting","tool_results":[{"tool_name":"selected_tool","tool_use_id":"toolu-selected","output":{"status":"selected"}}]}}]`
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_turns (
+			turn_id, agent_id, session_id, runtime_mode, scope_key, task_id, turn_blocks, parse_ok, created_at
+		) VALUES
+			($1::uuid, 'agent-1', $2::uuid, 'session_per_entity', 'entity-1', 'task-older', $3::jsonb, true, $5),
+			($4::uuid, 'agent-1', $6::uuid, 'session_per_entity', 'entity-2', 'task-selected', $7::jsonb, true, $8)
+	`, uuid.NewString(), sessionOlder, olderTurnBlocks, uuid.NewString(), selectedUpdatedAt.Add(2*time.Minute), sessionSelected, selectedTurnBlocks, selectedUpdatedAt.Add(-1*time.Minute)); err != nil {
+		t.Fatalf("seed agent_turns: %v", err)
+	}
+
+	reader := NewSQLAgentReader(db, pg, 12)
+	items, err := reader.ListGenericAgents(ctx)
+	if err != nil {
+		t.Fatalf("ListGenericAgents: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one agent, got %+v", items)
+	}
+	if items[0].SessionID != sessionSelected {
+		t.Fatalf("session_id = %q, want %q", items[0].SessionID, sessionSelected)
+	}
+	if items[0].ProviderSessionID != "provider-selected" {
+		t.Fatalf("provider_session_id = %q, want provider-selected", items[0].ProviderSessionID)
+	}
+	if items[0].CurrentTaskID != "task-selected" {
+		t.Fatalf("current_task_id = %q, want task-selected", items[0].CurrentTaskID)
+	}
+	if items[0].LiveTurn == nil {
+		t.Fatalf("expected live_turn, got nil")
+	}
+	if items[0].LiveTurn.TaskID != "task-selected" || items[0].LiveTurn.AssistantVisibleOutput != "selected session turn" {
+		t.Fatalf("live_turn = %+v", items[0].LiveTurn)
+	}
+	if items[0].LastTool == nil || items[0].LastTool.Name != "selected_tool" || items[0].LastTool.ToolUseID != "toolu-selected" {
+		t.Fatalf("last_tool = %#v", items[0].LastTool)
+	}
+}
+
 type pendingFactsOverrideStore struct {
 	*store.PostgresStore
 	facts map[string]store.PendingAgentDeliveryFacts
