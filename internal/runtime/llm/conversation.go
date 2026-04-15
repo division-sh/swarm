@@ -277,6 +277,13 @@ func (c *Conversation) projectToolResult(ctx context.Context, name string, input
 	if len(b) <= limit {
 		return result, nil
 	}
+	if !runtimeReadFileFollowUpAllowedForTurn(ctx, c.turnToolDefinitions()) {
+		return map[string]any{
+			"truncated": true,
+			"bytes":     len(b),
+			"preview":   clampRunes(string(b), maxToolResultPreviewRunes),
+		}, nil
+	}
 	if relay, ok, err := relayOversizedToolResult(ctx, c.runtime, c.Session, name, b); ok {
 		if err != nil {
 			return nil, fmt.Errorf("persist oversized tool result relay for %s: %w", strings.TrimSpace(name), err)
@@ -307,6 +314,16 @@ func (c *Conversation) projectToolResult(ctx context.Context, name string, input
 		"bytes":     len(b),
 		"preview":   clampRunes(string(b), maxToolResultPreviewRunes),
 	}, nil
+}
+
+func (c *Conversation) turnToolDefinitions() []ToolDefinition {
+	if c == nil {
+		return nil
+	}
+	if c.Session != nil && len(c.Session.Tools) > 0 {
+		return c.Session.Tools
+	}
+	return c.Tools
 }
 
 func shouldTerminateAfterToolCalls(calls []executedToolCall) bool {
@@ -367,6 +384,16 @@ func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context
 		return ctx
 	}
 	return toolcapabilities.WithContext(ctx, c.toolExecutor.ToolCapabilitiesForActor(actor, names, nil))
+}
+
+func runtimeReadFileFollowUpAllowedForTurn(ctx context.Context, tools []ToolDefinition) bool {
+	actor, _ := models.ActorFromContext(ctx)
+	for _, name := range plannedCanonicalVisibleToolsForActor(actor, tools) {
+		if name == "read_file" {
+			return true
+		}
+	}
+	return false
 }
 
 func clampToolResult(name string, result any) any {

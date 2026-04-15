@@ -1042,6 +1042,84 @@ func TestGatewayHandleMCP_ToolsCallRelaysOversizedReadFileResultsForHelperPath(t
 	}
 }
 
+func TestGatewayHandleMCP_ToolsCallSuppressesRuntimeReadFileFollowUpWithoutReadFileSurface(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	exec := &relayAwareToolExecutorStub{
+		execFn: func(_ context.Context, _ string, _ any) (any, error) {
+			return map[string]any{
+				"content":    strings.Repeat("q", maxToolResultBytes+512),
+				"size_bytes": maxToolResultBytes + 512,
+			}, nil
+		},
+		relayRef: ToolResultRelayRef{
+			Path:       "/workspace/.swarm/tool-results/agent/query-entities-1.json",
+			ReadTool:   "read_file",
+			Format:     "json",
+			Visibility: "workspace_mount",
+		},
+	}
+	g := NewGateway(exec, testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-query-only", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Allowed:   map[string]struct{}{"query_entities": {}},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "query_entities",
+			"arguments": map[string]any{"entity_type": "company"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-query-only")
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	resp := mustRPCResponse(t, rec)
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", resp.Result)
+	}
+	content, ok := result["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("content = %#v, want single text entry", result["content"])
+	}
+	entry, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("content[0] = %#v, want map", content[0])
+	}
+	text, _ := entry["text"].(string)
+	var projected map[string]any
+	if err := json.Unmarshal([]byte(text), &projected); err != nil {
+		t.Fatalf("unmarshal projected text: %v", err)
+	}
+	if truncated, _ := projected["truncated"].(bool); !truncated {
+		t.Fatalf("truncated = %#v, want true", projected["truncated"])
+	}
+	if _, ok := projected["follow_up"]; ok {
+		t.Fatalf("follow_up = %#v, want absent on no-read_file turn", projected["follow_up"])
+	}
+	if exec.relayTool != "" {
+		t.Fatalf("relay tool = %q, want no relay write", exec.relayTool)
+	}
+	if len(exec.relayRaw) != 0 {
+		t.Fatalf("relay raw = %q, want no relay payload write", string(exec.relayRaw))
+	}
+}
+
 func TestGatewayHandleMCP_ToolsCallPreservesLargeRelayPathReadInline(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	exec := &relayAwareToolExecutorStub{
