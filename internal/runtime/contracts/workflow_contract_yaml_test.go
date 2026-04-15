@@ -530,6 +530,20 @@ config_from:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_RejectsConfigFromPolicyKeys(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+action: create_flow_instance
+template: worker
+instance_id_from: payload.worker_id
+config_from:
+  policy_keys: [priority_profile]
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_PreservesEvidenceTarget(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
