@@ -456,9 +456,6 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 				if _, ok := inputs[eventType]; !ok {
 					continue
 				}
-				if isBackpropEvent(eventType) {
-					continue
-				}
 				if handler.CreateEntity {
 					continue
 				}

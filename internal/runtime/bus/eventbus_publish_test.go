@@ -1305,7 +1305,7 @@ func TestEventBusPublish_RecordsPublishDiagnosticsInTurnRecorder(t *testing.T) {
 	}
 }
 
-func TestEventBusPublish_NestedDescendantCompletionFlushesDeferredParentEvents(t *testing.T) {
+func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
 	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
@@ -1440,6 +1440,9 @@ func TestEventBusPublish_NestedDescendantCompletionFlushesDeferredParentEvents(t
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate events: %v", err)
 	}
+	if contains(emitted, "child/step.result") {
+		t.Fatalf("events = %v, do not want child/step.result", emitted)
+	}
 	if !contains(emitted, "pipeline.complete") {
 		t.Fatalf("events = %v, want pipeline.complete", emitted)
 	}
@@ -1454,7 +1457,7 @@ func contains(items []string, want string) bool {
 	return false
 }
 
-func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesPipeline(t *testing.T) {
+func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChildContinuation(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
 	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
@@ -1531,6 +1534,51 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesPipeline(t 
 		}
 		instances, _ := runtimepipeline.NewWorkflowInstanceStore(db).List(context.Background())
 		t.Fatalf("root current_state = %q, want done; events=%v instances=%#v", got, dump, instances)
+	}
+
+	instances, err := runtimepipeline.NewWorkflowInstanceStore(db).List(context.Background())
+	if err != nil {
+		t.Fatalf("list workflow instances: %v", err)
+	}
+	var (
+		childState      string
+		grandchildState string
+	)
+	var emitted []string
+	rows, err := db.QueryContext(context.Background(), `SELECT event_name FROM events ORDER BY created_at ASC, event_id ASC`)
+	if err != nil {
+		t.Fatalf("query events: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan event: %v", err)
+		}
+		emitted = append(emitted, strings.TrimSpace(name))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate events: %v", err)
+	}
+	for _, instance := range instances {
+		switch strings.TrimSpace(instance.WorkflowName) {
+		case "child":
+			childState = strings.TrimSpace(instance.CurrentState)
+		case "grandchild":
+			grandchildState = strings.TrimSpace(instance.CurrentState)
+		}
+	}
+	if childState != "completed" {
+		t.Fatalf("child current_state = %q, want completed", childState)
+	}
+	if grandchildState != "finished" {
+		t.Fatalf("grandchild current_state = %q, want finished", grandchildState)
+	}
+	if contains(emitted, "child/step.result") {
+		t.Fatalf("events = %v, do not want child/step.result", emitted)
+	}
+	if !contains(emitted, "pipeline.complete") {
+		t.Fatalf("events = %v, want pipeline.complete", emitted)
 	}
 }
 

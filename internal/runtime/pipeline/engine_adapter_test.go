@@ -958,15 +958,15 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 	if err != nil {
 		t.Fatalf("ShapeEmitPayload output: %v", err)
 	}
-	if got := output["entity_id"]; got != "ent-parent" {
-		t.Fatalf("output emit entity_id = %#v, want ent-parent", got)
+	if got := output["entity_id"]; got != "ent-child" {
+		t.Fatalf("output emit entity_id = %#v, want ent-child", got)
 	}
 	if _, ok := output["step"]; ok {
 		t.Fatalf("output emit step should be trimmed to the target event schema: %#v", output["step"])
 	}
 }
 
-func TestPipelineEnginePayloadShaper_TrimsUndeclaredFieldsAcrossCrossFlowOutputRetarget(t *testing.T) {
+func TestPipelineEnginePayloadShaper_TrimsUndeclaredFieldsAcrossCrossFlowOutputBoundary(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1001,8 +1001,8 @@ func TestPipelineEnginePayloadShaper_TrimsUndeclaredFieldsAcrossCrossFlowOutputR
 	if err != nil {
 		t.Fatalf("ShapeEmitPayload output: %v", err)
 	}
-	if got := output["entity_id"]; got != "ent-parent" {
-		t.Fatalf("output emit entity_id = %#v, want ent-parent", got)
+	if got := output["entity_id"]; got != "ent-child" {
+		t.Fatalf("output emit entity_id = %#v, want ent-child", got)
 	}
 	if _, ok := output["vertical_id"]; ok {
 		t.Fatalf("output emit vertical_id should be trimmed to the target event schema: %#v", output["vertical_id"])

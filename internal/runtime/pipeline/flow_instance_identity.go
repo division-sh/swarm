@@ -103,15 +103,5 @@ func resolveEmittedEntityID(
 		workflowEventEntityID(trigger),
 		trigger.EntityID(),
 	))
-	if !workflowEmitTargetsParentEntity(source, flowID, eventType) {
-		return entityID
-	}
-	if !instance.HasStoredPath {
-		return entityID
-	}
-	return strings.TrimSpace(firstNonEmptyString(
-		instance.ParentEntityID,
-		trigger.EntityID(),
-		entityID,
-	))
+	return entityID
 }

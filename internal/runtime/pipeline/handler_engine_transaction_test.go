@@ -1003,7 +1003,7 @@ func TestResolveHandlerEntityIDForRootUsesSubjectEntityForFlowScopedInbound(t *t
 	}
 }
 
-func TestResolveHandlerEntityIDForFlowUsesParentEntityForDescendantScopedInbound(t *testing.T) {
+func TestResolveHandlerEntityIDForFlowKeepsInboundEntityForDescendantScopedInbound(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Emits: runtimecontracts.EventEmission{Single: "step.result"},
 	}
@@ -1022,14 +1022,14 @@ func TestResolveHandlerEntityIDForFlowUsesParentEntityForDescendantScopedInbound
 		Type: events.EventType("child/grandchild/micro.done"),
 	}.WithEntityID(inboundEntityID), &state)
 
-	if gotID != parentEntityID {
-		t.Fatalf("entityID = %q, want parent %q", gotID, parentEntityID)
+	if gotID != inboundEntityID {
+		t.Fatalf("entityID = %q, want inbound %q", gotID, inboundEntityID)
 	}
 	if got := gotEvt.EntityID(); got != inboundEntityID {
 		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, inboundEntityID)
 	}
-	if state.EntityID != parentEntityID {
-		t.Fatalf("state entity_id = %q, want %q", state.EntityID, parentEntityID)
+	if state.EntityID != inboundEntityID {
+		t.Fatalf("state entity_id = %q, want %q", state.EntityID, inboundEntityID)
 	}
 }
 
@@ -1647,7 +1647,7 @@ func TestExecuteNodeContractHandlerPayloadTransformEntityPresenceCheckMintsEntit
 	}
 }
 
-func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionEmitsRootCompletion(t *testing.T) {
+func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotEmitChildContinuation(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
