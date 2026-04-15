@@ -143,7 +143,7 @@ type deliveryBackedTerminalTransitionRequest struct {
 // Receipts are outcome-only for an existing agent delivery. This write path must
 // never mint or repair delivery ownership from receipt state.
 func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSchemaCapabilities, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
-	return withEventStoreRetry(ctx, nil, func() error {
+	if err := withEventStoreRetry(ctx, nil, func() error {
 		tx, err := s.DB.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin event receipt tx: %w", err)
@@ -174,14 +174,14 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSc
 				return err
 			}
 		}
-		if err := s.convergeStandaloneRuntimePlatformRunByEventID(ctx, tx, caps, eventID); err != nil {
-			return err
-		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit event receipt tx: %w", err)
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return s.convergeStandaloneRuntimePlatformRunByEventID(ctx, s.DB, caps, eventID)
 }
 
 func buildAgentReceiptWriteState(baseRetryCount int, status runtimemanager.ReceiptStatus, errText string) agentReceiptWriteState {

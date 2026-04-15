@@ -317,6 +317,115 @@ func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testin
 	}
 }
 
+func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeRun_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentA := seedEntityAndAgent(t, ctx, pg)
+	agentB := "agent-" + uuid.NewString()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:       agentB,
+			Type:     "test",
+			Role:     "test",
+			Mode:     "worker",
+			EntityID: entityID,
+			Config:   []byte(`{"system_prompt":"x"}`),
+		},
+		Status:    "active",
+		HiredBy:   "test",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed second agent: %v", err)
+	}
+	payload, _ := json.Marshal(map[string]any{"k": "v"})
+	evt := (events.Event{
+		ID:          uuid.NewString(),
+		RunID:       "",
+		Type:        events.EventType("platform.paused"),
+		SourceAgent: "runtime",
+		Payload:     payload,
+		CreatedAt:   time.Now().Add(-1 * time.Hour),
+	}).WithEntityID(entityID)
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentA, agentB}); err != nil {
+		t.Fatalf("insert deliveries: %v", err)
+	}
+
+	if _, err := pg.DB.ExecContext(ctx, `
+		CREATE OR REPLACE FUNCTION slow_receipt_delivery_sync()
+		RETURNS trigger
+		LANGUAGE plpgsql
+		AS $$
+		BEGIN
+			PERFORM pg_sleep(0.2);
+			RETURN NEW;
+		END;
+		$$;
+	`); err != nil {
+		t.Fatalf("create slow trigger function: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		CREATE TRIGGER event_deliveries_slow_terminal_sync
+		BEFORE UPDATE ON event_deliveries
+		FOR EACH ROW
+		EXECUTE FUNCTION slow_receipt_delivery_sync()
+	`); err != nil {
+		t.Fatalf("create slow trigger: %v", err)
+	}
+
+	errCh := make(chan error, 2)
+	for _, agentID := range []string{agentA, agentB} {
+		agentID := agentID
+		go func() {
+			errCh <- pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusProcessed, "")
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("concurrent processed receipt #%d: %v", i+1, err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("timed out waiting for concurrent processed receipts")
+		}
+	}
+
+	var (
+		runStatus      string
+		pendingCount   int
+		deliveredCount int
+	)
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(r.status, '')
+		FROM events e
+		INNER JOIN runs r ON r.run_id = e.run_id
+		WHERE e.event_id = $1::uuid
+	`, evt.ID).Scan(&runStatus); err != nil {
+		t.Fatalf("load run status: %v", err)
+	}
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE status IN ('pending', 'in_progress')),
+			COUNT(*) FILTER (WHERE status = 'delivered')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+	`, evt.ID).Scan(&pendingCount, &deliveredCount); err != nil {
+		t.Fatalf("load delivery counts: %v", err)
+	}
+	if runStatus != "completed" {
+		t.Fatalf("run status = %q, want completed", runStatus)
+	}
+	if pendingCount != 0 || deliveredCount != 2 {
+		t.Fatalf("delivery counts = pending:%d delivered:%d, want pending:0 delivered:2", pendingCount, deliveredCount)
+	}
+}
+
 func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
