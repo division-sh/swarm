@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
@@ -50,12 +49,12 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 	entity := map[string]any{
 		"entity_id": entityID,
 	}
-	instanceID := strings.TrimSpace(firstNonEmptyString(
-		asString(payload["instance_id"]),
-		resolveFlowInstanceID(plan.InstanceIDPath, plan.InstanceIDFrom, payload, entity),
-	))
+	if !hasRequiredCreateFlowInstanceSiblings(plan) {
+		return fmt.Errorf("create_flow_instance requires non-empty instance_id_from and config_from")
+	}
+	instanceID := strings.TrimSpace(resolveFlowInstanceID(plan.InstanceIDPath, plan.InstanceIDFrom, payload, entity))
 	if instanceID == "" {
-		instanceID = uuid.NewString()
+		return fmt.Errorf("create_flow_instance instance_id_from resolved empty")
 	}
 	sourceEntityID := strings.TrimSpace(entityID)
 	instance := runtimeflowidentity.Derive(pc.SemanticSource(), templateID, instanceID)
@@ -74,13 +73,24 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 		Config:         map[string]any{},
 		TriggerEvent:   triggerCtx.Event,
 	}
-	if plan.ConfigFrom != nil {
-		req.Config = resolveFlowInstanceConfig(plan.ConfigFrom, payload, entity)
+	req.Config = resolveFlowInstanceConfig(plan.ConfigFrom, payload, entity)
+	if len(req.Config) == 0 {
+		return fmt.Errorf("create_flow_instance config_from resolved empty")
 	}
 	if err := pc.instanceActivator(ctx, req); err != nil {
 		return err
 	}
 	return nil
+}
+
+func hasRequiredCreateFlowInstanceSiblings(plan handlerExecutionPlan) bool {
+	if strings.TrimSpace(plan.InstanceIDFrom) == "" && !plan.InstanceIDPath.HasExplicitRoot() {
+		return false
+	}
+	if plan.ConfigFrom == nil {
+		return false
+	}
+	return len(plan.ConfigFrom.ConfigEntries()) > 0
 }
 
 func resolveFlowInstanceConfig(spec *runtimecontracts.ConfigFromSpec, payload, entity map[string]any) map[string]any {

@@ -90,6 +90,10 @@ active_issues:
     title: Enforce create_entity + accumulate prohibition at canonical boot validation
     maps_to:
       - startup_validation_missing_prohibited_handler_enforcement
+  - id: 415
+    title: Align runtime enforcement with primitive-only cross-flow model
+    maps_to:
+      - primitive_only_cross_flow_runtime_migration
 nodes:
   - id: boot_verification_false_negative_validation
     title: Boot/Verification False-Negative Validation
@@ -222,6 +226,36 @@ nodes:
       too_narrow:
         - one stale tier8 fixture
         - one missing if statement in a helper
+  - id: primitive_only_cross_flow_runtime_migration
+    title: Primitive-Only Cross-Flow Runtime Migration
+    parent_class: staged migration from coupled cross-flow runtime semantics to primitive-only event/config handoff semantics
+    canonical_owners:
+      - emitted-event identity shaping and parent-retarget ownership in internal/runtime/pipeline
+      - cross-flow entity access enforcement in internal/runtime/tools and pipeline state mutation
+      - create_flow_instance boot/runtime sibling-field enforcement in internal/runtime/bootverify and internal/runtime/pipeline
+    why_this_node_exists: the current runtime still implements the older coupled cross-flow model through multiple tightly-coupled seams, but the approved migration target removes those primitives in stages rather than as one local patch.
+    known_manifestations:
+      - child-flow output events still retarget to parent/root entity context at the emitted-event owner seam
+      - cross-flow get_entity reads remain runtime-authorized
+      - cross-flow writes are already fail-closed and must stay so during migration
+      - back-propagation events remain boot/runtime-recognized compatibility semantics
+      - subject_id remains propagated, persisted, queried, and exposed as a first-class cross-flow linkage surface
+      - create_flow_instance is still admitted without required sibling enforcement for both instance_id_from and config_from
+      - runtime create_flow_instance still falls back to payload.instance_id and then uuid generation when instance_id_from is absent
+    representative_issues:
+      - 413
+      - 415
+      - 416
+      - 417
+    common_framing_mistakes:
+      too_broad:
+        - remove all cross-flow complexity at once
+        - the spec draft is already the implementation boundary
+      too_narrow:
+        - one validation retarget bug
+        - one tool denial or one missing config_from check
+        - one missing create_flow_instance sibling field when the full current-spec required-sibling class is still under-enforced
+    current_action_pressure: active
   - id: entity_tool_schema_annotation_normalization_drift
     title: Entity-Tool Schema Annotation Normalization Drift
     parent_class: runtime entity-tool semantics drift from authored entity_schema type annotations

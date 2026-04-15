@@ -20,6 +20,33 @@ compute:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_RejectsLegacyCreateFlowInstanceActionShape(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+action:
+  type: create_flow_instance
+  flow_template: worker-flow
+  instance_id: "{{payload.instance_id}}"
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "DEPRECATED: legacy action field") {
+		t.Fatalf("yaml.Unmarshal error = %v, want legacy action field rejection", err)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsActionMappingMissingID(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+action:
+  template: worker
+  instance_id_from: payload.instance_id
+  config_from:
+    owner: payload.owner
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "action mapping missing id") {
+		t.Fatalf("yaml.Unmarshal error = %v, want action mapping missing id", err)
+	}
+}
+
 func TestHandlerRuleEntryDecode_AcceptsSpecComputeMetadataFields(t *testing.T) {
 	var rule HandlerRuleEntry
 	if err := yaml.Unmarshal([]byte(`

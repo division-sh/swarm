@@ -13,6 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/paths"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -896,6 +897,43 @@ func TestRun_AllowsFanOutDerivedAccumulationSourceEvent(t *testing.T) {
 
 	if reportContains(report.Errors(), "config_from_payload_alignment", "fan_out.child_completed") {
 		t.Fatalf("expected fan_out source_event to be accepted, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsCreateFlowInstanceMissingInstanceIDFrom(t *testing.T) {
+	repoRoot := repoRootForBootverifyTest(t)
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier9-composition-patterns", "test-compose-create-instance-config")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle := loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
+	node := bundle.Nodes["spawner"]
+	handler := node.EventHandlers["spawn.requested"]
+	handler.Action.InstanceIDFrom = ""
+	handler.Action.InstanceIDPath = paths.Path{}
+	node.EventHandlers["spawn.requested"] = handler
+	bundle.Nodes["spawner"] = node
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "create_flow_instance is missing instance_id_from") {
+		t.Fatalf("expected handler_field_compliance missing instance_id_from error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsCreateFlowInstanceMissingConfigFrom(t *testing.T) {
+	repoRoot := repoRootForBootverifyTest(t)
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier9-composition-patterns", "test-compose-create-instance-config")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle := loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
+	node := bundle.Nodes["spawner"]
+	handler := node.EventHandlers["spawn.requested"]
+	handler.Action.ConfigFrom = &runtimecontracts.ConfigFromSpec{Bindings: map[string]string{}}
+	node.EventHandlers["spawn.requested"] = handler
+	bundle.Nodes["spawner"] = node
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "create_flow_instance is missing config_from") {
+		t.Fatalf("expected handler_field_compliance missing config_from error, got %#v", report.Errors())
 	}
 }
 

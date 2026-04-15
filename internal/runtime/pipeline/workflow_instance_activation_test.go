@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"swarm/internal/events"
@@ -22,13 +23,18 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 	}
 	trigger := (events.Event{
 		Type:    events.EventType("custom.triggered"),
-		Payload: []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`),
+		Payload: []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42","name":"alpha"}`),
 	}).WithEntityID("ent-1")
 
 	ok := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.desired_instance_id",
 		InstanceIDPath: paths.Parse("payload.desired_instance_id"),
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{
+				"name": "payload.name",
+			},
+		},
 	})
 	if ok != nil {
 		t.Fatalf("expected createFlowInstance to succeed: %v", ok)
@@ -79,6 +85,103 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 	}
 	if captured.Instance.SubjectID != "ent-1" {
 		t.Fatalf("subject id = %q, want ent-1", captured.Instance.SubjectID)
+	}
+}
+
+func TestCreateFlowInstanceRejectsMissingRequiredSiblingFields(t *testing.T) {
+	pc := &PipelineCoordinator{
+		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
+			t.Fatalf("unexpected activation request: %#v", req)
+			return nil
+		},
+	}
+	trigger := (events.Event{
+		Type:    events.EventType("spawn.requested"),
+		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`),
+	}).WithEntityID("ent-1")
+
+	err := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
+		Template: "review",
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires non-empty instance_id_from and config_from") {
+		t.Fatalf("createFlowInstance error = %v, want missing required siblings", err)
+	}
+}
+
+func TestCreateFlowInstanceRejectsGeneratedFallbackWithoutInstanceIDFrom(t *testing.T) {
+	pc := &PipelineCoordinator{
+		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
+			t.Fatalf("unexpected activation request: %#v", req)
+			return nil
+		},
+	}
+	trigger := (events.Event{
+		Type:    events.EventType("spawn.requested"),
+		Payload: []byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`),
+	}).WithEntityID("ent-1")
+
+	err := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
+		Template: "review",
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{
+				"name": "payload.name",
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires non-empty instance_id_from and config_from") {
+		t.Fatalf("createFlowInstance error = %v, want missing instance_id_from failure", err)
+	}
+}
+
+func TestCreateFlowInstanceRejectsEmptyConfigFromBindings(t *testing.T) {
+	pc := &PipelineCoordinator{
+		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
+			t.Fatalf("unexpected activation request: %#v", req)
+			return nil
+		},
+	}
+	trigger := (events.Event{
+		Type:    events.EventType("spawn.requested"),
+		Payload: []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`),
+	}).WithEntityID("ent-1")
+
+	err := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
+		Template:       "review",
+		InstanceIDFrom: "payload.desired_instance_id",
+		InstanceIDPath: paths.Parse("payload.desired_instance_id"),
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires non-empty instance_id_from and config_from") {
+		t.Fatalf("createFlowInstance error = %v, want missing config_from failure", err)
+	}
+}
+
+func TestCreateFlowInstanceRejectsEmptyResolvedConfig(t *testing.T) {
+	pc := &PipelineCoordinator{
+		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
+			t.Fatalf("unexpected activation request: %#v", req)
+			return nil
+		},
+	}
+	trigger := (events.Event{
+		Type:    events.EventType("spawn.requested"),
+		Payload: []byte(`{"entity_id":"ent-1","desired_instance_id":"inst-42"}`),
+	}).WithEntityID("ent-1")
+
+	err := pc.createFlowInstance(context.Background(), workflowTriggerContext{Event: trigger}, handlerExecutionPlan{
+		Template:       "review",
+		InstanceIDFrom: "payload.desired_instance_id",
+		InstanceIDPath: paths.Parse("payload.desired_instance_id"),
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{
+				"name": "payload.missing_name",
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "config_from resolved empty") {
+		t.Fatalf("createFlowInstance error = %v, want empty resolved config failure", err)
 	}
 }
 
