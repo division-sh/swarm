@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimediaglog "swarm/internal/runtime/diaglog"
 	runtimellm "swarm/internal/runtime/llm"
@@ -1007,6 +1009,45 @@ func (conformanceTimerRecoveryEventStore) ListEventDeliveryRecipients(context.Co
 
 func (conformanceTimerRecoveryEventStore) SupportsPersistedReplay() bool { return false }
 
+type conformanceRecoveryFailureEventStore struct {
+	store    *store.PostgresStore
+	missing  []events.PersistedReplayEvent
+	claimErr error
+}
+
+func (s conformanceRecoveryFailureEventStore) CanonicalRuntimeLogCapability(context.Context) (bool, bool, error) {
+	return true, true, nil
+}
+
+func (s conformanceRecoveryFailureEventStore) AppendEvent(ctx context.Context, evt events.Event) error {
+	return s.store.AppendEvent(ctx, evt)
+}
+
+func (s conformanceRecoveryFailureEventStore) InsertEventDeliveries(ctx context.Context, eventID string, recipients []string) error {
+	return s.store.InsertEventDeliveries(ctx, eventID, recipients)
+}
+
+func (s conformanceRecoveryFailureEventStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
+	return s.store.ListEventDeliveryRecipients(ctx, eventID)
+}
+
+func (conformanceRecoveryFailureEventStore) UpsertCommittedReplayScope(context.Context, string, runtimereplayclaim.CommittedReplayScope) error {
+	return nil
+}
+
+func (s conformanceRecoveryFailureEventStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
+	return append([]events.PersistedReplayEvent(nil), s.missing...), nil
+}
+
+func (s conformanceRecoveryFailureEventStore) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
+	if s.claimErr != nil {
+		return nil, false, s.claimErr
+	}
+	return conformanceRecoveryReplayLease{}, true, nil
+}
+
+func (conformanceRecoveryFailureEventStore) SupportsPersistedReplay() bool { return true }
+
 type conformanceManagerReplayStore struct {
 	agents   []runtimemanager.PersistedAgent
 	pending  map[string][]events.Event
@@ -1178,6 +1219,85 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	classes, _ := detail["recoverable_work_classes"].([]any)
 	if len(classes) != 1 || readString(classes[0]) != "active schedules" {
 		t.Fatalf("detail.recoverable_work_classes = %#v, want [active schedules]", detail["recoverable_work_classes"])
+	}
+}
+
+func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalRuntimeLogSurface(t, ctx, pg)
+	module := loadConformanceRuntimeWorkflowModule(t)
+	eventStore := conformanceRecoveryFailureEventStore{
+		store: pg,
+		missing: []events.PersistedReplayEvent{{
+			Event: events.Event{
+				ID:        uuid.NewString(),
+				Type:      events.EventType("support.item_created"),
+				CreatedAt: time.Now().Add(-time.Minute).UTC(),
+			},
+		}},
+		claimErr: errors.New("claim failed"),
+	}
+
+	rt, err := runtimepkg.NewRuntime(ctx, &config.Config{
+		Runtime: config.RuntimeConfig{
+			RecoveryOnStartup: true,
+		},
+		LLM: config.LLMConfig{
+			RuntimeMode: "api",
+		},
+	}, runtimepkg.Stores{
+		SQLDB:        db,
+		EventStore:   eventStore,
+		ManagerStore: &conformanceManagerReplayStore{},
+	}, runtimepkg.RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     conformanceNoopLLMRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}()
+
+	var resetCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE event_name = 'platform.reset'
+	`).Scan(&resetCount); err != nil {
+		t.Fatalf("count platform.reset events: %v", err)
+	}
+	if resetCount != 0 {
+		t.Fatalf("platform.reset event count = %d, want 0", resetCount)
+	}
+
+	var recoveryFailedPayloadRaw []byte
+	if err := db.QueryRowContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE event_name = 'platform.recovery_failed'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`).Scan(&recoveryFailedPayloadRaw); err != nil {
+		t.Fatalf("load platform.recovery_failed event: %v", err)
+	}
+	var recoveryFailedPayload map[string]any
+	if err := json.Unmarshal(recoveryFailedPayloadRaw, &recoveryFailedPayload); err != nil {
+		t.Fatalf("unmarshal platform.recovery_failed payload: %v", err)
+	}
+	if got := readString(recoveryFailedPayload["error"]); !strings.Contains(got, "claim replay event") || !strings.Contains(got, "claim failed") {
+		t.Fatalf("platform.recovery_failed payload.error = %q, want replay claim failure", got)
 	}
 }
 
@@ -1438,6 +1558,24 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	}
 	if terminationDetail != "builder_api" {
 		t.Fatalf("termination_detail = %q, want builder_api", terminationDetail)
+	}
+
+	var resetPayloadRaw []byte
+	if err := db.QueryRowContext(ctx, `
+		SELECT payload
+		FROM events
+		WHERE event_name = 'platform.reset'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`).Scan(&resetPayloadRaw); err != nil {
+		t.Fatalf("load platform.reset event: %v", err)
+	}
+	var resetPayload map[string]any
+	if err := json.Unmarshal(resetPayloadRaw, &resetPayload); err != nil {
+		t.Fatalf("unmarshal platform.reset payload: %v", err)
+	}
+	if got := readString(resetPayload["source"]); got != "builder_api" {
+		t.Fatalf("platform.reset payload.source = %q, want builder_api", got)
 	}
 }
 

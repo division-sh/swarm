@@ -14,10 +14,14 @@ import (
 )
 
 type resetTestBus struct {
-	entries []runtimepipeline.RuntimeLogEntry
+	entries   []runtimepipeline.RuntimeLogEntry
+	publishes []events.Event
 }
 
-func (b *resetTestBus) Publish(context.Context, events.Event) error { return nil }
+func (b *resetTestBus) Publish(_ context.Context, evt events.Event) error {
+	b.publishes = append(b.publishes, evt)
+	return nil
+}
 func (b *resetTestBus) PublishDirect(context.Context, events.Event, []string) error {
 	return nil
 }
@@ -142,4 +146,33 @@ func TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath(t *testing.T) {
 	if got := records[0]["termination_reason"]; got != "orphaned" {
 		t.Fatalf("detail.orphaned_sessions[0].termination_reason = %#v, want orphaned", got)
 	}
+}
+
+func TestResetRuntimeStateWithSource_PublishesPlatformResetOnlyForExplicitAdminSources(t *testing.T) {
+	t.Run("builder_api", func(t *testing.T) {
+		bus := &resetTestBus{}
+		am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{})
+
+		if err := am.ResetRuntimeStateWithSource("builder_api"); err != nil {
+			t.Fatalf("ResetRuntimeStateWithSource(builder_api): %v", err)
+		}
+		if len(bus.publishes) != 1 {
+			t.Fatalf("published event count = %d, want 1", len(bus.publishes))
+		}
+		if got := string(bus.publishes[0].Type); got != "platform.reset" {
+			t.Fatalf("published event type = %q, want platform.reset", got)
+		}
+	})
+
+	t.Run("startup recovery fallback", func(t *testing.T) {
+		bus := &resetTestBus{}
+		am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{})
+
+		if err := am.ResetRuntimeStateWithSource("startup_recovery_failed"); err != nil {
+			t.Fatalf("ResetRuntimeStateWithSource(startup_recovery_failed): %v", err)
+		}
+		if len(bus.publishes) != 0 {
+			t.Fatalf("published event count = %d, want 0", len(bus.publishes))
+		}
+	})
 }
