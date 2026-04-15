@@ -17,7 +17,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	if publisher == nil || session == nil || strings.TrimSpace(session.AgentID) == "" {
 		return
 	}
-	marked, err := publisher.MarkDeliveryInProgress(ctx, session.AgentID, session.ID)
+	marked, err := markInboundDeliveryActiveForSession(ctx, publisher, session)
 	if err != nil {
 		logPublisherRuntime(ctx, publisher, "error", "mark_delivery_in_progress_failed", "Marking the agent delivery in progress failed", session.AgentID, session.ID, "", nil, err)
 	} else if marked {
@@ -70,6 +70,18 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 			"event_type": strings.TrimSpace(string(eventType)),
 		}, err)
 	}
+}
+
+func markInboundDeliveryActiveForSession(ctx context.Context, publisher EventPublisher, session *Session) (bool, error) {
+	if publisher == nil || session == nil {
+		return false, nil
+	}
+	agentID := strings.TrimSpace(session.AgentID)
+	sessionID := strings.TrimSpace(session.ID)
+	if agentID == "" || sessionID == "" {
+		return false, nil
+	}
+	return publisher.MarkDeliveryInProgress(ctx, agentID, sessionID)
 }
 
 func sessionModelTier(actor runtimeactors.AgentConfig) string {
