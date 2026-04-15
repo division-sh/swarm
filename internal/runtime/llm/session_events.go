@@ -10,6 +10,7 @@ import (
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
+	"swarm/internal/runtime/diaglog"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -82,6 +83,18 @@ func markInboundDeliveryActiveForSession(ctx context.Context, publisher EventPub
 		return false, nil
 	}
 	return publisher.MarkDeliveryInProgress(ctx, agentID, sessionID)
+}
+
+func requireInboundDeliveryActiveForSession(ctx context.Context, publisher EventPublisher, session *Session, level diaglog.Level, message string, detail map[string]any, entityID string) error {
+	if publisher == nil || session == nil {
+		return nil
+	}
+	_, err := markInboundDeliveryActiveForSession(ctx, publisher, session)
+	if err == nil {
+		return nil
+	}
+	logPublisherRuntime(ctx, publisher, level, "mark_delivery_in_progress_failed", message, session.AgentID, session.ID, entityID, detail, err)
+	return err
 }
 
 func sessionModelTier(actor runtimeactors.AgentConfig) string {

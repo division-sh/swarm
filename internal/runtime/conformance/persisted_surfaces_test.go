@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,9 +31,22 @@ import (
 	runtimesemanticview "swarm/internal/runtime/semanticview"
 	runtimesessions "swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
+	runtimeworkspace "swarm/internal/runtime/workspace"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
 )
+
+type staticWorkspaceResolver struct {
+	target *runtimeworkspace.Target
+	err    error
+}
+
+func (s staticWorkspaceResolver) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*runtimeworkspace.Target, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.target, nil
+}
 
 func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.DB, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, scopeKey string) string {
 	t.Helper()
@@ -356,6 +370,159 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	}
 	if got := facts["agent-1"].BlockingLayer; got != "session_execution" {
 		t.Fatalf("lifecycle blocking_layer = %q, want session_execution", got)
+	}
+}
+
+func TestRotatedLiveSessionRebindsDeliveryFrontierToSuccessorSession(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pg := &store.PostgresStore{DB: db}
+
+	requireCanonicalConversationSurface(t, ctx, pg)
+	requireCanonicalDeliveryLifecycleSurface(t, ctx, pg)
+	seedConformanceAgent(t, ctx, pg, "agent-1")
+
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	eventID := uuid.NewString()
+	evt := events.Event{
+		ID:          eventID,
+		RunID:       runID,
+		Type:        events.EventType("review.requested"),
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"turn":1}`),
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := pg.AppendEvent(ctx, evt); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{"agent-1"}); err != nil {
+		t.Fatalf("InsertEventDeliveries: %v", err)
+	}
+
+	dockerState := filepath.Join(t.TempDir(), "fake-docker-count")
+	fakeDocker := filepath.Join(t.TempDir(), "docker")
+	script := `#!/bin/sh
+state="$SWARM_FAKE_DOCKER_STATE"
+count=0
+if [ -f "$state" ]; then
+  count=$(cat "$state")
+fi
+count=$((count + 1))
+printf "%s" "$count" > "$state"
+if [ "$count" -eq 1 ]; then
+  printf "session not found" >&2
+  exit 1
+fi
+printf '{"result":"ok"}'
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("SWARM_DOCKER_BIN", fakeDocker)
+	t.Setenv("SWARM_FAKE_DOCKER_STATE", dockerState)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+
+	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	runtime := runtimellm.NewClaudeCLIRuntime(&config.Config{
+		LLM: config.LLMConfig{
+			ClaudeCLI: config.ClaudeCLIConfig{
+				Command:      "claude",
+				OutputFormat: "json",
+			},
+		},
+	}, registry, "worker-1", nil, nil, staticWorkspaceResolver{
+		target: &runtimeworkspace.Target{
+			Container: "swarm-agent-1",
+			Workdir:   "/workspace",
+		},
+	}, pg, bus)
+
+	newTurnContext := func(evt events.Event) context.Context {
+		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeGlobal.String(), "global")
+		base = runtimecorrelation.WithRunID(base, runID)
+		base = runtimebus.WithInboundEvent(base, evt)
+		return runtimeactors.WithActor(base, runtimeactors.AgentConfig{
+			ID:               "agent-1",
+			Type:             "stub",
+			SessionScope:     runtimesessions.SessionScopeGlobal.String(),
+			ConversationMode: runtimesessions.RuntimeModeSession.String(),
+		})
+	}
+
+	session, err := runtime.StartSession(newTurnContext(evt), "agent-1", "system", nil)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	originalSessionID := session.ID
+	if err := pg.MarkEventDeliveryInProgress(newTurnContext(evt), evt.ID, "agent-1", ""); err != nil {
+		t.Fatalf("MarkEventDeliveryInProgress(prelaunch): %v", err)
+	}
+	resp, err := runtime.ContinueSession(newTurnContext(evt), session, runtimellm.Message{Role: "user", Content: "rotate me"})
+	if err != nil {
+		t.Fatalf("ContinueSession: %v", err)
+	}
+	if resp == nil || strings.TrimSpace(resp.Message.Content) != "ok" {
+		t.Fatalf("response = %#v, want assistant ok", resp)
+	}
+	if session.ID == originalSessionID {
+		t.Fatalf("session ID did not rotate; got %q", session.ID)
+	}
+
+	var (
+		deliveryStatus         string
+		activeSessionID        string
+		predecessorStatus      string
+		successorStatus        string
+		successorRetriesFromID string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(active_session_id::text, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'agent-1'
+	`, evt.ID).Scan(&deliveryStatus, &activeSessionID); err != nil {
+		t.Fatalf("load delivery: %v", err)
+	}
+	if deliveryStatus != "in_progress" {
+		t.Fatalf("delivery status = %q, want in_progress", deliveryStatus)
+	}
+	if activeSessionID != session.ID {
+		t.Fatalf("delivery active_session_id = %q, want %q", activeSessionID, session.ID)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, '')
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, originalSessionID).Scan(&predecessorStatus); err != nil {
+		t.Fatalf("load predecessor session: %v", err)
+	}
+	if predecessorStatus != "terminated" {
+		t.Fatalf("predecessor status = %q, want terminated", predecessorStatus)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(status, ''),
+			COALESCE(runtime_state->>'retries_from_session_id', '')
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, session.ID).Scan(&successorStatus, &successorRetriesFromID); err != nil {
+		t.Fatalf("load successor session: %v", err)
+	}
+	if successorStatus != "active" {
+		t.Fatalf("successor status = %q, want active", successorStatus)
+	}
+	if successorRetriesFromID != originalSessionID {
+		t.Fatalf("successor retries_from_session_id = %q, want %q", successorRetriesFromID, originalSessionID)
 	}
 }
 

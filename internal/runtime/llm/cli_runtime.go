@@ -232,11 +232,11 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			s.ProviderSessionID = sid
 		}
 	}
-	if _, err := markInboundDeliveryActiveForSession(ctx, r.events, s); err != nil {
-		logPublisherRuntime(ctx, r.events, "error", "mark_delivery_in_progress_failed", "Marking the reused agent delivery in progress failed", s.AgentID, s.ID, entityID, map[string]any{
-			"runtime_mode": resolved.RuntimeMode.String(),
-			"scope_key":    resolved.ScopeKey,
-		}, err)
+	if err := requireInboundDeliveryActiveForSession(ctx, r.events, s, "error", "Marking the reused agent delivery in progress failed", map[string]any{
+		"runtime_mode": resolved.RuntimeMode.String(),
+		"scope_key":    resolved.ScopeKey,
+	}, entityID); err != nil {
+		return nil, fmt.Errorf("mark inbound delivery active for reused cli session: %w", err)
 	}
 	target, err := r.resolveWorkspace(ctx)
 	if err != nil {
@@ -369,11 +369,11 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 					s.Messages = []Message{{Role: "system", Content: "Session rotated due to CLI runtime recovery."}}
 				}
 				LogSessionRotatedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode.String(), oldSessionID, rotated.SessionID, resolved.ScopeKey, rotateReason, oldTurnCount, oldParseFailures)
-				if _, err := markInboundDeliveryActiveForSession(ctx, r.events, s); err != nil {
-					logPublisherRuntime(ctx, r.events, "error", "mark_delivery_in_progress_failed", "Marking the rotated agent delivery in progress failed", s.AgentID, s.ID, entityID, map[string]any{
-						"runtime_mode": resolved.RuntimeMode.String(),
-						"scope_key":    resolved.ScopeKey,
-					}, err)
+				if err := requireInboundDeliveryActiveForSession(ctx, r.events, s, "error", "Marking the rotated agent delivery in progress failed", map[string]any{
+					"runtime_mode": resolved.RuntimeMode.String(),
+					"scope_key":    resolved.ScopeKey,
+				}, entityID); err != nil {
+					return nil, fmt.Errorf("mark inbound delivery active for rotated cli session: %w", err)
 				}
 				args = []string{
 					"-p",

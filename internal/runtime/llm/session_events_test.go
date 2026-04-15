@@ -665,6 +665,80 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	}
 }
 
+func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *testing.T) {
+	publisher := &eventPublisherStub{}
+	runtime := NewAnthropicAPIRuntime(&config.Config{
+		LLM: config.LLMConfig{
+			ClaudeAPI: config.ClaudeAPIConfig{
+				DefaultModel: "claude-test",
+			},
+		},
+	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, publisher)
+	ctx := runtimeactors.WithActor(
+		runtimebus.WithInboundEvent(
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global"),
+			events.Event{ID: "evt-1"},
+		),
+		runtimeactors.AgentConfig{
+			ID:           "agent-1",
+			Type:         "sonnet",
+			SessionScope: sessions.SessionScopeGlobal.String(),
+		},
+	)
+
+	s, err := runtime.StartSession(ctx, "agent-1", "system", nil)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	publisher.marks = nil
+	publisher.markErr = errors.New("mark boom")
+
+	_, err = runtime.ContinueSession(ctx, s, Message{Role: "user", Content: "hello"})
+	if err == nil || !strings.Contains(err.Error(), "mark inbound delivery active for reused api session: mark boom") {
+		t.Fatalf("ContinueSession err = %v, want mark failure", err)
+	}
+	if len(publisher.runtimeLogs) != 1 {
+		t.Fatalf("runtime log count = %d, want 1", len(publisher.runtimeLogs))
+	}
+	if publisher.runtimeLogs[0].Action != "mark_delivery_in_progress_failed" {
+		t.Fatalf("runtime log action = %q, want mark_delivery_in_progress_failed", publisher.runtimeLogs[0].Action)
+	}
+}
+
+func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *testing.T) {
+	publisher := &eventPublisherStub{}
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, publisher)
+	ctx := runtimeactors.WithActor(
+		runtimebus.WithInboundEvent(
+			sessions.WithScope(context.Background(), sessions.RuntimeModeSession.String(), sessions.SessionScopeGlobal.String(), "global"),
+			events.Event{ID: "evt-1"},
+		),
+		runtimeactors.AgentConfig{
+			ID:           "agent-1",
+			Type:         "sonnet",
+			SessionScope: sessions.SessionScopeGlobal.String(),
+		},
+	)
+
+	s, err := runtime.StartSession(ctx, "agent-1", "system", nil)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	publisher.marks = nil
+	publisher.markErr = errors.New("mark boom")
+
+	_, err = runtime.ContinueSession(ctx, s, Message{Role: "user", Content: "hello"})
+	if err == nil || !strings.Contains(err.Error(), "mark inbound delivery active for reused cli session: mark boom") {
+		t.Fatalf("ContinueSession err = %v, want mark failure", err)
+	}
+	if len(publisher.runtimeLogs) != 1 {
+		t.Fatalf("runtime log count = %d, want 1", len(publisher.runtimeLogs))
+	}
+	if publisher.runtimeLogs[0].Action != "mark_delivery_in_progress_failed" {
+		t.Fatalf("runtime log action = %q, want mark_delivery_in_progress_failed", publisher.runtimeLogs[0].Action)
+	}
+}
+
 func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), "run-123")
 	ctx = runtimebus.WithInboundEvent(ctx, (events.Event{

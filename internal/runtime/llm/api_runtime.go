@@ -188,11 +188,11 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 			s.ID = lease.SessionID
 		}
 	}
-	if _, err := markInboundDeliveryActiveForSession(ctx, r.events, s); err != nil {
-		logPublisherRuntime(ctx, r.events, "error", "mark_delivery_in_progress_failed", "Marking the reused agent delivery in progress failed", s.AgentID, s.ID, entityID, map[string]any{
-			"runtime_mode": resolved.RuntimeMode.String(),
-			"scope_key":    resolved.ScopeKey,
-		}, err)
+	if err := requireInboundDeliveryActiveForSession(ctx, r.events, s, "error", "Marking the reused agent delivery in progress failed", map[string]any{
+		"runtime_mode": resolved.RuntimeMode.String(),
+		"scope_key":    resolved.ScopeKey,
+	}, entityID); err != nil {
+		return nil, fmt.Errorf("mark inbound delivery active for reused api session: %w", err)
 	}
 
 	if strings.TrimSpace(r.apiKey) == "" {
