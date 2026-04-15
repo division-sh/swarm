@@ -244,6 +244,7 @@ nodes:
       - cross-flow writes are already fail-closed and must stay so during migration
       - back-propagation events remain boot/runtime-recognized compatibility semantics
       - subject_id remains propagated, persisted, queried, and exposed as a first-class cross-flow linkage surface
+      - first child-flow create_entity still classifies root-scoped workflow/source identity as subject lineage input before the self-seeding proof seam can close honestly
       - create_flow_instance is still admitted without required sibling enforcement for both instance_id_from and config_from
       - runtime create_flow_instance still falls back to payload.instance_id and then uuid generation when instance_id_from is absent
     representative_issues:
@@ -252,6 +253,7 @@ nodes:
       - 426
       - 416
       - 417
+      - 446
     common_framing_mistakes:
       too_broad:
         - remove all cross-flow complexity at once
