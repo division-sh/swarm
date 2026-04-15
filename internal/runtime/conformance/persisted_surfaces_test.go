@@ -297,11 +297,11 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	}
 
 	var (
-		deliveryStatus    string
-		activeSessionID   string
-		sessionStatus     string
-		sessionScopeKey   string
-		liveSessionCount  int
+		deliveryStatus   string
+		activeSessionID  string
+		sessionStatus    string
+		sessionScopeKey  string
+		liveSessionCount int
 	)
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(status, ''), COALESCE(active_session_id::text, '')
