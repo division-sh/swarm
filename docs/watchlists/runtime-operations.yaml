@@ -85,6 +85,14 @@ active_issues:
     title: Expose recovery and restart decisions through canonical diagnostics
     maps_to:
       - recovery_restart_diagnostics
+  - id: 410
+    title: Reconcile run, session, and delivery lifecycle truth on the supported path
+    maps_to:
+      - runtime_lifecycle_observability
+  - id: 424
+    title: Reconcile stale active agent sessions against the delivery frontier on the supported path
+    maps_to:
+      - runtime_lifecycle_observability
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -247,8 +255,11 @@ nodes:
       - launch lifecycle is not exposed clearly enough
       - stalled runs and healthy running state look too similar
       - long-running or no-output sessions require log archaeology instead of first-class visibility
+      - persisted agent_sessions can remain active after the canonical same-run delivery frontier has narrowed
     representative_issues:
       - 175
+      - 410
+      - 424
     common_framing_mistakes:
       too_broad:
         - observability is weak
