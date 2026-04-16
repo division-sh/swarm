@@ -93,6 +93,20 @@ func TestRunClear_BuildsAndLaunchesBinaryDirectly(t *testing.T) {
 	}
 }
 
+func TestRunClear_ProvidesCanonicalLocalDevDefaultsWithoutSourcingEnv(t *testing.T) {
+	result := runRunClear(t, runClearConfig{})
+
+	if got := strings.TrimSpace(result.toolGatewayToken); got != "local-tool-gateway-token" {
+		t.Fatalf("tool gateway token = %q, want canonical local-dev default", got)
+	}
+	if got := strings.TrimSpace(result.claudeOAuthToken); got != "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" {
+		t.Fatalf("claude oauth token = %q, want canonical local-dev default", got)
+	}
+	if got := strings.TrimSpace(result.empireAPIKey); got != "local-dev-key" {
+		t.Fatalf("empire api key = %q, want canonical local-dev default", got)
+	}
+}
+
 func TestRunClear_DoesNotTreatLauncherStateChangeAsStartupFailure(t *testing.T) {
 	result := runRunClear(t, runClearConfig{psMode: "state_flip"})
 
@@ -194,6 +208,9 @@ type runClearResult struct {
 	stdout              string
 	operatorToken       string
 	builderToken        string
+	toolGatewayToken    string
+	claudeOAuthToken    string
+	empireAPIKey        string
 	hostGatewayURL      string
 	containerGatewayURL string
 	builtBinaryPath     string
@@ -226,6 +243,9 @@ func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error)
 	pidFile := filepath.Join(t.TempDir(), "swarm.pid")
 	operatorTokenSink := filepath.Join(t.TempDir(), "operator-token.txt")
 	builderTokenSink := filepath.Join(t.TempDir(), "builder-token.txt")
+	toolGatewayTokenSink := filepath.Join(t.TempDir(), "tool-gateway-token.txt")
+	claudeOAuthTokenSink := filepath.Join(t.TempDir(), "claude-oauth-token.txt")
+	empireAPIKeySink := filepath.Join(t.TempDir(), "empire-api-key.txt")
 	hostGatewayURLSink := filepath.Join(t.TempDir(), "host-gateway-url.txt")
 	containerGatewayURLSink := filepath.Join(t.TempDir(), "container-gateway-url.txt")
 	goBuildOutputSink := filepath.Join(t.TempDir(), "go-build-output.txt")
@@ -343,6 +363,9 @@ chmod +x "$out"
 set -euo pipefail
 printf '%s' "${SWARM_OPERATOR_AUTH_TOKEN:-}" > "${PYTHON_OPERATOR_TOKEN_SINK}"
 printf '%s' "${SWARM_BUILDER_AUTH_TOKEN:-}" > "${PYTHON_ENV_SINK}"
+printf '%s' "${SWARM_TOOL_GATEWAY_TOKEN:-}" > "${PYTHON_TOOL_GATEWAY_TOKEN_SINK}"
+printf '%s' "${CLAUDE_CODE_OAUTH_TOKEN:-}" > "${PYTHON_CLAUDE_OAUTH_TOKEN_SINK}"
+printf '%s' "${EMPIREAI_API_KEY:-}" > "${PYTHON_EMPIRE_API_KEY_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_URL:-}" > "${PYTHON_HOST_GATEWAY_URL_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" > "${PYTHON_CONTAINER_GATEWAY_URL_SINK}"
 printf '%s' "${BINARY_PATH:-}" > "${PYTHON_BINARY_PATH_SINK}"
@@ -475,6 +498,9 @@ printf '{}'
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"PYTHON_OPERATOR_TOKEN_SINK=" + operatorTokenSink,
 		"PYTHON_ENV_SINK=" + builderTokenSink,
+		"PYTHON_TOOL_GATEWAY_TOKEN_SINK=" + toolGatewayTokenSink,
+		"PYTHON_CLAUDE_OAUTH_TOKEN_SINK=" + claudeOAuthTokenSink,
+		"PYTHON_EMPIRE_API_KEY_SINK=" + empireAPIKeySink,
 		"PYTHON_HOST_GATEWAY_URL_SINK=" + hostGatewayURLSink,
 		"PYTHON_CONTAINER_GATEWAY_URL_SINK=" + containerGatewayURLSink,
 		"PYTHON_BINARY_PATH_SINK=" + pythonBinaryPathSink,
@@ -529,6 +555,9 @@ printf '{}'
 		stdout:              string(out),
 		operatorToken:       readFileTrimmed(t, operatorTokenSink),
 		builderToken:        readFileTrimmed(t, builderTokenSink),
+		toolGatewayToken:    readFileTrimmed(t, toolGatewayTokenSink),
+		claudeOAuthToken:    readFileTrimmed(t, claudeOAuthTokenSink),
+		empireAPIKey:        readFileTrimmed(t, empireAPIKeySink),
 		hostGatewayURL:      readFileTrimmed(t, hostGatewayURLSink),
 		containerGatewayURL: readFileTrimmed(t, containerGatewayURLSink),
 		builtBinaryPath:     readFileTrimmed(t, goBuildOutputSink),
