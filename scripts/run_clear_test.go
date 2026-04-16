@@ -18,6 +18,7 @@ type runClearConfig struct {
 	containerURL     string
 	launcherMode     string
 	launcherLogText  string
+	psMode           string
 	readyCode        string
 	apiHealthCode    string
 	startTimeout     string
@@ -75,6 +76,34 @@ func TestRunClear_UsesConfiguredBuilderAuthTokenForRPC(t *testing.T) {
 	wantBuilderHeader := "Authorization: Bearer " + explicitBuilderToken
 	if !strings.Contains(result.rpcHeaders, wantBuilderHeader) {
 		t.Fatalf("rpc headers = %q, want %q", result.rpcHeaders, wantBuilderHeader)
+	}
+}
+
+func TestRunClear_BuildsAndLaunchesBinaryDirectly(t *testing.T) {
+	result := runRunClear(t, runClearConfig{})
+
+	if got := strings.TrimSpace(result.builtBinaryPath); got == "" {
+		t.Fatal("expected helper to build a swarm binary")
+	}
+	if got, want := strings.TrimSpace(result.launchedBinaryPath), strings.TrimSpace(result.builtBinaryPath); got != want {
+		t.Fatalf("launched binary path = %q, want %q", got, want)
+	}
+	if got := filepath.Base(strings.TrimSpace(result.builtBinaryPath)); got != "swarm" {
+		t.Fatalf("built binary basename = %q, want swarm", got)
+	}
+}
+
+func TestRunClear_DoesNotTreatLauncherStateChangeAsStartupFailure(t *testing.T) {
+	result := runRunClear(t, runClearConfig{psMode: "state_flip"})
+
+	if strings.Contains(result.stdout, "Swarm exited before becoming ready. Current log:") {
+		t.Fatalf("stdout = %q, want readiness success despite launcher state change", result.stdout)
+	}
+	if !strings.Contains(result.stdout, "Swarm ready at http://127.0.0.1:8081") {
+		t.Fatalf("stdout = %q, want readiness success", result.stdout)
+	}
+	if !strings.Contains(result.stdout, `"status":"started"`) {
+		t.Fatalf("stdout = %q, want run.start request after readiness", result.stdout)
 	}
 }
 
@@ -167,6 +196,8 @@ type runClearResult struct {
 	builderToken        string
 	hostGatewayURL      string
 	containerGatewayURL string
+	builtBinaryPath     string
+	launchedBinaryPath  string
 	healthHeaders       string
 	healthURL           string
 	rpcHeaders          string
@@ -197,6 +228,9 @@ func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error)
 	builderTokenSink := filepath.Join(t.TempDir(), "builder-token.txt")
 	hostGatewayURLSink := filepath.Join(t.TempDir(), "host-gateway-url.txt")
 	containerGatewayURLSink := filepath.Join(t.TempDir(), "container-gateway-url.txt")
+	goBuildOutputSink := filepath.Join(t.TempDir(), "go-build-output.txt")
+	pythonBinaryPathSink := filepath.Join(t.TempDir(), "python-binary-path.txt")
+	psStateCountSink := filepath.Join(t.TempDir(), "ps-state-count.txt")
 	healthHeadersSink := filepath.Join(t.TempDir(), "api-health-headers.txt")
 	healthURLSink := filepath.Join(t.TempDir(), "api-health-url.txt")
 	rpcHeadersSink := filepath.Join(t.TempDir(), "rpc-headers.txt")
@@ -208,34 +242,114 @@ func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error)
 
 	writeExecutable(t, binDir, "pgrep", "#!/usr/bin/env bash\nexit 1\n")
 	writeExecutable(t, binDir, "lsof", "#!/usr/bin/env bash\nexit 1\n")
+	writeExecutable(t, binDir, "ps", `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${PS_MODE:-real}" == "real" ]]; then
+  exec /bin/ps "$@"
+fi
+format=""
+while (($#)); do
+  case "$1" in
+    -o)
+      format="$2"
+      shift 2
+      ;;
+    -p)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+case "${PS_MODE:-}" in
+  state_flip)
+    case "$format" in
+      state=)
+        count=0
+        if [[ -f "${PS_STATE_COUNT_SINK}" ]]; then
+          count="$(cat "${PS_STATE_COUNT_SINK}")"
+        fi
+        count=$((count + 1))
+        printf '%s' "$count" > "${PS_STATE_COUNT_SINK}"
+        if (( count == 1 )); then
+          printf 'R\n'
+        else
+          printf 'S\n'
+        fi
+        ;;
+      lstart=)
+        printf 'Wed Apr 15 23:54:13 2026\n'
+        ;;
+      command=)
+        printf '%s -contracts %s -health-addr %s\n' "${BINARY_PATH}" "${CONTRACTS_ROOT}" "${HEALTH_ADDR}"
+        ;;
+      *)
+        exit 1
+        ;;
+    esac
+    ;;
+  *)
+    echo "unexpected PS_MODE: ${PS_MODE:-}" >&2
+    exit 1
+    ;;
+esac
+`)
 	writeExecutable(t, binDir, "docker", "#!/usr/bin/env bash\nif [[ \"${1:-}\" == \"ps\" ]]; then exit 0; fi\nif [[ \"${1:-}\" == \"stop\" ]]; then exit 0; fi\nexit 0\n")
 	writeExecutable(t, binDir, "psql", "#!/usr/bin/env bash\nexit 0\n")
 	writeExecutable(t, binDir, "uuidgen", "#!/usr/bin/env bash\nprintf '11111111-1111-1111-1111-111111111111\\n'\n")
+	writeExecutable(t, binDir, "go", `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" != "build" ]]; then
+  echo "unexpected go subcommand: ${1:-}" >&2
+  exit 1
+fi
+out=""
+while (($#)); do
+  case "$1" in
+    -o)
+      out="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -z "$out" ]]; then
+  echo "missing build output" >&2
+  exit 1
+fi
+printf '%s' "$out" > "${GO_BUILD_OUTPUT_SINK}"
+mkdir -p "$(dirname "$out")"
+cat > "$out" <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${GO_BUILD_LAUNCHER_MODE:-steady}" in
+  exit_fast)
+    if [[ -n "${GO_BUILD_LAUNCHER_LOG_TEXT:-}" ]]; then
+      printf '%s\n' "${GO_BUILD_LAUNCHER_LOG_TEXT}"
+    fi
+    exit 1
+    ;;
+  *)
+    sleep 30 >/dev/null 2>&1 </dev/null
+    ;;
+esac
+EOS
+chmod +x "$out"
+`)
 	writeExecutable(t, binDir, "python3", `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s' "${SWARM_OPERATOR_AUTH_TOKEN:-}" > "${PYTHON_OPERATOR_TOKEN_SINK}"
 printf '%s' "${SWARM_BUILDER_AUTH_TOKEN:-}" > "${PYTHON_ENV_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_URL:-}" > "${PYTHON_HOST_GATEWAY_URL_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" > "${PYTHON_CONTAINER_GATEWAY_URL_SINK}"
-mode="${PYTHON_LAUNCHER_MODE:-steady}"
-case "$mode" in
-  exit_fast)
-    if [[ -n "${PYTHON_LAUNCHER_LOG_TEXT:-}" ]]; then
-      printf '%s\n' "${PYTHON_LAUNCHER_LOG_TEXT}" >> "${LOG_FILE}"
-    fi
-    (sleep 0.2 >/dev/null 2>&1 </dev/null) &
-    pid="$!"
-    (
-      sleep 0.3
-      kill "${pid}" >/dev/null 2>&1 || true
-    ) >/dev/null 2>&1 </dev/null &
-    printf '%s\n' "${pid}"
-    ;;
-  *)
-    (sleep 30 >/dev/null 2>&1 </dev/null) &
-    printf '%s\n' "$!"
-    ;;
-esac
+printf '%s' "${BINARY_PATH:-}" > "${PYTHON_BINARY_PATH_SINK}"
+(
+  exec "${BINARY_PATH}" -contracts "${CONTRACTS_ROOT}" -health-addr "${HEALTH_ADDR}" >> "${LOG_FILE}" 2>&1 < /dev/null
+) &
+printf '%s\n' "$!"
 `)
 	writeExecutable(t, binDir, "curl", `#!/usr/bin/env bash
 set -euo pipefail
@@ -363,8 +477,12 @@ printf '{}'
 		"PYTHON_ENV_SINK=" + builderTokenSink,
 		"PYTHON_HOST_GATEWAY_URL_SINK=" + hostGatewayURLSink,
 		"PYTHON_CONTAINER_GATEWAY_URL_SINK=" + containerGatewayURLSink,
-		"PYTHON_LAUNCHER_MODE=" + defaultString(cfg.launcherMode, "steady"),
-		"PYTHON_LAUNCHER_LOG_TEXT=" + cfg.launcherLogText,
+		"PYTHON_BINARY_PATH_SINK=" + pythonBinaryPathSink,
+		"GO_BUILD_OUTPUT_SINK=" + goBuildOutputSink,
+		"GO_BUILD_LAUNCHER_MODE=" + defaultString(cfg.launcherMode, "steady"),
+		"GO_BUILD_LAUNCHER_LOG_TEXT=" + cfg.launcherLogText,
+		"PS_MODE=" + defaultString(cfg.psMode, "real"),
+		"PS_STATE_COUNT_SINK=" + psStateCountSink,
 		"CURL_API_HEALTH_HEADERS_SINK=" + healthHeadersSink,
 		"CURL_API_HEALTH_URL_SINK=" + healthURLSink,
 		"CURL_HEALTHZ_CODE=200",
@@ -378,6 +496,7 @@ printf '{}'
 		"CURL_DIRECTIVE_URL_SINK=" + directiveURLSink,
 		"CONTRACTS_ROOT=/tmp/contracts",
 		"HEALTH_ADDR=127.0.0.1:8081",
+		"BINARY_PATH=" + filepath.Join(t.TempDir(), "swarm"),
 		"LOG_FILE=" + logFile,
 		"PID_FILE=" + pidFile,
 		"START_TIMEOUT=" + defaultString(cfg.startTimeout, "1"),
@@ -412,8 +531,10 @@ printf '{}'
 		builderToken:        readFileTrimmed(t, builderTokenSink),
 		hostGatewayURL:      readFileTrimmed(t, hostGatewayURLSink),
 		containerGatewayURL: readFileTrimmed(t, containerGatewayURLSink),
-		healthHeaders:       readFileTrimmed(t, healthHeadersSink),
-		healthURL:           readFileTrimmed(t, healthURLSink),
+		builtBinaryPath:     readFileTrimmed(t, goBuildOutputSink),
+		launchedBinaryPath:  readFileTrimmed(t, pythonBinaryPathSink),
+		healthHeaders:       readFileTrimmedOptional(t, healthHeadersSink),
+		healthURL:           readFileTrimmedOptional(t, healthURLSink),
 		rpcHeaders:          readFileTrimmedOptional(t, rpcHeadersSink),
 		rpcBody:             readFileTrimmedOptional(t, bodySink),
 		rpcURL:              readFileTrimmedOptional(t, urlSink),
