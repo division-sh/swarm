@@ -69,6 +69,10 @@ active_issues:
     title: Strengthen supported local startup smoke for run_clear and builder project-open
     maps_to:
       - harness_reliability_and_local_smoke
+  - id: 450
+    title: run-clear can report startup failure after runtime is already ready
+    maps_to:
+      - harness_reliability_and_local_smoke
 nodes:
   - id: boundary_owned_decomposition
     title: Boundary-Owned Decomposition

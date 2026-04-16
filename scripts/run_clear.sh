@@ -24,6 +24,7 @@ SWARM_DB_PASSWORD="${SWARM_DB_PASSWORD:-postgres}"
 
 LOG_FILE="${LOG_FILE:-/tmp/swarm-empire.log}"
 PID_FILE="${PID_FILE:-/tmp/swarm-empire.pid}"
+BINARY_PATH="${BINARY_PATH:-/tmp/swarm-empire-bin/swarm}"
 START_TIMEOUT="${START_TIMEOUT:-60}"
 
 DIRECTIVE_AGENT="${DIRECTIVE_AGENT:-}"
@@ -107,21 +108,26 @@ BEGIN
 END $$;
 SQL
 
+echo "Building Swarm binary at ${BINARY_PATH}..."
+mkdir -p "$(dirname "${BINARY_PATH}")"
+go build -o "${BINARY_PATH}" ./cmd/swarm
+
 echo "Starting Swarm with contracts ${CONTRACTS_ROOT}..."
 : > "${LOG_FILE}"
 launcher_pid="$(
-  LOG_FILE="${LOG_FILE}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" SWARM_OPERATOR_AUTH_TOKEN="${SWARM_OPERATOR_AUTH_TOKEN}" SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN}" python3 - <<'PY'
+  LOG_FILE="${LOG_FILE}" BINARY_PATH="${BINARY_PATH}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" SWARM_OPERATOR_AUTH_TOKEN="${SWARM_OPERATOR_AUTH_TOKEN}" SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN}" python3 - <<'PY'
 import os
 import subprocess
 import sys
 
 log_file = os.environ["LOG_FILE"]
+binary_path = os.environ["BINARY_PATH"]
 contracts_root = os.environ["CONTRACTS_ROOT"]
 health_addr = os.environ["HEALTH_ADDR"]
 
 with open(os.devnull, "rb", buffering=0) as devnull, open(log_file, "ab", buffering=0) as out:
     proc = subprocess.Popen(
-        ["go", "run", "./cmd/swarm", "-contracts", contracts_root, "-health-addr", health_addr],
+        [binary_path, "-contracts", contracts_root, "-health-addr", health_addr],
         stdin=devnull,
         stdout=out,
         stderr=subprocess.STDOUT,
@@ -133,35 +139,46 @@ PY
 )"
 echo "${launcher_pid}" > "${PID_FILE}"
 
-launcher_process_signature() {
+launcher_process_state() {
   local pid="${1:-}"
   [[ -n "${pid}" ]] || return 1
-  local state start command
-  state="$(ps -o state= -p "${pid}" 2>/dev/null | head -n 1 | sed 's/^ *//')"
-  start="$(ps -o lstart= -p "${pid}" 2>/dev/null | head -n 1 | sed 's/^ *//')"
-  command="$(ps -o command= -p "${pid}" 2>/dev/null | head -n 1 | sed 's/^ *//')"
-  if [[ -z "${state}" || -z "${start}" || -z "${command}" ]]; then
-    return 1
-  fi
-  printf '%s\t%s\t%s\n' "${state}" "${start}" "${command}"
+  ps -o state= -p "${pid}" 2>/dev/null | head -n 1 | sed 's/^ *//'
 }
 
-launcher_signature="$(launcher_process_signature "${launcher_pid}" || true)"
+launcher_process_identity() {
+  local pid="${1:-}"
+  [[ -n "${pid}" ]] || return 1
+  local start command
+  start="$(ps -o lstart= -p "${pid}" 2>/dev/null | head -n 1 | sed 's/^ *//')"
+  command="$(ps -o command= -p "${pid}" 2>/dev/null | head -n 1 | sed 's/^ *//')"
+  if [[ -z "${start}" || -z "${command}" ]]; then
+    return 1
+  fi
+  printf '%s\t%s\n' "${start}" "${command}"
+}
+
+launcher_identity="$(launcher_process_identity "${launcher_pid}" || true)"
 
 launcher_exited_before_ready() {
   local pid="${1:-}"
-  local expected_signature="${2:-}"
-  [[ -n "${pid}" && -n "${expected_signature}" ]] || return 1
-  local current_signature current_state
-  current_signature="$(launcher_process_signature "${pid}" || true)"
-  if [[ -z "${current_signature}" ]]; then
+  local expected_identity="${2:-}"
+  [[ -n "${pid}" ]] || return 1
+  local current_state current_identity
+  current_state="$(launcher_process_state "${pid}" || true)"
+  if [[ -z "${current_state}" ]]; then
     return 0
   fi
-  current_state="${current_signature%%$'\t'*}"
   if [[ "${current_state}" == *Z* ]]; then
     return 0
   fi
-  if [[ "${current_signature}" != "${expected_signature}" ]]; then
+  if [[ -z "${expected_identity}" ]]; then
+    return 1
+  fi
+  current_identity="$(launcher_process_identity "${pid}" || true)"
+  if [[ -z "${current_identity}" ]]; then
+    return 0
+  fi
+  if [[ "${current_identity}" != "${expected_identity}" ]]; then
     return 0
   fi
   return 1
@@ -169,7 +186,7 @@ launcher_exited_before_ready() {
 
 ready=0
 for _ in $(seq 1 "${START_TIMEOUT}"); do
-  if launcher_exited_before_ready "${launcher_pid}" "${launcher_signature}"; then
+  if launcher_exited_before_ready "${launcher_pid}" "${launcher_identity}"; then
     echo "Swarm exited before becoming ready. Current log:"
     tail -n 200 "${LOG_FILE}"
     exit 1
