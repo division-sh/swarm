@@ -426,7 +426,8 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 
 func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	instances := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(bus, instances)
 	bundle := testFlowBundleWithAutoEmitEntry("task.started", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -447,11 +448,21 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 	if len(bus.runtimeLogs) != 0 {
 		t.Fatalf("runtime logs = %#v, want none", bus.runtimeLogs)
 	}
+	if len(instances.upserts) != 0 {
+		t.Fatalf("instance upserts = %#v, want none", instances.upserts)
+	}
+	if len(bus.addedPaths) != 0 {
+		t.Fatalf("added paths = %#v, want none", bus.addedPaths)
+	}
+	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+		t.Fatal("unexpected activated agent config after auto-emit schema failure")
+	}
 }
 
 func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	instances := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(bus, instances)
 	bundle := testFlowBundle("task.started")
 	postCommit := make([]func(), 0, 1)
 	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
@@ -472,6 +483,15 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	}
 	if len(bus.runtimeLogs) != 0 {
 		t.Fatalf("runtime logs = %#v, want none", bus.runtimeLogs)
+	}
+	if len(instances.upserts) != 0 {
+		t.Fatalf("instance upserts = %#v, want none", instances.upserts)
+	}
+	if len(bus.addedPaths) != 0 {
+		t.Fatalf("added paths = %#v, want none", bus.addedPaths)
+	}
+	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
+		t.Fatal("unexpected activated agent config after queued auto-emit schema failure")
 	}
 }
 
