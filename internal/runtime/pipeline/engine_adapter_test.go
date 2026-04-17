@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -954,19 +955,14 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 		t.Fatalf("internal emit step = %#v, want done", got)
 	}
 
-	output, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.done", map[string]any{"entity_id": "ent-child", "step": "done"})
-	if err != nil {
-		t.Fatalf("ShapeEmitPayload output: %v", err)
-	}
-	if got := output["entity_id"]; got != "ent-child" {
-		t.Fatalf("output emit entity_id = %#v, want ent-child", got)
-	}
-	if _, ok := output["step"]; ok {
-		t.Fatalf("output emit step should be trimmed to the target event schema: %#v", output["step"])
+	if _, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.done", map[string]any{"entity_id": "ent-child", "step": "done"}); err == nil {
+		t.Fatal("expected cross-flow undeclared field to fail closed")
+	} else if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
+		t.Fatalf("ShapeEmitPayload output error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
 	}
 }
 
-func TestPipelineEnginePayloadShaper_TrimsUndeclaredFieldsAcrossCrossFlowOutputBoundary(t *testing.T) {
+func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsAcrossCrossFlowOutputBoundary(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -993,22 +989,16 @@ func TestPipelineEnginePayloadShaper_TrimsUndeclaredFieldsAcrossCrossFlowOutputB
 		},
 	}
 
-	output, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.done", map[string]any{
+	_, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.done", map[string]any{
 		"entity_id":   "ent-child",
 		"vertical_id": "ent-child",
 		"result":      "accepted",
 	})
-	if err != nil {
-		t.Fatalf("ShapeEmitPayload output: %v", err)
+	if err == nil {
+		t.Fatal("expected undeclared output fields to fail closed")
 	}
-	if got := output["entity_id"]; got != "ent-child" {
-		t.Fatalf("output emit entity_id = %#v, want ent-child", got)
-	}
-	if _, ok := output["vertical_id"]; ok {
-		t.Fatalf("output emit vertical_id should be trimmed to the target event schema: %#v", output["vertical_id"])
-	}
-	if _, ok := output["result"]; ok {
-		t.Fatalf("output emit result should be trimmed to the target event schema: %#v", output["result"])
+	if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
+		t.Fatalf("ShapeEmitPayload output error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
 	}
 }
 

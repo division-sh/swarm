@@ -1034,7 +1034,8 @@ engine:
     emit_payload_default: 'For supported declarative system-node emit sites, the platform constructs the payload by: 1. Start
       from an empty payload. 2. Evaluate emit.fields, if present, into the payload. 3. Force platform fields: entity_id,
       trigger_event_type, current_state (always present, always from platform). There is no implicit entity or trigger-payload
-      passthrough on this surface. Collision order: platform fields > emit.fields.'
+      passthrough on this surface. Collision order: platform fields > emit.fields. Runtime validates this surface fail-closed:
+      undeclared producer-authored payload fields are rejected, not silently trimmed.'
     dual_path_events: An event can be both an input pin (arriving from outside the flow) and internally generated (emitted
       by a handler within the flow). The system node handler processes it identically regardless of source. No priority or
       deduplication between paths — if the same event fires from both, it runs twice (idempotency_key in the events table
@@ -3198,6 +3199,12 @@ observation_model:
       collision_priority: platform fields > emit.fields
       note: This surface has no implicit entity passthrough or trigger-payload passthrough. If an emitted event needs a field
         beyond the platform-forced fields, the producer must declare it explicitly in emit.fields at the active emit site.
+      runtime_validation:
+        description: Runtime validates the emitted payload fail-closed on this surface.
+        validation_view: Validate the emitted payload against the target event schema after removing runtime-owned envelope fields
+          that the target schema does not declare.
+        rejection_rule: If any non-runtime-owned field is absent from the target schema, or any declared field violates the schema,
+          handler execution fails. Runtime does not silently trim producer-authored business payload keys.
   entity_state:
     description: The entity document after handler execution commits.
     observable_fields:
@@ -3213,7 +3220,9 @@ observation_model:
       reject: 'Guard failed with on_fail: reject. No side effects. Entity unchanged.'
       discard: 'Guard failed with on_fail: discard. No side effects. No record.'
       kill: 'Guard failed with on_fail: kill. Entity advanced to terminal state.'
-      escalate: 'Guard failed with on_fail: escalate:{event}. Escalation event emitted instead.'
+      escalate: 'Guard failed with on_fail: escalate:{event}. Escalation event emitted instead, using the same emit payload
+        construction rules as a declarative system-node emit with no business fields: no implicit trigger/entity passthrough,
+        platform-forced envelope only, and fail-closed contract validation.'
       dead_letter: Handler failed after retry exhaustion OR chain depth exceeded. Event moved to dead_letters.
       terminal_reject: Event targeted an entity in terminal state. Rejected before handler execution.
       waiting: Accumulation incomplete. Handler recorded the arrival but completion condition not yet met. No further steps

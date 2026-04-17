@@ -185,7 +185,7 @@ func TestCreateFlowInstanceRejectsEmptyResolvedConfig(t *testing.T) {
 	}
 }
 
-func TestHandlerEmitPayload_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T) {
+func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T) {
 	bundle := loadWorkflowFixtureBundle(t, "test-child-flow-local-events")
 	module, err := newPipelineFixtureWorkflowModule(bundle)
 	if err != nil {
@@ -207,12 +207,12 @@ func TestHandlerEmitPayload_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T)
 		},
 	}
 
-	internalPayload := pc.handlerEmitPayload(withPipelineFlowScope(context.Background(), "child"), trigger, "child/child.internal")
+	internalPayload := pc.handlerEmitEnvelope(withPipelineFlowScope(context.Background(), "child"), trigger, "child/child.internal")
 	if got := asString(internalPayload["entity_id"]); got != "ent-child" {
 		t.Fatalf("internal payload entity_id = %q, want ent-child", got)
 	}
 
-	outputPayload := pc.handlerEmitPayload(withPipelineFlowScope(context.Background(), "child"), trigger, "child/child.done")
+	outputPayload := pc.handlerEmitEnvelope(withPipelineFlowScope(context.Background(), "child"), trigger, "child/child.done")
 	if got := asString(outputPayload["entity_id"]); got != "ent-child" {
 		t.Fatalf("output payload entity_id = %q, want ent-child", got)
 	}
@@ -223,13 +223,13 @@ func TestHandlerEmitPayload_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T)
 		t.Fatalf("newPipelineFixtureWorkflowModule(pin wiring): %v", err)
 	}
 	pinPC := &PipelineCoordinator{module: pinModule}
-	pinPayload := pinPC.handlerEmitPayload(withPipelineFlowScope(context.Background(), "child"), trigger, "child/work.completed")
+	pinPayload := pinPC.handlerEmitEnvelope(withPipelineFlowScope(context.Background(), "child"), trigger, "child/work.completed")
 	if got := asString(pinPayload["entity_id"]); got != "ent-child" {
 		t.Fatalf("pin output payload entity_id = %q, want ent-child", got)
 	}
 }
 
-func TestHandlerEmitPayload_RootFlowOutputUsesLocalEntity(t *testing.T) {
+func TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": `name: test
 version: 1.0.0
@@ -265,7 +265,7 @@ pins:
 		},
 	}
 
-	payload := pc.handlerEmitPayload(withPipelineFlowScope(context.Background(), "scoring"), trigger, "scoring/scoring.requested")
+	payload := pc.handlerEmitEnvelope(withPipelineFlowScope(context.Background(), "scoring"), trigger, "scoring/scoring.requested")
 	if got := asString(payload["entity_id"]); got != "ent-child" {
 		t.Fatalf("root flow output payload entity_id = %q, want ent-child", got)
 	}
