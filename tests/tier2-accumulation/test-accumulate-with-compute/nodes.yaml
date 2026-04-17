@@ -22,8 +22,8 @@ test-node:
                 weight: 0.3
               - dimensions: [c]
                 weight: 0.2
+          emit: scores.aggregated
       advances_to: complete
-      emit: scores.aggregated
   state_schema:
     fields:
       expected_count: integer

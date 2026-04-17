@@ -1774,6 +1774,34 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRules(
 	}
 }
 
+func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+	}
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Emit: runtimecontracts.EmitSpec{Event: "default.emitted"},
+		Rules: []runtimecontracts.HandlerRuleEntry{
+			{ID: "pick-rule", Condition: "true", AdvancesTo: "done"},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("custom.trigger"),
+			Payload: mustJSON(map[string]any{"entity_id": "ent-1"}),
+		}.WithEntityID("ent-1"),
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err == nil {
+		t.Fatal("expected ambiguous handler-level emit config to be rejected")
+	}
+	if !strings.Contains(err.Error(), "handler-top-level emit is only allowed on single-emit handlers") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWritesEarly(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{

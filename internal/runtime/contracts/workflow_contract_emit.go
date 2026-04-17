@@ -47,30 +47,18 @@ func ruleEmitEvents(rule HandlerRuleEntry) []string {
 }
 
 func HandlerHasNestedEmitSites(handler SystemNodeEventHandler) bool {
-	if handler.FanOut != nil && !handler.FanOut.Emit.Empty() {
+	if handler.FanOut != nil {
 		return true
 	}
-	for _, rule := range handler.Rules {
-		if !rule.Emit.Empty() || (rule.FanOut != nil && !rule.FanOut.Emit.Empty()) {
-			return true
-		}
+	if len(handler.Rules) > 0 {
+		return true
 	}
-	for _, rule := range handler.OnComplete {
-		if !rule.Emit.Empty() || (rule.FanOut != nil && !rule.FanOut.Emit.Empty()) {
-			return true
-		}
+	if len(handler.OnComplete) > 0 {
+		return true
 	}
 	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if !rule.Emit.Empty() || (rule.FanOut != nil && !rule.FanOut.Emit.Empty()) {
-				return true
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			rule := handler.Accumulate.OnTimeout
-			if !rule.Emit.Empty() || (rule.FanOut != nil && !rule.FanOut.Emit.Empty()) {
-				return true
-			}
+		if len(handler.Accumulate.OnComplete) > 0 || handler.Accumulate.OnTimeout != nil {
+			return true
 		}
 	}
 	return false

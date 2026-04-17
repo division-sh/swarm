@@ -47,6 +47,20 @@ action:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_RejectsTopLevelEmitWhenRulesExistWithoutRuleEmit(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+emit: root.done
+rules:
+  pass:
+    condition: "payload.ok"
+    advances_to: done
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-EMIT") {
+		t.Fatalf("yaml.Unmarshal error = %v, want AMBIGUOUS-EMIT", err)
+	}
+}
+
 func TestHandlerRuleEntryDecode_AcceptsSpecComputeMetadataFields(t *testing.T) {
 	var rule HandlerRuleEntry
 	if err := yaml.Unmarshal([]byte(`
