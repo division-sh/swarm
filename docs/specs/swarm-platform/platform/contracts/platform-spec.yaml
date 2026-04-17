@@ -1133,9 +1133,10 @@ engine:
     - 8. Session state is persisted for audit/debug.
     tool_execution: Tools execute within the agent session context. Platform validates tool input against schema. Platform
       checks agent permissions before execution. Tool results are returned to the agent for continued reasoning.
-    event_emission: When an agent emits an event, the platform validates the payload against events.yaml schema. The event
-      enters the event loop at step 1. Agent emission is NOT within a node handler atomic boundary — it is a standalone event
-      publication.
+    event_emission: When an agent emits an event, the platform validates the payload against events.yaml schema before publish.
+      Missing required payload fields fail the emit. Undeclared agent-authored payload fields fail the emit and are not silently
+      stripped. The event enters the event loop at step 1 only after that validation passes. Agent emission is NOT within a
+      node handler atomic boundary — it is a standalone event publication.
     turn_budget: Each agent session has a max_turns_per_task (from agents.yaml). If the agent exceeds this budget, the session
       is terminated. The platform may emit a timeout or budget_exceeded event.
     agent_invocation: 'Agents are invoked via claude -p (CLI) or equivalent LLM API call. The platform constructs the invocation:

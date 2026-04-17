@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"swarm/internal/events"
@@ -14,15 +15,18 @@ import (
 
 type publishBusCapture struct {
 	event events.Event
+	count int
 }
 
 func (b *publishBusCapture) Publish(_ context.Context, evt events.Event) error {
 	b.event = evt
+	b.count++
 	return nil
 }
 
 func (b *publishBusCapture) PublishDirect(_ context.Context, evt events.Event, _ []string) error {
 	b.event = evt
+	b.count++
 	return nil
 }
 
@@ -93,6 +97,9 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 	if got, want := payload["signal_id"], "sig-1"; got != want {
 		t.Fatalf("payload signal_id = %#v, want %q", got, want)
 	}
+	if bus.count != 1 {
+		t.Fatalf("publish count = %d, want 1", bus.count)
+	}
 }
 
 func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
@@ -152,5 +159,48 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 
 	if got, want := string(bus.event.Type), "discovery/vertical.discovered"; got != want {
 		t.Fatalf("published event type = %q, want %q", got, want)
+	}
+	if bus.count != 1 {
+		t.Fatalf("publish count = %d, want 1", bus.count)
+	}
+}
+
+func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"category.assessed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Type: "object",
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"category": {Type: "string"},
+					},
+					Required: []string{"category"},
+				},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "market-research-agent",
+		Role:       "market_research",
+		EmitEvents: []string{"category.assessed"},
+	}
+
+	_, err := exec.handleEmitTool(context.Background(), actor, "emit_category_assessed", map[string]any{
+		"category":   "AP automation",
+		"unexpected": true,
+	})
+	if err == nil {
+		t.Fatal("expected undeclared payload field failure")
+	}
+	if !strings.Contains(err.Error(), "$.unexpected is not allowed") {
+		t.Fatalf("error = %v, want undeclared-field validation detail", err)
+	}
+	if bus.count != 0 {
+		t.Fatalf("publish count = %d, want 0", bus.count)
 	}
 }

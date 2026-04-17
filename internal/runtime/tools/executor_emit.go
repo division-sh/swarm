@@ -58,7 +58,6 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 
 	inbound, _ := runtimebus.InboundEventFromContext(ctx)
 	payloadMap = e.enrichEmitPayloadContext(actor, inbound, schemaEventType, payloadMap)
-	payloadMap = e.trimEmitPayloadToSchema(schemaEventType, payloadMap)
 	postEnrichmentPayload := diagnosticPayloadMap(payloadMap)
 	if err := e.emitRegistry.ValidateEventPayloadAgainstSchema(schemaEventType, payloadMap); err != nil {
 		wrapped := WrapRuntimeError(
