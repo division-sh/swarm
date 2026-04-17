@@ -1782,14 +1782,22 @@ func catalogConditionHasPrefix(condition string) bool {
 func catalogDefinedHandlerField(field string) bool {
 	switch strings.TrimSpace(field) {
 	case "description", "_note", "guard", "accumulate", "compute", "on_complete",
-		"advances_to", "sets_gate", "data_accumulation", "emit", "emits", "rules",
+		"advances_to", "sets_gate", "data_accumulation", "emit", "rules",
 		"fan_out", "query", "reduce", "filter", "count", "clear", "action",
-		"template", "instance_id_from", "config_from", "from", "payload_transform",
+		"template", "instance_id_from", "config_from", "from",
 		"clear_gates", "dedup_by", "subscriptions_bootstrap", "logic", "on_below_threshold",
 		"on_dedup", "on_pass":
 		return true
 	default:
 		return false
+	}
+}
+
+func TestCatalogDefinedHandlerField_RejectsRetiredEmitCarriers(t *testing.T) {
+	for _, field := range []string{"payload_transform", "emits"} {
+		if catalogDefinedHandlerField(field) {
+			t.Fatalf("catalogDefinedHandlerField(%q) = true, want false", field)
+		}
 	}
 }
 

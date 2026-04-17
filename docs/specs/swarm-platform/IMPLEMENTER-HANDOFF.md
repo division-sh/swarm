@@ -25,8 +25,8 @@ guard
                  └→ advances_to ─┐
                     sets_gate ────┤  (independent — any order)
                     data_accumulation ┘
-                         └→ payload_transform
-                              └→ emits
+                         └→ emit.fields
+                              └→ emit.event
                                    └→ action
 ```
 
@@ -38,11 +38,11 @@ Same answer. `data_accumulation` is independent of `advances_to`. Your "data fir
 
 ### 3. Side-effect emit equivalence
 
-`emits` is a normative handler step. The event is **persisted** within the atomic boundary and **delivered** after commit. `brand.requested`, `spec.revision_requested`, `vertical.killed` — these are handler outputs, not runtime side effects. Move them into handler-first execution.
+`emit` is a normative handler step. The event is **persisted** within the atomic boundary and **delivered** after commit. `brand.requested`, `spec.revision_requested`, `vertical.killed` — these are handler outputs, not runtime side effects. Move them into handler-first execution.
 
 ### 4. Packaging/finalization for `vertical.ready_for_review`
 
-The handler declares the complete packaging: `data_accumulation` writes (brand, research brief, spec, CTO notes) + `advances_to: ready_for_review` + `emits: mailbox event`. If your runtime does additional packaging not in the handler, the handler declaration is incomplete — tell us what's missing and we'll add it.
+The handler declares the complete packaging: `data_accumulation` writes (brand, research brief, spec, CTO notes) + `advances_to: ready_for_review` + `emit: mailbox event`. If your runtime does additional packaging not in the handler, the handler declaration is incomplete — tell us what's missing and we'll add it.
 
 ---
 ---
@@ -59,7 +59,7 @@ No. Treat the YAML contracts as the spec. The handoff explains the delta from v2
 
 ### Q3: Is `action` strictly platform-only?
 
-**Yes.** All legacy product actions (`set_gate`, `kill_vertical`, `finalize_validation`, `emit_spinup`, `accumulate_signal`, etc.) have been removed from the contracts. The only valid `action` values are `create_flow_instance` and `record_evidence`. Every other handler uses declarative fields: `advances_to`, `sets_gate`, `data_accumulation`, `emits`, `guard`, `rules`, `fan_out`, `accumulate`, `compute`, `query`, `clear`, `clear_gates`, `payload_transform`.
+**Yes.** All legacy product actions (`set_gate`, `kill_vertical`, `finalize_validation`, `emit_spinup`, `accumulate_signal`, etc.) have been removed from the contracts. The only valid `action` values are `create_flow_instance` and `record_evidence`. Every other handler uses declarative fields: `advances_to`, `sets_gate`, `data_accumulation`, `emit`, `guard`, `rules`, `fan_out`, `accumulate`, `compute`, `query`, `clear`, `clear_gates`.
 
 ### Q4: Is `platform-spec.yaml` authoritative over prose and scripts?
 
@@ -168,7 +168,7 @@ These are the handlers your runtime still runs flat-transition. Here's exactly w
 ```yaml
 vertical.shortlisted:
   advances_to: researching
-  emits: validation.started
+  emit: validation.started
 ```
 
 Cross-flow handoff: scoring emits, validation consumes. State goes to `researching` (first validation gate), not `shortlisted`.
@@ -182,7 +182,7 @@ research.completed:
     writes: [business_brief, research_context]
     source_event: research.completed
   advances_to: mvp_speccing
-  emits: spec.requested
+  emit: spec.requested
 ```
 
 Four independent writes in one atomic transaction. Order is cosmetic.
@@ -198,7 +198,7 @@ cto.spec_approved:
         target_field: cto_feasibility
     source_event: cto.spec_approved
   advances_to: branding
-  emits: brand.requested
+  emit: brand.requested
 ```
 
 Gate, data write, state advance, emit — all independent, all atomic.
@@ -208,7 +208,7 @@ Gate, data write, state advance, emit — all independent, all atomic.
 ```yaml
 vertical.ready_for_review:
   advances_to: ready_for_review
-  emits: mailbox.review_requested
+  emit: mailbox.review_requested
 ```
 
 All gates passed. Packaging happens via data_accumulation on the preceding gate handlers (research.completed, spec.approved, cto.spec_approved, brand.candidates_ready). This handler just advances state and notifies the mailbox.
@@ -218,7 +218,7 @@ All gates passed. Packaging happens via data_accumulation on the preceding gate 
 ```yaml
 vertical.approved:
   advances_to: approved
-  emits: opco.spinup_requested
+  emit: opco.spinup_requested
 ```
 
 Lifecycle handoff. The `opco.spinup_requested` event triggers `create_flow_instance` on portfolio-node.
@@ -229,7 +229,7 @@ Lifecycle handoff. The `opco.spinup_requested` event triggers `create_flow_insta
 vertical.needs_more_data:
   clear_gates: true
   advances_to: researching
-  emits: research.additional_requested
+  emit: research.additional_requested
 ```
 
 Human reset path. Gates are cleared, state goes back to `researching`, agent gets new research task.

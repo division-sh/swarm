@@ -220,51 +220,6 @@ type ClearSpec struct {
 	Target  string   `yaml:"target"`
 	Targets []string `yaml:"targets"`
 }
-type PayloadTransformSpec struct {
-	Mappings map[string]string `yaml:"mappings"`
-	Fields   map[string]string `yaml:"fields"`
-	Entries  []TransformSpec   `yaml:"entries,omitempty"`
-}
-type TransformSpec struct {
-	Target     string
-	TargetPath paths.Path
-	Value      ExpressionValue `yaml:"value,omitempty"`
-}
-type TransformBinding = TransformSpec
-
-func (p PayloadTransformSpec) TransformEntries() []TransformSpec {
-	mappings := p.Mappings
-	if len(mappings) == 0 && len(p.Fields) > 0 {
-		mappings = p.Fields
-	}
-	out := make([]TransformSpec, 0, len(mappings)+len(p.Entries))
-	for target, source := range mappings {
-		cleanTarget := strings.TrimSpace(target)
-		cleanSource := strings.TrimSpace(source)
-		if cleanTarget == "" || cleanSource == "" {
-			continue
-		}
-		out = append(out, TransformSpec{
-			Target:     cleanTarget,
-			TargetPath: paths.Parse(cleanTarget),
-			Value:      CELExpression(cleanSource),
-		})
-	}
-	for _, entry := range p.Entries {
-		if strings.TrimSpace(entry.Target) == "" {
-			continue
-		}
-		clone := entry
-		clone.Target = strings.TrimSpace(clone.Target)
-		clone.TargetPath = paths.Parse(clone.Target)
-		clone.Value.hydrate()
-		out = append(out, clone)
-	}
-	return out
-}
-func (p PayloadTransformSpec) TransformBindings() []TransformBinding {
-	return p.TransformEntries()
-}
 
 type ConfigFromSpec struct {
 	PolicyKeys []string          `yaml:"policy_keys"`

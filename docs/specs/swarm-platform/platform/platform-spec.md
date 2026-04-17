@@ -379,6 +379,12 @@ query (optional — pre-fetch cross-entity data into handler context)
   - `advances_to`: string — target state
   - `emit`: string or object — branch-local event to emit
 
+### retired_emit_carriers
+
+- `retired_fields`: `emits`, `payload_transform`, `fan_out.emit_per_item`, `fan_out.emit_mapping`
+- `replacement`: Use `emit` / `emit.fields` at the active emit site.
+- `note`: These are retired compatibility forms, not alternate current-contract spellings.
+
 - `_note`: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching condition executes.
 ### advances_to
 

@@ -15,7 +15,7 @@ func checkConditionExpressionValidation(c *checkerContext) []Finding { return c.
 func checkDataAccumulationExpressionValidation(c *checkerContext) []Finding {
 	return c.dataAccumulationExpressions()
 }
-func checkPayloadTransformExpressionValidation(c *checkerContext) []Finding {
+func checkEmitFieldExpressionValidation(c *checkerContext) []Finding {
 	return c.emitFieldExpressions()
 }
 func checkExpressionFieldReferenceValidation(c *checkerContext) []Finding {
@@ -93,10 +93,10 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 }
 
 func (c *checkerContext) emitFieldExpressions() []Finding {
-	if c.payloadTransformExprLoaded {
-		return c.payloadTransformExprFindings
+	if c.emitFieldExprLoaded {
+		return c.emitFieldExprFindings
 	}
-	c.payloadTransformExprLoaded = true
+	c.emitFieldExprLoaded = true
 	for nodeID, node := range c.source.NodeEntries() {
 		nodeID = strings.TrimSpace(nodeID)
 		for eventType, handler := range node.EventHandlers {
@@ -106,7 +106,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 					continue
 				}
 				if err := workflowexpr.ValidateValueExpression(expr.Expression); err != nil {
-					c.payloadTransformExprFindings = append(c.payloadTransformExprFindings, Finding{
+					c.emitFieldExprFindings = append(c.emitFieldExprFindings, Finding{
 						CheckID:  "emit_field_expression_validation",
 						Severity: "error",
 						Message:  fmt.Sprintf("node %s handler %s %s %q is invalid for emit.fields: %v", nodeID, eventType, expr.Kind, expr.Expression, err),
@@ -116,7 +116,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 			}
 		}
 	}
-	return c.payloadTransformExprFindings
+	return c.emitFieldExprFindings
 }
 
 func (c *checkerContext) expressionFieldReferences() []Finding {

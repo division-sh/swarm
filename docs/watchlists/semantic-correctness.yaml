@@ -98,6 +98,10 @@ active_issues:
     title: Remove implicit passthrough from declarative system-node emits and fail closed on undeclared payloads
     maps_to:
       - strict_event_schema_cross_flow_contract_migration
+  - id: 461
+    title: Harden verify/boot proof for the strict declarative emit payload contract
+    maps_to:
+      - strict_event_schema_cross_flow_contract_migration
   - id: 464
     title: Enforce strict event-schema parity for agent emits
     maps_to:
@@ -108,6 +112,10 @@ active_issues:
       - strict_event_schema_cross_flow_contract_migration
   - id: 468
     title: Enforce strict event-schema parity for auto_emit_on_create
+    maps_to:
+      - strict_event_schema_cross_flow_contract_migration
+  - id: 470
+    title: Retire legacy payload_transform compatibility and stale emit-contract reference surfaces
     maps_to:
       - strict_event_schema_cross_flow_contract_migration
   - id: 181
@@ -335,20 +343,27 @@ nodes:
       - emit grammar, loader, semantic-view, runtime selection, and boot/verify consumers that must interpret the same emit-site ownership model
     why_this_node_exists: the platform cannot make event schema the strict cross-flow contract while different emit sites still share one ambiguous handler-level payload model or while supported consumers interpret emit authorship differently.
     known_manifestations:
-      - multi-emit handlers cannot honestly satisfy distinct event schemas while payload_transform remains handler-scoped
-      - handler-top-level emits, on_complete branches, rules entries, accumulate.on_timeout, and fan_out per-item emits still use inconsistent or legacy event/payload ownership carriers
-      - boot/verify proof logic and runtime emit construction still read handler-level payload_transform rather than the active emit site
-      - declarative system-node emit construction still overlays explicit emit.fields onto an implicit entity/trigger context carrier and silently trims undeclared business payload keys instead of starting from an empty payload and failing closed
-      - agent emit execution still silently trims undeclared payload keys before schema validation instead of failing the emit on undeclared extras
-      - action-originated emits still reuse inbound trigger payload and bypass pipeline-side fail-closed payload-contract validation via EmitSurfaceAction before late publish-boundary schema checks
-      - persisted canonical-event validation strips undeclared runtime-owned context as an adjacent broader consumer, so system-node runtime closure must stay explicit about sibling emit surfaces that remain outside the child boundary
-      - auto_emit_on_create activation still constructs payloads from lifecycle/config state outside the canonical emit shaper and can downgrade schema violations to warning-only runtime logs on the queued post-commit publish path
+      - closed child seams under this node:
+        - structured emit ownership across handler top level, rules, on_complete, accumulate.on_timeout, and fan_out
+        - strict declarative runtime emit construction and verify/boot proof parity
+        - strict agent emit parity
+        - strict action-originated emit parity
+        - strict auto_emit_on_create parity
+      - remaining compatibility-reference tail addressed by #470:
+        - dead contract/type residue for PayloadTransformSpec after retired authored surfaces stopped being accepted on supported handler/rule/fan_out paths
+        - stale verify/report wording and dead-event audit text that still described payload_transform-era proof surfaces
+        - supported proof-harness allowlists and active prose/reference surfaces that still described payload_transform, fan_out.emit_per_item, or implicit passthrough as current behavior
+      - adjacent split retained after this node:
+        - generic post-publish canonical-event validation cleanup remains outside this migration class unless later promoted
     representative_issues:
       - 455
       - 457
       - 459
+      - 461
       - 464
       - 466
+      - 468
+      - 470
     common_framing_mistakes:
       too_broad:
         - land the entire strict event-schema migration in one PR

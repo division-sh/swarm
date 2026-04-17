@@ -84,7 +84,7 @@ expected:
 
 | Tier | Category | What it tests |
 |------|----------|---------------|
-| 1 | primitives | Single handler fields: advances_to, sets_gate, data_accumulation, emits, guards, rules, on_complete, compute, payload_transform |
+| 1 | primitives | Single handler fields: advances_to, sets_gate, data_accumulation, emit, guards, rules, on_complete, compute, emit.fields |
 | 2 | accumulation | Multi-event accumulate: expected_from, dedup_by, completion, timeout, idempotency |
 | 3 | list-processing | fan_out, filter, reduce, count, group_by, weighted_average |
 | 4 | cross-entity | create_entity, query, clear |

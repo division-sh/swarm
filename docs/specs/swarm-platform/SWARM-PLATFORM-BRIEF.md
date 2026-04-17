@@ -37,7 +37,7 @@ ticket.validated:
   data_accumulation:
     writes: [order_summary, validation_context]
   advances_to: processing
-  emits: work.assigned
+  emit: work.assigned
 ```
 
 The engine reads this and executes: set the gate, write data, advance state, emit the next event. All in one atomic transaction. If anything fails, everything rolls back.
@@ -49,7 +49,7 @@ Handler fields execute in causal order:
 ```
 guard → accumulate → compute → on_complete/rules
   → {advances_to, sets_gate, data_accumulation}    ← independent, atomic
-    → payload_transform → emits → action
+    → emit.fields → emit.event → action
 ```
 
 Independent steps can run in any order. Everything commits atomically. Guards see pre-handler state. The next handler sees post-commit state.
@@ -90,7 +90,7 @@ When an order gets approved, the platform creates a new fulfillment flow instanc
 ## Platform Capabilities
 
 ### Handler primitives
-guard, advances_to, sets_gate, clear_gates, data_accumulation, emits, rules, on_complete, accumulate, compute, fan_out, filter, reduce, count, group_by, query, clear, payload_transform, record_evidence, action (create_flow_instance)
+guard, advances_to, sets_gate, clear_gates, data_accumulation, emit, rules, on_complete, accumulate, compute, fan_out, filter, reduce, count, group_by, query, clear, record_evidence, action (create_flow_instance)
 
 ### Expression language
 CEL (Common Expression Language) for all conditions, guards, and filters. Strongly typed, non-Turing-complete, safe for policy evaluation.

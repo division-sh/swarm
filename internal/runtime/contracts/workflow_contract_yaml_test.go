@@ -61,6 +61,19 @@ rules:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_RejectsRetiredPayloadTransform(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+payload_transform:
+  fields:
+    score: payload.score
+emit: score.ready
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED payload_transform rejection", err)
+	}
+}
+
 func TestHandlerRuleEntryDecode_AcceptsSpecComputeMetadataFields(t *testing.T) {
 	var rule HandlerRuleEntry
 	if err := yaml.Unmarshal([]byte(`
@@ -276,6 +289,17 @@ emit_mapping:
 `), &spec)
 	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED legacy fan_out emit mapping rejection", err)
+	}
+}
+
+func TestFanOutSpecDecode_RejectsLegacyEmitPerItem(t *testing.T) {
+	var spec FanOutSpec
+	err := yaml.Unmarshal([]byte(`
+items_from: payload.items
+emit_per_item: routed.item
+`), &spec)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED legacy fan_out emit_per_item rejection", err)
 	}
 }
 
