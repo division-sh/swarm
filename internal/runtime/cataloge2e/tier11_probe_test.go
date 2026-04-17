@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimebootverify "swarm/internal/runtime/bootverify"
+	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -69,7 +70,7 @@ func TestTier11Probe(t *testing.T) {
 					}
 					for _, owner := range source.RuntimeEventOwners(trigger) {
 						if handler, ok := source.NodeEventHandler(owner, trigger); ok {
-							t.Logf("handler owner=%s emits=%v advances_to=%s", owner, handler.Emits.Values(), handler.AdvancesTo)
+							t.Logf("handler owner=%s emits=%v advances_to=%s", owner, runtimecontracts.HandlerEmitEvents(handler), handler.AdvancesTo)
 						}
 					}
 					for _, observed := range []string{

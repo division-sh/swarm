@@ -1227,7 +1227,7 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"dispatcher": {
 					"scan.corpus_dispatch": {
-						Emits: runtimecontracts.EventEmission{Single: "market_research.scan_assigned"},
+						Emit: runtimecontracts.EmitSpec{Event: "market_research.scan_assigned"},
 					},
 				},
 			},
@@ -1237,7 +1237,7 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 				SubscribesTo: []string{"scan.corpus_dispatch"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.corpus_dispatch": {
-						Emits: runtimecontracts.EventEmission{Single: "market_research.scan_assigned"},
+						Emit: runtimecontracts.EmitSpec{Event: "market_research.scan_assigned"},
 					},
 				},
 			},

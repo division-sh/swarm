@@ -17,14 +17,15 @@ var tier9CompositionPatternFixtures = []string{
 	"test-compose-gate-data-advance-emit",
 	"test-compose-guard-multi-source",
 	"test-compose-guard-query-capacity",
-	"test-compose-multi-emit-cross-flow",
 	"test-compose-rules-fanout-data",
 	"test-compose-rules-per-rule-data",
 	"test-compose-guard-counter-escalate",
 	"test-compose-lifecycle-seven-states",
 }
 
-var tier9ExcludedFixtures = map[string]catalogExcludedFixture{}
+var tier9ExcludedFixtures = map[string]catalogExcludedFixture{
+	"test-compose-multi-emit-cross-flow": {reason: "legacy multi-emit handler shape is retired by #457; fixture migration belongs to a later explicit child if multi-emit semantics return"},
+}
 
 func TestTier9CompositionPatternCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

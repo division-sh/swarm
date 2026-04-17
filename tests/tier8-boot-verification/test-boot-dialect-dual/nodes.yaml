@@ -10,7 +10,7 @@ dual-dialect-node:
           advances_to: done
           emit: check.passed
       rules:
-        - name: high_score
+        - id: high_score
           condition: "payload.score >= 70"
           emit: check.passed
       advances_to: done
