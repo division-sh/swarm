@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -54,7 +55,7 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 
 					c.payloadCompletenessFindings = append(c.payloadCompletenessFindings, Finding{
 						CheckID:  "semantic_drift_payload_completeness",
-						Severity: "warning",
+						Severity: "error",
 						Message: payloadCompletenessMessage(
 							nodeID,
 							triggerEventType,
@@ -148,6 +149,14 @@ func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandle
 			add(payloadCompletenessRuleLabel("accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID, "emit"), handler.Accumulate.OnTimeout.Emit)
 			if handler.Accumulate.OnTimeout.FanOut != nil {
 				add(payloadCompletenessRuleLabel("accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID, "fan_out.emit"), handler.Accumulate.OnTimeout.FanOut.Emit)
+			}
+		}
+	}
+	if handler.Guard != nil {
+		onFail := strings.TrimSpace(handler.Guard.OnFail)
+		if onFail != "" {
+			if parsed, err := runtimeengine.ParseGuardFailure(onFail); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
+				add("guard.on_fail.escalate", runtimecontracts.EmitSpec{Event: strings.TrimSpace(parsed.EventType)})
 			}
 		}
 	}

@@ -172,7 +172,7 @@ var bootCheckRegistry = []Check{
 	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},
 	{ID: "semantic_drift_dead_event_schema", Severity: "warning", Run: checkSemanticDriftDeadEventSchema},
 	{ID: "payload_field_coverage", Severity: "error", Run: checkPayloadFieldCoverage},
-	{ID: "semantic_drift_payload_completeness", Severity: "warning", Run: checkSemanticDriftPayloadCompleteness},
+	{ID: "semantic_drift_payload_completeness", Severity: "error", Run: checkSemanticDriftPayloadCompleteness},
 	{ID: "condition_payload_alignment", Severity: "error", Run: checkConditionPayloadAlignment},
 	{ID: "condition_policy_alignment", Severity: "warning", Run: checkConditionPolicyAlignment},
 	{ID: "state_machine_coherence", Severity: "error", Run: checkStateMachineCoherence},
