@@ -90,6 +90,9 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 			Event:  strings.TrimSpace(aux.Event),
 			Fields: cloneExpressionValueMap(aux.Fields),
 		}
+		if e.EventType() == "" && len(e.Fields) > 0 {
+			return fmt.Errorf("INVALID-EMIT: emit.event is required when emit.fields is present")
+		}
 		return nil
 	default:
 		return fmt.Errorf("unsupported emit yaml node kind %d", node.Kind)

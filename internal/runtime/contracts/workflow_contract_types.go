@@ -174,10 +174,10 @@ type ComputeKeyConfig struct {
 	NumericKeys  []string `yaml:"numeric_keys"`
 }
 type FanOutSpec struct {
-	ItemsFrom string   `yaml:"items_from"`
+	ItemsFrom string     `yaml:"items_from"`
 	ItemsPath paths.Path `yaml:"-"`
-	Target    string   `yaml:"target"`
-	Emit      EmitSpec `yaml:"emit"`
+	Target    string     `yaml:"target"`
+	Emit      EmitSpec   `yaml:"emit"`
 }
 type GroupBySpec struct {
 	ItemsFrom string     `yaml:"items_from"`
