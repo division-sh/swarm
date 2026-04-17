@@ -1,6 +1,6 @@
 name: test-payload-transform-multi-source
 version: 1.0.0
-description: payload_transform constructs output from multiple sources including entity and payload.
+description: emit.fields constructs output from multiple sources including entity and payload.
 platform_version: ">=1.1.0"
 flows: []
 entity_schema:

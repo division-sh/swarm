@@ -132,8 +132,8 @@ type checkerContext struct {
 	dataAccumulationExprLoaded   bool
 	dataAccumulationExprFindings []Finding
 
-	payloadTransformExprLoaded   bool
-	payloadTransformExprFindings []Finding
+	emitFieldExprLoaded   bool
+	emitFieldExprFindings []Finding
 
 	entityRefLoaded   bool
 	entityRefFindings []Finding
@@ -198,7 +198,7 @@ var bootCheckRegistry = []Check{
 	{ID: "transition_reference_validation", Severity: "error", Run: checkTransitionReferenceValidation},
 	{ID: "condition_expression_validation", Severity: "error", Run: checkConditionExpressionValidation},
 	{ID: "data_accumulation_expression_validation", Severity: "error", Run: checkDataAccumulationExpressionValidation},
-	{ID: "emit_field_expression_validation", Severity: "error", Run: checkPayloadTransformExpressionValidation},
+	{ID: "emit_field_expression_validation", Severity: "error", Run: checkEmitFieldExpressionValidation},
 	{ID: "expression_field_reference_validation", Severity: "warning", Run: checkExpressionFieldReferenceValidation},
 	{ID: "transition_ownership_validation", Severity: "error", Run: checkTransitionOwnershipValidation},
 	{ID: "event_runtime_wiring_validation", Severity: "error", Run: checkEventRuntimeWiringValidation},

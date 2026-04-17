@@ -100,21 +100,21 @@ func TestResolveRefRequiresExplicitScope(t *testing.T) {
 	}
 }
 
-func TestSetValuePathAndPayloadTransform(t *testing.T) {
+func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 	base := BaseContext{
 		Entity:  values.Wrap(map[string]any{"current_state": "researching"}),
 		Payload: values.Wrap(map[string]any{"score": 9}),
 	}
 	state := ExecutionState{}
-	transformed, err := payloadTransform(base, state, &runtimecontracts.PayloadTransformSpec{
-		Mappings: map[string]string{
-			"nested.score":   "payload.score",
-			"nested.state":   "entity.current_state",
-			"literal.string": `"hello"`,
+	transformed, err := emitFieldsPayload(base, state, runtimecontracts.EmitSpec{
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"nested.score":   runtimecontracts.CELExpression("payload.score"),
+			"nested.state":   runtimecontracts.CELExpression("entity.current_state"),
+			"literal.string": runtimecontracts.CELExpression(`"hello"`),
 		},
 	})
 	if err != nil {
-		t.Fatalf("payloadTransform(...) error = %v", err)
+		t.Fatalf("emitFieldsPayload(...) error = %v", err)
 	}
 	nested, ok := transformed["nested"].(map[string]any)
 	if !ok {
@@ -132,18 +132,17 @@ func TestSetValuePathAndPayloadTransform(t *testing.T) {
 	}
 }
 
-func TestPayloadTransform_NormalizesWholeNumberJSONInputs(t *testing.T) {
+func TestEmitFieldsPayload_NormalizesWholeNumberJSONInputs(t *testing.T) {
 	base := BaseContext{
 		Payload: values.Wrap(map[string]any{"raw_score": 25.0}),
 	}
-	transformed, err := payloadTransform(base, ExecutionState{}, &runtimecontracts.PayloadTransformSpec{
-		Entries: []runtimecontracts.TransformSpec{{
-			Target: "score",
-			Value:  runtimecontracts.CELExpression("payload.raw_score * 2"),
-		}},
+	transformed, err := emitFieldsPayload(base, ExecutionState{}, runtimecontracts.EmitSpec{
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"score": runtimecontracts.CELExpression("payload.raw_score * 2"),
+		},
 	})
 	if err != nil {
-		t.Fatalf("payloadTransform(...) error = %v", err)
+		t.Fatalf("emitFieldsPayload(...) error = %v", err)
 	}
 	if got := transformed["score"]; got != 50 {
 		t.Fatalf("score = %#v, want 50", got)

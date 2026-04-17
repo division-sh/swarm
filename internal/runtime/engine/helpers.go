@@ -231,28 +231,6 @@ func normalizedCELInputMap(source map[string]any) map[string]any {
 	return workflowexpr.NormalizeCELInputMap(source)
 }
 
-func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontracts.PayloadTransformSpec) (map[string]any, error) {
-	if spec == nil {
-		return nil, nil
-	}
-	entries := spec.TransformEntries()
-	if len(entries) == 0 {
-		return nil, nil
-	}
-	payload := map[string]any{}
-	for _, entry := range entries {
-		if !entry.Value.HasCELValue() {
-			continue
-		}
-		value, err := evalWorkflowValueExpression(base, state, entry.Value.CEL)
-		if err != nil {
-			return nil, fmt.Errorf("payload transform target %s: %w", entry.Target, err)
-		}
-		setParsedValuePath(payload, entry.TargetPath, value)
-	}
-	return payload, nil
-}
-
 func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontracts.EmitSpec) (map[string]any, error) {
 	if len(spec.Fields) == 0 {
 		return nil, nil

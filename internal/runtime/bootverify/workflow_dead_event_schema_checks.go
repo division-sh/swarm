@@ -19,7 +19,7 @@ type deadEventSchemaUsage struct {
 	agentEmitEvents    int
 	agentSubscriptions int
 	timerReferences    int
-	fanOutEmitPerItem  int
+	fanOutEmit         int
 	autoEmitOnCreate   bool
 	externalSource     bool
 	externalConsumer   bool
@@ -31,7 +31,7 @@ func (u deadEventSchemaUsage) hasAny() bool {
 		u.agentEmitEvents > 0 ||
 		u.agentSubscriptions > 0 ||
 		u.timerReferences > 0 ||
-		u.fanOutEmitPerItem > 0 ||
+		u.fanOutEmit > 0 ||
 		u.autoEmitOnCreate ||
 		u.externalSource ||
 		u.externalConsumer
@@ -58,7 +58,7 @@ func (c *checkerContext) deadEventSchema() []Finding {
 			CheckID:  "semantic_drift_dead_event_schema",
 			Severity: "warning",
 			Message: fmt.Sprintf(
-				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- External source annotation (_source): %s\n- External consumer annotation (_consumer): %s\n- Fan-out emit_per_item: %d\n- Auto-emit-on-create: %s\n\nIf this event is no longer used, remove it from %s.\nIf it is used by an external system, add _source: external (...) or _consumer: ... to document the external role.",
+				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- External source annotation (_source): %s\n- External consumer annotation (_consumer): %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n\nIf this event is no longer used, remove it from %s.\nIf it is used by an external system, add _source: external (...) or _consumer: ... to document the external role.",
 				decl.Canonical,
 				fileLabel,
 				usage.handlerEmits,
@@ -68,7 +68,7 @@ func (c *checkerContext) deadEventSchema() []Finding {
 				usage.timerReferences,
 				yesNoLocal(usage.externalSource),
 				yesNoLocal(usage.externalConsumer),
-				usage.fanOutEmitPerItem,
+				usage.fanOutEmit,
 				yesNoLocal(usage.autoEmitOnCreate),
 				fileLabel,
 			),
@@ -200,7 +200,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 				}
 				for _, emitted := range deadEventHandlerFanOutEmits(handler) {
 					if deadEventSameScope(decl.FlowID, flowID) && deadEventRoleMatches(c.source, decl, flowID, emitted) {
-						usage.fanOutEmitPerItem++
+						usage.fanOutEmit++
 					}
 				}
 			}
@@ -246,7 +246,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 			}
 			for _, emitted := range deadEventHandlerFanOutEmits(handler) {
 				if deadEventSameScope(decl.FlowID, flowID) && deadEventRoleMatches(c.source, decl, flowID, emitted) {
-					usage.fanOutEmitPerItem++
+					usage.fanOutEmit++
 				}
 			}
 		}

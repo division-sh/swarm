@@ -140,53 +140,6 @@ func (g *GroupBySpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func (p *PayloadTransformSpec) UnmarshalYAML(node *yaml.Node) error {
-	if p == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*p = PayloadTransformSpec{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("unsupported payload transform yaml node kind %d", node.Kind)
-	}
-	type shadow struct {
-		Mappings map[string]string `yaml:"mappings"`
-		Fields   map[string]string `yaml:"fields"`
-		Entries  []TransformSpec   `yaml:"entries"`
-	}
-	var aux shadow
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	spec := PayloadTransformSpec{
-		Mappings: cloneStringMap(aux.Mappings),
-		Fields:   cloneStringMap(aux.Fields),
-		Entries:  append([]TransformSpec(nil), aux.Entries...),
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		switch key {
-		case "", "mappings", "fields", "entries":
-			continue
-		}
-		entry, err := decodePayloadTransformShorthandEntry(key, node.Content[i+1])
-		if err != nil {
-			return err
-		}
-		spec.Entries = append(spec.Entries, entry)
-	}
-	spec.Entries = spec.TransformEntries()
-	for i := range spec.Entries {
-		if err := hydrateTransformSpec(&spec.Entries[i]); err != nil {
-			return err
-		}
-	}
-	*p = spec
-	return nil
-}
-
 func (g *GateSpec) UnmarshalYAML(node *yaml.Node) error {
 	if g == nil {
 		return nil
@@ -479,31 +432,6 @@ func (e *ExpressionValue) UnmarshalYAML(node *yaml.Node) error {
 	}
 }
 
-func (t *TransformSpec) UnmarshalYAML(node *yaml.Node) error {
-	if t == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*t = TransformSpec{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("unsupported payload transform entry yaml node kind %d", node.Kind)
-	}
-	var aux struct {
-		Target     string `yaml:"target"`
-		Expression string `yaml:"expression"`
-	}
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*t = TransformSpec{Target: strings.TrimSpace(aux.Target)}
-	if strings.TrimSpace(aux.Expression) != "" {
-		t.Value = CELExpression(aux.Expression)
-	}
-	return hydrateTransformSpec(t)
-}
-
 func decodeLiteralExpressionNode(node *yaml.Node) (ExpressionValue, error) {
 	var literal any
 	if err := node.Decode(&literal); err != nil {
@@ -583,35 +511,6 @@ func hydrateWorkflowDataWrite(w *WorkflowDataWrite) error {
 	w.SourcePath = paths.Parse(w.Source())
 	w.TargetPath = paths.Parse(w.Target())
 	return nil
-}
-
-func hydrateTransformSpec(t *TransformSpec) error {
-	if t == nil {
-		return nil
-	}
-	t.Target = strings.TrimSpace(t.Target)
-	t.TargetPath = paths.Parse(t.Target)
-	t.Value.hydrate()
-	if err := validateExpressionValue(t.Value); err != nil {
-		return err
-	}
-	if !t.Value.HasCELValue() {
-		return fmt.Errorf("payload transform target %q must use a CEL expression", t.Target)
-	}
-	return nil
-}
-
-func decodePayloadTransformShorthandEntry(target string, node *yaml.Node) (TransformSpec, error) {
-	entry := TransformSpec{Target: strings.TrimSpace(target)}
-	if node == nil || node.Kind == 0 {
-		entry.TargetPath = paths.Parse(entry.Target)
-		return entry, nil
-	}
-	if node.Kind == yaml.ScalarNode {
-		entry.Value = CELExpression(strings.TrimSpace(node.Value))
-		return entry, hydrateTransformSpec(&entry)
-	}
-	return TransformSpec{}, fmt.Errorf("payload transform target %q must be a CEL expression string", target)
 }
 
 func decodeWorkflowDataWriteValueNode(node *yaml.Node) (ExpressionValue, error) {

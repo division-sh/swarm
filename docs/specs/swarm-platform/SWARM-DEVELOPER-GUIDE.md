@@ -95,7 +95,7 @@ ticket-orchestrator:
             target_field: priority
         source_event: ticket.classified
       advances_to: assigned
-      emits: ticket.assigned
+      emit: ticket.assigned
 
     ticket.resolved:
       description: Agent resolved the ticket.
@@ -103,7 +103,7 @@ ticket-orchestrator:
         writes: [resolution, resolved_by]
         source_event: ticket.resolved
       advances_to: resolved
-      emits: ticket.resolution_confirmed
+      emit: ticket.resolution_confirmed
 
     ticket.escalated:
       description: Agent couldn't resolve. Escalate to human.
@@ -112,7 +112,7 @@ ticket-orchestrator:
         check: "entity.escalation_count < policy.max_escalations"
         on_fail: kill
       advances_to: assigned
-      emits: ticket.assigned
+      emit: ticket.assigned
 
     ticket.abandoned:
       description: Ticket abandoned (customer left, duplicate, etc.)
@@ -120,7 +120,7 @@ ticket-orchestrator:
 
     timer.ticket_sla:
       description: SLA timer expired. Breach notification.
-      emits: ticket.sla_breached
+      emit: ticket.sla_breached
 
   timers:
     - id: ticket_sla
@@ -295,7 +295,7 @@ python3 verify.py
 # Should output: 0 errors, 0 warnings
 ```
 
-**Note on emitted event payloads:** By default, emitted events carry entity fields as a base, overlaid with the triggering event payload (trigger wins on collision), plus platform fields (entity_id, trigger_event_type, current_state). Use `payload_transform` when you need to construct a custom payload from entity state, policy, or computed values instead of forwarding the trigger payload.
+**Note on emitted event payloads:** On the supported declarative system-node emit surface, payload construction starts from an empty payload, evaluates `emit.fields` for the active emit site if present, then forces platform fields. There is no implicit entity or trigger-payload passthrough on this surface.
 
 That's it. The platform loads your contracts, boots the state machine, starts the agents, and processes tickets.
 
@@ -352,7 +352,7 @@ ticket.classified:
     writes: [category, priority]
     source_event: ticket.classified
   advances_to: assigned
-  emits: ticket.assigned
+  emit: ticket.assigned
 ```
 
 **One system node per event.** No two nodes may handle the same event. This ensures unambiguous state authority.
@@ -364,7 +364,7 @@ Handler fields execute in causal order:
 ```
 guard → accumulate → compute → on_complete/rules
   → {advances_to, sets_gate, data_accumulation}   ← independent, atomic commit
-    → payload_transform → emits → action
+    → emit.fields → emit.event → action
 ```
 
 - Guard failure → handler stops (reject/discard/kill/escalate)
@@ -412,10 +412,10 @@ guard:
 rules:
   billing:
     condition: "payload.category == 'billing'"
-    emits: ticket.billing_assigned
+    emit: ticket.billing_assigned
   technical:
     condition: "payload.category == 'technical'"
-    emits: ticket.tech_assigned
+    emit: ticket.tech_assigned
 ```
 
 Available context variables:
@@ -449,7 +449,7 @@ Guard on_fail actions: `reject` (default), `discard` (silent), `kill` (terminal)
 review.completed:
   sets_gate: g_reviewed
   advances_to: approved
-  emits: approval.requested
+  emit: approval.requested
 
 # Gate 2
 approval.granted:
@@ -483,10 +483,10 @@ score.received:
   on_complete:
     - condition: "entity.composite_score >= policy.threshold"
       advances_to: approved
-      emits: candidate.approved
+      emit: candidate.approved
     - condition: "entity.composite_score < policy.threshold"
       advances_to: rejected
-      emits: candidate.rejected
+      emit: candidate.rejected
 ```
 
 `on_complete` MUST be a YAML list (ordered). First matching condition wins.
@@ -500,7 +500,8 @@ batch.requested:
   fan_out:
     items_from: payload.items
     target: worker-agent
-    emit_per_item: item.assigned
+    emit:
+      event: item.assigned
   data_accumulation:
     writes: [batch_expected_count]
     source_event: fan_out.count
@@ -515,15 +516,15 @@ request.received:
   rules:
     billing:
       condition: "payload.category == 'billing'"
-      emits: billing.request
+      emit: billing.request
       advances_to: billing_review
     technical:
       condition: "payload.category == 'technical'"
-      emits: tech.request
+      emit: tech.request
       advances_to: tech_review
     unknown:
       condition: "else"
-      emits: manual.review_needed
+      emit: manual.review_needed
 ```
 
 `rules` and `on_complete` are mutually exclusive. Never use both in the same handler.
@@ -575,7 +576,7 @@ timers:
 # Handler for timer expiry
 timer.payment_deadline:
   advances_to: payment_overdue
-  emits: payment.overdue_notification
+  emit: payment.overdue_notification
 ```
 
 ### Pattern 8: Cross-Entity Queries
@@ -592,7 +593,7 @@ timer.daily_report:
       filter: "priority == 'critical' && state != 'resolved'"
       select: [ticket_id, subject, assigned_to]
       store_as: report.open_critical
-  emits: report.daily_compiled
+  emit: report.daily_compiled
 ```
 
 ### Pattern 9: Payload Transform
@@ -601,13 +602,13 @@ Construct output event payload from multiple sources:
 
 ```yaml
 order.finalized:
-  payload_transform:
+  emit:
+    event: invoice.generation_requested
     fields:
       order_id: entity.order_id
       total: entity.computed_total
       customer: entity.customer_name
       items_count: entity.items.size()
-  emits: invoice.generation_requested
 ```
 
 CEL expressions evaluate against entity state, payload, and policy.
@@ -819,7 +820,7 @@ Your YAML must follow the platform spec exactly:
 3. **Conditions** — always prefixed: `payload.X`, `entity.X`, or `policy.X`
 4. **on_complete vs rules** — mutually exclusive, never both in one handler
 5. **advances_to** — single string, never a list
-6. **emits** — string or list of strings
+6. **emit** — string or `{event, fields}` object
 7. **data_accumulation.writes** — list of strings (direct) or `{source_field, target_field}` objects (mapped)
 8. **dedup_by** — set on accumulate when tracking by content (e.g., `payload.dimension`), not sender
 9. **clear_gates: true** — clears ALL entity gates, not selective
@@ -848,9 +849,9 @@ Your YAML must follow the platform spec exactly:
 
 ```
 guard, accumulate, compute, on_complete, rules, advances_to,
-sets_gate, clear_gates, data_accumulation, emits, fan_out,
+sets_gate, clear_gates, data_accumulation, emit, fan_out,
 filter, reduce, count, group_by, query, clear,
-payload_transform, action, from, description
+action, from, description
 ```
 
 ### Platform Actions

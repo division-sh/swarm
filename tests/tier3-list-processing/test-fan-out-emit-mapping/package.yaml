@@ -1,5 +1,5 @@
 name: test-fan-out-emit-mapping
 version: 1.0.0
-description: fan_out with emit_mapping routes items to different events by type.
+description: fan_out.emit.fields routes items to different events by type.
 platform_version: ">=1.1.0"
 flows: []

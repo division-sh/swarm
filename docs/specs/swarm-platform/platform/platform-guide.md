@@ -294,7 +294,7 @@ hello-node:
   event_handlers:
     hello.requested:
       advances_to: done
-      emits: hello.completed
+      emit: hello.completed
 ```
 
 **events.yaml:**
@@ -335,8 +335,8 @@ query (optional — pre-fetch cross-entity data into handler context)
                                           └→ advances_to ─┐
                                              sets_gate ────┤ (independent of each other)
                                              data_accumulation ┘
-                                                  └→ payload_transform
-                                                       └→ emits
+                                                  └→ emit.fields
+                                                       └→ emit.event
                                                             └→ action
                                                                  └→ clear (optional — reset accumulator/state buckets)
 ```
@@ -360,19 +360,19 @@ Handlers can stop early in two important ways:
 
 These are mutually exclusive — a handler uses one or the other, never both.
 
-**`on_complete`** is an ordered list of `{condition, advances_to, emits}` objects. Conditions are evaluated top to bottom; the first match wins. This is used after accumulation or computation when you need conditional branching based on computed results.
+**`on_complete`** is an ordered list of `{condition, advances_to, emit}` objects. Conditions are evaluated top to bottom; the first match wins. This is used after accumulation or computation when you need conditional branching based on computed results.
 
-**`rules`** is a map of named rules used for payload-based routing. Each rule has a condition evaluated against the payload, plus optional `emits`, `advances_to`, and `data_accumulation`. This is used for type-dispatching — routing different kinds of incoming events to different outcomes.
+**`rules`** is a map of named rules used for payload-based routing. Each rule has a condition evaluated against the payload, plus optional `emit`, `advances_to`, and `data_accumulation`. This is used for type-dispatching — routing different kinds of incoming events to different outcomes.
 
 ### Core Fields vs. Extension Fields
 
 Most handlers use a small core subset. The spec draws this distinction explicitly.
 
 **Core fields** (used by 90%+ of handlers — learn these first):
-`guard`, `advances_to`, `sets_gate`, `data_accumulation`, `emits`, `rules`, `on_complete`
+`guard`, `advances_to`, `sets_gate`, `data_accumulation`, `emit`, `rules`, `on_complete`
 
 **Extension fields** (used by specialized handlers — learn when needed):
-`accumulate`, `compute`, `fan_out`, `filter`, `reduce`, `count`, `query`, `clear`, `payload_transform`, `clear_gates`, `action`
+`accumulate`, `compute`, `fan_out`, `filter`, `reduce`, `count`, `query`, `clear`, `clear_gates`, `action`
 
 ### Handler Fields At A Glance
 
@@ -386,7 +386,7 @@ Most handlers use a small core subset. The spec draws this distinction explicitl
 | `advances_to` | Set `entity.state` to a target state. |
 | `sets_gate` | Set `entity.gates.{name} = true`. |
 | `data_accumulation` | Write payload-derived values into entity state. |
-| `emits` | Publish follow-up event(s). |
+| `emit` | Publish the follow-up event for the active emit site. |
 | `rules` | Payload-based routing with per-rule side effects. |
 | `fan_out` | Emit one event per item in a list. |
 | `query` | Pre-fetch cross-entity data into handler context. |
@@ -395,7 +395,6 @@ Most handlers use a small core subset. The spec draws this distinction explicitl
 | `count` | Count items matching a condition. |
 | `clear` | Reset accumulator or state buckets after everything else. |
 | `action` | Invoke a platform action (`create_flow_instance` or `record_evidence`). |
-| `payload_transform` | Construct emitted payloads explicitly from multiple sources. |
 | `clear_gates` | Reset all entity gates to `false`. |
 | `evidence_target` | Required when `action` is `record_evidence`. |
 
@@ -429,14 +428,14 @@ data_accumulation:
       expression: "entity.counter + 1"    # CEL expression → entity.target_key
 ```
 
-### Rules And Handler-Level Defaults
+### Rules And Active Emit Sites
 
-When a handler has both `rules` and handler-level fields, the interaction is:
+When a handler has `rules`, the selected rule owns the active emit site:
 
 1. The matching rule fires first with its condition-specific side effects.
 2. Handler-level `data_accumulation` executes after rules — it *supplements* rule-level writes, it does not replace them.
-3. Handler-level `emits` fires after rules — both rule-level emits and handler-level emits fire (handler-level is unconditional).
-4. For fields like `advances_to` and `sets_gate`, the rule value *overrides* the handler-level value if present. Fields not specified in the rule fall through to handler-level.
+3. The selected rule's `emit` is the only emit site on that branch. There is no retired handler-level `emits` fallthrough.
+4. For fields like `advances_to` and `sets_gate`, the rule value overrides the handler-level value if present. Fields not specified in the rule fall through to handler-level.
 
 ---
 
@@ -786,11 +785,11 @@ The observation model defines what a test, audit, or flight recorder can see aft
 
 ### Emitted Events
 
-The `emitted_events` view includes events from handler `emits`, `rules`, `on_complete`, `fan_out`, and handler action side effects like `auto_emit_on_create`. It excludes agent fixture emissions, dead-lettered events, and child flow `auto_emit` events from the parent emission log.
+The `emitted_events` view includes events from handler top-level `emit`, `rules`, `on_complete`, `fan_out.emit`, and handler action side effects like `auto_emit_on_create`. It excludes agent fixture emissions, dead-lettered events, and child flow `auto_emit` events from the parent emission log.
 
 ### Payload Construction
 
-When `payload_transform` is absent, emitted payloads are constructed from entity fields, then overlaid with trigger payload fields, then forced platform fields. The collision priority (highest to lowest) is: platform fields > `payload_transform` > trigger payload > entity fields.
+On the supported declarative system-node emit surface, payload construction starts from an empty payload, evaluates `emit.fields` for the active emit site if present, then forces platform-owned fields. There is no implicit entity or trigger-payload passthrough on this surface.
 
 ### Entity State Observation
 
@@ -893,8 +892,8 @@ contracts on disk
                                                               │                                       └─ compute
                                                               │                                            └─ on_complete / rules
                                                               │                                                 └─ advances_to + sets_gate + data_accumulation
-                                                              │                                                      └─ payload_transform
-                                                              │                                                           └─ emits
+                                                              │                                                      └─ emit.fields
+                                                              │                                                           └─ emit.event
                                                               │                                                                └─ action
                                                               │                                                                     └─ clear
                                                               └─ agent delivery
