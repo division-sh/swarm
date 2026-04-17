@@ -3226,6 +3226,23 @@ observation_model:
           rejection_rule: If any non-runtime-owned field is absent from the target event schema, or any producer-authored field is
             undeclared or violates the schema, handler execution fails. Runtime does not silently trim inherited trigger-payload keys
             on this surface.
+      auto_emit_on_create_surface:
+        construction_order:
+        - 1. Start from lifecycle-owned activation fields: instance_id, template_id, flow_path, subject_id, parent_entity_id
+        - 2. Overlay create_flow_instance config entries only for keys not already owned by the lifecycle surface
+        - '3. Force runtime-owned canonical context: entity_id'
+        collision_priority: runtime-owned canonical context > lifecycle-owned fields > create_flow_instance config
+        note: This surface is authored only as `auto_emit_on_create.event`, so runtime owns the payload construction. It still
+          must satisfy the active event schema fail-closed. Lifecycle-owned fields are explicit runtime payload on this surface;
+          create_flow_instance config does not silently widen the event contract.
+        runtime_validation:
+          description: Runtime validates the constructed auto-emit payload fail-closed before either immediate publish or queued
+            post-commit publish.
+          validation_view: Validate the emitted payload against the target event schema after removing runtime-owned envelope fields
+            that the target schema does not declare.
+          rejection_rule: If any non-runtime-owned field is absent from the target event schema, or any lifecycle/config-authored field
+            is undeclared or violates the schema, flow activation fails. Runtime does not downgrade auto_emit_on_create schema violations
+            into warning-only success on the queued post-commit branch.
   entity_state:
     description: The entity document after handler execution commits.
     observable_fields:

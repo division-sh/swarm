@@ -106,6 +106,10 @@ active_issues:
     title: Enforce strict event-schema parity for action-originated emits
     maps_to:
       - strict_event_schema_cross_flow_contract_migration
+  - id: 468
+    title: Enforce strict event-schema parity for auto_emit_on_create
+    maps_to:
+      - strict_event_schema_cross_flow_contract_migration
   - id: 181
     title: Expose accumulator completion and on_complete transaction outcomes together
     maps_to:
@@ -338,7 +342,7 @@ nodes:
       - agent emit execution still silently trims undeclared payload keys before schema validation instead of failing the emit on undeclared extras
       - action-originated emits still reuse inbound trigger payload and bypass pipeline-side fail-closed payload-contract validation via EmitSurfaceAction before late publish-boundary schema checks
       - persisted canonical-event validation strips undeclared runtime-owned context as an adjacent broader consumer, so system-node runtime closure must stay explicit about sibling emit surfaces that remain outside the child boundary
-      - auto_emit_on_create remains an adjacent emit interpreter that must stay explicitly split unless the governing draft widens
+      - auto_emit_on_create activation still constructs payloads from lifecycle/config state outside the canonical emit shaper and can downgrade schema violations to warning-only runtime logs on the queued post-commit publish path
     representative_issues:
       - 455
       - 457
