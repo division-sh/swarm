@@ -1616,7 +1616,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 
 func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T) {
 	runner := &stubActionRunner{}
-	shaper := &recordingPayloadShaper{err: ErrEmitPayloadContractViolation}
+	shaper := &recordingPayloadShaper{err: errors.Join(ErrEmitPayloadContractViolation, errors.New("wrapped payload contract failure"))}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),
 		StateRepo:  stubStateRepo{},
