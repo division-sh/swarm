@@ -10,10 +10,23 @@ They are short operational prompts. The full rules still live in:
 
 ## Default Implementer Prompt
 
+Use this in two phases:
+
+- Phase 1: pre-audit / gate
+- Phase 2: implementation / PR proof
+
+Do not combine them by default. Phase 1 should end at the gate decision. Phase 2 starts only after the issue is gated for implementation.
+
+### Phase 1: Pre-Audit / Gate
+
 ```text
 Pick up issue `#NNN`.
 
-Before coding:
+Phase:
+- pre-audit first
+- do not start implementation yet
+
+Before the audit:
 - read the full issue body/thread
 - re-read the exact cited spec section(s) and treat them as binding when they exist
 - if no exact governing spec section exists, explicitly identify the binding governing context:
@@ -35,7 +48,7 @@ Important steering:
 - do not treat “shared owner introduced” or “same seam” as proof by themselves
 - stop and escalate on any spec gap, ambiguity, contradiction, or uncaptured off-spec behavior
 
-Mandatory before implementation:
+Mandatory in this phase:
 - post a `Pre-Implementation Coverage Audit` comment on the GitHub issue
 
 That issue comment must state:
@@ -116,6 +129,37 @@ If the pre-audit shows broad duplication and a narrow fix would be dishonest:
   - `denied; keep first-slice scope`
   - `split: do first slice now, open canonicalization follow-up`
 
+Deliverable for this phase:
+- the issue thread contains the `Pre-Implementation Coverage Audit`
+- any required tracker/watchlist repair is already done
+- the required independent pre-audit gate outcome is explicitly recorded on the issue thread
+- stop here and report the gate result
+```
+
+### Phase 2: Implementation / PR Proof
+
+```text
+Resume issue `#NNN` after the pre-audit gate is satisfied.
+
+Phase:
+- implementation
+- use the approved gate boundary as binding
+
+Before coding:
+- re-read the approved `Pre-Implementation Coverage Audit`
+- re-read the recorded gate outcome and conditions
+- re-read the exact cited spec section(s) and binding governing context
+- follow:
+  - `docs/IMPLEMENTER_GUIDELINES.md`
+  - `docs/SEMANTIC_DRIFT.md`
+
+Important steering:
+- stay inside the approved child/class boundary
+- if implementation discovers another live same-concept interpreter or a wider parent obligation than the gate allowed, stop and repair the issue/gate record before continuing
+- do not silently widen scope
+- do not preserve compatibility seams or dual semantic ownership unless explicitly approved
+- do not rely on “shared owner introduced” or “same seam” as proof by themselves
+
 Mandatory before review:
 - post a `Post-Implementation Proof Audit` comment on the PR
 
@@ -159,13 +203,22 @@ Required workflow:
 - run required supported-surface proof for parity issues
 - commit
 - push
-- open PR against `master`
+- open a normal reviewable PR against `master`, not a draft PR
+- use the required PR title format:
+  - `[agent-x][issue #123] Short workstream title`
+- use commit subjects in the required format:
+  - `<type>: <short summary>`
 - include the correct issue link in the PR body:
   - `Closes #NNN` only if this PR actually completes issue `#NNN`
   - otherwise use `Part of #NNN` or `Related to #NNN`
 - include governing refs/context in the PR body:
   - exact spec references when they exist
   - otherwise an explicit statement that no exact governing spec section exists, plus the binding issue/repro context and any adjacent contract sections used
+- for any semantic migration, include in the PR body:
+  - the new canonical owner
+  - the old producer / reader / writer path now invalid
+  - which production paths were checked for surviving old behavior
+  - whether the migration is complete
 - report back with the PR number
 
 Deliverable is not complete until the PR is open and both audit artifacts exist.
@@ -263,8 +316,19 @@ Required process:
 24. After every review pass, leave both required GitHub artifacts on the PR:
    - one human-readable substantive review comment
    - one short checklist-style PR comment with guideline checks, residual risk, risk level, and merge recommendation
-25. If review reveals worthwhile follow-up work, do not leave it as chat-only commentary.
-26. On approval, explicitly state:
+25. In the checklist-style PR comment, classify PR risk as exactly one of:
+   - `low`
+   - `medium`
+   - `high`
+26. If risk is `high`, do not recommend merge until a second reviewer has also reviewed it.
+27. Verify the PR itself follows the required hygiene rules:
+   - normal reviewable PR rather than draft PR
+   - PR title format:
+     - `[agent-x][issue #123] Short workstream title`
+   - commit subjects:
+     - `<type>: <short summary>`
+28. If review reveals worthwhile follow-up work, do not leave it as chat-only commentary.
+29. On approval, explicitly state:
    - spec compliance assessment
    - failure-class coverage assessment
    - closure level assessment
