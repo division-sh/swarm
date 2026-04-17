@@ -182,12 +182,26 @@ printf '%s\n' '{"type":"result","result":"done"}'
 	if len(turns.records) == 0 {
 		t.Fatal("expected persisted turn records")
 	}
-	first := turns.records[0]
+	first := AgentTurnRecord{}
+	found := false
+	for _, rec := range turns.records {
+		if got := rec.MCPServers["runtime-tools"]; got == "connected" {
+			first = rec
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no provider-observed first-turn record found in %#v", turns.records)
+	}
 	if !slices.Equal(first.AvailableTools, []string{"emit_category_assessed", "read_file", "write_file"}) {
 		t.Fatalf("first turn available_tools = %#v", first.AvailableTools)
 	}
-	if !slices.Equal(first.MCPToolsListed, []string{"mcp__runtime-tools__emit_category_assessed"}) {
-		t.Fatalf("first turn mcp_tools_listed = %#v", first.MCPToolsListed)
+	if !slices.Equal(first.MCPToolsVisible, []string{"mcp__runtime-tools__emit_category_assessed"}) {
+		t.Fatalf("first turn mcp_tools_visible = %#v", first.MCPToolsVisible)
+	}
+	if got := first.MCPServers["runtime-tools"]; got != "connected" {
+		t.Fatalf("first turn mcp_servers = %#v", first.MCPServers)
 	}
 	if len(recorder.Snapshot()) != 1 || recorder.Snapshot()[0].Type != events.EventType("discovery/category.assessed") {
 		t.Fatalf("emitted events = %#v", recorder.Snapshot())
