@@ -12,12 +12,47 @@ func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 		r.Description = strings.TrimSpace(node.Value)
 		return nil
 	}
+	if err := validateRuleFieldNodes(node); err != nil {
+		return err
+	}
 	type alias HandlerRuleEntry
 	var aux alias
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
 	*r = HandlerRuleEntry(aux)
+	return nil
+}
+
+func validateRuleFieldNodes(node *yaml.Node) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"id":                {},
+		"description":       {},
+		"condition":         {},
+		"advances_to":       {},
+		"emit":              {},
+		"data_accumulation": {},
+		"compute":           {},
+		"fan_out":           {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		switch key {
+		case "emits":
+			return fmt.Errorf("RETIRED: rule field %q is retired; use emit: <event> or emit: {event, fields}", key)
+		case "payload_transform":
+			return fmt.Errorf("RETIRED: rule field %q is retired; move payload ownership into rule-local emit.fields", key)
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: rule field %q not in platform spec", key)
+		}
+	}
 	return nil
 }
 

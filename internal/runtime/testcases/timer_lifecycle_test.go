@@ -1,6 +1,10 @@
 package testcases
 
-import "testing"
+import (
+	"testing"
+
+	runtimecontracts "swarm/internal/runtime/contracts"
+)
 
 func TestGenericBundle_TimerLifecyclePatterns(t *testing.T) {
 	bundle := loadGenericSwarmBundle(t)
@@ -19,8 +23,8 @@ func TestGenericBundle_TimerLifecyclePatterns(t *testing.T) {
 	if handler.AdvancesTo != "completed" {
 		t.Fatalf("expected timeout to force completion, got %q", handler.AdvancesTo)
 	}
-	if !hasAll(handler.Emits.Values(), "delivery/item.completed") {
-		t.Fatalf("expected timeout completion emission, got %v", handler.Emits.Values())
+	if got := runtimecontracts.HandlerEmitEvents(handler); !hasAll(got, "delivery/item.completed") {
+		t.Fatalf("expected timeout completion emission, got %v", got)
 	}
 	if fields := handler.DataAccumulation.TargetFields(); !hasAll(fields, "timed_out", "status") {
 		t.Fatalf("expected timed_out/status writes, got %v", fields)

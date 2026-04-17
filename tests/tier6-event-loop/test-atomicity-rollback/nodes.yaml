@@ -11,4 +11,4 @@ test-node:
         on_fail: reject
       advances_to: done
       sets_gate: approval_gate
-      emits: task.accepted
+      emit: task.accepted

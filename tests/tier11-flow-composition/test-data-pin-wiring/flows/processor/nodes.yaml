@@ -14,4 +14,4 @@ processor-node:
             value:
               status: processed
       advances_to: finished
-      emits: process.done
+      emit: process.done

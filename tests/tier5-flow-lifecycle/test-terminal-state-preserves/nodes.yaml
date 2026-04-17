@@ -6,7 +6,7 @@ complete-node:
   event_handlers:
     task.completed:
       advances_to: done
-      emits: task.finished
+      emit: task.finished
 
 update-node:
   id: update-node
@@ -16,4 +16,4 @@ update-node:
   event_handlers:
     task.updated:
       advances_to: pending
-      emits: state.updated
+      emit: state.updated

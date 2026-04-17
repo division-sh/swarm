@@ -9,4 +9,4 @@ validator:
       create_entity: true
       advances_to: done
       sets_gate: g_validated
-      emits: validation.done
+      emit: validation.done

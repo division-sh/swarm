@@ -123,6 +123,9 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if handlerDeclaresConflictingCompletion(req.Handler) {
 		return fmt.Errorf("%w: handler declares both on_complete and rules", ErrInvalidConfig)
 	}
+	if runtimecontracts.HandlerHasAmbiguousTopLevelEmit(req.Handler) {
+		return fmt.Errorf("%w: handler-top-level emit is only allowed on single-emit handlers", ErrInvalidConfig)
+	}
 	if req.Handler.CreateEntity && req.Handler.Accumulate != nil {
 		return fmt.Errorf("%w: handler declares both create_entity and accumulate", ErrInvalidConfig)
 	}
@@ -666,17 +669,18 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		return false, nil
 	}
 	for _, item := range items {
-		eventType := fanOutEventType(spec, item)
+		eventType := fanOutEventType(spec)
 		if eventType == "" {
 			continue
 		}
-		payload := cloneStringAnyMap(frame.payload)
-		if payload == nil {
-			payload = map[string]any{}
+		frame.state.SetFanOut("item", item)
+		payload := map[string]any{}
+		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, spec.Emit)
+		if err != nil {
+			return false, err
 		}
-		payload["item"] = item
-		if target := strings.TrimSpace(spec.Target); target != "" {
-			payload["target"] = target
+		if len(transformed) > 0 {
+			payload = transformed
 		}
 		shaped, err := e.shapeEmitPayload(frame, eventType, payload)
 		if err != nil {
@@ -723,6 +727,12 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 }
 
 func (e *Executor) stepOnComplete(frame *executionFrame) error {
+	if isAccumulationTimeoutEvent(frame.req.Event.Type) &&
+		frame.req.Handler.Accumulate != nil &&
+		frame.req.Handler.Accumulate.OnTimeout != nil &&
+		frame.rule == frame.req.Handler.Accumulate.OnTimeout {
+		return nil
+	}
 	rules := frame.req.Handler.OnComplete
 	if len(rules) == 0 && frame.req.Handler.Accumulate != nil {
 		rules = frame.req.Handler.Accumulate.OnComplete
@@ -848,9 +858,13 @@ func (e *Executor) stepDataWrites(frame *executionFrame) error {
 }
 
 func (e *Executor) stepTransform(frame *executionFrame) error {
-	// Resolve payload transforms against the current execution context so
+	emitSpec := selectedEmitSpec(frame.req.Handler, frame.rule)
+	if emitSpec.Empty() || !emitSpec.HasFields() {
+		return nil
+	}
+	// Resolve emit.fields against the current execution context so
 	// data_accumulation and rule-selected writes are visible to emitted payloads.
-	transformed, err := payloadTransform(e.currentContext(frame), frame.state, frame.req.Handler.PayloadTransform)
+	transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec)
 	if err != nil {
 		return err
 	}
@@ -862,28 +876,21 @@ func (e *Executor) stepTransform(frame *executionFrame) error {
 }
 
 func (e *Executor) stepEmits(frame *executionFrame) error {
-	eventTypes := append([]string{}, frame.req.Handler.Emits.Values()...)
-	if frame.rule != nil && !frame.rule.Emits.Empty() {
-		eventTypes = append(eventTypes, frame.rule.Emits.Values()...)
-	}
-	eventTypes = uniqueOrderedStrings(eventTypes)
-	if len(eventTypes) == 0 {
+	emitSpec := selectedEmitSpec(frame.req.Handler, frame.rule)
+	eventType := emitSpec.EventType()
+	if eventType == "" {
 		return nil
 	}
-	payload := frame.payload
+	payload := map[string]any{}
 	if len(frame.state.Transformed) > 0 {
 		payload = frame.state.Transformed
 	}
-	for _, eventType := range eventTypes {
-		shaped, err := e.shapeEmitPayload(frame, eventType, payload)
-		if err != nil {
-			return err
-		}
-		if _, err := e.queueEmitIntent(frame, eventType, shaped); err != nil {
-			return err
-		}
+	shaped, err := e.shapeEmitPayload(frame, eventType, payload)
+	if err != nil {
+		return err
 	}
-	return nil
+	_, err = e.queueEmitIntent(frame, eventType, shaped)
+	return err
 }
 
 func (e *Executor) stepAction(frame *executionFrame) error {
@@ -1347,6 +1354,13 @@ func (e *Executor) selectedFanOut(frame *executionFrame) *runtimecontracts.FanOu
 	return frame.req.Handler.FanOut
 }
 
+func selectedEmitSpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry) runtimecontracts.EmitSpec {
+	if rule != nil && !rule.Emit.Empty() {
+		return rule.Emit
+	}
+	return handler.Emit
+}
+
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
 	cloned := cloneStringAnyMap(payload)
 	if e.deps.PayloadShaper == nil {
@@ -1412,60 +1426,11 @@ func (e *Executor) queueEmitIntent(frame *executionFrame, eventType string, payl
 	return true, nil
 }
 
-func fanOutEventType(spec *runtimecontracts.FanOutSpec, item any) string {
+func fanOutEventType(spec *runtimecontracts.FanOutSpec) string {
 	if spec == nil {
 		return ""
 	}
-	if len(spec.EmitMapping) > 0 {
-		if keyField := strings.TrimSpace(spec.EmitMappingKey); keyField != "" {
-			if value, ok := fanOutMappingValue(item, keyField); ok {
-				if eventType, ok := spec.EmitMapping[strings.TrimSpace(asString(value))]; ok {
-					return strings.TrimSpace(eventType)
-				}
-			}
-		}
-		for key, eventType := range spec.EmitMapping {
-			if strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(asString(item))) {
-				return strings.TrimSpace(eventType)
-			}
-		}
-		if obj, ok := asObject(item); ok {
-			for _, raw := range obj {
-				if eventType, ok := spec.EmitMapping[strings.TrimSpace(asString(raw))]; ok {
-					return strings.TrimSpace(eventType)
-				}
-			}
-		}
-	}
-	return strings.TrimSpace(spec.EmitPerItem)
-}
-
-func fanOutMappingValue(item any, keyField string) (any, bool) {
-	keyField = strings.TrimSpace(strings.TrimPrefix(keyField, "item."))
-	if keyField == "" {
-		return nil, false
-	}
-	obj, ok := asObject(item)
-	if !ok {
-		return nil, false
-	}
-	current := any(obj)
-	for _, segment := range strings.Split(keyField, ".") {
-		segment = strings.TrimSpace(segment)
-		if segment == "" {
-			return nil, false
-		}
-		m, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		value, ok := m[segment]
-		if !ok {
-			return nil, false
-		}
-		current = value
-	}
-	return current, true
+	return spec.Emit.EventType()
 }
 
 func (e *Executor) resolveClearGates(frame *executionFrame) []string {
@@ -1487,7 +1452,7 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 	frame.req.Handler.SetsGate = nil
 	frame.req.Handler.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
 	frame.topLevelDataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
-	frame.req.Handler.Emits = runtimecontracts.EventEmission{}
+	frame.req.Handler.Emit = runtimecontracts.EmitSpec{}
 	switch parsed.Action {
 	case GuardFailureReject:
 		frame.result.Status = OutcomeRejected

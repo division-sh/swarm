@@ -7,4 +7,4 @@ beta-node:
     trigger.beta:
       create_entity: true
       advances_to: done
-      emits: job.beta_done
+      emit: job.beta_done

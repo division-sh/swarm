@@ -6,7 +6,7 @@ node-a:
   event_handlers:
     task.started:
       advances_to: processing
-      emits: task.progressed
+      emit: task.progressed
 
 node-b:
   id: node-b
@@ -16,4 +16,4 @@ node-b:
   event_handlers:
     task.progressed:
       advances_to: complete
-      emits: task.finished
+      emit: task.finished

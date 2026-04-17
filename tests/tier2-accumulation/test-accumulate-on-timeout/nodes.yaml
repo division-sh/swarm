@@ -8,11 +8,13 @@ test-node:
       accumulate:
         expected_from: entity.expected_count
         completion: all
+        on_complete:
+          - condition: else
+            advances_to: complete
+            emit: collection.done
         on_timeout:
           advances_to: partial
-          emits: collection.partial
-      advances_to: complete
-      emits: collection.done
+          emit: collection.partial
   state_schema:
     fields:
       expected_count: integer

@@ -6,7 +6,7 @@ assign-node:
   event_handlers:
     task.assigned:
       advances_to: assigned
-      emits: task.acknowledged
+      emit: task.acknowledged
 
 complete-node:
   id: complete-node
@@ -16,4 +16,4 @@ complete-node:
   event_handlers:
     task.completed:
       advances_to: done
-      emits: task.finalized
+      emit: task.finalized

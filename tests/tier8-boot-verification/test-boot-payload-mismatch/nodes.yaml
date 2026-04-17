@@ -9,7 +9,7 @@ test-node:
         writes: [foo]
         source_event: item.received
       advances_to: done
-      emits: item.stored
+      emit: item.stored
   state_schema:
     fields:
       foo: string

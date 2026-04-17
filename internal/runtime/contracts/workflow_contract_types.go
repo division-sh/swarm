@@ -106,7 +106,7 @@ type HandlerTransitionSemantic struct {
 	SetsGate         *GateSpec
 	ClearGates       []string
 	DataAccumulation WorkflowDataAccumulation
-	Emits            EventEmission
+	Emit             EmitSpec
 	Condition        string
 	CompletionRule   string
 	OnComplete       []HandlerRuleEntry
@@ -120,7 +120,6 @@ type HandlerTransitionSemantic struct {
 	Reduce           *ReduceSpec
 	Count            *CountSpec
 	Clear            *ClearSpec
-	PayloadTransform *PayloadTransformSpec
 	Branch           []BranchSpec
 }
 type HandlerRuleEntry struct {
@@ -128,7 +127,7 @@ type HandlerRuleEntry struct {
 	Description      string                   `yaml:"description"`
 	Condition        string                   `yaml:"condition"`
 	AdvancesTo       string                   `yaml:"advances_to"`
-	Emits            EventEmission            `yaml:"emits"`
+	Emit             EmitSpec                 `yaml:"emit"`
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Compute          *ComputeSpec             `yaml:"compute"`
 	FanOut           *FanOutSpec              `yaml:"fan_out"`
@@ -175,12 +174,10 @@ type ComputeKeyConfig struct {
 	NumericKeys  []string `yaml:"numeric_keys"`
 }
 type FanOutSpec struct {
-	ItemsFrom      string            `yaml:"items_from"`
-	ItemsPath      paths.Path        `yaml:"-"`
-	Target         string            `yaml:"target"`
-	EmitPerItem    string            `yaml:"emit_per_item"`
-	EmitMapping    map[string]string `yaml:"emit_mapping"`
-	EmitMappingKey string            `yaml:"-"`
+	ItemsFrom string   `yaml:"items_from"`
+	ItemsPath paths.Path `yaml:"-"`
+	Target    string   `yaml:"target"`
+	Emit      EmitSpec `yaml:"emit"`
 }
 type GroupBySpec struct {
 	ItemsFrom string     `yaml:"items_from"`
@@ -742,6 +739,42 @@ func (e EventEmission) Empty() bool {
 	return len(e.Values()) == 0
 }
 
+type EmitSpec struct {
+	Event  string                     `yaml:"event"`
+	Fields map[string]ExpressionValue `yaml:"fields"`
+}
+
+func (e EmitSpec) EventType() string {
+	return strings.TrimSpace(e.Event)
+}
+
+func (e EmitSpec) Empty() bool {
+	return strings.TrimSpace(e.Event) == ""
+}
+
+func (e EmitSpec) HasFields() bool {
+	return len(e.Fields) > 0
+}
+
+func cloneExpressionValueMap(in map[string]ExpressionValue) map[string]ExpressionValue {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]ExpressionValue, len(in))
+	for key, value := range in {
+		value.hydrate()
+		out[key] = value
+	}
+	return out
+}
+
+func cloneEmitSpec(spec EmitSpec) EmitSpec {
+	return EmitSpec{
+		Event:  strings.TrimSpace(spec.Event),
+		Fields: cloneExpressionValueMap(spec.Fields),
+	}
+}
+
 type GuardActionEntry struct {
 	ID              string `yaml:"id"`
 	Category        string `yaml:"category"`
@@ -773,7 +806,7 @@ type SystemNodeEventHandler struct {
 	CreateEntity     bool                     `yaml:"create_entity"`
 	Description      string                   `yaml:"description"`
 	EvidenceTarget   string                   `yaml:"evidence_target"`
-	Emits            EventEmission            `yaml:"emits"`
+	Emit             EmitSpec                 `yaml:"emit"`
 	Guard            *GuardSpec               `yaml:"guard"`
 	AdvancesTo       string                   `yaml:"advances_to"`
 	SetsGate         *GateSpec                `yaml:"sets_gate"`
@@ -794,7 +827,6 @@ type SystemNodeEventHandler struct {
 	Reduce           *ReduceSpec              `yaml:"reduce"`
 	Count            *CountSpec               `yaml:"count"`
 	Clear            *ClearSpec               `yaml:"clear"`
-	PayloadTransform *PayloadTransformSpec    `yaml:"payload_transform"`
 	Branch           []BranchSpec             `yaml:"branch"`
 }
 type EventCatalogEntry struct {

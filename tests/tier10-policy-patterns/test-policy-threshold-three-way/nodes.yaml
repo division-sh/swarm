@@ -11,10 +11,10 @@ classifier:
       on_complete:
         - condition: "payload.score >= policy.high_mark"
           advances_to: tier_a
-          emits: eval.tier_a
+          emit: eval.tier_a
         - condition: "payload.score >= policy.low_mark"
           advances_to: tier_b
-          emits: eval.tier_b
+          emit: eval.tier_b
         - condition: "else"
           advances_to: tier_c
-          emits: eval.tier_c
+          emit: eval.tier_c

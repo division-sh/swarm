@@ -32,7 +32,7 @@ test-node:
         check: "payload.score >= policy.minimum_score"
         on_fail: reject
       advances_to: done
-      emits: check.passed
+      emit: check.passed
 `,
 		`
 minimum_score: 80
@@ -120,7 +120,7 @@ test-node:
   event_handlers:
     check.requested:
       advances_to: done
-      emits: check.passed
+      emit: check.passed
 `,
 		"{}\n",
 		`

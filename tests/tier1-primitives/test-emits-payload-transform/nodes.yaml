@@ -5,7 +5,8 @@ test-node:
   produces: [item.scored]
   event_handlers:
     item.received:
-      payload_transform:
-        score: "payload.raw_score * 2"
       advances_to: done
-      emits: item.scored
+      emit:
+        event: item.scored
+        fields:
+          score: "payload.raw_score * 2"

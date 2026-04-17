@@ -9,5 +9,5 @@ filter-node:
         items_from: payload.items
         condition: "item.score > 50"
         store_as: entity.filtered
-      emits: items.filtered
+      emit: items.filtered
       advances_to: done

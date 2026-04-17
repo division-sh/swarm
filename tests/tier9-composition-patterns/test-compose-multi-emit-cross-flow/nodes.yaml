@@ -6,6 +6,6 @@ notifier:
   event_handlers:
     task.completed:
       advances_to: done
-      emits:
+      emit:
         - task.logged
         - tracker/task.record

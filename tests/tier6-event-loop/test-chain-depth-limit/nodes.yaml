@@ -6,7 +6,7 @@ node-1:
   event_handlers:
     chain.start:
       advances_to: processing
-      emits: chain.e1
+      emit: chain.e1
 
 node-2:
   id: node-2
@@ -15,7 +15,7 @@ node-2:
   produces: [chain.e2]
   event_handlers:
     chain.e1:
-      emits: chain.e2
+      emit: chain.e2
 
 node-3:
   id: node-3
@@ -24,7 +24,7 @@ node-3:
   produces: [chain.e3]
   event_handlers:
     chain.e2:
-      emits: chain.e3
+      emit: chain.e3
 
 node-4:
   id: node-4
@@ -33,7 +33,7 @@ node-4:
   produces: [chain.e4]
   event_handlers:
     chain.e3:
-      emits: chain.e4
+      emit: chain.e4
 
 node-5:
   id: node-5
@@ -42,7 +42,7 @@ node-5:
   produces: [chain.e5]
   event_handlers:
     chain.e4:
-      emits: chain.e5
+      emit: chain.e5
 
 node-6:
   id: node-6
@@ -51,7 +51,7 @@ node-6:
   produces: [chain.e6]
   event_handlers:
     chain.e5:
-      emits: chain.e6
+      emit: chain.e6
 
 node-7:
   id: node-7
@@ -60,4 +60,4 @@ node-7:
   produces: [chain.e7]
   event_handlers:
     chain.e6:
-      emits: chain.e7
+      emit: chain.e7

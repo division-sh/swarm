@@ -11,4 +11,4 @@ admitter:
             check: "query_entities(current_state == 'active').count < policy.max_capacity"
         on_fail: discard
       advances_to: active
-      emits: slot.granted
+      emit: slot.granted

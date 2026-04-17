@@ -810,23 +810,21 @@ func (b *WorkflowContractBundle) nodeEventScope(nodeID string) eventidentity.Sco
 }
 
 func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler SystemNodeEventHandler) SystemNodeEventHandler {
-	handler.Emits = b.externalizeEventEmission(nodeID, handler.Emits)
+	handler.Emit = b.externalizeEmitSpec(nodeID, handler.Emit)
 	if handler.FanOut != nil {
 		clone := *handler.FanOut
-		clone.EmitPerItem = b.externalizeNodeEventType(nodeID, clone.EmitPerItem)
-		if len(clone.EmitMapping) > 0 {
-			mapping := make(map[string]string, len(clone.EmitMapping))
-			for key, value := range clone.EmitMapping {
-				mapping[key] = b.externalizeNodeEventType(nodeID, value)
-			}
-			clone.EmitMapping = mapping
-		}
+		clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
 		handler.FanOut = &clone
 	}
 	if len(handler.Rules) > 0 {
 		rules := make([]HandlerRuleEntry, 0, len(handler.Rules))
 		for _, rule := range handler.Rules {
-			rule.Emits = b.externalizeEventEmission(nodeID, rule.Emits)
+			rule.Emit = b.externalizeEmitSpec(nodeID, rule.Emit)
+			if rule.FanOut != nil {
+				clone := *rule.FanOut
+				clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
+				rule.FanOut = &clone
+			}
 			rules = append(rules, rule)
 		}
 		handler.Rules = rules
@@ -834,7 +832,12 @@ func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler S
 	if len(handler.OnComplete) > 0 {
 		rules := make([]HandlerRuleEntry, 0, len(handler.OnComplete))
 		for _, rule := range handler.OnComplete {
-			rule.Emits = b.externalizeEventEmission(nodeID, rule.Emits)
+			rule.Emit = b.externalizeEmitSpec(nodeID, rule.Emit)
+			if rule.FanOut != nil {
+				clone := *rule.FanOut
+				clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
+				rule.FanOut = &clone
+			}
 			rules = append(rules, rule)
 		}
 		handler.OnComplete = rules
@@ -844,19 +847,35 @@ func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler S
 		if len(clone.OnComplete) > 0 {
 			rules := make([]HandlerRuleEntry, 0, len(clone.OnComplete))
 			for _, rule := range clone.OnComplete {
-				rule.Emits = b.externalizeEventEmission(nodeID, rule.Emits)
+				rule.Emit = b.externalizeEmitSpec(nodeID, rule.Emit)
+				if rule.FanOut != nil {
+					fanOut := *rule.FanOut
+					fanOut.Emit = b.externalizeEmitSpec(nodeID, fanOut.Emit)
+					rule.FanOut = &fanOut
+				}
 				rules = append(rules, rule)
 			}
 			clone.OnComplete = rules
 		}
 		if clone.OnTimeout != nil {
 			onTimeout := *clone.OnTimeout
-			onTimeout.Emits = b.externalizeEventEmission(nodeID, onTimeout.Emits)
+			onTimeout.Emit = b.externalizeEmitSpec(nodeID, onTimeout.Emit)
+			if onTimeout.FanOut != nil {
+				fanOut := *onTimeout.FanOut
+				fanOut.Emit = b.externalizeEmitSpec(nodeID, fanOut.Emit)
+				onTimeout.FanOut = &fanOut
+			}
 			clone.OnTimeout = &onTimeout
 		}
 		handler.Accumulate = &clone
 	}
 	return handler
+}
+
+func (b *WorkflowContractBundle) externalizeEmitSpec(nodeID string, spec EmitSpec) EmitSpec {
+	spec = cloneEmitSpec(spec)
+	spec.Event = b.externalizeNodeEventType(nodeID, spec.Event)
+	return spec
 }
 
 func (b *WorkflowContractBundle) externalizeEventEmission(nodeID string, emission EventEmission) EventEmission {

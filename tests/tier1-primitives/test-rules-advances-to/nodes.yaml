@@ -9,4 +9,4 @@ test-node:
         approve:
           condition: "payload.decision == 'approve'"
           advances_to: approved
-          emits: item.approved
+          emit: item.approved

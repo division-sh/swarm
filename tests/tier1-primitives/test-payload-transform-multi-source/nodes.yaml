@@ -5,13 +5,13 @@ test-node:
   produces: [item.exported]
   event_handlers:
     export.requested:
-      payload_transform:
+      advances_to: done
+      emit:
+        event: item.exported
         fields:
           id: payload.entity_id
           name: entity.name
           status: entity.current_state
-      advances_to: done
-      emits: item.exported
   state_schema:
     fields:
       name: string

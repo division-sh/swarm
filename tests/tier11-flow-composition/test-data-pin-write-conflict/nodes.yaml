@@ -6,4 +6,4 @@ parent-node:
   event_handlers:
     start:
       advances_to: done
-      emits: complete
+      emit: complete

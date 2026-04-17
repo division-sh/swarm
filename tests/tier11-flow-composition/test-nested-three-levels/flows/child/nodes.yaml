@@ -7,4 +7,4 @@ child-relay:
     step.begin:
       create_entity: true
       advances_to: completed
-      emits: grandchild/micro.start
+      emit: grandchild/micro.start

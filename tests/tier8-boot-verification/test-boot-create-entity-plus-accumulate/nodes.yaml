@@ -10,4 +10,4 @@ test-node:
         expected_from: entity.expected_count
         completion: all
       advances_to: done
-      emits: task.done
+      emit: task.done

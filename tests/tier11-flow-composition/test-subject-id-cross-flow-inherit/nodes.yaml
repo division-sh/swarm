@@ -6,4 +6,4 @@ dispatcher:
   event_handlers:
     item.discovered:
       advances_to: dispatched
-      emits: score.requested
+      emit: score.requested

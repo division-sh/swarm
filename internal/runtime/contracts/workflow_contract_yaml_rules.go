@@ -72,51 +72,53 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 	if f == nil {
 		return nil
 	}
+	if err := validateFanOutFieldNodes(node); err != nil {
+		return err
+	}
 	var aux struct {
-		ItemsFrom   string    `yaml:"items_from"`
-		Target      string    `yaml:"target"`
-		EmitPerItem string    `yaml:"emit_per_item"`
-		EmitMapping yaml.Node `yaml:"emit_mapping"`
+		ItemsFrom string   `yaml:"items_from"`
+		Target    string   `yaml:"target"`
+		Emit      EmitSpec `yaml:"emit"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
 	*f = FanOutSpec{
-		ItemsFrom:   strings.TrimSpace(aux.ItemsFrom),
-		Target:      strings.TrimSpace(aux.Target),
-		EmitPerItem: strings.TrimSpace(aux.EmitPerItem),
+		ItemsFrom: strings.TrimSpace(aux.ItemsFrom),
+		Target:    strings.TrimSpace(aux.Target),
+		Emit:      aux.Emit,
 	}
 	f.ItemsFrom = strings.TrimSpace(f.ItemsFrom)
 	f.ItemsPath = paths.Parse(f.ItemsFrom)
 	f.Target = strings.TrimSpace(f.Target)
-	f.EmitPerItem = strings.TrimSpace(f.EmitPerItem)
-	if aux.EmitMapping.Kind != 0 {
-		mapping, keyField, err := decodeFanOutEmitMappingNode(&aux.EmitMapping)
-		if err != nil {
-			return err
-		}
-		f.EmitMapping = mapping
-		f.EmitMappingKey = keyField
-	}
 	return nil
 }
 
-func decodeFanOutEmitMappingNode(node *yaml.Node) (map[string]string, string, error) {
-	if node == nil || node.Kind == 0 {
-		return nil, "", nil
+func validateFanOutFieldNodes(node *yaml.Node) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
 	}
-	var plain map[string]string
-	if err := node.Decode(&plain); err == nil && len(plain) > 0 {
-		return plain, "", nil
+	allowed := map[string]struct{}{
+		"items_from": {},
+		"target":     {},
+		"emit":       {},
 	}
-	var structured struct {
-		KeyField string            `yaml:"key_field"`
-		Mapping  map[string]string `yaml:"mapping"`
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		switch key {
+		case "emit_per_item":
+			return fmt.Errorf("RETIRED: fan_out field %q is retired; use emit: <event> or emit: {event, fields}", key)
+		case "emit_mapping":
+			return fmt.Errorf("RETIRED: fan_out field %q is retired; move per-item payload ownership into fan_out.emit", key)
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: fan_out field %q not in platform spec", key)
+		}
 	}
-	if err := node.Decode(&structured); err != nil {
-		return nil, "", err
-	}
-	return structured.Mapping, strings.TrimSpace(structured.KeyField), nil
+	return nil
 }
 
 func (g *GroupBySpec) UnmarshalYAML(node *yaml.Node) error {

@@ -404,7 +404,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 				DedupBy:      "payload.dimension",
 			},
 			OnComplete: []runtimecontracts.HandlerRuleEntry{
-				{Condition: "else", Emits: runtimecontracts.EventEmission{Single: "vertical.rejected"}},
+				{Condition: "else", Emit: runtimecontracts.EmitSpec{Event: "vertical.rejected"}},
 			},
 		},
 	}
@@ -492,7 +492,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
 			ClearGates: []string{"gate_a"},
-			Emits:      runtimecontracts.EventEmission{Single: "task.recorded"},
+			Emit:       runtimecontracts.EmitSpec{Event: "task.recorded"},
 			Action:     runtimecontracts.ActionSpec{ID: "record"},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -808,7 +808,7 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 	}
 }
 
-func TestExecutor_RuleEmitsAugmentHandlerEmits(t *testing.T) {
+func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
@@ -829,26 +829,20 @@ func TestExecutor_RuleEmitsAugmentHandlerEmits(t *testing.T) {
 		ChainDepth: 1,
 		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Emits: runtimecontracts.EventEmission{Single: "handler.emitted"},
+			Emit: runtimecontracts.EmitSpec{Event: "handler.emitted"},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
 				ID:        "rule-1",
 				Condition: "payload.score > 5",
-				Emits:     runtimecontracts.EventEmission{Single: "rule.emitted"},
+				Emit:      runtimecontracts.EmitSpec{Event: "rule.emitted"},
 			}},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
+	if err == nil {
+		t.Fatalf("expected ambiguous handler-level emit config to be rejected, got %+v", result)
 	}
-	if got := len(result.EmitIntents); got != 2 {
-		t.Fatalf("EmitIntents count = %d, want 2", got)
-	}
-	if got := string(result.EmitIntents[0].Event.Type); got != "handler.emitted" {
-		t.Fatalf("first emit type = %q", got)
-	}
-	if got := string(result.EmitIntents[1].Event.Type); got != "rule.emitted" {
-		t.Fatalf("second emit type = %q", got)
+	if !strings.Contains(err.Error(), "handler-top-level emit is only allowed on single-emit handlers") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -988,7 +982,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 			OnComplete: []runtimecontracts.HandlerRuleEntry{{
 				ID:        "too-early",
 				Condition: `entity.branch_target == "handler"`,
-				Emits:     runtimecontracts.EventEmission{Single: "branch.selected"},
+				Emit:      runtimecontracts.EmitSpec{Event: "branch.selected"},
 			}},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -1028,7 +1022,7 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
-			Emits:      runtimecontracts.EventEmission{Single: "task.followup"},
+			Emit:       runtimecontracts.EmitSpec{Event: "task.followup"},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
@@ -1074,9 +1068,9 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"items":["a","b"]}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
-				ItemsFrom:   "payload.items",
-				EmitPerItem: "item.process",
-				Target:      "agent-x",
+				ItemsFrom: "payload.items",
+				Emit:      runtimecontracts.EmitSpec{Event: "item.process"},
+				Target:    "agent-x",
 			},
 			AdvancesTo: "processing",
 			Action:     runtimecontracts.ActionSpec{ID: "should_not_run"},
@@ -1151,16 +1145,15 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 					},
 				},
 			},
-			PayloadTransform: &runtimecontracts.PayloadTransformSpec{
-				Fields: map[string]string{
-					"vertical_id":          "entity.entity_id",
-					"vertical_name":        "entity.name",
-					"rubric":               "entity.scoring_rubric",
-					"dimensions_requested": "entity.dimensions_requested",
-					"discovery_context":    "payload.discovery_context",
+			Emit: runtimecontracts.EmitSpec{
+				Event: "scoring.requested",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"vertical_name":        runtimecontracts.CELExpression("entity.name"),
+					"rubric":               runtimecontracts.CELExpression("entity.scoring_rubric"),
+					"dimensions_requested": runtimecontracts.CELExpression("entity.dimensions_requested"),
+					"discovery_context":    runtimecontracts.CELExpression("payload.discovery_context"),
 				},
 			},
-			Emits: runtimecontracts.EventEmission{Single: "scoring.requested"},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
@@ -1173,9 +1166,6 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 	var payload map[string]any
 	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if got := payload["vertical_id"]; got != "vertical-1" {
-		t.Fatalf("vertical_id = %#v", got)
 	}
 	if got := payload["vertical_name"]; got != "Test Vertical" {
 		t.Fatalf("vertical_name = %#v", got)
@@ -1193,7 +1183,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 	}
 }
 
-func TestExecutor_PayloadTransformCELFailureReturnsError(t *testing.T) {
+func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),
 		StateRepo:  stubStateRepo{},
@@ -1215,20 +1205,17 @@ func TestExecutor_PayloadTransformCELFailureReturnsError(t *testing.T) {
 			Payload: json.RawMessage(`{"mode":"corpus"}`),
 		},
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			PayloadTransform: &runtimecontracts.PayloadTransformSpec{
-				Fields: map[string]string{
-					"missing": "payload.discovery_context.source",
+			Emit: runtimecontracts.EmitSpec{
+				Event: "scoring.requested",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"missing": runtimecontracts.CELExpression("payload.discovery_context.source +"),
 				},
 			},
-			Emits: runtimecontracts.EventEmission{Single: "scoring.requested"},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
 	if err == nil {
-		t.Fatal("expected payload transform CEL failure to return an error")
-	}
-	if !strings.Contains(err.Error(), "payload transform target missing") {
-		t.Fatalf("error = %v, want payload transform target context", err)
+		t.Fatal("expected emit.fields CEL failure to return an error")
 	}
 }
 
@@ -1251,8 +1238,8 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"items":[]}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
-				ItemsFrom:   "payload.items",
-				EmitPerItem: "item.process",
+				ItemsFrom: "payload.items",
+				Emit:      runtimecontracts.EmitSpec{Event: "item.process"},
 			},
 			AdvancesTo: "scanning",
 		},
@@ -1272,7 +1259,7 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	}
 }
 
-func TestExecutor_FanOutStructuredEmitMappingSelectsEventByKeyField(t *testing.T) {
+func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
@@ -1294,12 +1281,8 @@ func TestExecutor_FanOutStructuredEmitMappingSelectsEventByKeyField(t *testing.T
 		Event:      events.Event{ID: "evt-1", Type: "batch.submitted", Payload: json.RawMessage(`{"items":[{"kind":"a"},{"kind":"b"}]}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
-				ItemsFrom:      "payload.items",
-				EmitMappingKey: "item.kind",
-				EmitMapping: map[string]string{
-					"a": "routed.a",
-					"b": "routed.b",
-				},
+				ItemsFrom: "payload.items",
+				Emit:      runtimecontracts.EmitSpec{Event: "routed.item"},
 			},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -1310,10 +1293,10 @@ func TestExecutor_FanOutStructuredEmitMappingSelectsEventByKeyField(t *testing.T
 	if got := len(result.EmitIntents); got != 2 {
 		t.Fatalf("EmitIntents count = %d", got)
 	}
-	if got := string(result.EmitIntents[0].Event.Type); got != "routed.a" {
+	if got := string(result.EmitIntents[0].Event.Type); got != "routed.item" {
 		t.Fatalf("first emit type = %q", got)
 	}
-	if got := string(result.EmitIntents[1].Event.Type); got != "routed.b" {
+	if got := string(result.EmitIntents[1].Event.Type); got != "routed.item" {
 		t.Fatalf("second emit type = %q", got)
 	}
 	if !result.EmitIntents[1].Event.CreatedAt.After(result.EmitIntents[0].Event.CreatedAt) {
@@ -1344,7 +1327,7 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 				OnFail: "kill",
 			},
 			AdvancesTo: "done",
-			Emits:      runtimecontracts.EventEmission{Single: "check.passed"},
+			Emit:       runtimecontracts.EmitSpec{Event: "check.passed"},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})

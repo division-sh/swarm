@@ -143,7 +143,7 @@ type catalogNodeContract struct {
 }
 
 type catalogSystemNodeEventHandler struct {
-	Emits            runtimecontracts.EventEmission            `yaml:"emits"`
+	Emit             runtimecontracts.EmitSpec                 `yaml:"emit"`
 	Guard            *runtimecontracts.GuardSpec               `yaml:"guard"`
 	Action           catalogActionSpec                         `yaml:"action"`
 	ActionParams     *catalogActionParams                      `yaml:"action_params"`
@@ -217,7 +217,7 @@ type catalogRule struct {
 	Description      string                                    `yaml:"description"`
 	Condition        string                                    `yaml:"condition"`
 	AdvancesTo       string                                    `yaml:"advances_to"`
-	Emits            runtimecontracts.EventEmission            `yaml:"emits"`
+	Emit             runtimecontracts.EmitSpec                 `yaml:"emit"`
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Compute          *catalogComputeSpec                       `yaml:"compute"`
 }
@@ -240,15 +240,9 @@ type catalogComputeSpec struct {
 }
 
 type catalogFanOutSpec struct {
-	ItemsFrom   string                    `yaml:"items_from"`
-	Target      string                    `yaml:"target"`
-	EmitPerItem string                    `yaml:"emit_per_item"`
-	EmitMapping *catalogFanOutEmitMapping `yaml:"emit_mapping"`
-}
-
-type catalogFanOutEmitMapping struct {
-	KeyField string            `yaml:"key_field"`
-	Mapping  map[string]string `yaml:"mapping"`
+	ItemsFrom string                    `yaml:"items_from"`
+	Target    string                    `yaml:"target"`
+	Emit      runtimecontracts.EmitSpec `yaml:"emit"`
 }
 
 type catalogActionParams struct {
@@ -642,8 +636,8 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 				if next := strings.TrimSpace(accumulate.OnTimeout.AdvancesTo); next != "" {
 					result.entityState = next
 				}
-				if !accumulate.OnTimeout.Emits.Empty() {
-					result.emittedEvents = append(result.emittedEvents, accumulate.OnTimeout.Emits.Values()...)
+				if emit := strings.TrimSpace(accumulate.OnTimeout.Emit.EventType()); emit != "" {
+					result.emittedEvents = append(result.emittedEvents, emit)
 				}
 				if accumulate.OnTimeout.DataAccumulation.HasWrites() {
 					applyCatalogDataAccumulation(accumulate.OnTimeout.DataAccumulation, step.Payload, entity)
@@ -653,7 +647,9 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 				applyCatalogDataAccumulation(handler.DataAccumulation, step.Payload, entity)
 				applyCatalogCompute(handler.Compute, entity)
 				result.entityFields = cloneStringAnyMapCatalog(entity)
-				result.emittedEvents = append(result.emittedEvents, handler.Emits.Values()...)
+				if emit := strings.TrimSpace(handler.Emit.EventType()); emit != "" {
+					result.emittedEvents = append(result.emittedEvents, emit)
+				}
 				break
 			}
 			continue
@@ -1284,7 +1280,7 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 				if _, ok := handler["advances_to"].([]any); ok {
 					issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-ADV-LIST", Message: fmt.Sprintf("%s: advances_to is list, must be string", loc)})
 				}
-				for _, emitted := range catalogEmissionStrings(handler["emits"]) {
+				for _, emitted := range catalogCollectHandlerEmits(handler) {
 					if emitted == eventType {
 						issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-SELF-EMIT", Message: fmt.Sprintf("%s: emits own trigger '%s'", loc, eventType)})
 					}
@@ -1574,6 +1570,20 @@ func catalogEmissionStrings(value any) []string {
 	return catalogStringSlice(value)
 }
 
+func catalogEmitEventStrings(value any) []string {
+	if value == nil {
+		return nil
+	}
+	if text := catalogBootText(value); text != "" {
+		return []string{text}
+	}
+	mapping := catalogMap(value)
+	if event := catalogBootText(mapping["event"]); event != "" {
+		return []string{event}
+	}
+	return nil
+}
+
 func catalogBootText(value any) string {
 	if value == nil {
 		return ""
@@ -1586,23 +1596,16 @@ func catalogBootText(value any) string {
 }
 
 func catalogCollectHandlerEmits(handler map[string]any) []string {
-	out := append([]string{}, catalogEmissionStrings(handler["emits"])...)
+	out := append([]string{}, catalogEmitEventStrings(handler["emit"])...)
 	fanOut := catalogMap(handler["fan_out"])
-	if emit := catalogBootText(fanOut["emit_per_item"]); emit != "" {
-		out = append(out, emit)
-	}
-	if mapping := catalogMap(catalogMap(fanOut["emit_mapping"])["mapping"]); len(mapping) > 0 {
-		for _, key := range catalogSortedKeys(mapping) {
-			if emit := catalogBootText(mapping[key]); emit != "" {
-				out = append(out, emit)
-			}
-		}
+	if emit := catalogEmitEventStrings(fanOut["emit"]); len(emit) > 0 {
+		out = append(out, emit...)
 	}
 	for _, rule := range catalogRuleEntries(handler["rules"]) {
-		out = append(out, catalogEmissionStrings(rule["emits"])...)
+		out = append(out, catalogEmitEventStrings(rule["emit"])...)
 	}
 	for _, branch := range catalogBranchEntries(handler["on_complete"]) {
-		out = append(out, catalogEmissionStrings(branch["emits"])...)
+		out = append(out, catalogEmitEventStrings(branch["emit"])...)
 	}
 	return normalizeSorted(out)
 }
@@ -1779,7 +1782,7 @@ func catalogConditionHasPrefix(condition string) bool {
 func catalogDefinedHandlerField(field string) bool {
 	switch strings.TrimSpace(field) {
 	case "description", "_note", "guard", "accumulate", "compute", "on_complete",
-		"advances_to", "sets_gate", "data_accumulation", "emits", "rules",
+		"advances_to", "sets_gate", "data_accumulation", "emit", "emits", "rules",
 		"fan_out", "query", "reduce", "filter", "count", "clear", "action",
 		"template", "instance_id_from", "config_from", "from", "payload_transform",
 		"clear_gates", "dedup_by", "subscriptions_bootstrap", "logic", "on_below_threshold",
@@ -1973,7 +1976,9 @@ func executeCatalogHandlerStep(t testing.TB, handler catalogSystemNodeEventHandl
 	applyCatalogCount(handler.Count, payload, entity, policy)
 	applyCatalogGroupBy(handler.GroupBy, payload, entity)
 	result.entityFields = cloneStringAnyMapCatalog(entity)
-	result.emittedEvents = append(result.emittedEvents, handler.Emits.Values()...)
+	if emit := strings.TrimSpace(handler.Emit.EventType()); emit != "" {
+		result.emittedEvents = append(result.emittedEvents, emit)
+	}
 	return result
 }
 
@@ -1991,8 +1996,8 @@ func applyCatalogRule(rule catalogRule, payload, entity map[string]any, result c
 	if next := strings.TrimSpace(rule.AdvancesTo); next != "" {
 		result.entityState = next
 	}
-	if !rule.Emits.Empty() {
-		result.emittedEvents = append(result.emittedEvents, rule.Emits.Values()...)
+	if emit := strings.TrimSpace(rule.Emit.EventType()); emit != "" {
+		result.emittedEvents = append(result.emittedEvents, emit)
 	}
 	if rule.DataAccumulation.HasWrites() {
 		applyCatalogDataAccumulation(rule.DataAccumulation, payload, entity)
@@ -2123,15 +2128,8 @@ func applyCatalogFanOut(spec *catalogFanOutSpec, payload, entity map[string]any,
 	if len(items) == 0 {
 		return
 	}
-	for _, item := range items {
-		if spec.EmitMapping != nil && len(spec.EmitMapping.Mapping) > 0 {
-			mappingKey := resolveCatalogRef(strings.TrimSpace(spec.EmitMapping.KeyField), entity, map[string]any{"item": item, "entity": entity, "payload": payload})
-			if eventType, ok := spec.EmitMapping.Mapping[strings.TrimSpace(asStringForCatalog(mappingKey))]; ok {
-				result.emittedEvents = append(result.emittedEvents, strings.TrimSpace(eventType))
-			}
-			continue
-		}
-		if emit := strings.TrimSpace(spec.EmitPerItem); emit != "" {
+	for range items {
+		if emit := strings.TrimSpace(spec.Emit.EventType()); emit != "" {
 			result.emittedEvents = append(result.emittedEvents, emit)
 		}
 	}

@@ -9,7 +9,7 @@ test-node:
         expected_from: entity.item_count
         completion: all
       advances_to: complete
-      emits: collection.done
+      emit: collection.done
   state_schema:
     fields:
       item_count: integer

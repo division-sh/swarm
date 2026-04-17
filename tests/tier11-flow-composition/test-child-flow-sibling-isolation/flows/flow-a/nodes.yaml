@@ -7,7 +7,7 @@ alpha-intake:
     alpha.start:
       create_entity: true
       advances_to: working
-      emits: internal.done
+      emit: internal.done
 
 alpha-finisher:
   id: alpha-finisher
@@ -17,4 +17,4 @@ alpha-finisher:
   event_handlers:
     internal.done:
       advances_to: processed
-      emits: alpha.complete
+      emit: alpha.complete

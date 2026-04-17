@@ -6,4 +6,4 @@ parent-node:
   event_handlers:
     parent.trigger:
       advances_to: done
-      emits: parent.result
+      emit: parent.result

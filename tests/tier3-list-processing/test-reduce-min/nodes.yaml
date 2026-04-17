@@ -9,5 +9,5 @@ reduce-node:
         items_from: payload.values
         operation: min
         store_as: entity.minimum
-      emits: values.reduced
+      emit: values.reduced
       advances_to: done

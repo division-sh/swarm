@@ -107,7 +107,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				SetsGate:         handler.SetsGate,
 				ClearGates:       handler.ClearGates,
 				DataAccumulation: handler.DataAccumulation,
-				Emits:            handler.Emits,
+				Emit:             cloneEmitSpec(handler.Emit),
 				Condition:        strings.TrimSpace(handler.Condition),
 				CompletionRule:   strings.TrimSpace(handler.CompletionRule),
 				OnComplete:       handler.OnComplete,
@@ -121,7 +121,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				Reduce:           handler.Reduce,
 				Count:            handler.Count,
 				Clear:            handler.Clear,
-				PayloadTransform: handler.PayloadTransform,
 				Branch:           append([]BranchSpec{}, handler.Branch...),
 			}
 			semantics.HandlerTransitions = append(semantics.HandlerTransitions, transition)

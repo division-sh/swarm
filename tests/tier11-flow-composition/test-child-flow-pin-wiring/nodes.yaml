@@ -5,7 +5,7 @@ parent-node:
   produces: [work.requested]
   event_handlers:
     job.submit:
-      emits: work.requested
+      emit: work.requested
 
 parent-listener:
   id: parent-listener
@@ -15,4 +15,4 @@ parent-listener:
   event_handlers:
     child/work.completed:
       advances_to: done
-      emits: job.done
+      emit: job.done

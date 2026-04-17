@@ -13,4 +13,4 @@ task-node:
       advances_to: active
     timer.task_timeout:
       advances_to: timed_out
-      emits: task.timed_out
+      emit: task.timed_out

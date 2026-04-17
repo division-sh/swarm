@@ -221,13 +221,15 @@ contract_formats:
     schema_yaml: "initial_state: waiting\nterminal_states: [done]\nstates: [waiting, done]\npins:\n  inputs:\n    events:\
       \ [hello.requested]\n  outputs:\n    events: [hello.completed]"
     nodes_yaml: "hello-node:\n  id: hello-node\n  execution_type: system_node\n  subscribes_to: [hello.requested]\n  produces:\
-      \ [hello.completed]\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emits: hello.completed"
+      \ [hello.completed]\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emit: hello.completed"
     events_yaml: "hello.requested:\n  payload:\n    entity_id: string\n    message: string\nhello.completed:\n  payload:\n\
       \    entity_id: string"
     agents_yaml: '{}'
-  produces_derivation: The produces field on system nodes is OPTIONAL. If omitted, the platform derives it from handler emits,
-    rules emits, on_complete emits, and fan_out emit_per_item at boot. If present, the verifier checks it matches actual emits
-    (PRODUCES-DRIFT warning). Authors should omit produces and let the platform derive it.
+  produces_derivation: >-
+    The produces field on system nodes is OPTIONAL. If omitted, the platform derives it from every supported declarative
+    emit site at boot: handler top-level emit, rule-local emit, on_complete branch emit, accumulate.on_timeout emit, and
+    fan_out emit. If present, the verifier checks it matches actual emits (PRODUCES-DRIFT warning). Authors should omit
+    produces and let the platform derive it.
   underscore_prefix_convention:
     description: Fields starting with _ in contract YAML files.
     semantic_fields:
@@ -247,12 +249,12 @@ handler_specification:
       \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
-      \           └→ on_complete / rules (mutually exclusive)\n                                          └→ advances_to ─┐\n\
-      \                                             sets_gate ────┤ (independent of each other)\n                        \
-      \                     data_accumulation ┘\n                                                  └→ payload_transform\n\
-      \                                                       └→ emits\n                                                 \
-      \           └→ action\n                                                                 └→ clear (optional — reset accumulator/state\
-      \ buckets)\n    "
+      \           └→ emit-site selection (handler emit OR active branch/rule/timeout/fan_out emit)\n                    \
+      \                      └→ advances_to ─┐\n                                             sets_gate ────┤ (independent\
+      \ of each other)\n                                             data_accumulation ┘\n                         \
+      \                         └→ emit.fields\n                                                       └→ emit.event\n  \
+      \                                                          └→ action\n                                            \
+      \                     └→ clear (optional — reset accumulator/state buckets)\n    "
   atomicity:
     description: ALL side effects from one handler execution commit in a single database transaction. State advance, gate
       set, data write, and event persistence happen atomically. No external observer sees intermediate state.
@@ -264,8 +266,8 @@ handler_specification:
       after this transaction commits).
   on_complete_vs_rules:
     description: Mutually exclusive. A handler uses on_complete OR rules, never both.
-    on_complete: Ordered list of {condition, advances_to, emits} — first match wins. Used after accumulation/computation.
-    rules: Map of {condition, emits/advances_to/data_accumulation} — payload-based routing. Used for type dispatching.
+    on_complete: Ordered list of {condition, advances_to, emit} — first match wins. Used after accumulation/computation.
+    rules: Map of {condition, emit/advances_to/data_accumulation} — payload-based routing. Used for type dispatching.
   short_circuits:
     guard_fail: If guard fails, handler stops. on_fail action executes (reject/kill/discard/escalate). No further steps.
     accumulate_incomplete: If accumulation is not yet complete, handler stops after recording the arrival. No further steps
@@ -281,7 +283,7 @@ handler_specification:
       field: create_entity
       type: boolean
       purpose: When true, the handler mints a fresh entity_id before any other processing. All subsequent handler steps
-        (guard, data_accumulation, advances_to, emits, etc.) operate on the NEW entity. The inbound event's entity_id is
+        (guard, data_accumulation, advances_to, emit, etc.) operate on the NEW entity. The inbound event's entity_id is
         ignored for state operations — the new entity starts at the flow's initial_state with schema-declared initial values
         already materialized. The original
         event entity_id is preserved in the event payload for reference.
@@ -368,12 +370,12 @@ handler_specification:
             \    weight: 0.4\n  store_as: entity.composite_score"
     on_complete:
       field: on_complete
-      type: list of {condition, advances_to, emits} objects — evaluated top-to-bottom, first match wins
+      type: list of {condition, advances_to, emit} objects — evaluated top-to-bottom, first match wins
       purpose: Conditional branching after accumulation or computation.
       branch_fields:
         condition: string — expression evaluated against entity state and policy
         advances_to: string — target state
-        emits: string — event to emit
+        emit: string or object — event to emit, optionally with local fields payload construction
       _note: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching
         condition executes.
   expression_context:
@@ -432,7 +434,7 @@ handler_specification:
         create_entity_unconditional_data_accumulation:
           form: The handler containing create_entity writes X unconditionally in top-level data_accumulation.
           valid_for: Only positions that run strictly after same-handler top-level data_accumulation in the dependency graph
-            (payload_transform, emits, action, clear), plus downstream handlers after commit.
+            (emit.fields, emit.event, action, clear), plus downstream handlers after commit.
           not_valid_for: guard.check, filter, reduce, count, compute inputs, on_complete.condition, rules.condition,
             and same-handler data_accumulation.expression.
       presence_positions:
@@ -501,17 +503,26 @@ handler_specification:
         \ revision_count                # literal\n    value: 0\n  - target_field: expected_count\
         \              # computed\n    expression: fan_out.count\n  source_event: scan.requested\
         \               # optional"
-    emits:
-      field: emits
-      type: string or list of strings
-      purpose: Publish follow-up event(s). Skipped if on_complete already emitted.
+    emit:
+      field: emit
+      type: 'scalar event name OR object: {event, fields}'
+      purpose: Publish the selected follow-up event for this emit site. Handler top-level emit is allowed only when the handler
+        has no nested emit sites. Nested emit sites are branch-local on_complete emit, rules emit, accumulate.on_timeout emit,
+        and fan_out emit.
+      sub_fields:
+        event: string — event to emit
+        fields: map of output_field_name → CEL expression evaluated against handler context. Optional. If omitted, the emitted
+          payload contains only platform-forced fields.
+      single_emit_handler_rule: 'A handler top-level emit is valid only when the handler has exactly one possible emit site.
+        If the handler also declares rules, on_complete, accumulate.on_timeout, or fan_out emit, boot fails with ambiguity.
+        Payload ownership must move to the active emit site.'
     rules:
       field: rules
       type: map of rule_name → rule
       purpose: Type-based routing. Match payload field against conditions.
       rule_fields:
         condition: string — expression evaluated against payload
-        emits: string or list — event(s) to emit
+        emit: string or object — rule-local event to emit
         advances_to: string — optional state change
         data_accumulation: object — optional data write (same format as handler-level)
         description: string — human-readable note
@@ -522,8 +533,7 @@ handler_specification:
       sub_fields:
         items_from: string — source list (payload field or entity field)
         target: string — agent path to receive events
-        emit_per_item: string — event name to emit for each item (all same type)
-        emit_mapping: 'object — optional: map item key values to different event names'
+        emit: string or object — per-item event to emit, optionally with local fields payload construction
       side_effect: Writes fan_out.count to handler context (available for data_accumulation).
     query:
       field: query
@@ -595,15 +605,13 @@ handler_specification:
           behavior: Reads the event payload and appends it as a new entry in the entity's evidence accumulator (from state_schema).
             Append-only — never replaces. Used for building an audit trail of signals, scores, or decisions.
           required_sibling_fields: {}
-    payload_transform:
-      field: payload_transform
-      type: object
-      purpose: Construct an output event payload from multiple sources. Used when emitting an event that combines fields from
-        entity state, incoming event payload, and computed values.
-      sub_fields:
-        fields: map of output_field_name → source expression (CEL)
-      example: "payload_transform:\n  fields:\n    order_id: payload.order_id\n    customer_name: entity.name\n    total:\
-        \ entity.total_amount\n    notes: payload.notes"
+    retired_fields:
+      description: Legacy declarative emit carriers retired by the structured emit grammar.
+      entries:
+      - "`emits` — retired; use `emit`"
+      - "`payload_transform` — retired; move payload ownership into `emit.fields` at the active emit site"
+      - "`fan_out.emit_per_item` — retired; use `fan_out.emit`"
+      - "`fan_out.emit_mapping` — retired; use `fan_out.emit.fields`"
     clear_gates:
       field: clear_gates
       type: boolean
@@ -643,11 +651,11 @@ handler_specification:
   - 'filter → reduce: pruned items available before aggregation'
   - 'reduce → count: aggregated result available before counting'
   - 'count → compute: all list processing complete before computation'
-  - 'compute → on_complete/rules: computed values written before branch conditions evaluate'
-  - 'on_complete/rules → {advances_to, sets_gate, data_accumulation}: branches may override these fields'
+  - 'compute → emit-site selection: computed values written before branch/rule/timeout selection evaluates'
+  - 'emit-site selection → {advances_to, sets_gate, data_accumulation}: active branch/rule/timeout may override these fields'
   - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency, any order valid'
-  - 'payload_transform → emits: output payload constructed before event persisted'
-  - 'emits → action: events persisted before platform actions execute'
+  - 'emit.fields → emit.event: output payload constructed before event persisted'
+  - 'emit.event → action: events persisted before platform actions execute'
   - 'action → clear: state cleanup runs last, after all side effects committed'
   core_vs_extensions:
     description: Most handlers use a small core subset. Advanced features are extensions.
@@ -658,7 +666,7 @@ handler_specification:
       - advances_to
       - sets_gate
       - data_accumulation
-      - emits
+      - emit
       - rules
       - on_complete
     extension_fields:
@@ -672,25 +680,23 @@ handler_specification:
       - count
       - query
       - clear
-      - payload_transform
       - clear_gates
       - action
   yaml_field_order: YAML field order within a handler is cosmetic. The engine executes fields per the dependency graph, not
     per source order. A handler may list on_complete before accumulate in YAML — the engine still runs accumulate first. Authors
     SHOULD order fields to match the dependency graph for readability, but the engine does not require it.
   rules_handler_interaction:
-    description: When a handler has both rules and handler-level fields (emits, data_accumulation).
-    execution_order: 1. rules execute first — the matching rule fires its condition-specific side effects (rule-level emits,
-      rule-level data_accumulation, rule-level advances_to). 2. Handler-level data_accumulation executes AFTER rules — it
-      supplements rule-level writes, does not replace them. Both write to the entity in the same atomic transaction. 3. Handler-level
-      emits executes AFTER rules — rule-level emits AND handler-level emits BOTH fire. Handler-level emits are unconditional;
-      rule-level emits are conditional on the matched rule.
-    example: 'order.received has handler-level data_accumulation (3 fields) + rules with per-rule data_accumulation (category_data).
-      Result: all 3 handler-level fields are written, PLUS the matching rule writes category_data. Handler-level emits (order.processing_requested)
-      fires regardless of which rule matched.'
-    precedence: Handler-level advances_to, sets_gate, data_accumulation, and emits are defaults. If the matched rule specifies
-      any of these, the rule value OVERRIDES the handler-level value for that field only. Fields not specified in the rule
-      fall through to handler-level.
+    description: When a handler has rules, the active rule owns conditional emit selection for that execution.
+    execution_order: 1. rules execute first — the matching rule determines the active condition-specific side effects (rule-level
+      emit, data_accumulation, advances_to). 2. Handler-level data_accumulation executes AFTER rules when present and supplements
+      rule-level writes in the same atomic transaction. 3. Handler-level emit does NOT supplement rules. If rules are present,
+      handler-level emit is invalid and boot fails as ambiguous.
+    example: 'order.received may have handler-level data_accumulation (3 fields) + rules with per-rule data_accumulation (category_data).
+      Result: all 3 handler-level fields are written, PLUS the matching rule writes category_data. Event emission, however,
+      must be owned by the matching rule.'
+    precedence: Handler-level advances_to, sets_gate, and data_accumulation are defaults. If the matched rule specifies any
+      of these, the rule value OVERRIDES the handler-level value for that field only. emit never falls through from a handler
+      into a rules-based multi-emit handler.
 engine:
   description: Specification for the platform engine — how it loads, validates, and executes flows.
   flow_tree_walker:
@@ -1011,7 +1017,7 @@ engine:
       - Entity state change (advances_to)
       - Gate updates (sets_gate)
       - Accumulator state updates (data_accumulation, accumulate tracking)
-      - New events persisted to event store (emits)
+      - New events persisted to event store (emit)
       outside_atomic_boundary:
       - Delivery of emitted events to their subscribers (happens after commit)
       - Agent inbox delivery (async)
@@ -1025,11 +1031,10 @@ engine:
         event_handlers, boot fails. This ensures unambiguous state authority — one event, one state transition, one owner.
       agents: Not constrained. Multiple agents may subscribe to the same event freely.
       enforcement: Boot validation rejects duplicate node handlers for the same event.
-    emit_payload_default: 'When a handler emits without payload_transform, the platform constructs the payload by: 1. Start
-      with contract-visible entity fields (from entity_state.fields). 2. Overlay triggering event payload (trigger wins on
-      collision with entity fields). 3. Force platform fields: entity_id, trigger_event_type, current_state (always present,
-      always from platform). 4. If payload_transform is present, its result replaces steps 1-2 entirely (step 3 still applies).
-      Collision order: platform fields > payload_transform > trigger payload > entity fields.'
+    emit_payload_default: 'For supported declarative system-node emit sites, the platform constructs the payload by: 1. Start
+      from an empty payload. 2. Evaluate emit.fields, if present, into the payload. 3. Force platform fields: entity_id,
+      trigger_event_type, current_state (always present, always from platform). There is no implicit entity or trigger-payload
+      passthrough on this surface. Collision order: platform fields > emit.fields.'
     dual_path_events: An event can be both an input pin (arriving from outside the flow) and internally generated (emitted
       by a handler within the flow). The system node handler processes it identically regardless of source. No priority or
       deduplication between paths — if the same event fires from both, it runs twice (idempotency_key in the events table
@@ -1106,7 +1111,7 @@ engine:
       threshold: Proceed when received count reaches a configured number.
       timeout: Proceed when a timer fires, regardless of how many items arrived. Partial results available.
     on_complete: When completion condition is met, the handler continues to the remaining steps (compute, on_complete branches,
-      advances_to, emits). The accumulated data is available to these steps.
+      advances_to, emit). The accumulated data is available to these steps.
     on_timeout: If the handler declares accumulate.on_timeout, the platform executes that branch when the timer fires before
       completion. Partial accumulated data is available. Typically used to proceed with whatever data arrived.
     idempotency: Duplicate arrivals (same item, same entity) are ignored. The received list is a set, not a list. Crash recovery
@@ -1574,8 +1579,8 @@ engine:
       severity: error
       scope: per-flow
       trigger: A handler uses a field name not in the defined handler_fields set (create_entity, guard, accumulate, fan_out,
-        filter, reduce, count, compute, on_complete, rules, advances_to, sets_gate, data_accumulation, emits, action,
-        payload_transform, clear_gates, clear, query, description, evidence_target).
+        filter, reduce, count, compute, on_complete, rules, advances_to, sets_gate, data_accumulation, emit, action,
+        clear_gates, clear, query, description, evidence_target).
       when: boot-only
     - id: tool_resolution
       severity: warning
@@ -1591,8 +1596,9 @@ engine:
     - id: produces_drift
       severity: warning
       scope: per-node
-      trigger: A node's explicit produces list does not match the set of events derived from its handler emits, rules emits,
-        on_complete emits, and fan_out emit_per_item.
+      trigger: >-
+        A node's explicit produces list does not match the set of events derived from its supported declarative emit
+        sites: handler top-level emit, rules emit, on_complete emit, accumulate.on_timeout emit, and fan_out emit.
       when: boot-only
     - id: invalid_field_detection
       severity: error
@@ -1717,8 +1723,8 @@ engine:
       scope: per-flow
       trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs.events) has no satisfiable authored producer
         path on the static verify surface. The warning checks only sibling flow output pins, root agent emit_events, root
-        node handler emits, exact platform_events catalog matches, _source values starting with external, and same-flow timer
-        declarations. It does not use produces or _status: planned as proof.'
+        node handler emit sites, exact platform_events catalog matches, _source values starting with external, and same-flow
+        timer declarations. It does not use produces or _status: planned as proof.'
       when: boot-only
     - id: semantic_drift_dead_event_schema
       severity: warning
@@ -1726,7 +1732,7 @@ engine:
       trigger: A product-declared event schema entry in `events.yaml` has no active authored role on the static verify surface.
         Active roles are limited to intra-flow local usage, explicit cross-flow qualified usage, root-local usage for root-declared
         events only, external `_source` / `_consumer` annotations, same-flow timer fire/start/cancel references, same-flow
-        `fan_out.emit_per_item`, and same-flow `auto_emit_on_create`. It does not treat platform catalog membership, root-local
+        `fan_out.emit`, and same-flow `auto_emit_on_create`. It does not treat platform catalog membership, root-local
         references into child-flow declarations, or coincidental same local names in other flows as proof.
       when: boot-only
     severity_behavior:
@@ -1778,12 +1784,10 @@ compliance:
     - Match inbound event to handler in owning node
     - 'If handler has guard: evaluate condition. If false, reject or kill.'
     - 'If handler has accumulate: track arrival, check completion, proceed only on complete.'
-    - 'If handler has advances_to: update entity state.'
-    - 'If handler has emits: publish follow-up event.'
-    - 'If handler has sets_gate: update entity gate state.'
-    - 'If handler has data_accumulation: write payload fields to entity.'
     - 'If handler has on_complete: evaluate conditions, execute matching branch.'
-    - 'If handler has rules: match payload field, emit matching event.'
+    - 'If handler has rules: match payload field, select the matching rule-local emit if present.'
+    - 'Apply advances_to, sets_gate, and data_accumulation from the active handler/branch/rule outcome.'
+    - 'If the active emit site has emit: publish the selected follow-up event.'
     - 'If handler has action that is a platform action: call registered platform action.'
   product_boundary:
     description: Rules for product-specific code isolation.
@@ -3003,7 +3007,7 @@ platform_events:
     violations:
     - Event names declared in product events.yaml
     - Event names in agent emit_events declarations
-    - Event names in node handler emits fields
+    - Event names in node handler emit sites
     - Event names in node produces lists
     - Event names in flow schema.yaml pins.outputs.events (platform.* events are produced by the engine, not by flows)
     not_violations:
@@ -3173,10 +3177,11 @@ observation_model:
   emitted_events:
     description: The list of events produced by system node handler execution.
     includes:
-    - Events from handler emits field
-    - Events from handler rules emits
-    - Events from handler on_complete emits
-    - Events from handler fan_out emit_per_item
+    - Events from handler top-level emit on single-emit handlers
+    - Events from handler rules emit
+    - Events from handler on_complete emit
+    - Events from handler accumulate.on_timeout emit
+    - Events from handler fan_out emit
     - Events from handler action side effects (e.g., auto_emit_on_create)
     excludes:
     - Agent fixture emissions (agents are independent, their emissions route through the event loop separately)
@@ -3185,16 +3190,14 @@ observation_model:
     naming: Events are recorded with their fully-qualified URI in the parent flow context. When a child flow node emits order.completed,
       the parent sees child-flow-id/order.completed. Within the same flow, events use local names (no prefix).
     payload_rules:
-      description: Rules for constructing emitted event payloads.
+      description: Rules for constructing emitted event payloads on the supported declarative system-node emit surface.
       construction_order:
-      - 1. Entity fields (base layer — contract-visible fields from entity_state)
-      - 2. Trigger payload (overlays entity fields — trigger wins on collision)
-      - '3. Platform fields forced: entity_id, trigger_event_type, current_state'
-      - 4. payload_transform replaces steps 1-2 if present
-      collision_priority: platform fields > payload_transform > trigger payload > entity fields
-      note: This means emitted events carry context from both entity state AND the triggering event. If the trigger payload
-        has a field with the same name as an entity field, the trigger value is used. Platform fields (entity_id, trigger_event_type,
-        current_state) are always present and cannot be overridden.
+      - 1. Start from an empty payload
+      - 2. Evaluate emit.fields for the active emit site, if present
+      - '3. Force platform fields: entity_id, trigger_event_type, current_state'
+      collision_priority: platform fields > emit.fields
+      note: This surface has no implicit entity passthrough or trigger-payload passthrough. If an emitted event needs a field
+        beyond the platform-forced fields, the producer must declare it explicitly in emit.fields at the active emit site.
   entity_state:
     description: The entity document after handler execution commits.
     observable_fields:
@@ -3365,8 +3368,7 @@ static_analyzer:
     canonical_owner: internal/runtime/bootverify
     supported_surface: cmd/swarm verify
     spec_basis:
-    - handler_specification.handler_fields.emits
-    - handler_specification.handler_fields.payload_transform
+    - handler_specification.handler_fields.emit
     - contract_formats.event_schema
     - observation_model.emitted_events.payload_rules
     scope:
@@ -3385,16 +3387,12 @@ static_analyzer:
         - entity_id
         - trigger_event_type
         - current_state
-      explicit_payload_transform_fields:
-        valid_for: keys explicitly declared in payload_transform.fields
-      transform_replacement_rule:
-        description: When payload_transform is present, implicit passthrough does not count. Only payload_transform.fields keys plus
-          platform-forced fields are provable.
-    no_transform_rule:
-      description: When payload_transform is absent, trigger-schema context and entity-schema context may enrich the finding message
-        but do not clear the finding. Only platform-forced fields are provable in this slice.
+      explicit_emit_fields:
+        valid_for: keys explicitly declared in emit.fields at the active emit site
+    no_emit_fields_rule:
+      description: When emit.fields is absent, only platform-forced fields are provable in this slice.
     rule: For each required emitted-event field, emit semantic_drift_warning unless the field is platform-forced or explicitly covered
-      by payload_transform.fields. The finding message must say the field is not statically provable.
+      by emit.fields at the active emit site. The finding message must say the field is not statically provable.
   slice_3_input_pin_producer_path_satisfaction:
     id: input_pin_wiring
     domain: semantic_drift
@@ -3424,7 +3422,8 @@ static_analyzer:
       root_agent_emit_events:
         rule: A root-level agent declares the event in emit_events.
       root_node_handler_emits:
-        rule: A root-level system node emits the event from handler emits, rules emits, on_complete emits, or fan_out emit_per_item.
+        rule: A root-level system node emits the event from handler top-level emit, rules emit, on_complete emit, accumulate.on_timeout
+          emit, or fan_out emit.
       platform_event_catalog:
         rule: The input pin event exactly matches a platform_events.catalog key.
       external_source_annotation:
@@ -3483,7 +3482,7 @@ static_analyzer:
     - engine.event_identity
     - engine.timer_model
     - engine.agent_session_management.emit_tool_convention
-    - handler_specification.handler_fields.emits
+    - handler_specification.handler_fields.emit
     scope:
       description: For every product-declared event schema entry in `events.yaml`, verify that at least one accepted active
         authored role exists on the supported static verify path.
@@ -3509,8 +3508,8 @@ static_analyzer:
         rule: "`_source` beginning with external or `_consumer` metadata on the declared event entry counts as an active external role."
       same_flow_timer_references:
         rule: "Timers in the same scope keep the declaration alive through `event`, `start_on: event:...`, or `cancel_on: event:...`."
-      same_flow_fan_out_emit_per_item:
-        rule: "`fan_out.emit_per_item` in the same scope keeps the declaration alive."
+      same_flow_fan_out_emit:
+        rule: "`fan_out.emit` in the same scope keeps the declaration alive."
       same_flow_auto_emit_on_create:
         rule: "`auto_emit_on_create` in the same scope keeps the declaration alive."
     non_proof_carriers:

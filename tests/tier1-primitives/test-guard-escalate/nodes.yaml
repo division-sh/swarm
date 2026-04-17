@@ -10,4 +10,4 @@ test-node:
         check: "payload.score >= policy.threshold"
         on_fail: "escalate:check.escalated"
       advances_to: done
-      emits: check.passed
+      emit: check.passed

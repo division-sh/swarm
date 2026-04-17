@@ -13,6 +13,6 @@ spawner:
         priority: payload.priority
         owner: payload.owner
       advances_to: spawned
-      emits: spawn.done
+      emit: spawn.done
   permissions:
   - create_flow_instance

@@ -10,7 +10,7 @@ validation-node:
         check: "payload.amount >= policy.min_amount"
       advances_to: validated
       sets_gate: validation_passed
-      emits: order.validated
+      emit: order.validated
 
 completion-node:
   id: completion-node
@@ -23,4 +23,4 @@ completion-node:
         id: gate_check
         check: "entity.gates.validation_passed == true"
       advances_to: complete
-      emits: order.finalized
+      emit: order.finalized

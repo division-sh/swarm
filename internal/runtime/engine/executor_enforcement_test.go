@@ -289,7 +289,7 @@ func TestExecutor_AccumulateOnTimeoutAppliesRule(t *testing.T) {
 				Completion: runtimecontracts.ParseAccumulateCompletion("all"),
 				OnTimeout: &runtimecontracts.HandlerRuleEntry{
 					AdvancesTo: "partial",
-					Emits:      runtimecontracts.EventEmission{Single: "collection.partial"},
+					Emit:       runtimecontracts.EmitSpec{Event: "collection.partial"},
 				},
 			},
 		},

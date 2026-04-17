@@ -9,4 +9,4 @@ root-node:
         id: root_threshold_check
         check: "payload.score >= policy.threshold"
       advances_to: done
-      emits: root.done
+      emit: root.done

@@ -11,4 +11,4 @@ gatekeeper:
             check: "query_entities(current_state == 'admitted').count < policy.max_capacity"
         on_fail: discard
       advances_to: admitted
-      emits: admission.granted
+      emit: admission.granted

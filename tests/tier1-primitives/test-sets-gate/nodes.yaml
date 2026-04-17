@@ -6,4 +6,4 @@ test-node:
   event_handlers:
     gate.requested:
       sets_gate: g1_check
-      emits: gate.set
+      emit: gate.set

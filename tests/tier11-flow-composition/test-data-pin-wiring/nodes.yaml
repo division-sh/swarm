@@ -12,7 +12,7 @@ config-writer:
               mode: "{{payload.mode}}"
               threshold: "{{payload.threshold}}"
       advances_to: configured
-      emits: processor/process.run
+      emit: processor/process.run
 
 result-listener:
   id: result-listener
@@ -22,4 +22,4 @@ result-listener:
   event_handlers:
     processor/process.done:
       advances_to: done
-      emits: job.complete
+      emit: job.complete

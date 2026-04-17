@@ -7,9 +7,8 @@ routing-node:
     batch.submitted:
       fan_out:
         items_from: payload.items
-        emit_mapping:
-          key_field: "item.kind"
-          mapping:
-            a: "routed.a"
-            b: "routed.b"
+        emit:
+          event: routed.a
+          fields:
+            kind: item.kind
       advances_to: routing

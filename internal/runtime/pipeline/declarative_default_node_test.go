@@ -21,7 +21,7 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 		t.Fatal("expected engine")
 	}
 	outcome, err := engine.ExecuteHandlerSteps(context.Background(), runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
+		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"))
 	if err != nil {
 		t.Fatalf("ExecuteHandlerSteps: %v", err)

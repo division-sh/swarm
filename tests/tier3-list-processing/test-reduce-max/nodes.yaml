@@ -9,5 +9,5 @@ reduce-node:
         items_from: payload.values
         operation: max
         store_as: entity.maximum
-      emits: values.reduced
+      emit: values.reduced
       advances_to: done

@@ -19,4 +19,4 @@ gatekeeper:
             check: "query_entities(name == payload.name).count == 0"
         on_fail: discard
       advances_to: accepted
-      emits: candidate.accepted
+      emit: candidate.accepted

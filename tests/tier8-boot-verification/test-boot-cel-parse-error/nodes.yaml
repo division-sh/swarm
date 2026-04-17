@@ -9,4 +9,4 @@ test-node:
         id: bad_cel_guard
         check: "payload.((invalid"
       advances_to: done
-      emits: check.passed
+      emit: check.passed

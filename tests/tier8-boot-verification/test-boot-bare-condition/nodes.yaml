@@ -9,4 +9,4 @@ test-node:
         id: bare_cond_guard
         check: "type == intake"
       advances_to: done
-      emits: intake.completed
+      emit: intake.completed

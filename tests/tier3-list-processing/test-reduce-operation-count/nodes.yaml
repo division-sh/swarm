@@ -10,4 +10,4 @@ counter-node:
         operation: count
         store_as: entity.item_count
       advances_to: done
-      emits: batch.counted
+      emit: batch.counted

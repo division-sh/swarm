@@ -8,5 +8,5 @@ test-node:
       query:
         entities: items
         filter: "entity.status == 'active'"
-      emits: filter.completed
+      emit: filter.completed
       advances_to: filtered

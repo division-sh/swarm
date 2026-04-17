@@ -248,7 +248,7 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 				"node-a": {
 					"score.dimension_complete": {
 						Rules: []runtimecontracts.HandlerRuleEntry{
-							{Condition: "payload.score >=", Emits: runtimecontracts.EventEmission{Single: "vertical.shortlisted"}},
+							{Condition: "payload.score >=", Emit: runtimecontracts.EmitSpec{Event: "vertical.shortlisted"}},
 						},
 					},
 				},

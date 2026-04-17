@@ -13,4 +13,4 @@ processor:
           - target_field: counter
             expression: entity.counter + 1
       advances_to: processing
-      emits: process.done
+      emit: process.done

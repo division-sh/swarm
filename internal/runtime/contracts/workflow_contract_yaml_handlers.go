@@ -57,6 +57,45 @@ func (e *EventEmission) UnmarshalYAML(node *yaml.Node) error {
 	}
 }
 
+func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
+	if e == nil {
+		return nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			*e = EmitSpec{}
+			return nil
+		}
+		*e = EmitSpec{Event: strings.TrimSpace(node.Value)}
+		return nil
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			switch key {
+			case "", "event", "fields":
+			default:
+				return fmt.Errorf("UNDEFINED-FIELD: emit field %q not in platform spec", key)
+			}
+		}
+		type shadow struct {
+			Event  string                     `yaml:"event"`
+			Fields map[string]ExpressionValue `yaml:"fields"`
+		}
+		var aux shadow
+		if err := node.Decode(&aux); err != nil {
+			return err
+		}
+		*e = EmitSpec{
+			Event:  strings.TrimSpace(aux.Event),
+			Fields: cloneExpressionValueMap(aux.Fields),
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported emit yaml node kind %d", node.Kind)
+	}
+}
+
 func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	if h == nil {
 		return nil
@@ -72,7 +111,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		ConfigFrom       yaml.Node                `yaml:"config_from"`
 		EvidenceTarget   string                   `yaml:"evidence_target"`
 		Description      string                   `yaml:"description"`
-		Emits            EventEmission            `yaml:"emits"`
+		Emit             EmitSpec                 `yaml:"emit"`
 		Guard            yaml.Node                `yaml:"guard"`
 		AdvancesTo       yaml.Node                `yaml:"advances_to"`
 		SetsGate         yaml.Node                `yaml:"sets_gate"`
@@ -93,7 +132,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Reduce           *ReduceSpec              `yaml:"reduce"`
 		Count            *CountSpec               `yaml:"count"`
 		Clear            yaml.Node                `yaml:"clear"`
-		PayloadTransform *PayloadTransformSpec    `yaml:"payload_transform"`
 		Branch           yaml.Node                `yaml:"branch"`
 	}
 	if err := node.Decode(&aux); err != nil {
@@ -103,7 +141,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		CreateEntity:     aux.CreateEntity,
 		EvidenceTarget:   strings.TrimSpace(aux.EvidenceTarget),
 		Description:      strings.TrimSpace(aux.Description),
-		Emits:            aux.Emits,
+		Emit:             aux.Emit,
 		DataAccumulation: aux.DataAccumulation,
 		Condition:        strings.TrimSpace(aux.Condition),
 		CompletionRule:   strings.TrimSpace(aux.CompletionRule),
@@ -116,7 +154,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Filter:           aux.Filter,
 		Reduce:           aux.Reduce,
 		Count:            aux.Count,
-		PayloadTransform: aux.PayloadTransform,
 	}
 	var err error
 	if h.Action, err = decodeActionSpecNode(&aux.Action); err != nil {
@@ -162,6 +199,9 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	}
 	if h.Branch, err = decodeBranchSpecsNode(&aux.Branch); err != nil {
 		return err
+	}
+	if HandlerHasAmbiguousTopLevelEmit(*h) {
+		return fmt.Errorf("AMBIGUOUS-EMIT: handler-top-level emit is only allowed on single-emit handlers; move emit ownership to the active branch, rule, timeout, or fan_out site")
 	}
 	return nil
 }
@@ -292,7 +332,7 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		"_note":             {},
 		"evidence_target":   {},
 		"create_entity":     {},
-		"emits":             {},
+		"emit":              {},
 		"guard":             {},
 		"advances_to":       {},
 		"sets_gate":         {},
@@ -317,7 +357,6 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		"instance_id_from":  {},
 		"config_from":       {},
 		"from":              {},
-		"payload_transform": {},
 		"branch":            {},
 		"dedup_by":          {},
 	}
@@ -335,6 +374,12 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		}
 		if _, ok := deprecated[key]; ok {
 			return fmt.Errorf("DEPRECATED: handler uses deprecated field %q", key)
+		}
+		switch key {
+		case "emits":
+			return fmt.Errorf("RETIRED: handler field %q is retired; use emit: <event> or emit: {event, fields}", key)
+		case "payload_transform":
+			return fmt.Errorf("RETIRED: handler field %q is retired; move payload ownership into emit.fields at the active emit site", key)
 		}
 		if key == "on_complete" && node.Content[i+1].Kind == yaml.MappingNode {
 			return fmt.Errorf("DIALECT-OC-ORDER: on_complete is dict, must be ordered list")
@@ -392,7 +437,7 @@ func decodeHandlerRuleEntryNode(node *yaml.Node) (*HandlerRuleEntry, error) {
 	if err := node.Decode(&rule); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emits.Empty() && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
+	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
 		return nil, nil
 	}
 	return &rule, nil
@@ -410,7 +455,7 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node) ([]HandlerRuleEntry, error) {
 		}
 		return rules, nil
 	case yaml.MappingNode:
-		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emits", "data_accumulation", "compute", "fan_out") {
+		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emit", "emits", "data_accumulation", "compute", "fan_out") {
 			rule, err := decodeHandlerRuleEntryNode(node)
 			if err != nil || rule == nil {
 				return nil, err

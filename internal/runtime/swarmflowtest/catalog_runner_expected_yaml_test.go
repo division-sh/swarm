@@ -31,7 +31,7 @@ test-node:
         check: "payload.score >= policy.minimum_score"
         on_fail: discard
       advances_to: done
-      emits: check.passed
+      emit: check.passed
 `,
 		`
 minimum_score: 80
@@ -95,7 +95,7 @@ test-node:
         expected_from: entity.expected_count
         completion: all
       advances_to: complete
-      emits: collection.done
+      emit: collection.done
   state_schema:
     fields:
       expected_count: integer

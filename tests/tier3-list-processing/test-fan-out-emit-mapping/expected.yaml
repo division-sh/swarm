@@ -13,4 +13,3 @@ expected:
   entity_state: routing
   emitted_events:
     - routed.a
-    - routed.b

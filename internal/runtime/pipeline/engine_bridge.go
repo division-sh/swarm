@@ -244,7 +244,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	plan.AdvancesTo = firstNonEmptyString(outcome.AdvancesTo, plan.AdvancesTo)
 	if len(outcome.Emits) > 0 {
 		plan.EmitEvents = append([]string{}, outcome.Emits...)
-		plan.Emits = strings.TrimSpace(outcome.Emits[0])
+		if len(outcome.Emits) == 1 {
+			plan.Emit.Event = strings.TrimSpace(outcome.Emits[0])
+		}
 	}
 	if outcome.SetsGate != "" {
 		plan.SetsGate = outcome.SetsGate

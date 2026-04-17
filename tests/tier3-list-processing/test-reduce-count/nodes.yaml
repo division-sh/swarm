@@ -9,5 +9,5 @@ count-node:
         items_from: payload.items
         condition: "item.active == true"
         store_as: entity.active_count
-      emits: items.counted
+      emit: items.counted
       advances_to: done

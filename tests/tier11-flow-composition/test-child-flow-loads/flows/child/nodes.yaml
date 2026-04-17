@@ -7,4 +7,4 @@ child-node:
     child.start:
       create_entity: true
       advances_to: completed
-      emits: child.done
+      emit: child.done

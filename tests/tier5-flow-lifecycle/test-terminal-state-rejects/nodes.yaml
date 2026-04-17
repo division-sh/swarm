@@ -6,7 +6,7 @@ complete-node:
   event_handlers:
     task.completed:
       advances_to: done
-      emits: task.finished
+      emit: task.finished
 
 reopen-node:
   id: reopen-node
@@ -16,4 +16,4 @@ reopen-node:
   event_handlers:
     task.reopen_requested:
       advances_to: processing
-      emits: state.reopened
+      emit: state.reopened

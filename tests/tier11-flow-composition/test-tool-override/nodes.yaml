@@ -5,7 +5,7 @@ root-node:
   produces: [task.done, child/child.start]
   event_handlers:
     task.requested:
-      emits: child/child.start
+      emit: child/child.start
     child/child.done:
       advances_to: done
-      emits: task.done
+      emit: task.done

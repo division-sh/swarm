@@ -8,7 +8,7 @@ orchestrator:
       action: create_flow_instance
       template: worker
       instance_id_from: payload.worker_id
-      emits: spawn.confirmed
+      emit: spawn.confirmed
       advances_to: done
   permissions:
   - create_flow_instance
