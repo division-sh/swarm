@@ -74,6 +74,10 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if initialState == "" {
 		initialState = "pending"
 	}
+	autoEmitEvent, autoEmitName, err := buildAutoEmitOnCreateEvent(req.ContractBundle, schema, templateID, flowPath, instanceID, flowEntityID, sourceEntityID, strings.TrimSpace(instance.ParentEntityID), req.Config)
+	if err != nil {
+		return err
+	}
 	if err := am.workflowInstances.Upsert(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      instanceID,
 		SubjectID:       strings.TrimSpace(sourceEntityID),
@@ -127,39 +131,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	} else {
 		return fmt.Errorf("event bus does not support derived flow-instance routing for %s", flowPath)
 	}
-	if autoEmit := strings.TrimSpace(schema.AutoEmitOnCreate.Event); autoEmit != "" {
-		eventType := eventidentity.ExternalizeForFlow(flowPath, []string{autoEmit}, autoEmit)
-		payload := map[string]any{
-			"entity_id":        flowEntityID,
-			"instance_id":      instanceID,
-			"template_id":      templateID,
-			"flow_path":        flowPath,
-			"subject_id":       strings.TrimSpace(sourceEntityID),
-			"parent_entity_id": strings.TrimSpace(instance.ParentEntityID),
-		}
-		for key, value := range req.Config {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			if _, exists := payload[key]; !exists {
-				payload[key] = value
-			}
-		}
-		if err := validateAutoEmitPayload(req.ContractBundle, templateID, autoEmit, payload); err != nil {
-			return fmt.Errorf("auto-emit %s: %w", autoEmit, err)
-		}
-		encoded, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("encode auto-emit payload %s: %w", autoEmit, err)
-		}
-		autoEmitEvent := (events.Event{
-			ID:          uuid.NewString(),
-			Type:        events.EventType(eventType),
-			SourceAgent: "flow-instance-activator",
-			Payload:     encoded,
-			CreatedAt:   time.Now().UTC(),
-		}).WithEntityID(flowEntityID).WithFlowInstance(flowPath)
+	if strings.TrimSpace(autoEmitName) != "" {
 		publishAutoEmit := func() {
 			if err := am.bus.Publish(context.Background(), autoEmitEvent); err != nil {
 				am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
@@ -167,7 +139,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 					Message:   "Auto-emitting the flow activation event failed",
 					Component: "flow_activation",
 					Action:    "auto_emit_failed",
-					EventType: autoEmit,
+					EventType: autoEmitName,
 					EntityID:  flowEntityID,
 					Detail: map[string]any{
 						"flow_path": flowPath,
@@ -178,11 +150,50 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		}
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, publishAutoEmit) {
 			if err := am.bus.Publish(ctx, autoEmitEvent); err != nil {
-				return fmt.Errorf("auto-emit %s: %w", autoEmit, err)
+				return fmt.Errorf("auto-emit %s: %w", autoEmitName, err)
 			}
 		}
 	}
 	return nil
+}
+
+func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontracts.FlowSchemaDocument, templateID, flowPath, instanceID, flowEntityID, sourceEntityID, parentEntityID string, config map[string]any) (events.Event, string, error) {
+	autoEmit := strings.TrimSpace(schema.AutoEmitOnCreate.Event)
+	if autoEmit == "" {
+		return events.Event{}, "", nil
+	}
+	eventType := eventidentity.ExternalizeForFlow(flowPath, []string{autoEmit}, autoEmit)
+	payload := map[string]any{
+		"entity_id":        flowEntityID,
+		"instance_id":      instanceID,
+		"template_id":      templateID,
+		"flow_path":        flowPath,
+		"subject_id":       strings.TrimSpace(sourceEntityID),
+		"parent_entity_id": strings.TrimSpace(parentEntityID),
+	}
+	for key, value := range config {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, exists := payload[key]; !exists {
+			payload[key] = value
+		}
+	}
+	if err := validateAutoEmitPayload(source, templateID, autoEmit, payload); err != nil {
+		return events.Event{}, autoEmit, fmt.Errorf("auto-emit %s: %w", autoEmit, err)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return events.Event{}, autoEmit, fmt.Errorf("encode auto-emit payload %s: %w", autoEmit, err)
+	}
+	return (events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType(eventType),
+		SourceAgent: "flow-instance-activator",
+		Payload:     encoded,
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(flowEntityID).WithFlowInstance(flowPath), autoEmit, nil
 }
 
 func validateAutoEmitPayload(source semanticview.Source, flowID, eventType string, payload map[string]any) error {
