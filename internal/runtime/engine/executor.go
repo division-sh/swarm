@@ -227,6 +227,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		}
 		if errors.Is(err, ErrEmitPersistencePrerequisite) || errors.Is(err, ErrEmitPayloadContractViolation) {
 			result.Status = OutcomeRejected
+			result.FailureClass = FailureLogic
 		}
 		if result.Status == OutcomeUnknown {
 			result.Status = OutcomeRejected
