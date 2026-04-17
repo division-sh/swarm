@@ -5,7 +5,7 @@ root-dispatcher:
   produces: [child/step.begin]
   event_handlers:
     pipeline.start:
-      emits: child/step.begin
+      emit: child/step.begin
 
 root-collector:
   id: root-collector
@@ -15,4 +15,4 @@ root-collector:
   event_handlers:
     child/grandchild/micro.done:
       advances_to: done
-      emits: pipeline.complete
+      emit: pipeline.complete

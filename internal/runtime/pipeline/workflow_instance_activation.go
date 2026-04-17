@@ -179,16 +179,7 @@ func DeriveFlowInstancePath(source semanticview.Source, templateID, instanceID s
 
 func (pc *PipelineCoordinator) handlerEmitPayload(ctx context.Context, triggerCtx workflowTriggerContext, eventType string) map[string]any {
 	payload := parsePayloadMap(triggerCtx.Event.Payload)
-	// Only carry contract-visible entity fields into emitted payloads; internal
-	// workflow metadata such as gates, evidence, and runtime bookkeeping should
-	// not leak onto the bus.
-	out := workflowEntityMetadataPayload(pc.SemanticSource(), triggerCtx.State.Metadata)
-	if out == nil {
-		out = map[string]any{}
-	}
-	for key, value := range payload {
-		out[key] = value
-	}
+	out := map[string]any{}
 	entityID := resolveEmittedEntityID(
 		pc.SemanticSource(),
 		pipelineFlowScope(ctx),

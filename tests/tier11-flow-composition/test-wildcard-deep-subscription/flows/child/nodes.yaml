@@ -6,7 +6,7 @@ relay:
   event_handlers:
     work.begin:
       create_entity: true
-      emits: grandchild/task.start
+      emit: grandchild/task.start
 
 listener:
   id: listener
@@ -16,4 +16,4 @@ listener:
   event_handlers:
     grandchild/task.done:
       advances_to: completed
-      emits: work.finished
+      emit: work.finished

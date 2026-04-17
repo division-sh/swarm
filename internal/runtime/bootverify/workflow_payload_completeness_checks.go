@@ -30,8 +30,7 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 		for triggerEventType, handler := range c.source.NodeEventHandlers(nodeID) {
 			triggerEventType = strings.TrimSpace(triggerEventType)
 			triggerProof := semanticview.ResolveFlowEventProof(c.source, flowID, triggerEventType)
-			transformTargets := payloadCompletenessTransformTargets(handler)
-			hasTransform := handler.PayloadTransform != nil
+			emitFieldsByEvent := payloadCompletenessEmitFields(handler)
 
 			for _, emitted := range uniquePayloadCompletenessStrings(handlerEmits(handler)...) {
 				emitted = strings.TrimSpace(emitted)
@@ -51,8 +50,8 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 					if _, ok := forced[field]; ok {
 						continue
 					}
-					if hasTransform {
-						if _, ok := transformTargets[field]; ok {
+					if targets := emitFieldsByEvent[emitted]; len(targets) > 0 {
+						if _, ok := targets[field]; ok {
 							continue
 						}
 					}
@@ -65,8 +64,7 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 							triggerEventType,
 							emittedProof.DisplayName(),
 							field,
-							hasTransform,
-							transformTargets,
+							emitFieldsByEvent[emitted],
 							triggerProof.Entry,
 							triggerProof.HasSchema,
 							entityFields,
@@ -99,17 +97,55 @@ func payloadCompletenessForcedFields() map[string]struct{} {
 	}
 }
 
-func payloadCompletenessTransformTargets(handler runtimecontracts.SystemNodeEventHandler) map[string]struct{} {
-	out := map[string]struct{}{}
-	if handler.PayloadTransform == nil {
-		return out
-	}
-	for _, entry := range handler.PayloadTransform.TransformEntries() {
-		target := strings.TrimSpace(entry.Target)
-		if target == "" {
-			continue
+func payloadCompletenessEmitFields(handler runtimecontracts.SystemNodeEventHandler) map[string]map[string]struct{} {
+	out := map[string]map[string]struct{}{}
+	add := func(spec runtimecontracts.EmitSpec) {
+		eventType := spec.EventType()
+		if eventType == "" {
+			return
 		}
-		out[target] = struct{}{}
+		targets := out[eventType]
+		if targets == nil {
+			targets = map[string]struct{}{}
+		}
+		for key := range spec.Fields {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			targets[key] = struct{}{}
+		}
+		out[eventType] = targets
+	}
+	add(handler.Emit)
+	if handler.FanOut != nil {
+		add(handler.FanOut.Emit)
+	}
+	for _, rule := range handler.Rules {
+		add(rule.Emit)
+		if rule.FanOut != nil {
+			add(rule.FanOut.Emit)
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		add(rule.Emit)
+		if rule.FanOut != nil {
+			add(rule.FanOut.Emit)
+		}
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			add(rule.Emit)
+			if rule.FanOut != nil {
+				add(rule.FanOut.Emit)
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			add(handler.Accumulate.OnTimeout.Emit)
+			if handler.Accumulate.OnTimeout.FanOut != nil {
+				add(handler.Accumulate.OnTimeout.FanOut.Emit)
+			}
+		}
 	}
 	return out
 }
@@ -149,25 +185,24 @@ func payloadCompletenessEntitySchemaState(entityFields map[string]struct{}, fiel
 	return "no"
 }
 
-func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, field string, hasTransform bool, transformTargets map[string]struct{}, triggerEntry runtimecontracts.EventCatalogEntry, hasTriggerSchema bool, entityFields map[string]struct{}) string {
-	transformState := "absent"
-	transformCovered := "N/A (no transform)"
-	if hasTransform {
-		transformState = "present"
-		transformCovered = strings.Join(sortedPayloadCompletenessKeys(transformTargets), ", ")
-		if transformCovered == "" {
-			transformCovered = "(none)"
+func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, field string, emitFieldTargets map[string]struct{}, triggerEntry runtimecontracts.EventCatalogEntry, hasTriggerSchema bool, entityFields map[string]struct{}) string {
+	fieldState := "absent"
+	fieldCovered := "N/A (no emit.fields)"
+	if len(emitFieldTargets) > 0 {
+		fieldState = "present"
+		fieldCovered = strings.Join(sortedPayloadCompletenessKeys(emitFieldTargets), ", ")
+		if fieldCovered == "" {
+			fieldCovered = "(none)"
 		}
 	}
-
 	return fmt.Sprintf(
-		"event %s emitted by node %s handler %s: required field %s is not statically provable in the emitted payload. Payload construction: payload_transform: %s; transform covers: %s; platform-forced: entity_id, trigger_event_type, current_state. Context (does not clear finding): trigger schema declares %s: %s; entity schema declares %s: %s.",
+		"event %s emitted by node %s handler %s: required field %s is not statically provable in the emitted payload. Payload construction: emit.fields: %s; emit.fields covers: %s; platform-forced: entity_id, trigger_event_type, current_state. Context (does not clear finding): trigger schema declares %s: %s; entity schema declares %s: %s.",
 		strings.TrimSpace(emittedEventType),
 		strings.TrimSpace(nodeID),
 		strings.TrimSpace(triggerEventType),
 		strings.TrimSpace(field),
-		transformState,
-		transformCovered,
+		fieldState,
+		fieldCovered,
 		strings.TrimSpace(field),
 		payloadCompletenessTriggerSchemaState(triggerEntry, hasTriggerSchema, field),
 		strings.TrimSpace(field),

@@ -265,7 +265,7 @@ support-node:
     - start
   event_handlers:
     start:
-      emits: ticket.ready
+      emit: ticket.ready
 `,
 					},
 				},
@@ -359,7 +359,7 @@ timer-owner:
 			},
 		},
 		{
-			name:   "fan-out emit_per_item",
+			name:   "fan-out emit",
 			target: "support/ticket.ready",
 			opts: deadEventSchemaFixtureOptions{
 				name: "dead-event-schema-fanout",
@@ -375,7 +375,7 @@ fanout-node:
   event_handlers:
     start:
       fan_out:
-        emit_per_item: ticket.ready
+        emit: ticket.ready
 `,
 					},
 				},
@@ -401,7 +401,7 @@ accumulate-node:
         expected_from: payload.items
         threshold: 1
         on_complete:
-          - emits: ticket.ready
+          - emit: ticket.ready
 `,
 					},
 				},
@@ -429,7 +429,7 @@ accumulate-timeout-node:
         timeout_ms: 1000
         on_timeout:
           fan_out:
-            emit_per_item: ticket.ready
+            emit: ticket.ready
 `,
 					},
 				},
@@ -561,7 +561,7 @@ func TestRun_DoesNotWarnForEventConsumerExistsWhenCatalogDeclaresConsumerMetadat
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"producer": {
-					"task.start": {Emits: runtimecontracts.EventEmission{Single: "task.done"}},
+					"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
 				},
 			},
 		},
@@ -570,7 +570,7 @@ func TestRun_DoesNotWarnForEventConsumerExistsWhenCatalogDeclaresConsumerMetadat
 				SubscribesTo: []string{"task.start"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"task.start": {
-						Emits: runtimecontracts.EventEmission{Single: "task.done"},
+						Emit: runtimecontracts.EmitSpec{Event: "task.done"},
 					},
 				},
 			},
@@ -1288,7 +1288,7 @@ func TestRun_MapsSelfEmitToEventCycleDetection(t *testing.T) {
 func TestRun_MapsSelfEmitToEventCycleDetectionForFlowLocalHandlers(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-local-events"))
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.Emits = runtimecontracts.EventEmission{Single: eventType}
+	handler.Emit = runtimecontracts.EmitSpec{Event: eventType}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -1302,10 +1302,10 @@ func TestRun_ReportsSemanticModelMultiHopEventCycle(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-self-emit")
 	bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 		"node-a": {
-			"task.a": {Emits: runtimecontracts.EventEmission{Single: "task.b"}},
+			"task.a": {Emit: runtimecontracts.EmitSpec{Event: "task.b"}},
 		},
 		"node-b": {
-			"task.b": {Emits: runtimecontracts.EventEmission{Single: "task.a"}},
+			"task.b": {Emit: runtimecontracts.EmitSpec{Event: "task.a"}},
 		},
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
@@ -1314,7 +1314,7 @@ func TestRun_ReportsSemanticModelMultiHopEventCycle(t *testing.T) {
 			SubscribesTo: []string{"task.a"},
 			Produces:     []string{"task.b"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"task.a": {Emits: runtimecontracts.EventEmission{Single: "task.b"}},
+				"task.a": {Emit: runtimecontracts.EmitSpec{Event: "task.b"}},
 			},
 		},
 		"node-b": {
@@ -1322,7 +1322,7 @@ func TestRun_ReportsSemanticModelMultiHopEventCycle(t *testing.T) {
 			SubscribesTo: []string{"task.b"},
 			Produces:     []string{"task.a"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"task.b": {Emits: runtimecontracts.EventEmission{Single: "task.a"}},
+				"task.b": {Emit: runtimecontracts.EmitSpec{Event: "task.a"}},
 			},
 		},
 	}
@@ -1476,16 +1476,17 @@ func TestRun_RejectsAccumulatedNamespaceInDataAccumulationExpressions(t *testing
 	}
 }
 
-func TestRun_RejectsAccumulatedNamespaceInPayloadTransformExpressions(t *testing.T) {
+func TestRun_RejectsAccumulatedNamespaceInEmitFieldExpressions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
 				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
-						PayloadTransform: &runtimecontracts.PayloadTransformSpec{
-							Fields: map[string]string{
-								"bad": "accumulated.size()",
+						Emit: runtimecontracts.EmitSpec{
+							Event: "item.scored",
+							Fields: map[string]runtimecontracts.ExpressionValue{
+								"bad": runtimecontracts.CELExpression("accumulated.size()"),
 							},
 						},
 					},
@@ -1496,8 +1497,8 @@ func TestRun_RejectsAccumulatedNamespaceInPayloadTransformExpressions(t *testing
 
 	report := Run(context.Background(), source, Options{})
 
-	if !reportContains(report.Errors(), "payload_transform_expression_validation", "accumulated.size()") {
-		t.Fatalf("expected accumulated namespace in payload_transform expression to fail validation, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "emit_field_expression_validation", "accumulated.size()") {
+		t.Fatalf("expected accumulated namespace in emit.fields expression to fail validation, got %#v", report.Errors())
 	}
 }
 
@@ -1603,7 +1604,7 @@ func TestRun_MapsPhantomProducesToNamedWarning(t *testing.T) {
 	bundle.Nodes["producer"] = runtimecontracts.SystemNodeContract{
 		Produces: []string{"task.done", "task.unused"},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"task.start": {Emits: runtimecontracts.EventEmission{Single: "task.done"}},
+			"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
 		},
 		SubscribesTo: []string{"task.start"},
 	}
@@ -1626,14 +1627,15 @@ func TestRun_DoesNotWarnForPhantomProducesWhenDeclaredEventsMatchEmits(t *testin
 	}
 }
 
-func TestRun_WarnsWhenPayloadTransformOmitsRequiredEmittedField(t *testing.T) {
+func TestRun_WarnsWhenEmitFieldsOmitRequiredEmittedField(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
-	handler.PayloadTransform = &runtimecontracts.PayloadTransformSpec{
-		Fields: map[string]string{
-			"geography": "payload.geography",
-			"mode":      "payload.mode",
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "market_research.scan_assigned",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"geography": runtimecontracts.RefExpression("payload.geography"),
+			"mode":      runtimecontracts.RefExpression("payload.mode"),
 		},
 	}
 	node.EventHandlers["scan.corpus_dispatch"] = handler
@@ -1648,12 +1650,12 @@ func TestRun_WarnsWhenPayloadTransformOmitsRequiredEmittedField(t *testing.T) {
 	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
 		t.Fatalf("expected payload completeness warning for scan_id, got %#v", report.Warnings())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "payload_transform: present") {
-		t.Fatalf("expected payload completeness warning to mention payload_transform presence, got %#v", report.Warnings())
+	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "emit.fields covers: geography, mode") {
+		t.Fatalf("expected payload completeness warning to mention emit.fields coverage, got %#v", report.Warnings())
 	}
 }
 
-func TestRun_WarnsWithoutPayloadTransformEvenWhenContextSuggestsPassthrough(t *testing.T) {
+func TestRun_WarnsWithoutEmitFieldsEvenWhenContextSuggestsPassthrough(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
 	entry.Required = []string{"entity_id", "scan_id"}
@@ -1667,8 +1669,8 @@ func TestRun_WarnsWithoutPayloadTransformEvenWhenContextSuggestsPassthrough(t *t
 	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
 		t.Fatalf("expected payload completeness warning for scan_id, got %#v", report.Warnings())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "payload_transform: absent") {
-		t.Fatalf("expected payload completeness warning to mention missing payload_transform, got %#v", report.Warnings())
+	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "emit.fields: absent") {
+		t.Fatalf("expected payload completeness warning to mention missing emit.fields, got %#v", report.Warnings())
 	}
 	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "trigger schema declares scan_id: yes (required)") {
 		t.Fatalf("expected payload completeness warning to mention trigger schema context, got %#v", report.Warnings())
@@ -1678,14 +1680,15 @@ func TestRun_WarnsWithoutPayloadTransformEvenWhenContextSuggestsPassthrough(t *t
 	}
 }
 
-func TestRun_DoesNotWarnWhenTransformAndPlatformForcedFieldsCoverRequiredPayload(t *testing.T) {
+func TestRun_DoesNotWarnWhenEmitFieldsAndPlatformForcedFieldsCoverRequiredPayload(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
-	handler.PayloadTransform = &runtimecontracts.PayloadTransformSpec{
-		Fields: map[string]string{
-			"scan_id":   "payload.scan_id",
-			"geography": "payload.geography",
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "market_research.scan_assigned",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"scan_id":   runtimecontracts.RefExpression("payload.scan_id"),
+			"geography": runtimecontracts.RefExpression("payload.geography"),
 		},
 	}
 	node.EventHandlers["scan.corpus_dispatch"] = handler
@@ -1699,30 +1702,30 @@ func TestRun_DoesNotWarnWhenTransformAndPlatformForcedFieldsCoverRequiredPayload
 	}
 }
 
-func TestRun_DoesNotWarnWhenNormalizedTransformTargetsCoverRequiredPayload(t *testing.T) {
+func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayloadAcrossExpressionKinds(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name      string
-		body      string
-		transform *runtimecontracts.PayloadTransformSpec
+		name   string
+		fields map[string]runtimecontracts.ExpressionValue
 	}{
 		{
-			name: "mappings",
-			body: "payload_transform:\n  mappings:\n    scan_id: payload.scan_id\n",
-		},
-		{
-			name: "entries",
-			transform: &runtimecontracts.PayloadTransformSpec{
-				Entries: []runtimecontracts.TransformSpec{{
-					Target: "scan_id",
-					Value:  runtimecontracts.CELExpression("payload.scan_id"),
-				}},
+			name: "ref",
+			fields: map[string]runtimecontracts.ExpressionValue{
+				"scan_id": runtimecontracts.RefExpression("payload.scan_id"),
 			},
 		},
 		{
-			name: "shorthand",
-			body: "payload_transform:\n  scan_id: payload.scan_id\n",
+			name: "cel",
+			fields: map[string]runtimecontracts.ExpressionValue{
+				"scan_id": runtimecontracts.CELExpression("payload.scan_id"),
+			},
+		},
+		{
+			name: "literal",
+			fields: map[string]runtimecontracts.ExpressionValue{
+				"scan_id": runtimecontracts.LiteralExpression("scan-1"),
+			},
 		},
 	}
 
@@ -1731,10 +1734,9 @@ func TestRun_DoesNotWarnWhenNormalizedTransformTargetsCoverRequiredPayload(t *te
 			bundle := bootverifyPayloadCompletenessBundle()
 			node := bundle.Nodes["dispatcher"]
 			handler := node.EventHandlers["scan.corpus_dispatch"]
-			if tc.transform != nil {
-				handler.PayloadTransform = tc.transform
-			} else {
-				handler.PayloadTransform = mustPayloadCompletenessTransform(t, tc.body)
+			handler.Emit = runtimecontracts.EmitSpec{
+				Event:  "market_research.scan_assigned",
+				Fields: tc.fields,
 			}
 			node.EventHandlers["scan.corpus_dispatch"] = handler
 			bundle.Nodes["dispatcher"] = node
@@ -1844,7 +1846,7 @@ func TestRun_DoesNotWarnForRootNodeHandlerEmitInputProducerPath(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	node := bundle.Nodes["dispatcher"]
 	node.EventHandlers["task.requested"] = runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "child/task.feedback"},
+		Emit: runtimecontracts.EmitSpec{Event: "child/task.feedback"},
 	}
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["task.requested"] = node.EventHandlers["task.requested"]
@@ -1864,7 +1866,7 @@ func TestRun_DoesNotWarnForPlatformEventCatalogInputProducerPath(t *testing.T) {
 	renameFlowHandlerEvent(t, bundle, "child", "worker", "task.feedback", "platform.runtime_log", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		AdvancesTo:   "done",
-		Emits:        runtimecontracts.EventEmission{Single: "task.result"},
+		Emit: runtimecontracts.EmitSpec{Event: "task.result"},
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -2268,7 +2270,7 @@ func TestRun_RejectsCreateEntityGuardReferenceToFieldInitializedOnlyBySameHandle
 	}
 }
 
-func TestRun_AllowsCreateEntityPayloadTransformReadOfSameHandlerTopLevelWrite(t *testing.T) {
+func TestRun_AllowsCreateEntityEmitFieldReadOfSameHandlerTopLevelWrite(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
@@ -2284,9 +2286,10 @@ func TestRun_AllowsCreateEntityPayloadTransformReadOfSameHandlerTopLevelWrite(t 
 		TargetField: "revision_count",
 		Value:       runtimecontracts.LiteralExpression(0),
 	}}
-	handler.PayloadTransform = &runtimecontracts.PayloadTransformSpec{
-		Fields: map[string]string{
-			"revision_count": "entity.revision_count",
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "testing.revision_count_read",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"revision_count": runtimecontracts.CELExpression("entity.revision_count"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
@@ -2298,7 +2301,7 @@ func TestRun_AllowsCreateEntityPayloadTransformReadOfSameHandlerTopLevelWrite(t 
 	}
 }
 
-func TestRun_RejectsCreateEntityPayloadTransformReadOfRuleOnlyWrite(t *testing.T) {
+func TestRun_RejectsCreateEntityEmitFieldReadOfRuleOnlyWrite(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
@@ -2319,9 +2322,10 @@ func TestRun_RejectsCreateEntityPayloadTransformReadOfRuleOnlyWrite(t *testing.T
 			}},
 		},
 	}}
-	handler.PayloadTransform = &runtimecontracts.PayloadTransformSpec{
-		Fields: map[string]string{
-			"revision_count": "entity.revision_count",
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "testing.revision_count_read",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"revision_count": runtimecontracts.CELExpression("entity.revision_count"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
@@ -2333,7 +2337,7 @@ func TestRun_RejectsCreateEntityPayloadTransformReadOfRuleOnlyWrite(t *testing.T
 	}
 }
 
-func TestRun_RejectsCreateEntityPayloadTransformReadOfRuleOnlyComputeOutput(t *testing.T) {
+func TestRun_RejectsCreateEntityEmitFieldReadOfRuleOnlyComputeOutput(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
@@ -2352,9 +2356,10 @@ func TestRun_RejectsCreateEntityPayloadTransformReadOfRuleOnlyComputeOutput(t *t
 			StoreAs:   "entity.revision_count",
 		},
 	}}
-	handler.PayloadTransform = &runtimecontracts.PayloadTransformSpec{
-		Fields: map[string]string{
-			"revision_count": "entity.revision_count",
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "testing.revision_count_read",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"revision_count": runtimecontracts.CELExpression("entity.revision_count"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
@@ -2366,7 +2371,7 @@ func TestRun_RejectsCreateEntityPayloadTransformReadOfRuleOnlyComputeOutput(t *t
 	}
 }
 
-func TestRun_AllowsCreateEntityPayloadTransformReadWhenRuleAlsoWritesUnconditionallyAvailableField(t *testing.T) {
+func TestRun_AllowsCreateEntityEmitFieldReadWhenRuleAlsoWritesUnconditionallyAvailableField(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
@@ -2391,9 +2396,10 @@ func TestRun_AllowsCreateEntityPayloadTransformReadWhenRuleAlsoWritesUncondition
 			}},
 		},
 	}}
-	handler.PayloadTransform = &runtimecontracts.PayloadTransformSpec{
-		Fields: map[string]string{
-			"revision_count": "entity.revision_count",
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "testing.revision_count_read",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"revision_count": runtimecontracts.CELExpression("entity.revision_count"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
@@ -3222,7 +3228,7 @@ consumer-node:
     ticket.ready:
       create_entity: true
       advances_to: done
-      emits: consumer.started
+      emit: consumer.started
 `)
 
 	return root
@@ -3334,7 +3340,7 @@ producer-node:
     - ticket.ready
   event_handlers:
     start:
-      emits: ticket.ready
+      emit: ticket.ready
 `)
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
@@ -3526,7 +3532,7 @@ func bootverifyDeclarationDriftBundle() *runtimecontracts.WorkflowContractBundle
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"producer": {
-					"task.start": {Emits: runtimecontracts.EventEmission{Single: "task.done"}},
+					"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
 				},
 			},
 		},
@@ -3535,7 +3541,7 @@ func bootverifyDeclarationDriftBundle() *runtimecontracts.WorkflowContractBundle
 				SubscribesTo: []string{"task.start"},
 				Produces:     []string{"task.done"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.start": {Emits: runtimecontracts.EventEmission{Single: "task.done"}},
+					"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
 				},
 			},
 		},
@@ -3565,7 +3571,7 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"dispatcher": {
 					"scan.corpus_dispatch": {
-						Emits: runtimecontracts.EventEmission{Single: "market_research.scan_assigned"},
+						Emit: runtimecontracts.EmitSpec{Event: "market_research.scan_assigned"},
 					},
 				},
 			},
@@ -3575,7 +3581,7 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 				SubscribesTo: []string{"scan.corpus_dispatch"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.corpus_dispatch": {
-						Emits: runtimecontracts.EventEmission{Single: "market_research.scan_assigned"},
+						Emit: runtimecontracts.EmitSpec{Event: "market_research.scan_assigned"},
 					},
 				},
 			},
@@ -3691,18 +3697,6 @@ func defaultFixtureYAML(contents string) string {
 		return contents
 	}
 	return contents + "\n"
-}
-
-func mustPayloadCompletenessTransform(t *testing.T, body string) *runtimecontracts.PayloadTransformSpec {
-	t.Helper()
-
-	var decoded struct {
-		PayloadTransform runtimecontracts.PayloadTransformSpec `yaml:"payload_transform"`
-	}
-	if err := yaml.Unmarshal([]byte(body), &decoded); err != nil {
-		t.Fatalf("unmarshal payload_transform: %v", err)
-	}
-	return &decoded.PayloadTransform
 }
 
 func reportContains(items []Finding, checkID, contains string) bool {

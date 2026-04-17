@@ -6,4 +6,4 @@ complete-task:
   event_handlers:
     task.requested:
       advances_to: done
-      emits: task.completed
+      emit: task.completed

@@ -159,7 +159,7 @@ scoring-node:
     - vertical.shortlisted
   event_handlers:
     score.ready:
-      emits: vertical.shortlisted
+      emit: vertical.shortlisted
 `)
 
 	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "schema.yaml"), `
@@ -192,7 +192,7 @@ validation-orchestrator:
   event_handlers:
     vertical.shortlisted:
       create_entity: true
-      emits: validation.started
+      emit: validation.started
 `)
 
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, "")
@@ -203,7 +203,7 @@ validation-orchestrator:
 	if !ok {
 		t.Fatal("expected cross-flow qualified input event to resolve to local handler")
 	}
-	if got := strings.TrimSpace(handler.Emits.Single); got != "validation/validation.started" {
+	if got := strings.TrimSpace(handler.Emit.EventType()); got != "validation/validation.started" {
 		t.Fatalf("handler emits = %q, want %q", got, "validation/validation.started")
 	}
 }
@@ -293,7 +293,7 @@ audit-node:
     item.created:
       action: record_evidence
       evidence_target: item.audit
-      emits: evidence.recorded
+      emit: evidence.recorded
 `)
 	return root
 }

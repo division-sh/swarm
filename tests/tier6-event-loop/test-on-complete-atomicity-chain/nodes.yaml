@@ -11,7 +11,7 @@ phase-one:
       on_complete:
         - condition: "payload.ready == true"
           advances_to: processing
-          emits: phase.advanced
+          emit: phase.advanced
 
 phase-two:
   id: phase-two
@@ -25,4 +25,4 @@ phase-two:
         check: "entity.batch_id != \"\""
         on_fail: reject
       advances_to: done
-      emits: task.done
+      emit: task.done

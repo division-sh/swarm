@@ -250,26 +250,18 @@ entity_schema:
 	}
 }
 
-func TestFanOutSpecDecode_PreservesStructuredEmitMapping(t *testing.T) {
+func TestFanOutSpecDecode_RejectsLegacyStructuredEmitMapping(t *testing.T) {
 	var spec FanOutSpec
-	if err := yaml.Unmarshal([]byte(`
+	err := yaml.Unmarshal([]byte(`
 items_from: payload.items
 emit_mapping:
   key_field: item.kind
   mapping:
     a: routed.a
     b: routed.b
-`), &spec); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := spec.EmitMappingKey; got != "item.kind" {
-		t.Fatalf("EmitMappingKey = %q", got)
-	}
-	if got := spec.EmitMapping["a"]; got != "routed.a" {
-		t.Fatalf("EmitMapping[a] = %q", got)
-	}
-	if got := spec.EmitMapping["b"]; got != "routed.b" {
-		t.Fatalf("EmitMapping[b] = %q", got)
+`), &spec)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED legacy fan_out emit mapping rejection", err)
 	}
 }
 
@@ -373,15 +365,15 @@ func TestSystemNodeEventHandlerDecode_PreservesCreateEntity(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 create_entity: true
-emits: scoring.requested
+emit: scoring.requested
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if !handler.CreateEntity {
 		t.Fatal("expected create_entity to decode as true")
 	}
-	if got := handler.Emits.Single; got != "scoring.requested" {
-		t.Fatalf("Emits.Single = %q", got)
+	if got := handler.Emit.EventType(); got != "scoring.requested" {
+		t.Fatalf("Emit.EventType() = %q", got)
 	}
 }
 

@@ -10,7 +10,7 @@ test-node:
         completion: threshold
         threshold: 2
       advances_to: complete
-      emits: collection.done
+      emit: collection.done
   state_schema:
     fields:
       expected_count: integer

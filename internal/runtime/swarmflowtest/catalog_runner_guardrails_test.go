@@ -31,7 +31,7 @@ test-node:
         check: "payload.score >= policy.minimum_score"
         on_fail: discard
       advances_to: done
-      emits: check.passed
+      emit: check.passed
 `,
 		`
 minimum_score: 80

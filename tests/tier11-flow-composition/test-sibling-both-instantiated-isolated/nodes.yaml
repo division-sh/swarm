@@ -6,4 +6,4 @@ root-node:
   event_handlers:
     start.all:
       advances_to: done
-      emits: work.begin
+      emit: work.begin

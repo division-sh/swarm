@@ -116,7 +116,7 @@ func TestExecuteNodeContractHandlerFlushesCollectedEventsToParentCollector(t *te
 	ctx := context.WithValue(context.Background(), pipelineEmitCollectorKey{}, &parentCollector)
 
 	result, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
+		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
@@ -147,7 +147,7 @@ func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollecto
 	}
 
 	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
+		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
@@ -172,7 +172,7 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 	}
 
 	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
+		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: (events.Event{
 			Type:      events.EventType("custom.trigger"),
@@ -232,7 +232,7 @@ func TestExecuteNodeContractHandlerMintsEntityIDForEntityMaterializingHandler(t 
 				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Minted Entity")},
 			},
 		},
-		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
+		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("custom.trigger")},
 		State: WorkflowState{Stage: WorkflowStateID(""), Metadata: map[string]any{}},
@@ -277,7 +277,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 			},
 			SourceEvent: "research.completed",
 		},
-		Emits:      runtimecontracts.EventEmission{Single: "spec.requested"},
+		Emit: runtimecontracts.EmitSpec{Event: "spec.requested"},
 		AdvancesTo: "mvp_speccing",
 	}, workflowTriggerContext{
 		Event: events.Event{
@@ -338,7 +338,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 			},
 			SourceEvent: "research.completed",
 		},
-		Emits:      runtimecontracts.EventEmission{Single: "spec.requested"},
+		Emit: runtimecontracts.EmitSpec{Event: "spec.requested"},
 		AdvancesTo: "mvp_speccing",
 	}, workflowTriggerContext{
 		Event: events.Event{
@@ -411,7 +411,7 @@ func TestExecuteNodeContractHandlerLogsAccumulatorCompletionCommittedOutcome(t *
 			Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "business_brief"}},
 		},
 		OnComplete: []runtimecontracts.HandlerRuleEntry{
-			{ID: "complete", Condition: "true", AdvancesTo: "mvp_speccing", Emits: runtimecontracts.EventEmission{Single: "spec.requested"}},
+			{ID: "complete", Condition: "true", AdvancesTo: "mvp_speccing", Emit: runtimecontracts.EmitSpec{Event: "spec.requested"}},
 		},
 	}
 
@@ -558,7 +558,7 @@ func TestExecuteNodeContractHandlerLogsAccumulatorCompletionCommitFailure(t *tes
 			Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "business_brief"}},
 		},
 		OnComplete: []runtimecontracts.HandlerRuleEntry{
-			{ID: "complete", Condition: "true", AdvancesTo: "mvp_speccing", Emits: runtimecontracts.EventEmission{Single: "spec.requested"}},
+			{ID: "complete", Condition: "true", AdvancesTo: "mvp_speccing", Emit: runtimecontracts.EmitSpec{Event: "spec.requested"}},
 		},
 	}, workflowTriggerContext{
 		Event: events.Event{
@@ -977,7 +977,7 @@ func TestResolveHandlerEntityIDForFlowPreservesCrossFlowEntityWithoutCreateEntit
 
 func TestResolveHandlerEntityIDForRootUsesSubjectEntityForFlowScopedInbound(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "pipeline.complete"},
+		Emit: runtimecontracts.EmitSpec{Event: "pipeline.complete"},
 	}
 	const inboundEntityID = "ent-child"
 	const subjectEntityID = "ent-root"
@@ -1005,7 +1005,7 @@ func TestResolveHandlerEntityIDForRootUsesSubjectEntityForFlowScopedInbound(t *t
 
 func TestResolveHandlerEntityIDForFlowKeepsInboundEntityForDescendantScopedInbound(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "step.result"},
+		Emit: runtimecontracts.EmitSpec{Event: "step.result"},
 	}
 	const inboundEntityID = "ent-grandchild"
 	const parentEntityID = "ent-child"
@@ -1035,7 +1035,7 @@ func TestResolveHandlerEntityIDForFlowKeepsInboundEntityForDescendantScopedInbou
 
 func TestResolveHandlerEntityIDForFlowDoesNotRetargetSameFlowInstancePath(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "step.result"},
+		Emit: runtimecontracts.EmitSpec{Event: "step.result"},
 	}
 	const (
 		entityID = "ent-child"
@@ -1254,7 +1254,12 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBefore
 	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0 && !has(entity.kill_reason)"},
-		Emits:        runtimecontracts.EventEmission{Single: "entity.created"},
+		Emit: runtimecontracts.EmitSpec{
+			Event: "entity.created",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"revision_count": runtimecontracts.CELExpression("entity.revision_count"),
+			},
+		},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("candidate.discovered")},
 		State: WorkflowState{},
@@ -1360,7 +1365,7 @@ func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialVa
 	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		Clear:        &runtimecontracts.ClearSpec{Target: "entity.revision_count"},
-		Emits:        runtimecontracts.EventEmission{Single: "entity.created"},
+		Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("candidate.discovered")},
 		State: WorkflowState{},
@@ -1428,7 +1433,7 @@ func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testin
 					"candidate.discovered": {
 						CreateEntity: true,
 						Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"},
-						Emits:        runtimecontracts.EventEmission{Single: "entity.created"},
+						Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
 					},
 				},
 			},
@@ -1442,7 +1447,7 @@ func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testin
 					"candidate.discovered": {
 						CreateEntity: true,
 						Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"},
-						Emits:        runtimecontracts.EventEmission{Single: "entity.created"},
+						Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
 					},
 				},
 			},
@@ -1500,7 +1505,7 @@ func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *tes
 	}
 }
 
-func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *testing.T) {
+func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -1509,15 +1514,13 @@ func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *test
 	}
 
 	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
-		PayloadTransform: &runtimecontracts.PayloadTransformSpec{
-			Mappings: map[string]string{
-				"entity_id":     "payload.entity_id",
-				"summary.stage": "entity.current_state",
-			},
-			Entries: []runtimecontracts.TransformSpec{
-				{Target: "flags.ready", Value: runtimecontracts.CELExpression("true")},
-				{Target: "label", Value: runtimecontracts.CELExpression(`"done"`)},
+		Emit: runtimecontracts.EmitSpec{
+			Event: "custom.emitted",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"entity_id":     runtimecontracts.CELExpression("payload.entity_id"),
+				"summary.stage": runtimecontracts.CELExpression("entity.current_state"),
+				"flags.ready":   runtimecontracts.CELExpression("true"),
+				"label":         runtimecontracts.CELExpression(`"done"`),
 			},
 		},
 	}, workflowTriggerContext{
@@ -1553,7 +1556,7 @@ func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *test
 	}
 }
 
-func TestExecuteNodeContractHandlerAppliesPayloadTransformSparseFieldPresenceCheck(t *testing.T) {
+func TestExecuteNodeContractHandlerAppliesEmitFieldsSparseFieldPresenceCheck(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -1562,10 +1565,10 @@ func TestExecuteNodeContractHandlerAppliesPayloadTransformSparseFieldPresenceChe
 	}
 
 	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
-		PayloadTransform: &runtimecontracts.PayloadTransformSpec{
-			Fields: map[string]string{
-				"kill_reason_missing": "entity.kill_reason == null",
+		Emit: runtimecontracts.EmitSpec{
+			Event: "custom.emitted",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"kill_reason_missing": runtimecontracts.CELExpression("entity.kill_reason == null"),
 			},
 		},
 	}, workflowTriggerContext{
@@ -1590,7 +1593,7 @@ func TestExecuteNodeContractHandlerAppliesPayloadTransformSparseFieldPresenceChe
 	}
 }
 
-func TestExecuteNodeContractHandlerPayloadTransformEntityPresenceCheckMintsEntityID(t *testing.T) {
+func TestExecuteNodeContractHandlerEmitFieldsEntityPresenceCheckMintsEntityID(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -1615,10 +1618,10 @@ func TestExecuteNodeContractHandlerPayloadTransformEntityPresenceCheckMintsEntit
 	}
 
 	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
-		PayloadTransform: &runtimecontracts.PayloadTransformSpec{
-			Fields: map[string]string{
-				"label": `has(entity.kill_reason) ? entity.kill_reason : payload.reason`,
+		Emit: runtimecontracts.EmitSpec{
+			Event: "custom.emitted",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"label": runtimecontracts.CELExpression(`has(entity.kill_reason) ? entity.kill_reason : payload.reason`),
 			},
 		},
 	}, workflowTriggerContext{
@@ -1636,7 +1639,7 @@ func TestExecuteNodeContractHandlerPayloadTransformEntityPresenceCheckMintsEntit
 	}
 	emitted := bus.publishedEvent(0)
 	if got := emitted.EntityID(); got == "" {
-		t.Fatal("expected payload_transform entity reference to mint entity_id")
+		t.Fatal("expected emit.fields entity reference to mint entity_id")
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(emitted.Payload, &payload); err != nil {
@@ -1743,7 +1746,7 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotEmitChild
 	}
 }
 
-func TestExecuteNodeContractHandlerRuleMatchAugmentsDefaultEmit(t *testing.T) {
+func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -1752,9 +1755,9 @@ func TestExecuteNodeContractHandlerRuleMatchAugmentsDefaultEmit(t *testing.T) {
 	}
 
 	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "default.emitted"},
+		Emit: runtimecontracts.EmitSpec{Event: "default.emitted"},
 		Rules: []runtimecontracts.HandlerRuleEntry{
-			{ID: "pick-rule", Condition: "true", Emits: runtimecontracts.EventEmission{Single: "rule.emitted"}},
+			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
 		},
 	}, workflowTriggerContext{
 		Event: events.Event{
@@ -1763,17 +1766,11 @@ func TestExecuteNodeContractHandlerRuleMatchAugmentsDefaultEmit(t *testing.T) {
 		}.WithEntityID("ent-1"),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
-	if err != nil {
-		t.Fatalf("executeNodeContractHandler: %v", err)
+	if err == nil {
+		t.Fatal("expected ambiguous handler-level emit config to be rejected")
 	}
-	if got := bus.publishedCount(); got != 2 {
-		t.Fatalf("bus published count = %d, want 2", got)
-	}
-	if got := string(bus.publishedEvent(0).Type); got != "default.emitted" {
-		t.Fatalf("published type[0] = %q, want default.emitted", got)
-	}
-	if got := string(bus.publishedEvent(1).Type); got != "rule.emitted" {
-		t.Fatalf("published type[1] = %q, want rule.emitted", got)
+	if !strings.Contains(err.Error(), "handler-top-level emit is only allowed on single-emit handlers") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -1792,7 +1789,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 			},
 		},
 		OnComplete: []runtimecontracts.HandlerRuleEntry{
-			{ID: "too-early", Condition: `"branch_target" in entity && entity.branch_target == "handler"`, Emits: runtimecontracts.EventEmission{Single: "branch.selected"}},
+			{ID: "too-early", Condition: `"branch_target" in entity && entity.branch_target == "handler"`, Emit: runtimecontracts.EmitSpec{Event: "branch.selected"}},
 		},
 	}, workflowTriggerContext{
 		Event: events.Event{
@@ -1816,7 +1813,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	entityID := "ent-1"
 
 	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
-		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
+		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID(entityID),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},

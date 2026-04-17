@@ -10,4 +10,4 @@ worker:
     task.feedback:
       create_entity: true
       advances_to: done
-      emits: task.result
+      emit: task.result

@@ -32,8 +32,7 @@ type handlerExecutionPlan struct {
 	SetsGate         string
 	ClearGates       bool
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
-	PayloadTransform *runtimecontracts.PayloadTransformSpec
-	Emits            string
+	Emit             runtimecontracts.EmitSpec
 	EmitEvents       []string
 	Rules            []runtimecontracts.HandlerRuleEntry
 	OnComplete       []runtimecontracts.HandlerRuleEntry
@@ -82,9 +81,8 @@ func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runti
 		SetsGate:         gateSpecString(handler.SetsGate),
 		ClearGates:       len(handler.ClearGates) > 0,
 		DataAccumulation: handler.DataAccumulation,
-		PayloadTransform: handler.PayloadTransform,
-		Emits:            strings.TrimSpace(handler.Emits.First()),
-		EmitEvents:       handler.Emits.Values(),
+		Emit:             handler.Emit,
+		EmitEvents:       runtimecontracts.HandlerEmitEvents(handler),
 		Rules:            append([]runtimecontracts.HandlerRuleEntry(nil), handler.Rules...),
 		OnComplete:       append([]runtimecontracts.HandlerRuleEntry(nil), handler.OnComplete...),
 	}
@@ -124,14 +122,58 @@ func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	if plan.DataAccumulation.HasWrites() || strings.TrimSpace(plan.DataAccumulation.SourceEvent) != "" {
 		steps = append(steps, "data_accumulation")
 	}
-	if plan.PayloadTransform != nil {
-		steps = append(steps, "payload_transform")
+	if handlerPlanHasEmitFields(plan) {
+		steps = append(steps, "emit_fields")
 	}
-	if len(plan.EmitEvents) > 0 || plan.Emits != "" {
+	if len(plan.EmitEvents) > 0 {
 		steps = append(steps, "emits")
 	}
 	if plan.Action != "" {
 		steps = append(steps, "action")
 	}
 	return steps
+}
+
+func handlerPlanHasEmitFields(plan handlerExecutionPlan) bool {
+	if plan.Emit.HasFields() {
+		return true
+	}
+	if plan.FanOut != nil && plan.FanOut.Emit.HasFields() {
+		return true
+	}
+	for _, rule := range plan.Rules {
+		if rule.Emit.HasFields() {
+			return true
+		}
+		if rule.FanOut != nil && rule.FanOut.Emit.HasFields() {
+			return true
+		}
+	}
+	for _, rule := range plan.OnComplete {
+		if rule.Emit.HasFields() {
+			return true
+		}
+		if rule.FanOut != nil && rule.FanOut.Emit.HasFields() {
+			return true
+		}
+	}
+	if plan.Accumulate != nil {
+		for _, rule := range plan.Accumulate.OnComplete {
+			if rule.Emit.HasFields() {
+				return true
+			}
+			if rule.FanOut != nil && rule.FanOut.Emit.HasFields() {
+				return true
+			}
+		}
+		if plan.Accumulate.OnTimeout != nil {
+			if plan.Accumulate.OnTimeout.Emit.HasFields() {
+				return true
+			}
+			if plan.Accumulate.OnTimeout.FanOut != nil && plan.Accumulate.OnTimeout.FanOut.Emit.HasFields() {
+				return true
+			}
+		}
+	}
+	return false
 }

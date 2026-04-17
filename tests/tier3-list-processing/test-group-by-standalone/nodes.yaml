@@ -9,5 +9,5 @@ group-node:
         items_from: payload.items
         key: category
         store_as: entity.grouped
-      emits: items.grouped
+      emit: items.grouped
       advances_to: done

@@ -7,4 +7,4 @@ worker:
     task.start:
       create_entity: true
       advances_to: finished
-      emits: task.done
+      emit: task.done

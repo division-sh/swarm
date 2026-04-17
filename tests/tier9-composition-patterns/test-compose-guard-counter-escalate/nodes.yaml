@@ -13,4 +13,4 @@ retrier:
         writes:
           - target_field: retry_count
             expression: entity.retry_count + 1
-      emits: retry.dispatched
+      emit: retry.dispatched

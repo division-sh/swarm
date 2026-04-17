@@ -32,7 +32,7 @@ test-node:
         expected_from: entity.expected_count
         completion: all
       advances_to: complete
-      emits: collection.done
+      emit: collection.done
 `,
 		"{}\n",
 		`
@@ -90,7 +90,7 @@ test-node:
         expected_from: entity.threshold_count
         completion: threshold
       advances_to: complete
-      emits: collection.threshold_met
+      emit: collection.threshold_met
 `,
 		"{}\n",
 		`
@@ -150,7 +150,7 @@ test-node:
         expected_from: entity.expected_count
         completion: all
       advances_to: complete
-      emits: collection.done
+      emit: collection.done
 `,
 		"{}\n",
 		`

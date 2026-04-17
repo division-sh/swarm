@@ -24,10 +24,10 @@ delivery-node:
       branch:
         - condition: payload.priority == 'urgent'
           then:
-            emits: item.completed
+            emit: item.completed
     timer.item.timeout:
       advances_to: completed
-      emits: item.completed
+      emit: item.completed
       data_accumulation:
         source_event: timer.item.timeout
         writes:

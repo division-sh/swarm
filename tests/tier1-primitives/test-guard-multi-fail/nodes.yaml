@@ -12,4 +12,4 @@ test-node:
           - id: level_check
             check: "payload.level >= policy.min_level"
       advances_to: done
-      emits: check.passed
+      emit: check.passed

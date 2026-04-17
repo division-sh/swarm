@@ -8,9 +8,9 @@ test-node:
       on_complete:
         - condition: "payload.score >= 70"
           advances_to: done
-          emits: task.completed
+          emit: task.completed
       rules:
         route_a:
           condition: "payload.type == \"a\""
-          emits: task.routed
+          emit: task.routed
           advances_to: routed

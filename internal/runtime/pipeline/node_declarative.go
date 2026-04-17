@@ -369,7 +369,7 @@ func handlerMaterializesEntity(source semanticview.Source, handler SystemNodeEve
 	if computeStoresEntityField(handler.Compute, allowedFields) {
 		return true
 	}
-	if payloadTransformReferencesEntity(handler.PayloadTransform) {
+	if emitSitesReferenceEntity(handler) {
 		return true
 	}
 	if accumulateReferencesEntity(handler.Accumulate) {
@@ -449,12 +449,54 @@ func computeStoresEntityField(spec *runtimecontracts.ComputeSpec, allowedFields 
 	return ok
 }
 
-func payloadTransformReferencesEntity(spec *runtimecontracts.PayloadTransformSpec) bool {
-	if spec == nil {
-		return false
+func emitSitesReferenceEntity(handler SystemNodeEventHandler) bool {
+	if emitReferencesEntity(handler.Emit) {
+		return true
 	}
-	for _, entry := range spec.TransformEntries() {
-		if entry.Value.Kind == runtimecontracts.ExpressionKindCEL && workflowexpr.ExpressionReferencesEntity(entry.Value.CEL) {
+	if handler.FanOut != nil && emitReferencesEntity(handler.FanOut.Emit) {
+		return true
+	}
+	for _, rule := range handler.Rules {
+		if emitReferencesEntity(rule.Emit) {
+			return true
+		}
+		if rule.FanOut != nil && emitReferencesEntity(rule.FanOut.Emit) {
+			return true
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		if emitReferencesEntity(rule.Emit) {
+			return true
+		}
+		if rule.FanOut != nil && emitReferencesEntity(rule.FanOut.Emit) {
+			return true
+		}
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			if emitReferencesEntity(rule.Emit) {
+				return true
+			}
+			if rule.FanOut != nil && emitReferencesEntity(rule.FanOut.Emit) {
+				return true
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			rule := handler.Accumulate.OnTimeout
+			if emitReferencesEntity(rule.Emit) {
+				return true
+			}
+			if rule.FanOut != nil && emitReferencesEntity(rule.FanOut.Emit) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func emitReferencesEntity(spec runtimecontracts.EmitSpec) bool {
+	for _, value := range spec.Fields {
+		if value.Kind == runtimecontracts.ExpressionKindCEL && workflowexpr.ExpressionReferencesEntity(value.CEL) {
 			return true
 		}
 	}

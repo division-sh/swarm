@@ -8,5 +8,5 @@ fan-out-node:
       fan_out:
         items_from: payload.items
         target: fan-out-node
-        emit_per_item: item.assigned
+        emit: item.assigned
       advances_to: scanning

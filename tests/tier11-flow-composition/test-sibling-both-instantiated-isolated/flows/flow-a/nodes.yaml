@@ -7,7 +7,7 @@ alpha-intake:
     work.begin:
       create_entity: true
       advances_to: active
-      emits: internal.step2
+      emit: internal.step2
 
 alpha-processor:
   id: alpha-processor
@@ -17,4 +17,4 @@ alpha-processor:
   event_handlers:
     internal.step2:
       advances_to: processed
-      emits: alpha.done
+      emit: alpha.done

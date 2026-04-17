@@ -8,9 +8,9 @@ dual-dialect-node:
       on_complete:
         - condition: "payload.score >= 70"
           advances_to: done
-          emits: check.passed
+          emit: check.passed
       rules:
         - name: high_score
           condition: "payload.score >= 70"
-          emits: check.passed
+          emit: check.passed
       advances_to: done

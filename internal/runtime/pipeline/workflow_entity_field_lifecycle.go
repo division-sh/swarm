@@ -21,7 +21,7 @@ const (
 	WorkflowEntityFieldLifecycleOnComplete       WorkflowEntityFieldLifecyclePhase = "on_complete"
 	WorkflowEntityFieldLifecycleRule             WorkflowEntityFieldLifecyclePhase = "rule"
 	WorkflowEntityFieldLifecycleDataAccumulation WorkflowEntityFieldLifecyclePhase = "data_accumulation"
-	WorkflowEntityFieldLifecyclePayloadTransform WorkflowEntityFieldLifecyclePhase = "payload_transform"
+	WorkflowEntityFieldLifecycleEmitFields       WorkflowEntityFieldLifecyclePhase = "emit_fields"
 )
 
 func WorkflowEntityReferences(expression string) []string {
@@ -70,7 +70,7 @@ func WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler runtimecontract
 	return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleDataAccumulation)
 }
 
-func WorkflowEntityFieldsAvailableBeforePayloadTransform(handler runtimecontracts.SystemNodeEventHandler) map[string]struct{} {
+func WorkflowEntityFieldsAvailableBeforeEmitFields(handler runtimecontracts.SystemNodeEventHandler) map[string]struct{} {
 	available := workflowBuiltinEntityFields()
 	addWriter := func(target string) {
 		if field, ok := workflowEntityFieldNameFromTarget(target); ok {
@@ -280,7 +280,7 @@ func workflowEntityFieldLifecycleOrder(phase WorkflowEntityFieldLifecyclePhase) 
 		return 10
 	case WorkflowEntityFieldLifecycleDataAccumulation:
 		return 11
-	case WorkflowEntityFieldLifecyclePayloadTransform:
+	case WorkflowEntityFieldLifecycleEmitFields:
 		return 12
 	default:
 		return 0

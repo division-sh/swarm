@@ -7,4 +7,4 @@ sub-node:
     sub.requested:
       create_entity: true
       advances_to: done
-      emits: sub.completed
+      emit: sub.completed

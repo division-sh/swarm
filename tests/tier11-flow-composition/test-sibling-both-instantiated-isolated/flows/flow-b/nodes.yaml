@@ -7,4 +7,4 @@ beta-intake:
     work.begin:
       create_entity: true
       advances_to: active
-      emits: beta.done
+      emit: beta.done

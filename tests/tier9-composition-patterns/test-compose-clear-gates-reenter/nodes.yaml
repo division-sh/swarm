@@ -7,8 +7,8 @@ reviewer:
     review.done:
       sets_gate: g_reviewed
       advances_to: approved
-      emits: review.approved
+      emit: review.approved
     review.insufficient:
       clear_gates: true
       advances_to: reviewing
-      emits: review.restarted
+      emit: review.restarted

@@ -268,67 +268,26 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 }
 
 func deadEventHandlerEmits(handler runtimecontracts.SystemNodeEventHandler) []string {
-	out := make([]string, 0, len(handler.Rules)+len(handler.OnComplete)+6)
-	for _, emitted := range handler.Emits.Values() {
-		emitted = strings.TrimSpace(emitted)
-		if emitted != "" {
-			out = append(out, emitted)
-		}
-	}
-	for _, rule := range handler.Rules {
-		for _, emitted := range rule.Emits.Values() {
-			emitted = strings.TrimSpace(emitted)
-			if emitted != "" {
-				out = append(out, emitted)
-			}
-		}
-	}
-	for _, branch := range handler.OnComplete {
-		for _, emitted := range branch.Emits.Values() {
-			emitted = strings.TrimSpace(emitted)
-			if emitted != "" {
-				out = append(out, emitted)
-			}
-		}
-	}
-	if handler.Accumulate != nil {
-		for _, branch := range handler.Accumulate.OnComplete {
-			for _, emitted := range branch.Emits.Values() {
-				emitted = strings.TrimSpace(emitted)
-				if emitted != "" {
-					out = append(out, emitted)
-				}
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			for _, emitted := range handler.Accumulate.OnTimeout.Emits.Values() {
-				emitted = strings.TrimSpace(emitted)
-				if emitted != "" {
-					out = append(out, emitted)
-				}
-			}
-		}
-	}
-	return out
+	return runtimecontracts.HandlerEmitEvents(handler)
 }
 
 func deadEventHandlerFanOutEmits(handler runtimecontracts.SystemNodeEventHandler) []string {
 	out := make([]string, 0, 1+len(handler.Rules)+len(handler.OnComplete)+2)
 	if handler.FanOut != nil {
-		if emitted := strings.TrimSpace(handler.FanOut.EmitPerItem); emitted != "" {
+		if emitted := handler.FanOut.Emit.EventType(); emitted != "" {
 			out = append(out, emitted)
 		}
 	}
 	for _, rule := range handler.Rules {
 		if rule.FanOut != nil {
-			if emitted := strings.TrimSpace(rule.FanOut.EmitPerItem); emitted != "" {
+			if emitted := rule.FanOut.Emit.EventType(); emitted != "" {
 				out = append(out, emitted)
 			}
 		}
 	}
 	for _, rule := range handler.OnComplete {
 		if rule.FanOut != nil {
-			if emitted := strings.TrimSpace(rule.FanOut.EmitPerItem); emitted != "" {
+			if emitted := rule.FanOut.Emit.EventType(); emitted != "" {
 				out = append(out, emitted)
 			}
 		}
@@ -336,13 +295,13 @@ func deadEventHandlerFanOutEmits(handler runtimecontracts.SystemNodeEventHandler
 	if handler.Accumulate != nil {
 		for _, rule := range handler.Accumulate.OnComplete {
 			if rule.FanOut != nil {
-				if emitted := strings.TrimSpace(rule.FanOut.EmitPerItem); emitted != "" {
+				if emitted := rule.FanOut.Emit.EventType(); emitted != "" {
 					out = append(out, emitted)
 				}
 			}
 		}
 		if handler.Accumulate.OnTimeout != nil && handler.Accumulate.OnTimeout.FanOut != nil {
-			if emitted := strings.TrimSpace(handler.Accumulate.OnTimeout.FanOut.EmitPerItem); emitted != "" {
+			if emitted := handler.Accumulate.OnTimeout.FanOut.Emit.EventType(); emitted != "" {
 				out = append(out, emitted)
 			}
 		}

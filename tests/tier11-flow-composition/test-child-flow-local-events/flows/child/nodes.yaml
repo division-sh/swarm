@@ -7,7 +7,7 @@ child-intake:
     child.start:
       create_entity: true
       advances_to: processing
-      emits: child.internal
+      emit: child.internal
 
 child-processor:
   id: child-processor
@@ -17,4 +17,4 @@ child-processor:
   event_handlers:
     child.internal:
       advances_to: processed
-      emits: child.done
+      emit: child.done

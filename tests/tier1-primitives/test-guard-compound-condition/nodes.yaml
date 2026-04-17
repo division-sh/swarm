@@ -9,4 +9,4 @@ test-node:
         id: compound
         check: "payload.score >= policy.min_score && (entity.priority == 'high' || payload.override == true)"
       advances_to: done
-      emits: check.passed
+      emit: check.passed

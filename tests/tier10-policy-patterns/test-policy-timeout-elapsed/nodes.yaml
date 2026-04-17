@@ -6,10 +6,10 @@ monitor:
   event_handlers:
     task.done:
       advances_to: done
-      emits: task.completed
+      emit: task.completed
     timer.check:
       guard:
         id: past_deadline
         check: "payload.elapsed_hours >= policy.timeout_hours"
       advances_to: timed_out
-      emits: task.timed_out
+      emit: task.timed_out

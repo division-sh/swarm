@@ -5,7 +5,7 @@ parent-node:
   produces: [analyzer-flow/analysis.requested]
   event_handlers:
     request.start:
-      emits: analyzer-flow/analysis.requested
+      emit: analyzer-flow/analysis.requested
 
 parent-listener:
   id: parent-listener
@@ -15,4 +15,4 @@ parent-listener:
   event_handlers:
     analyzer-flow/analysis.done:
       advances_to: done
-      emits: request.complete
+      emit: request.complete

@@ -8,7 +8,7 @@ test-node:
       rules:
         type_a:
           condition: "payload.kind == 'a'"
-          emits: routed.a
+          emit: routed.a
         type_b:
           condition: "payload.kind == 'b'"
-          emits: routed.b
+          emit: routed.b

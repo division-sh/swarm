@@ -5,7 +5,7 @@ dispatcher:
   produces: [child/task.requested]
   event_handlers:
     work.start:
-      emits: child/task.requested
+      emit: child/task.requested
 
 listener:
   id: listener
@@ -15,4 +15,4 @@ listener:
   event_handlers:
     child/task.done:
       advances_to: done
-      emits: work.finished
+      emit: work.finished

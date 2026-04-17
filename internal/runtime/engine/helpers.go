@@ -253,6 +253,28 @@ func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontr
 	return payload, nil
 }
 
+func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontracts.EmitSpec) (map[string]any, error) {
+	if len(spec.Fields) == 0 {
+		return nil, nil
+	}
+	payload := map[string]any{}
+	for target, valueSpec := range spec.Fields {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			continue
+		}
+		if !valueSpec.HasCELValue() {
+			continue
+		}
+		value, err := evalWorkflowValueExpression(base, state, valueSpec.CEL)
+		if err != nil {
+			return nil, fmt.Errorf("emit field %s: %w", target, err)
+		}
+		setParsedValuePath(payload, paths.Parse(target), value)
+	}
+	return payload, nil
+}
+
 func nextChainDepth(current, max int) (int, error) {
 	if max <= 0 {
 		max = DefaultMaxChainDepth

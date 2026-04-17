@@ -9,5 +9,5 @@ reduce-node:
         items_from: entity.values
         operation: sum
         store_as: entity.total
-      emits: values.totaled
+      emit: values.totaled
       advances_to: done

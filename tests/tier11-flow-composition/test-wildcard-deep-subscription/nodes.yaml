@@ -5,7 +5,7 @@ dispatcher:
   produces: [child/work.begin]
   event_handlers:
     pipeline.start:
-      emits: child/work.begin
+      emit: child/work.begin
 
 collector:
   id: collector
@@ -15,4 +15,4 @@ collector:
   event_handlers:
     "**/task.done":
       advances_to: done
-      emits: pipeline.complete
+      emit: pipeline.complete

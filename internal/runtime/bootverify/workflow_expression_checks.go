@@ -16,7 +16,7 @@ func checkDataAccumulationExpressionValidation(c *checkerContext) []Finding {
 	return c.dataAccumulationExpressions()
 }
 func checkPayloadTransformExpressionValidation(c *checkerContext) []Finding {
-	return c.payloadTransformExpressions()
+	return c.emitFieldExpressions()
 }
 func checkExpressionFieldReferenceValidation(c *checkerContext) []Finding {
 	return c.expressionFieldReferences()
@@ -92,7 +92,7 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 	return c.dataAccumulationExprFindings
 }
 
-func (c *checkerContext) payloadTransformExpressions() []Finding {
+func (c *checkerContext) emitFieldExpressions() []Finding {
 	if c.payloadTransformExprLoaded {
 		return c.payloadTransformExprFindings
 	}
@@ -102,14 +102,14 @@ func (c *checkerContext) payloadTransformExpressions() []Finding {
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			for _, expr := range handlerEntityExpressions(handler) {
-				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecyclePayloadTransform {
+				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleEmitFields {
 					continue
 				}
 				if err := workflowexpr.ValidateValueExpression(expr.Expression); err != nil {
 					c.payloadTransformExprFindings = append(c.payloadTransformExprFindings, Finding{
-						CheckID:  "payload_transform_expression_validation",
+						CheckID:  "emit_field_expression_validation",
 						Severity: "error",
-						Message:  fmt.Sprintf("node %s handler %s %s %q is invalid for payload_transform: %v", nodeID, eventType, expr.Kind, expr.Expression, err),
+						Message:  fmt.Sprintf("node %s handler %s %s %q is invalid for emit.fields: %v", nodeID, eventType, expr.Kind, expr.Expression, err),
 						Location: nodeID,
 					})
 				}
@@ -258,7 +258,7 @@ func createEntityComputeStoresField(handler runtimecontracts.SystemNodeEventHand
 }
 
 func createEntityTopLevelDataAccumulationMakesFieldAvailable(phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) bool {
-	return phase == runtimepipeline.WorkflowEntityFieldLifecyclePayloadTransform
+	return phase == runtimepipeline.WorkflowEntityFieldLifecycleEmitFields
 }
 
 func createEntityComputeMakesFieldAvailable(phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) bool {
@@ -266,7 +266,7 @@ func createEntityComputeMakesFieldAvailable(phase runtimepipeline.WorkflowEntity
 	case runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
 		runtimepipeline.WorkflowEntityFieldLifecycleRule,
 		runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation,
-		runtimepipeline.WorkflowEntityFieldLifecyclePayloadTransform:
+		runtimepipeline.WorkflowEntityFieldLifecycleEmitFields:
 		return true
 	default:
 		return false
@@ -429,10 +429,44 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 			out = append(out, expressionReference{Kind: "count condition", Expression: condition, Phase: runtimepipeline.WorkflowEntityFieldLifecycleCount})
 		}
 	}
-	if handler.PayloadTransform != nil {
-		for _, entry := range handler.PayloadTransform.TransformEntries() {
-			if expr := strings.TrimSpace(entry.Value.CEL); expr != "" {
-				out = append(out, expressionReference{Kind: "payload_transform value", Expression: expr, Phase: runtimepipeline.WorkflowEntityFieldLifecyclePayloadTransform})
+	appendEmitExpressions := func(kindPrefix string, spec runtimecontracts.EmitSpec) {
+		for key, value := range spec.Fields {
+			if expr := strings.TrimSpace(value.CEL); expr != "" {
+				out = append(out, expressionReference{
+					Kind:       kindPrefix + " emit field " + strings.TrimSpace(key),
+					Expression: expr,
+					Phase:      runtimepipeline.WorkflowEntityFieldLifecycleEmitFields,
+				})
+			}
+		}
+	}
+	appendEmitExpressions("handler", handler.Emit)
+	if handler.FanOut != nil {
+		appendEmitExpressions("fan_out", handler.FanOut.Emit)
+	}
+	for _, rule := range handler.Rules {
+		appendEmitExpressions("rule", rule.Emit)
+		if rule.FanOut != nil {
+			appendEmitExpressions("rule fan_out", rule.FanOut.Emit)
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		appendEmitExpressions("on_complete", rule.Emit)
+		if rule.FanOut != nil {
+			appendEmitExpressions("on_complete fan_out", rule.FanOut.Emit)
+		}
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			appendEmitExpressions("accumulate.on_complete", rule.Emit)
+			if rule.FanOut != nil {
+				appendEmitExpressions("accumulate.on_complete fan_out", rule.FanOut.Emit)
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			appendEmitExpressions("accumulate.on_timeout", handler.Accumulate.OnTimeout.Emit)
+			if handler.Accumulate.OnTimeout.FanOut != nil {
+				appendEmitExpressions("accumulate.on_timeout fan_out", handler.Accumulate.OnTimeout.FanOut.Emit)
 			}
 		}
 	}
@@ -485,8 +519,8 @@ func availableEntityFieldsForExpression(handler runtimecontracts.SystemNodeEvent
 		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeCondition(handler, runtimepipeline.WorkflowConditionContextRule)
 	case runtimepipeline.WorkflowEntityFieldLifecycleReduce:
 		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler)
-	case runtimepipeline.WorkflowEntityFieldLifecyclePayloadTransform:
-		return runtimepipeline.WorkflowEntityFieldsAvailableBeforePayloadTransform(handler)
+	case runtimepipeline.WorkflowEntityFieldLifecycleEmitFields:
+		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeEmitFields(handler)
 	default:
 		return map[string]struct{}{}
 	}

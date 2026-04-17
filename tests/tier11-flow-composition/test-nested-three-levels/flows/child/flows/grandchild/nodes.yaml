@@ -7,4 +7,4 @@ grandchild-worker:
     micro.start:
       create_entity: true
       advances_to: finished
-      emits: micro.done
+      emit: micro.done

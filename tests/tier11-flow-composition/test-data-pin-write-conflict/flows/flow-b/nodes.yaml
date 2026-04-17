@@ -12,4 +12,4 @@ b-node:
             value:
               source: flow-b
       advances_to: done
-      emits: b.done
+      emit: b.done

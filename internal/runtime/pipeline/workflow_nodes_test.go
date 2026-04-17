@@ -137,7 +137,7 @@ func TestLoadWorkflowNodes_UsesHandlerKeysForCrossFlowPinAutoWire(t *testing.T) 
 				Produces: []string{"scan.completed"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.requested": {
-						Emits: runtimecontracts.EventEmission{Single: "scan.completed"},
+						Emit: runtimecontracts.EmitSpec{Event: "scan.completed"},
 					},
 				},
 			},

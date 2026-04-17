@@ -6,7 +6,7 @@ gate-setter-1:
   event_handlers:
     gate.g1_set:
       sets_gate: g1
-      emits: gate.set
+      emit: gate.set
 
 gate-setter-2:
   id: gate-setter-2
@@ -16,7 +16,7 @@ gate-setter-2:
   event_handlers:
     gate.g2_set:
       sets_gate: g2
-      emits: gate.set
+      emit: gate.set
 
 gate-setter-3:
   id: gate-setter-3
@@ -26,7 +26,7 @@ gate-setter-3:
   event_handlers:
     gate.g3_set:
       sets_gate: g3
-      emits: gate.set
+      emit: gate.set
 
 approval-node:
   id: approval-node
@@ -39,4 +39,4 @@ approval-node:
         id: all_gates_check
         check: "entity.gates.g1 == true && entity.gates.g2 == true && entity.gates.g3 == true"
       advances_to: approved
-      emits: approval.granted
+      emit: approval.granted

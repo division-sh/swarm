@@ -198,7 +198,7 @@ var bootCheckRegistry = []Check{
 	{ID: "transition_reference_validation", Severity: "error", Run: checkTransitionReferenceValidation},
 	{ID: "condition_expression_validation", Severity: "error", Run: checkConditionExpressionValidation},
 	{ID: "data_accumulation_expression_validation", Severity: "error", Run: checkDataAccumulationExpressionValidation},
-	{ID: "payload_transform_expression_validation", Severity: "error", Run: checkPayloadTransformExpressionValidation},
+	{ID: "emit_field_expression_validation", Severity: "error", Run: checkPayloadTransformExpressionValidation},
 	{ID: "expression_field_reference_validation", Severity: "warning", Run: checkExpressionFieldReferenceValidation},
 	{ID: "transition_ownership_validation", Severity: "error", Run: checkTransitionOwnershipValidation},
 	{ID: "event_runtime_wiring_validation", Severity: "error", Run: checkEventRuntimeWiringValidation},
@@ -1759,48 +1759,11 @@ func uniqueFindings(items []Finding) []Finding {
 }
 
 func handlerEmits(handler runtimecontracts.SystemNodeEventHandler) []string {
-	out := make([]string, 0, len(handler.Rules)+4)
-	for _, emitted := range handler.Emits.Values() {
-		emitted = strings.TrimSpace(emitted)
-		if emitted != "" {
-			out = append(out, emitted)
-		}
-	}
-	for _, rule := range handler.Rules {
-		for _, emitted := range rule.Emits.Values() {
-			emitted = strings.TrimSpace(emitted)
-			if emitted != "" {
-				out = append(out, emitted)
-			}
-		}
-	}
-	for _, branch := range handler.OnComplete {
-		for _, emitted := range branchRuleEmits(branch) {
-			out = append(out, emitted)
-		}
-	}
-	if handler.FanOut != nil {
-		if emitted := strings.TrimSpace(handler.FanOut.EmitPerItem); emitted != "" {
-			out = append(out, emitted)
-		}
-	}
-	return out
+	return runtimecontracts.HandlerEmitEvents(handler)
 }
 
 func branchRuleEmits(rule runtimecontracts.HandlerRuleEntry) []string {
-	out := make([]string, 0, 4)
-	for _, emitted := range rule.Emits.Values() {
-		emitted = strings.TrimSpace(emitted)
-		if emitted != "" {
-			out = append(out, emitted)
-		}
-	}
-	if rule.FanOut != nil {
-		if emitted := strings.TrimSpace(rule.FanOut.EmitPerItem); emitted != "" {
-			out = append(out, emitted)
-		}
-	}
-	return out
+	return runtimecontracts.RuleEmitEvents(rule)
 }
 
 type permissionWarning struct {

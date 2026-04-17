@@ -11,7 +11,7 @@ scorer:
       on_complete:
         - condition: "true"
           advances_to: scored
-          emits: batch.scored
+          emit: batch.scored
 
 verifier:
   id: verifier
@@ -25,4 +25,4 @@ verifier:
         check: "entity.current_state == \"scored\""
         on_fail: reject
       advances_to: verified
-      emits: scores.verified
+      emit: scores.verified

@@ -5,7 +5,7 @@ dispatcher:
   produces: [task.completed, child/task.assigned]
   event_handlers:
     task.requested:
-      emits: child/task.assigned
+      emit: child/task.assigned
     child/task.result:
       advances_to: done
-      emits: task.completed
+      emit: task.completed

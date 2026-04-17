@@ -8,5 +8,5 @@ test-node:
       clear:
         targets:
           - accumulator_state
-      emits: state.cleared
+      emit: state.cleared
       advances_to: cleared

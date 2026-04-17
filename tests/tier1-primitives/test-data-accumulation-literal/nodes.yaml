@@ -11,7 +11,7 @@ test-node:
             value: "premium"
         source_event: item.received
       advances_to: done
-      emits: item.categorized
+      emit: item.categorized
   state_schema:
     fields:
       category: string
