@@ -6,7 +6,7 @@ dispatcher:
   event_handlers:
     batch.requested:
       rules:
-        - name: parallel
+        - id: parallel
           condition: "payload.mode == 'parallel'"
           fan_out:
             items_from: payload.items
@@ -16,7 +16,7 @@ dispatcher:
                 expression: fan_out.count
           advances_to: dispatched
           emit: batch.dispatched
-        - name: sequential
+        - id: sequential
           condition: "payload.mode == 'sequential'"
           data_accumulation:
             writes:
@@ -24,7 +24,7 @@ dispatcher:
                 value: 1
           advances_to: dispatched
           emit: batch.dispatched
-        - name: fallback
+        - id: fallback
           condition: "else"
           data_accumulation:
             writes:
