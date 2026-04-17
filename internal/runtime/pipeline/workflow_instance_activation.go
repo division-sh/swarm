@@ -177,7 +177,7 @@ func DeriveFlowInstancePath(source semanticview.Source, templateID, instanceID s
 	return runtimeflowidentity.InstancePath(source, templateID, instanceID)
 }
 
-func (pc *PipelineCoordinator) handlerEmitPayload(ctx context.Context, triggerCtx workflowTriggerContext, eventType string) map[string]any {
+func (pc *PipelineCoordinator) handlerEmitEnvelope(ctx context.Context, triggerCtx workflowTriggerContext, eventType string) map[string]any {
 	payload := parsePayloadMap(triggerCtx.Event.Payload)
 	out := map[string]any{}
 	entityID := resolveEmittedEntityID(

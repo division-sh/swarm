@@ -69,7 +69,8 @@ type stubGuardRegistry struct {
 }
 type stubPayloadShaper struct{}
 type recordingPayloadShaper struct {
-	lastReq ExecutionRequest
+	lastReq     ExecutionRequest
+	lastPayload map[string]any
 }
 
 func (stubStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
@@ -142,6 +143,7 @@ func (stubPayloadShaper) ShapeEmitPayload(_ context.Context, _ ExecutionRequest,
 }
 func (s *recordingPayloadShaper) ShapeEmitPayload(_ context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
 	s.lastReq = req
+	s.lastPayload = cloneStringAnyMap(payload)
 	out := cloneStringAnyMap(payload)
 	out["shaped_for"] = eventType
 	return out, nil
@@ -1599,6 +1601,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 }
 
 func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
+	shaper := &recordingPayloadShaper{}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
@@ -1606,7 +1609,7 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 		Locker:        stubLocker{},
 		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
-		PayloadShaper: stubPayloadShaper{},
+		PayloadShaper: shaper,
 		MaxChainDepth: 5,
 	}, stubEvaluator{bools: map[string]bool{
 		"payload.ok == true": false,
@@ -1639,5 +1642,8 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 	}
 	if result.ChainDepth != 2 {
 		t.Fatalf("ChainDepth = %d", result.ChainDepth)
+	}
+	if len(shaper.lastPayload) != 0 {
+		t.Fatalf("guard escalation payload = %#v, want empty explicit business payload", shaper.lastPayload)
 	}
 }

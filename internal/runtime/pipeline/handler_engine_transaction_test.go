@@ -1856,3 +1856,269 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 		t.Fatalf("bus published count = %d, want 1", got)
 	}
 }
+
+func declarativeEmitContractTestBundle(eventType string) *runtimecontracts.WorkflowContractBundle {
+	return declarativeEmitContractTestBundleWithEntry(eventType, runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"label": {Type: "string"},
+			},
+		},
+		Required: []string{"label"},
+	})
+}
+
+func declarativeEmitContractTestBundleWithEntry(eventType string, entry runtimecontracts.EventCatalogEntry) *runtimecontracts.WorkflowContractBundle {
+	eventType = strings.TrimSpace(eventType)
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "test",
+			Version: "v-test",
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			eventType: entry,
+		},
+	}
+}
+
+func newDeclarativeEmitContractCoordinator(eventType string) (*PipelineCoordinator, *recordingPipelineBus) {
+	return newDeclarativeEmitContractCoordinatorWithBundle(declarativeEmitContractTestBundle(eventType))
+}
+
+func newDeclarativeEmitContractCoordinatorWithBundle(bundle *runtimecontracts.WorkflowContractBundle) (*PipelineCoordinator, *recordingPipelineBus) {
+	bus := &recordingPipelineBus{}
+	return &PipelineCoordinator{
+		bus:            bus,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module: &previewWorkflowModule{
+			bundle: bundle,
+		},
+	}, bus
+}
+
+func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t *testing.T) {
+	pc, bus := newDeclarativeEmitContractCoordinator("custom.emitted")
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Emit: runtimecontracts.EmitSpec{
+			Event: "custom.emitted",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"label": runtimecontracts.CELExpression(`"done"`),
+			},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("custom.trigger"),
+			Payload: mustJSON(map[string]any{"entity_id": "ent-1", "legacy": "should-not-pass"}),
+		}.WithEntityID("ent-1"),
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if got := payload["label"]; got != "done" {
+		t.Fatalf("payload.label = %#v, want done", got)
+	}
+	if got := payload["entity_id"]; got != "ent-1" {
+		t.Fatalf("payload.entity_id = %#v, want ent-1", got)
+	}
+	if got := payload["trigger_event_type"]; got != "custom.trigger" {
+		t.Fatalf("payload.trigger_event_type = %#v, want custom.trigger", got)
+	}
+	if got := payload["current_state"]; got != "queued" {
+		t.Fatalf("payload.current_state = %#v, want queued", got)
+	}
+	if _, ok := payload["legacy"]; ok {
+		t.Fatalf("legacy trigger payload leaked into emitted payload: %#v", payload["legacy"])
+	}
+	if _, ok := payload["legacy_entity"]; ok {
+		t.Fatalf("entity metadata leaked into emitted payload: %#v", payload["legacy_entity"])
+	}
+}
+
+func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t *testing.T) {
+	pc, bus := newDeclarativeEmitContractCoordinatorWithBundle(declarativeEmitContractTestBundleWithEntry("guard.failed", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{},
+	}))
+
+	_, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Guard: &runtimecontracts.GuardSpec{
+			Check:  "payload.score >= 70",
+			OnFail: "escalate:guard.failed",
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("custom.trigger"),
+			Payload: mustJSON(map[string]any{"entity_id": "ent-1", "score": 50, "legacy": "should-not-pass"}),
+		}.WithEntityID("ent-1"),
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if got := payload["entity_id"]; got != "ent-1" {
+		t.Fatalf("payload.entity_id = %#v, want ent-1", got)
+	}
+	if got := payload["trigger_event_type"]; got != "custom.trigger" {
+		t.Fatalf("payload.trigger_event_type = %#v, want custom.trigger", got)
+	}
+	if got := payload["current_state"]; got != "queued" {
+		t.Fatalf("payload.current_state = %#v, want queued", got)
+	}
+	if _, ok := payload["score"]; ok {
+		t.Fatalf("guard escalation leaked trigger payload into emitted payload: %#v", payload["score"])
+	}
+	if _, ok := payload["legacy"]; ok {
+		t.Fatalf("guard escalation leaked legacy trigger payload into emitted payload: %#v", payload["legacy"])
+	}
+	if _, ok := payload["legacy_entity"]; ok {
+		t.Fatalf("guard escalation leaked entity metadata into emitted payload: %#v", payload["legacy_entity"])
+	}
+}
+
+func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSupportedEmitSites(t *testing.T) {
+	tests := []struct {
+		name    string
+		event   events.Event
+		state   WorkflowState
+		handler runtimecontracts.SystemNodeEventHandler
+	}{
+		{
+			name:  "handler top level",
+			event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"),
+			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Emit: runtimecontracts.EmitSpec{
+					Event: "custom.emitted",
+					Fields: map[string]runtimecontracts.ExpressionValue{
+						"label": runtimecontracts.CELExpression(`"ok"`),
+						"extra": runtimecontracts.CELExpression(`"bad"`),
+					},
+				},
+			},
+		},
+		{
+			name:  "rules",
+			event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"),
+			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Rules: []runtimecontracts.HandlerRuleEntry{{
+					ID:        "pick",
+					Condition: "true",
+					Emit: runtimecontracts.EmitSpec{
+						Event: "custom.emitted",
+						Fields: map[string]runtimecontracts.ExpressionValue{
+							"label": runtimecontracts.CELExpression(`"ok"`),
+							"extra": runtimecontracts.CELExpression(`"bad"`),
+						},
+					},
+				}},
+			},
+		},
+		{
+			name:  "on_complete",
+			event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"),
+			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+			handler: runtimecontracts.SystemNodeEventHandler{
+				OnComplete: []runtimecontracts.HandlerRuleEntry{{
+					ID:        "complete",
+					Condition: "true",
+					Emit: runtimecontracts.EmitSpec{
+						Event: "custom.emitted",
+						Fields: map[string]runtimecontracts.ExpressionValue{
+							"label": runtimecontracts.CELExpression(`"ok"`),
+							"extra": runtimecontracts.CELExpression(`"bad"`),
+						},
+					},
+				}},
+			},
+		},
+		{
+			name: "accumulate.on_timeout",
+			event: events.Event{
+				Type: events.EventType("accumulate.timeout"),
+				Payload: mustJSON(map[string]any{
+					"timer_handle": map[string]any{
+						"kind": "accumulation_timeout",
+						"bucket": map[string]any{
+							"node_id":    "node-a",
+							"event_type": "item.arrived",
+						},
+					},
+				}),
+			}.WithEntityID("ent-1"),
+			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("collecting"), Metadata: map[string]any{"expected_count": 2}},
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Accumulate: &runtimecontracts.AccumulateSpec{
+					ExpectedFrom: "entity.expected_count",
+					Completion: runtimecontracts.AccumulateCompletion{
+						Mode: runtimecontracts.AccumulateModeAll,
+					},
+					OnTimeout: &runtimecontracts.HandlerRuleEntry{
+						Emit: runtimecontracts.EmitSpec{
+							Event: "custom.emitted",
+							Fields: map[string]runtimecontracts.ExpressionValue{
+								"label": runtimecontracts.CELExpression(`"ok"`),
+								"extra": runtimecontracts.CELExpression(`"bad"`),
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "fan_out",
+			event: events.Event{
+				Type:    events.EventType("batch.submitted"),
+				Payload: mustJSON(map[string]any{"items": []any{map[string]any{"label": "x"}}}),
+			}.WithEntityID("ent-1"),
+			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+			handler: runtimecontracts.SystemNodeEventHandler{
+				FanOut: &runtimecontracts.FanOutSpec{
+					ItemsFrom: "payload.items",
+					Emit: runtimecontracts.EmitSpec{
+						Event: "custom.emitted",
+						Fields: map[string]runtimecontracts.ExpressionValue{
+							"label": runtimecontracts.CELExpression(`"ok"`),
+							"extra": runtimecontracts.CELExpression(`"bad"`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pc, bus := newDeclarativeEmitContractCoordinator("custom.emitted")
+			_, err := pc.executeNodeContractHandler(context.Background(), "node-a", tc.handler, workflowTriggerContext{
+				Event: tc.event,
+				State: tc.state,
+			}, false)
+			if err == nil {
+				t.Fatal("expected undeclared business payload to fail closed")
+			}
+			if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
+				t.Fatalf("error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
+			}
+			if got := bus.publishedCount(); got != 0 {
+				t.Fatalf("bus published count = %d, want 0", got)
+			}
+		})
+	}
+}

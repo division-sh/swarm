@@ -23,7 +23,8 @@ func ClassifyFailure(err error) FailureClass {
 		ErrMissingNodeID,
 		ErrMissingNodeHandler,
 		ErrInvalidTransition,
-		ErrEmitPersistencePrerequisite:
+		ErrEmitPersistencePrerequisite,
+		ErrEmitPayloadContractViolation:
 		return FailureLogic
 	default:
 		return FailureTransient

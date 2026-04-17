@@ -16,6 +16,7 @@ import (
 	runtimeregistry "swarm/internal/runtime/core/registry"
 	runtimeengine "swarm/internal/runtime/engine"
 	runtimeeventpayload "swarm/internal/runtime/eventpayload"
+	runtimeeventschema "swarm/internal/runtime/eventschema"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -670,17 +671,11 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 	if pc == nil {
 		return cloneStringAnyMap(payload), nil
 	}
-	base := pc.handlerEmitPayload(ctx, engineTriggerContext(req), strings.TrimSpace(eventType))
-	out := cloneStringAnyMap(base)
+	out := cloneStringAnyMap(payload)
 	if out == nil {
 		out = map[string]any{}
 	}
-	for key, value := range payload {
-		if strings.TrimSpace(key) == "entity_id" {
-			continue
-		}
-		out[key] = value
-	}
+	envelope := pc.handlerEmitEnvelope(ctx, engineTriggerContext(req), strings.TrimSpace(eventType))
 	state := workflowStateFromEngine(req.State)
 	entityID := resolveEmittedEntityID(
 		pc.SemanticSource(),
@@ -689,29 +684,41 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 		*state,
 		req.Event,
 		req.EntityID.String(),
-		asString(base["entity_id"]),
+		asString(envelope["entity_id"]),
 	)
 	if entityID == "" && !req.EntityID.IsZero() {
 		entityID = strings.TrimSpace(req.EntityID.String())
 	}
 	if entityID != "" {
-		out["entity_id"] = entityID
+		envelope["entity_id"] = entityID
 	}
-	return trimPipelineEmitPayloadToSchema(pc.SemanticSource(), req.FlowID.String(), eventType, out), nil
+	for key, value := range envelope {
+		out[key] = value
+	}
+	if err := validatePipelineEmitPayload(pc.SemanticSource(), req.FlowID.String(), eventType, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
-func trimPipelineEmitPayloadToSchema(source semanticview.Source, flowID, eventType string, payload map[string]any) map[string]any {
-	if payload == nil {
-		return map[string]any{}
+func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType string, payload map[string]any) error {
+	proof := semanticview.ResolveFlowEventProof(source, strings.TrimSpace(flowID), strings.TrimSpace(eventType))
+	if !proof.HasSchema {
+		return nil
 	}
-	if source == nil {
-		return cloneStringAnyMap(payload)
+	registry := runtimecontracts.EventSchemaRegistryFromCatalog(map[string]runtimecontracts.EventCatalogEntry{
+		proof.CatalogKey: proof.Entry,
+	})
+	schema, ok := registry[proof.CatalogKey]
+	if !ok {
+		return nil
 	}
-	allowed := pipelineEmitPayloadProperties(source, flowID, eventType)
-	if len(allowed) == 0 {
-		return cloneStringAnyMap(payload)
+	allowed := eventPayloadProperties(proof.Entry)
+	validationPayload := runtimeeventpayload.StripUndeclaredRuntimeOwnedCanonicalContext(payload, allowed)
+	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, validationPayload); err != nil {
+		return fmt.Errorf("%w: event %s payload violates schema: %v", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), err)
 	}
-	return runtimeeventpayload.TrimToAllowedKeys(payload, allowed)
+	return nil
 }
 
 func pipelineEmitPayloadProperties(source semanticview.Source, flowID, eventType string) map[string]struct{} {

@@ -1475,7 +1475,11 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 		eventType := parsed.EventType
 		frame.result.Status = OutcomeEscalated
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "escalate:"+eventType)
-		shaped, err := e.shapeEmitPayload(frame, eventType, frame.payload)
+		// Guard escalation is a supported declarative emit outcome, but it has no
+		// business-payload authoring surface. It therefore uses the same runtime
+		// envelope-only path as an empty emit.fields payload, not the inbound
+		// trigger payload.
+		shaped, err := e.shapeEmitPayload(frame, eventType, map[string]any{})
 		if err != nil {
 			return err
 		}
