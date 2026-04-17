@@ -10,12 +10,16 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimeeventpayload "swarm/internal/runtime/eventpayload"
+	runtimeeventschema "swarm/internal/runtime/eventschema"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
+	runtimesharedjson "swarm/internal/runtime/sharedjson"
 	runtimetools "swarm/internal/runtime/tools"
 )
 
@@ -142,6 +146,9 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 				payload[key] = value
 			}
 		}
+		if err := validateAutoEmitPayload(req.ContractBundle, templateID, autoEmit, payload); err != nil {
+			return fmt.Errorf("auto-emit %s: %w", autoEmit, err)
+		}
 		encoded, err := json.Marshal(payload)
 		if err != nil {
 			return fmt.Errorf("encode auto-emit payload %s: %w", autoEmit, err)
@@ -176,6 +183,43 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		}
 	}
 	return nil
+}
+
+func validateAutoEmitPayload(source semanticview.Source, flowID, eventType string, payload map[string]any) error {
+	flowID = strings.TrimSpace(flowID)
+	eventType = strings.TrimSpace(eventType)
+	if source == nil || flowID == "" || eventType == "" {
+		return nil
+	}
+	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
+	if !proof.HasSchema {
+		return nil
+	}
+	registry := runtimecontracts.EventSchemaRegistryFromCatalog(map[string]runtimecontracts.EventCatalogEntry{
+		proof.CatalogKey: proof.Entry,
+	})
+	schema, ok := registry[proof.CatalogKey]
+	if !ok {
+		return nil
+	}
+	validationPayload := runtimeeventpayload.StripUndeclaredRuntimeOwnedCanonicalContext(payload, autoEmitSchemaPropertyNames(schema.Schema))
+	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, validationPayload); err != nil {
+		return fmt.Errorf("%w for %s: %v", runtimebus.ErrPayloadValidation, proof.EventKey(), err)
+	}
+	return nil
+}
+
+func autoEmitSchemaPropertyNames(schema map[string]any) map[string]struct{} {
+	props := runtimesharedjson.SchemaProperties(schema["properties"])
+	out := make(map[string]struct{}, len(props))
+	for key := range props {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = struct{}{}
+	}
+	return out
 }
 
 func (am *AgentManager) EnsureStaticFlowRequiredAgents(ctx context.Context, source semanticview.Source) error {

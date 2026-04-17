@@ -28,6 +28,7 @@ type flowActivationTestBus struct {
 	addedPaths   []string
 	removedPairs []string
 	published    []events.Event
+	runtimeLogs  []runtimepipeline.RuntimeLogEntry
 	routeStore   flowActivationRouteStore
 }
 
@@ -139,7 +140,8 @@ func (*flowActivationTestBus) Subscribe(string, ...events.EventType) <-chan even
 func (*flowActivationTestBus) Unsubscribe(string)           {}
 func (*flowActivationTestBus) Store() runtimebus.EventStore { return nil }
 func (*flowActivationTestBus) ResetInMemoryState() error    { return nil }
-func (*flowActivationTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+func (b *flowActivationTestBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	b.runtimeLogs = append(b.runtimeLogs, entry)
 	return nil
 }
 
@@ -177,6 +179,20 @@ func (flowActivationStubAgent) OnEvent(context.Context, events.Event) ([]events.
 func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 	reviewFlow := &runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.started": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"instance_id":      {Type: "string"},
+						"template_id":      {Type: "string"},
+						"flow_path":        {Type: "string"},
+						"subject_id":       {Type: "string"},
+						"parent_entity_id": {Type: "string"},
+					},
+				},
+				Required: []string{"instance_id", "template_id", "flow_path", "subject_id", "parent_entity_id"},
+			},
+		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"reviewer": {
 				ID:            "reviewer-{instance_id}",
@@ -206,6 +222,19 @@ func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},
 	}
+}
+
+func testFlowBundleWithAutoEmitEntry(autoEmit string, entry runtimecontracts.EventCatalogEntry) *runtimecontracts.WorkflowContractBundle {
+	bundle := testFlowBundle(autoEmit)
+	reviewFlow := bundle.FlowTree.ByID["review"]
+	if reviewFlow == nil {
+		return bundle
+	}
+	if reviewFlow.Events == nil {
+		reviewFlow.Events = map[string]runtimecontracts.EventCatalogEntry{}
+	}
+	reviewFlow.Events[strings.TrimSpace(autoEmit)] = entry
+	return bundle
 }
 
 func testNestedFlowBundle() *runtimecontracts.WorkflowContractBundle {
@@ -395,6 +424,57 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	}
 }
 
+func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundleWithAutoEmitEntry("task.started", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"instance_id": {Type: "string"},
+				"reason":      {Type: "string"},
+			},
+		},
+		Required: []string{"instance_id", "reason"},
+	})
+
+	err := am.ActivateFlowInstance(context.Background(), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "reason is required") {
+		t.Fatalf("ActivateFlowInstance error = %v, want missing required auto-emit schema failure", err)
+	}
+	if len(bus.published) != 0 {
+		t.Fatalf("published events = %#v, want none", bus.published)
+	}
+	if len(bus.runtimeLogs) != 0 {
+		t.Fatalf("runtime logs = %#v, want none", bus.runtimeLogs)
+	}
+}
+
+func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundle("task.started")
+	postCommit := make([]func(), 0, 1)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.Config = map[string]any{
+		"unexpected": "value",
+	}
+
+	err := am.ActivateFlowInstance(ctx, req)
+	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "unexpected is not allowed") {
+		t.Fatalf("ActivateFlowInstance error = %v, want undeclared auto-emit schema failure", err)
+	}
+	if len(postCommit) != 0 {
+		t.Fatalf("post-commit actions = %d, want 0", len(postCommit))
+	}
+	if len(bus.published) != 0 {
+		t.Fatalf("published events = %#v, want none", bus.published)
+	}
+	if len(bus.runtimeLogs) != 0 {
+		t.Fatalf("runtime logs = %#v, want none", bus.runtimeLogs)
+	}
+}
+
 func TestNormalizedStaticFlowEmitEvents_ExternalizesLocalEvents(t *testing.T) {
 	got := normalizedStaticFlowEmitEvents(
 		[]string{"analysis.done", "shared.event"},
@@ -425,7 +505,20 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(bus, instances)
-	bundle := testFlowBundle("task.started")
+	bundle := testFlowBundleWithAutoEmitEntry("task.started", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"instance_id":      {Type: "string"},
+				"template_id":      {Type: "string"},
+				"flow_path":        {Type: "string"},
+				"subject_id":       {Type: "string"},
+				"parent_entity_id": {Type: "string"},
+				"name":             {Type: "string"},
+				"priority":         {Type: "integer"},
+			},
+		},
+		Required: []string{"instance_id", "template_id", "flow_path", "subject_id", "parent_entity_id"},
+	})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{
