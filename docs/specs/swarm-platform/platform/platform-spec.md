@@ -382,7 +382,7 @@ query (optional — pre-fetch cross-entity data into handler context)
 ### retired_emit_carriers
 
 - `retired_fields`: `emits`, `payload_transform`, `fan_out.emit_per_item`, `fan_out.emit_mapping`
-- `replacement`: Use `emit` / `emit.fields` at the active emit site.
+- `replacement`: Use `emit` / `emit.fields` at the active emit site. `fan_out.emit_mapping` has no direct replacement in the current fan_out model because `fan_out` now owns one `emit.event`; per-item event-name branching must happen before or after fan-out.
 - `note`: These are retired compatibility forms, not alternate current-contract spellings.
 
 - `_note`: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching condition executes.

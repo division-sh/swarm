@@ -615,7 +615,7 @@ handler_specification:
       - "`emits` — retired; use `emit`"
       - "`payload_transform` — retired; move payload ownership into `emit.fields` at the active emit site"
       - "`fan_out.emit_per_item` — retired; use `fan_out.emit`"
-      - "`fan_out.emit_mapping` — retired; use `fan_out.emit.fields`"
+      - "`fan_out.emit_mapping` — retired; no direct replacement in the current fan_out model. Use a single `fan_out.emit` and route before or after fan-out if per-item event-name branching is required."
     clear_gates:
       field: clear_gates
       type: boolean
