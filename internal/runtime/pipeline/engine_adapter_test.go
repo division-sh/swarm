@@ -1002,6 +1002,50 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsAcrossCrossFlowOutpu
 	}
 }
 
+func TestPipelineEnginePayloadShaper_DoesNotApplyDeclarativeValidationToActionSurface(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	shaper := pipelineEnginePayloadShaper{
+		coordinator: &PipelineCoordinator{
+			module: &previewWorkflowModule{
+				bundle: bundle,
+			},
+		},
+	}
+
+	req := runtimeengine.ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("ent-child"),
+		FlowID:   identity.NormalizeFlowID("child"),
+		Event: events.Event{
+			Type:    events.EventType("child/child.internal"),
+			Payload: json.RawMessage(`{"entity_id":"ent-child","step":"done"}`),
+		}.WithEntityID("ent-child"),
+		State: runtimeengine.StateSnapshot{
+			EntityID:     identity.NormalizeEntityID("ent-child"),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+		},
+	}
+
+	actionCtx := runtimeengine.WithEmitSurface(context.Background(), runtimeengine.EmitSurfaceAction)
+	payload, err := shaper.ShapeEmitPayload(actionCtx, req, "child/child.done", map[string]any{
+		"entity_id":   "ent-child",
+		"vertical_id": "ent-child",
+		"result":      "accepted",
+	})
+	if err != nil {
+		t.Fatalf("ShapeEmitPayload action surface: %v", err)
+	}
+	if got := payload["vertical_id"]; got != "ent-child" {
+		t.Fatalf("action payload vertical_id = %#v, want ent-child", got)
+	}
+	if got := payload["result"]; got != "accepted" {
+		t.Fatalf("action payload result = %#v, want accepted", got)
+	}
+}
+
 func TestPipelineEmitPayloadProperties_UsesCanonicalFlowEventProofForLocalAndCanonicalRefs(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
 
