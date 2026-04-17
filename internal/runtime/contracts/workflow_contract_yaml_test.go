@@ -377,6 +377,19 @@ emit: scoring.requested
 	}
 }
 
+func TestHandlerRuleEntryDecode_RejectsEmitFieldsWithoutEvent(t *testing.T) {
+	var rule HandlerRuleEntry
+	err := yaml.Unmarshal([]byte(`
+condition: "else"
+emit:
+  fields:
+    scan_id: payload.scan_id
+`), &rule)
+	if err == nil || !strings.Contains(err.Error(), "INVALID-EMIT") {
+		t.Fatalf("yaml.Unmarshal error = %v, want INVALID-EMIT", err)
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_RejectsTieredWeightedAverageWithoutDimensionKey(t *testing.T) {
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`

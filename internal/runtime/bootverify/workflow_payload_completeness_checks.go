@@ -30,10 +30,8 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 		for triggerEventType, handler := range c.source.NodeEventHandlers(nodeID) {
 			triggerEventType = strings.TrimSpace(triggerEventType)
 			triggerProof := semanticview.ResolveFlowEventProof(c.source, flowID, triggerEventType)
-			emitFieldsByEvent := payloadCompletenessEmitFields(handler)
-
-			for _, emitted := range uniquePayloadCompletenessStrings(handlerEmits(handler)...) {
-				emitted = strings.TrimSpace(emitted)
+			for _, emitSite := range payloadCompletenessEmitSites(handler) {
+				emitted := strings.TrimSpace(emitSite.EventType)
 				if emitted == "" {
 					continue
 				}
@@ -50,10 +48,8 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 					if _, ok := forced[field]; ok {
 						continue
 					}
-					if targets := emitFieldsByEvent[emitted]; len(targets) > 0 {
-						if _, ok := targets[field]; ok {
-							continue
-						}
+					if _, ok := emitSite.Fields[field]; ok {
+						continue
 					}
 
 					c.payloadCompletenessFindings = append(c.payloadCompletenessFindings, Finding{
@@ -64,7 +60,8 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 							triggerEventType,
 							emittedProof.DisplayName(),
 							field,
-							emitFieldsByEvent[emitted],
+							emitSite.Label,
+							emitSite.Fields,
 							triggerProof.Entry,
 							triggerProof.HasSchema,
 							entityFields,
@@ -85,6 +82,12 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 	return c.payloadCompletenessFindings
 }
 
+type payloadCompletenessEmitSite struct {
+	EventType string
+	Label     string
+	Fields    map[string]struct{}
+}
+
 func payloadCompletenessRequiredFields(entry runtimecontracts.EventCatalogEntry) []string {
 	return uniquePayloadCompletenessStrings(entry.Required...)
 }
@@ -97,17 +100,14 @@ func payloadCompletenessForcedFields() map[string]struct{} {
 	}
 }
 
-func payloadCompletenessEmitFields(handler runtimecontracts.SystemNodeEventHandler) map[string]map[string]struct{} {
-	out := map[string]map[string]struct{}{}
-	add := func(spec runtimecontracts.EmitSpec) {
+func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandler) []payloadCompletenessEmitSite {
+	var out []payloadCompletenessEmitSite
+	add := func(label string, spec runtimecontracts.EmitSpec) {
 		eventType := spec.EventType()
 		if eventType == "" {
 			return
 		}
-		targets := out[eventType]
-		if targets == nil {
-			targets = map[string]struct{}{}
-		}
+		targets := map[string]struct{}{}
 		for key := range spec.Fields {
 			key = strings.TrimSpace(key)
 			if key == "" {
@@ -115,39 +115,53 @@ func payloadCompletenessEmitFields(handler runtimecontracts.SystemNodeEventHandl
 			}
 			targets[key] = struct{}{}
 		}
-		out[eventType] = targets
+		out = append(out, payloadCompletenessEmitSite{
+			EventType: eventType,
+			Label:     strings.TrimSpace(label),
+			Fields:    targets,
+		})
 	}
-	add(handler.Emit)
+	add("handler.emit", handler.Emit)
 	if handler.FanOut != nil {
-		add(handler.FanOut.Emit)
+		add("handler.fan_out.emit", handler.FanOut.Emit)
 	}
-	for _, rule := range handler.Rules {
-		add(rule.Emit)
+	for i, rule := range handler.Rules {
+		add(payloadCompletenessRuleLabel("rules", i, rule.ID, "emit"), rule.Emit)
 		if rule.FanOut != nil {
-			add(rule.FanOut.Emit)
+			add(payloadCompletenessRuleLabel("rules", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
 		}
 	}
-	for _, rule := range handler.OnComplete {
-		add(rule.Emit)
+	for i, rule := range handler.OnComplete {
+		add(payloadCompletenessRuleLabel("on_complete", i, rule.ID, "emit"), rule.Emit)
 		if rule.FanOut != nil {
-			add(rule.FanOut.Emit)
+			add(payloadCompletenessRuleLabel("on_complete", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
 		}
 	}
 	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			add(rule.Emit)
+		for i, rule := range handler.Accumulate.OnComplete {
+			add(payloadCompletenessRuleLabel("accumulate.on_complete", i, rule.ID, "emit"), rule.Emit)
 			if rule.FanOut != nil {
-				add(rule.FanOut.Emit)
+				add(payloadCompletenessRuleLabel("accumulate.on_complete", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
 			}
 		}
 		if handler.Accumulate.OnTimeout != nil {
-			add(handler.Accumulate.OnTimeout.Emit)
+			add(payloadCompletenessRuleLabel("accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID, "emit"), handler.Accumulate.OnTimeout.Emit)
 			if handler.Accumulate.OnTimeout.FanOut != nil {
-				add(handler.Accumulate.OnTimeout.FanOut.Emit)
+				add(payloadCompletenessRuleLabel("accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID, "fan_out.emit"), handler.Accumulate.OnTimeout.FanOut.Emit)
 			}
 		}
 	}
 	return out
+}
+
+func payloadCompletenessRuleLabel(scope string, index int, id, suffix string) string {
+	scope = strings.TrimSpace(scope)
+	id = strings.TrimSpace(id)
+	suffix = strings.TrimSpace(suffix)
+	if id != "" {
+		return fmt.Sprintf("%s[%s].%s", scope, id, suffix)
+	}
+	return fmt.Sprintf("%s[%d].%s", scope, index, suffix)
 }
 
 func payloadCompletenessTriggerSchemaState(entry runtimecontracts.EventCatalogEntry, hasSchema bool, field string) string {
@@ -185,9 +199,13 @@ func payloadCompletenessEntitySchemaState(entityFields map[string]struct{}, fiel
 	return "no"
 }
 
-func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, field string, emitFieldTargets map[string]struct{}, triggerEntry runtimecontracts.EventCatalogEntry, hasTriggerSchema bool, entityFields map[string]struct{}) string {
+func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, field, emitSiteLabel string, emitFieldTargets map[string]struct{}, triggerEntry runtimecontracts.EventCatalogEntry, hasTriggerSchema bool, entityFields map[string]struct{}) string {
 	fieldState := "absent"
 	fieldCovered := "N/A (no emit.fields)"
+	emitSiteLabel = strings.TrimSpace(emitSiteLabel)
+	if emitSiteLabel == "" {
+		emitSiteLabel = "emit"
+	}
 	if len(emitFieldTargets) > 0 {
 		fieldState = "present"
 		fieldCovered = strings.Join(sortedPayloadCompletenessKeys(emitFieldTargets), ", ")
@@ -196,10 +214,11 @@ func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, fiel
 		}
 	}
 	return fmt.Sprintf(
-		"event %s emitted by node %s handler %s: required field %s is not statically provable in the emitted payload. Payload construction: emit.fields: %s; emit.fields covers: %s; platform-forced: entity_id, trigger_event_type, current_state. Context (does not clear finding): trigger schema declares %s: %s; entity schema declares %s: %s.",
+		"event %s emitted by node %s handler %s at %s: required field %s is not statically provable in the emitted payload. Payload construction: emit.fields: %s; emit.fields covers: %s; platform-forced: entity_id, trigger_event_type, current_state. Context (does not clear finding): trigger schema declares %s: %s; entity schema declares %s: %s.",
 		strings.TrimSpace(emittedEventType),
 		strings.TrimSpace(nodeID),
 		strings.TrimSpace(triggerEventType),
+		emitSiteLabel,
 		strings.TrimSpace(field),
 		fieldState,
 		fieldCovered,

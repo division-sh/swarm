@@ -277,7 +277,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 			},
 			SourceEvent: "research.completed",
 		},
-		Emit: runtimecontracts.EmitSpec{Event: "spec.requested"},
+		Emit:       runtimecontracts.EmitSpec{Event: "spec.requested"},
 		AdvancesTo: "mvp_speccing",
 	}, workflowTriggerContext{
 		Event: events.Event{
@@ -338,7 +338,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 			},
 			SourceEvent: "research.completed",
 		},
-		Emit: runtimecontracts.EmitSpec{Event: "spec.requested"},
+		Emit:       runtimecontracts.EmitSpec{Event: "spec.requested"},
 		AdvancesTo: "mvp_speccing",
 	}, workflowTriggerContext{
 		Event: events.Event{
@@ -1365,7 +1365,7 @@ func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialVa
 	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		Clear:        &runtimecontracts.ClearSpec{Target: "entity.revision_count"},
-		Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
+		Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("candidate.discovered")},
 		State: WorkflowState{},
@@ -1433,7 +1433,7 @@ func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testin
 					"candidate.discovered": {
 						CreateEntity: true,
 						Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"},
-						Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
+						Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
 					},
 				},
 			},
@@ -1447,7 +1447,7 @@ func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testin
 					"candidate.discovered": {
 						CreateEntity: true,
 						Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"},
-						Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
+						Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
 					},
 				},
 			},

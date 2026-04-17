@@ -1764,6 +1764,53 @@ func TestRun_DoesNotWarnWhenOnlyPlatformForcedFieldsAreRequired(t *testing.T) {
 	}
 }
 
+func TestRun_WarnsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{}
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{
+		{
+			ID:        "complete",
+			Condition: "payload.mode == 'full'",
+			Emit: runtimecontracts.EmitSpec{
+				Event: "market_research.scan_assigned",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"scan_id": runtimecontracts.RefExpression("payload.scan_id"),
+				},
+			},
+		},
+		{
+			ID:        "partial",
+			Condition: "payload.mode == 'partial'",
+			Emit: runtimecontracts.EmitSpec{
+				Event: "market_research.scan_assigned",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"geography": runtimecontracts.RefExpression("payload.geography"),
+				},
+			},
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "rules[partial].emit") {
+		t.Fatalf("expected site-specific payload completeness warning for partial rule, got %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("expected missing scan_id warning for underspecified rule, got %#v", report.Warnings())
+	}
+	if reportContains(report.Warnings(), "semantic_drift_payload_completeness", "rules[complete].emit") {
+		t.Fatalf("unexpected payload completeness warning for fully specified rule, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-missing-pin")
 
@@ -1866,7 +1913,7 @@ func TestRun_DoesNotWarnForPlatformEventCatalogInputProducerPath(t *testing.T) {
 	renameFlowHandlerEvent(t, bundle, "child", "worker", "task.feedback", "platform.runtime_log", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		AdvancesTo:   "done",
-		Emit: runtimecontracts.EmitSpec{Event: "task.result"},
+		Emit:         runtimecontracts.EmitSpec{Event: "task.result"},
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
