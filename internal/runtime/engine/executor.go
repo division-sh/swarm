@@ -904,7 +904,8 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 			return fmt.Errorf("action %q is not executable", actionKey.String())
 		}
 		if strings.TrimSpace(entry.Emits) != "" {
-			shaped, err := e.shapeEmitPayload(frame, entry.Emits, frame.payload)
+			actionCtx := WithEmitSurface(frame.tx.Context(), EmitSurfaceAction)
+			shaped, err := e.shapeEmitPayloadWithContext(actionCtx, frame, entry.Emits, frame.payload)
 			if err != nil {
 				return err
 			}
@@ -1362,13 +1363,17 @@ func selectedEmitSpec(handler runtimecontracts.SystemNodeEventHandler, rule *run
 }
 
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
+	return e.shapeEmitPayloadWithContext(frame.tx.Context(), frame, eventType, payload)
+}
+
+func (e *Executor) shapeEmitPayloadWithContext(ctx context.Context, frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
 	cloned := cloneStringAnyMap(payload)
 	if e.deps.PayloadShaper == nil {
 		return cloned, nil
 	}
 	req := frame.req
 	req.State = frame.state.State
-	return e.deps.PayloadShaper.ShapeEmitPayload(frame.tx.Context(), req, strings.TrimSpace(eventType), cloned)
+	return e.deps.PayloadShaper.ShapeEmitPayload(ctx, req, strings.TrimSpace(eventType), cloned)
 }
 
 func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payload map[string]any, chainDepth int) (EmitIntent, error) {

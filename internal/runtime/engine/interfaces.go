@@ -9,6 +9,29 @@ import (
 	"swarm/internal/runtime/semanticview"
 )
 
+type emitSurfaceContextKey struct{}
+
+type EmitSurface string
+
+const (
+	EmitSurfaceDeclarative EmitSurface = "declarative"
+	EmitSurfaceAction      EmitSurface = "action"
+)
+
+func WithEmitSurface(ctx context.Context, surface EmitSurface) context.Context {
+	return context.WithValue(ctx, emitSurfaceContextKey{}, surface)
+}
+
+func EmitSurfaceFromContext(ctx context.Context) EmitSurface {
+	if ctx == nil {
+		return EmitSurfaceDeclarative
+	}
+	if surface, ok := ctx.Value(emitSurfaceContextKey{}).(EmitSurface); ok && surface != "" {
+		return surface
+	}
+	return EmitSurfaceDeclarative
+}
+
 type SemanticSourceProvider interface {
 	SemanticSource() semanticview.Source
 }

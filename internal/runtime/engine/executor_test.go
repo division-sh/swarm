@@ -1557,6 +1557,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 
 func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	runner := &stubActionRunner{}
+	shaper := &recordingPayloadShaper{}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),
 		StateRepo:  stubStateRepo{},
@@ -1571,7 +1572,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 			},
 		}},
 		ActionRunner:  runner,
-		PayloadShaper: stubPayloadShaper{},
+		PayloadShaper: shaper,
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1597,6 +1598,9 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	}
 	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type) != "action.emitted" {
 		t.Fatalf("unexpected action emit intents: %#v", result.EmitIntents)
+	}
+	if got := shaper.lastPayload["score"]; got != float64(9) {
+		t.Fatalf("action emit payload score = %#v, want 9", got)
 	}
 }
 
