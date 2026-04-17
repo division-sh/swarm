@@ -1272,10 +1272,10 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 
 	err := verifyBundle(context.Background(), semanticview.Wrap(bundle))
 	if err == nil {
-		t.Fatal("verifyBundle error = nil, want warning-only failure from emitted payload completeness")
+		t.Fatal("verifyBundle error = nil, want emitted payload completeness invalidity")
 	}
 	if !strings.Contains(err.Error(), "scan_id is not statically provable") {
-		t.Fatalf("verifyBundle error = %v, want emitted payload completeness warning", err)
+		t.Fatalf("verifyBundle error = %v, want emitted payload completeness invalidity", err)
 	}
 	if strings.Contains(err.Error(), "definitely missing") {
 		t.Fatalf("verifyBundle error = %v, want approved warning wording only", err)

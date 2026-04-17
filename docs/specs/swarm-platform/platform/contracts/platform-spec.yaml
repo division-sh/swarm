@@ -3372,8 +3372,8 @@ static_analyzer:
   slice_2_emitted_event_payload_completeness:
     id: semantic_drift_payload_completeness
     domain: semantic_drift
-    authority: semantic_drift_warning
-    severity: warning
+    authority: hard_invalidity
+    severity: error
     canonical_owner: internal/runtime/bootverify
     supported_surface: cmd/swarm verify
     spec_basis:
@@ -3384,7 +3384,12 @@ static_analyzer:
       description: For every event emitted by a system node handler, verify that the emitted payload statically covers all required
         event-schema fields using only the accepted slice-2 proof carriers.
       applies_to:
-      - all system-node emitted events
+      - handler top-level single-emit
+      - rules entries
+      - on_complete branches
+      - accumulate.on_timeout
+      - fan_out per-item emit
+      - guard on_fail: escalate
       excludes:
       - cross-handler reaching-definitions
       - prompt lint / provenance / handoff audit work
@@ -3400,7 +3405,7 @@ static_analyzer:
         valid_for: keys explicitly declared in emit.fields at the active emit site
     no_emit_fields_rule:
       description: When emit.fields is absent, only platform-forced fields are provable in this slice.
-    rule: For each required emitted-event field, emit semantic_drift_warning unless the field is platform-forced or explicitly covered
+    rule: For each required emitted-event field, emit hard-invalidity unless the field is platform-forced or explicitly covered
       by emit.fields at the active emit site. The finding message must say the field is not statically provable.
   slice_3_input_pin_producer_path_satisfaction:
     id: input_pin_wiring

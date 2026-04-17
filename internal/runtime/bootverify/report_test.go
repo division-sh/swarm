@@ -1627,7 +1627,7 @@ func TestRun_DoesNotWarnForPhantomProducesWhenDeclaredEventsMatchEmits(t *testin
 	}
 }
 
-func TestRun_WarnsWhenEmitFieldsOmitRequiredEmittedField(t *testing.T) {
+func TestRun_ErrorsWhenEmitFieldsOmitRequiredEmittedField(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
@@ -1644,18 +1644,15 @@ func TestRun_WarnsWhenEmitFieldsOmitRequiredEmittedField(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("expected payload completeness error for scan_id, got %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
-		t.Fatalf("expected payload completeness warning for scan_id, got %#v", report.Warnings())
-	}
-	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "emit.fields covers: geography, mode") {
-		t.Fatalf("expected payload completeness warning to mention emit.fields coverage, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "emit.fields covers: geography, mode") {
+		t.Fatalf("expected payload completeness error to mention emit.fields coverage, got %#v", report.Errors())
 	}
 }
 
-func TestRun_WarnsWithoutEmitFieldsEvenWhenContextSuggestsPassthrough(t *testing.T) {
+func TestRun_ErrorsWithoutEmitFieldsEvenWhenContextSuggestsPassthrough(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
 	entry.Required = []string{"entity_id", "scan_id"}
@@ -1663,20 +1660,17 @@ func TestRun_WarnsWithoutEmitFieldsEvenWhenContextSuggestsPassthrough(t *testing
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("expected payload completeness error for scan_id, got %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
-		t.Fatalf("expected payload completeness warning for scan_id, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "emit.fields: absent") {
+		t.Fatalf("expected payload completeness error to mention missing emit.fields, got %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "emit.fields: absent") {
-		t.Fatalf("expected payload completeness warning to mention missing emit.fields, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "trigger schema declares scan_id: yes (required)") {
+		t.Fatalf("expected payload completeness error to mention trigger schema context, got %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "trigger schema declares scan_id: yes (required)") {
-		t.Fatalf("expected payload completeness warning to mention trigger schema context, got %#v", report.Warnings())
-	}
-	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "entity schema declares scan_id: yes") {
-		t.Fatalf("expected payload completeness warning to mention entity schema context, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "entity schema declares scan_id: yes") {
+		t.Fatalf("expected payload completeness error to mention entity schema context, got %#v", report.Errors())
 	}
 }
 
@@ -1697,8 +1691,8 @@ func TestRun_DoesNotWarnWhenEmitFieldsAndPlatformForcedFieldsCoverRequiredPayloa
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
-		t.Fatalf("unexpected payload completeness warning when transform covers required fields, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("unexpected payload completeness error when transform covers required fields, got %#v", report.Errors())
 	}
 }
 
@@ -1744,8 +1738,8 @@ func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayloadAcrossExpressionKinds(
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-			if reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
-				t.Fatalf("unexpected payload completeness warning for %s transform form, got %#v", tc.name, report.Warnings())
+			if reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+				t.Fatalf("unexpected payload completeness error for %s transform form, got %#v", tc.name, report.Errors())
 			}
 		})
 	}
@@ -1759,12 +1753,12 @@ func TestRun_DoesNotWarnWhenOnlyPlatformForcedFieldsAreRequired(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "semantic_drift_payload_completeness", "not statically provable") {
-		t.Fatalf("unexpected payload completeness warning for platform-forced-only schema, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "not statically provable") {
+		t.Fatalf("unexpected payload completeness error for platform-forced-only schema, got %#v", report.Errors())
 	}
 }
 
-func TestRun_WarnsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *testing.T) {
+func TestRun_ErrorsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
@@ -1797,17 +1791,140 @@ func TestRun_WarnsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *testi
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[partial].emit") {
+		t.Fatalf("expected site-specific payload completeness error for partial rule, got %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "rules[partial].emit") {
-		t.Fatalf("expected site-specific payload completeness warning for partial rule, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("expected missing scan_id error for underspecified rule, got %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
-		t.Fatalf("expected missing scan_id warning for underspecified rule, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[complete].emit") {
+		t.Fatalf("unexpected payload completeness error for fully specified rule, got %#v", report.Errors())
 	}
-	if reportContains(report.Warnings(), "semantic_drift_payload_completeness", "rules[complete].emit") {
-		t.Fatalf("unexpected payload completeness warning for fully specified rule, got %#v", report.Warnings())
+}
+
+func TestRun_ErrorsForOnCompleteEmitSitePayloadDrift(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{}
+	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{
+		{
+			ID: "complete",
+			Emit: runtimecontracts.EmitSpec{
+				Event: "market_research.scan_assigned",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"scan_id": runtimecontracts.RefExpression("payload.scan_id"),
+				},
+			},
+		},
+		{
+			ID: "partial",
+			Emit: runtimecontracts.EmitSpec{
+				Event: "market_research.scan_assigned",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"geography": runtimecontracts.RefExpression("payload.geography"),
+				},
+			},
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "on_complete[partial].emit") {
+		t.Fatalf("expected on_complete payload completeness error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("expected missing scan_id error for underspecified on_complete branch, got %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "on_complete[complete].emit") {
+		t.Fatalf("unexpected payload completeness error for fully specified on_complete branch, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ErrorsForAccumulateOnTimeoutEmitSitePayloadDrift(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{}
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{
+		OnTimeout: &runtimecontracts.HandlerRuleEntry{
+			ID: "timeout",
+			Emit: runtimecontracts.EmitSpec{
+				Event: "market_research.scan_assigned",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"geography": runtimecontracts.RefExpression("payload.geography"),
+				},
+			},
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "accumulate.on_timeout[timeout].emit") {
+		t.Fatalf("expected accumulate.on_timeout payload completeness error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("expected missing scan_id error for accumulate.on_timeout emit, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ErrorsForFanOutEmitSitePayloadDrift(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{}
+	handler.FanOut = &runtimecontracts.FanOutSpec{
+		Emit: runtimecontracts.EmitSpec{
+			Event: "market_research.scan_assigned",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"geography": runtimecontracts.RefExpression("payload.geography"),
+			},
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "handler.fan_out.emit") {
+		t.Fatalf("expected fan_out payload completeness error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
+		t.Fatalf("expected missing scan_id error for fan_out emit, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
+	entry := bundle.Events["check.escalated"]
+	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
+	entry.Required = []string{"entity_id", "reason"}
+	bundle.Events["check.escalated"] = entry
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
+		t.Fatalf("expected guard escalation payload completeness error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "reason is not statically provable") {
+		t.Fatalf("expected missing reason error for guard escalation emit, got %#v", report.Errors())
+	}
+}
+
+func TestRun_DoesNotErrorForGuardEscalateWhenOnlyPlatformForcedFieldsAreRequired(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
+		t.Fatalf("unexpected payload completeness error for platform-forced-only guard escalation, got %#v", report.Errors())
 	}
 }
 
