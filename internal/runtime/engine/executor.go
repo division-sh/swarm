@@ -1355,7 +1355,7 @@ func (e *Executor) selectedFanOut(frame *executionFrame) *runtimecontracts.FanOu
 }
 
 func selectedEmitSpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry) runtimecontracts.EmitSpec {
-	if rule != nil && !rule.Emit.Empty() {
+	if rule != nil {
 		return rule.Emit
 	}
 	return handler.Emit

@@ -846,6 +846,44 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 	}
 }
 
+func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        stubOutbox{},
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: stubPayloadShaper{},
+		MaxChainDepth: 5,
+	}, stubEvaluator{bools: map[string]bool{"payload.score > 5": true}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "entity-1",
+		NodeID:     "node-1",
+		FlowID:     "flow-1",
+		ChainDepth: 1,
+		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Emit: runtimecontracts.EmitSpec{Event: "handler.emitted"},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:         "rule-1",
+				Condition:  "payload.score > 5",
+				AdvancesTo: "approved",
+			}},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil {
+		t.Fatalf("expected ambiguous handler-level emit config to be rejected, got %+v", result)
+	}
+	if !strings.Contains(err.Error(), "handler-top-level emit is only allowed on single-emit handlers") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),
@@ -1143,15 +1181,15 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 							{TargetField: "scoring_rubric", Value: runtimecontracts.LiteralExpression("corpus_rubric")},
 						},
 					},
-				},
-			},
-			Emit: runtimecontracts.EmitSpec{
-				Event: "scoring.requested",
-				Fields: map[string]runtimecontracts.ExpressionValue{
-					"vertical_name":        runtimecontracts.CELExpression("entity.name"),
-					"rubric":               runtimecontracts.CELExpression("entity.scoring_rubric"),
-					"dimensions_requested": runtimecontracts.CELExpression("entity.dimensions_requested"),
-					"discovery_context":    runtimecontracts.CELExpression("payload.discovery_context"),
+					Emit: runtimecontracts.EmitSpec{
+						Event: "scoring.requested",
+						Fields: map[string]runtimecontracts.ExpressionValue{
+							"vertical_name":        runtimecontracts.CELExpression("entity.name"),
+							"rubric":               runtimecontracts.CELExpression("entity.scoring_rubric"),
+							"dimensions_requested": runtimecontracts.CELExpression("entity.dimensions_requested"),
+							"discovery_context":    runtimecontracts.CELExpression("payload.discovery_context"),
+						},
+					},
 				},
 			},
 		},

@@ -128,31 +128,77 @@ def is_suppressed(ev_name):
         if ev.get('_producer', '').startswith('agent'): return True
     return False
 
+def emit_event_name(spec):
+    if isinstance(spec, str):
+        return spec
+    if isinstance(spec, dict):
+        ev = spec.get('event')
+        if isinstance(ev, str):
+            return ev
+    return ""
+
 def collect_handler_emits(h):
     """Collect all events emitted by a handler."""
     emitted = set()
     if not isinstance(h, dict): return emitted
-    e = h.get('emits')
-    if isinstance(e, str): emitted.add(e)
-    elif isinstance(e, list): emitted.update(e)
+    e = emit_event_name(h.get('emit'))
+    if e:
+        emitted.add(e)
     fo = h.get('fan_out', {})
-    if isinstance(fo, dict) and fo.get('emit_per_item'):
-        emitted.add(fo['emit_per_item'])
+    if isinstance(fo, dict):
+        e = emit_event_name(fo.get('emit'))
+        if e:
+            emitted.add(e)
     rules = h.get('rules', {})
     if isinstance(rules, dict):
         for r in rules.values():
             if isinstance(r, dict):
-                re_ = r.get('emits')
-                if isinstance(re_, str): emitted.add(re_)
-                elif isinstance(re_, list): emitted.update(re_)
+                e = emit_event_name(r.get('emit'))
+                if e:
+                    emitted.add(e)
+                fo = r.get('fan_out', {})
+                if isinstance(fo, dict):
+                    e = emit_event_name(fo.get('emit'))
+                    if e:
+                        emitted.add(e)
     oc = h.get('on_complete')
     if isinstance(oc, (dict, list)):
         items = oc.values() if isinstance(oc, dict) else oc
         for b in items:
             if isinstance(b, dict):
-                be = b.get('emits')
-                if isinstance(be, str): emitted.add(be)
-                elif isinstance(be, list): emitted.update(be)
+                e = emit_event_name(b.get('emit'))
+                if e:
+                    emitted.add(e)
+                fo = b.get('fan_out', {})
+                if isinstance(fo, dict):
+                    e = emit_event_name(fo.get('emit'))
+                    if e:
+                        emitted.add(e)
+    acc = h.get('accumulate', {})
+    if isinstance(acc, dict):
+        ot = acc.get('on_timeout')
+        if isinstance(ot, dict):
+            e = emit_event_name(ot.get('emit'))
+            if e:
+                emitted.add(e)
+            fo = ot.get('fan_out', {})
+            if isinstance(fo, dict):
+                e = emit_event_name(fo.get('emit'))
+                if e:
+                    emitted.add(e)
+        oc = acc.get('on_complete')
+        if isinstance(oc, (dict, list)):
+            items = oc.values() if isinstance(oc, dict) else oc
+            for b in items:
+                if isinstance(b, dict):
+                    e = emit_event_name(b.get('emit'))
+                    if e:
+                        emitted.add(e)
+                    fo = b.get('fan_out', {})
+                    if isinstance(fo, dict):
+                        e = emit_event_name(fo.get('emit'))
+                        if e:
+                            emitted.add(e)
     return emitted
 
 def iter_flows_with_nodes():
@@ -225,9 +271,33 @@ fan_out_events = set()
 for nid, node in all_nodes.items():
     if not isinstance(node, dict): continue
     for ev, h in node.get('event_handlers', {}).items():
-        fo = h.get('fan_out', {}) if isinstance(h, dict) else {}
-        if isinstance(fo, dict) and fo.get('emit_per_item'):
-            fan_out_events.add(fo['emit_per_item'])
+        if not isinstance(h, dict):
+            continue
+        fo = h.get('fan_out', {})
+        if isinstance(fo, dict):
+            e = emit_event_name(fo.get('emit'))
+            if e:
+                fan_out_events.add(e)
+        for block_name in ("rules", "on_complete"):
+            block = h.get(block_name, {})
+            items = block.values() if isinstance(block, dict) else (block if isinstance(block, list) else [])
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                fo = item.get('fan_out', {})
+                if isinstance(fo, dict):
+                    e = emit_event_name(fo.get('emit'))
+                    if e:
+                        fan_out_events.add(e)
+        acc = h.get('accumulate', {})
+        if isinstance(acc, dict):
+            ot = acc.get('on_timeout')
+            if isinstance(ot, dict):
+                fo = ot.get('fan_out', {})
+                if isinstance(fo, dict):
+                    e = emit_event_name(fo.get('emit'))
+                    if e:
+                        fan_out_events.add(e)
 
 # ============================================================
 # CHECK: event_chain_integrity [warning, per-flow]
@@ -387,9 +457,9 @@ for flow in FLOWS:
 # ============================================================
 DEFINED_HANDLER_FIELDS = {
     'description', '_note', 'guard', 'accumulate', 'compute', 'on_complete',
-    'advances_to', 'sets_gate', 'data_accumulation', 'emits', 'rules',
+    'advances_to', 'sets_gate', 'data_accumulation', 'emit', 'rules',
     'fan_out', 'query', 'reduce', 'filter', 'count', 'clear', 'action',
-    'template', 'instance_id_from', 'config_from', 'payload_transform',
+    'template', 'instance_id_from', 'config_from',
     'clear_gates', 'evidence_target', 'create_entity',
 }
 for flow, nodes in iter_flows_with_nodes():
@@ -535,9 +605,7 @@ for flow, nodes in iter_flows_with_nodes():
             if isinstance(h.get('advances_to'), list):
                 error("dialect_compliance", "advances_to is list, must be string", loc)
 
-            emit_val = h.get('emits')
-            elist = [emit_val] if isinstance(emit_val, str) else (emit_val if isinstance(emit_val, list) else [])
-            if ev in elist:
+            if ev in collect_handler_emits(h):
                 error("dialect_compliance", "emits own trigger event '%s' (self-emit)" % ev, loc)
 
 # ============================================================
