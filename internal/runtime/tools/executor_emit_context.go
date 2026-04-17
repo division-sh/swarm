@@ -45,32 +45,3 @@ func (e *Executor) emitSchemaAllowsProperty(eventType, property string) bool {
 	_, ok = props[property]
 	return ok
 }
-
-func (e *Executor) trimEmitPayloadToSchema(eventType string, payload map[string]any) map[string]any {
-	if payload == nil {
-		return map[string]any{}
-	}
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		return payload
-	}
-	if e == nil || e.emitRegistry == nil {
-		return payload
-	}
-	schema := e.emitRegistry.SchemaForEventType(eventType).Schema
-	if schemaAdditionalProps(schema["additionalProperties"]) {
-		return payload
-	}
-	props := schemaProperties(schema["properties"])
-	if len(props) == 0 {
-		return payload
-	}
-	out := make(map[string]any, len(payload))
-	for k, v := range payload {
-		if _, ok := props[strings.TrimSpace(k)]; !ok {
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}

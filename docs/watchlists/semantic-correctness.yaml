@@ -98,6 +98,10 @@ active_issues:
     title: Remove implicit passthrough from declarative system-node emits and fail closed on undeclared payloads
     maps_to:
       - strict_event_schema_cross_flow_contract_migration
+  - id: 464
+    title: Enforce strict event-schema parity for agent emits
+    maps_to:
+      - strict_event_schema_cross_flow_contract_migration
   - id: 181
     title: Expose accumulator completion and on_complete transaction outcomes together
     maps_to:
@@ -327,6 +331,7 @@ nodes:
       - handler-top-level emits, on_complete branches, rules entries, accumulate.on_timeout, and fan_out per-item emits still use inconsistent or legacy event/payload ownership carriers
       - boot/verify proof logic and runtime emit construction still read handler-level payload_transform rather than the active emit site
       - declarative system-node emit construction still overlays explicit emit.fields onto an implicit entity/trigger context carrier and silently trims undeclared business payload keys instead of starting from an empty payload and failing closed
+      - agent emit execution still silently trims undeclared payload keys before schema validation instead of failing the emit on undeclared extras
       - persisted canonical-event validation strips undeclared runtime-owned context as an adjacent broader consumer, so system-node runtime closure must stay explicit about sibling emit surfaces that remain outside the child boundary
       - action emits and auto_emit_on_create remain adjacent emit interpreters that must stay explicitly split unless the governing draft widens
     representative_issues:

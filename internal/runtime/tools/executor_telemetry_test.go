@@ -304,6 +304,77 @@ func TestExecutorTelemetry_EmitToolLogsSchemaValidationFailureSeparatelyFromPubl
 	}
 }
 
+func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t *testing.T) {
+	bus := &telemetryBusStub{}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"category.assessed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Type: "object",
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"category":  {Type: "string"},
+						"entity_id": {Type: "string"},
+						"task_id":   {Type: "string"},
+					},
+				},
+				Required: []string{"category"},
+			},
+		},
+	})
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:       "agent-emit-undeclared",
+		EntityID: "entity-actor",
+		EmitEvents: []string{
+			"category.assessed",
+		},
+	})
+	ctx = runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:        "evt-inbound",
+		Type:      events.EventType("trigger.input"),
+		TaskID:    "task-inbound",
+		Payload:   []byte(`{"entity_id":"entity-inbound"}`),
+		CreatedAt: testTime(),
+	}.WithEntityID("entity-inbound"))
+
+	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{
+		"category":   "AP automation",
+		"unexpected": true,
+	}); err == nil {
+		t.Fatal("expected schema validation failure for undeclared payload field")
+	}
+	if len(bus.logs) != 1 {
+		t.Fatalf("runtime log count = %d, want 1", len(bus.logs))
+	}
+	detail, _ := bus.logs[0].Detail.(map[string]any)
+	if got := strings.TrimSpace(asString(detail["outcome"])); got != "schema_validation_failed" {
+		t.Fatalf("outcome = %#v, want schema_validation_failed", detail["outcome"])
+	}
+	if got := strings.TrimSpace(asString(detail["failure_class"])); got != "validation" {
+		t.Fatalf("failure_class = %#v, want validation", detail["failure_class"])
+	}
+	if got := strings.TrimSpace(asString(detail["failure_stage"])); got != "validate_schema" {
+		t.Fatalf("failure_stage = %#v, want validate_schema", detail["failure_stage"])
+	}
+	pre, _ := detail["pre_validation_payload"].(map[string]any)
+	post, _ := detail["post_enrichment_payload"].(map[string]any)
+	if got, ok := pre["unexpected"].(bool); !ok || !got {
+		t.Fatalf("pre_validation unexpected = %#v, want true", pre["unexpected"])
+	}
+	if got, ok := post["unexpected"].(bool); !ok || !got {
+		t.Fatalf("post_enrichment unexpected = %#v, want true", post["unexpected"])
+	}
+	if got := strings.TrimSpace(asString(post["entity_id"])); got != "entity-actor" {
+		t.Fatalf("post_enrichment entity_id = %#v, want entity-actor", post["entity_id"])
+	}
+	if got := strings.TrimSpace(asString(post["task_id"])); got != "task-inbound" {
+		t.Fatalf("post_enrichment task_id = %#v, want task-inbound", post["task_id"])
+	}
+	if _, ok := detail["emitted_event_id"]; ok {
+		t.Fatalf("unexpected emitted_event_id on schema validation failure: %#v", detail["emitted_event_id"])
+	}
+}
+
 func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(t *testing.T) {
 	bus := &telemetryBusStub{publishErr: errors.New("publish down")}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -429,7 +500,7 @@ func TestExecutorTelemetry_EmitToolLogsInvalidEmitToolNameOutcome(t *testing.T) 
 	}
 }
 
-func TestExecutorTelemetry_EmitToolCapsOversizedPayloadSnapshots(t *testing.T) {
+func TestExecutorTelemetry_EmitToolCapsOversizedPayloadSnapshotsOnSchemaValidationFailure(t *testing.T) {
 	bus := &telemetryBusStub{}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -455,13 +526,19 @@ func TestExecutorTelemetry_EmitToolCapsOversizedPayloadSnapshots(t *testing.T) {
 		oversizedPayload[fmt.Sprintf("extra_%02d", i)] = strings.Repeat("x", 40)
 	}
 
-	if _, err := exec.Execute(ctx, "emit_category_assessed", oversizedPayload); err != nil {
-		t.Fatalf("Execute(emit oversized): %v", err)
+	if _, err := exec.Execute(ctx, "emit_category_assessed", oversizedPayload); err == nil {
+		t.Fatal("expected schema validation failure for oversized undeclared payload")
 	}
 	if len(bus.logs) != 1 {
 		t.Fatalf("runtime log count = %d, want 1", len(bus.logs))
 	}
 	detail, _ := bus.logs[0].Detail.(map[string]any)
+	if got := strings.TrimSpace(asString(detail["outcome"])); got != "schema_validation_failed" {
+		t.Fatalf("outcome = %#v, want schema_validation_failed", detail["outcome"])
+	}
+	if _, ok := detail["emitted_event_id"]; ok {
+		t.Fatalf("unexpected emitted_event_id on schema validation failure: %#v", detail["emitted_event_id"])
+	}
 	pre, _ := detail["pre_validation_payload"].(map[string]any)
 	if truncated, _ := pre["truncated"].(bool); !truncated {
 		t.Fatalf("pre_validation_payload.truncated = %#v, want true", pre["truncated"])
@@ -472,6 +549,10 @@ func TestExecutorTelemetry_EmitToolCapsOversizedPayloadSnapshots(t *testing.T) {
 	}
 	if len(summary) > maxToolTelemetryChars+3 {
 		t.Fatalf("summary length = %d, want <= %d", len(summary), maxToolTelemetryChars+3)
+	}
+	post, _ := detail["post_enrichment_payload"].(map[string]any)
+	if truncated, _ := post["truncated"].(bool); !truncated {
+		t.Fatalf("post_enrichment_payload.truncated = %#v, want true", post["truncated"])
 	}
 }
 
