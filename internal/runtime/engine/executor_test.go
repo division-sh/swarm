@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -71,6 +72,8 @@ type stubPayloadShaper struct{}
 type recordingPayloadShaper struct {
 	lastReq     ExecutionRequest
 	lastPayload map[string]any
+	lastSurface EmitSurface
+	err         error
 }
 
 func (stubStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
@@ -141,9 +144,13 @@ func (stubPayloadShaper) ShapeEmitPayload(_ context.Context, _ ExecutionRequest,
 	out["shaped_for"] = eventType
 	return out, nil
 }
-func (s *recordingPayloadShaper) ShapeEmitPayload(_ context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
+func (s *recordingPayloadShaper) ShapeEmitPayload(ctx context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
 	s.lastReq = req
 	s.lastPayload = cloneStringAnyMap(payload)
+	s.lastSurface = EmitSurfaceFromContext(ctx)
+	if s.err != nil {
+		return nil, s.err
+	}
 	out := cloneStringAnyMap(payload)
 	out["shaped_for"] = eventType
 	return out, nil
@@ -1601,6 +1608,64 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	}
 	if got := shaper.lastPayload["score"]; got != float64(9) {
 		t.Fatalf("action emit payload score = %#v, want 9", got)
+	}
+	if shaper.lastSurface != EmitSurfaceAction {
+		t.Fatalf("action emit surface = %q, want %q", shaper.lastSurface, EmitSurfaceAction)
+	}
+}
+
+func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T) {
+	runner := &stubActionRunner{}
+	shaper := &recordingPayloadShaper{err: ErrEmitPayloadContractViolation}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
+			identity.NormalizeActionKey("notify"): {
+				Key:   identity.NormalizeActionKey("notify"),
+				Emits: "action.emitted",
+			},
+		}},
+		ActionRunner:  runner,
+		PayloadShaper: shaper,
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Action: runtimecontracts.ActionSpec{ID: "notify"},
+		},
+		State: testStateSnapshot("", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if !errors.Is(err, ErrEmitPayloadContractViolation) {
+		t.Fatalf("Execute error = %v, want %v", err, ErrEmitPayloadContractViolation)
+	}
+	if result.Status != OutcomeRejected {
+		t.Fatalf("Status = %q, want %q", result.Status, OutcomeRejected)
+	}
+	if result.FailureClass != FailureLogic {
+		t.Fatalf("FailureClass = %q, want %q", result.FailureClass, FailureLogic)
+	}
+	if len(result.EmitIntents) != 0 {
+		t.Fatalf("EmitIntents = %#v, want none", result.EmitIntents)
+	}
+	if len(result.ActionsExecuted) != 0 {
+		t.Fatalf("ActionsExecuted = %#v, want none", result.ActionsExecuted)
+	}
+	if len(runner.called) != 0 {
+		t.Fatalf("action runner calls = %#v, want none", runner.called)
+	}
+	if shaper.lastSurface != EmitSurfaceAction {
+		t.Fatalf("action emit surface = %q, want %q", shaper.lastSurface, EmitSurfaceAction)
 	}
 }
 

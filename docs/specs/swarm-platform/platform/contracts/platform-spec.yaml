@@ -592,6 +592,9 @@ handler_specification:
       type: string
       purpose: 'Names a platform-provided action. Valid values: create_flow_instance, record_evidence. The platform executes
         the named action. NOT for platform actions — all behavior must be declarative.'
+      emit_interaction: If the resolved runtime action instruction emits a follow-up event, that event uses the action-originated
+        emitted-event payload rules under observation_model.emitted_events.payload_rules. The action field itself does not
+        declare emit.fields or a separate payload carrier.
       valid_values:
         create_flow_instance:
           description: Create a new dynamic flow instance.
@@ -1760,7 +1763,7 @@ compliance:
     - Message delivery checked against agent message scope permission
     - State state_changes only follow declared advances_to paths
     - Guards evaluated before state advancement — block if false
-    - Events validated against payload schema before publish
+    - Events, including action-originated emits, validated against payload schema before publish
     - Accumulation is idempotent — duplicate events do not double-count
     - Permission checks read from agent.permissions, not hardcoded policy functions
     - Product behavior read from policy configuration, not hardcoded
@@ -1791,6 +1794,7 @@ compliance:
     - 'Apply advances_to, sets_gate, and data_accumulation from the active handler/branch/rule outcome.'
     - 'If the active emit site has emit: publish the selected follow-up event.'
     - 'If handler has action that is a platform action: call registered platform action.'
+    - 'If the resolved action runtime instruction emits an event: publish it using the action-originated payload rules and fail-closed schema validation before commit.'
   product_boundary:
     description: Rules for product-specific code isolation.
     rules:
@@ -3184,6 +3188,7 @@ observation_model:
     - Events from handler on_complete emit
     - Events from handler accumulate.on_timeout emit
     - Events from handler fan_out emit
+    - Events from action-originated emits produced by runtime action instructions
     - Events from handler action side effects (e.g., auto_emit_on_create)
     excludes:
     - Agent fixture emissions (agents are independent, their emissions route through the event loop separately)
@@ -3192,20 +3197,35 @@ observation_model:
     naming: Events are recorded with their fully-qualified URI in the parent flow context. When a child flow node emits order.completed,
       the parent sees child-flow-id/order.completed. Within the same flow, events use local names (no prefix).
     payload_rules:
-      description: Rules for constructing emitted event payloads on the supported declarative system-node emit surface.
-      construction_order:
-      - 1. Start from an empty payload
-      - 2. Evaluate emit.fields for the active emit site, if present
-      - '3. Force platform fields: entity_id, trigger_event_type, current_state'
-      collision_priority: platform fields > emit.fields
-      note: This surface has no implicit entity passthrough or trigger-payload passthrough. If an emitted event needs a field
-        beyond the platform-forced fields, the producer must declare it explicitly in emit.fields at the active emit site.
-      runtime_validation:
-        description: Runtime validates the emitted payload fail-closed on this surface.
-        validation_view: Validate the emitted payload against the target event schema after removing runtime-owned envelope fields
-          that the target schema does not declare.
-        rejection_rule: If any non-runtime-owned field is absent from the target schema, or any declared field violates the schema,
-          handler execution fails. Runtime does not silently trim producer-authored business payload keys.
+      description: Rules for constructing emitted event payloads on supported system-node runtime emit surfaces.
+      declarative_system_node_emit_surface:
+        construction_order:
+        - 1. Start from an empty payload
+        - 2. Evaluate emit.fields for the active emit site, if present
+        - '3. Force platform fields: entity_id, trigger_event_type, current_state'
+        collision_priority: platform fields > emit.fields
+        note: This surface has no implicit entity passthrough or trigger-payload passthrough. If an emitted event needs a field
+          beyond the platform-forced fields, the producer must declare it explicitly in emit.fields at the active emit site.
+        runtime_validation:
+          description: Runtime validates the emitted payload fail-closed on this surface.
+          validation_view: Validate the emitted payload against the target event schema after removing runtime-owned envelope fields
+            that the target schema does not declare.
+          rejection_rule: If any non-runtime-owned field is absent from the target event schema, or any declared field violates the
+            schema, handler execution fails. Runtime does not silently trim producer-authored business payload keys.
+      action_originated_emit_surface:
+        construction_order:
+        - 1. Start from the triggering event payload
+        - '2. Force platform fields: entity_id, trigger_event_type, current_state'
+        collision_priority: platform fields > triggering event payload
+        note: This surface currently inherits its business payload from the triggering event payload because the action runtime
+          instruction model has no separate emit.fields carrier. Runtime must still fail closed on the resulting payload.
+        runtime_validation:
+          description: Runtime validates the emitted payload fail-closed on this surface before publish.
+          validation_view: Validate the emitted payload against the target event schema after removing runtime-owned envelope fields
+            that the target schema does not declare.
+          rejection_rule: If any non-runtime-owned field is absent from the target event schema, or any producer-authored field is
+            undeclared or violates the schema, handler execution fails. Runtime does not silently trim inherited trigger-payload keys
+            on this surface.
   entity_state:
     description: The entity document after handler execution commits.
     observable_fields:

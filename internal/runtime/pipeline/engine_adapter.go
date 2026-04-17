@@ -695,10 +695,8 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 	for key, value := range envelope {
 		out[key] = value
 	}
-	if runtimeengine.EmitSurfaceFromContext(ctx) == runtimeengine.EmitSurfaceDeclarative {
-		if err := validatePipelineEmitPayload(pc.SemanticSource(), req.FlowID.String(), eventType, out); err != nil {
-			return nil, err
-		}
+	if err := validatePipelineEmitPayload(pc.SemanticSource(), req.FlowID.String(), eventType, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

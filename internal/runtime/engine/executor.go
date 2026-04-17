@@ -225,7 +225,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		if result.AccumulatorCompletionDiagnostics.Relevant {
 			result.AccumulatorCompletionDiagnostics.CommitOutcome = AccumulatorCompletionCommitRolledBack
 		}
-		if errors.Is(err, ErrEmitPersistencePrerequisite) {
+		if errors.Is(err, ErrEmitPersistencePrerequisite) || errors.Is(err, ErrEmitPayloadContractViolation) {
 			result.Status = OutcomeRejected
 		}
 		if result.Status == OutcomeUnknown {

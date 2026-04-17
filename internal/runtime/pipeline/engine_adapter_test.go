@@ -1002,7 +1002,7 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsAcrossCrossFlowOutpu
 	}
 }
 
-func TestPipelineEnginePayloadShaper_DoesNotApplyDeclarativeValidationToActionSurface(t *testing.T) {
+func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnActionSurface(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1031,18 +1031,103 @@ func TestPipelineEnginePayloadShaper_DoesNotApplyDeclarativeValidationToActionSu
 
 	actionCtx := runtimeengine.WithEmitSurface(context.Background(), runtimeengine.EmitSurfaceAction)
 	payload, err := shaper.ShapeEmitPayload(actionCtx, req, "child/child.done", map[string]any{
-		"entity_id":   "ent-child",
-		"vertical_id": "ent-child",
-		"result":      "accepted",
+		"entity_id": "ent-child",
 	})
 	if err != nil {
 		t.Fatalf("ShapeEmitPayload action surface: %v", err)
 	}
-	if got := payload["vertical_id"]; got != "ent-child" {
-		t.Fatalf("action payload vertical_id = %#v, want ent-child", got)
+	if got := payload["entity_id"]; got != "ent-child" {
+		t.Fatalf("action payload entity_id = %#v, want ent-child", got)
 	}
-	if got := payload["result"]; got != "accepted" {
-		t.Fatalf("action payload result = %#v, want accepted", got)
+	if got := payload["trigger_event_type"]; got != "child/child.internal" {
+		t.Fatalf("action payload trigger_event_type = %#v, want child/child.internal", got)
+	}
+}
+
+func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface(t *testing.T) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml":             "name: action-emit-required\nversion: 1.0.0\ndescription: Action emit required-field proof.\nplatform_version: \">=1.1.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
+		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
+		"events.yaml":              "parent.trigger:\n  payload:\n    entity_id: string\nparent.result:\n  payload:\n    entity_id: string\n",
+		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=1.1.0\"\nflows: []\n",
+		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
+		"flows/child/events.yaml":  "child.start:\n  payload:\n    entity_id: string\nchild.internal:\n  payload:\n    entity_id: string\n    step: string\n  required: [entity_id, step]\n",
+	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	shaper := pipelineEnginePayloadShaper{
+		coordinator: &PipelineCoordinator{
+			module: &previewWorkflowModule{
+				bundle: bundle,
+			},
+		},
+	}
+
+	req := runtimeengine.ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("ent-child"),
+		FlowID:   identity.NormalizeFlowID("child"),
+		Event: events.Event{
+			Type:    events.EventType("child/child.start"),
+			Payload: json.RawMessage(`{"entity_id":"ent-child"}`),
+		}.WithEntityID("ent-child"),
+		State: runtimeengine.StateSnapshot{
+			EntityID:     identity.NormalizeEntityID("ent-child"),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+		},
+	}
+
+	actionCtx := runtimeengine.WithEmitSurface(context.Background(), runtimeengine.EmitSurfaceAction)
+	_, err := shaper.ShapeEmitPayload(actionCtx, req, "child/child.internal", map[string]any{
+		"entity_id": "ent-child",
+	})
+	if err == nil {
+		t.Fatal("expected action surface missing required field to fail closed")
+	}
+	if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
+		t.Fatalf("ShapeEmitPayload action surface error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
+	}
+}
+
+func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsOnActionSurface(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	shaper := pipelineEnginePayloadShaper{
+		coordinator: &PipelineCoordinator{
+			module: &previewWorkflowModule{
+				bundle: bundle,
+			},
+		},
+	}
+
+	req := runtimeengine.ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("ent-child"),
+		FlowID:   identity.NormalizeFlowID("child"),
+		Event: events.Event{
+			Type:    events.EventType("child/child.internal"),
+			Payload: json.RawMessage(`{"entity_id":"ent-child","step":"done"}`),
+		}.WithEntityID("ent-child"),
+		State: runtimeengine.StateSnapshot{
+			EntityID:     identity.NormalizeEntityID("ent-child"),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+		},
+	}
+
+	actionCtx := runtimeengine.WithEmitSurface(context.Background(), runtimeengine.EmitSurfaceAction)
+	_, err := shaper.ShapeEmitPayload(actionCtx, req, "child/child.done", map[string]any{
+		"entity_id":   "ent-child",
+		"vertical_id": "ent-child",
+		"result":      "accepted",
+	})
+	if err == nil {
+		t.Fatal("expected undeclared action surface fields to fail closed")
+	}
+	if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
+		t.Fatalf("ShapeEmitPayload action surface error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
 	}
 }
 
