@@ -17,7 +17,7 @@ func TestProjectScopes_PackageBackedScopeCarriesOwningFlowID(t *testing.T) {
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 
-writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=1.0.0"
@@ -90,7 +90,7 @@ func TestProjectScopes_SoleParentFlowCarriesOwningFlowIDOutsideFlowDir(t *testin
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 
-writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=1.0.0"
@@ -166,7 +166,7 @@ func TestResolveAgentSessionScopeProof_PackageBackedAgentCarriesFlowPath(t *test
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 
-writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=1.0.0"
@@ -234,7 +234,7 @@ func TestResolveAgentSessionScopeProof_FlowScopedAgentCarriesFlowPath(t *testing
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 
-writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=1.0.0"
