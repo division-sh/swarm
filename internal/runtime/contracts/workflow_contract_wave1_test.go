@@ -186,6 +186,43 @@ bundle_item:
 	}
 }
 
+func TestLoadWorkflowContractBundle_RejectsLegacySubpackageEntitySchemaAlongsideWave1Entities(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	root := t.TempDir()
+
+	writeFixtureFile(t, root+"/package.yaml", `
+name: mixed-subpackage-bundle
+version: "1.0.0"
+platform_version: ">=1.0.0"
+packages:
+  - path: packages/legacy-child
+flows: []
+`)
+	writeFixtureFile(t, root+"/schema.yaml", "name: mixed-subpackage-bundle\n")
+	writeFixtureFile(t, root+"/entities.yaml", `
+root_entity:
+  _owner: scoring
+  name: text
+`)
+	writeFixtureFile(t, root+"/packages/legacy-child/package.yaml", `
+name: legacy-child
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows: []
+entity_schema:
+  child:
+    legacy_id: text
+`)
+
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-CONTRACT-GRAMMAR") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want AMBIGUOUS-CONTRACT-GRAMMAR", err)
+	}
+	if !strings.Contains(err.Error(), "legacy scope: packages/legacy-child") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want legacy subpackage scope", err)
+	}
+}
+
 func TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
