@@ -11,7 +11,7 @@ import (
 )
 
 func (e *Executor) execGetEntity(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
-	db, _, payload, err := e.entityToolDependencies(input)
+	db, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +26,16 @@ func (e *Executor) execGetEntity(ctx context.Context, _ models.AgentConfig, inpu
 	if !found {
 		return nil, NewRuntimeError("not_found", "tool-executor", "exec_get_entity.lookup", false, "entity %s not found", entityID)
 	}
-	return entity, nil
+	if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
+		if strings.Trim(strings.TrimSpace(asString(entity["flow_instance"])), "/") != flowInstance {
+			return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_get_entity.flow_instance", false, "flow_instance does not match entity ownership")
+		}
+	}
+	materialized, err := materializeEntityStateRow(source, entity)
+	if err != nil {
+		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_get_entity.materialize", false, err, "materialize entity %s", entityID)
+	}
+	return materialized, nil
 }
 
 func (e *Executor) execGetSubjectStatus(ctx context.Context, _ models.AgentConfig, input any) (any, error) {

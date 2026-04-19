@@ -53,15 +53,10 @@ func TestHandlerExecutionStateSnapshotRejectsMalformedPersistedGateShape(t *test
 
 func TestEnsureHandlerEntityIDMintsForEntityMaterializingHandler(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			EntitySchema: runtimecontracts.EntitySchema{
-				Groups: []runtimecontracts.EntitySchemaGroup{
-					{
-						Name: "identity",
-						Fields: []runtimecontracts.EntitySchemaField{
-							{Name: "name", Type: "text"},
-						},
-					},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"subject": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"name": {Type: "text"},
 				},
 			},
 		},
@@ -74,7 +69,7 @@ func TestEnsureHandlerEntityIDMintsForEntityMaterializingHandler(t *testing.T) {
 		},
 	}
 
-	entityID, evt := ensureHandlerEntityID(source, handler, "", events.Event{Type: events.EventType("custom.trigger")})
+	entityID, evt := ensureHandlerEntityID(source, "", handler, "", events.Event{Type: events.EventType("custom.trigger")})
 
 	if entityID == "" {
 		t.Fatal("expected minted entity_id")
@@ -88,7 +83,7 @@ func TestEnsureHandlerEntityIDCreateEntityKeepsInboundEventReference(t *testing.
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	inbound := events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-parent")
 
-	entityID, evt := ensureHandlerEntityID(nil, handler, "ent-parent", inbound)
+	entityID, evt := ensureHandlerEntityID(nil, "", handler, "ent-parent", inbound)
 
 	if entityID == "" || entityID == "ent-parent" {
 		t.Fatalf("entityID = %q, want fresh id", entityID)

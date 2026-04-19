@@ -3,6 +3,7 @@ package engine
 import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/values"
+	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -23,7 +24,10 @@ type ContextBuilderInput struct {
 
 func BuildBaseContext(input ContextBuilderInput) BaseContext {
 	base := values.NewContext()
-	base.Entity = values.Wrap(input.State.EntityContext())
+	materializedMetadata := entityruntime.MaterializeMetadataForFlow(input.Source, input.FlowID, input.State.StateCarrier.Metadata)
+	materializedState := input.State
+	materializedState.StateCarrier.Metadata = materializedMetadata
+	base.Entity = values.Wrap(materializedState.EntityContext())
 	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.StateCarrier.Metadata))
 	base.Gates = values.Wrap(boolMapToAnyMap(input.State.StateCarrier.Gates))
 	base.Payload = values.Wrap(cloneStringAnyMap(input.Payload))

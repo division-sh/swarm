@@ -201,24 +201,20 @@ func (pc *PipelineCoordinator) handlerEmitEnvelope(ctx context.Context, triggerC
 	return out
 }
 
-func workflowEntityMetadataPayload(source semanticview.Source, metadata map[string]any) map[string]any {
+func workflowEntityMetadataPayload(source semanticview.Source, flowID string, metadata map[string]any) map[string]any {
 	if len(metadata) == 0 {
 		return nil
 	}
-	allowed := workflowEntitySchemaFields(source)
+	allowed := workflowEntitySchemaFields(source, flowID)
 	if len(allowed) == 0 {
 		return nil
 	}
+	materialized := workflowMaterializeEntityMetadata(source, flowID, metadata)
 	out := make(map[string]any, len(allowed))
-	for key, value := range metadata {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
+	for key := range allowed {
+		if value, ok := materialized[key]; ok {
+			out[key] = value
 		}
-		if _, ok := allowed[key]; !ok {
-			continue
-		}
-		out[key] = value
 	}
 	if len(out) == 0 {
 		return nil

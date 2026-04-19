@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -29,26 +30,22 @@ var entityStateTopLevelFields = map[string]struct{}{
 	"updated_at":       {},
 }
 
-func (e *Executor) entityToolDependencies(input any) (*sql.DB, entityToolSchema, map[string]any, error) {
+func (e *Executor) entityToolDependencies(input any) (*sql.DB, semanticview.Source, map[string]any, error) {
 	db, err := e.sqlDBDependency()
 	if err != nil {
-		return nil, entityToolSchema{}, nil, NewRuntimeError("dependency_unavailable", "tool-executor", "entity_tool.db", true, "sql database is not configured")
+		return nil, nil, nil, NewRuntimeError("dependency_unavailable", "tool-executor", "entity_tool.db", true, "sql database is not configured")
 	}
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
 	payload := map[string]any{}
 	if err := decodeToolInput(input, &payload); err != nil {
-		return nil, entityToolSchema{}, nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "entity_tool.decode", false, err, "decode entity tool input")
+		return nil, nil, nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "entity_tool.decode", false, err, "decode entity tool input")
 	}
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	schema, err := entityToolSchemaFromSource(source)
-	if err != nil {
-		return nil, entityToolSchema{}, nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "entity_tool.schema", false, err, "resolve entity schema")
-	}
-	return db, schema, payload, nil
+	return db, source, payload, nil
 }
 
 func parseEntityID(raw any) (string, error) {
@@ -76,6 +73,24 @@ func loadEntityState(ctx context.Context, db *sql.DB, entityID string) (map[stri
 		return nil, false, err
 	}
 	return entity, true, nil
+}
+
+func materializeEntityStateRow(source semanticview.Source, row map[string]any) (map[string]any, error) {
+	contract, ok := entityruntime.ResolveForEntityRow(source, row)
+	if !ok {
+		return row, nil
+	}
+	fields := entityRowFieldMap(row)
+	materialized, err := entityruntime.Materialize(contract, fields)
+	if err != nil {
+		return nil, err
+	}
+	cloned := cloneEntityRows([]map[string]any{row})[0]
+	cloned["fields"] = materialized
+	if strings.TrimSpace(asString(cloned["entity_type"])) == "" {
+		cloned["entity_type"] = contract.EntityType
+	}
+	return cloned, nil
 }
 
 func entityStateRowQuery(suffix string) string {
@@ -169,6 +184,21 @@ func queryEntityStateRows(ctx context.Context, db *sql.DB, suffix string, args .
 	return out, rows.Err()
 }
 
+func materializeEntityStateRows(source semanticview.Source, rows []map[string]any) ([]map[string]any, error) {
+	if len(rows) == 0 {
+		return rows, nil
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		materialized, err := materializeEntityStateRow(source, row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, materialized)
+	}
+	return out, nil
+}
+
 func mapKeys(values map[string]any) []string {
 	out := make([]string, 0, len(values))
 	for key := range values {
@@ -235,21 +265,5 @@ func decodeEntityJSONMap(raw []byte) (map[string]any, error) {
 }
 
 func subjectStatusFlowID(source semanticview.Source, flowInstance string) string {
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	if flowInstance == "" || source == nil {
-		return flowInstance
-	}
-	if _, ok := source.FlowScopeByID(flowInstance); ok {
-		return flowInstance
-	}
-	for flowID := range source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			continue
-		}
-		if strings.Trim(source.FlowPath(flowID), "/") == flowInstance {
-			return flowID
-		}
-	}
-	return flowInstance
+	return entityruntime.ResolveFlowIDForInstance(source, flowInstance)
 }

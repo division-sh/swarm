@@ -10,19 +10,17 @@ import (
 	"github.com/google/uuid"
 	models "swarm/internal/runtime/core/actors"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	"swarm/internal/runtime/entityruntime"
 	runtimemutationlog "swarm/internal/runtime/mutationlog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
 
 func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	db, schema, payload, err := e.entityToolDependencies(input)
+	db, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
 	}
-	e.mu.RLock()
-	source := e.workflowSource
-	e.mu.RUnlock()
 	entityID, err := parseEntityID(payload["entity_id"])
 	if err != nil {
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.entity_id", false, err.Error())
@@ -30,15 +28,46 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	if err := enforceEntityWriteOwnership(ctx, db, source, actor, entityID, e.runtimeLogSink()); err != nil {
 		return nil, err
 	}
+	row, found, err := loadEntityState(ctx, db, entityID)
+	if err != nil {
+		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_save_entity_field.lookup", true, err, "load entity %s", entityID)
+	}
+	if !found {
+		return nil, NewRuntimeError("not_found", "tool-executor", "exec_save_entity_field.lookup", false, "entity %s not found", entityID)
+	}
+	if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
+		if strings.Trim(strings.TrimSpace(asString(row["flow_instance"])), "/") != flowInstance {
+			return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.flow_instance", false, "flow_instance does not match entity ownership")
+		}
+	}
+	schema, err := entityToolSchemaForEntityRow(source, row)
+	if err != nil {
+		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.schema", false, err, "resolve entity contract")
+	}
 	fieldName := strings.TrimSpace(asString(payload["field"]))
 	if fieldName == "" {
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, "field is required")
 	}
-	field, err := schema.field(fieldName)
+	field, err := schema.declaredField(fieldName)
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, err, "validate field")
 	}
-	value, err := normalizeEntityFieldValue(field, payload["value"])
+	if strings.TrimSpace(field.Path) != fieldName {
+		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, "nested writes are not supported in Wave 1")
+	}
+	currentFields := entityRowFieldMap(row)
+	if field.FieldDecl.Immutable {
+		materializedDefaults, defaultErr := entityruntime.Materialize(schema.Contract, nil)
+		if defaultErr != nil {
+			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, defaultErr, "resolve immutable baseline")
+		}
+		if currentValue, ok := currentFields[fieldName]; ok {
+			if baseline, exists := materializedDefaults[fieldName]; exists && !valuesEqual(currentValue, baseline) {
+				return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, "immutable field %s cannot be changed after create", fieldName)
+			}
+		}
+	}
+	value, err := normalizeEntityFieldValue(schema, field, payload["value"])
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.value", false, err, "validate value")
 	}
@@ -185,25 +214,32 @@ func entityFlowOwnedBy(flowRoot, targetFlow string) bool {
 	return runtimeflowidentity.OwnedByScope(flowRoot, targetFlow)
 }
 
-func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
-	db, schema, payload, err := e.entityToolDependencies(input)
+func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	db, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
 	}
-	entityID := strings.TrimSpace(asString(payload["entity_id"]))
-	if entityID == "" {
-		entityID = uuid.NewString()
+	if strings.TrimSpace(asString(payload["entity_id"])) != "" {
+		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.entity_id", false, "entity_id is platform-minted and must not be supplied")
 	}
-	if _, err := uuid.Parse(entityID); err != nil {
-		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.entity_id", false, "entity_id must be uuid")
-	}
+	entityID := uuid.NewString()
 	flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/")
 	if flowInstance == "" {
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.flow_instance", false, "flow_instance is required")
 	}
-	entityType := strings.TrimSpace(asString(payload["entity_type"]))
-	if entityType == "" {
-		entityType = "default"
+	contract, ok := entityruntime.ResolveForActor(source, actor.ID)
+	if !ok {
+		contract, ok = entityruntime.ResolveForFlowInstance(source, flowInstance)
+	}
+	if !ok {
+		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.flow_instance", false, "flow_instance does not resolve to a flow-owned entity contract")
+	}
+	flowID := entityruntime.ResolveFlowIDForInstance(source, flowInstance)
+	if contract.FlowID != "" && flowID != "" && contract.FlowID != flowID {
+		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.flow_instance", false, "flow_instance is outside the caller's flow scope")
+	}
+	if strings.TrimSpace(asString(payload["entity_type"])) != "" {
+		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.entity_type", false, "entity_type is inferred from flow_instance and must not be supplied")
 	}
 	subjectID := strings.TrimSpace(asString(payload["subject_id"]))
 	if subjectID == "" {
@@ -214,13 +250,8 @@ func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, i
 	}
 	name := strings.TrimSpace(asString(payload["name"]))
 	currentState := strings.TrimSpace(asString(payload["initial_state"]))
-	if currentState == "" {
-		e.mu.RLock()
-		source := e.workflowSource
-		e.mu.RUnlock()
-		if source != nil {
-			currentState = strings.TrimSpace(source.WorkflowInitialStage())
-		}
+	if currentState == "" && source != nil {
+		currentState = strings.TrimSpace(source.FlowInitialStage(flowID))
 	}
 	if currentState == "" {
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.initial_state", false, "initial_state is required when workflow has no initial stage")
@@ -234,17 +265,9 @@ func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, i
 			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.fields", false, err, "decode fields")
 		}
 	}
-	normalizedFields := map[string]any{}
-	for _, fieldName := range orderedEntityFieldNamesFromInput(mapKeys(fieldsPayload)) {
-		field, err := schema.field(fieldName)
-		if err != nil {
-			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.field", false, err, "validate field")
-		}
-		value, err := normalizeEntityFieldValue(field, fieldsPayload[fieldName])
-		if err != nil {
-			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.value", false, err, "validate field %s", fieldName)
-		}
-		normalizedFields[fieldName] = value
+	normalizedFields, err := entityruntime.Materialize(contract, fieldsPayload)
+	if err != nil {
+		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.fields", false, err, "materialize fields")
 	}
 	fieldsJSON, err := json.Marshal(normalizedFields)
 	if err != nil {
@@ -272,7 +295,7 @@ func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, i
 			$6, '{}'::jsonb, $7::jsonb, '{}'::jsonb, 1,
 			$8, $8, $8
 		)
-	`, entityID, subjectID, flowInstance, entityType, name, currentState, string(fieldsJSON), now); err != nil {
+	`, entityID, subjectID, flowInstance, contract.EntityType, name, currentState, string(fieldsJSON), now); err != nil {
 		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_create_entity.insert", false, err, "create entity %s", entityID)
 	}
 	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, entityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
@@ -295,4 +318,13 @@ func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, i
 		"current_state": currentState,
 		"created_at":    now.Format(time.RFC3339Nano),
 	}, nil
+}
+
+func valuesEqual(left, right any) bool {
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	if leftErr != nil || rightErr != nil {
+		return left == right
+	}
+	return string(leftJSON) == string(rightJSON)
 }

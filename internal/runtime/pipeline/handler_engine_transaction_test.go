@@ -203,26 +203,44 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 }
 
 func TestExecuteNodeContractHandlerMintsEntityIDForEntityMaterializingHandler(t *testing.T) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `
+name: runtime-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: scoring
+    flow: scoring
+    mode: static
+`,
+		"schema.yaml": "name: runtime-test\n",
+		"flows/scoring/schema.yaml": `
+name: scoring
+mode: static
+initial_state: queued
+states: [queued]
+`,
+		"flows/scoring/entities.yaml": `
+subject:
+  name: text
+`,
+		"flows/scoring/nodes.yaml": `
+node-a:
+  id: node-a
+  execution_type: system_node
+`,
+	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected temp workflow bundle")
+	}
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 		module: &previewWorkflowModule{
-			bundle: &runtimecontracts.WorkflowContractBundle{
-				Semantics: runtimecontracts.WorkflowSemanticView{
-					EntitySchema: runtimecontracts.EntitySchema{
-						Groups: []runtimecontracts.EntitySchemaGroup{
-							{
-								Name: "identity",
-								Fields: []runtimecontracts.EntitySchemaField{
-									{Name: "name", Type: "text"},
-								},
-							},
-						},
-					},
-				},
-			},
+			bundle: bundle,
 		},
 	}
 
@@ -1066,20 +1084,32 @@ func TestResolveHandlerEntityIDForFlowDoesNotRetargetSameFlowInstancePath(t *tes
 }
 
 func TestResolveHandlerEntityIDForFlowCreateEntitySeedsInitialStateAndSchemaDefaults(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			InitialStage: "queued",
-			FlowInitial:  map[string]string{"scoring": "queued"},
-			EntitySchema: runtimecontracts.EntitySchema{
-				Groups: []runtimecontracts.EntitySchemaGroup{{
-					Name: "scoring_phase",
-					Fields: []runtimecontracts.EntitySchemaField{
-						{Name: "revision_count", Type: "integer", Initial: 0},
-						{Name: "is_duplicate", Type: "boolean", Initial: false},
-					},
-				}},
-			},
-		},
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `
+name: runtime-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: scoring
+    flow: scoring
+    mode: static
+`,
+		"schema.yaml": "name: runtime-test\n",
+		"flows/scoring/schema.yaml": `
+name: scoring
+mode: static
+initial_state: queued
+states: [queued]
+`,
+		"flows/scoring/entities.yaml": `
+vertical:
+  revision_count:
+    type: integer
+    initial: 0
+  is_duplicate:
+    type: boolean
+    initial: false
+`,
 	})
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	const inboundEntityID = "ent-parent"
@@ -1130,7 +1160,7 @@ func TestResolveHandlerEntityIDForFlowCreateEntitySeedsInitialStateAndSchemaDefa
 	if got := strings.TrimSpace(asString(state.Metadata["storage_ref"])); got != "scoring/"+instanceID {
 		t.Fatalf("state storage_ref = %q, want %q", got, "scoring/"+instanceID)
 	}
-	if got := state.Metadata["revision_count"]; got != 0 {
+	if got := state.Metadata["revision_count"]; !isZeroIntegerValue(got) {
 		t.Fatalf("state revision_count = %#v, want 0", got)
 	}
 	if got := state.Metadata["is_duplicate"]; got != false {
@@ -1221,21 +1251,39 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBefore
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "validation",
-			Version:      "v-test",
-			InitialStage: "queued",
-			EntitySchema: runtimecontracts.EntitySchema{
-				Groups: []runtimecontracts.EntitySchemaGroup{{
-					Name: "validation_phase",
-					Fields: []runtimecontracts.EntitySchemaField{
-						{Name: "revision_count", Type: "integer", Initial: 0},
-						{Name: "kill_reason", Type: "text"},
-					},
-				}},
-			},
-		},
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `
+name: runtime-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: validation
+    flow: validation
+    mode: static
+`,
+		"schema.yaml": "name: runtime-test\n",
+		"flows/validation/schema.yaml": `
+name: validation
+mode: static
+initial_state: queued
+states: [queued]
+`,
+		"flows/validation/entities.yaml": `
+validation_entity:
+  revision_count:
+    type: integer
+    initial: 0
+  kill_reason: text
+`,
+		"flows/validation/nodes.yaml": `
+node-a:
+  id: node-a
+  execution_type: system_node
+`,
+	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected temp workflow bundle")
 	}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -1253,7 +1301,7 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBefore
 
 	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
-		Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0 && !has(entity.kill_reason)"},
+		Guard:        &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && entity.kill_reason == ""`},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "entity.created",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -1333,20 +1381,38 @@ func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialVa
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "validation",
-			Version:      "v-test",
-			InitialStage: "queued",
-			EntitySchema: runtimecontracts.EntitySchema{
-				Groups: []runtimecontracts.EntitySchemaGroup{{
-					Name: "validation_phase",
-					Fields: []runtimecontracts.EntitySchemaField{
-						{Name: "revision_count", Type: "integer", Initial: 0},
-					},
-				}},
-			},
-		},
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `
+name: runtime-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: validation
+    flow: validation
+    mode: static
+`,
+		"schema.yaml": "name: runtime-test\n",
+		"flows/validation/schema.yaml": `
+name: validation
+mode: static
+initial_state: queued
+states: [queued]
+`,
+		"flows/validation/entities.yaml": `
+validation_entity:
+  revision_count:
+    type: integer
+    initial: 0
+`,
+		"flows/validation/nodes.yaml": `
+node-a:
+  id: node-a
+  execution_type: system_node
+`,
+	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected temp workflow bundle")
 	}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -1425,42 +1491,47 @@ func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialVa
 }
 
 func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testing.T) {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {
-				ID: "node-a",
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"candidate.discovered": {
-						CreateEntity: true,
-						Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"},
-						Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
-					},
-				},
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "validation",
-			Version:      "v-test",
-			InitialStage: "queued",
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"node-a": {
-					"candidate.discovered": {
-						CreateEntity: true,
-						Guard:        &runtimecontracts.GuardSpec{Check: "entity.revision_count == 0"},
-						Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
-					},
-				},
-			},
-			EntitySchema: runtimecontracts.EntitySchema{
-				Groups: []runtimecontracts.EntitySchemaGroup{{
-					Name: "validation_phase",
-					Fields: []runtimecontracts.EntitySchemaField{
-						{Name: "revision_count", Type: "integer", Initial: 0},
-						{Name: "is_duplicate", Type: "boolean", Initial: false},
-					},
-				}},
-			},
-		},
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `
+name: runtime-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: validation
+    flow: validation
+    mode: static
+`,
+		"schema.yaml": "name: runtime-test\n",
+		"flows/validation/schema.yaml": `
+name: validation
+mode: static
+initial_state: queued
+states: [queued]
+`,
+		"flows/validation/entities.yaml": `
+validation_entity:
+  revision_count:
+    type: integer
+    initial: 0
+  is_duplicate:
+    type: boolean
+    initial: false
+`,
+		"flows/validation/nodes.yaml": `
+node-a:
+  id: node-a
+  execution_type: system_node
+  event_handlers:
+    candidate.discovered:
+      create_entity: true
+      guard:
+        check: entity.revision_count == 0
+      emit: entity.created
+`,
+	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected temp workflow bundle")
 	}
 
 	preview, err := PreviewContractHandlerExecution(context.Background(), bundle, "node-a", events.Event{
@@ -1469,14 +1540,45 @@ func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testin
 	if err != nil {
 		t.Fatalf("PreviewContractHandlerExecution: %v", err)
 	}
-	if got := preview.Metadata["revision_count"]; got != 0 {
+	if got := preview.Metadata["revision_count"]; !isZeroIntegerValue(got) {
 		t.Fatalf("preview revision_count = %#v, want 0", got)
 	}
-	if got := preview.InitialValues["revision_count"]; got != 0 {
+	if got := preview.InitialValues["revision_count"]; !isZeroIntegerValue(got) {
 		t.Fatalf("preview initial revision_count = %#v, want 0", got)
 	}
 	if got := preview.InitialValues["is_duplicate"]; got != false {
 		t.Fatalf("preview initial is_duplicate = %#v, want false", got)
+	}
+}
+
+func isZeroIntegerValue(v any) bool {
+	switch typed := v.(type) {
+	case int:
+		return typed == 0
+	case int8:
+		return typed == 0
+	case int16:
+		return typed == 0
+	case int32:
+		return typed == 0
+	case int64:
+		return typed == 0
+	case uint:
+		return typed == 0
+	case uint8:
+		return typed == 0
+	case uint16:
+		return typed == 0
+	case uint32:
+		return typed == 0
+	case uint64:
+		return typed == 0
+	case float32:
+		return typed == 0
+	case float64:
+		return typed == 0
+	default:
+		return false
 	}
 }
 
@@ -1600,20 +1702,40 @@ func TestExecuteNodeContractHandlerEmitFieldsEntityPresenceCheckMintsEntityID(t 
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 		module: &previewWorkflowModule{
-			bundle: &runtimecontracts.WorkflowContractBundle{
-				Semantics: runtimecontracts.WorkflowSemanticView{
-					EntitySchema: runtimecontracts.EntitySchema{
-						Groups: []runtimecontracts.EntitySchemaGroup{
-							{
-								Name: "identity",
-								Fields: []runtimecontracts.EntitySchemaField{
-									{Name: "kill_reason", Type: "text"},
-								},
-							},
-						},
-					},
-				},
-			},
+			bundle: func() *runtimecontracts.WorkflowContractBundle {
+				source := loadWorkflowTempSource(t, map[string]string{
+					"package.yaml": `
+name: runtime-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: scoring
+    flow: scoring
+    mode: static
+`,
+					"schema.yaml": "name: runtime-test\n",
+					"flows/scoring/schema.yaml": `
+name: scoring
+mode: static
+initial_state: queued
+states: [queued]
+`,
+					"flows/scoring/entities.yaml": `
+subject:
+  kill_reason: text
+`,
+					"flows/scoring/nodes.yaml": `
+node-a:
+  id: node-a
+  execution_type: system_node
+`,
+				})
+				bundle, ok := semanticview.Bundle(source)
+				if !ok {
+					t.Fatal("expected temp workflow bundle")
+				}
+				return bundle
+			}(),
 		},
 	}
 
@@ -1621,7 +1743,7 @@ func TestExecuteNodeContractHandlerEmitFieldsEntityPresenceCheckMintsEntityID(t 
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
-				"label": runtimecontracts.CELExpression(`has(entity.kill_reason) ? entity.kill_reason : payload.reason`),
+				"label": runtimecontracts.CELExpression(`entity.kill_reason != "" ? entity.kill_reason : payload.reason`),
 			},
 		},
 	}, workflowTriggerContext{
