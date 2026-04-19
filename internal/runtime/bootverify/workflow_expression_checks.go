@@ -126,85 +126,45 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 	c.entityRefLoaded = true
 
 	seen := map[string]struct{}{}
-	for _, flow := range c.source.FlowScopes() {
-		flowID := strings.TrimSpace(flow.ID)
-		if flowID == "" {
-			continue
+	for nodeID, node := range c.source.NodeEntries() {
+		nodeID = strings.TrimSpace(nodeID)
+		flowID := ""
+		if sourceRef, ok := c.source.NodeContractSource(nodeID); ok {
+			flowID = strings.TrimSpace(sourceRef.FlowID)
 		}
-		schemaInitials := runtimepipeline.WorkflowEntitySchemaInitialValueFields(c.source)
-		writers := flowEntityFieldWriters(flow.Nodes)
-		for _, transition := range c.source.DerivedHandlerTransitions() {
-			if strings.TrimSpace(transition.FlowID) != flowID {
-				continue
-			}
-			if gate := gateNameLocal(transition.SetsGate); gate != "" {
-				writers["gates"] = struct{}{}
-				break
-			}
-		}
-		for nodeID, node := range flow.Nodes {
-			nodeID = strings.TrimSpace(nodeID)
-			for eventType, handler := range node.EventHandlers {
-				eventType = strings.TrimSpace(eventType)
-				handlerWriters := handlerEntityFieldWriters(handler)
-				for _, expr := range handlerEntityExpressions(handler) {
-					available := availableEntityFieldsForExpression(handler, expr)
-					guarded := runtimepipeline.WorkflowPresenceGuardedEntityFields(expr.Expression)
-					for _, ref := range runtimepipeline.WorkflowEntityReferences(expr.Expression) {
-						field := runtimepipeline.WorkflowEntityReferenceField(ref)
-						if runtimepipeline.WorkflowBuiltinEntityField(field) {
-							continue
-						}
-						if _, ok := guarded[field]; ok {
-							continue
-						}
-						if _, ok := schemaInitials[field]; ok {
-							continue
-						}
-						if handler.CreateEntity {
-							if finding := createEntityFieldInitializationFinding(flowID, nodeID, eventType, handler, expr, field); finding != nil {
-								key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, field, finding.Severity}, "|")
-								if _, ok := seen[key]; ok {
-									continue
-								}
-								seen[key] = struct{}{}
-								c.entityRefFindings = append(c.entityRefFindings, *finding)
-							}
-							continue
-						}
-						key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, field}, "|")
+		for eventType, handler := range node.EventHandlers {
+			eventType = strings.TrimSpace(eventType)
+			for _, expr := range handlerEntityExpressions(handler) {
+				for _, ref := range runtimepipeline.WorkflowEntityReferences(expr.Expression) {
+					ref = strings.TrimSpace(ref)
+					if ref == "" {
+						continue
+					}
+					leaf, err := wave1ResolveEntityPath(c.source, flowID, ref)
+					if err != nil {
+						key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, ref}, "|")
 						if _, ok := seen[key]; ok {
-							continue
-						}
-						if _, ok := available[field]; ok {
-							continue
-						}
-						if expr.SelfTargetField == field && !handler.CreateEntity {
-							continue
-						}
-						if runtimepipeline.WorkflowEntityReadsPersistedStateBeforeHandlerWrites(expr.Phase) {
-							if _, ok := handlerWriters[field]; ok && !handler.CreateEntity {
-								continue
-							}
-						}
-						if _, ok := handlerWriters[field]; ok {
-							seen[key] = struct{}{}
-							c.entityRefFindings = append(c.entityRefFindings, Finding{
-								CheckID:  "expression_field_reference_validation",
-								Severity: "error",
-								Message:  fmt.Sprintf("flow %s node %s handler %s references entity.%s in %s before the handler lifecycle makes it available", flowID, nodeID, eventType, field, expr.Kind),
-								Location: nodeID,
-							})
-							continue
-						}
-						if _, ok := writers[field]; ok {
 							continue
 						}
 						seen[key] = struct{}{}
 						c.entityRefFindings = append(c.entityRefFindings, Finding{
 							CheckID:  "expression_field_reference_validation",
-							Severity: "warning",
-							Message:  fmt.Sprintf("flow %s node %s handler %s references entity.%s in %s but no handler writes %s to entity state — did you mean accumulated.filter()?", flowID, nodeID, eventType, field, expr.Kind, field),
+							Severity: SeverityHardInvalidity,
+							Message:  fmt.Sprintf("flow %s node %s handler %s references entity.%s in %s but %v", defaultFlowLabel(flowID), nodeID, eventType, ref, expr.Kind, err),
+							Location: nodeID,
+						})
+						continue
+					}
+					if expr.Kind == "query filter" && leaf.Kind != "scalar" && leaf.Kind != "enum" {
+						key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, ref, leaf.Kind}, "|")
+						if _, ok := seen[key]; ok {
+							continue
+						}
+						seen[key] = struct{}{}
+						c.entityRefFindings = append(c.entityRefFindings, Finding{
+							CheckID:  "expression_field_reference_validation",
+							Severity: SeverityHardInvalidity,
+							Message:  fmt.Sprintf("flow %s node %s handler %s query filter path entity.%s must resolve to scalar or enum leaf, got %s", defaultFlowLabel(flowID), nodeID, eventType, ref, leaf.Type),
 							Location: nodeID,
 						})
 					}

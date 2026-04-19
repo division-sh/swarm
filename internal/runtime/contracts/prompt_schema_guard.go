@@ -9,6 +9,13 @@ import (
 	"strings"
 )
 
+type PromptSchemaGuardFinding struct {
+	CheckID  string
+	Severity string
+	Message  string
+	Location string
+}
+
 func ValidatePromptSchemaGuards(repoRoot string) error {
 	bundle, err := LoadWorkflowContractBundle(repoRoot)
 	if err != nil {
@@ -18,27 +25,39 @@ func ValidatePromptSchemaGuards(repoRoot string) error {
 }
 
 func ValidatePromptSchemaGuardsForBundle(bundle *WorkflowContractBundle) error {
+	findings, err := PromptSchemaGuardFindingsForBundle(bundle)
+	if err != nil {
+		return err
+	}
+	if len(findings) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s [%s] %s", strings.TrimSpace(findings[0].CheckID), strings.TrimSpace(findings[0].Location), strings.TrimSpace(findings[0].Message))
+}
+
+func PromptSchemaGuardFindingsForBundle(bundle *WorkflowContractBundle) ([]PromptSchemaGuardFinding, error) {
 	if bundle == nil {
-		return fmt.Errorf("workflow contract bundle is required")
+		return nil, fmt.Errorf("workflow contract bundle is required")
 	}
 	schemas := EventSchemaRegistryFromBundle(bundle)
 	cases := DerivePromptSchemaGuards(bundle)
+	findings := make([]PromptSchemaGuardFinding, 0)
 
 	for _, tc := range cases {
-		_, raw, err := readPromptSchemaGuardFile(bundle, tc.PromptFile)
+		path, raw, err := readPromptSchemaGuardFile(bundle, tc.PromptFile)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		text := raw
 
 		eventType := strings.ReplaceAll(strings.TrimPrefix(tc.EmitTool, "emit_"), "_", ".")
 		schema, ok := schemas[eventType]
 		if !ok {
-			return fmt.Errorf("unknown emit tool %s", tc.EmitTool)
+			return nil, fmt.Errorf("unknown emit tool %s", tc.EmitTool)
 		}
 		props := schemaProperties(schema.Schema["properties"])
 		if len(props) == 0 {
-			return fmt.Errorf("schema for %s has no properties", eventType)
+			return nil, fmt.Errorf("schema for %s has no properties", eventType)
 		}
 
 		fields := extractPromptEmitTopLevelFields(text, tc.EmitTool)
@@ -51,23 +70,38 @@ func ValidatePromptSchemaGuardsForBundle(bundle *WorkflowContractBundle) error {
 			}
 			if len(invalid) > 0 {
 				sort.Strings(invalid)
-				return fmt.Errorf("prompt %s: fields not in %s schema: %v", tc.PromptFile, eventType, invalid)
+				findings = append(findings, PromptSchemaGuardFinding{
+					CheckID:  "agent_prompt_lint_structural",
+					Severity: "hard_invalidity",
+					Message:  fmt.Sprintf("prompt %s: fields not in %s schema: %v", tc.PromptFile, eventType, invalid),
+					Location: path,
+				})
 			}
 		}
 
 		for _, required := range tc.RequiredTopLevel {
 			if !promptMentionsField(text, fields, required) {
-				return fmt.Errorf("prompt %s: missing required top-level field %q for %s", tc.PromptFile, required, tc.EmitTool)
+				findings = append(findings, PromptSchemaGuardFinding{
+					CheckID:  "agent_prompt_lint_structural",
+					Severity: "hard_invalidity",
+					Message:  fmt.Sprintf("prompt %s: missing required top-level field %q for %s", tc.PromptFile, required, tc.EmitTool),
+					Location: path,
+				})
 			}
 		}
 
 		for _, forbidden := range tc.ForbiddenTokens {
 			if promptContainsToken(text, forbidden) {
-				return fmt.Errorf("prompt %s: contains forbidden legacy token %q", tc.PromptFile, forbidden)
+				findings = append(findings, PromptSchemaGuardFinding{
+					CheckID:  "agent_prompt_lint_structural",
+					Severity: "hard_invalidity",
+					Message:  fmt.Sprintf("prompt %s: contains forbidden legacy token %q", tc.PromptFile, forbidden),
+					Location: path,
+				})
 			}
 		}
 	}
-	return nil
+	return findings, nil
 }
 
 func readPromptSchemaGuardFile(bundle *WorkflowContractBundle, promptFile string) (string, string, error) {

@@ -1,0 +1,4 @@
+items:
+  status:
+    type: text
+    _unused_reason: preseeded query filter proof field

@@ -1,0 +1,10 @@
+core:
+  depth:
+    type: integer
+    _unused_reason: preseeded policy-guard proof field
+  flag_count:
+    type: integer
+    _unused_reason: preseeded policy-guard proof field
+  item_count:
+    type: integer
+    _unused_reason: preseeded policy-guard proof field

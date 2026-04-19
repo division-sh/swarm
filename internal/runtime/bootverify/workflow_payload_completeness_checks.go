@@ -20,13 +20,21 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 	}
 	c.payloadCompletenessLoaded = true
 
-	entityFields := entitySchemaFields(c.source)
 	forced := payloadCompletenessForcedFields()
 
 	for nodeID := range c.source.NodeEntries() {
 		nodeID = strings.TrimSpace(nodeID)
 		nodeSource, _ := c.source.NodeContractSource(nodeID)
 		flowID := strings.TrimSpace(nodeSource.FlowID)
+		entityFields := map[string]struct{}{}
+		if contract := wave1EntityContractForFlow(c.source, flowID); contract.Defined {
+			for field := range contract.Contract.Fields {
+				field = strings.TrimSpace(field)
+				if field != "" {
+					entityFields[field] = struct{}{}
+				}
+			}
+		}
 
 		for triggerEventType, handler := range c.source.NodeEventHandlers(nodeID) {
 			triggerEventType = strings.TrimSpace(triggerEventType)

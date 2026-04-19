@@ -1168,14 +1168,13 @@ func TestVerifyBundle_DoesNotWarnForFlowOwnedAgentOutputEvents(t *testing.T) {
 func TestVerifyBundle_CreateEntityAccumulatePreemptsDynamicComputeWarningSurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
-	bundle.Semantics.EntitySchema = runtimecontracts.EntitySchema{
-		Groups: []runtimecontracts.EntitySchemaGroup{{
-			Name: "tracking",
-			Fields: []runtimecontracts.EntitySchemaField{
-				{Name: "expected_count", Type: "integer", Initial: 1},
-				{Name: "composite_score", Type: "number"},
+	bundle.RootEntities = runtimecontracts.EntityContractsDocument{
+		"tracking": {
+			Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"expected_count":  {Type: "integer", Initial: 1},
+				"composite_score": {Type: "numeric"},
 			},
-		}},
+		},
 	}
 	nodeID := "complete-task"
 	eventType := "task.requested"
@@ -1214,16 +1213,15 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Platform: runtimecontracts.PlatformSpecDocument{},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			EntitySchema: runtimecontracts.EntitySchema{
-				Groups: []runtimecontracts.EntitySchemaGroup{{
-					Name: "default",
-					Fields: []runtimecontracts.EntitySchemaField{
-						{Name: "scan_id", Type: "string"},
-						{Name: "geography", Type: "string"},
-					},
-				}},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"scan": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"scan_id":   {Type: "string"},
+					"geography": {Type: "string"},
+				},
 			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"dispatcher": {
 					"scan.corpus_dispatch": {

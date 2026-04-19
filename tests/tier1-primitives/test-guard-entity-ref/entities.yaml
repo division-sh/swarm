@@ -1,5 +1,4 @@
 core:
-  status:
-    type: text
+  level:
+    type: integer
     _unused_reason: preseeded guard proof field
-  counter: integer

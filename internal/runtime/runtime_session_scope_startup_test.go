@@ -69,7 +69,9 @@ flows:
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
-  item_id: string
+  item_id:
+    type: string
+    _unused_reason: startup scope fixture field
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -136,7 +138,9 @@ flows:
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
-  item_id: string
+  item_id:
+    type: string
+    _unused_reason: startup scope fixture field
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")

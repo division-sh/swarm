@@ -6,11 +6,14 @@ test-node:
   event_handlers:
     item.received:
       data_accumulation:
-        writes: [name, score]
+        writes:
+          - source_field: name
+            target_field: item_name
+          - score
         source_event: item.received
       advances_to: done
       emit: item.stored
   state_schema:
     fields:
-      name: string
+      item_name: string
       score: integer

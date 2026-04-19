@@ -7,7 +7,6 @@ import (
 
 	runtimeauthority "swarm/internal/runtime/authority"
 	runtimebootverify "swarm/internal/runtime/bootverify"
-	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
@@ -45,11 +44,6 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	result := WorkflowContractValidationResult{}
 	if source == nil {
 		return result, fmt.Errorf("semantic source is required")
-	}
-	if bundle, ok := semanticview.Bundle(source); ok {
-		if err := runtimecontracts.ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
-			return result, fmt.Errorf("validate prompt schema guards: %w", err)
-		}
 	}
 
 	result.BootReport = runtimebootverify.Run(ctx, source, runtimebootverify.Options{

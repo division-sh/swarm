@@ -1,4 +1,7 @@
 core:
-  item_count: integer
+  item_count:
+    type: integer
+    _unused_reason: preseeded accumulation threshold field
   received_items:
-  - text
+    type: "[text]"
+    _unused_reason: platform-managed accumulation bucket

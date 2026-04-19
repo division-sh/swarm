@@ -1,5 +1,4 @@
 core:
-  status:
+  priority:
     type: text
     _unused_reason: preseeded guard proof field
-  counter: integer
