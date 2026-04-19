@@ -88,9 +88,11 @@ vocabulary:
     not_interchangeable: 'These are not interchangeable. Using instance path where scope key is needed
       causes prefix-based ownership bugs. Using scope key where instance path is needed causes
       cross-instance state leakage. The runtime MUST use the correct identity for each context.'
-    flow_entity_id: 'The canonical entity identity within a flow is derived from the concrete instance
-      path. One flow instance produces one entity_state row. The runtime MUST NOT maintain multiple
-      competing identities for the same flow instance row.'
+    flow_entity_id: 'The canonical entity identity within a flow is scoped by the concrete instance
+      path, but cardinality depends on the flow kind. A static flow instance may create many
+      entity_state rows over time; a template flow instance typically owns one entity_state row.
+      The runtime MUST NOT maintain competing identities for the same entity row or blur flow-instance
+      identity with entity identity.'
   state:
     description: 'A named state in a workflow. An entity (e.g. a ticket, an order, a document) is always in exactly one
       state. States belong to phases for grouping. Some states are terminal (no outgoing transitions).
@@ -2228,6 +2230,7 @@ tool_model:
       get_entity:
         description: Read an entity by ID. Returns the full entity state from entity_state table.
         input:
+          flow_instance: string — required existing addressing surface for the owning flow instance
           entity_id: string — required
         output:
           entity_id: string
@@ -2247,6 +2250,7 @@ tool_model:
       save_entity_field:
         description: Write a specific field on an entity. The field is written to entity_state.fields JSONB.
         input:
+          flow_instance: string — required existing addressing surface for the owning flow instance
           entity_id: string — required
           field: string — required, field name to write. Must exist on the inferred entity contract and must not be an envelope field.
           value: any — required, the value to write
@@ -2260,7 +2264,6 @@ tool_model:
         description: Query entities by state, field values, or metadata. Returns matching entities from entity_state.
         input:
           flow_instance: string — optional, filter by flow instance
-          entity_type: string — optional, filter by inferred flow-scoped entity type
           current_state: string — optional, filter by state
           filter: object — optional, field-value pairs to match against entity_state.fields JSONB
           limit: integer — optional, default 100
@@ -2271,7 +2274,7 @@ tool_model:
       query_entities:
         description: Cross-entity read with aggregation. Query entities by state, fields, group, and aggregate.
         input:
-          entity_type: string — optional, filter by inferred flow-scoped entity type
+          flow_instance: string — optional, filter by flow instance when the caller needs a narrower execution scope
           filter: string — optional, CEL expression evaluated against entity fields
           group_by: string — optional, field to group results by
           select: array — optional, field names to include in results
@@ -2281,7 +2284,6 @@ tool_model:
       query_metrics:
         description: Read aggregated metrics across entities. Counts, sums, averages.
         input:
-          entity_type: string — optional, inferred flow-scoped entity type
           flow_instance: string — optional
           metric: string — required, one of count, sum, avg, min, max
           field: string — required for sum/avg/min/max, the JSONB field to aggregate
