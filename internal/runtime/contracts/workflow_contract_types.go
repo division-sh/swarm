@@ -32,10 +32,7 @@ type WorkflowContractBundle struct {
 	Paths                 ContractPaths
 	Package               ProjectPackageDocument
 	PackageTree           []LoadedProjectPackage
-	Compatibility         []ContractCompatibilityUsage
 	projectContracts      map[string]ProjectContractView
-	projectTypes          map[string]TypeCatalogDocument
-	projectEntities       map[string]EntityContractsDocument
 	flowTypes             map[string]TypeCatalogDocument
 	flowEntities          map[string]EntityContractsDocument
 	scopedNodes           map[string]SystemNodeContract
@@ -97,14 +94,6 @@ type WorkflowSemanticView struct {
 	EventOwners            map[string][]string
 	HandlerTransitions     []HandlerTransitionSemantic
 	HandlerTransitionIndex map[string]map[string]HandlerTransitionSemantic
-}
-
-type ContractCompatibilityUsage struct {
-	Kind   string
-	File   string
-	Scope  string
-	ItemID string
-	Detail string
 }
 
 type FlowInputAutoWireResolution struct {
@@ -458,20 +447,18 @@ type ToolInputSchema struct {
 	Maximum              *float64                   `yaml:"maximum"`
 }
 type ProjectPackagePaths struct {
-	Key                 string
-	ParentKey           string
-	Depth               int
-	Dir                 string
-	PackageFile         string
-	ProjectTypesFile    string
-	ProjectEntitiesFile string
-	ProjectNodesFile    string
-	ProjectEventsFile   string
-	ProjectAgentsFile   string
-	ProjectToolsFile    string
-	ProjectPolicyFile   string
-	ProjectPromptsDir   string
-	Flows               []FlowContractPaths
+	Key               string
+	ParentKey         string
+	Depth             int
+	Dir               string
+	PackageFile       string
+	ProjectNodesFile  string
+	ProjectEventsFile string
+	ProjectAgentsFile string
+	ProjectToolsFile  string
+	ProjectPolicyFile string
+	ProjectPromptsDir string
+	Flows             []FlowContractPaths
 }
 type FlowContractPaths struct {
 	ID           string
@@ -492,18 +479,17 @@ type FlowContractPaths struct {
 	PromptsDir   string
 }
 type ProjectPackageDocument struct {
-	Name                   string              `yaml:"name"`
-	Version                string              `yaml:"version"`
-	PlatformVersion        string              `yaml:"platform_version"`
-	Author                 string              `yaml:"author"`
-	Description            string              `yaml:"description"`
-	Flows                  []ProjectFlowRef    `yaml:"flows"`
-	Packages               []ProjectPackageRef `yaml:"packages"`
-	Children               []ProjectPackageRef `yaml:"children"`
-	Subpackages            []ProjectPackageRef `yaml:"subpackages"`
-	Handoffs               []ProjectHandoff    `yaml:"handoffs"`
-	EntitySchema           EntitySchema        `yaml:"entity_schema"`
-	UsesLegacyEntitySchema bool                `yaml:"-"`
+	Name            string              `yaml:"name"`
+	Version         string              `yaml:"version"`
+	PlatformVersion string              `yaml:"platform_version"`
+	Author          string              `yaml:"author"`
+	Description     string              `yaml:"description"`
+	Flows           []ProjectFlowRef    `yaml:"flows"`
+	Packages        []ProjectPackageRef `yaml:"packages"`
+	Children        []ProjectPackageRef `yaml:"children"`
+	Subpackages     []ProjectPackageRef `yaml:"subpackages"`
+	Handoffs        []ProjectHandoff    `yaml:"handoffs"`
+	EntitySchema    EntitySchema        `yaml:"entity_schema"`
 }
 
 type TypeCatalogDocument struct {
@@ -863,7 +849,6 @@ type EventCatalogEntry struct {
 	DeliveryChannel   string           `yaml:"delivery_channel"`
 	Payload           EventPayloadSpec `yaml:"payload"`
 	Required          []string         `yaml:"required"`
-	UsesLegacyPayload bool             `yaml:"-"`
 }
 type AgentRegistryEntry struct {
 	ID                     string         `yaml:"id"`

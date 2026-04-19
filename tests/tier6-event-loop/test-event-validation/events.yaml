@@ -1,8 +1,8 @@
 task.submitted:
-  payload:
-    entity_id: string
-    priority: integer
-  required: [entity_id, priority]
+  required:
+  - entity_id
+  - priority
+  entity_id: string
+  priority: integer
 task.accepted:
-  payload:
-    entity_id: string
+  entity_id: string

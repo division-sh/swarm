@@ -1,10 +1,8 @@
 name: test-compose-guard-counter-escalate
 version: 1.0.0
-description: >
-  Composition: guard checks entity counter against policy limit.
-  When counter reaches limit, on_fail escalates to a named event.
-platform_version: ">=1.1.0"
-entity_schema:
-  core:
-    retry_count: integer
+description: 'Composition: guard checks entity counter against policy limit. When
+  counter reaches limit, on_fail escalates to a named event.
+
+  '
+platform_version: '>=1.1.0'
 flows: []

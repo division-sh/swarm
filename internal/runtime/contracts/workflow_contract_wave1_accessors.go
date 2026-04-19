@@ -1,53 +1,40 @@
 package contracts
 
-import "strings"
-
-func recordContractCompatibilityUsage(bundle *WorkflowContractBundle, usage ContractCompatibilityUsage) {
-	if bundle == nil {
-		return
-	}
-	usage.Kind = strings.TrimSpace(usage.Kind)
-	usage.File = strings.TrimSpace(usage.File)
-	usage.Scope = strings.TrimSpace(usage.Scope)
-	usage.ItemID = strings.TrimSpace(usage.ItemID)
-	usage.Detail = strings.TrimSpace(usage.Detail)
-	if usage.Kind == "" || usage.File == "" {
-		return
-	}
-	bundle.Compatibility = append(bundle.Compatibility, usage)
-}
-
-func recordEventCompatibilityUsages(bundle *WorkflowContractBundle, entries map[string]EventCatalogEntry, file, scope string) {
-	if bundle == nil || strings.TrimSpace(file) == "" || len(entries) == 0 {
-		return
-	}
-	for eventType, entry := range entries {
-		if !entry.UsesLegacyPayload {
-			continue
-		}
-		recordContractCompatibilityUsage(bundle, ContractCompatibilityUsage{
-			Kind:   "legacy_event_payload_block",
-			File:   file,
-			Scope:  scope,
-			ItemID: strings.TrimSpace(eventType),
-			Detail: "events.yaml payload: block loaded through Wave 1 migration compatibility",
-		})
-	}
-}
+import (
+	"path/filepath"
+	"strings"
+)
 
 func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 	if bundle == nil {
 		return nil
 	}
-	legacyEntitySchemaScope, hasLegacyEntitySchema := bundleLegacyEntitySchemaScope(bundle)
-	if hasLegacyEntitySchema && (len(bundle.RootEntities) > 0 || len(bundle.projectEntities) > 0 || len(bundle.flowEntities) > 0) {
-		detail := "AMBIGUOUS-CONTRACT-GRAMMAR: package.yaml entity_schema cannot coexist with Wave 1 entities.yaml declarations in the same bundle"
-		if legacyEntitySchemaScope != "" {
-			detail += " (legacy scope: " + legacyEntitySchemaScope + ")"
-		}
+	if legacyScope, ok := bundleLegacyEntitySchemaScope(bundle); ok {
 		return &LoadValidationError{Items: []error{
-			errString(detail),
+			errString("RETIRED: package.yaml entity_schema is no longer supported; migrate to entities.yaml (legacy scope: " + legacyScope + ")"),
 		}}
+	}
+	for _, pkg := range bundle.PackageTree {
+		if strings.TrimSpace(pkg.Key) == "." {
+			continue
+		}
+		if path := existingFile(filepath.Join(pkg.Paths.Dir, "types.yaml")); path != "" {
+			return &LoadValidationError{Items: []error{
+				errString("RETIRED: package-scoped types.yaml is not supported in Wave 1; move declarations to bundle root or flow scope (" + path + ")"),
+			}}
+		}
+		if path := existingFile(filepath.Join(pkg.Paths.Dir, "entities.yaml")); path != "" {
+			return &LoadValidationError{Items: []error{
+				errString("RETIRED: package-scoped entities.yaml is not supported in Wave 1; move declarations to bundle root or flow scope (" + path + ")"),
+			}}
+		}
+	}
+	for entityType, contract := range bundle.RootEntities {
+		if strings.TrimSpace(contract.Owner) != "" {
+			return &LoadValidationError{Items: []error{
+				errString("UNDEFINED-FIELD: root entity contract " + strings.TrimSpace(entityType) + " must not declare _owner; ownership is implied by root location"),
+			}}
+		}
 	}
 	for flowID, entities := range bundle.flowEntities {
 		if len(entities) > 1 {
@@ -70,11 +57,8 @@ func bundleLegacyEntitySchemaScope(bundle *WorkflowContractBundle) (string, bool
 	if bundle == nil {
 		return "", false
 	}
-	if bundle.Package.UsesLegacyEntitySchema {
-		return ".", true
-	}
 	for _, pkg := range bundle.PackageTree {
-		if !pkg.Manifest.UsesLegacyEntitySchema {
+		if pkg.Manifest.EntitySchema.Empty() {
 			continue
 		}
 		scope := strings.TrimSpace(pkg.Key)
@@ -83,21 +67,15 @@ func bundleLegacyEntitySchemaScope(bundle *WorkflowContractBundle) (string, bool
 		}
 		return scope, true
 	}
+	if !bundle.Package.EntitySchema.Empty() {
+		return ".", true
+	}
 	return "", false
 }
 
 type errString string
 
 func (e errString) Error() string { return string(e) }
-
-func (b *WorkflowContractBundle) CompatibilityUsages() []ContractCompatibilityUsage {
-	if b == nil || len(b.Compatibility) == 0 {
-		return nil
-	}
-	out := make([]ContractCompatibilityUsage, len(b.Compatibility))
-	copy(out, b.Compatibility)
-	return out
-}
 
 func (b *WorkflowContractBundle) RootTypeCatalog() TypeCatalogDocument {
 	if b == nil {
@@ -111,24 +89,6 @@ func (b *WorkflowContractBundle) RootEntityContracts() EntityContractsDocument {
 		return nil
 	}
 	return cloneEntityContractsDocument(b.RootEntities)
-}
-
-func (b *WorkflowContractBundle) ProjectTypeCatalogByKey(key string) (TypeCatalogDocument, bool) {
-	key = strings.TrimSpace(key)
-	if b == nil || key == "" || key == "." {
-		return TypeCatalogDocument{}, false
-	}
-	doc, ok := b.projectTypes[key]
-	return cloneTypeCatalogDocument(doc), ok
-}
-
-func (b *WorkflowContractBundle) ProjectEntityContractsByKey(key string) (EntityContractsDocument, bool) {
-	key = strings.TrimSpace(key)
-	if b == nil || key == "" || key == "." {
-		return nil, false
-	}
-	doc, ok := b.projectEntities[key]
-	return cloneEntityContractsDocument(doc), ok
 }
 
 func (b *WorkflowContractBundle) FlowTypeCatalogByID(flowID string) (TypeCatalogDocument, bool) {
@@ -166,19 +126,6 @@ func (b *WorkflowContractBundle) ResolvedTypeCatalogForFlow(flowID string) TypeC
 		return TypeCatalogDocument{}
 	}
 	resolved := cloneTypeCatalogDocument(b.RootTypes)
-	packageKey := ""
-	if flowID != "" {
-		if view, ok := b.FlowViewByID(flowID); ok {
-			packageKey = strings.TrimSpace(view.Paths.PackageKey)
-		}
-	}
-	for _, key := range b.packageLineageKeys(packageKey) {
-		doc, ok := b.projectTypes[key]
-		if !ok {
-			continue
-		}
-		resolved = mergeTypeCatalogDocuments(resolved, doc)
-	}
 	if flowID != "" {
 		if flowDoc, ok := b.flowTypes[flowID]; ok {
 			resolved = mergeTypeCatalogDocuments(resolved, flowDoc)
@@ -193,42 +140,12 @@ func (b *WorkflowContractBundle) ResolvedEntityContractsForFlow(flowID string) E
 		return nil
 	}
 	resolved := cloneEntityContractsDocument(b.RootEntities)
-	packageKey := ""
-	if flowID != "" {
-		if view, ok := b.FlowViewByID(flowID); ok {
-			packageKey = strings.TrimSpace(view.Paths.PackageKey)
-		}
-	}
-	for _, key := range b.packageLineageKeys(packageKey) {
-		doc, ok := b.projectEntities[key]
-		if !ok {
-			continue
-		}
-		resolved = mergeEntityContractsDocuments(resolved, doc)
-	}
 	if flowID != "" {
 		if flowDoc, ok := b.flowEntities[flowID]; ok {
 			resolved = mergeEntityContractsDocuments(resolved, flowDoc)
 		}
 	}
 	return resolved
-}
-
-func (b *WorkflowContractBundle) packageLineageKeys(key string) []string {
-	key = strings.TrimSpace(key)
-	if b == nil || key == "" || key == "." {
-		return nil
-	}
-	parents := map[string]string{}
-	for _, pkg := range b.PackageTree {
-		parents[strings.TrimSpace(pkg.Key)] = strings.TrimSpace(pkg.ParentKey)
-	}
-	var lineage []string
-	for key != "" && key != "." {
-		lineage = append([]string{key}, lineage...)
-		key = parents[key]
-	}
-	return lineage
 }
 
 func mergeTypeCatalogDocuments(base, incoming TypeCatalogDocument) TypeCatalogDocument {

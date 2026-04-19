@@ -1,9 +1,6 @@
 alpha.start:
-  payload:
-    entity_id: string
+  entity_id: string
 internal.done:
-  payload:
-    entity_id: string
+  entity_id: string
 alpha.complete:
-  payload:
-    entity_id: string
+  entity_id: string

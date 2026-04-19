@@ -1,13 +1,9 @@
 job.submit:
-  payload:
-    entity_id: string
+  entity_id: string
 work.requested:
-  payload:
-    entity_id: string
-    task_type: string
+  entity_id: string
+  task_type: string
 job.done:
-  payload:
-    entity_id: string
+  entity_id: string
 child/work.completed:
-  payload:
-    entity_id: string
+  entity_id: string

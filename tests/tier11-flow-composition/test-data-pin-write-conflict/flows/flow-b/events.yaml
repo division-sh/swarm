@@ -1,6 +1,4 @@
 b.start:
-  payload:
-    entity_id: string
+  entity_id: string
 b.done:
-  payload:
-    entity_id: string
+  entity_id: string

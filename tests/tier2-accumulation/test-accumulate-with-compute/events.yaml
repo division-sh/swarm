@@ -1,9 +1,7 @@
 score.received:
-  payload:
-    entity_id: string
-    dimension: string
-    score: float
+  entity_id: string
+  dimension: string
+  score: float
 scores.aggregated:
-  payload:
-    entity_id: string
-    composite: float
+  entity_id: string
+  composite: float

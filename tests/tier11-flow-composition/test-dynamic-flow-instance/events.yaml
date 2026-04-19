@@ -1,16 +1,11 @@
 spawn.requested:
-  payload:
-    entity_id: string
-    worker_id: string
+  entity_id: string
+  worker_id: string
 spawn.confirmed:
-  payload:
-    entity_id: string
+  entity_id: string
 worker/worker.ready:
-  payload:
-    entity_id: string
+  entity_id: string
 worker/work.assign:
-  payload:
-    entity_id: string
+  entity_id: string
 worker/work.done:
-  payload:
-    entity_id: string
+  entity_id: string

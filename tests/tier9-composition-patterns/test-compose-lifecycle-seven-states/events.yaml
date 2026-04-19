@@ -1,21 +1,14 @@
 phase.init:
-  payload:
-    entity_id: string
+  entity_id: string
 phase.activate:
-  payload:
-    entity_id: string
+  entity_id: string
 phase.start:
-  payload:
-    entity_id: string
+  entity_id: string
 phase.stabilize:
-  payload:
-    entity_id: string
+  entity_id: string
 phase.wind_down:
-  payload:
-    entity_id: string
+  entity_id: string
 phase.close:
-  payload:
-    entity_id: string
+  entity_id: string
 lifecycle.complete:
-  payload:
-    entity_id: string
+  entity_id: string

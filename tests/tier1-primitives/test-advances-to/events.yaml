@@ -1,6 +1,4 @@
 task.started:
-  payload:
-    entity_id: string
+  entity_id: string
 task.progressed:
-  payload:
-    entity_id: string
+  entity_id: string

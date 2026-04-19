@@ -1,7 +1,5 @@
 review.requested:
-  payload:
-    entity_id: string
-    score: integer
+  entity_id: string
+  score: integer
 review.done:
-  payload:
-    entity_id: string
+  entity_id: string

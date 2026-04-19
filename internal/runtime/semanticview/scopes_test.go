@@ -17,21 +17,18 @@ func TestProjectScopes_PackageBackedScopeCarriesOwningFlowID(t *testing.T) {
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=1.0.0"
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
 flows:
   - id: support
     flow: support
     mode: static
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -93,23 +90,20 @@ func TestProjectScopes_SoleParentFlowCarriesOwningFlowIDOutsideFlowDir(t *testin
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=1.0.0"
 packages:
   - path: extras
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
 flows:
   - id: support
     flow: support
     mode: static
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -172,21 +166,18 @@ func TestResolveAgentSessionScopeProof_PackageBackedAgentCarriesFlowPath(t *test
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=1.0.0"
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
 flows:
   - id: support
     flow: support
     mode: static
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -243,21 +234,18 @@ func TestResolveAgentSessionScopeProof_FlowScopedAgentCarriesFlowPath(t *testing
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=1.0.0"
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
 flows:
   - id: support
     flow: support
     mode: static
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")

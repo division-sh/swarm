@@ -1,8 +1,5 @@
 name: test-on-complete-with-state
 version: 1.0.0
 description: on_complete condition reads entity state to determine branch.
-platform_version: ">=1.1.0"
+platform_version: '>=1.1.0'
 flows: []
-entity_schema:
-  core:
-    priority: text

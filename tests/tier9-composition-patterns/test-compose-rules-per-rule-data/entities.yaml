@@ -1,0 +1,5 @@
+core:
+  resolved_value: string
+  resolved_value_a: string
+  resolved_value_b: string
+  resolution_method: string

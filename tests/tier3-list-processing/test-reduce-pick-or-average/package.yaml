@@ -1,8 +1,5 @@
 name: test-reduce-pick-or-average
 version: 1.0.0
 description: reduce with pick_or_average picks higher score when spread exceeds threshold.
-platform_version: ">=1.1.0"
+platform_version: '>=1.1.0'
 flows: []
-entity_schema:
-  core:
-    result: numeric(5,2)

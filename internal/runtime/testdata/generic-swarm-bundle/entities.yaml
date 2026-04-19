@@ -1,0 +1,6 @@
+item:
+  item_id: string
+  status: string
+  priority: string
+  score: number
+  gates: GateState

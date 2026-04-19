@@ -1,16 +1,11 @@
 item.discovered:
-  payload:
-    entity_id: string
-    name: string
+  entity_id: string
+  name: string
 score.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 item.dispatched:
-  payload:
-    entity_id: string
+  entity_id: string
 scoring/score.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 scoring/score.done:
-  payload:
-    entity_id: string
+  entity_id: string

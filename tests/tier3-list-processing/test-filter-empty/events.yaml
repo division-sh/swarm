@@ -1,7 +1,5 @@
 items.submitted:
-  payload:
-    entity_id: string
-    items: array
+  entity_id: string
+  items: array
 items.filtered:
-  payload:
-    entity_id: string
+  entity_id: string

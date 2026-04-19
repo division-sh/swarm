@@ -1,21 +1,14 @@
 run.start:
-  payload:
-    entity_id: string
+  entity_id: string
 run.complete:
-  payload:
-    entity_id: string
+  entity_id: string
 flow-a/alpha.start:
-  payload:
-    entity_id: string
+  entity_id: string
 flow-a/internal.done:
-  payload:
-    entity_id: string
+  entity_id: string
 flow-a/alpha.complete:
-  payload:
-    entity_id: string
+  entity_id: string
 flow-b/beta.start:
-  payload:
-    entity_id: string
+  entity_id: string
 flow-b/beta.complete:
-  payload:
-    entity_id: string
+  entity_id: string

@@ -1,14 +1,10 @@
 task.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 task.completed:
-  payload:
-    entity_id: string
+  entity_id: string
 child/task.assigned:
-  description: "Cross-flow event dispatching a task assignment to the child flow"
-  payload:
-    entity_id: string
+  description: Cross-flow event dispatching a task assignment to the child flow
+  entity_id: string
 child/task.result:
-  description: "Cross-flow event returning a task result from the child flow"
-  payload:
-    entity_id: string
+  description: Cross-flow event returning a task result from the child flow
+  entity_id: string

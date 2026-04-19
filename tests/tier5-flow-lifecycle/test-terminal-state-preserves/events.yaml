@@ -1,13 +1,9 @@
 task.completed:
-  payload:
-    entity_id: string
+  entity_id: string
 task.updated:
-  payload:
-    entity_id: string
-    data: string
+  entity_id: string
+  data: string
 task.finished:
-  payload:
-    entity_id: string
+  entity_id: string
 state.updated:
-  payload:
-    entity_id: string
+  entity_id: string

@@ -924,17 +924,14 @@ func loadPackageBackedStaticAgentSource(t *testing.T) semanticview.Source {
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=1.0.0"
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
 flows:
   - id: support
     flow: support
     mode: static
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -942,10 +939,7 @@ flows:
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
 name: support
@@ -962,10 +956,7 @@ states:
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 support/item.created:
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
@@ -997,17 +988,14 @@ version: "1.0.0"
 platform_version: ">=1.0.0"
 packages:
   - path: extras
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
 flows:
   - id: support
     flow: support
     mode: static
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -1015,10 +1003,7 @@ flows:
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
 name: support
@@ -1030,10 +1015,7 @@ states:
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 support/item.created:
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `
 name: extras

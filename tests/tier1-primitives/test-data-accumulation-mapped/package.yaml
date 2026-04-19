@@ -1,8 +1,5 @@
 name: test-data-accumulation-mapped
 version: 1.0.0
 description: data_accumulation with source_field to target_field mapping.
-platform_version: ">=1.1.0"
+platform_version: '>=1.1.0'
 flows: []
-entity_schema:
-  core:
-    name: text

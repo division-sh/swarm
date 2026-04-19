@@ -1,9 +1,6 @@
-"*.completed":
-  payload:
-    entity_id: string
+'*.completed':
+  entity_id: string
 task.completed:
-  payload:
-    entity_id: string
+  entity_id: string
 match.found:
-  payload:
-    entity_id: string
+  entity_id: string

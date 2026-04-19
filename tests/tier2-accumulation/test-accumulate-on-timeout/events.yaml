@@ -1,13 +1,9 @@
 item.arrived:
-  payload:
-    entity_id: string
-    item_id: string
+  entity_id: string
+  item_id: string
 accumulate.timeout:
-  payload:
-    entity_id: string
+  entity_id: string
 collection.done:
-  payload:
-    entity_id: string
+  entity_id: string
 collection.partial:
-  payload:
-    entity_id: string
+  entity_id: string

@@ -1,13 +1,6 @@
 name: test-compose-rules-per-rule-data
 version: 1.0.0
-description: >
-  Composition: rules with 3 branches where each rule writes different
-  entity fields via data_accumulation — the per-rule field mapping pattern.
-platform_version: ">=1.1.0"
-entity_schema:
-  core:
-    resolved_value: string
-    resolved_value_a: string
-    resolved_value_b: string
-    resolution_method: string
+description: "Composition: rules with 3 branches where each rule writes different\
+  \ entity fields via data_accumulation \u2014 the per-rule field mapping pattern.\n"
+platform_version: '>=1.1.0'
 flows: []

@@ -1,14 +1,10 @@
 stage.one_done:
-  payload:
-    entity_id: string
-    result: string
+  entity_id: string
+  result: string
 stage.two_done:
-  payload:
-    entity_id: string
-    result: string
+  entity_id: string
+  result: string
 stage.two_start:
-  payload:
-    entity_id: string
+  entity_id: string
 stage.complete:
-  payload:
-    entity_id: string
+  entity_id: string

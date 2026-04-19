@@ -1,9 +1,6 @@
 task.requested:
   _source: external
-  payload:
-    entity_id: string
-
+  entity_id: string
 task.completed:
   _source: external
-  payload:
-    entity_id: string
+  entity_id: string

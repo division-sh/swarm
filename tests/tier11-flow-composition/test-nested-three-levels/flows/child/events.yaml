@@ -1,6 +1,4 @@
 step.begin:
-  payload:
-    entity_id: string
+  entity_id: string
 grandchild/micro.done:
-  payload:
-    entity_id: string
+  entity_id: string

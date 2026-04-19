@@ -1,8 +1,5 @@
 name: test-filter-basic
 version: 1.0.0
 description: filter keeps only items where score > 50.
-platform_version: ">=1.1.0"
+platform_version: '>=1.1.0'
 flows: []
-entity_schema:
-  core:
-    filtered: [FilteredItem]

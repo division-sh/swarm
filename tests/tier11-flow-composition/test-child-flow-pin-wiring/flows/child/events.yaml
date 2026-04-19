@@ -1,7 +1,5 @@
 work.requested:
-  payload:
-    entity_id: string
-    task_type: string
+  entity_id: string
+  task_type: string
 work.completed:
-  payload:
-    entity_id: string
+  entity_id: string

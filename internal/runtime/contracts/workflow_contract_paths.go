@@ -127,8 +127,6 @@ func ContractFilesExist(repoRoot string) []string {
 		for _, pkg := range paths.ProjectPackages {
 			files = append(files,
 				pkg.PackageFile,
-				pkg.ProjectTypesFile,
-				pkg.ProjectEntitiesFile,
 				pkg.ProjectNodesFile,
 				pkg.ProjectEventsFile,
 				pkg.ProjectAgentsFile,
@@ -210,19 +208,17 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 			key = filepath.Clean(rel)
 		}
 		pkg := ProjectPackagePaths{
-			Key:                 key,
-			ParentKey:           parentKey,
-			Depth:               depth,
-			Dir:                 packageDir,
-			PackageFile:         packageFile,
-			ProjectTypesFile:    existingFile(filepath.Join(packageDir, "types.yaml")),
-			ProjectEntitiesFile: existingFile(filepath.Join(packageDir, "entities.yaml")),
-			ProjectNodesFile:    existingFile(filepath.Join(packageDir, "nodes.yaml")),
-			ProjectEventsFile:   existingFile(filepath.Join(packageDir, "events.yaml")),
-			ProjectAgentsFile:   existingFile(filepath.Join(packageDir, "agents.yaml")),
-			ProjectToolsFile:    existingFile(filepath.Join(packageDir, "tools.yaml")),
-			ProjectPolicyFile:   existingFile(filepath.Join(packageDir, "policy.yaml")),
-			ProjectPromptsDir:   existingDir(filepath.Join(packageDir, "prompts")),
+			Key:               key,
+			ParentKey:         parentKey,
+			Depth:             depth,
+			Dir:               packageDir,
+			PackageFile:       packageFile,
+			ProjectNodesFile:  existingFile(filepath.Join(packageDir, "nodes.yaml")),
+			ProjectEventsFile: existingFile(filepath.Join(packageDir, "events.yaml")),
+			ProjectAgentsFile: existingFile(filepath.Join(packageDir, "agents.yaml")),
+			ProjectToolsFile:  existingFile(filepath.Join(packageDir, "tools.yaml")),
+			ProjectPolicyFile: existingFile(filepath.Join(packageDir, "policy.yaml")),
+			ProjectPromptsDir: existingDir(filepath.Join(packageDir, "prompts")),
 		}
 		if manifestErr != nil {
 			out = append(out, pkg)

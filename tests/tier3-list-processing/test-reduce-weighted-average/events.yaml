@@ -1,6 +1,4 @@
 scores.submitted:
-  payload:
-    entity_id: string
+  entity_id: string
 scores.aggregated:
-  payload:
-    entity_id: string
+  entity_id: string

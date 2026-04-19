@@ -12,7 +12,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 	}
 	name := strings.TrimSpace(bundle.Package.Name)
 	version := strings.TrimSpace(bundle.Package.Version)
-	entitySchema := bundle.Package.EntitySchema
+	entitySchema := legacyWorkflowEntitySchema(bundle)
 	semantics := WorkflowSemanticView{
 		Name:                   name,
 		Version:                version,
@@ -139,6 +139,53 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		semantics.NodeHandlers[nodeID] = handlers
 	}
 	bundle.Semantics = semantics
+}
+
+func legacyWorkflowEntitySchema(bundle *WorkflowContractBundle) EntitySchema {
+	if bundle == nil {
+		return EntitySchema{}
+	}
+	if !bundle.Package.EntitySchema.Empty() {
+		return bundle.Package.EntitySchema
+	}
+	if len(bundle.RootEntities) > 0 {
+		return entityContractsToLegacyEntitySchema(bundle.RootEntities)
+	}
+	if len(bundle.flowEntities) == 1 {
+		for _, entities := range bundle.flowEntities {
+			return entityContractsToLegacyEntitySchema(entities)
+		}
+	}
+	return EntitySchema{}
+}
+
+func entityContractsToLegacyEntitySchema(entities EntityContractsDocument) EntitySchema {
+	if len(entities) == 0 {
+		return EntitySchema{}
+	}
+	groups := make([]EntitySchemaGroup, 0, len(entities))
+	for entityType, contract := range entities {
+		group := EntitySchemaGroup{
+			Name:   strings.TrimSpace(entityType),
+			Fields: make([]EntitySchemaField, 0, len(contract.Fields)),
+		}
+		for fieldName, field := range contract.Fields {
+			group.Fields = append(group.Fields, EntitySchemaField{
+				Name:        strings.TrimSpace(fieldName),
+				Type:        strings.TrimSpace(field.Type),
+				Initial:     field.Initial,
+				Description: field.Description,
+			})
+		}
+		sort.Slice(group.Fields, func(i, j int) bool {
+			return strings.TrimSpace(group.Fields[i].Name) < strings.TrimSpace(group.Fields[j].Name)
+		})
+		groups = append(groups, group)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return strings.TrimSpace(groups[i].Name) < strings.TrimSpace(groups[j].Name)
+	})
+	return EntitySchema{Groups: groups}
 }
 func deriveWorkflowGuardEntries(bundle *WorkflowContractBundle) []GuardActionEntry {
 	if bundle == nil {

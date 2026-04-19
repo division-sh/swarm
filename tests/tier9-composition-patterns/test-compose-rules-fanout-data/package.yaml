@@ -1,10 +1,8 @@
 name: test-compose-rules-fanout-data
 version: 1.0.0
-description: >
-  Composition: rules with 3 branches, winning branch triggers fan_out
+description: 'Composition: rules with 3 branches, winning branch triggers fan_out
   over payload items, data_accumulation stores the fan_out count.
-platform_version: ">=1.1.0"
-entity_schema:
-  core:
-    dispatch_count: integer
+
+  '
+platform_version: '>=1.1.0'
 flows: []

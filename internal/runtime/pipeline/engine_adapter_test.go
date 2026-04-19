@@ -1048,10 +1048,10 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml":             "name: action-emit-required\nversion: 1.0.0\ndescription: Action emit required-field proof.\nplatform_version: \">=1.1.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
 		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
-		"events.yaml":              "parent.trigger:\n  payload:\n    entity_id: string\nparent.result:\n  payload:\n    entity_id: string\n",
+		"events.yaml":              "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
 		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=1.1.0\"\nflows: []\n",
 		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
-		"flows/child/events.yaml":  "child.start:\n  payload:\n    entity_id: string\nchild.internal:\n  payload:\n    entity_id: string\n    step: string\n  required: [entity_id, step]\n",
+		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n  step: string\n  required: [entity_id, step]\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {

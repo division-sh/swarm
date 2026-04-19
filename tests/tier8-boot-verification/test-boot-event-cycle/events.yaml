@@ -1,6 +1,4 @@
 cycle.ping:
-  payload:
-    entity_id: string
+  entity_id: string
 cycle.pong:
-  payload:
-    entity_id: string
+  entity_id: string

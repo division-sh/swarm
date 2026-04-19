@@ -1,10 +1,7 @@
 task.completed:
-  payload:
-    entity_id: string
+  entity_id: string
 task.finalized:
-  payload:
-    entity_id: string
+  entity_id: string
 task.audited:
-  description: "Event emitted by audit-agent after auditing a completed task"
-  payload:
-    entity_id: string
+  description: Event emitted by audit-agent after auditing a completed task
+  entity_id: string

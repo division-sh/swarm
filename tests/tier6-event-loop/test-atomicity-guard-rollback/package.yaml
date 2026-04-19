@@ -1,11 +1,8 @@
 name: test-atomicity-guard-rollback
 version: 1.0.0
-description: >
-  When a guard rejects, ALL handler side effects are rolled back atomically.
+description: 'When a guard rejects, ALL handler side effects are rolled back atomically.
   No data change, no gate change, no emitted events.
-platform_version: ">=1.1.0"
+
+  '
+platform_version: '>=1.1.0'
 flows: []
-entity_schema:
-  core:
-    status: text
-    counter: integer

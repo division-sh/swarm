@@ -1,7 +1,5 @@
 task.submitted:
-  payload:
-    entity_id: string
-    score: number
+  entity_id: string
+  score: number
 task.accepted:
-  payload:
-    entity_id: string
+  entity_id: string

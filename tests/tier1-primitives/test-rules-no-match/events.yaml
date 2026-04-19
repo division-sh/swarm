@@ -1,10 +1,7 @@
 item.received:
-  payload:
-    entity_id: string
-    kind: string
+  entity_id: string
+  kind: string
 routed.a:
-  payload:
-    entity_id: string
+  entity_id: string
 routed.b:
-  payload:
-    entity_id: string
+  entity_id: string

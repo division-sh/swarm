@@ -1,9 +1,6 @@
 worker.ready:
-  payload:
-    entity_id: string
+  entity_id: string
 work.assign:
-  payload:
-    entity_id: string
+  entity_id: string
 work.done:
-  payload:
-    entity_id: string
+  entity_id: string

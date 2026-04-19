@@ -1,0 +1,2 @@
+core:
+  retry_count: integer

@@ -1,7 +1,5 @@
 scores.ready:
-  payload:
-    entity_id: string
-    scores: array
+  entity_id: string
+  scores: array
 scores.computed:
-  payload:
-    entity_id: string
+  entity_id: string

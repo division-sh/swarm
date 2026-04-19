@@ -1,18 +1,12 @@
 pipeline.start:
-  payload:
-    entity_id: string
+  entity_id: string
 pipeline.complete:
-  payload:
-    entity_id: string
+  entity_id: string
 child/work.begin:
-  payload:
-    entity_id: string
+  entity_id: string
 child/work.finished:
-  payload:
-    entity_id: string
+  entity_id: string
 child/grandchild/task.start:
-  payload:
-    entity_id: string
+  entity_id: string
 child/grandchild/task.done:
-  payload:
-    entity_id: string
+  entity_id: string

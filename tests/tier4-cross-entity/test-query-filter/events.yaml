@@ -1,7 +1,6 @@
 filter.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 filter.completed:
-  payload:
-    entity_id: string
-    results: [FilterResult]
+  entity_id: string
+  results:
+  - FilterResult

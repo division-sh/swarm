@@ -1,6 +1,4 @@
 gates.clear_requested:
-  payload:
-    entity_id: string
+  entity_id: string
 gates.cleared:
-  payload:
-    entity_id: string
+  entity_id: string

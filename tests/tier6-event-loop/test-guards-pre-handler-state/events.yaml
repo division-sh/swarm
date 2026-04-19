@@ -1,6 +1,4 @@
 process.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 process.done:
-  payload:
-    entity_id: string
+  entity_id: string

@@ -1,12 +1,8 @@
 pipeline.start:
-  payload:
-    entity_id: string
+  entity_id: string
 pipeline.complete:
-  payload:
-    entity_id: string
+  entity_id: string
 child/step.begin:
-  payload:
-    entity_id: string
+  entity_id: string
 child/grandchild/micro.done:
-  payload:
-    entity_id: string
+  entity_id: string

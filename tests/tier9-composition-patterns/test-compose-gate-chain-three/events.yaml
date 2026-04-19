@@ -1,12 +1,8 @@
 step.a_done:
-  payload:
-    entity_id: string
+  entity_id: string
 step.b_done:
-  payload:
-    entity_id: string
+  entity_id: string
 step.c_done:
-  payload:
-    entity_id: string
+  entity_id: string
 release.ready:
-  payload:
-    entity_id: string
+  entity_id: string

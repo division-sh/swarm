@@ -1179,10 +1179,10 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 				if condition := catalogGuardCheckString(handler["guard"]); condition != "" && !catalogConditionHasPrefix(condition) {
 					issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-BARE-COND", Message: fmt.Sprintf("%s: condition '%s' missing prefix", loc, condition)})
 				}
-				payloadFields := catalogFlattenPayloadFields(catalogMap(catalogMap(bundle.AllEvents[eventType])["payload"]))
+				payloadFields := catalogEventPayloadFields(catalogMap(bundle.AllEvents[eventType]))
 				if dataAccumulation := catalogMap(handler["data_accumulation"]); len(dataAccumulation) > 0 {
 					sourceEvent := catalogFirstNonEmptyString(catalogBootText(dataAccumulation["source_event"]), eventType)
-					sourceFields := catalogFlattenPayloadFields(catalogMap(catalogMap(bundle.AllEvents[sourceEvent])["payload"]))
+					sourceFields := catalogEventPayloadFields(catalogMap(bundle.AllEvents[sourceEvent]))
 					for _, rawWrite := range catalogAnySlice(dataAccumulation["writes"]) {
 						switch typed := rawWrite.(type) {
 						case string:
@@ -1665,6 +1665,27 @@ func catalogFlattenPayloadFields(payload map[string]any) map[string]struct{} {
 	}
 	walk("", payload)
 	return fields
+}
+
+func catalogEventPayloadFields(entry map[string]any) map[string]struct{} {
+	if len(entry) == 0 {
+		return map[string]struct{}{}
+	}
+	if payload := catalogMap(entry["payload"]); len(payload) > 0 {
+		return catalogFlattenPayloadFields(payload)
+	}
+	flat := map[string]any{}
+	for _, key := range catalogSortedKeys(entry) {
+		if key == "" || strings.HasPrefix(key, "_") {
+			continue
+		}
+		switch key {
+		case "description", "emitter", "emitter_type", "producer", "alternate_emitters", "consumer", "consumer_type", "intercepted", "passthrough", "runtime_handling", "owning_node", "delivery_channel", "required":
+			continue
+		}
+		flat[key] = entry[key]
+	}
+	return catalogFlattenPayloadFields(flat)
 }
 
 func catalogSchemaLeaf(node map[string]any) bool {

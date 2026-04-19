@@ -1,9 +1,7 @@
 conflict.submitted:
-  payload:
-    entity_id: string
-    strategy: string
-    value_a: string
-    value_b: string
+  entity_id: string
+  strategy: string
+  value_a: string
+  value_b: string
 conflict.resolved:
-  payload:
-    entity_id: string
+  entity_id: string
