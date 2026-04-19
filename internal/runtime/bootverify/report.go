@@ -18,12 +18,12 @@ type Finding struct {
 }
 
 const (
-	SeverityHardInvalidity      = "hard_invalidity"
-	SeveritySemanticDriftWarn   = "semantic_drift_warning"
-	SeverityAuditAnalysis       = "audit_analysis"
-	SeverityLintEvidence        = "lint_evidence"
-	legacySeverityError         = "error"
-	legacySeverityWarning       = "warning"
+	SeverityHardInvalidity    = "hard_invalidity"
+	SeveritySemanticDriftWarn = "semantic_drift_warning"
+	SeverityAuditAnalysis     = "audit_analysis"
+	SeverityLintEvidence      = "lint_evidence"
+	legacySeverityError       = "error"
+	legacySeverityWarning     = "warning"
 )
 
 type Report struct {
