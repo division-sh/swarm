@@ -118,19 +118,16 @@ contract_formats:
     description: Every flow has the same directory structure. The root flow is the entry point. Flows nest via flows/ subdirectories.
       The runtime/ bridge provides merged flat files for flat file loaders.
     structure: "\n{root_flow}/                         # Root flow (entry point)\n  package.yaml                       # Manifest:\
-      \ name, version, flows, handoffs\n  schema.yaml                        # Flow pins + state machine\n  nodes.yaml \
-      \                        # Root-level system nodes\n  events.yaml                        # Root-level events (flat payload\
-      \ declarations)\n  entities.yaml                      # Root-level entity contracts (rare)\n  types.yaml         \
-      \                # Shared named types / enums / scalar aliases\n  agents.yaml                        # Root-level agents\n\
-      \  tools.yaml                         # Shared tools\n  policy.yaml                        # Shared policy\n  prompts/\
-      \                           # Root-level agent prompts\n  runtime/                           # Merged flat files for\
-      \ flat file loader\n    nodes.yaml\n    events.yaml\n    entities.yaml\n    types.yaml\n    agents.yaml\n    tools.yaml\n\
-      \    policy.yaml\n  flows/\n    {child_flow}/                    # Child flow (same structure, recursive)\n      package.yaml\n\
-      \      schema.yaml\n      nodes.yaml\n      events.yaml\n      entities.yaml                  # Flow-owned entity contract\
-      (optional)\n      types.yaml                     # Flow-local types (optional)\n      agents.yaml\n      tools.yaml\
-      \                    # Optional\n      policy.yaml                   # Optional\n      prompts/\n      flows/      \
-      \                   # Grandchild flows (if any)\n        {grandchild}/\n          package.yaml\n          ...\n\n\
-      platform/                            # Platform contracts (separate from any flow)\n  package.yaml\n  platform-spec.yaml\n"
+      \ name, version, flows, handoffs, entity_schema\n  schema.yaml                        # Root flow pins\n  nodes.yaml\
+      \                         # Root-level system nodes\n  events.yaml                        # Root-level events\n  agents.yaml\
+      \                        # Root-level agents\n  tools.yaml                         # Shared tools\n  policy.yaml   \
+      \                     # Shared policy\n  prompts/                           # Root-level agent prompts\n  runtime/ \
+      \                          # Merged flat files for flat file loader\n    nodes.yaml\n    events.yaml\n    agents.yaml\n\
+      \    tools.yaml\n    policy.yaml\n  flows/\n    {child_flow}/                    # Child flow (same structure, recursive)\n\
+      \      package.yaml\n      schema.yaml\n      nodes.yaml\n      events.yaml\n      agents.yaml\n      tools.yaml   \
+      \                  # Optional\n      policy.yaml                    # Optional\n      prompts/\n      flows/       \
+      \                  # Grandchild flows (if any)\n        {grandchild}/\n          package.yaml\n          ...\n\nplatform/\
+      \                            # Platform contracts (separate from any flow)\n  package.yaml\n  platform-spec.yaml\n"
   minimum_flow_package:
     required_files:
     - package.yaml
@@ -138,8 +135,6 @@ contract_formats:
     optional_files:
     - nodes.yaml
     - events.yaml
-    - entities.yaml
-    - types.yaml
     - agents.yaml
     - tools.yaml
     - policy.yaml
@@ -149,63 +144,39 @@ contract_formats:
     rule: A flow with no agents needs no prompts/. A flow with no handlers needs no nodes.yaml. A flow with no events needs
       no events.yaml.
   entity_schema:
-    description: |
-      `package.yaml.entity_schema` is retired. Authoritative entity
-      contracts now live in `entities.yaml`, owned by the flow whose
-      directory contains the file. The platform derives DDL and entity
-      tool validation from those entity contracts plus the shared type
-      system.
-    replacement_surface:
-      owner_file: contracts/flows/<flow>/entities.yaml
-      bundle_scope_exception: contracts/entities.yaml for rare bundle-scope entities
-      type_source: contracts/types.yaml and contracts/flows/<flow>/types.yaml
-    migration_rules:
-      retired:
-      - Embedded `entity_schema` blocks in package.yaml
-      - Grouped field sections as the contract authority
-      - jsonb as an author-declared entity field type
-      - Inline `nullable:` authoring as a substitute for explicit type semantics
-      replacement: |
-        Entity contracts use a flat form: underscore-prefixed keys are
-        entity metadata, non-underscored keys are field declarations.
-        Field types come from the Wave 1 type system. Every declared
-        field is always readable with a type-valid value; `initial:` is
-        the explicit authored create-time override when needed.
-    authoritative_section: See top-level `entity_contracts` and `type_system`.
-  event_schema:
-    description: |
-      Events in `events.yaml` use the Wave 1 flat payload form.
-      Event-level metadata is underscore-prefixed. Non-underscored keys
-      are producer-owned payload fields. The platform validates emit
-      calls against the declared payload contract and populates envelope
-      fields separately.
+    description: entity_schema in package.yaml declares the persistent fields for entities managed by this flow. The platform
+      derives database DDL from this schema at boot.
     format:
-      event_name: |
-        _note: Human-readable metadata (optional)
-        _source: Producer annotation (optional)
-        _consumer: Consumer annotation (optional)
-        field_name: type
-        nested_field:
-          type: NamedType
-          description: Human-readable annotation
-    strict_payload_contract:
-      rule: |
-        Event payloads are producer-complete only. Every declared
-        payload field must be populated by the active emit site's
-        `emit.fields`. No payload defaults. No implicit passthrough.
-        No nested `payload:` block. Missing declared fields and
-        undeclared emitted fields are contract violations.
-      envelope_split: |
-        Envelope fields such as entity_id, trigger_event_type,
-        current_state, source_event_id, and emitted_at are
-        platform-populated and are not author-declared in event
-        schemas. Consumers access them via the event.* namespace, not
-        payload.*.
-      retired:
-      - Nested `payload:` wrapper blocks
-      - Inline `type: object` without declared inner shape
-      - jsonb payload declarations
-      - Author-declared envelope fields
+      groups: Schema is organized into named groups (e.g., intake_phase, processing_phase).
+      fields: 'Each field is declared in one of two forms.'
+      scalar_form:
+        shape: 'field_name: type_description'
+        meaning: Type-only declaration. No initial value. The field remains sparse until first explicit write.
+      mapping_form:
+        shape: 'field_name: { type: string, initial: value, nullable: bool, description: string }'
+        required_fields:
+          type: string — same type vocabulary as scalar form
+        optional_fields:
+          initial: Constant value materialized once at create_entity time. Type must match the declared type.
+          nullable: Boolean. Defaults to false. If true, the field may later be set to null without re-materializing the initial value.
+          description: Human-readable annotation, not parsed.
+      types: text, integer, numeric(precision,scale), boolean, jsonb, timestamp, uuid
+      annotations: Parenthetical notes after the type are human-readable, not machine-parsed.
+      invalid_forms:
+        string_with_initial_suffix: 'revision_count: integer initial 0 — REJECTED. Use mapping form when declaring an initial value.'
+        mapping_without_type: 'field_name: { initial: 0 } — REJECTED. type is required in mapping form.'
+    example: "entity_schema:\n  identity:\n    order_id: uuid (primary key)\n    name: text\n  processing_phase:\n    revision_count:\n      type:\
+      \ integer\n      initial: 0\n    is_duplicate:\n      type: boolean\n      initial: false\n    total_amount: numeric(10,2)\n\
+      \    order_type: text"
+  event_schema:
+    description: Each workflow defines event payload schemas in events.yaml. Events are keyed by event name. Each entry contains
+      a payload object mapping field names to types (string, integer, object, array, boolean). The platform uses these schemas
+      to validate emit tool calls at runtime. Routing is NOT declared in events.yaml — see
+      engine.cross_flow_routing for the routing model.
+    format:
+      event_name:
+        payload:
+          field_name: type (string | integer | boolean | object | array)
     routing_derivation:
       description: 'Routing is derived from two sources depending on scope:'
       intra_flow: 'Within a flow, routing derives from local subscriptions — agents.yaml subscriptions,
@@ -221,15 +192,15 @@ contract_formats:
         consuming: If only a node subscribes → route to node only
         passthrough: If no node subscribes → pure agent delivery
   persistence_model:
-    description: Agents do not have raw database access. The platform provides typed persistence tools derived from the
-      authoritative entity contracts in entities.yaml and the shared type system. This ensures all data access is
-      permissioned, auditable, and storage-backend agnostic.
+    description: Agents do not have raw database access. The platform provides typed persistence tools auto-generated from
+      the entity_schema in package.yaml. For each field group in the entity schema, the platform generates save/get tools
+      with validated input schemas. This ensures all data access is permissioned, auditable, and storage-backend agnostic.
     auto_generated_tools:
       get_entity: Read entity by ID. Returns all fields the agent has permission to see.
-      save_entity_field: Write a specific field on an entity. Field must exist in the inferred entity contract.
+      save_entity_field: Write a specific field on an entity. Field must exist in entity_schema.
       search_entities: Query entities by stage, field values, or metadata.
       query_metrics: Read aggregated metrics (counts, sums, averages) across entities.
-    schema_source: entities.yaml + types.yaml
+    schema_source: package.yaml → entity_schema
   required_agents:
     description: required_agents in schema.yaml declares agents the flow needs.
     fulfillment_rule: 'The agent YAML map key must match the role field in required_agents. This is the canonical identity:
@@ -250,9 +221,9 @@ contract_formats:
     schema_yaml: "initial_state: waiting\nterminal_states: [done]\nstates: [waiting, done]\npins:\n  inputs:\n    events:\
       \ [hello.requested]\n  outputs:\n    events: [hello.completed]"
     nodes_yaml: "hello-node:\n  id: hello-node\n  execution_type: system_node\n  subscribes_to: [hello.requested]\n  produces:\
-      \ [hello.completed]\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emit:\n        event: hello.completed\n\
-      \        fields:\n          result: payload.message"
-    events_yaml: "hello.requested:\n  message: text\nhello.completed:\n  result: text"
+      \ [hello.completed]\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emit: hello.completed"
+    events_yaml: "hello.requested:\n  payload:\n    entity_id: string\n    message: string\nhello.completed:\n  payload:\n\
+      \    entity_id: string"
     agents_yaml: '{}'
   produces_derivation: >-
     The produces field on system nodes is OPTIONAL. If omitted, the platform derives it from every supported declarative
@@ -268,240 +239,6 @@ contract_formats:
       _producer: Event producer agent. Suppresses NO-PRODUCER warnings for agent-emitted events.
     documentation_fields: Any other _-prefixed field (_note, _routing_note, _internal_events_note, etc.) is a human comment.
       The platform ignores them. The verifier ignores them. They are not part of the contract.
-rule:
-  statement: |
-    Entity contracts are the authoritative source of truth for what
-    persists in entity_state. Entity type names are flow-scoped: each
-    entity type is declared in exactly one owner flow's entities.yaml,
-    and the owner flow is determined by the file location under
-    contracts/flows/<flow>/entities.yaml. Different flows may reuse the
-    same short local name; the fully-qualified form is
-    <flow>.<entity_name>.
-
-    A shared type system declared in types.yaml is used by entity
-    contracts, event payloads, and policy. Scalars, enums, named types,
-    and lists are the complete Wave 1 structural vocabulary. jsonb and
-    inline object hand-waves are retired from the author-facing contract
-    surface.
-  consequences:
-    flow_scoped_entity_types: |
-      Entity type names are flow-scoped, not bundle-global. Cross-flow
-      references use the fully-qualified form; inside the owner flow the
-      short form is sufficient.
-    declared_is_authority: |
-      Writers and readers conform to the declared contract. Writer drift,
-      reader drift, and dead contract fields are verification failures.
-    universal_presence: |
-      Every declared entity field is always readable with a type-valid
-      value. Explicit `initial:` or the type default provides the value
-      when no writer has populated the field yet.
-    lifecycle_vs_field_presence: |
-      The state machine is the authority for entity lifecycle. It is not
-      the authority for field-level "was this written yet" semantics;
-      companion fields are the explicit answer when that distinction
-      matters.
-type_system:
-  description: |
-    Shared Wave 1 type declarations used by entities, event payloads,
-    and policy. Bundle-wide reusable types live in contracts/types.yaml.
-    Flow-local reusable types live in contracts/flows/<flow>/types.yaml.
-  vocabulary:
-    built_in_scalars:
-    - text
-    - integer
-    - numeric
-    - boolean
-    - timestamp
-    - uuid
-    named_types: Composite types with declared inner fields.
-    enums: Closed named sets of values.
-    lists: Ordered collections of a declared element type.
-  field_forms:
-    terse: 'field_name: TypeName'
-    verbose: |
-      field_name:
-        type: TypeName
-        initial: <value>          # entities only
-        immutable: true           # entities only
-        description: Human-readable annotation
-        _unused_reason: Reason    # entities only; verify suppression for E1
-  restrictions:
-    retired:
-    - jsonb as an author-declared contract type
-    - Inline type: object without declared inner shape
-    - Optional<T> in Wave 1
-    - inheritance / extends clauses
-    - recursive types in Wave 1
-    allowed_composition: |
-      Reuse is compositional only: types reference other named types via
-      declared fields. There is no inheritance hierarchy.
-  entity_envelope:
-    description: |
-      Every entity has a platform-owned envelope parallel to the event
-      envelope. Envelope fields are implicit and are not author-declared
-      in entities.yaml.
-    fields:
-      id: uuid
-      current_state: text (or null for stateless flows)
-      revision: integer
-      created_at: timestamp
-      updated_at: timestamp
-      flow_instance: text
-  defaults:
-    description: |
-      Entity field defaults materialize when no explicit `initial:` is
-      declared and no writer has set the field.
-    values:
-      text: '""'
-      integer: '0'
-      numeric: '0'
-      boolean: 'false'
-      list: '[]'
-      named_type: empty instance with each field at its own default
-      enum: first declared value unless initial overrides it
-      timestamp: 'null'
-      uuid: 'null'
-entity_contracts:
-  description: |
-    Entity contracts are declared in entities.yaml owned by a single
-    flow. Ownership is implicit from file location. Bundle-root
-    contracts/entities.yaml remains a rare bundle-scope exception.
-  ownership: |
-    Exactly one flow owns each entity type. Only the owner flow edits
-    the contract and creates instances of that type.
-  grammar:
-    form: |
-      <entity_type>:
-        _description: Human-readable description
-        <field_name>: <type>
-        <field_name>:
-          type: <type>
-          initial: <value>
-          immutable: <bool>
-          description: <text>
-          _unused_reason: <reason>
-    notes:
-    - Entity-level metadata is underscore-prefixed.
-    - State does not live in entity contracts.
-    - Envelope names are reserved and must not be author-declared.
-  one_entity_type_per_flow: |
-    Each flow declares and creates at most one entity type. Verify
-    rejects multiple entity types per flow in Wave 1.
-  state_machine_link:
-    description: |
-      State is flow-scoped and declared in schema.yaml. The entity
-      envelope field entity.current_state is populated from that flow
-      state machine. Authors do not declare a state field or state model
-      inside entities.yaml.
-event_payload_migration:
-  description: |
-    Event payload contracts use the same type system and the same flat
-    declaration style as entity contracts. Event-level metadata is
-    underscore-prefixed; all other keys are payload fields.
-  rules:
-    flat_form: |
-      Event schemas are declared directly under the event name. Nested
-      `payload:` blocks are retired.
-    envelope_payload_split: |
-      Envelope fields are platform-managed and accessed through event.*.
-      Author-declared payload fields are accessed through payload.*.
-    strict_payload_completeness: |
-      Event payloads are producer-complete only. Every declared payload
-      field must be populated by the emitting surface's emit.fields. No
-      payload defaults, no implicit passthrough, no undeclared extras.
-    retired:
-    - nested payload wrappers
-    - jsonb payload fields
-    - inline type: object without declared shape
-    - author-declared envelope fields
-runtime_enforcement:
-  description: |
-    Wave 1 adds authoritative behavioral rules on top of the existing
-    entity tool APIs. This section does not introduce a second tool
-    family; it defines the contract semantics those tools must honor.
-  create_entity:
-    rule: |
-      create_entity writes only fields declared in the inferred
-      flow-owned entity contract. Envelope field names are rejected as
-      caller input. Missing declared fields receive explicit `initial:`
-      or the type default.
-  save_entity_field:
-    rule: |
-      save_entity_field targets only declared non-envelope fields on the
-      inferred entity contract. Immutable fields reject post-create
-      writes. Values must satisfy the declared type.
-  get_entity:
-    rule: |
-      get_entity returns the full entity object with every declared
-      field present at a type-valid value plus the envelope fields.
-      Declared fields are never omitted from the response.
-  query_entities:
-    rule: |
-      query_entities validates filter paths against the inferred entity
-      contract. Paths must resolve to scalar or enum leaves. Composite
-      whole-value comparison is not part of Wave 1.
-  error_shape:
-    invalid_field: cause=invalid_tool_input with nearest declared matches
-    immutable_write: cause=invalid_tool_input for post-create immutable writes
-    envelope_write: cause=invalid_tool_input for caller-supplied envelope fields
-state_machine_authority:
-  description: |
-    The flow state machine declared in schema.yaml is the authority for
-    entity lifecycle phase. State is flow-scoped, not per-entity-type,
-    and Wave 1 assumes one entity type per flow.
-  rules:
-    state_field_is_implicit: |
-      Authors do not declare a state_field anywhere. entity.current_state
-      is the implicit envelope carrier. Any state_field declaration is a
-      contract error.
-    stateless_flows: |
-      Stateless flows declare initial_state: null, states: [], and
-      terminal_states: []. For them, entity.current_state is null.
-    not_field_presence_authority: |
-      The state machine answers lifecycle questions, not field-write
-      status questions.
-companion_field_pattern:
-  description: |
-    Wave 1 does not use Optional<T>. When a consumer must distinguish
-    "unwritten" from "written with the type default value," the contract
-    declares an explicit boolean companion field.
-  example: |
-    score: numeric
-    has_scored:
-      type: boolean
-      initial: false
-  guidance:
-    use_when: |
-      Use a companion boolean only when downstream behavior depends on
-      distinguishing "not yet written" from a legitimate default value.
-    do_not_use_when: |
-      Do not add companion fields when the type default is already a
-      semantically sufficient baseline or when the state machine already
-      gates consumers naturally.
-design_principles:
-  description: Durable Wave 1 principles for future DSL work.
-  declaration_is_authority_everything_else_is_secondary:
-    principle: |
-      Contracts are the single declaration surface for structural facts.
-      Any other surface mentioning those facts must be derivation,
-      assignment, authorization, or documentation — never a second
-      hand-authored structural authority.
-  contract_derived_summaries_are_canonical:
-    principle: |
-      Any summary shown to agents, prompts, or documentation that
-      restates contract structure must be contract-derived, not
-      hand-maintained.
-  no_structural_primitive_elides_type_discipline:
-    principle: |
-      Any structural primitive must preserve named source types,
-      explicit target mapping, explicit overrides, and hard-invalidity
-      on unmapped or undeclared fields.
-  contract_shaping_vs_ergonomics_classification:
-    principle: |
-      Contract-shaping changes alter what the platform can safely
-      express and require architectural review. Ergonomics changes only
-      reduce author typing for an already-safe expression and must not
-      smuggle contract behavior changes.
 handler_specification:
   description: Unified handler specification. Each handler field is documented once with its schema, purpose, execution position
     in the dependency graph, and dependencies.
@@ -560,8 +297,7 @@ handler_specification:
         entity_id: Auto-generated UUID
         initial_state: From the flow's schema.yaml initial_state
         flow_instance: Current flow instance path
-        fields: Declared entity fields materialized at create_entity time. Explicit `initial:` values apply where declared;
-          otherwise the type default is materialized so every declared field is readable immediately.
+        fields: Schema-declared initial values materialized once at create_entity time. Fields without declared initial values remain sparse until first explicit write.
       interactions:
         with_accumulate: 'PROHIBITED. create_entity mints a new entity_id on every handler invocation. Accumulate receives
           multiple events for the same entity. Combining them would create a different entity on each accumulation event.
@@ -569,8 +305,8 @@ handler_specification:
         with_fan_out: 'ALLOWED. create_entity creates ONE entity, then fan_out emits multiple events all carrying that entity_id.
           Fan_out items share the new entity.'
         with_guard: 'ALLOWED. Guards evaluate against the NEWLY CREATED entity state after schema initial values materialize.
-          Guards may read any declared entity field directly. Declared fields are universally present with either their
-          explicit initial or their type default.'
+          Guards may read schema-initialized fields directly. Sparse fields still require explicit presence checks such as
+          has(entity.field) or entity.field != null.'
         with_on_complete: 'ALLOWED. on_complete conditions evaluate according to the handler dependency graph. They may rely on
           schema initial values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
         with_rules: 'ALLOWED. rule conditions evaluate according to the handler dependency graph. They may rely on schema initial
@@ -645,8 +381,8 @@ handler_specification:
   expression_context:
     description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
       rules.condition, data_accumulation.expression, and filter.condition. Each namespace resolves to a specific
-      data source. Declared entity fields are universally readable at a type-valid value; undeclared field references
-      are contract errors.'
+      data source. Referencing an entity field that does not exist in entity_state.fields is a runtime error unless
+      the reference appears in an explicit presence-check position.'
     namespaces:
       entity:
         resolves_to: 'entity_state row for the current entity. entity.X reads entity_state.fields->>X.
@@ -654,9 +390,10 @@ handler_specification:
         populated_by: 'data_accumulation writes, compute.store_as, sets_gate, advances_to, save_entity_field
           (agent tool), and create_entity (initial field population).'
         read_model:
-          declared_fields: Every declared entity field is readable with either an explicit initial value or the field's type default.
-          undeclared_fields: Referencing an undeclared entity field is a contract error.
-          presence_checks: has(entity.X) and == null / != null comparisons remain available, but they are not required for declared fields.
+          sparse_field: A field with no declared initial value remains absent from entity_state.fields until first explicit write.
+          missing_field_as_value: Reading a missing entity field as a value is a runtime error (no such key).
+          presence_check_positions: 'Missing fields are allowed only inside has(entity.X) or == null / != null comparisons.
+            These positions test presence instead of requiring a value.'
         does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
           collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
           only in the accumulator. To reference them, use the accumulated namespace.'
@@ -687,23 +424,35 @@ handler_specification:
         resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
           (or root policy.yaml if not overridden at flow level).'
     boot_validation:
-      description: 'The platform MUST validate entity field references at boot against the declared entity contract.
-        Declared entity fields are always readable; the boot check is declaration and type resolution, not sparse-field
-        initializer proof.'
-      checks:
-        declared_field_resolution: Every entity.X reference must resolve against the inferred entity contract.
-        nested_type_resolution: Nested paths must resolve through named types to a declared field.
-        filter_leaf_rule: query_entities filter paths must resolve to scalar or enum leaves.
-      rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract. Universal
-        presence semantics provide the runtime value via explicit initial or type default. Dynamic writes remain
-        relevant for business meaning, but not for raw field readability.'
+      description: 'The platform MUST validate entity field references at boot using only statically provable
+        initializers. Every entity.X used as a VALUE (not in a presence-check position) must be guaranteed initialized
+        at that position in the handler dependency graph.'
+      statically_provable_initializers:
+        schema_initial_value:
+          form: 'entity_schema mapping form with initial: ...'
+          valid_for: All reference positions, including guards on create_entity handlers.
+        create_entity_unconditional_data_accumulation:
+          form: The handler containing create_entity writes X unconditionally in top-level data_accumulation.
+          valid_for: Only positions that run strictly after same-handler top-level data_accumulation in the dependency graph
+            (emit.fields, emit.event, action, clear), plus downstream handlers after commit.
+          not_valid_for: guard.check, filter, reduce, count, compute inputs, on_complete.condition, rules.condition,
+            and same-handler data_accumulation.expression.
+      presence_positions:
+      - has(entity.X)
+      - entity.X == null
+      - entity.X != null
+      rule: 'For every entity.X used as a value, at least one of the following must be true: (1) X has a declared
+        schema initial value, or (2) the current create_entity handler writes X unconditionally in top-level
+        data_accumulation and the reference position runs strictly after that step, or (3) the reference is in a
+        presence-check position. Dynamic agent writes and conditional reachability do not count as static proof.'
       severity: error (boot fails)
-      example_violation: 'A guard references entity.build_complexity, but the inferred entity contract does not declare
-        build_complexity. Correct usage is to declare the field on the entity contract or stop reading it.'
+      example_violation: 'A create_entity guard references entity.build_complexity as a value, but build_complexity is sparse
+        and only later written by data_accumulation or a downstream handler. Correct usage would be to declare an initial value
+        in entity_schema or use a presence check such as has(entity.build_complexity).'
     advances_to:
       field: advances_to
       type: string
-      purpose: Set entity.current_state to the target state. Skipped if on_complete already advanced.
+      purpose: Set entity.state to target. Skipped if on_complete already advanced.
     sets_gate:
       field: sets_gate
       type: string
@@ -1205,8 +954,8 @@ engine:
       action: Root flow's platform_version range includes the running platform version.
     - step: 12
       name: initialize_state_stores
-      action: Create or verify entity tables, accumulator state tables, event store. Derive entity contract metadata from
-        entities.yaml plus the shared type system; derive node-local state from nodes.yaml.
+      action: Create or verify entity tables, accumulator state tables, event store. Derive schema from package.yaml entity_schema
+        and nodes.yaml state_schema.
     - step: 13
       name: start_system_nodes
       action: Each node subscribes to its declared events. Nodes are ready to handle.
@@ -1345,10 +1094,10 @@ engine:
         and similar patterns are valid.
     entity_field_resolution:
       description: 'In CEL expressions, entity.X resolves against a unified namespace that includes: entity_state.fields (from
-        declared entity fields, entity_state.current_state (as entity.current_state), entity_state.gates (as entity.gates.X), and
-        node-local state_schema fields (from accumulate/compute writes). Entity contract fields come from entities.yaml, not
-        package.yaml.entity_schema. Declared entity fields are universally readable at type-valid values; node state remains
-        a separate local concept merged into the CEL namespace by the runtime.'
+        data_accumulation writes), entity_state.current_state (as entity.state), entity_state.gates (as entity.gates.X), and
+        node state_schema fields (from accumulate/compute writes). There is no distinction between entity_schema and state_schema
+        at resolution time — both are accessible via entity.X. The storage layer may use separate tables, but the CEL context
+        merges them.'
     state_schema_scoping: state_schema fields are node-scoped in storage. In CEL, entity.X reads the current handler node
       state. Cross-node state reads are not supported — use events to pass data between nodes.
   accumulation_engine:
@@ -1700,7 +1449,7 @@ engine:
     specification: https://github.com/google/cel-spec
     go_implementation: https://github.com/google/cel-go
     context_variables:
-      entity: Current entity state (all declared entity fields at type-valid values + envelope + gates)
+      entity: Current entity state (all fields from entity_schema + state + gates)
       payload: Current event payload fields
       policy: Policy values from flow policy.yaml merged with root policy.yaml
       fan_out: Available after fan_out step (e.g., fan_out.count)
@@ -1715,12 +1464,10 @@ engine:
     presence_semantics:
       has_function:
         signature: has(entity.X) -> boolean
-        meaning: Returns true for declared entity fields. Remains useful for dynamic maps and rare non-contract objects, but is
-          redundant for declared entity fields under universal presence semantics.
+        meaning: Returns true if entity.X exists in entity_state.fields, false otherwise. Does not raise an error for missing fields.
       null_comparison:
-        meaning: 'entity.X == null and entity.X != null compare against the materialized value. Timestamp and uuid fields may
-          legitimately read null when unwritten; most other declared fields read their non-null type defaults.'
-      missing_field_rule: Declared entity fields read as their explicit initial or type default. Undeclared fields are contract errors.
+        meaning: 'entity.X == null and entity.X != null are presence-check positions. They do not raise an error when X is missing.'
+      missing_field_rule: Missing entity fields are never implicitly coerced to a default value or to null outside explicit presence checks.
     examples:
     - entity.retry_count <= policy.max_retries
     - payload.category == "billing"
@@ -1729,7 +1476,7 @@ engine:
     - payload.decision == "approve"
     - entity.revision_count < policy.max_revisions
     - entity.total_amount >= policy.approval_threshold
-    - entity.kill_reason
+    - has(entity.kill_reason) ? entity.kill_reason : "active"
     - entity.kill_reason != null
   error_model:
     description: How the platform handles failures at each layer.
@@ -2188,7 +1935,7 @@ tool_model:
       query_entities: Query entities by state, fields, or aggregation. Auto-granted to all agents (universal tool).
       query_metrics: Read aggregated metrics (counts, sums, averages) across entities. Auto-granted to all agents (universal
         tool).
-      save_entity_field: Write a specific field on an entity. Field must exist in the inferred entity contract. Auto-granted to all agents
+      save_entity_field: Write a specific field on an entity. Field must exist in entity_schema. Auto-granted to all agents
         (universal tool).
       schedule: Schedule a future action or timer. Requires schedule permission.
       search_entities: Query entities by stage, field values, or metadata. Auto-granted to all agents (universal tool).
@@ -2217,14 +1964,16 @@ tool_model:
       create_entity:
         description: Create a new entity row in entity_state.
         input:
-          flow_instance: string — existing addressing surface. The platform infers the flow-owned entity contract from this context.
-          fields: object — authored field values for the new entity. Keys must be declared on the inferred entity contract.
+          entity_id: string — optional, auto-generated UUID if omitted
+          flow_instance: string — required, flow instance path this entity belongs to
+          entity_type: string — optional, default "default". Distinguishes entity kinds within a flow.
+          name: string — optional, human-readable name
+          initial_state: string — optional, defaults to flow schema's initial_state
+          fields: object — optional, initial field values (written to entity_state.fields JSONB)
         output:
           entity_id: string — the created entity's ID
-          current_state: string — the entity's initial state from the owning flow state machine
+          current_state: string — the entity's initial state
           created_at: string — ISO 8601
-        validation: The caller does not supply entity_type or envelope fields. Missing declared fields materialize from explicit
-          initial values or type defaults.
       get_entity:
         description: Read an entity by ID. Returns the full entity state from entity_state table.
         input:
@@ -2232,11 +1981,11 @@ tool_model:
         output:
           entity_id: string
           flow_instance: string
-          entity_type: string — inferred flow-scoped entity type
+          entity_type: string
           name: string (nullable)
           current_state: string
           gates: object — map of gate names to boolean values
-          fields: object — all declared entity fields at type-valid values
+          fields: object — all entity fields from the JSONB column
           accumulator: object — accumulator state
           revision: integer — entity revision number
           entered_state_at: string — ISO 8601, when current_state was entered
@@ -2248,19 +1997,19 @@ tool_model:
         description: Write a specific field on an entity. The field is written to entity_state.fields JSONB.
         input:
           entity_id: string — required
-          field: string — required, field name to write. Must exist on the inferred entity contract and must not be an envelope field.
+          field: string — required, field name to write. Must exist in entity_schema if entity_schema is defined.
           value: any — required, the value to write
         output:
           entity_id: string
           field: string
           revision: integer — new revision after write
-        validation: The field name must exist on the inferred entity contract. Undeclared fields, envelope fields, and
-          post-create writes to immutable fields are rejected.
+        validation: If the flow's package.yaml defines entity_schema, the field name must exist in the schema. If no
+          entity_schema is defined, any field name is accepted.
       search_entities:
         description: Query entities by state, field values, or metadata. Returns matching entities from entity_state.
         input:
           flow_instance: string — optional, filter by flow instance
-          entity_type: string — optional, filter by inferred flow-scoped entity type
+          entity_type: string — optional, filter by entity type
           current_state: string — optional, filter by state
           filter: object — optional, field-value pairs to match against entity_state.fields JSONB
           limit: integer — optional, default 100
@@ -2271,7 +2020,7 @@ tool_model:
       query_entities:
         description: Cross-entity read with aggregation. Query entities by state, fields, group, and aggregate.
         input:
-          entity_type: string — optional, filter by inferred flow-scoped entity type
+          entity_type: string — optional, filter by entity type
           filter: string — optional, CEL expression evaluated against entity fields
           group_by: string — optional, field to group results by
           select: array — optional, field names to include in results
@@ -2281,7 +2030,7 @@ tool_model:
       query_metrics:
         description: Read aggregated metrics across entities. Counts, sums, averages.
         input:
-          entity_type: string — optional, inferred flow-scoped entity type
+          entity_type: string — optional
           flow_instance: string — optional
           metric: string — required, one of count, sum, avg, min, max
           field: string — required for sum/avg/min/max, the JSONB field to aggregate
@@ -2624,7 +2373,7 @@ flow_model:
       description: 'A business object (e.g., a vertical) passes through multiple flows, creating a separate
         entity in each. subject_id links these flow-local entities into one business identity.'
       column: 'entity_state.subject_id — UUID, nullable, indexed. Platform-owned column — products do NOT
-        declare it in entities.yaml. The platform auto-populates it on create_entity.'
+        declare it in entity_schema. The platform auto-populates it on create_entity.'
       propagation_rules:
         first_flow: 'When create_entity fires and no source entity exists (first flow in the chain):
           subject_id = entity_id. The new entity IS the subject origin.'
@@ -2702,8 +2451,7 @@ versioning:
       2.0.0.'
 platform_tables:
   description: Platform-owned infrastructure tables. These exist regardless of which product contracts are loaded. They are
-    NOT entity tables (those are contract-driven from entities.yaml and the shared type system). The platform generates DDL
-    for these at boot via GeneratePlatformTableDDLs.
+    NOT entity tables (those are contract-driven from entity_schema). The platform generates DDL for these at boot via GeneratePlatformTableDDLs.
   tables:
     events:
       description: 'Append-only event store. Every event persisted before delivery. Three scopes: entity (entity_id + flow_instance
@@ -2751,10 +2499,9 @@ platform_tables:
         \ (idempotency_key) WHERE idempotency_key IS NOT NULL\n);"
     entity_state:
       description: Current state of every entity. This IS the entity registry — no separate registry table. slug and name
-        are top-level columns for fast lookup/display without JSONB queries. entity_type records the inferred flow-scoped
-        entity contract for the row; callers do not author or choose multiple entity kinds inside one flow in Wave 1.
-        fields JSONB holds all contract-driven entity fields. Generic store reads use entity_state for listing, filtering,
-        and lookup.
+        are top-level columns for fast lookup/display without JSONB queries. entity_type distinguishes entity kinds within
+        a flow (e.g., order, ticket, customer). fields JSONB holds all contract-driven entity fields. Generic store reads use
+        entity_state for listing, filtering, and lookup.
       ddl: "CREATE TABLE entity_state (\n    entity_id         UUID PRIMARY KEY,\n    subject_id        UUID,\n\
         \    flow_instance     TEXT NOT NULL,\n    entity_type       TEXT NOT NULL DEFAULT 'default',\n    slug              TEXT,\n\
         \    name              TEXT,\n    current_state     TEXT NOT NULL,\n    gates             JSONB NOT NULL DEFAULT '{}',\n\
@@ -3020,8 +2767,7 @@ platform_tables:
         \  TEXT NOT NULL,\n    applied_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    migration_log     JSONB NOT NULL\
         \ DEFAULT '[]'\n);"
   notes:
-    product_tables: Product-specific tables (entity fields, custom state) are generated from entities.yaml plus the shared
-      type system.
+    product_tables: Product-specific tables (entity fields, custom state) are generated from entity_schema in package.yaml.
       Those are contract-driven, not listed here.
     migrations: Platform table schema is versioned with the platform version. The platform generates DDL at boot and applies
       migrations if the schema version changed. Products never modify platform tables directly.
@@ -3095,13 +2841,12 @@ platform_tables:
     description: After legacy SQL deletion, test bootstrap creates tables from two sources only.
     sources:
       platform_tables: All tables from platform_tables.tables in platform-spec.yaml. Always created.
-      entity_tables: Generated from entities.yaml in the flow contracts loaded for the test. Optional — only if the test uses
+      entity_tables: Generated from entity_schema in the flow contracts loaded for the test. Optional — only if the test uses
         entity fields beyond the JSONB.
     generic_store_tests: Generic store tests (postgres_smoke_test.go, etc.) bootstrap using platform_tables only. They create
       entities in entity_state, events in events, sessions in agent_sessions. No product contracts needed. No legacy SQL files.
       No migrations/ directory.
-    product_integration_tests: Tests that need product-specific entity tables load product contracts and generate DDL from
-      entities.yaml plus types.yaml.
+    product_integration_tests: Tests that need product-specific entity tables load product contracts and generate DDL from entity_schema.
       These tests are product tests, not platform tests.
     bootstrap_function: BootstrapPlatformTables(spec PlatformSpec) — reads platform_tables.tables, generates DDL, executes.
       Called by both production boot and test setup. Single code path.
@@ -3626,9 +3371,8 @@ static_analyzer:
     - handler_specification.handler_fields.create_entity
     - handler_specification.dependency_graph
     scope:
-      description: 'For handlers with create_entity: true, every entity.X value read must resolve against the inferred
-        entity contract. Wave 1 universal presence semantics make declared fields readable at explicit initial or
-        type-default values from create time.
+      description: 'For handlers with create_entity: true, every entity.X value read must be provably initialized before the
+        read position using only the accepted slice-1 proof carriers.
         '
       applies_to:
       - 'create_entity: true handlers only'
@@ -3638,16 +3382,32 @@ static_analyzer:
       - agent write proof via save_entity_field
       - declared event/timer dead-surface drift
     proof_carriers:
-      declared_entity_field:
+      schema_initial_value:
         valid_for: all create_entity read positions
-      nested_declared_path:
-        valid_for: all create_entity read positions when the path resolves through named types to a declared leaf
-      undeclared_field_reference:
-        invalid: true
-    rule: A create_entity handler value read of entity.X is invalid only when X is undeclared on the inferred entity contract
-      (or the nested path does not resolve). Missing initializer proof is not a Wave 1 failure class.
+      same_handler_unconditional_top_level_data_accumulation:
+        valid_for: positions strictly after top-level data_accumulation in the same handler
+        not_valid_for:
+        - guard
+        - filter
+        - reduce
+        - count
+        - compute
+        - on_complete.condition
+        - rules.condition
+        - same-handler data_accumulation.expression
+      same_handler_compute_store_as:
+        valid_for: positions that run after compute in the same handler
+        degradation: If the proof depends on accumulate.expected_from resolving from a dynamic entity field, degrade the
+          finding to warning with an explicit assumption instead of claiming hard proof.
+      presence_check_positions:
+      - has(entity.X)
+      - entity.X == null
+      - entity.X != null
+    rule: A create_entity handler value read of entity.X is invalid unless one of the accepted proof carriers proves X is initialized
+      before that read position.
     authority_notes:
-      hard_invalidity: Undeclared field/path usage is error-level semantic invalidity on the verify surface.
+      hard_invalidity: Missing proof is error-level semantic invalidity on the verify surface.
+      degraded_warning: Same-handler compute.store_as proof becomes warning-grade only when it depends on dynamic expected_from.
   slice_2_emitted_event_payload_completeness:
     id: semantic_drift_payload_completeness
     domain: semantic_drift
