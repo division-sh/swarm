@@ -1,0 +1,3 @@
+types:
+  FilterResult:
+    entity_id: text

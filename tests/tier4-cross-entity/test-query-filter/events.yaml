@@ -4,4 +4,4 @@ filter.requested:
 filter.completed:
   payload:
     entity_id: string
-    results: object
+    results: [FilterResult]

@@ -5,4 +5,4 @@ batch.received:
 task.dispatched:
   payload:
     entity_id: string
-    item: object
+    item: FanOutItem

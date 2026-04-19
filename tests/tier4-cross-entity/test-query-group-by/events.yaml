@@ -4,4 +4,4 @@ digest.requested:
 digest.compiled:
   payload:
     entity_id: string
-    groups: object
+    groups: [GroupedDigest]

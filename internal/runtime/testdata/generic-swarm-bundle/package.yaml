@@ -18,7 +18,7 @@ entity_schema:
           type: number
           nullable: true
         - name: gates
-          type: object
+          type: GateState
           nullable: true
 flows:
   - id: intake

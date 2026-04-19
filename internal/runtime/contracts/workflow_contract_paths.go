@@ -74,6 +74,8 @@ func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, pl
 		ContractsRoot:         workflowDir,
 		WorkflowDir:           workflowDir,
 		RootSchemaFile:        existingFile(filepath.Join(workflowDir, "schema.yaml")),
+		RootTypesFile:         existingFile(filepath.Join(workflowDir, "types.yaml")),
+		RootEntitiesFile:      existingFile(filepath.Join(workflowDir, "entities.yaml")),
 		ProjectPackageFile:    existingFile(filepath.Join(workflowDir, "package.yaml")),
 		ProjectNodesFile:      existingFile(filepath.Join(workflowDir, "nodes.yaml")),
 		ProjectEventsFile:     existingFile(filepath.Join(workflowDir, "events.yaml")),
@@ -116,6 +118,8 @@ func ContractFilesExist(repoRoot string) []string {
 	if paths.ProjectPackageFile != "" {
 		files = append(files,
 			paths.ProjectPackageFile,
+			paths.RootTypesFile,
+			paths.RootEntitiesFile,
 			paths.ProjectNodesFile,
 			paths.ProjectEventsFile,
 			paths.ProjectAgentsFile,
@@ -123,6 +127,8 @@ func ContractFilesExist(repoRoot string) []string {
 		for _, pkg := range paths.ProjectPackages {
 			files = append(files,
 				pkg.PackageFile,
+				pkg.ProjectTypesFile,
+				pkg.ProjectEntitiesFile,
 				pkg.ProjectNodesFile,
 				pkg.ProjectEventsFile,
 				pkg.ProjectAgentsFile,
@@ -131,7 +137,7 @@ func ContractFilesExist(repoRoot string) []string {
 			)
 		}
 		for _, flow := range paths.Flows {
-			files = append(files, flow.SchemaFile, flow.NodesFile, flow.EventsFile, flow.AgentsFile)
+			files = append(files, flow.SchemaFile, flow.TypesFile, flow.EntitiesFile, flow.NodesFile, flow.EventsFile, flow.AgentsFile)
 		}
 	}
 	missing := make([]string, 0)
@@ -196,9 +202,7 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 		visited[packageFile] = true
 
 		var manifest ProjectPackageDocument
-		if err := loadYAMLFile(packageFile, &manifest); err != nil {
-			return
-		}
+		manifestErr := loadYAMLFile(packageFile, &manifest)
 
 		packageDir := filepath.Dir(packageFile)
 		key := "."
@@ -206,17 +210,23 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 			key = filepath.Clean(rel)
 		}
 		pkg := ProjectPackagePaths{
-			Key:               key,
-			ParentKey:         parentKey,
-			Depth:             depth,
-			Dir:               packageDir,
-			PackageFile:       packageFile,
-			ProjectNodesFile:  existingFile(filepath.Join(packageDir, "nodes.yaml")),
-			ProjectEventsFile: existingFile(filepath.Join(packageDir, "events.yaml")),
-			ProjectAgentsFile: existingFile(filepath.Join(packageDir, "agents.yaml")),
-			ProjectToolsFile:  existingFile(filepath.Join(packageDir, "tools.yaml")),
-			ProjectPolicyFile: existingFile(filepath.Join(packageDir, "policy.yaml")),
-			ProjectPromptsDir: existingDir(filepath.Join(packageDir, "prompts")),
+			Key:                 key,
+			ParentKey:           parentKey,
+			Depth:               depth,
+			Dir:                 packageDir,
+			PackageFile:         packageFile,
+			ProjectTypesFile:    existingFile(filepath.Join(packageDir, "types.yaml")),
+			ProjectEntitiesFile: existingFile(filepath.Join(packageDir, "entities.yaml")),
+			ProjectNodesFile:    existingFile(filepath.Join(packageDir, "nodes.yaml")),
+			ProjectEventsFile:   existingFile(filepath.Join(packageDir, "events.yaml")),
+			ProjectAgentsFile:   existingFile(filepath.Join(packageDir, "agents.yaml")),
+			ProjectToolsFile:    existingFile(filepath.Join(packageDir, "tools.yaml")),
+			ProjectPolicyFile:   existingFile(filepath.Join(packageDir, "policy.yaml")),
+			ProjectPromptsDir:   existingDir(filepath.Join(packageDir, "prompts")),
+		}
+		if manifestErr != nil {
+			out = append(out, pkg)
+			return
 		}
 		for _, flow := range manifest.Flows {
 			flowDirName := strings.TrimSpace(flow.Flow)
@@ -225,20 +235,22 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 			}
 			dir := filepath.Join(packageDir, "flows", flowDirName)
 			pkg.Flows = append(pkg.Flows, FlowContractPaths{
-				ID:         strings.TrimSpace(flow.ID),
-				Flow:       flowDirName,
-				Mode:       strings.TrimSpace(flow.Mode),
-				Namespace:  strings.TrimSpace(flow.Namespace),
-				PackageKey: pkg.Key,
-				PackageDir: packageDir,
-				Dir:        dir,
-				SchemaFile: existingFile(filepath.Join(dir, "schema.yaml")),
-				NodesFile:  existingFile(filepath.Join(dir, "nodes.yaml")),
-				EventsFile: existingFile(filepath.Join(dir, "events.yaml")),
-				AgentsFile: existingFile(filepath.Join(dir, "agents.yaml")),
-				ToolsFile:  existingFile(filepath.Join(dir, "tools.yaml")),
-				PolicyFile: existingFile(filepath.Join(dir, "policy.yaml")),
-				PromptsDir: existingDir(filepath.Join(dir, "prompts")),
+				ID:           strings.TrimSpace(flow.ID),
+				Flow:         flowDirName,
+				Mode:         strings.TrimSpace(flow.Mode),
+				Namespace:    strings.TrimSpace(flow.Namespace),
+				PackageKey:   pkg.Key,
+				PackageDir:   packageDir,
+				Dir:          dir,
+				SchemaFile:   existingFile(filepath.Join(dir, "schema.yaml")),
+				TypesFile:    existingFile(filepath.Join(dir, "types.yaml")),
+				EntitiesFile: existingFile(filepath.Join(dir, "entities.yaml")),
+				NodesFile:    existingFile(filepath.Join(dir, "nodes.yaml")),
+				EventsFile:   existingFile(filepath.Join(dir, "events.yaml")),
+				AgentsFile:   existingFile(filepath.Join(dir, "agents.yaml")),
+				ToolsFile:    existingFile(filepath.Join(dir, "tools.yaml")),
+				PolicyFile:   existingFile(filepath.Join(dir, "policy.yaml")),
+				PromptsDir:   existingDir(filepath.Join(dir, "prompts")),
 			})
 		}
 		sort.Slice(pkg.Flows, func(i, j int) bool {

@@ -1,0 +1,4 @@
+types:
+  WorkerConfig:
+    max_retries: integer
+    timeout_ms: integer

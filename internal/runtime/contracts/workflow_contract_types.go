@@ -11,6 +11,8 @@ type ContractPaths struct {
 	ContractsRoot         string
 	WorkflowDir           string
 	RootSchemaFile        string
+	RootTypesFile         string
+	RootEntitiesFile      string
 	ProjectPackageFile    string
 	ProjectPackages       []ProjectPackagePaths
 	ProjectNodesFile      string
@@ -30,7 +32,12 @@ type WorkflowContractBundle struct {
 	Paths                 ContractPaths
 	Package               ProjectPackageDocument
 	PackageTree           []LoadedProjectPackage
+	Compatibility         []ContractCompatibilityUsage
 	projectContracts      map[string]ProjectContractView
+	projectTypes          map[string]TypeCatalogDocument
+	projectEntities       map[string]EntityContractsDocument
+	flowTypes             map[string]TypeCatalogDocument
+	flowEntities          map[string]EntityContractsDocument
 	scopedNodes           map[string]SystemNodeContract
 	scopedEvents          map[string]EventCatalogEntry
 	scopedAgents          map[string]AgentRegistryEntry
@@ -55,6 +62,8 @@ type WorkflowContractBundle struct {
 	Policy                PolicyDocument
 	Platform              PlatformSpecDocument
 	RootSchema            *FlowSchemaDocument
+	RootTypes             TypeCatalogDocument
+	RootEntities          EntityContractsDocument
 	FlowSchemas           map[string]FlowSchemaDocument
 	FlowTree              FlowTree
 	URIRegistry           ContractURIRegistry
@@ -88,6 +97,14 @@ type WorkflowSemanticView struct {
 	EventOwners            map[string][]string
 	HandlerTransitions     []HandlerTransitionSemantic
 	HandlerTransitionIndex map[string]map[string]HandlerTransitionSemantic
+}
+
+type ContractCompatibilityUsage struct {
+	Kind   string
+	File   string
+	Scope  string
+	ItemID string
+	Detail string
 }
 
 type FlowInputAutoWireResolution struct {
@@ -441,47 +458,92 @@ type ToolInputSchema struct {
 	Maximum              *float64                   `yaml:"maximum"`
 }
 type ProjectPackagePaths struct {
-	Key               string
-	ParentKey         string
-	Depth             int
-	Dir               string
-	PackageFile       string
-	ProjectNodesFile  string
-	ProjectEventsFile string
-	ProjectAgentsFile string
-	ProjectToolsFile  string
-	ProjectPolicyFile string
-	ProjectPromptsDir string
-	Flows             []FlowContractPaths
+	Key                 string
+	ParentKey           string
+	Depth               int
+	Dir                 string
+	PackageFile         string
+	ProjectTypesFile    string
+	ProjectEntitiesFile string
+	ProjectNodesFile    string
+	ProjectEventsFile   string
+	ProjectAgentsFile   string
+	ProjectToolsFile    string
+	ProjectPolicyFile   string
+	ProjectPromptsDir   string
+	Flows               []FlowContractPaths
 }
 type FlowContractPaths struct {
-	ID         string
-	Flow       string
-	Mode       string
-	Namespace  string
-	PackageKey string
-	PackageDir string
-	Dir        string
-	SchemaFile string
-	NodesFile  string
-	EventsFile string
-	AgentsFile string
-	ToolsFile  string
-	PolicyFile string
-	PromptsDir string
+	ID           string
+	Flow         string
+	Mode         string
+	Namespace    string
+	PackageKey   string
+	PackageDir   string
+	Dir          string
+	SchemaFile   string
+	TypesFile    string
+	EntitiesFile string
+	NodesFile    string
+	EventsFile   string
+	AgentsFile   string
+	ToolsFile    string
+	PolicyFile   string
+	PromptsDir   string
 }
 type ProjectPackageDocument struct {
-	Name            string              `yaml:"name"`
-	Version         string              `yaml:"version"`
-	PlatformVersion string              `yaml:"platform_version"`
-	Author          string              `yaml:"author"`
-	Description     string              `yaml:"description"`
-	Flows           []ProjectFlowRef    `yaml:"flows"`
-	Packages        []ProjectPackageRef `yaml:"packages"`
-	Children        []ProjectPackageRef `yaml:"children"`
-	Subpackages     []ProjectPackageRef `yaml:"subpackages"`
-	Handoffs        []ProjectHandoff    `yaml:"handoffs"`
-	EntitySchema    EntitySchema        `yaml:"entity_schema"`
+	Name                   string              `yaml:"name"`
+	Version                string              `yaml:"version"`
+	PlatformVersion        string              `yaml:"platform_version"`
+	Author                 string              `yaml:"author"`
+	Description            string              `yaml:"description"`
+	Flows                  []ProjectFlowRef    `yaml:"flows"`
+	Packages               []ProjectPackageRef `yaml:"packages"`
+	Children               []ProjectPackageRef `yaml:"children"`
+	Subpackages            []ProjectPackageRef `yaml:"subpackages"`
+	Handoffs               []ProjectHandoff    `yaml:"handoffs"`
+	EntitySchema           EntitySchema        `yaml:"entity_schema"`
+	UsesLegacyEntitySchema bool                `yaml:"-"`
+}
+
+type TypeCatalogDocument struct {
+	Scalars map[string]ScalarTypeDecl `yaml:"scalars"`
+	Enums   map[string]EnumTypeDecl   `yaml:"enums"`
+	Types   map[string]NamedTypeDecl  `yaml:"types"`
+}
+
+type ScalarTypeDecl struct {
+	Base string `yaml:"-"`
+}
+
+type EnumTypeDecl struct {
+	Values []string `yaml:"-"`
+}
+
+type NamedTypeDecl struct {
+	Description string                   `yaml:"-"`
+	Fields      map[string]TypeFieldSpec `yaml:"-"`
+}
+
+type TypeFieldSpec struct {
+	Type        string `yaml:"type"`
+	Description string `yaml:"description"`
+}
+
+type EntityContractsDocument map[string]EntityContract
+
+type EntityContract struct {
+	Description string                     `yaml:"-"`
+	Owner       string                     `yaml:"-"`
+	Fields      map[string]EntityFieldDecl `yaml:"-"`
+}
+
+type EntityFieldDecl struct {
+	Type         string `yaml:"type"`
+	Initial      any    `yaml:"initial"`
+	Immutable    bool   `yaml:"immutable"`
+	Description  string `yaml:"description"`
+	UnusedReason string `yaml:"_unused_reason"`
 }
 type ProjectPackageRef struct {
 	ID      string `yaml:"id"`
@@ -785,6 +847,7 @@ type SystemNodeEventHandler struct {
 	Branch           []BranchSpec             `yaml:"branch"`
 }
 type EventCatalogEntry struct {
+	Note              string           `yaml:"_note"`
 	Emitter           EventEmitterRef  `yaml:"emitter"`
 	EmitterType       string           `yaml:"emitter_type"`
 	Producer          []string         `yaml:"producer"`
@@ -800,6 +863,7 @@ type EventCatalogEntry struct {
 	DeliveryChannel   string           `yaml:"delivery_channel"`
 	Payload           EventPayloadSpec `yaml:"payload"`
 	Required          []string         `yaml:"required"`
+	UsesLegacyPayload bool             `yaml:"-"`
 }
 type AgentRegistryEntry struct {
 	ID                     string         `yaml:"id"`

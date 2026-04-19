@@ -213,7 +213,16 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	if e == nil {
 		return nil
 	}
+	hasLegacyPayload := hasYAMLMappingKey(node, "payload")
+	flatPayload, err := buildFlatEventPayloadSpec(node)
+	if err != nil {
+		return err
+	}
+	if hasLegacyPayload && len(flatPayload.Properties) > 0 {
+		return fmt.Errorf("AMBIGUOUS-EVENT-GRAMMAR: event mixes retired payload: with flat payload fields")
+	}
 	var aux struct {
+		Note               string    `yaml:"_note"`
 		Emitter            yaml.Node `yaml:"emitter"`
 		EmitterType        string    `yaml:"emitter_type"`
 		Producer           yaml.Node `yaml:"producer"`
@@ -276,10 +285,17 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	if err != nil {
 		return err
 	}
-	payload, err := decodeEventPayloadSpecNode(&aux.Payload)
-	if err != nil {
-		return err
+	payload := flatPayload
+	if hasLegacyPayload {
+		payload, err = decodeEventPayloadSpecNode(&aux.Payload)
+		if err != nil {
+			return err
+		}
 	}
+	if len(payload.Required) == 0 {
+		payload.Required = normalizeStrings(aux.Required)
+	}
+	e.Note = strings.TrimSpace(aux.Note)
 	e.Emitter = emitter
 	e.EmitterType = strings.TrimSpace(aux.EmitterType)
 	e.Producer = mergeStringLists(producer, legacyProducer)
@@ -295,6 +311,7 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	e.DeliveryChannel = deliveryChannel
 	e.Payload = payload
 	e.Required = normalizeStrings(aux.Required)
+	e.UsesLegacyPayload = hasLegacyPayload
 	return nil
 }
 
