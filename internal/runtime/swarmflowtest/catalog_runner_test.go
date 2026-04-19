@@ -1010,13 +1010,13 @@ func runBootVerificationCatalogCase(
 			if strings.TrimSpace(issue.Category) != wantCategory {
 				continue
 			}
-			if wantResult := strings.TrimSpace(expected.Expected.BootResult); wantResult != "" && !strings.EqualFold(issue.Severity, wantResult) {
+			if wantResult := strings.TrimSpace(expected.Expected.BootResult); wantResult != "" && !strings.EqualFold(catalogNormalizeIssueSeverity(issue.Severity), wantResult) {
 				continue
 			}
 			if wantContains != "" && !strings.Contains(issue.Message, wantContains) {
 				continue
 			}
-			result.bootResult = strings.ToLower(strings.TrimSpace(issue.Severity))
+			result.bootResult = catalogNormalizeIssueSeverity(issue.Severity)
 			result.errorCategory = issue.Category
 			result.errorContains = issue.Message
 			return result, expected
@@ -1025,17 +1025,17 @@ func runBootVerificationCatalogCase(
 			if strings.TrimSpace(issue.Category) != wantCategory {
 				continue
 			}
-			if wantResult := strings.TrimSpace(expected.Expected.BootResult); wantResult != "" && !strings.EqualFold(issue.Severity, wantResult) {
+			if wantResult := strings.TrimSpace(expected.Expected.BootResult); wantResult != "" && !strings.EqualFold(catalogNormalizeIssueSeverity(issue.Severity), wantResult) {
 				continue
 			}
-			result.bootResult = strings.ToLower(strings.TrimSpace(issue.Severity))
+			result.bootResult = catalogNormalizeIssueSeverity(issue.Severity)
 			result.errorCategory = issue.Category
 			result.errorContains = issue.Message
 			return result, expected
 		}
 	}
 	for _, issue := range issues {
-		if strings.EqualFold(issue.Severity, "error") {
+		if catalogNormalizeIssueSeverity(issue.Severity) == "error" {
 			result.bootResult = "error"
 			result.errorCategory = issue.Category
 			result.errorContains = issue.Message
@@ -1043,7 +1043,7 @@ func runBootVerificationCatalogCase(
 		}
 	}
 	for _, issue := range issues {
-		if strings.EqualFold(issue.Severity, "warning") {
+		if catalogNormalizeIssueSeverity(issue.Severity) == "warning" {
 			result.bootResult = "warning"
 			result.errorCategory = issue.Category
 			result.errorContains = issue.Message
@@ -1052,6 +1052,19 @@ func runBootVerificationCatalogCase(
 	}
 	result.bootResult = "success"
 	return result, expected
+}
+
+func catalogNormalizeIssueSeverity(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "hard_invalidity", "error":
+		return "error"
+	case "semantic_drift_warning", "warning":
+		return "warning"
+	case "audit_analysis", "lint_evidence", "informational":
+		return "informational"
+	default:
+		return strings.TrimSpace(strings.ToLower(raw))
+	}
 }
 
 func catalogLoadBootBundle(t testing.TB, dir string) catalogBootBundle {

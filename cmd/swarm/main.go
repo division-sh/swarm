@@ -113,10 +113,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("load Swarm contracts: %v", err)
 	}
-	if err := runtimecontracts.ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
-		slog.Error("validate prompt schema guards", "error", err)
-		os.Exit(1)
-	}
 	source := semanticview.Wrap(bundle)
 	stateStoreSummary, err := initializeStateStores(ctx, stores, bundle)
 	if err != nil {

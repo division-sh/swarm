@@ -1,5 +1,13 @@
 core:
-  child_count: integer
-  depth: integer
-  flag_count: integer
-  name: text
+  child_count:
+    type: integer
+    _unused_reason: preseeded guard proof field
+  depth:
+    type: integer
+    _unused_reason: preseeded guard proof field
+  flag_count:
+    type: integer
+    _unused_reason: preseeded guard proof field
+  name:
+    type: text
+    _unused_reason: query-only uniqueness proof field

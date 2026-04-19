@@ -2004,7 +2004,11 @@ engine:
     severity_behavior:
       error: Boot aborts. System does not start.
       warning: Boot continues. Warning logged with finding details.
-    check_count: 34 checks (21 error, 13 warning)
+      hard_invalidity: Boot aborts. Deterministic Wave 1 contract drift is treated as error-level invalidity.
+      semantic_drift_warning: Boot continues. Warning logged with finding details and explicit check ID.
+      audit_analysis: Not surfaced on normal boot. Available on dedicated audit surfaces.
+      lint_evidence: Informational only. Available on detailed lint/audit surfaces.
+    check_count: 43 primary checks plus 3 supplemental checks
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, and location (flow, node, agent, or event name). The boot sequence runs
@@ -3620,9 +3624,28 @@ workspace_model:
       /opt/swarm/contracts: Read-only volume from deployment artifact.
     portability_rule: A product contract that works on local dev MUST work on Docker and production without contract changes.
       Mount paths are invariant. Only the backing storage implementation changes.
+agent_prompt_lint:
+  description: Prompt/schema lint for authored agent prompts on the verify surface.
+  authority_distribution:
+    structural:
+      authority: hard_invalidity
+      scope: Parseable structural references only. Deterministic drift fails boot.
+      examples:
+      - fenced code blocks showing tool arguments
+      - quoted/backticked field references in direct instructions
+      - YAML or JSON prompt fragments that name declared contract fields
+    lower_confidence_follow_ons:
+      authority: tracked separately
+      scope: Directive, audit, and lint-confidence prompt findings are not widened into this authoritative first slice unless
+        separately promoted.
 static_analyzer:
   description: Accepted static analyzer slices promoted from review drafts into the authoritative platform contract spec.
     These slices are verify-owned and must not be widened beyond their recorded scope without a spec change.
+  authority_levels:
+    hard_invalidity: Deterministic drift or invalidity. Boot fails. The bundle cannot ship until fixed.
+    semantic_drift_warning: High-confidence drift signal that remains warning-level in this Wave 1 slice.
+    audit_analysis: Medium-confidence migration/audit output. Not surfaced on normal boot.
+    lint_evidence: Informational evidence catalog. Not boot-fatal and not warning-level.
   slice_1_create_entity_field_initialization:
     id: semantic_validity_create_entity_field_initialization
     domain: semantic_validity
@@ -3826,3 +3849,127 @@ static_analyzer:
         rule: "Node `produces` lists are not active-role proof."
     rule: Emit warning when a declared event-schema entry has zero accepted active-role carriers. The message must describe the
       event as having no active role in the authored bundle, not as definitely unreachable at runtime.
+  slice_6_entity_writer_coverage:
+    id: entity_writer_coverage
+    domain: semantic_validity
+    authority: hard_invalidity
+    severity: error
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - rule.consequences.bidirectional_verification
+    - rule.consequences.declared_is_authority
+    - type_system.field_forms.verbose
+    scope:
+      description: For every declared field on the active root or flow-owned Wave 1 entity contract, verify that explicit
+        authorial population intent exists.
+      applies_to:
+      - declared entity fields only
+      excludes:
+      - platform-owned envelope fields
+      - runtime read semantics
+      - MCP/tool-schema derivation
+    accepted_coverage:
+      initial:
+        rule: Explicit `initial:` on the field counts as authored creation-time coverage.
+      unused_reason:
+        rule: Explicit `_unused_reason:` documents intentional no-writer intent and suppresses this slice only.
+      handler_write_sites:
+        rule: Handler write targets that name the field explicitly count as coverage. This includes data_accumulation, compute,
+          filter/group_by/reduce/count store_as, query store_as, and clear targets.
+    rule: Emit hard invalidity when a declared entity field has no authored writer coverage, no explicit `initial:`, and no
+      `_unused_reason:`.
+  slice_7_entity_reader_compliance:
+    id: expression_field_reference_validation
+    domain: semantic_validity
+    authority: hard_invalidity
+    severity: error
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - rule.consequences.required_by_default_uniform_with_events
+    - runtime_enforcement.query_entities
+    - handler_specification.expression_context.boot_validation
+    scope:
+      description: Verify that every `entity.*` reference used by handler CEL surfaces resolves against the active Wave 1
+        entity contract and, for query-filter contexts, resolves to a scalar or enum leaf.
+      applies_to:
+      - handler guards
+      - handler conditions
+      - on_complete and rules conditions
+      - emit.fields expressions
+      - data_accumulation expressions
+      - query/filter expressions on entity paths
+      excludes:
+      - runtime tool execution
+      - prompt heuristics
+    proof_carriers:
+      declared_field:
+        rule: Declared top-level entity field is valid.
+      nested_declared_path:
+        rule: Nested path is valid only if every named-type step resolves and the final leaf resolves.
+      query_filter_leaf:
+        rule: Query/filter references must end at a scalar or enum leaf. `list.size()` is accepted because it reduces to integer.
+    rule: Emit hard invalidity when an entity read path is undeclared, unresolved through the named-type chain, or used as a
+      non-scalar/non-enum filter leaf.
+  slice_8_entity_write_target_compliance:
+    id: payload_field_coverage
+    domain: semantic_validity
+    authority: hard_invalidity
+    severity: error
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - rule.consequences.bidirectional_verification
+    - runtime_enforcement.create_entity
+    - runtime_enforcement.save_entity_field
+    scope:
+      description: Verify that handler-side entity write targets name declared top-level entity fields on the active Wave 1
+        contract.
+      applies_to:
+      - handler data_accumulation writes
+      - handler compute/filter/group_by/reduce/count store targets
+      - handler query store targets
+      - handler clear targets
+      excludes:
+      - nested write primitives beyond Wave 1
+      - runtime tool delivery/schema generation
+    rule: Emit hard invalidity when a handler write target is nested, targets an envelope field, targets an undeclared entity
+      field, or appears in a flow with no declared Wave 1 entity contract.
+  slice_9_entity_reader_coverage:
+    id: entity_reader_coverage
+    domain: semantic_validity
+    authority: lint_evidence
+    severity: informational
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - rule.consequences.bidirectional_verification
+    - design_principles
+    scope:
+      description: Informational audit over declared entity fields for which verify finds no internal handler reader coverage.
+      applies_to:
+      - declared entity fields only
+      excludes:
+      - external/operator readers outside platform visibility
+      - hard gating or warning-level surfacing
+    rule: Emit lint evidence when a declared entity field has no detected internal reader on the supported verify surface.
+  slice_10_agent_prompt_lint_structural:
+    id: agent_prompt_lint_structural
+    domain: semantic_validity
+    authority: hard_invalidity
+    severity: error
+    canonical_owner: internal/runtime/contracts/prompt_schema_guard.go
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - agent_prompt_lint
+    - rule.consequences.bidirectional_verification
+    scope:
+      description: Deterministic prompt-schema guard over parseable structural prompt references only.
+      applies_to:
+      - prompt schema guard structural findings
+      excludes:
+      - directive-form prompt heuristics
+      - audit/lint confidence bands
+      - delivery/session-primer derivation
+    rule: Emit hard invalidity when a parseable structural prompt reference drifts from the declared event or entity contract.

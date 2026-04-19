@@ -48,6 +48,9 @@ type checkerContext struct {
 	promptLoaded   bool
 	promptFindings []Finding
 
+	promptSchemaGuardLoaded   bool
+	promptSchemaGuardFindings []Finding
+
 	toolLoaded   bool
 	toolFindings []Finding
 
@@ -83,6 +86,12 @@ type checkerContext struct {
 
 	invalidLoaded   bool
 	invalidFindings []Finding
+
+	entityWriterCoverageLoaded   bool
+	entityWriterCoverageFindings []Finding
+
+	entityReaderCoverageLoaded   bool
+	entityReaderCoverageFindings []Finding
 
 	handlerLoaded   bool
 	handlerFindings []Finding
@@ -171,6 +180,7 @@ var bootCheckRegistry = []Check{
 	{ID: "event_consumer_exists", Severity: "warning", Run: checkEventConsumerExists},
 	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},
 	{ID: "semantic_drift_dead_event_schema", Severity: "warning", Run: checkSemanticDriftDeadEventSchema},
+	{ID: "entity_writer_coverage", Severity: SeverityHardInvalidity, Run: checkEntityWriterCoverage},
 	{ID: "payload_field_coverage", Severity: "error", Run: checkPayloadFieldCoverage},
 	{ID: "semantic_drift_payload_completeness", Severity: "error", Run: checkSemanticDriftPayloadCompleteness},
 	{ID: "condition_payload_alignment", Severity: "error", Run: checkConditionPayloadAlignment},
@@ -200,6 +210,7 @@ var bootCheckRegistry = []Check{
 	{ID: "data_accumulation_expression_validation", Severity: "error", Run: checkDataAccumulationExpressionValidation},
 	{ID: "emit_field_expression_validation", Severity: "error", Run: checkEmitFieldExpressionValidation},
 	{ID: "expression_field_reference_validation", Severity: "warning", Run: checkExpressionFieldReferenceValidation},
+	{ID: "entity_reader_coverage", Severity: SeverityLintEvidence, Run: checkEntityReaderCoverage},
 	{ID: "transition_ownership_validation", Severity: "error", Run: checkTransitionOwnershipValidation},
 	{ID: "event_runtime_wiring_validation", Severity: "error", Run: checkEventRuntimeWiringValidation},
 	{ID: "timer_validation", Severity: "error", Run: checkTimerValidation},
@@ -213,6 +224,7 @@ var bootCheckRegistry = []Check{
 var supplementalChecks = []Check{
 	{ID: "impl.platform_metadata_validation", Severity: "error", Run: checkPlatformMetadataValidation},
 	{ID: "impl.deprecated_contract_alias", Severity: "warning", Run: checkDeprecatedContractAlias},
+	{ID: "agent_prompt_lint_structural", Severity: SeverityHardInvalidity, Run: checkPromptSchemaGuardStructural},
 }
 
 func newCheckerContext(ctx context.Context, source semanticview.Source, opts Options) *checkerContext {
@@ -240,9 +252,10 @@ func checkMCPServerReachable(c *checkerContext) []Finding         { return c.mcp
 func checkAgentPermissionValidation(c *checkerContext) []Finding {
 	return uniqueFindings(append(c.permissions(), c.permissionWarnings()...))
 }
-func checkPlatformMetadataValidation(c *checkerContext) []Finding { return c.platformMetadata() }
-func checkGateSchemaValidation(c *checkerContext) []Finding       { return c.gateSchemaValidation() }
-func checkDeprecatedContractAlias(c *checkerContext) []Finding    { return c.deprecatedAliases() }
+func checkPlatformMetadataValidation(c *checkerContext) []Finding  { return c.platformMetadata() }
+func checkGateSchemaValidation(c *checkerContext) []Finding        { return c.gateSchemaValidation() }
+func checkDeprecatedContractAlias(c *checkerContext) []Finding     { return c.deprecatedAliases() }
+func checkPromptSchemaGuardStructural(c *checkerContext) []Finding { return c.promptSchemaGuard() }
 
 func (c *checkerContext) permissions() []Finding {
 	if c.permissionLoaded {
@@ -260,6 +273,36 @@ func (c *checkerContext) permissions() []Finding {
 		})
 	}
 	return c.permissionFindings
+}
+
+func (c *checkerContext) promptSchemaGuard() []Finding {
+	if c.promptSchemaGuardLoaded {
+		return c.promptSchemaGuardFindings
+	}
+	c.promptSchemaGuardLoaded = true
+	bundle, ok := semanticview.Bundle(c.source)
+	if !ok || bundle == nil {
+		return nil
+	}
+	findings, err := runtimecontracts.PromptSchemaGuardFindingsForBundle(bundle)
+	if err != nil {
+		c.promptSchemaGuardFindings = append(c.promptSchemaGuardFindings, Finding{
+			CheckID:  "agent_prompt_lint_structural",
+			Severity: SeverityHardInvalidity,
+			Message:  err.Error(),
+			Location: "global",
+		})
+		return c.promptSchemaGuardFindings
+	}
+	for _, finding := range findings {
+		c.promptSchemaGuardFindings = append(c.promptSchemaGuardFindings, Finding{
+			CheckID:  strings.TrimSpace(finding.CheckID),
+			Severity: finding.Severity,
+			Message:  strings.TrimSpace(finding.Message),
+			Location: strings.TrimSpace(finding.Location),
+		})
+	}
+	return c.promptSchemaGuardFindings
 }
 
 func (c *checkerContext) permissionWarnings() []Finding {
@@ -513,25 +556,54 @@ func (c *checkerContext) payloadFieldCoverage() []Finding {
 		return c.payloadCoverageFindings
 	}
 	c.payloadCoverageLoaded = true
-	entityFields := entitySchemaFields(c.source)
-	for _, transition := range c.source.WorkflowTransitions() {
-		id := strings.TrimSpace(transition.ID)
-		if id == "" {
+	seen := map[string]struct{}{}
+	for _, target := range wave1AllEntityWriteTargets(c.source) {
+		if !target.Entity || strings.TrimSpace(target.Field) == "" {
 			continue
 		}
-		for _, field := range transition.DataAccumulation.TargetFields() {
-			field = strings.TrimSpace(field)
-			if field == "" {
-				continue
-			}
-			if _, ok := entityFields[field]; ok {
-				continue
-			}
+		key := strings.Join([]string{target.FlowID, target.NodeID, target.EventType, target.Kind, target.Target}, "|")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		if target.Nested {
 			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
 				CheckID:  "payload_field_coverage",
-				Severity: "error",
-				Message:  fmt.Sprintf("transition %s data_accumulation writes '%s' missing from workflow entity_schema", id, field),
-				Location: id,
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s target %q is a nested entity write; Wave 1 permits top-level entity fields only", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Target),
+				Location: target.NodeID,
+			})
+			continue
+		}
+		if target.Kind == "handler.clear" && wave1SpecialClearTarget(target.Field) {
+			continue
+		}
+		if wave1EntityEnvelopeField(target.Field) {
+			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
+				CheckID:  "payload_field_coverage",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s targets envelope field %q; envelope fields are platform-owned", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Field),
+				Location: target.NodeID,
+			})
+			continue
+		}
+		contract, ok := wave1WriteTargetContract(c.source, target)
+		if !ok {
+			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
+				CheckID:  "payload_field_coverage",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes %q missing from declared Wave 1 entity contract", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Field),
+				Location: target.NodeID,
+			})
+			continue
+		}
+		if _, ok := contract.Contract.Fields[target.Field]; !ok {
+			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
+				CheckID:  "payload_field_coverage",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes undeclared entity field %q on entity_type %s", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Field, contract.EntityType),
+				Location: target.NodeID,
 			})
 		}
 	}

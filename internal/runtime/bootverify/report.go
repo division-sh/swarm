@@ -17,6 +17,15 @@ type Finding struct {
 	Location string
 }
 
+const (
+	SeverityHardInvalidity      = "hard_invalidity"
+	SeveritySemanticDriftWarn   = "semantic_drift_warning"
+	SeverityAuditAnalysis       = "audit_analysis"
+	SeverityLintEvidence        = "lint_evidence"
+	legacySeverityError         = "error"
+	legacySeverityWarning       = "warning"
+)
+
 type Report struct {
 	Findings []Finding
 }
@@ -31,7 +40,7 @@ func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
 	if source == nil {
 		report.Add(Finding{
 			CheckID:  "workflow_contract_validation",
-			Severity: "error",
+			Severity: SeverityHardInvalidity,
 			Message:  "semantic source is not configured",
 			Location: "global",
 		})
@@ -58,19 +67,20 @@ func (r *Report) Add(f Finding) {
 	if f.CheckID == "" {
 		f.CheckID = "workflow_contract_validation"
 	}
-	f.Severity = strings.TrimSpace(strings.ToLower(f.Severity))
-	if f.Severity == "" {
-		f.Severity = "error"
-	}
+	f.Severity = normalizeFindingSeverity(f.Severity)
 	f.Message = strings.TrimSpace(f.Message)
 	f.Location = strings.TrimSpace(f.Location)
 	r.Findings = append(r.Findings, f)
 }
 
 func (r Report) Errors() []Finding {
+	return r.HardInvalidities()
+}
+
+func (r Report) HardInvalidities() []Finding {
 	out := make([]Finding, 0)
 	for _, finding := range r.Findings {
-		if finding.Severity == "error" {
+		if finding.Severity == SeverityHardInvalidity {
 			out = append(out, finding)
 		}
 	}
@@ -78,9 +88,33 @@ func (r Report) Errors() []Finding {
 }
 
 func (r Report) Warnings() []Finding {
+	return r.SemanticDriftWarnings()
+}
+
+func (r Report) SemanticDriftWarnings() []Finding {
 	out := make([]Finding, 0)
 	for _, finding := range r.Findings {
-		if finding.Severity == "warning" {
+		if finding.Severity == SeveritySemanticDriftWarn {
+			out = append(out, finding)
+		}
+	}
+	return out
+}
+
+func (r Report) AuditAnalyses() []Finding {
+	out := make([]Finding, 0)
+	for _, finding := range r.Findings {
+		if finding.Severity == SeverityAuditAnalysis {
+			out = append(out, finding)
+		}
+	}
+	return out
+}
+
+func (r Report) LintEvidence() []Finding {
+	out := make([]Finding, 0)
+	for _, finding := range r.Findings {
+		if finding.Severity == SeverityLintEvidence {
 			out = append(out, finding)
 		}
 	}
@@ -88,8 +122,12 @@ func (r Report) Warnings() []Finding {
 }
 
 func (r Report) HasErrors() bool {
+	return r.HasHardInvalidities()
+}
+
+func (r Report) HasHardInvalidities() bool {
 	for _, finding := range r.Findings {
-		if finding.Severity == "error" {
+		if finding.Severity == SeverityHardInvalidity {
 			return true
 		}
 	}
@@ -98,7 +136,9 @@ func (r Report) HasErrors() bool {
 
 func (r *Report) Sort() {
 	sort.Slice(r.Findings, func(i, j int) bool {
-		if r.Findings[i].Severity == r.Findings[j].Severity {
+		leftSeverity := severityRank(r.Findings[i].Severity)
+		rightSeverity := severityRank(r.Findings[j].Severity)
+		if leftSeverity == rightSeverity {
 			if r.Findings[i].CheckID == r.Findings[j].CheckID {
 				if r.Findings[i].Location == r.Findings[j].Location {
 					return r.Findings[i].Message < r.Findings[j].Message
@@ -107,8 +147,38 @@ func (r *Report) Sort() {
 			}
 			return r.Findings[i].CheckID < r.Findings[j].CheckID
 		}
-		return r.Findings[i].Severity < r.Findings[j].Severity
+		return leftSeverity < rightSeverity
 	})
+}
+
+func normalizeFindingSeverity(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "", legacySeverityError, SeverityHardInvalidity:
+		return SeverityHardInvalidity
+	case legacySeverityWarning, SeveritySemanticDriftWarn:
+		return SeveritySemanticDriftWarn
+	case SeverityAuditAnalysis:
+		return SeverityAuditAnalysis
+	case SeverityLintEvidence:
+		return SeverityLintEvidence
+	default:
+		return SeverityHardInvalidity
+	}
+}
+
+func severityRank(severity string) int {
+	switch normalizeFindingSeverity(severity) {
+	case SeverityHardInvalidity:
+		return 0
+	case SeveritySemanticDriftWarn:
+		return 1
+	case SeverityAuditAnalysis:
+		return 2
+	case SeverityLintEvidence:
+		return 3
+	default:
+		return 4
+	}
 }
 
 func locationFromMessage(message string) string {
@@ -132,7 +202,7 @@ func workspaceClassFindings(source semanticview.Source) []Finding {
 	if err != nil {
 		return []Finding{{
 			CheckID:  "workspace_class_exists",
-			Severity: "error",
+			Severity: SeverityHardInvalidity,
 			Message:  err.Error(),
 			Location: "global",
 		}}
@@ -148,7 +218,7 @@ func workspaceClassFindings(source semanticview.Source) []Finding {
 		if !ok {
 			out = append(out, Finding{
 				CheckID:  "workspace_class_exists",
-				Severity: "error",
+				Severity: SeverityHardInvalidity,
 				Message:  fmt.Sprintf("agent %s references undefined workspace_class %q", agentID, class),
 				Location: agentID,
 			})
@@ -157,7 +227,7 @@ func workspaceClassFindings(source semanticview.Source) []Finding {
 		if scope != "per-agent" && scope != "per-flow-instance" {
 			out = append(out, Finding{
 				CheckID:  "workspace_class_exists",
-				Severity: "error",
+				Severity: SeverityHardInvalidity,
 				Message:  fmt.Sprintf("workspace_class %q declares unsupported workspace_scope %q", class, scope),
 				Location: class,
 			})

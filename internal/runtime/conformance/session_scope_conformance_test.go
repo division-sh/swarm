@@ -337,8 +337,7 @@ platform_version: ">=1.0.0"
 flows:`+flows+`
 `)
 	writeSessionScopeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
+item: {}
 `)
 	writeSessionScopeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-conformance\n")
 	writeSessionScopeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")

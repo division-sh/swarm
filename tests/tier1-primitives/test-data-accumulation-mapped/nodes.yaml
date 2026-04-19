@@ -8,10 +8,10 @@ test-node:
       data_accumulation:
         writes:
           - source_field: src_name
-            target_field: name
+            target_field: item_name
         source_event: item.received
       advances_to: done
       emit: item.stored
   state_schema:
     fields:
-      name: string
+      item_name: string

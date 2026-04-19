@@ -9,7 +9,7 @@ expected:
   handler_outcome: success
   entity_state: done
   entity_fields:
-    name: "test"
+    item_name: "test"
     score: 85
   emitted_events:
     - item.stored
