@@ -39,9 +39,14 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 	if bundle == nil {
 		return nil
 	}
-	if bundle.Package.UsesLegacyEntitySchema && (len(bundle.RootEntities) > 0 || len(bundle.projectEntities) > 0 || len(bundle.flowEntities) > 0) {
+	legacyEntitySchemaScope, hasLegacyEntitySchema := bundleLegacyEntitySchemaScope(bundle)
+	if hasLegacyEntitySchema && (len(bundle.RootEntities) > 0 || len(bundle.projectEntities) > 0 || len(bundle.flowEntities) > 0) {
+		detail := "AMBIGUOUS-CONTRACT-GRAMMAR: package.yaml entity_schema cannot coexist with Wave 1 entities.yaml declarations in the same bundle"
+		if legacyEntitySchemaScope != "" {
+			detail += " (legacy scope: " + legacyEntitySchemaScope + ")"
+		}
 		return &LoadValidationError{Items: []error{
-			errString("AMBIGUOUS-CONTRACT-GRAMMAR: package.yaml entity_schema cannot coexist with Wave 1 entities.yaml declarations in the same bundle"),
+			errString(detail),
 		}}
 	}
 	for flowID, entities := range bundle.flowEntities {
@@ -59,6 +64,26 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 		}
 	}
 	return nil
+}
+
+func bundleLegacyEntitySchemaScope(bundle *WorkflowContractBundle) (string, bool) {
+	if bundle == nil {
+		return "", false
+	}
+	if bundle.Package.UsesLegacyEntitySchema {
+		return ".", true
+	}
+	for _, pkg := range bundle.PackageTree {
+		if !pkg.Manifest.UsesLegacyEntitySchema {
+			continue
+		}
+		scope := strings.TrimSpace(pkg.Key)
+		if scope == "" {
+			scope = "."
+		}
+		return scope, true
+	}
+	return "", false
 }
 
 type errString string
