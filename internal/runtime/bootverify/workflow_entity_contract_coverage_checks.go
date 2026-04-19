@@ -168,10 +168,11 @@ func wave1EntityReaderCoverageByFlow(source semanticview.Source) map[string]map[
 					if wave1EntityEnvelopeField(ref.Field) {
 						continue
 					}
-					if out[flowID] == nil {
-						out[flowID] = map[string]struct{}{}
+					ownerFlowID := strings.TrimSpace(ref.OwnerFlowID)
+					if out[ownerFlowID] == nil {
+						out[ownerFlowID] = map[string]struct{}{}
 					}
-					out[flowID][ref.Field] = struct{}{}
+					out[ownerFlowID][ref.Field] = struct{}{}
 				}
 			}
 		}
@@ -334,23 +335,25 @@ func wave1ParseWriteTarget(flowID, nodeID, eventType, kind, target string) wave1
 }
 
 type wave1ResolvedExpressionRef struct {
-	Ref   string
-	Field string
-	Leaf  wave1ResolvedType
+	Ref         string
+	Field       string
+	OwnerFlowID string
+	Leaf        wave1ResolvedType
 }
 
 func wave1ResolvedExpressionRefs(source semanticview.Source, flowID, nodeID, eventType string, expr expressionReference) []wave1ResolvedExpressionRef {
 	refs := runtimepipeline.WorkflowEntityReferences(expr.Expression)
 	out := make([]wave1ResolvedExpressionRef, 0, len(refs))
 	for _, ref := range refs {
-		leaf, err := wave1ResolveEntityPath(source, flowID, ref)
+		leaf, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, flowID, ref)
 		if err != nil {
 			continue
 		}
 		out = append(out, wave1ResolvedExpressionRef{
-			Ref:   ref,
-			Field: runtimepipeline.WorkflowEntityReferenceField(ref),
-			Leaf:  leaf,
+			Ref:         ref,
+			Field:       runtimepipeline.WorkflowEntityReferenceField(ref),
+			OwnerFlowID: strings.TrimSpace(ownerFlowID),
+			Leaf:        leaf,
 		})
 	}
 	return out

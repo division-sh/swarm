@@ -122,23 +122,28 @@ func wave1FlowWritesRootField(source semanticview.Source, flowID, field string) 
 }
 
 func wave1ResolveEntityPath(source semanticview.Source, flowID, ref string) (wave1ResolvedType, error) {
+	resolved, _, err := wave1ResolveEntityPathWithOwner(source, flowID, ref)
+	return resolved, err
+}
+
+func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref string) (wave1ResolvedType, string, error) {
 	ref = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), "entity."))
 	if ref == "" {
-		return wave1ResolvedType{}, fmt.Errorf("entity field path is required")
+		return wave1ResolvedType{}, "", fmt.Errorf("entity field path is required")
 	}
 	segments := strings.Split(ref, ".")
 	head := strings.TrimSpace(segments[0])
 	if resolved, ok := wave1EnvelopeTypes[head]; ok {
 		if len(segments) > 1 {
-			return wave1ResolvedType{}, fmt.Errorf("entity.%s is an envelope scalar and does not support nested path %q", head, ref)
+			return wave1ResolvedType{}, "", fmt.Errorf("entity.%s is an envelope scalar and does not support nested path %q", head, ref)
 		}
-		return resolved, nil
+		return resolved, "", nil
 	}
 	if head == "gates" {
 		if len(segments) == 1 {
-			return wave1ResolvedType{Kind: "named", Type: "gates"}, nil
+			return wave1ResolvedType{Kind: "named", Type: "gates"}, "", nil
 		}
-		return wave1ResolvedType{Kind: "scalar", Type: "boolean"}, nil
+		return wave1ResolvedType{Kind: "scalar", Type: "boolean"}, "", nil
 	}
 
 	view := wave1EntityContractForFlow(source, flowID)
@@ -151,7 +156,7 @@ func wave1ResolveEntityPath(source semanticview.Source, flowID, ref string) (wav
 		}
 	}
 	if !view.Defined {
-		return wave1ResolvedType{}, fmt.Errorf("flow %s has no declared Wave 1 entity contract for entity.%s", defaultFlowLabel(flowID), head)
+		return wave1ResolvedType{}, "", fmt.Errorf("flow %s has no declared Wave 1 entity contract for entity.%s", defaultFlowLabel(flowID), head)
 	}
 	field, ok := view.Contract.Fields[head]
 	if !ok && flowID != "" && view.FlowID != "" && wave1FlowReadsRootField(source, flowID, head) {
@@ -163,44 +168,44 @@ func wave1ResolveEntityPath(source semanticview.Source, flowID, ref string) (wav
 		}
 	}
 	if !ok {
-		return wave1ResolvedType{}, fmt.Errorf("flow %s entity_type %s does not declare field %q", defaultFlowLabel(flowID), view.EntityType, head)
+		return wave1ResolvedType{}, "", fmt.Errorf("flow %s entity_type %s does not declare field %q", defaultFlowLabel(flowID), view.EntityType, head)
 	}
 	current := strings.TrimSpace(field.Type)
 	if current == "" {
-		return wave1ResolvedType{}, fmt.Errorf("flow %s entity_type %s field %q has empty type", defaultFlowLabel(flowID), view.EntityType, head)
+		return wave1ResolvedType{}, "", fmt.Errorf("flow %s entity_type %s field %q has empty type", defaultFlowLabel(flowID), view.EntityType, head)
 	}
 	for idx := 1; idx < len(segments); idx++ {
 		segment := strings.TrimSpace(segments[idx])
 		if segment == "" {
-			return wave1ResolvedType{}, fmt.Errorf("entity path %q contains empty segment", ref)
+			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q contains empty segment", ref)
 		}
 		if _, ok := wave1ListElementType(current); ok {
 			if segment == "size" && idx == len(segments)-1 {
-				return wave1ResolvedType{Kind: "scalar", Type: "integer"}, nil
+				return wave1ResolvedType{Kind: "scalar", Type: "integer"}, view.FlowID, nil
 			}
-			return wave1ResolvedType{}, fmt.Errorf("entity path %q traverses list type %q through unsupported segment %q", ref, current, segment)
+			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q traverses list type %q through unsupported segment %q", ref, current, segment)
 		}
 		kind, named, err := wave1ResolveNamedType(view.Types, current)
 		if err != nil {
-			return wave1ResolvedType{}, fmt.Errorf("entity path %q: %w", ref, err)
+			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q: %w", ref, err)
 		}
 		if kind != "named" {
-			return wave1ResolvedType{}, fmt.Errorf("entity path %q cannot traverse non-composite type %q through segment %q", ref, current, segment)
+			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q cannot traverse non-composite type %q through segment %q", ref, current, segment)
 		}
 		fieldSpec, ok := named.Fields[segment]
 		if !ok {
-			return wave1ResolvedType{}, fmt.Errorf("entity path %q references undeclared nested field %q", ref, segment)
+			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q references undeclared nested field %q", ref, segment)
 		}
 		current = strings.TrimSpace(fieldSpec.Type)
 		if current == "" {
-			return wave1ResolvedType{}, fmt.Errorf("entity path %q nested field %q has empty type", ref, segment)
+			return wave1ResolvedType{}, "", fmt.Errorf("entity path %q nested field %q has empty type", ref, segment)
 		}
 	}
 	kind, _, err := wave1ResolveNamedType(view.Types, current)
 	if err != nil {
-		return wave1ResolvedType{}, fmt.Errorf("entity path %q: %w", ref, err)
+		return wave1ResolvedType{}, "", fmt.Errorf("entity path %q: %w", ref, err)
 	}
-	return wave1ResolvedType{Kind: kind, Type: current}, nil
+	return wave1ResolvedType{Kind: kind, Type: current}, view.FlowID, nil
 }
 
 func wave1ResolveNamedType(types runtimecontracts.TypeCatalogDocument, typeRef string) (string, runtimecontracts.NamedTypeDecl, error) {

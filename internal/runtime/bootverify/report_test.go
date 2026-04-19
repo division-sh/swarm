@@ -2239,6 +2239,16 @@ func TestRun_RejectsFilterReferenceToSparseFieldEvenWhenSameHandlerComputesField
 	}
 }
 
+func TestRun_AttributesReaderCoverageToResolvedRootContractOwner(t *testing.T) {
+	bundle := loadWave1RootReaderCoverageFixtureBundle(t)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.LintEvidence(), "entity_reader_coverage", "flow root entity_type case declares field priority") {
+		t.Fatalf("unexpected root entity_reader_coverage lint, got %#v", report.LintEvidence())
+	}
+}
+
 func TestRun_AllowsExpressionFieldReferenceForDeclaredFieldWrittenBySiblingStep(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
@@ -3539,6 +3549,71 @@ worker:
 func loadWave1ExpressionFixtureBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := writeWave1ExpressionFixture(t)
+	return loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+}
+
+func writeWave1RootReaderCoverageFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: wave1-root-reader-coverage
+version: "1.0.0"
+platform: ">=1.6.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wave1-root-reader-coverage\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+case:
+  priority:
+    type: integer
+    _unused_reason: child read-pin coverage proof field
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events: [task.assigned]
+    reads: [priority]
+  outputs:
+    events: []
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+task.assigned:
+  entity_id: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+reader:
+  id: reader
+  execution_type: system_node
+  subscribes_to: [task.assigned]
+  event_handlers:
+    task.assigned:
+      guard:
+        check: "entity.priority >= 0"
+      advances_to: done
+`)
+
+	return root
+}
+
+func loadWave1RootReaderCoverageFixtureBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := writeWave1RootReaderCoverageFixture(t)
 	return loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
 }
 
