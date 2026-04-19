@@ -1,9 +1,5 @@
 name: test-accumulate-partial
 version: 1.0.0
 description: Expect 3 items but send only 2. Accumulate stays incomplete.
-platform_version: ">=1.1.0"
+platform_version: '>=1.1.0'
 flows: []
-entity_schema:
-  core:
-    expected_count: integer
-    received_items: [text]

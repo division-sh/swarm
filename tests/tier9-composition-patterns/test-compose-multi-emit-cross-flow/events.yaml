@@ -1,10 +1,7 @@
 task.completed:
-  payload:
-    entity_id: string
-    status: string
+  entity_id: string
+  status: string
 task.logged:
-  payload:
-    entity_id: string
+  entity_id: string
 tracker/task.record:
-  payload:
-    entity_id: string
+  entity_id: string

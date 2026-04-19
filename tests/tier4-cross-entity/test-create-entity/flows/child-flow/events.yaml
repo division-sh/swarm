@@ -1,6 +1,4 @@
 child.start:
-  payload:
-    entity_id: string
+  entity_id: string
 child.done:
-  payload:
-    entity_id: string
+  entity_id: string

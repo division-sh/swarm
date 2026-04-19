@@ -100,12 +100,9 @@ vertical.shortlisted:
 	if _, ok := resolvedTypes.Types["ScoreBreakdown"]; !ok {
 		t.Fatal("expected resolved flow type catalog to include flow-local type")
 	}
-	if len(bundle.CompatibilityUsages()) != 0 {
-		t.Fatalf("CompatibilityUsages() = %#v, want none", bundle.CompatibilityUsages())
-	}
 }
 
-func TestLoadWorkflowContractBundle_RecordsLegacyCompatibilityUsage(t *testing.T) {
+func TestLoadWorkflowContractBundle_RejectsLegacyPackageEntitySchema(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
@@ -122,41 +119,9 @@ flows:
     mode: static
 `)
 	writeFixtureFile(t, root+"/schema.yaml", "name: compat-bundle\n")
-	writeFixtureFile(t, root+"/events.yaml", `
-root.ready:
-  payload:
-    entity_id: uuid
-`)
-	writeFixtureFile(t, root+"/flows/scoring/schema.yaml", `
-name: scoring
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
-pins:
-  inputs:
-    events: [root.ready]
-  outputs:
-    events: []
-`)
-
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-
-	usages := bundle.CompatibilityUsages()
-	if len(usages) != 2 {
-		t.Fatalf("len(CompatibilityUsages()) = %d, want 2 (%#v)", len(usages), usages)
-	}
-	seen := map[string]bool{}
-	for _, usage := range usages {
-		seen[usage.Kind] = true
-	}
-	if !seen["legacy_package_entity_schema"] {
-		t.Fatalf("missing legacy_package_entity_schema usage in %#v", usages)
-	}
-	if !seen["legacy_event_payload_block"] {
-		t.Fatalf("missing legacy_event_payload_block usage in %#v", usages)
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "entity_schema") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want RETIRED entity_schema rejection", err)
 	}
 }
 
@@ -181,8 +146,8 @@ bundle_item:
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-CONTRACT-GRAMMAR") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want AMBIGUOUS-CONTRACT-GRAMMAR", err)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "entity_schema") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want RETIRED entity_schema rejection", err)
 	}
 }
 
@@ -215,11 +180,62 @@ entity_schema:
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-CONTRACT-GRAMMAR") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want AMBIGUOUS-CONTRACT-GRAMMAR", err)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "entity_schema") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want RETIRED entity_schema rejection", err)
 	}
-	if !strings.Contains(err.Error(), "legacy scope: packages/legacy-child") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want legacy subpackage scope", err)
+}
+
+func TestLoadWorkflowContractBundle_RejectsPackageScopedTypeCatalog(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	root := t.TempDir()
+
+	writeFixtureFile(t, root+"/package.yaml", `
+name: invalid-package-types
+version: "1.0.0"
+platform_version: ">=1.0.0"
+packages:
+  - path: packages/child
+flows: []
+`)
+	writeFixtureFile(t, root+"/schema.yaml", "name: invalid-package-types\n")
+	writeFixtureFile(t, root+"/packages/child/package.yaml", `
+name: child
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows: []
+`)
+	writeFixtureFile(t, root+"/packages/child/types.yaml", "types:\n  Thing:\n    name: text\n")
+
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "package-scoped types.yaml") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want package-scoped types.yaml rejection", err)
+	}
+}
+
+func TestLoadWorkflowContractBundle_RejectsPackageScopedEntityContracts(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	root := t.TempDir()
+
+	writeFixtureFile(t, root+"/package.yaml", `
+name: invalid-package-entities
+version: "1.0.0"
+platform_version: ">=1.0.0"
+packages:
+  - path: packages/child
+flows: []
+`)
+	writeFixtureFile(t, root+"/schema.yaml", "name: invalid-package-entities\n")
+	writeFixtureFile(t, root+"/packages/child/package.yaml", `
+name: child
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows: []
+`)
+	writeFixtureFile(t, root+"/packages/child/entities.yaml", "child:\n  name: text\n")
+
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "package-scoped entities.yaml") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want package-scoped entities.yaml rejection", err)
 	}
 }
 
@@ -261,9 +277,9 @@ campaign:
 	}
 }
 
-func TestProjectPackageDocumentDecode_PreservesManifestFieldsWithLegacyEntitySchemaListField(t *testing.T) {
+func TestProjectPackageDocumentDecode_RejectsLegacyEntitySchema(t *testing.T) {
 	var doc ProjectPackageDocument
-	if err := yaml.Unmarshal([]byte(`
+	err := yaml.Unmarshal([]byte(`
 name: test-accumulate-all
 version: 1.0.0
 description: Accumulate 3 items, fire on_complete when all arrive.
@@ -273,27 +289,9 @@ entity_schema:
   core:
     expected_count: integer
     received_items: [text]
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := doc.Name; got != "test-accumulate-all" {
-		t.Fatalf("Name = %q", got)
-	}
-	if got := doc.Version; got != "1.0.0" {
-		t.Fatalf("Version = %q", got)
-	}
-	if got := doc.PlatformVersion; got != ">=1.1.0" {
-		t.Fatalf("PlatformVersion = %q", got)
-	}
-	if !doc.UsesLegacyEntitySchema {
-		t.Fatal("expected UsesLegacyEntitySchema to be set")
-	}
-	if got := len(doc.EntitySchema.Groups); got != 1 {
-		t.Fatalf("len(EntitySchema.Groups) = %d", got)
-	}
-	fields := doc.EntitySchema.Groups[0].Fields
-	if got := fields[1].Type; got != "list<text>" {
-		t.Fatalf("received_items type = %q", got)
+`), &doc)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "entity_schema") {
+		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED entity_schema rejection", err)
 	}
 }
 
@@ -316,8 +314,8 @@ flows: []
 	if err == nil {
 		t.Fatal("expected parse error")
 	}
-	if !strings.Contains(err.Error(), "parse") || !strings.Contains(err.Error(), "jsonb") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want parse error mentioning jsonb", err)
+	if !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "entity_schema") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want RETIRED entity_schema rejection", err)
 	}
 	if strings.Contains(err.Error(), "workflow.name missing") {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want parse error instead of downstream semantics failure", err)
@@ -335,9 +333,6 @@ composite_score:
   description: final score
 `), &entry); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if entry.UsesLegacyPayload {
-		t.Fatal("expected flat event grammar to avoid legacy payload compatibility flag")
 	}
 	if got := entry.Note; got != "root handoff" {
 		t.Fatalf("Note = %q", got)
@@ -357,8 +352,8 @@ payload:
   entity_id: uuid
 vertical_name: text
 `), &entry)
-	if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-EVENT-GRAMMAR") {
-		t.Fatalf("yaml.Unmarshal error = %v, want AMBIGUOUS-EVENT-GRAMMAR", err)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "payload") {
+		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED nested payload rejection", err)
 	}
 }
 

@@ -1,10 +1,7 @@
 item.evaluated:
-  payload:
-    entity_id: string
-    score: integer
+  entity_id: string
+  score: integer
 item.passed:
-  payload:
-    entity_id: string
+  entity_id: string
 item.failed:
-  payload:
-    entity_id: string
+  entity_id: string

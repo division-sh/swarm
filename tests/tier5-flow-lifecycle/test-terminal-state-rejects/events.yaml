@@ -1,12 +1,8 @@
 task.completed:
-  payload:
-    entity_id: string
+  entity_id: string
 task.reopen_requested:
-  payload:
-    entity_id: string
+  entity_id: string
 task.finished:
-  payload:
-    entity_id: string
+  entity_id: string
 state.reopened:
-  payload:
-    entity_id: string
+  entity_id: string

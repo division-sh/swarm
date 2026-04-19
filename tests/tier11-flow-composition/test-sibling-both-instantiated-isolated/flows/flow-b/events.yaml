@@ -1,6 +1,4 @@
 work.begin:
-  payload:
-    entity_id: string
+  entity_id: string
 beta.done:
-  payload:
-    entity_id: string
+  entity_id: string

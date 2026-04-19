@@ -1,8 +1,6 @@
 item.received:
-  payload:
-    entity_id: string
-    kind: string
-    value: integer
+  entity_id: string
+  kind: string
+  value: integer
 item.accumulated:
-  payload:
-    entity_id: string
+  entity_id: string

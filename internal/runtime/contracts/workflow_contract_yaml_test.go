@@ -218,25 +218,22 @@ pins:
 }
 
 func TestEntitySchemaDecode_AcceptsMappingInitialValue(t *testing.T) {
-	var doc ProjectPackageDocument
+	var schema EntitySchema
 	if err := yaml.Unmarshal([]byte(`
-name: test
-version: 1.0.0
-entity_schema:
-  scoring_phase:
-    revision_count:
-      type: integer
-      initial: 0
-    is_duplicate:
-      type: boolean
-      initial: false
-`), &doc); err != nil {
+scoring_phase:
+  revision_count:
+    type: integer
+    initial: 0
+  is_duplicate:
+    type: boolean
+    initial: false
+`), &schema); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got := len(doc.EntitySchema.Groups); got != 1 {
-		t.Fatalf("len(EntitySchema.Groups) = %d", got)
+	if got := len(schema.Groups); got != 1 {
+		t.Fatalf("len(Groups) = %d", got)
 	}
-	fields := doc.EntitySchema.Groups[0].Fields
+	fields := schema.Groups[0].Fields
 	if got := fields[0].Name; got != "revision_count" {
 		t.Fatalf("Fields[0].Name = %q", got)
 	}
@@ -249,29 +246,23 @@ entity_schema:
 }
 
 func TestEntitySchemaDecode_RejectsScalarInitialSuffix(t *testing.T) {
-	var doc ProjectPackageDocument
+	var schema EntitySchema
 	err := yaml.Unmarshal([]byte(`
-name: test
-version: 1.0.0
-entity_schema:
-  scoring_phase:
-    revision_count: integer initial 0
-`), &doc)
+scoring_phase:
+  revision_count: integer initial 0
+`), &schema)
 	if err == nil || !strings.Contains(err.Error(), "scalar form cannot declare initial values") {
 		t.Fatalf("yaml.Unmarshal error = %v, want scalar initial rejection", err)
 	}
 }
 
 func TestEntitySchemaDecode_RejectsMappingWithoutType(t *testing.T) {
-	var doc ProjectPackageDocument
+	var schema EntitySchema
 	err := yaml.Unmarshal([]byte(`
-name: test
-version: 1.0.0
-entity_schema:
-  scoring_phase:
-    revision_count:
-      initial: 0
-`), &doc)
+scoring_phase:
+  revision_count:
+    initial: 0
+`), &schema)
 	if err == nil || !strings.Contains(err.Error(), "type is required") {
 		t.Fatalf("yaml.Unmarshal error = %v, want missing-type rejection", err)
 	}

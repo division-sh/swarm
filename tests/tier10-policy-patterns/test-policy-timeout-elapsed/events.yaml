@@ -1,13 +1,9 @@
 task.done:
-  payload:
-    entity_id: string
+  entity_id: string
 timer.check:
-  payload:
-    entity_id: string
-    elapsed_hours: number
+  entity_id: string
+  elapsed_hours: number
 task.completed:
-  payload:
-    entity_id: string
+  entity_id: string
 task.timed_out:
-  payload:
-    entity_id: string
+  entity_id: string

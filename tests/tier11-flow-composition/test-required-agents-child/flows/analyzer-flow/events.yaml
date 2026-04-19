@@ -1,6 +1,4 @@
 analysis.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 analysis.done:
-  payload:
-    entity_id: string
+  entity_id: string

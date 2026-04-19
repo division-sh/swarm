@@ -1,9 +1,7 @@
 export.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 item.exported:
-  payload:
-    entity_id: string
-    id: string
-    name: string
-    status: string
+  entity_id: string
+  id: string
+  name: string
+  status: string

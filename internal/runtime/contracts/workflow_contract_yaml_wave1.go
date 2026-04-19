@@ -20,6 +20,9 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 	if p == nil {
 		return nil
 	}
+	if hasYAMLMappingKey(node, "entity_schema") {
+		return fmt.Errorf("RETIRED: package.yaml entity_schema is no longer supported; migrate to entities.yaml")
+	}
 	var aux struct {
 		Name            string              `yaml:"name"`
 		Version         string              `yaml:"version"`
@@ -49,7 +52,6 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		Handoffs:        append([]ProjectHandoff(nil), aux.Handoffs...),
 		EntitySchema:    aux.EntitySchema,
 	}
-	p.UsesLegacyEntitySchema = hasYAMLMappingKey(node, "entity_schema")
 	return nil
 }
 

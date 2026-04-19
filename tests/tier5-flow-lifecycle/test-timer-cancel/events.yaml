@@ -1,12 +1,8 @@
 timer.scheduled:
-  payload:
-    entity_id: string
+  entity_id: string
 timer.cancel_requested:
-  payload:
-    entity_id: string
+  entity_id: string
 timer.check:
-  payload:
-    entity_id: string
+  entity_id: string
 timer.cancelled:
-  payload:
-    entity_id: string
+  entity_id: string

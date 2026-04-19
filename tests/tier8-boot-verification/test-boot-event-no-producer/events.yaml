@@ -1,12 +1,8 @@
 task.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 task.completed:
-  payload:
-    entity_id: string
+  entity_id: string
 ghost.event:
-  payload:
-    entity_id: string
+  entity_id: string
 ghost.ack:
-  payload:
-    entity_id: string
+  entity_id: string

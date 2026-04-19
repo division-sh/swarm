@@ -1,10 +1,7 @@
 check.requested:
-  payload:
-    entity_id: string
-    score: integer
+  entity_id: string
+  score: integer
 check.passed:
-  payload:
-    entity_id: string
+  entity_id: string
 check.escalated:
-  payload:
-    entity_id: string
+  entity_id: string

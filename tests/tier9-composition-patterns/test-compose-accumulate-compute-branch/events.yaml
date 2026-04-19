@@ -1,13 +1,9 @@
 score.submitted:
-  payload:
-    entity_id: string
-    value: number
+  entity_id: string
+  value: number
 result.high:
-  payload:
-    entity_id: string
+  entity_id: string
 result.mid:
-  payload:
-    entity_id: string
+  entity_id: string
 result.low:
-  payload:
-    entity_id: string
+  entity_id: string

@@ -1,11 +1,8 @@
 task.submitted:
-  payload:
-    entity_id: string
-    score: integer
-    type: string
+  entity_id: string
+  score: integer
+  type: string
 task.completed:
-  payload:
-    entity_id: string
+  entity_id: string
 task.routed:
-  payload:
-    entity_id: string
+  entity_id: string

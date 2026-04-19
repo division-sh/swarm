@@ -1,6 +1,4 @@
 task.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 task.completed:
-  payload:
-    entity_id: string
+  entity_id: string

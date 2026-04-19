@@ -1,7 +1,6 @@
 digest.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 digest.compiled:
-  payload:
-    entity_id: string
-    groups: [GroupedDigest]
+  entity_id: string
+  groups:
+  - GroupedDigest

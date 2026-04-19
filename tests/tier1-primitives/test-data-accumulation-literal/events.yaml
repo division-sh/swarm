@@ -1,6 +1,4 @@
 item.received:
-  payload:
-    entity_id: string
+  entity_id: string
 item.categorized:
-  payload:
-    entity_id: string
+  entity_id: string

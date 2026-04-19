@@ -1,12 +1,9 @@
 batch.submitted:
-  payload:
-    entity_id: string
-    items: array
+  entity_id: string
+  items: array
 routed.a:
-  payload:
-    entity_id: string
-    item: FanOutItem
+  entity_id: string
+  item: FanOutItem
 routed.b:
-  payload:
-    entity_id: string
-    item: FanOutItem
+  entity_id: string
+  item: FanOutItem

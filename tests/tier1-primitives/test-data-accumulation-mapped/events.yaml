@@ -1,7 +1,5 @@
 item.received:
-  payload:
-    entity_id: string
-    src_name: string
+  entity_id: string
+  src_name: string
 item.stored:
-  payload:
-    entity_id: string
+  entity_id: string

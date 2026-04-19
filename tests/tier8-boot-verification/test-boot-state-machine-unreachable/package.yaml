@@ -1,17 +1,12 @@
 name: test-boot-state-machine-unreachable
 version: 1.0.0
-description: >
-  Boot verification: declared workflow state is unreachable from the authored
-  initial state and transition carriers. Platform must surface a warning-grade
-  semantic drift finding on the supported verify path.
-platform_version: ">=1.1.0"
-entity_schema:
-  groups:
-    - name: ticket
-      fields:
-        - name: ticket_id
-          type: string
+description: 'Boot verification: declared workflow state is unreachable from the authored
+  initial state and transition carriers. Platform must surface a warning-grade semantic
+  drift finding on the supported verify path.
+
+  '
+platform_version: '>=1.1.0'
 flows:
-  - id: support
-    flow: support
-    mode: static
+- id: support
+  flow: support
+  mode: static

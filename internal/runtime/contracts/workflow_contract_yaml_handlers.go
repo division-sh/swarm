@@ -213,13 +213,12 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	if e == nil {
 		return nil
 	}
-	hasLegacyPayload := hasYAMLMappingKey(node, "payload")
+	if hasYAMLMappingKey(node, "payload") {
+		return fmt.Errorf("RETIRED: nested events.yaml payload blocks are no longer supported; move payload fields to the event top level")
+	}
 	flatPayload, err := buildFlatEventPayloadSpec(node)
 	if err != nil {
 		return err
-	}
-	if hasLegacyPayload && len(flatPayload.Properties) > 0 {
-		return fmt.Errorf("AMBIGUOUS-EVENT-GRAMMAR: event mixes retired payload: with flat payload fields")
 	}
 	var aux struct {
 		Note               string    `yaml:"_note"`
@@ -286,12 +285,6 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	payload := flatPayload
-	if hasLegacyPayload {
-		payload, err = decodeEventPayloadSpecNode(&aux.Payload)
-		if err != nil {
-			return err
-		}
-	}
 	if len(payload.Required) == 0 {
 		payload.Required = normalizeStrings(aux.Required)
 	}
@@ -311,7 +304,6 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	e.DeliveryChannel = deliveryChannel
 	e.Payload = payload
 	e.Required = normalizeStrings(aux.Required)
-	e.UsesLegacyPayload = hasLegacyPayload
 	return nil
 }
 

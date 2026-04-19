@@ -1,18 +1,12 @@
 start:
-  payload:
-    entity_id: string
+  entity_id: string
 complete:
-  payload:
-    entity_id: string
+  entity_id: string
 flow-a/a.start:
-  payload:
-    entity_id: string
+  entity_id: string
 flow-a/a.done:
-  payload:
-    entity_id: string
+  entity_id: string
 flow-b/b.start:
-  payload:
-    entity_id: string
+  entity_id: string
 flow-b/b.done:
-  payload:
-    entity_id: string
+  entity_id: string

@@ -1,7 +1,5 @@
 intake.requested:
-  payload:
-    entity_id: string
-    type: string
+  entity_id: string
+  type: string
 intake.completed:
-  payload:
-    entity_id: string
+  entity_id: string

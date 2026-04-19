@@ -1,10 +1,7 @@
 score.received:
-  payload:
-    entity_id: string
-    score: integer
+  entity_id: string
+  score: integer
 batch.scored:
-  payload:
-    entity_id: string
+  entity_id: string
 scores.verified:
-  payload:
-    entity_id: string
+  entity_id: string

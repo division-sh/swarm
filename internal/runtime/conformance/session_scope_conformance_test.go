@@ -334,24 +334,18 @@ func loadSessionScopeConformanceSource(t *testing.T, tc sessionScopeConformanceC
 name: session-scope-conformance
 version: "1.0.0"
 platform_version: ">=1.0.0"
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
 flows:`+flows+`
+`)
+	writeSessionScopeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
 `)
 	writeSessionScopeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-conformance\n")
 	writeSessionScopeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeSessionScopeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeSessionScopeFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	rootAgents := "{}\n"
 	flowAgents := "{}\n"
@@ -367,10 +361,7 @@ states:
 		writeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 		writeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 support/item.created:
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 		writeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), flowAgents)
 	} else {

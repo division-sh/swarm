@@ -1,12 +1,8 @@
 work.begin:
-  payload:
-    entity_id: string
+  entity_id: string
 work.finished:
-  payload:
-    entity_id: string
+  entity_id: string
 grandchild/task.start:
-  payload:
-    entity_id: string
+  entity_id: string
 grandchild/task.done:
-  payload:
-    entity_id: string
+  entity_id: string

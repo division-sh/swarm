@@ -1,11 +1,8 @@
 task.started:
-  payload:
-    entity_id: string
-    ready: boolean
-    batch_id: string
+  entity_id: string
+  ready: boolean
+  batch_id: string
 phase.advanced:
-  payload:
-    entity_id: string
+  entity_id: string
 task.done:
-  payload:
-    entity_id: string
+  entity_id: string

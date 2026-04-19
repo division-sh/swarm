@@ -1,6 +1,4 @@
 monitor.started:
-  payload:
-    entity_id: string
+  entity_id: string
 timer.tick:
-  payload:
-    entity_id: string
+  entity_id: string

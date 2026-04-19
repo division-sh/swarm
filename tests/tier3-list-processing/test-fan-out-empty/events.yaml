@@ -1,8 +1,6 @@
 batch.submitted:
-  payload:
-    entity_id: string
-    items: array
+  entity_id: string
+  items: array
 item.assigned:
-  payload:
-    entity_id: string
-    item: FanOutItem
+  entity_id: string
+  item: FanOutItem

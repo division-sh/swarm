@@ -1,8 +1,5 @@
 name: test-compute-standalone
 version: 1.0.0
 description: Compute as a standalone handler field with weighted_average operation.
-platform_version: ">=1.1.0"
+platform_version: '>=1.1.0'
 flows: []
-entity_schema:
-  core:
-    composite: numeric(5,2)

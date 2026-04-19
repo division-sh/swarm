@@ -1,10 +1,7 @@
 flow-b/order.submitted:
-  payload:
-    entity_id: string
+  entity_id: string
 flow-b/order.completed:
-  description: "Cross-flow event from flow-b indicating an order has been completed"
-  payload:
-    entity_id: string
+  description: Cross-flow event from flow-b indicating an order has been completed
+  entity_id: string
 flow-a/invoice.created:
-  payload:
-    entity_id: string
+  entity_id: string

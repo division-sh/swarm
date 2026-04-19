@@ -1,3 +1,2 @@
 invoice.created:
-  payload:
-    entity_id: string
+  entity_id: string

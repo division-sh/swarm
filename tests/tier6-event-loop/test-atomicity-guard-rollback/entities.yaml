@@ -1,0 +1,3 @@
+core:
+  status: text
+  counter: integer

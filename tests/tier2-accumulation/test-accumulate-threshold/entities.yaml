@@ -1,0 +1,4 @@
+core:
+  expected_count: integer
+  received_items:
+  - text

@@ -1,9 +1,6 @@
 task.started:
-  payload:
-    entity_id: string
+  entity_id: string
 timer.task_timeout:
-  payload:
-    entity_id: string
+  entity_id: string
 task.timed_out:
-  payload:
-    entity_id: string
+  entity_id: string

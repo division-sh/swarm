@@ -2,24 +2,6 @@ name: test-platform
 version: "1.0.0"
 platform_version: ">=1.0.0"
 description: Generic Swarm bundle for contract-driven runtime tests.
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
-        - name: status
-          type: string
-          indexed: true
-        - name: priority
-          type: string
-        - name: score
-          type: number
-          nullable: true
-        - name: gates
-          type: GateState
-          nullable: true
 flows:
   - id: intake
     flow: intake

@@ -1,6 +1,4 @@
 trigger.beta:
-  payload:
-    entity_id: string
+  entity_id: string
 job.beta_done:
-  payload:
-    entity_id: string
+  entity_id: string

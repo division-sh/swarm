@@ -62,17 +62,14 @@ func loadPackageBackedRuntimeSessionScopeSource(t *testing.T) semanticview.Sourc
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=1.0.0"
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
 flows:
   - id: support
     flow: support
     mode: static
+`)
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -81,10 +78,7 @@ flows:
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   _source: external (bootstrap fixture)
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
 name: support
@@ -101,10 +95,7 @@ states:
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "prompts", "backend.md"), "Handle support events.\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 support/item.created:
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
@@ -138,17 +129,14 @@ version: "1.0.0"
 platform_version: ">=1.0.0"
 packages:
   - path: extras
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
 flows:
   - id: support
     flow: support
     mode: static
+`)
+	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -157,10 +145,7 @@ flows:
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   _source: external (bootstrap fixture)
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
 name: support
@@ -171,10 +156,7 @@ states:
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 support/item.created:
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "extras", "prompts", "backend.md"), "Handle support events.\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `

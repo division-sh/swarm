@@ -109,12 +109,6 @@ func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t 
 name: cross-flow-localization
 version: "1.0.0"
 platform_version: ">=1.6.0"
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
 flows:
   - id: scoring
     flow: scoring
@@ -122,6 +116,10 @@ flows:
   - id: validation
     flow: validation
     mode: static
+`)
+	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: cross-flow-localization\n")
 	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -144,10 +142,7 @@ pins:
 	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "policy.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), `
 vertical.shortlisted:
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), `
 scoring-node:
@@ -178,10 +173,7 @@ pins:
 	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "policy.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "events.yaml"), `
 validation.started:
-  payload:
-    properties:
-      entity_id:
-        type: string
+  entity_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "nodes.yaml"), `
 validation-orchestrator:
@@ -225,16 +217,12 @@ func currentWorkflowContractsDirForTest(t *testing.T) string {
 name: contract-test-bundle
 version: "1.0.0"
 platform_version: ">=1.0.0"
-entity_schema:
-  groups:
-    - name: item
-      fields:
-        - name: item_id
-          type: string
-          primary: true
-        - name: status
-          type: string
 flows: []
+`)
+	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
+  status: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 initial_state: idle
@@ -262,24 +250,11 @@ control-plane:
 `)
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
-  payload:
-    properties:
-      entity_id:
-        type: string
-      item_id:
-        type: string
-    required:
-      - entity_id
-      - item_id
+  entity_id: string
+  item_id: string
 evidence.recorded:
-  payload:
-    properties:
-      entity_id:
-        type: string
-      note:
-        type: string
-    required:
-      - entity_id
+  entity_id: string
+  note: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 audit-node:
@@ -332,8 +307,7 @@ parent-node:
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "events.yaml"), `
 parent.started:
-  payload:
-    entity_id: string
+  entity_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "agents.yaml"), `
 parent-agent:
@@ -365,8 +339,7 @@ child-node:
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "events.yaml"), `
 child.completed:
-  payload:
-    entity_id: string
+  entity_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "agents.yaml"), `
 child-agent:
@@ -476,8 +449,7 @@ _source: external (human board interface)
 _producer: mailbox_human
 _consumer: mailbox_system (external UI, not agent-subscribed)
 _consumer_type: external_ui
-payload:
-  entity_id: string
+entity_id: string
 `), &entry); err != nil {
 		t.Fatalf("load event catalog entry: %v", err)
 	}

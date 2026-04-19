@@ -1,12 +1,8 @@
 validate.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 validate.passed:
-  payload:
-    entity_id: string
+  entity_id: string
 child/validate.start:
-  payload:
-    entity_id: string
+  entity_id: string
 child/validation.done:
-  payload:
-    entity_id: string
+  entity_id: string

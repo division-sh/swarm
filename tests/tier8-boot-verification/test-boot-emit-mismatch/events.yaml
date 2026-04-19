@@ -1,8 +1,6 @@
 task.requested:
-  payload:
-    entity_id: string
-    task_type: string
+  entity_id: string
+  task_type: string
 task.completed:
-  payload:
-    entity_id: string
-    result: string
+  entity_id: string
+  result: string

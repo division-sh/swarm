@@ -1,8 +1,6 @@
 flow.spawn_with_config:
-  payload:
-    entity_id: string
-    instance_id: string
-    config: WorkerConfig
+  entity_id: string
+  instance_id: string
+  config: WorkerConfig
 flow.spawned:
-  payload:
-    entity_id: string
+  entity_id: string

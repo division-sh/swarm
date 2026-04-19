@@ -1,6 +1,4 @@
 sub.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 sub.completed:
-  payload:
-    entity_id: string
+  entity_id: string

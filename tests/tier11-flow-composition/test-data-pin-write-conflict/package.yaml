@@ -1,7 +1,8 @@
 name: test-data-pin-write-conflict
 version: 1.0.0
-description: Two sibling child flows declare the same writes data pin. Boot should fail.
-platform_version: ">=1.1.0"
+description: Two sibling child flows declare the same writes data pin. Boot should
+  fail.
+platform_version: '>=1.1.0'
 flows:
 - id: flow-a
   flow: flow-a
@@ -9,6 +10,3 @@ flows:
 - id: flow-b
   flow: flow-b
   mode: static
-entity_schema:
-  core:
-    shared_field: text

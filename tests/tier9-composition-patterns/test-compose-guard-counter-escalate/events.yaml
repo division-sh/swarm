@@ -1,9 +1,6 @@
 retry.requested:
-  payload:
-    entity_id: string
+  entity_id: string
 retry.dispatched:
-  payload:
-    entity_id: string
+  entity_id: string
 limit.reached:
-  payload:
-    entity_id: string
+  entity_id: string

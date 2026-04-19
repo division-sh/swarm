@@ -1,8 +1,6 @@
 check.requested:
-  payload:
-    entity_id: string
-    score: number
-    confidence: number
+  entity_id: string
+  score: number
+  confidence: number
 check.passed:
-  payload:
-    entity_id: string
+  entity_id: string

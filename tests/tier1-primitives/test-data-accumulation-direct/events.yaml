@@ -1,8 +1,6 @@
 item.received:
-  payload:
-    entity_id: string
-    name: string
-    score: integer
+  entity_id: string
+  name: string
+  score: integer
 item.stored:
-  payload:
-    entity_id: string
+  entity_id: string

@@ -1,6 +1,4 @@
 item.evaluated:
-  payload:
-    entity_id: string
+  entity_id: string
 item.expedited:
-  payload:
-    entity_id: string
+  entity_id: string

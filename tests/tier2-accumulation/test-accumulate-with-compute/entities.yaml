@@ -1,0 +1,5 @@
+core:
+  expected_count: integer
+  composite: numeric(5,2)
+  received_items:
+  - text

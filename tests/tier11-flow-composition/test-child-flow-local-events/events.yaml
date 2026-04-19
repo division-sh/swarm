@@ -1,6 +1,4 @@
 parent.trigger:
-  payload:
-    entity_id: string
+  entity_id: string
 parent.result:
-  payload:
-    entity_id: string
+  entity_id: string

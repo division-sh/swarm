@@ -1,6 +1,4 @@
 work.assigned:
-  payload:
-    entity_id: string
+  entity_id: string
 item.processed:
-  payload:
-    entity_id: string
+  entity_id: string

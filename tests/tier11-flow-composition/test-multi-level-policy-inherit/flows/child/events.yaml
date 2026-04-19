@@ -1,7 +1,5 @@
 child.check:
-  payload:
-    entity_id: string
-    score: integer
+  entity_id: string
+  score: integer
 child.done:
-  payload:
-    entity_id: string
+  entity_id: string

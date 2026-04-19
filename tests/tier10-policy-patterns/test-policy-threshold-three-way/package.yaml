@@ -1,10 +1,6 @@
 name: test-policy-threshold-three-way
 version: 1.0.0
-description: >
-  Policy: on_complete branches reference policy thresholds for 3-way
-  routing — high/mid/low based on policy.high_mark and policy.low_mark.
-platform_version: ">=1.1.0"
-entity_schema:
-  core:
-    score: number
+description: "Policy: on_complete branches reference policy thresholds for 3-way routing\
+  \ \u2014 high/mid/low based on policy.high_mark and policy.low_mark.\n"
+platform_version: '>=1.1.0'
 flows: []

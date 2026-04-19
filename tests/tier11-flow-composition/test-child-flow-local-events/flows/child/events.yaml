@@ -1,10 +1,7 @@
 child.start:
-  payload:
-    entity_id: string
+  entity_id: string
 child.internal:
-  payload:
-    entity_id: string
-    step: string
+  entity_id: string
+  step: string
 child.done:
-  payload:
-    entity_id: string
+  entity_id: string
