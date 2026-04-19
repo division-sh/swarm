@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"swarm/internal/runtime/entityruntime"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/eventidentity"
 	"swarm/internal/runtime/semanticview"
@@ -22,57 +23,66 @@ func asBool(v any) bool {
 	return ok && typed
 }
 
-func workflowEntitySchemaFields(source semanticview.Source) map[string]struct{} {
-	if source == nil {
-		return map[string]struct{}{}
-	}
-	return workflowEntitySchemaFieldNames(source.WorkflowEntitySchema())
+func workflowEntityContract(source semanticview.Source, flowID string) (entityruntime.Contract, bool) {
+	return entityruntime.ResolveForFlow(source, flowID)
 }
 
-func workflowEntitySchemaFieldNames(raw any) map[string]struct{} {
-	out := map[string]struct{}{}
-	collectEntitySchemaFields(raw, out)
+func workflowEntitySchemaFields(source semanticview.Source, flowID string) map[string]struct{} {
+	contract, ok := workflowEntityContract(source, flowID)
+	if !ok {
+		return map[string]struct{}{}
+	}
+	out := make(map[string]struct{}, len(contract.Entity.Fields))
+	for _, field := range entityruntime.FieldNames(contract) {
+		out[field] = struct{}{}
+	}
 	return out
 }
 
-func collectEntitySchemaFields(raw any, out map[string]struct{}) {
-	for name := range workflowEntitySchemaFieldDefinitions(raw) {
-		out[name] = struct{}{}
-	}
-}
-
-func workflowEntitySchemaInitialValues(source semanticview.Source) map[string]any {
-	if source == nil {
+func workflowEntitySchemaInitialValues(source semanticview.Source, flowID string) map[string]any {
+	contract, ok := workflowEntityContract(source, flowID)
+	if !ok {
 		return nil
 	}
-	return workflowEntitySchemaInitialValuesFromRaw(source.WorkflowEntitySchema())
+	values, err := entityruntime.Materialize(contract, nil)
+	if err != nil {
+		return nil
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
 }
 
 func WorkflowEntitySchemaInitialValueFields(source semanticview.Source) map[string]struct{} {
 	if source == nil {
 		return nil
 	}
-	out := map[string]struct{}{}
-	for field := range workflowEntitySchemaInitialValuesFromRaw(source.WorkflowEntitySchema()) {
-		out[field] = struct{}{}
-	}
-	if len(out) == 0 {
+	return workflowEntitySchemaInitialValueFieldsFromRaw(source.WorkflowEntitySchema())
+}
+
+func workflowEntitySchemaInitialValueFieldsForFlow(source semanticview.Source, flowID string) map[string]struct{} {
+	values := workflowEntitySchemaInitialValues(source, flowID)
+	if len(values) == 0 {
 		return nil
+	}
+	out := map[string]struct{}{}
+	for field := range values {
+		out[field] = struct{}{}
 	}
 	return out
 }
 
-func workflowEntitySchemaInitialValuesFromRaw(raw any) map[string]any {
+func workflowEntitySchemaInitialValueFieldsFromRaw(raw any) map[string]struct{} {
 	fields := workflowEntitySchemaFieldDefinitions(raw)
 	if len(fields) == 0 {
 		return nil
 	}
-	out := make(map[string]any, len(fields))
+	out := map[string]struct{}{}
 	for name, field := range fields {
-		if field.Initial == nil {
-			continue
+		if field.Initial != nil {
+			out[name] = struct{}{}
 		}
-		out[name] = cloneWorkflowSchemaValue(field.Initial)
 	}
 	if len(out) == 0 {
 		return nil
@@ -145,6 +155,35 @@ func workflowEntitySchemaFieldDefinitions(raw any) map[string]runtimecontracts.E
 				}
 			}
 		}
+	}
+	return out
+}
+
+func workflowMaterializeEntityMetadata(source semanticview.Source, flowID string, metadata map[string]any) map[string]any {
+	contract, ok := workflowEntityContract(source, flowID)
+	if !ok {
+		return cloneStringAnyMap(metadata)
+	}
+	entityFields := map[string]any{}
+	for name := range contract.Entity.Fields {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if value, exists := metadata[name]; exists {
+			entityFields[name] = cloneWorkflowSchemaValue(value)
+		}
+	}
+	materialized, err := entityruntime.Materialize(contract, entityFields)
+	if err != nil {
+		return cloneStringAnyMap(metadata)
+	}
+	out := cloneStringAnyMap(metadata)
+	if out == nil {
+		out = map[string]any{}
+	}
+	for key, value := range materialized {
+		out[key] = value
 	}
 	return out
 }

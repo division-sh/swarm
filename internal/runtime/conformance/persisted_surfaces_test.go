@@ -2002,17 +2002,23 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 
 	requireMutationSurface(t, db)
 
-	entityID := uuid.NewString()
-	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
-		"entity_id":     entityID,
+	createOut, err := exec.Execute(ctx, "create_entity", map[string]any{
 		"flow_instance": "review/inst-1",
-		"entity_type":   "accounts",
 		"fields": map[string]any{
 			"status": "open",
 			"score":  10.0,
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("create_entity: %v", err)
+	}
+	created, ok := createOut.(map[string]any)
+	if !ok {
+		t.Fatalf("create_entity output = %#v, want map", createOut)
+	}
+	entityID := readString(created["entity_id"])
+	if entityID == "" {
+		t.Fatal("create_entity did not return entity_id")
 	}
 	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
@@ -2295,17 +2301,17 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
 		SQLDB: db,
 		WorkflowSource: runtimesemanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-			Semantics: runtimecontracts.WorkflowSemanticView{
-				InitialStage: "queued",
-				EntitySchema: runtimecontracts.EntitySchema{
-					Groups: []runtimecontracts.EntitySchemaGroup{{
-						Name: "accounts",
-						Fields: []runtimecontracts.EntitySchemaField{
-							{Name: "status", Type: "string", Indexed: true},
-							{Name: "score", Type: "numeric(10,2)"},
-						},
-					}},
+			RootEntities: runtimecontracts.EntityContractsDocument{
+				"accounts": {
+					Fields: map[string]runtimecontracts.EntityFieldDecl{
+						"score":  {Type: "numeric(10,2)"},
+						"status": {Type: "text"},
+					},
 				},
+			},
+			Semantics: runtimecontracts.WorkflowSemanticView{
+				Name:         "review",
+				InitialStage: "queued",
 			},
 		}),
 	})

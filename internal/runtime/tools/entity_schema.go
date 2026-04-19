@@ -1,133 +1,86 @@
 package tools
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
-	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
-	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
 type entityToolSchema struct {
-	Defined bool
-	Fields  map[string]runtimecontracts.EntitySchemaField
+	Defined  bool
+	Contract entityruntime.Contract
 }
 
 type entityFilterCondition struct {
-	Field    runtimecontracts.EntitySchemaField
+	Field    entityruntime.Field
 	Operator string
 	Value    any
 }
 
 var (
 	entityFilterSplitter = regexp.MustCompile(`(?i)\s+AND\s+`)
-	entityFilterPattern  = regexp.MustCompile(`^\s*([a-z_][a-z0-9_]*)\s*(=|!=|>=|<=|>|<)\s*(.+?)\s*$`)
+	entityFilterPattern  = regexp.MustCompile(`^\s*([a-z_][a-z0-9_.]*)\s*(=|!=|>=|<=|>|<)\s*(.+?)\s*$`)
 )
 
-func entityToolSchemaFromSource(source semanticview.Source) (entityToolSchema, error) {
+func entityToolSchemaForActor(source semanticview.Source, actorID string) (entityToolSchema, error) {
 	if source == nil {
 		return entityToolSchema{}, fmt.Errorf("workflow source is not configured")
 	}
-	fields := map[string]runtimecontracts.EntitySchemaField{}
-	defined := false
-	for _, group := range source.WorkflowEntitySchema().Groups {
-		for _, field := range group.Fields {
-			name := strings.TrimSpace(field.Name)
-			if name == "" {
-				continue
-			}
-			fields[name] = field
-			defined = true
-		}
+	contract, ok := entityruntime.ResolveForActor(source, actorID)
+	if !ok {
+		return entityToolSchema{}, fmt.Errorf("flow-owned entity contract is not available for actor %s", strings.TrimSpace(actorID))
 	}
-	return entityToolSchema{
-		Defined: defined,
-		Fields:  fields,
-	}, nil
+	return entityToolSchema{Defined: true, Contract: contract}, nil
 }
 
-func (s entityToolSchema) field(name string) (runtimecontracts.EntitySchemaField, error) {
+func entityToolSchemaForEntityRow(source semanticview.Source, row map[string]any) (entityToolSchema, error) {
+	if source == nil {
+		return entityToolSchema{}, fmt.Errorf("workflow source is not configured")
+	}
+	contract, ok := entityruntime.ResolveForEntityRow(source, row)
+	if !ok {
+		return entityToolSchema{}, fmt.Errorf("flow-owned entity contract is not available for entity flow_instance %s", strings.TrimSpace(asString(row["flow_instance"])))
+	}
+	return entityToolSchema{Defined: true, Contract: contract}, nil
+}
+
+func (s entityToolSchema) field(name string) (entityruntime.Field, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return runtimecontracts.EntitySchemaField{}, fmt.Errorf("field is required")
+		return entityruntime.Field{}, fmt.Errorf("field is required")
 	}
-	if !s.Defined {
-		return runtimecontracts.EntitySchemaField{Name: name}, nil
-	}
-	field, ok := s.Fields[name]
-	if !ok {
-		return runtimecontracts.EntitySchemaField{}, fmt.Errorf("%w: entity schema does not define field %s", ErrUnknownEntityField, name)
+	field, err := entityruntime.ResolveLeafField(s.Contract, name)
+	if err != nil {
+		return entityruntime.Field{}, fmt.Errorf("%w: %v", ErrUnknownEntityField, err)
 	}
 	return field, nil
 }
 
-func normalizeEntityFieldValue(field runtimecontracts.EntitySchemaField, value any) (any, error) {
-	fieldType := normalizeEntityFieldType(field.Type)
-	if fieldType == "" {
-		return value, nil
+func (s entityToolSchema) declaredField(name string) (entityruntime.Field, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return entityruntime.Field{}, fmt.Errorf("field is required")
 	}
-	if value == nil {
-		if field.Nullable {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("field %s is not nullable", strings.TrimSpace(field.Name))
+	if strings.Contains(name, ".") {
+		return entityruntime.Field{}, fmt.Errorf("%w: nested writes are not supported in Wave 1", ErrUnknownEntityField)
 	}
-	switch {
-	case fieldType == "text" || fieldType == "string":
-		if _, ok := value.(string); !ok {
-			return nil, fmt.Errorf("field %s must be string", strings.TrimSpace(field.Name))
-		}
-		return value, nil
-	case fieldType == "integer":
-		if !runtimesharedjson.IsInteger(value) {
-			return nil, fmt.Errorf("field %s must be integer", strings.TrimSpace(field.Name))
-		}
-		f, _ := runtimesharedjson.AsFloat64(value)
-		return int64(f), nil
-	case strings.HasPrefix(fieldType, "numeric("):
-		if !runtimesharedjson.IsNumeric(value) {
-			return nil, fmt.Errorf("field %s must be numeric", strings.TrimSpace(field.Name))
-		}
-		f, _ := runtimesharedjson.AsFloat64(value)
-		return f, nil
-	case fieldType == "boolean":
-		if _, ok := value.(bool); !ok {
-			return nil, fmt.Errorf("field %s must be boolean", strings.TrimSpace(field.Name))
-		}
-		return value, nil
-	case fieldType == "jsonb":
-		if _, err := json.Marshal(value); err != nil {
-			return nil, fmt.Errorf("field %s must be valid json: %w", strings.TrimSpace(field.Name), err)
-		}
-		return value, nil
-	case fieldType == "timestamp":
-		switch t := value.(type) {
-		case time.Time:
-			return t.UTC(), nil
-		case string:
-			parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(t))
-			if err != nil {
-				return nil, fmt.Errorf("field %s must be RFC3339 timestamp", strings.TrimSpace(field.Name))
-			}
-			return parsed.UTC(), nil
-		default:
-			return nil, fmt.Errorf("field %s must be timestamp", strings.TrimSpace(field.Name))
-		}
-	case fieldType == "uuid":
-		id := strings.TrimSpace(runtimesharedjson.AsString(value))
-		if _, err := uuid.Parse(id); err != nil {
-			return nil, fmt.Errorf("field %s must be uuid", strings.TrimSpace(field.Name))
-		}
-		return id, nil
-	default:
-		return nil, fmt.Errorf("field %s has unsupported schema type %s", strings.TrimSpace(field.Name), field.Type)
+	decl, err := entityruntime.FieldDecl(s.Contract, name)
+	if err != nil {
+		return entityruntime.Field{}, fmt.Errorf("%w: %v", ErrUnknownEntityField, err)
 	}
+	return entityruntime.Field{
+		Path:      name,
+		Type:      strings.TrimSpace(decl.Type),
+		FieldDecl: decl,
+	}, nil
+}
+
+func normalizeEntityFieldValue(schema entityToolSchema, field entityruntime.Field, value any) (any, error) {
+	return entityruntime.NormalizeFieldValue(schema.Contract, field.Path, value)
 }
 
 func parseEntityFilter(schema entityToolSchema, filter string, paramStart int) (string, []any, error) {
@@ -152,12 +105,11 @@ func parseEntityFilter(schema entityToolSchema, filter string, paramStart int) (
 		if err != nil {
 			return "", nil, err
 		}
-		value, err := parseEntityFilterValue(field, match[3])
+		value, err := parseEntityFilterValue(schema, field, match[3])
 		if err != nil {
 			return "", nil, err
 		}
-		operator := strings.TrimSpace(match[2])
-		clauses = append(clauses, fmt.Sprintf("%s %s $%d", entityQuoteIdent(strings.TrimSpace(field.Name)), operator, paramIndex))
+		clauses = append(clauses, fmt.Sprintf("%s %s $%d", entityFilterSQLPath(field.Path), strings.TrimSpace(match[2]), paramIndex))
 		args = append(args, value)
 		paramIndex++
 	}
@@ -167,18 +119,18 @@ func parseEntityFilter(schema entityToolSchema, filter string, paramStart int) (
 	return " WHERE " + strings.Join(clauses, " AND "), args, nil
 }
 
-func parseEntityFilterValue(field runtimecontracts.EntitySchemaField, raw string) (any, error) {
+func parseEntityFilterValue(schema entityToolSchema, field entityruntime.Field, raw string) (any, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, fmt.Errorf("filter value for field %s is required", strings.TrimSpace(field.Name))
+		return nil, fmt.Errorf("filter value for field %s is required", strings.TrimSpace(field.Path))
 	}
 	if strings.EqualFold(raw, "null") {
-		return normalizeEntityFieldValue(field, nil)
+		return normalizeEntityFieldValue(schema, field, nil)
 	}
 	if unquoted, ok := unquoteEntityFilterValue(raw); ok {
-		return normalizeEntityFieldValue(field, unquoted)
+		return normalizeEntityFieldValue(schema, field, unquoted)
 	}
-	switch normalizeEntityFieldType(field.Type) {
+	switch strings.ToLower(field.Type) {
 	case "boolean":
 		switch strings.ToLower(raw) {
 		case "true":
@@ -189,16 +141,14 @@ func parseEntityFilterValue(field runtimecontracts.EntitySchemaField, raw string
 	case "integer":
 		var v int64
 		if _, err := fmt.Sscanf(raw, "%d", &v); err == nil {
-			return v, nil
+			return normalizeEntityFieldValue(schema, field, v)
 		}
 	default:
-		if strings.HasPrefix(normalizeEntityFieldType(field.Type), "numeric(") {
-			if f, ok := runtimesharedjson.AsFloat64(parseLooseNumeric(raw)); ok {
-				return normalizeEntityFieldValue(field, f)
-			}
+		if f := parseLooseNumeric(raw); f != raw {
+			return normalizeEntityFieldValue(schema, field, f)
 		}
 	}
-	return normalizeEntityFieldValue(field, raw)
+	return normalizeEntityFieldValue(schema, field, raw)
 }
 
 func unquoteEntityFilterValue(raw string) (string, bool) {
@@ -214,7 +164,7 @@ func unquoteEntityFilterValue(raw string) (string, bool) {
 func parseLooseNumeric(raw string) any {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil
+		return raw
 	}
 	var floatValue float64
 	if _, err := fmt.Sscanf(raw, "%f", &floatValue); err == nil {
@@ -223,50 +173,22 @@ func parseLooseNumeric(raw string) any {
 	return raw
 }
 
-func metricExpression(metric string, field runtimecontracts.EntitySchemaField) (string, error) {
+func metricExpression(metric string, field entityruntime.Field) (string, error) {
 	metric = strings.ToLower(strings.TrimSpace(metric))
 	switch metric {
 	case "count":
 		return "COUNT(*)", nil
 	case "sum", "avg":
-		fieldType := normalizeEntityFieldType(field.Type)
-		if fieldType != "integer" && !strings.HasPrefix(fieldType, "numeric(") {
+		fieldType := strings.ToLower(strings.TrimSpace(field.Type))
+		if fieldType != "integer" && !strings.HasPrefix(fieldType, "numeric") {
 			return "", fmt.Errorf("metric %s requires numeric field, got %s", metric, field.Type)
 		}
-		return strings.ToUpper(metric) + "(" + entityQuoteIdent(strings.TrimSpace(field.Name)) + ")", nil
+		return strings.ToUpper(metric) + "(" + entityFilterSQLPath(field.Path) + ")", nil
 	case "min", "max":
-		if normalizeEntityFieldType(field.Type) == "jsonb" {
-			return "", fmt.Errorf("metric %s does not support jsonb field %s", metric, strings.TrimSpace(field.Name))
-		}
-		return strings.ToUpper(metric) + "(" + entityQuoteIdent(strings.TrimSpace(field.Name)) + ")", nil
+		return strings.ToUpper(metric) + "(" + entityFilterSQLPath(field.Path) + ")", nil
 	default:
 		return "", fmt.Errorf("unsupported metric %q", metric)
 	}
-}
-
-func normalizeEntityFieldType(raw string) string {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	if raw == "" {
-		return ""
-	}
-	if strings.HasPrefix(raw, "numeric(") {
-		if end := strings.Index(raw, ")"); end >= 0 {
-			return strings.TrimSpace(raw[:end+1])
-		}
-		return raw
-	}
-	for _, base := range []string{"text", "string", "integer", "boolean", "jsonb", "timestamp", "uuid"} {
-		if raw == base {
-			return base
-		}
-		if strings.HasPrefix(raw, base+"(") {
-			return base
-		}
-		if strings.HasPrefix(raw, base+" ") && strings.HasPrefix(strings.TrimPrefix(raw, base), " (") {
-			return base
-		}
-	}
-	return raw
 }
 
 func defaultEntitySearchLimit(value int) int {
@@ -279,13 +201,38 @@ func defaultEntitySearchLimit(value int) int {
 	return value
 }
 
-func orderedEntityFieldNames(fields map[string]runtimecontracts.EntitySchemaField) []string {
+func orderedEntityFieldNames(fields map[string]entityruntime.Field) []string {
 	out := make([]string, 0, len(fields))
 	for name := range fields {
 		out = append(out, name)
 	}
 	sort.Strings(out)
 	return out
+}
+
+func entityFilterSQLPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return `COALESCE(fields, '{}'::jsonb)`
+	}
+	segments := strings.Split(path, ".")
+	if len(segments) == 1 {
+		return fmt.Sprintf("COALESCE(fields, '{}'::jsonb) -> %s", entitySQLLiteral(segments[0]))
+	}
+	sqlPath := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		sqlPath = append(sqlPath, entitySQLLiteral(segment))
+	}
+	return fmt.Sprintf("COALESCE(fields, '{}'::jsonb) #> ARRAY[%s]", strings.Join(sqlPath, ", "))
+}
+
+func entitySQLLiteral(value string) string {
+	value = strings.ReplaceAll(strings.TrimSpace(value), `'`, `''`)
+	return "'" + value + "'"
 }
 
 func entityQuoteIdent(v string) string {

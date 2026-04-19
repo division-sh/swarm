@@ -1,0 +1,5 @@
+core:
+  child_count: integer
+  depth: integer
+  flag_count: integer
+  name: text

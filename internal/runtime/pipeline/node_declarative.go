@@ -282,8 +282,8 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		return &HandlerOutcome{Handled: false}, nil
 	}
 	entityID := workflowEventEntityID(evt)
-	entityID, evt = ensureHandlerEntityID(e.coordinator.SemanticSource(), handler, entityID, evt)
 	flowID := workflowNodeFlowID(e.coordinator.SemanticSource(), e.nodeID)
+	entityID, evt = ensureHandlerEntityID(e.coordinator.SemanticSource(), flowID, handler, entityID, evt)
 	ctx = withPipelineFlowScope(ctx, flowID)
 	currentState := e.coordinator.currentWorkflowState(ctx, entityID)
 	exec := e.executor
@@ -337,7 +337,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	}, nil
 }
 
-func ensureHandlerEntityID(source semanticview.Source, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event) {
+func ensureHandlerEntityID(source semanticview.Source, flowID string, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event) {
 	if handler.CreateEntity {
 		return uuid.NewString(), evt
 	}
@@ -348,18 +348,18 @@ func ensureHandlerEntityID(source semanticview.Source, handler SystemNodeEventHa
 		}
 		return entityID, evt
 	}
-	if !handlerMaterializesEntity(source, handler) {
+	if !handlerMaterializesEntity(source, flowID, handler) {
 		return "", evt
 	}
 	entityID = uuid.NewString()
 	return entityID, evt.WithEntityID(entityID)
 }
 
-func handlerMaterializesEntity(source semanticview.Source, handler SystemNodeEventHandler) bool {
+func handlerMaterializesEntity(source semanticview.Source, flowID string, handler SystemNodeEventHandler) bool {
 	if handler.CreateEntity {
 		return true
 	}
-	allowedFields := workflowEntitySchemaFields(source)
+	allowedFields := workflowEntitySchemaFields(source, flowID)
 	if len(allowedFields) == 0 {
 		return false
 	}

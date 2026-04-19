@@ -334,19 +334,48 @@ func (b *WorkflowContractBundle) FlowInitialStage(flowID string) string {
 	if b == nil {
 		return ""
 	}
-	return strings.TrimSpace(b.Semantics.FlowInitial[strings.TrimSpace(flowID)])
+	flowID = strings.TrimSpace(flowID)
+	if initial := strings.TrimSpace(b.Semantics.FlowInitial[flowID]); initial != "" {
+		return initial
+	}
+	if flowID != "" && flowID == b.WorkflowName() {
+		return b.WorkflowInitialStage()
+	}
+	return ""
 }
 func (b *WorkflowContractBundle) FlowStates(flowID string) []string {
 	if b == nil {
 		return nil
 	}
-	return append([]string{}, b.Semantics.FlowStates[strings.TrimSpace(flowID)]...)
+	flowID = strings.TrimSpace(flowID)
+	if states := b.Semantics.FlowStates[flowID]; len(states) > 0 {
+		return append([]string{}, states...)
+	}
+	if flowID != "" && flowID == b.WorkflowName() {
+		out := make([]string, 0, len(b.Semantics.Stages))
+		for _, stage := range b.Semantics.Stages {
+			stageID := strings.TrimSpace(stage.ID)
+			if stageID == "" {
+				continue
+			}
+			out = append(out, stageID)
+		}
+		return out
+	}
+	return nil
 }
 func (b *WorkflowContractBundle) FlowTerminalStages(flowID string) []string {
 	if b == nil {
 		return nil
 	}
-	return append([]string{}, b.Semantics.FlowTerminal[strings.TrimSpace(flowID)]...)
+	flowID = strings.TrimSpace(flowID)
+	if terminal := b.Semantics.FlowTerminal[flowID]; len(terminal) > 0 {
+		return append([]string{}, terminal...)
+	}
+	if flowID != "" && flowID == b.WorkflowName() {
+		return append([]string{}, b.Semantics.TerminalStages...)
+	}
+	return nil
 }
 func (b *WorkflowContractBundle) FlowNamespace(flowID string) string {
 	if b == nil {

@@ -424,14 +424,17 @@ runtime_enforcement:
   create_entity:
     rule: |
       create_entity writes only fields declared in the inferred
-      flow-owned entity contract. Envelope field names are rejected as
-      caller input. Missing declared fields receive explicit `initial:`
-      or the type default.
+      flow-owned entity contract. The caller does not supply
+      `entity_id` or `entity_type`; the runtime mints identity and
+      infers the contract from flow context. Envelope field names are
+      rejected as caller input. Missing declared fields receive
+      explicit `initial:` or the type default.
   save_entity_field:
     rule: |
       save_entity_field targets only declared non-envelope fields on the
-      inferred entity contract. Immutable fields reject post-create
-      writes. Values must satisfy the declared type.
+      inferred entity contract. Wave 1 writes are top-level only;
+      dotted-path writes are rejected. Immutable fields reject
+      post-create writes. Values must satisfy the declared type.
   get_entity:
     rule: |
       get_entity returns the full entity object with every declared
@@ -440,8 +443,10 @@ runtime_enforcement:
   query_entities:
     rule: |
       query_entities validates filter paths against the inferred entity
-      contract. Paths must resolve to scalar or enum leaves. Composite
-      whole-value comparison is not part of Wave 1.
+      contract. Filter paths, metric selectors, and grouped/projected
+      entity selectors must resolve either to an envelope field or to a
+      declared scalar or enum leaf. Composite whole-value comparison is
+      not part of Wave 1.
   error_shape:
     invalid_field: cause=invalid_tool_input with nearest declared matches
     immutable_write: cause=invalid_tool_input for post-create immutable writes
@@ -2223,10 +2228,11 @@ tool_model:
           fields: object — authored field values for the new entity. Keys must be declared on the inferred entity contract.
         output:
           entity_id: string — the created entity's ID
+          subject_id: string — the subject linked to the new entity; defaults to entity_id when not supplied
           current_state: string — the entity's initial state from the owning flow state machine
           created_at: string — ISO 8601
-        validation: The caller does not supply entity_type or envelope fields. Missing declared fields materialize from explicit
-          initial values or type defaults.
+        validation: The caller does not supply entity_id, entity_type, or envelope fields. Missing declared fields materialize
+          from explicit initial values or type defaults.
       get_entity:
         description: Read an entity by ID. Returns the full entity state from entity_state table.
         input:
@@ -2252,14 +2258,14 @@ tool_model:
         input:
           flow_instance: string — required existing addressing surface for the owning flow instance
           entity_id: string — required
-          field: string — required, field name to write. Must exist on the inferred entity contract and must not be an envelope field.
+          field: string — required top-level field name. Must exist on the inferred entity contract and must not be an envelope field.
           value: any — required, the value to write
         output:
           entity_id: string
           field: string
           revision: integer — new revision after write
-        validation: The field name must exist on the inferred entity contract. Undeclared fields, envelope fields, and
-          post-create writes to immutable fields are rejected.
+        validation: The field name must exist on the inferred entity contract. Undeclared fields, dotted-path writes, envelope
+          fields, and post-create writes to immutable fields are rejected.
       search_entities:
         description: Query entities by state, field values, or metadata. Returns matching entities from entity_state.
         input:
@@ -2276,22 +2282,24 @@ tool_model:
         input:
           flow_instance: string — optional, filter by flow instance when the caller needs a narrower execution scope
           filter: string — optional, CEL expression evaluated against entity fields
-          group_by: string — optional, field to group results by
-          select: array — optional, field names to include in results
+          group_by: string — optional, envelope field or declared scalar/enum leaf to group results by
+          select: array — optional, envelope fields or declared scalar/enum leaves to include in results
           limit: integer — optional, default 100
         output:
           results: array — matching entities or grouped aggregations
+        validation: Filter expressions, group_by, and select selectors must resolve to envelope fields or declared scalar/enum leaves.
       query_metrics:
         description: Read aggregated metrics across entities. Counts, sums, averages.
         input:
           flow_instance: string — optional
           metric: string — required, one of count, sum, avg, min, max
-          field: string — required for sum/avg/min/max, the JSONB field to aggregate
-          group_by: string — optional, field to group by
+          field: string — required for sum/avg/min/max, envelope field or declared scalar/enum leaf to aggregate
+          group_by: string — optional, envelope field or declared scalar/enum leaf to group by
           filter: string — optional, CEL expression
         output:
           value: number — the aggregated result (for ungrouped queries)
           groups: array — for grouped queries, each entry has group_key and value
+        validation: metric field, group_by, and filter selectors must resolve to envelope fields or declared scalar/enum leaves.
   agent_tool_filtering:
     description: Agents only see tools listed in their tools contract field. The platform never injects the full tool
       catalog from any source into an agent session. This controls LLM context cost.

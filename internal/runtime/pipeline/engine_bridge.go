@@ -189,7 +189,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	ctx = runtimecorrelation.WithInboundEvent(ctx, triggerCtx.Event)
 	ctx = runtimecorrelation.WithHandlerID(ctx, strings.TrimSpace(nodeID)+":"+strings.TrimSpace(string(triggerCtx.Event.Type)))
 	if handler.CreateEntity {
-		ctx = withWorkflowCreateEntityInitialValues(ctx, workflowEntitySchemaInitialValues(source))
+		ctx = withWorkflowCreateEntityInitialValues(ctx, workflowEntitySchemaInitialValues(source, flowID))
 	}
 	deps := coordinatorEngineDependencies(pc)
 	if collectLocally {
@@ -225,7 +225,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	previewMetadata := previewMetadataAfterExecution(stateSnapshot, result.StateMutation)
 	initialValuesMaterialized := map[string]any(nil)
 	if handler.CreateEntity {
-		initialValuesMaterialized = workflowEntitySchemaInitialValues(source)
+		initialValuesMaterialized = workflowEntitySchemaInitialValues(source, flowID)
 	}
 	if !preview {
 		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result))
@@ -295,7 +295,10 @@ func resolveHandlerEntityIDForFlow(
 		}
 		return entityID, evt
 	}
-	entityID, evt = ensureHandlerEntityID(source, handler, entityID, evt)
+	entityID, evt = ensureHandlerEntityID(source, flowID, handler, entityID, evt)
+	if state != nil && handlerMaterializesEntity(source, flowID, handler) {
+		state.Metadata = workflowMaterializeEntityMetadata(source, flowID, state.Metadata)
+	}
 	if strings.TrimSpace(flowID) == "" && state != nil {
 		subjectID := strings.TrimSpace(workflowStateIdentity(source, "", *state).SubjectID)
 		if subjectID != "" && subjectID != entityID {
@@ -310,7 +313,7 @@ func resolveHandlerEntityIDForFlow(
 }
 
 func workflowCreateEntityMetadata(source semanticview.Source, flowID string, instance FlowInstanceIdentity) map[string]any {
-	metadata := workflowEntitySchemaInitialValues(source)
+	metadata := workflowEntitySchemaInitialValues(source, flowID)
 	if metadata == nil {
 		metadata = map[string]any{}
 	}

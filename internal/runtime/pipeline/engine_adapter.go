@@ -15,6 +15,7 @@ import (
 	"swarm/internal/runtime/core/paths"
 	runtimeregistry "swarm/internal/runtime/core/registry"
 	runtimeengine "swarm/internal/runtime/engine"
+	"swarm/internal/runtime/entityruntime"
 	runtimeeventpayload "swarm/internal/runtime/eventpayload"
 	runtimeeventschema "swarm/internal/runtime/eventschema"
 	"swarm/internal/runtime/semanticview"
@@ -124,7 +125,8 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
 	state := r.coordinator.currentWorkflowState(ctx, entityID.String())
-	carrier, err := runtimeengine.StateCarrierFromPersisted(state.Metadata, nil)
+	flowID := strings.TrimSpace(pipelineFlowScope(ctx))
+	carrier, err := runtimeengine.StateCarrierFromPersisted(workflowMaterializeEntityMetadata(r.coordinator.SemanticSource(), flowID, state.Metadata), nil)
 	if err != nil {
 		return runtimeengine.StateSnapshot{}, false, err
 	}
@@ -141,7 +143,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 		if ok {
 			out.WorkflowName = strings.TrimSpace(instance.WorkflowName)
 			out.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
-			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+			carrier, err := runtimeengine.StateCarrierFromPersisted(workflowMaterializeEntityMetadata(r.coordinator.SemanticSource(), strings.TrimSpace(instance.WorkflowName), instance.Metadata), instance.StateBuckets)
 			if err != nil {
 				return runtimeengine.StateSnapshot{}, false, err
 			}
@@ -184,7 +186,7 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		if err := r.ensureFlowOwnsEntity(ctx, entityID.String()); err != nil {
 			return err
 		}
-		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource())
+		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
 		if err := r.coordinator.workflowStore.Mutate(ctx, entityID.String(), func(instance *WorkflowInstance) {
 			applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
 		}); err != nil {
@@ -331,35 +333,139 @@ func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext,
 	if err != nil {
 		return 0, err
 	}
-	return queryEntityStateCount(e.coordinator.db, parsed)
+	flowID := strings.TrimSpace(asString(ctx.Entity["workflow_name"]))
+	contract, ok := entityruntime.ResolveForFlow(e.coordinator.SemanticSource(), flowID)
+	if !ok {
+		return 0, fmt.Errorf("flow-owned entity contract is not available for workflow %s", flowID)
+	}
+	if strings.TrimSpace(parsed.Field) != "current_state" {
+		if _, err := entityruntime.ResolveLeafField(contract, parsed.Field); err != nil {
+			return 0, err
+		}
+	}
+	return queryEntityStateCount(e.coordinator.db, e.coordinator.SemanticSource(), contract, parsed)
 }
 
-func queryEntityStateCount(db *sql.DB, predicate workflowEntityQueryPredicate) (int, error) {
+func queryEntityStateCount(db *sql.DB, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
 	if db == nil {
 		return 0, nil
 	}
-	var (
-		query string
-		args  []any
-	)
-	op, err := sqlComparisonOperator(predicate.Op)
+	flowRoot := runtimeflowidentity.ScopeKey(source, contract.FlowID)
+	where := ""
+	var args []any
+	if flowRoot != "" {
+		args = []any{flowRoot, flowRoot + "/%"}
+		where = " WHERE (flow_instance = $1 OR flow_instance LIKE $2)"
+	}
+	rows, err := db.QueryContext(context.Background(), `
+		SELECT COALESCE(fields, '{}'::jsonb), current_state
+		FROM entity_state`+where, args...)
 	if err != nil {
 		return 0, err
 	}
-	value := fmt.Sprintf("%v", predicate.Value)
-	switch strings.TrimSpace(predicate.Field) {
-	case "current_state", "name", "slug", "entity_type":
-		query = fmt.Sprintf(`SELECT COUNT(*) FROM entity_state WHERE %s %s $1`, predicate.Field, op)
-		args = []any{value}
-	default:
-		query = fmt.Sprintf(`SELECT COUNT(*) FROM entity_state WHERE fields ->> $1 %s $2`, op)
-		args = []any{strings.TrimSpace(predicate.Field), value}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var fieldsRaw []byte
+		var currentState string
+		if err := rows.Scan(&fieldsRaw, &currentState); err != nil {
+			return 0, err
+		}
+		fields := map[string]any{}
+		if len(fieldsRaw) > 0 {
+			if err := json.Unmarshal(fieldsRaw, &fields); err != nil {
+				return 0, err
+			}
+		}
+		materialized, err := entityruntime.Materialize(contract, fields)
+		if err != nil {
+			return 0, err
+		}
+		if workflowQueryPredicateMatches(map[string]any{
+			"fields":         materialized,
+			"current_state":  strings.TrimSpace(currentState),
+			"entity_type":    contract.EntityType,
+			"flow_instance":  flowRoot,
+			"workflow_name":  contract.FlowID,
+			"workflow_state": strings.TrimSpace(currentState),
+		}, predicate) {
+			count++
+		}
 	}
-	var count int
-	if err := db.QueryRow(query, args...).Scan(&count); err != nil {
+	if err := rows.Err(); err != nil {
 		return 0, err
 	}
 	return count, nil
+}
+
+func workflowQueryPredicateMatches(row map[string]any, predicate workflowEntityQueryPredicate) bool {
+	left := workflowQuerySelectorValue(row, predicate.Field)
+	switch predicate.Op {
+	case "==":
+		return workflowJSONValuesEqual(left, predicate.Value)
+	case "!=":
+		return !workflowJSONValuesEqual(left, predicate.Value)
+	}
+	leftNum, leftNumOK := workflowNumericEntityValue(left)
+	rightNum, rightNumOK := workflowNumericEntityValue(predicate.Value)
+	if leftNumOK && rightNumOK {
+		switch predicate.Op {
+		case ">=":
+			return leftNum >= rightNum
+		case "<=":
+			return leftNum <= rightNum
+		case ">":
+			return leftNum > rightNum
+		case "<":
+			return leftNum < rightNum
+		}
+	}
+	leftText := fmt.Sprintf("%v", left)
+	rightText := fmt.Sprintf("%v", predicate.Value)
+	switch predicate.Op {
+	case ">=":
+		return leftText >= rightText
+	case "<=":
+		return leftText <= rightText
+	case ">":
+		return leftText > rightText
+	case "<":
+		return leftText < rightText
+	default:
+		return false
+	}
+}
+
+func workflowNumericEntityValue(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case float32:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	default:
+		return 0, false
+	}
+}
+
+func workflowQuerySelectorValue(row map[string]any, field string) any {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return nil
+	}
+	if value, ok := row[field]; ok {
+		return value
+	}
+	fields, _ := row["fields"].(map[string]any)
+	if value, ok := workflowMetadataValue(fields, field); ok {
+		return value
+	}
+	return nil
 }
 
 func sqlComparisonOperator(op string) (string, error) {

@@ -9,28 +9,25 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
+	"swarm/internal/runtime/entityruntime"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/semanticview"
 )
 
-func (e *Executor) execSearchEntities(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
-	db, schema, payload, err := e.entityToolDependencies(input)
+func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	db, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
 	}
-	filterSQL := make([]string, 0, 4)
-	args := make([]any, 0, 4)
+	schema, err := entityToolSchemaForActor(source, actor.ID)
+	if err != nil {
+		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.schema", false, err, "resolve entity contract")
+	}
+	filterSQL, args := entityStateBaseQuery(source, actor, payload, true)
 	currentStateFilter := strings.TrimSpace(asString(payload["current_state"]))
-	if subjectID := strings.TrimSpace(asString(payload["subject_id"])); subjectID != "" {
-		args = append(args, subjectID)
-		filterSQL = append(filterSQL, fmt.Sprintf("subject_id = $%d::uuid", len(args)))
-	}
-	if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
-		args = append(args, flowInstance)
-		filterSQL = append(filterSQL, fmt.Sprintf("flow_instance = $%d", len(args)))
-	}
-	if entityType := strings.TrimSpace(asString(payload["entity_type"])); entityType != "" {
-		args = append(args, entityType)
-		filterSQL = append(filterSQL, fmt.Sprintf("entity_type = $%d", len(args)))
+	if currentStateFilter != "" {
+		args = append(args, currentStateFilter)
+		filterSQL = append(filterSQL, fmt.Sprintf("current_state = $%d", len(args)))
 	}
 	if rawFilter, ok := payload["filter"]; ok && rawFilter != nil {
 		filterObject := map[string]any{}
@@ -39,25 +36,21 @@ func (e *Executor) execSearchEntities(ctx context.Context, _ models.AgentConfig,
 		} else if err := decodeToolInput(rawFilter, &filterObject); err != nil {
 			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.filter", false, err, "decode filter")
 		}
-		normalizedFilter := map[string]any{}
 		for _, fieldName := range orderedEntityFieldNamesFromInput(mapKeys(filterObject)) {
 			field, err := schema.field(fieldName)
 			if err != nil {
 				return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.filter", false, err, "validate filter field")
 			}
-			value, err := normalizeEntityFieldValue(field, filterObject[fieldName])
+			value, err := normalizeEntityFieldValue(schema, field, filterObject[fieldName])
 			if err != nil {
 				return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.filter", false, err, "validate filter field %s", fieldName)
 			}
-			normalizedFilter[fieldName] = value
-		}
-		if len(normalizedFilter) > 0 {
-			filterJSON, err := json.Marshal(normalizedFilter)
+			filterJSON, err := json.Marshal(value)
 			if err != nil {
-				return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.filter", false, err, "marshal filter")
+				return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.filter", false, err, "marshal filter field %s", fieldName)
 			}
 			args = append(args, string(filterJSON))
-			filterSQL = append(filterSQL, fmt.Sprintf("COALESCE(fields, '{}'::jsonb) @> $%d::jsonb", len(args)))
+			filterSQL = append(filterSQL, fmt.Sprintf("%s = $%d::jsonb", entityFilterSQLPath(field.Path), len(args)))
 		}
 	}
 	whereClause := joinEntityStateWhere(filterSQL)
@@ -70,15 +63,9 @@ func (e *Executor) execSearchEntities(ctx context.Context, _ models.AgentConfig,
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.query", true, err, "search entity_state")
 	}
-	if currentStateFilter != "" {
-		filtered := make([]map[string]any, 0, len(rows))
-		for _, row := range rows {
-			if currentStateFilter != "" && strings.TrimSpace(asString(row["current_state"])) != currentStateFilter {
-				continue
-			}
-			filtered = append(filtered, row)
-		}
-		rows = filtered
+	rows, err = materializeEntityStateRows(source, rows)
+	if err != nil {
+		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.materialize", false, err, "materialize query results")
 	}
 	total := len(rows)
 	if offset >= len(rows) {
@@ -96,15 +83,24 @@ func (e *Executor) execSearchEntities(ctx context.Context, _ models.AgentConfig,
 	}, nil
 }
 
-func (e *Executor) execQueryEntities(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
-	db, schema, payload, err := e.entityToolDependencies(input)
+func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	db, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
 	}
-	whereClause, args := entityStateBaseQuery(payload, false)
+	schema, err := entityToolSchemaForActor(source, actor.ID)
+	if err != nil {
+		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.schema", false, err, "resolve entity contract")
+	}
+	filterSQL, args := entityStateBaseQuery(source, actor, payload, true)
+	whereClause := joinEntityStateWhere(filterSQL)
 	rows, err := queryEntityStateRows(ctx, db, whereClause+" ORDER BY created_at DESC", args...)
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_entities.query", true, err, "query entity_state")
+	}
+	rows, err = materializeEntityStateRows(source, rows)
+	if err != nil {
+		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_entities.materialize", false, err, "materialize query results")
 	}
 	filtered, err := filterEntityStateRowsCEL(strings.TrimSpace(asString(payload["filter"])), rows, schema)
 	if err != nil {
@@ -130,10 +126,14 @@ func (e *Executor) execQueryEntities(ctx context.Context, _ models.AgentConfig, 
 	return map[string]any{"results": projected}, nil
 }
 
-func (e *Executor) execQueryMetrics(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
-	db, schema, payload, err := e.entityToolDependencies(input)
+func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	db, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
+	}
+	schema, err := entityToolSchemaForActor(source, actor.ID)
+	if err != nil {
+		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.schema", false, err, "resolve entity contract")
 	}
 	metric := strings.ToLower(strings.TrimSpace(asString(payload["metric"])))
 	if metric == "" {
@@ -154,10 +154,15 @@ func (e *Executor) execQueryMetrics(ctx context.Context, _ models.AgentConfig, i
 			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.group_by", false, err, "validate group_by")
 		}
 	}
-	whereClause, args := entityStateBaseQuery(payload, true)
+	filterSQL, args := entityStateBaseQuery(source, actor, payload, true)
+	whereClause := joinEntityStateWhere(filterSQL)
 	rows, err := queryEntityStateRows(ctx, db, whereClause+" ORDER BY created_at DESC", args...)
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_metrics.query", true, err, "query entity_state metrics")
+	}
+	rows, err = materializeEntityStateRows(source, rows)
+	if err != nil {
+		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_metrics.materialize", false, err, "materialize query results")
 	}
 	filtered, err := filterEntityStateRowsCEL(strings.TrimSpace(asString(payload["filter"])), rows, schema)
 	if err != nil {
@@ -177,16 +182,17 @@ func (e *Executor) execQueryMetrics(ctx context.Context, _ models.AgentConfig, i
 	return map[string]any{"groups": groups}, nil
 }
 
-func entityStateBaseQuery(payload map[string]any, includeFlowInstance bool) (string, []any) {
-	clauses := make([]string, 0, 2)
-	args := make([]any, 0, 2)
+func entityStateBaseQuery(source semanticview.Source, actor models.AgentConfig, payload map[string]any, includeFlowInstance bool) ([]string, []any) {
+	clauses := make([]string, 0, 4)
+	args := make([]any, 0, 4)
 	if subjectID := strings.TrimSpace(asString(payload["subject_id"])); subjectID != "" {
 		args = append(args, subjectID)
 		clauses = append(clauses, fmt.Sprintf("subject_id = $%d::uuid", len(args)))
 	}
-	if entityType := strings.TrimSpace(asString(payload["entity_type"])); entityType != "" {
-		args = append(args, entityType)
-		clauses = append(clauses, fmt.Sprintf("entity_type = $%d", len(args)))
+	flowRoot := actorFlowOwnershipRoot(source, actor.ID)
+	if flowRoot != "" {
+		args = append(args, flowRoot, flowRoot+"/%")
+		clauses = append(clauses, fmt.Sprintf("(flow_instance = $%d OR flow_instance LIKE $%d)", len(args)-1, len(args)))
 	}
 	if includeFlowInstance {
 		if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
@@ -194,7 +200,7 @@ func entityStateBaseQuery(payload map[string]any, includeFlowInstance bool) (str
 			clauses = append(clauses, fmt.Sprintf("flow_instance = $%d", len(args)))
 		}
 	}
-	return joinEntityStateWhere(clauses), args
+	return clauses, args
 }
 
 func joinEntityStateWhere(clauses []string) string {
@@ -209,7 +215,7 @@ func filterEntityStateRowsCEL(expression string, rows []map[string]any, schema e
 	if expression == "" {
 		return rows, nil
 	}
-	env, err := newEntityFilterEnv(rows, schema)
+	env, err := newEntityFilterEnv(schema)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +229,7 @@ func filterEntityStateRowsCEL(expression string, rows []map[string]any, schema e
 	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		val, _, err := program.Eval(entityCELActivation(row))
+		val, _, err := program.Eval(entityCELActivation(row, schema))
 		if err != nil {
 			return nil, err
 		}
@@ -238,19 +244,14 @@ func filterEntityStateRowsCEL(expression string, rows []map[string]any, schema e
 	return out, nil
 }
 
-func newEntityFilterEnv(rows []map[string]any, schema entityToolSchema) (*cel.Env, error) {
+func newEntityFilterEnv(schema entityToolSchema) (*cel.Env, error) {
 	decls := []cel.EnvOption{cel.Variable("entity", cel.DynType)}
 	keys := map[string]struct{}{}
 	for key := range entityStateTopLevelFields {
 		keys[key] = struct{}{}
 	}
-	for key := range schema.Fields {
+	for _, key := range entityruntime.FieldNames(schema.Contract) {
 		keys[key] = struct{}{}
-	}
-	for _, row := range rows {
-		for key := range entityRowFieldMap(row) {
-			keys[key] = struct{}{}
-		}
 	}
 	names := make([]string, 0, len(keys))
 	for key := range keys {
@@ -263,15 +264,15 @@ func newEntityFilterEnv(rows []map[string]any, schema entityToolSchema) (*cel.En
 	return cel.NewEnv(decls...)
 }
 
-func entityCELActivation(row map[string]any) map[string]any {
+func entityCELActivation(row map[string]any, schema entityToolSchema) map[string]any {
 	activation := map[string]any{
 		"entity": row,
 	}
 	for key, value := range row {
 		activation[key] = value
 	}
-	for key, value := range entityRowFieldMap(row) {
-		if _, exists := activation[key]; !exists {
+	for _, key := range entityruntime.FieldNames(schema.Contract) {
+		if value, ok := entityRowFieldMap(row)[key]; ok {
 			activation[key] = value
 		}
 	}
@@ -451,7 +452,10 @@ func resolveEntitySelectorValue(row map[string]any, field string) any {
 	if value, ok := row[field]; ok {
 		return value
 	}
-	return entityRowFieldMap(row)[field]
+	if value, ok := entityruntime.PathValue(entityRowFieldMap(row), field); ok {
+		return value
+	}
+	return nil
 }
 
 func entityRowFieldMap(row map[string]any) map[string]any {
