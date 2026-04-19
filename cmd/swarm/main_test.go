@@ -918,6 +918,80 @@ func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
 	}
 }
 
+func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: verify-lint-evidence
+version: "1.0.0"
+platform: ">=1.6.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-lint-evidence`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+case:
+  untouched:
+    type: integer
+    _unused_reason: verify command lint evidence proof field
+  priority:
+    type: integer
+    _unused_reason: child read-pin coverage proof field
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events: [task.assigned]
+    reads: [priority]
+  outputs:
+    events: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+task.assigned:
+  _source: external (verify lint evidence test)
+  entity_id: string
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+reader:
+  id: reader
+  execution_type: system_node
+  subscribes_to: [task.assigned]
+  event_handlers:
+    task.assigned:
+      create_entity: true
+      guard:
+        check: "entity.priority >= 0"
+      advances_to: done
+`)
+
+	var buf bytes.Buffer
+	code := runVerifyCommand(context.Background(), repoRoot(), []string{
+		"-contracts", root,
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "lint_evidence: entity_reader_coverage [root] flow root entity_type case declares field untouched with no detected internal reader coverage") {
+		t.Fatalf("verify output missing lint evidence:\n%s", out)
+	}
+	if !strings.Contains(out, "verify ok: contracts=") {
+		t.Fatalf("verify output missing success marker:\n%s", out)
+	}
+}
+
 func testWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	bundle.Platform.Platform.Name = "swarm"
