@@ -323,6 +323,100 @@ func TestEntityTools_SaveEntityFieldRejectsNestedWritePath(t *testing.T) {
 	}
 }
 
+func TestEntityTools_SaveEntityFieldRejectsImmutableFieldUpdateAfterCreate(t *testing.T) {
+	actor := models.AgentConfig{
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
+	}
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", `
+accounts:
+  code:
+    type: text
+    immutable: true
+  status: text
+`)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "review/inst-1",
+		"fields": map[string]any{
+			"code":   "acct-001",
+			"status": "open",
+		},
+	})
+
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "code",
+		"value":     "acct-002",
+	}); err == nil || !strings.Contains(err.Error(), "immutable field code cannot be changed after create") {
+		t.Fatalf("save_entity_field immutable error = %v, want immutable rejection", err)
+	}
+
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "code",
+		"value":     "acct-001",
+	}); err != nil {
+		t.Fatalf("save_entity_field immutable idempotent write: %v", err)
+	}
+}
+
+func TestEntityTools_ReadsIgnoreLegacyUndeclaredStoredFields(t *testing.T) {
+	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "get_entity", "query_entities"},
+	})
+	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "review/inst-1",
+		"fields": map[string]any{
+			"status": "open",
+			"score":  10.0,
+		},
+	})
+	if _, err := db.Exec(`
+		UPDATE entity_state
+		SET fields = jsonb_set(COALESCE(fields, '{}'::jsonb), '{legacy_flag}', 'true'::jsonb, true)
+		WHERE entity_id = $1::uuid
+	`, entityID); err != nil {
+		t.Fatalf("inject legacy field: %v", err)
+	}
+
+	got, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+	if err != nil {
+		t.Fatalf("get_entity with legacy stored field: %v", err)
+	}
+	entity, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("expected entity map, got %#v", got)
+	}
+	fields, ok := entity["fields"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fields map, got %#v", entity["fields"])
+	}
+	if _, exists := fields["legacy_flag"]; exists {
+		t.Fatalf("legacy stored field leaked into materialized entity: %#v", fields)
+	}
+
+	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"filter": `status == "open"`,
+		"select": []string{"status"},
+		"limit":  10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities with legacy stored field: %v", err)
+	}
+	queryResult, ok := queryOut.(map[string]any)
+	if !ok {
+		t.Fatalf("expected query result map, got %#v", queryOut)
+	}
+	queryRows, ok := queryResult["results"].([]map[string]any)
+	if !ok || len(queryRows) != 1 {
+		t.Fatalf("unexpected query results: %#v", queryResult["results"])
+	}
+}
+
 func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarness(t)
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{

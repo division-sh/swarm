@@ -56,20 +56,18 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, "nested writes are not supported in Wave 1")
 	}
 	currentFields := entityRowFieldMap(row)
-	if field.FieldDecl.Immutable {
-		materializedDefaults, defaultErr := entityruntime.Materialize(schema.Contract, nil)
-		if defaultErr != nil {
-			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, defaultErr, "resolve immutable baseline")
-		}
-		if currentValue, ok := currentFields[fieldName]; ok {
-			if baseline, exists := materializedDefaults[fieldName]; exists && !valuesEqual(currentValue, baseline) {
-				return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, "immutable field %s cannot be changed after create", fieldName)
-			}
-		}
-	}
 	value, err := normalizeEntityFieldValue(schema, field, payload["value"])
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.value", false, err, "validate value")
+	}
+	if field.FieldDecl.Immutable {
+		materializedCurrent, currentErr := entityruntime.Materialize(schema.Contract, entityruntime.DeclaredValues(schema.Contract, currentFields))
+		if currentErr != nil {
+			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, currentErr, "resolve immutable current value")
+		}
+		if currentValue, exists := materializedCurrent[fieldName]; exists && !valuesEqual(currentValue, value) {
+			return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, "immutable field %s cannot be changed after create", fieldName)
+		}
 	}
 	valueJSON, err := json.Marshal(value)
 	if err != nil {
