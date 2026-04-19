@@ -7,4 +7,4 @@ entity_schema:
   core:
     expected_count: integer
     composite: numeric(5,2)
-    received_items: jsonb
+    received_items: [text]

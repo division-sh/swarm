@@ -6,4 +6,4 @@ flows: []
 entity_schema:
   core:
     expected_count: integer
-    received_items: jsonb
+    received_items: [text]

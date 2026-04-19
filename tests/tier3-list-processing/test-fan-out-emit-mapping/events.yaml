@@ -5,8 +5,8 @@ batch.submitted:
 routed.a:
   payload:
     entity_id: string
-    item: object
+    item: FanOutItem
 routed.b:
   payload:
     entity_id: string
-    item: object
+    item: FanOutItem

@@ -27,7 +27,12 @@ func LoadWorkflowContractBundleWithOverrides(repoRoot, workflowDirOverride, plat
 func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractBundle, error) {
 	bundle := &WorkflowContractBundle{
 		Paths:                 paths,
+		Compatibility:         nil,
 		projectContracts:      map[string]ProjectContractView{},
+		projectTypes:          map[string]TypeCatalogDocument{},
+		projectEntities:       map[string]EntityContractsDocument{},
+		flowTypes:             map[string]TypeCatalogDocument{},
+		flowEntities:          map[string]EntityContractsDocument{},
 		scopedNodes:           map[string]SystemNodeContract{},
 		scopedEvents:          map[string]EventCatalogEntry{},
 		scopedAgents:          map[string]AgentRegistryEntry{},
@@ -59,6 +64,12 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 			}
 			bundle.RootSchema = &rootSchema
 		}
+		if err := loadOptionalYAMLMap(paths.RootTypesFile, &bundle.RootTypes); err != nil {
+			return nil, err
+		}
+		if err := loadOptionalYAMLMap(paths.RootEntitiesFile, &bundle.RootEntities); err != nil {
+			return nil, err
+		}
 		for i, pkgPaths := range paths.ProjectPackages {
 			var manifest ProjectPackageDocument
 			if err := loadYAMLFile(pkgPaths.PackageFile, &manifest); err != nil {
@@ -67,6 +78,14 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 			if i == 0 {
 				bundle.Package = manifest
 			}
+			if manifest.UsesLegacyEntitySchema {
+				recordContractCompatibilityUsage(bundle, ContractCompatibilityUsage{
+					Kind:   "legacy_package_entity_schema",
+					File:   pkgPaths.PackageFile,
+					Scope:  pkgPaths.Key,
+					Detail: "package.yaml entity_schema loaded through Wave 1 migration compatibility",
+				})
+			}
 			bundle.PackageTree = append(bundle.PackageTree, LoadedProjectPackage{
 				Key:       pkgPaths.Key,
 				ParentKey: pkgPaths.ParentKey,
@@ -74,11 +93,28 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 				Paths:     pkgPaths,
 				Manifest:  manifest,
 			})
+			if pkgPaths.Key != "." {
+				var projectTypes TypeCatalogDocument
+				if err := loadOptionalYAMLMap(pkgPaths.ProjectTypesFile, &projectTypes); err != nil {
+					return nil, err
+				}
+				if len(projectTypes.Scalars) > 0 || len(projectTypes.Enums) > 0 || len(projectTypes.Types) > 0 {
+					bundle.projectTypes[pkgPaths.Key] = projectTypes
+				}
+				var projectEntities EntityContractsDocument
+				if err := loadOptionalYAMLMap(pkgPaths.ProjectEntitiesFile, &projectEntities); err != nil {
+					return nil, err
+				}
+				if len(projectEntities) > 0 {
+					bundle.projectEntities[pkgPaths.Key] = projectEntities
+				}
+			}
 			projectView, err := loadProjectContractView(pkgPaths, manifest)
 			if err != nil {
 				return nil, err
 			}
 			bundle.projectContracts[pkgPaths.Key] = projectView
+			recordEventCompatibilityUsages(bundle, projectView.Events, pkgPaths.ProjectEventsFile, pkgPaths.Key)
 		}
 		if err := validateDiscoveredPackageTree(bundle.PackageTree); err != nil {
 			return nil, err
@@ -98,11 +134,29 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 				schema.Mode = strings.TrimSpace(flow.Mode)
 			}
 			bundle.FlowSchemas[flow.ID] = schema
+			var flowTypes TypeCatalogDocument
+			if err := loadOptionalYAMLMap(flow.TypesFile, &flowTypes); err != nil {
+				return nil, err
+			}
+			if len(flowTypes.Scalars) > 0 || len(flowTypes.Enums) > 0 || len(flowTypes.Types) > 0 {
+				bundle.flowTypes[flow.ID] = flowTypes
+			}
+			var flowEntities EntityContractsDocument
+			if err := loadOptionalYAMLMap(flow.EntitiesFile, &flowEntities); err != nil {
+				return nil, err
+			}
+			if len(flowEntities) > 0 {
+				bundle.flowEntities[flow.ID] = flowEntities
+			}
 			flowView, err := loadFlowContractView(flow, schema)
 			if err != nil {
 				return nil, err
 			}
 			flowViewsByID[flow.ID] = flowView
+			recordEventCompatibilityUsages(bundle, flowView.Events, flow.EventsFile, flow.ID)
+		}
+		if err := validateWave1ContractsLoadBoundary(bundle); err != nil {
+			return nil, err
 		}
 		if err := buildFlowTree(bundle, flowViewsByID); err != nil {
 			return nil, err

@@ -126,21 +126,20 @@ func (s *EventFieldSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
 	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		*s = EventFieldSpec{Type: strings.TrimSpace(node.Value)}
-		return nil
-	case yaml.MappingNode:
-		type alias EventFieldSpec
-		var aux alias
-		if err := node.Decode(&aux); err != nil {
-			return err
-		}
-		*s = EventFieldSpec(aux)
-		return nil
-	default:
-		return fmt.Errorf("unsupported event field yaml node kind %d", node.Kind)
+	parsed, err := decodeWave1FieldNode(node, wave1FieldNodeOptions{
+		Context:           "event payload field",
+		AllowInitial:      false,
+		AllowImmutable:    false,
+		AllowUnusedReason: false,
+	})
+	if err != nil {
+		return err
 	}
+	*s = EventFieldSpec{
+		Type:        parsed.Type,
+		Description: parsed.Description,
+	}
+	return nil
 }
 
 func (p *EventPayloadSpec) UnmarshalYAML(node *yaml.Node) error {
@@ -348,6 +347,26 @@ func decodeEntitySchemaField(name string, node *yaml.Node) (EntitySchemaField, e
 		field.Primary = parsed.Primary
 		field.Indexed = parsed.Indexed
 		field.Nullable = parsed.Nullable
+		if err := validateWave1TypeRef(field.Type, fmt.Sprintf("entity schema field %s", field.Name)); err != nil {
+			return EntitySchemaField{}, err
+		}
+		return field, nil
+	case yaml.SequenceNode:
+		var items []string
+		if err := node.Decode(&items); err != nil {
+			return EntitySchemaField{}, err
+		}
+		if len(items) != 1 {
+			return EntitySchemaField{}, fmt.Errorf("entity schema field %s: list shorthand requires exactly one item type", field.Name)
+		}
+		itemType := strings.TrimSpace(items[0])
+		if itemType == "" {
+			return EntitySchemaField{}, fmt.Errorf("entity schema field %s: list shorthand requires a non-empty item type", field.Name)
+		}
+		if err := validateWave1TypeRef(itemType, fmt.Sprintf("entity schema field %s list item", field.Name)); err != nil {
+			return EntitySchemaField{}, err
+		}
+		field.Type = fmt.Sprintf("list<%s>", itemType)
 		return field, nil
 	case yaml.MappingNode:
 		type alias EntitySchemaField
@@ -363,6 +382,9 @@ func decodeEntitySchemaField(name string, node *yaml.Node) (EntitySchemaField, e
 		field.Description = aux.Description
 		if strings.TrimSpace(field.Type) == "" {
 			return EntitySchemaField{}, fmt.Errorf("entity schema field %s: type is required", field.Name)
+		}
+		if err := validateWave1TypeRef(field.Type, fmt.Sprintf("entity schema field %s", field.Name)); err != nil {
+			return EntitySchemaField{}, err
 		}
 		return field, nil
 	default:
