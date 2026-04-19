@@ -377,7 +377,7 @@ func queryEntityStateCount(db *sql.DB, source semanticview.Source, contract enti
 				return 0, err
 			}
 		}
-		materialized, err := entityruntime.Materialize(contract, fields)
+		materialized, err := entityruntime.Materialize(contract, entityruntime.DeclaredValues(contract, fields))
 		if err != nil {
 			return 0, err
 		}

@@ -178,6 +178,23 @@ func FieldNames(contract Contract) []string {
 	return names
 }
 
+func DeclaredValues(contract Contract, provided map[string]any) map[string]any {
+	if len(provided) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(contract.Entity.Fields))
+	for name := range contract.Entity.Fields {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if value, ok := provided[name]; ok {
+			out[name] = cloneValue(value)
+		}
+	}
+	return out
+}
+
 func FieldDecl(contract Contract, name string) (runtimecontracts.EntityFieldDecl, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

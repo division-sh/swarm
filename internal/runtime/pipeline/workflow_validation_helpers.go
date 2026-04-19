@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"swarm/internal/runtime/entityruntime"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/eventidentity"
+	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
 )
 

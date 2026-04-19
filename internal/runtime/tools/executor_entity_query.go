@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
-	"swarm/internal/runtime/entityruntime"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
 )
 
