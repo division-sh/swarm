@@ -216,13 +216,16 @@ func runVerifyCommand(ctx context.Context, repo string, args []string, out io.Wr
 		}
 		return 1
 	} else {
-		if err := verifyBundle(ctx, semanticview.Wrap(bundle)); err != nil {
+		result, err := verifyBundleResult(ctx, semanticview.Wrap(bundle))
+		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "verify failed: %v\n", err)
 			}
 			return 1
 		}
 		if out != nil {
+			writeVerifyFindings(out, "warning", result.BootReport.Warnings())
+			writeVerifyFindings(out, "lint_evidence", result.BootReport.LintEvidence())
 			fmt.Fprintf(out, "verify ok: contracts=%s\n", contractsRoot)
 		}
 	}
@@ -617,15 +620,28 @@ func runStatusReportFromStore(detail store.RunDebugReport) runStatusReport {
 }
 
 func verifyBundle(ctx context.Context, source semanticview.Source) error {
+	_, err := verifyBundleResult(ctx, source)
+	return err
+}
+
+func verifyBundleResult(ctx context.Context, source semanticview.Source) (runtime.WorkflowContractValidationResult, error) {
 	if source == nil {
-		return errors.New("semantic source is required")
+		return runtime.WorkflowContractValidationResult{}, errors.New("semantic source is required")
 	}
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
-		return fmt.Errorf("configure credentials: %w", err)
+		return runtime.WorkflowContractValidationResult{}, fmt.Errorf("configure credentials: %w", err)
 	}
-	_, err = runtime.ValidateWorkflowContractSurface(ctx, source, runtime.DefaultWorkflowContractValidationOptions(credentialStore))
-	return err
+	return runtime.ValidateWorkflowContractSurface(ctx, source, runtime.DefaultWorkflowContractValidationOptions(credentialStore))
+}
+
+func writeVerifyFindings(out io.Writer, label string, findings []runtimebootverify.Finding) {
+	if out == nil || len(findings) == 0 {
+		return
+	}
+	for _, finding := range findings {
+		fmt.Fprintf(out, "%s: %s [%s] %s\n", strings.TrimSpace(label), strings.TrimSpace(finding.CheckID), strings.TrimSpace(finding.Location), strings.TrimSpace(finding.Message))
+	}
 }
 
 func loadRuntimeConfig(path string) (*config.Config, error) {
