@@ -98,7 +98,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 	exec.authorizer = NewToolAuthorizer(bus, func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
 		return classifyToolAuthorization(actor, toolName, exec.authority, exec.emitRegistry)
 	})
-	exec.validator = NewToolInputValidator(exec.contractDefinitions)
+	exec.validator = NewToolInputValidator(exec.contractDefinitionsForActor)
 	exec.dispatcher = NewToolDispatcher(
 		func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
 			return exec.handleEmitTool(ctx, actor, name, input)
@@ -127,6 +127,21 @@ func (e *Executor) contractDefinitions() ([]llm.ToolDefinition, error) {
 		discovered = client.DiscoveredTools()
 	}
 	return toolDefinitionsForRuntime(source, discovered)
+}
+
+func (e *Executor) contractDefinitionsForActor(actor *models.AgentConfig) ([]llm.ToolDefinition, error) {
+	if actor == nil {
+		return e.contractDefinitions()
+	}
+	e.mu.RLock()
+	source := e.workflowSource
+	client := e.mcpClient
+	e.mu.RUnlock()
+	var discovered map[string]runtimemcp.DiscoveredTool
+	if client != nil {
+		discovered = client.DiscoveredTools()
+	}
+	return toolDefinitionsForActor(source, *actor, discovered)
 }
 
 func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool, error) {
@@ -206,7 +221,7 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "authorize")
 		return nil, err
 	}
-	if err := e.validateRuntimeToolInput(name, input); err != nil {
+	if err := e.validateRuntimeToolInput(actor, name, input); err != nil {
 		wrapped := WrapRuntimeError(
 			"invalid_tool_input",
 			"tool-executor",
@@ -228,11 +243,11 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 	return out, err
 }
 
-func (e *Executor) validateRuntimeToolInput(name string, input any) error {
+func (e *Executor) validateRuntimeToolInput(actor models.AgentConfig, name string, input any) error {
 	if e.validator == nil {
 		return nil
 	}
-	return e.validator.Validate(name, input)
+	return e.validator.Validate(&actor, name, input)
 }
 
 func runtimeToolSchemaForName(defs []llm.ToolDefinition, name string) (map[string]any, bool) {
@@ -539,7 +554,7 @@ func (e *Executor) sqlDBDependency() (*sql.DB, error) {
 }
 
 func (e *Executor) ValidateRuntimeToolInputForTest(name string, input any) error {
-	return e.validateRuntimeToolInput(name, input)
+	return e.validateRuntimeToolInput(models.AgentConfig{}, name, input)
 }
 
 func (e *Executor) ExecAgentMessageDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {

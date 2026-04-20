@@ -4,26 +4,27 @@ import (
 	"errors"
 	"strings"
 
+	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
 	llm "swarm/internal/runtime/llm"
 )
 
 type ToolInputValidator struct {
-	definitions func() ([]llm.ToolDefinition, error)
+	definitions func(actor *models.AgentConfig) ([]llm.ToolDefinition, error)
 }
 
 var errToolDefinitionsProviderRequired = errors.New("tool definitions provider is required")
 
-func NewToolInputValidator(definitions func() ([]llm.ToolDefinition, error)) *ToolInputValidator {
+func NewToolInputValidator(definitions func(actor *models.AgentConfig) ([]llm.ToolDefinition, error)) *ToolInputValidator {
 	if definitions == nil {
-		definitions = func() ([]llm.ToolDefinition, error) {
+		definitions = func(*models.AgentConfig) ([]llm.ToolDefinition, error) {
 			return nil, errToolDefinitionsProviderRequired
 		}
 	}
 	return &ToolInputValidator{definitions: definitions}
 }
 
-func (v *ToolInputValidator) Validate(name string, input any) error {
+func (v *ToolInputValidator) Validate(actor *models.AgentConfig, name string, input any) error {
 	name = normalizeNativeToolName(name)
 	if name == "" || toolKindPolicy(name) == toolcapabilities.KindEmit {
 		return nil
@@ -40,7 +41,7 @@ func (v *ToolInputValidator) Validate(name string, input any) error {
 		payload = map[string]any{}
 	}
 
-	defs, defsErr := v.definitions()
+	defs, defsErr := v.definitions(actor)
 	if defsErr != nil {
 		return defsErr
 	}

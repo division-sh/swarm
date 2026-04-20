@@ -59,6 +59,31 @@ func toolDefinitionsForRuntime(source semanticview.Source, discovered map[string
 	return defs, nil
 }
 
+func toolDefinitionsForActor(source semanticview.Source, actor models.AgentConfig, discovered map[string]runtimemcp.DiscoveredTool) ([]llm.ToolDefinition, error) {
+	entries, err := registeredToolsForActor(source, actor, discovered)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		if runtimeToolHiddenFromAgents(name) {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	defs := make([]llm.ToolDefinition, 0, len(names))
+	for _, name := range names {
+		entry := entries[name]
+		defs = append(defs, llm.ToolDefinition{
+			Name:        name,
+			Description: strings.TrimSpace(entry.Description),
+			Schema:      deepCloneJSONValue(entry.InputSchema),
+		})
+	}
+	return defs, nil
+}
+
 func runtimeToolHiddenFromAgents(name string) bool {
 	return false
 }
