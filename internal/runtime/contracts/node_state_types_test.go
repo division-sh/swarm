@@ -1,6 +1,11 @@
 package contracts
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
 
 func TestNormalizeNodeStateFieldType_AllowsCanonicalNodeStateTypes(t *testing.T) {
 	cases := map[string]string{
@@ -42,5 +47,19 @@ func TestNormalizeNodeStateFieldType_RejectsPseudoTypes(t *testing.T) {
 				t.Fatalf("expected pseudo-type rejection for %q", raw)
 			}
 		})
+	}
+}
+
+func TestDecodeNodeStateFields_RejectsPseudoTypesInSequenceForm(t *testing.T) {
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte(`
+- name: dimensions_received
+  type: dimension score receipts keyed by dimension name
+`), &node); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	_, err := decodeNodeStateFields(node.Content[0])
+	if err == nil || !strings.Contains(err.Error(), "not canonical") {
+		t.Fatalf("expected pseudo-type error, got %v", err)
 	}
 }

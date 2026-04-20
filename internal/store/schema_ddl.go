@@ -29,6 +29,12 @@ func SchemaFieldTypeToDDL(schemaType string) (string, error) {
 		return "", fmt.Errorf("schema type is required")
 	}
 	normalized := strings.ToLower(schemaType)
+	if matches := schemaDDLNumericPattern.FindStringSubmatch(normalized); len(matches) == 3 {
+		return fmt.Sprintf("NUMERIC(%s,%s)", matches[1], matches[2]), nil
+	}
+	if strings.HasPrefix(normalized, "numeric ") {
+		return "", fmt.Errorf("%w %q", ErrUnknownSchemaType, schemaType)
+	}
 	if idx := strings.IndexAny(normalized, " \t\r\n"); idx >= 0 {
 		normalized = strings.TrimSpace(normalized[:idx])
 	}
@@ -56,9 +62,6 @@ func SchemaFieldTypeToDDL(schemaType string) (string, error) {
 		return "TIMESTAMPTZ", nil
 	case "uuid":
 		return "UUID", nil
-	}
-	if matches := schemaDDLNumericPattern.FindStringSubmatch(normalized); len(matches) == 3 {
-		return fmt.Sprintf("NUMERIC(%s,%s)", matches[1], matches[2]), nil
 	}
 	return "", fmt.Errorf("%w %q", ErrUnknownSchemaType, schemaType)
 }
