@@ -2,8 +2,8 @@ package tools
 
 import (
 	"swarm/internal/events"
-	runtimeeventpayload "swarm/internal/runtime/eventpayload"
 	models "swarm/internal/runtime/core/actors"
+	runtimeeventpayload "swarm/internal/runtime/eventpayload"
 )
 
 func (e *Executor) enrichEmitPayloadContext(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
