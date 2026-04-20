@@ -201,9 +201,7 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 				Payload: runtimecontracts.EventPayloadSpec{
 					Type: "object",
 					Properties: map[string]runtimecontracts.EventFieldSpec{
-						"category":  {Type: "string"},
-						"entity_id": {Type: "string"},
-						"task_id":   {Type: "string"},
+						"category": {Type: "string"},
 					},
 				},
 				Required: []string{"category"},
@@ -251,14 +249,23 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 	if got := strings.TrimSpace(asString(pre["entity_id"])); got != "" {
 		t.Fatalf("pre_validation entity_id = %#v, want empty", pre["entity_id"])
 	}
-	if got := strings.TrimSpace(asString(post["entity_id"])); got != "entity-actor" {
-		t.Fatalf("post_enrichment entity_id = %#v, want entity-actor", post["entity_id"])
+	if _, ok := post["entity_id"]; ok {
+		t.Fatalf("post_enrichment payload must not carry envelope entity_id: %#v", post["entity_id"])
 	}
-	if got := strings.TrimSpace(asString(post["task_id"])); got != "task-inbound" {
-		t.Fatalf("post_enrichment task_id = %#v, want task-inbound", post["task_id"])
+	if _, ok := post["task_id"]; ok {
+		t.Fatalf("post_enrichment payload must not carry envelope task_id: %#v", post["task_id"])
 	}
 	if got := strings.TrimSpace(asString(detail["emitted_event_id"])); got == "" {
 		t.Fatal("expected emitted_event_id")
+	}
+	if len(bus.published) != 1 {
+		t.Fatalf("published event count = %d, want 1", len(bus.published))
+	}
+	if got := bus.published[0].EntityID(); got != "entity-actor" {
+		t.Fatalf("published event entity_id = %q, want entity-actor", got)
+	}
+	if got := bus.published[0].TaskID; got != "task-inbound" {
+		t.Fatalf("published event task_id = %q, want task-inbound", got)
 	}
 }
 
@@ -312,9 +319,7 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 				Payload: runtimecontracts.EventPayloadSpec{
 					Type: "object",
 					Properties: map[string]runtimecontracts.EventFieldSpec{
-						"category":  {Type: "string"},
-						"entity_id": {Type: "string"},
-						"task_id":   {Type: "string"},
+						"category": {Type: "string"},
 					},
 				},
 				Required: []string{"category"},
@@ -364,11 +369,11 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 	if got, ok := post["unexpected"].(bool); !ok || !got {
 		t.Fatalf("post_enrichment unexpected = %#v, want true", post["unexpected"])
 	}
-	if got := strings.TrimSpace(asString(post["entity_id"])); got != "entity-actor" {
-		t.Fatalf("post_enrichment entity_id = %#v, want entity-actor", post["entity_id"])
+	if _, ok := post["entity_id"]; ok {
+		t.Fatalf("post_enrichment payload must not carry envelope entity_id: %#v", post["entity_id"])
 	}
-	if got := strings.TrimSpace(asString(post["task_id"])); got != "task-inbound" {
-		t.Fatalf("post_enrichment task_id = %#v, want task-inbound", post["task_id"])
+	if _, ok := post["task_id"]; ok {
+		t.Fatalf("post_enrichment payload must not carry envelope task_id: %#v", post["task_id"])
 	}
 	if _, ok := detail["emitted_event_id"]; ok {
 		t.Fatalf("unexpected emitted_event_id on schema validation failure: %#v", detail["emitted_event_id"])

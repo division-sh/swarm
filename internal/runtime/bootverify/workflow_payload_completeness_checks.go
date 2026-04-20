@@ -20,8 +20,6 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 	}
 	c.payloadCompletenessLoaded = true
 
-	forced := payloadCompletenessForcedFields()
-
 	for nodeID := range c.source.NodeEntries() {
 		nodeID = strings.TrimSpace(nodeID)
 		nodeSource, _ := c.source.NodeContractSource(nodeID)
@@ -45,6 +43,19 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 					continue
 				}
 				emittedProof := semanticview.ResolveFlowEventProof(c.source, flowID, emitted)
+				emittedDisplayName := strings.TrimSpace(emittedProof.DisplayName())
+				if emittedDisplayName == "" {
+					emittedDisplayName = emitted
+				}
+
+				for _, authoredEnvelopeField := range payloadCompletenessEnvelopeFields(emitSite.Fields) {
+					c.payloadCompletenessFindings = append(c.payloadCompletenessFindings, Finding{
+						CheckID:  "semantic_drift_payload_completeness",
+						Severity: "error",
+						Message:  fmt.Sprintf("event %s emitted by node %s handler %s at %s authors envelope-owned field %s in emit.fields; envelope fields are platform-managed and must be accessed via event.*", emittedDisplayName, nodeID, triggerEventType, emitSite.Label, authoredEnvelopeField),
+						Location: nodeID,
+					})
+				}
 				if !emittedProof.HasSchema {
 					continue
 				}
@@ -54,9 +65,6 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 				}
 
 				for _, field := range required {
-					if _, ok := forced[field]; ok {
-						continue
-					}
 					if _, ok := emitSite.Fields[field]; ok {
 						continue
 					}
@@ -67,7 +75,7 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 						Message: payloadCompletenessMessage(
 							nodeID,
 							triggerEventType,
-							emittedProof.DisplayName(),
+							emittedDisplayName,
 							field,
 							emitSite.Label,
 							emitSite.Fields,
@@ -99,14 +107,6 @@ type payloadCompletenessEmitSite struct {
 
 func payloadCompletenessRequiredFields(entry runtimecontracts.EventCatalogEntry) []string {
 	return uniquePayloadCompletenessStrings(entry.Required...)
-}
-
-func payloadCompletenessForcedFields() map[string]struct{} {
-	return map[string]struct{}{
-		"entity_id":          {},
-		"trigger_event_type": {},
-		"current_state":      {},
-	}
 }
 
 func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandler) []payloadCompletenessEmitSite {
@@ -171,6 +171,31 @@ func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandle
 	return out
 }
 
+func payloadCompletenessEnvelopeFields(fields map[string]struct{}) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(fields))
+	for field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" || !isRuntimeOwnedCanonicalContextField(field) {
+			continue
+		}
+		out = append(out, field)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func isRuntimeOwnedCanonicalContextField(field string) bool {
+	switch strings.TrimSpace(field) {
+	case "entity_id", "flow_instance", "trigger_event_type", "current_state", "task_id", "timer_handle", "source_event_id", "emitted_at":
+		return true
+	default:
+		return false
+	}
+}
+
 func payloadCompletenessRuleLabel(scope string, index int, id, suffix string) string {
 	scope = strings.TrimSpace(scope)
 	id = strings.TrimSpace(id)
@@ -231,7 +256,7 @@ func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, fiel
 		}
 	}
 	return fmt.Sprintf(
-		"event %s emitted by node %s handler %s at %s: required field %s is not statically provable in the emitted payload. Payload construction: emit.fields: %s; emit.fields covers: %s; platform-forced: entity_id, trigger_event_type, current_state. Context (does not clear finding): trigger schema declares %s: %s; entity schema declares %s: %s.",
+		"event %s emitted by node %s handler %s at %s: required field %s is not statically provable in the emitted payload. Payload construction: emit.fields: %s; emit.fields covers: %s. Context (does not clear finding): trigger schema declares %s: %s; entity schema declares %s: %s.",
 		strings.TrimSpace(emittedEventType),
 		strings.TrimSpace(nodeID),
 		strings.TrimSpace(triggerEventType),

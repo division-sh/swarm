@@ -7,6 +7,7 @@ type PathRoot uint8
 const (
 	RootUnknown PathRoot = iota
 	RootPayload
+	RootEvent
 	RootEntity
 	RootPolicy
 	RootMetadata
@@ -20,6 +21,8 @@ func (r PathRoot) String() string {
 	switch r {
 	case RootPayload:
 		return "payload"
+	case RootEvent:
+		return "event"
 	case RootEntity:
 		return "entity"
 	case RootPolicy:
@@ -73,6 +76,8 @@ func parseRoot(text string) PathRoot {
 	switch strings.ToLower(strings.TrimSpace(text)) {
 	case "payload":
 		return RootPayload
+	case "event":
+		return RootEvent
 	case "entity":
 		return RootEntity
 	case "policy":

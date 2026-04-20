@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/values"
 	"swarm/internal/runtime/entityruntime"
@@ -19,6 +20,7 @@ type ContextBuilderInput struct {
 	Source  semanticview.Source
 	FlowID  string
 	State   StateSnapshot
+	Event   events.Event
 	Payload map[string]any
 }
 
@@ -30,6 +32,7 @@ func BuildBaseContext(input ContextBuilderInput) BaseContext {
 	base.Entity = values.Wrap(materializedState.EntityContext())
 	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.StateCarrier.Metadata))
 	base.Gates = values.Wrap(boolMapToAnyMap(input.State.StateCarrier.Gates))
+	base.Event = values.Wrap(input.Event.ContextMap(input.State.CurrentState))
 	base.Payload = values.Wrap(cloneStringAnyMap(input.Payload))
 	if input.Source != nil {
 		base.Policy = values.Wrap(policyDocumentToMap(input.Source.ResolvedPolicyForFlow(input.FlowID)))
@@ -39,6 +42,11 @@ func BuildBaseContext(input ContextBuilderInput) BaseContext {
 
 func WithPayload(base BaseContext, payload map[string]any) BaseContext {
 	base.Payload = values.Wrap(cloneStringAnyMap(payload))
+	return base
+}
+
+func WithEvent(base BaseContext, event map[string]any) BaseContext {
+	base.Event = values.Wrap(cloneStringAnyMap(event))
 	return base
 }
 

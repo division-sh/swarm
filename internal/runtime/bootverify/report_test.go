@@ -1671,7 +1671,7 @@ func TestRun_ErrorsWithoutEmitFieldsEvenWhenContextSuggestsPassthrough(t *testin
 	}
 }
 
-func TestRun_DoesNotWarnWhenEmitFieldsAndPlatformForcedFieldsCoverRequiredPayload(t *testing.T) {
+func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayload(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
@@ -1742,7 +1742,7 @@ func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayloadAcrossExpressionKinds(
 	}
 }
 
-func TestRun_DoesNotWarnWhenOnlyPlatformForcedFieldsAreRequired(t *testing.T) {
+func TestRun_ErrorsWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
 	entry.Required = []string{"entity_id", "current_state"}
@@ -1750,8 +1750,35 @@ func TestRun_DoesNotWarnWhenOnlyPlatformForcedFieldsAreRequired(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "not statically provable") {
-		t.Fatalf("unexpected payload completeness error for platform-forced-only schema, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "entity_id is not statically provable") {
+		t.Fatalf("expected payload completeness error for envelope-owned required field entity_id, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "current_state is not statically provable") {
+		t.Fatalf("expected payload completeness error for envelope-owned required field current_state, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ErrorsWhenEmitFieldsAuthorEnvelopeOwnedFieldWithoutRequiredPayload(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Required = nil
+	bundle.Events["market_research.scan_assigned"] = entry
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "market_research.scan_assigned",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"entity_id": runtimecontracts.RefExpression("payload.scan_id"),
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "authors envelope-owned field entity_id in emit.fields") {
+		t.Fatalf("expected authored envelope field error even without required payload fields, got %#v", report.Errors())
 	}
 }
 
@@ -1915,13 +1942,19 @@ func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
 	}
 }
 
-func TestRun_DoesNotErrorForGuardEscalateWhenOnlyPlatformForcedFieldsAreRequired(t *testing.T) {
+func TestRun_ErrorsForGuardEscalateWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
+	entry := bundle.Events["check.escalated"]
+	entry.Required = []string{"entity_id"}
+	bundle.Events["check.escalated"] = entry
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
-		t.Fatalf("unexpected payload completeness error for platform-forced-only guard escalation, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
+		t.Fatalf("expected payload completeness error for guard escalation event schema that still requires envelope-owned payload fields, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "entity_id is not statically provable") {
+		t.Fatalf("expected envelope-owned entity_id drift for guard escalation, got %#v", report.Errors())
 	}
 }
 
@@ -3994,14 +4027,11 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 				ConsumerType: []string{"dashboard"},
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{
-						"entity_id":          {Type: "string"},
-						"current_state":      {Type: "string"},
-						"trigger_event_type": {Type: "string"},
-						"scan_id":            {Type: "string"},
-						"geography":          {Type: "string"},
+						"scan_id":   {Type: "string"},
+						"geography": {Type: "string"},
 					},
 				},
-				Required: []string{"entity_id", "scan_id"},
+				Required: []string{"scan_id"},
 			},
 		},
 	}

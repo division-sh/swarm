@@ -944,18 +944,18 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 		},
 	}
 
-	internal, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.internal", map[string]any{"entity_id": "ent-child", "step": "done"})
+	internal, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.internal", map[string]any{"step": "done"})
 	if err != nil {
 		t.Fatalf("ShapeEmitPayload internal: %v", err)
 	}
-	if got := internal["entity_id"]; got != "ent-child" {
-		t.Fatalf("internal emit entity_id = %#v, want ent-child", got)
+	if _, ok := internal["entity_id"]; ok {
+		t.Fatalf("internal emit payload must not carry envelope entity_id: %#v", internal["entity_id"])
 	}
 	if got := internal["step"]; got != "done" {
 		t.Fatalf("internal emit step = %#v, want done", got)
 	}
 
-	if _, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.done", map[string]any{"entity_id": "ent-child", "step": "done"}); err == nil {
+	if _, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.done", map[string]any{"step": "done"}); err == nil {
 		t.Fatal("expected cross-flow undeclared field to fail closed")
 	} else if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
 		t.Fatalf("ShapeEmitPayload output error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
@@ -990,7 +990,6 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsAcrossCrossFlowOutpu
 	}
 
 	_, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.done", map[string]any{
-		"entity_id":   "ent-child",
 		"vertical_id": "ent-child",
 		"result":      "accepted",
 	})
@@ -1030,17 +1029,12 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnActionSurface(t *tes
 	}
 
 	actionCtx := runtimeengine.WithEmitSurface(context.Background(), runtimeengine.EmitSurfaceAction)
-	payload, err := shaper.ShapeEmitPayload(actionCtx, req, "child/child.done", map[string]any{
-		"entity_id": "ent-child",
-	})
+	payload, err := shaper.ShapeEmitPayload(actionCtx, req, "child/child.done", map[string]any{})
 	if err != nil {
 		t.Fatalf("ShapeEmitPayload action surface: %v", err)
 	}
-	if got := payload["entity_id"]; got != "ent-child" {
-		t.Fatalf("action payload entity_id = %#v, want ent-child", got)
-	}
-	if got := payload["trigger_event_type"]; got != "child/child.internal" {
-		t.Fatalf("action payload trigger_event_type = %#v, want child/child.internal", got)
+	if len(payload) != 0 {
+		t.Fatalf("action payload = %#v, want declared business payload only", payload)
 	}
 }
 
@@ -1146,11 +1140,11 @@ func TestPipelineEmitPayloadProperties_UsesCanonicalFlowEventProofForLocalAndCan
 	if !reflect.DeepEqual(canonical, local) {
 		t.Fatalf("local/canonical payload properties drifted: canonical=%#v local=%#v", canonical, local)
 	}
-	if _, ok := canonical["entity_id"]; !ok {
-		t.Fatalf("expected entity_id in canonical payload properties: %#v", canonical)
-	}
 	if _, ok := canonical["step"]; !ok {
 		t.Fatalf("expected step in canonical payload properties: %#v", canonical)
+	}
+	if _, ok := canonical["entity_id"]; ok {
+		t.Fatalf("payload properties must not expose envelope entity_id: %#v", canonical)
 	}
 }
 

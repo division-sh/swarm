@@ -58,6 +58,10 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 
 	inbound, _ := runtimebus.InboundEventFromContext(ctx)
 	payloadMap = e.enrichEmitPayloadContext(actor, inbound, schemaEventType, payloadMap)
+	if err := rejectEmitEnvelopeFields(payloadMap); err != nil {
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, diagnosticPayloadMap(payloadMap), events.Event{}, "payload_shape_failed", "payload_shape", "envelope_field", err)
+		return nil, err
+	}
 	postEnrichmentPayload := diagnosticPayloadMap(payloadMap)
 	if err := e.emitRegistry.ValidateEventPayloadAgainstSchema(schemaEventType, payloadMap); err != nil {
 		wrapped := WrapRuntimeError(
@@ -76,27 +80,26 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		ID:          uuid.NewString(),
 		Type:        events.EventType(eventType),
 		SourceAgent: actor.ID,
-		TaskID:      strings.TrimSpace(asString(payloadMap["task_id"])),
 		Payload:     mustJSON(payloadMap),
 		CreatedAt:   time.Now(),
-	}).WithEntityID(strings.TrimSpace(asString(payloadMap["entity_id"])))
-	if flowInstance := strings.Trim(strings.TrimSpace(asString(payloadMap["flow_instance"])), "/"); flowInstance != "" {
+	})
+	entityID := strings.TrimSpace(actor.EffectiveEntityID())
+	if entityID == "" {
+		entityID = strings.TrimSpace(inbound.EntityID())
+	}
+	if entityID != "" {
+		emitted = emitted.WithEntityID(entityID)
+	}
+	flowInstance := strings.Trim(strings.TrimSpace(actor.CanonicalFlowPath()), "/")
+	if flowInstance == "" {
+		flowInstance = strings.Trim(strings.TrimSpace(inbound.FlowInstance()), "/")
+	}
+	if flowInstance != "" {
 		emitted = emitted.WithFlowInstance(flowInstance)
 	}
-	if emitted.EntityID() == "" {
-		emitted = emitted.WithEntityID(strings.TrimSpace(actor.EffectiveEntityID()))
-	}
+	emitted.TaskID = strings.TrimSpace(inbound.TaskID)
 	if emitted.TaskID == "" {
-		emitted.TaskID = strings.TrimSpace(inbound.TaskID)
-	}
-	if emitted.EntityID() == "" {
-		emitted = emitted.WithEntityID(strings.TrimSpace(inbound.EntityID()))
-	}
-	if emitted.EntityID() != "" {
-		if strings.TrimSpace(asString(payloadMap["entity_id"])) == "" {
-			payloadMap["entity_id"] = emitted.EntityID()
-		}
-		emitted.Payload = mustJSON(payloadMap)
+		emitted.TaskID = strings.TrimSpace(asString(payloadMap["task_id"]))
 	}
 	if err := e.bus.Publish(ctx, emitted); err != nil {
 		wrapped := WrapRuntimeError(

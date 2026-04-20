@@ -23,6 +23,7 @@ var workflowExpressionQueryPredicatePattern = regexp.MustCompile(`^\s*([a-zA-Z_]
 
 type workflowExpressionContext struct {
 	Entity           map[string]any
+	Event            map[string]any
 	Payload          map[string]any
 	Policy           map[string]any
 	Accumulated      any
@@ -39,6 +40,7 @@ type workflowExpressionEvaluator struct {
 func newWorkflowExpressionEvaluator() *workflowExpressionEvaluator {
 	env, err := cel.NewEnv(
 		cel.Variable("entity", cel.DynType),
+		cel.Variable("event", cel.DynType),
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
 		cel.Variable("accumulated", cel.DynType),
@@ -78,6 +80,7 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 	}
 	out, _, err := program.Eval(map[string]any{
 		"entity":      workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Entity)),
+		"event":       workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Event)),
 		"payload":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Payload)),
 		"policy":      workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Policy)),
 		"accumulated": normalizedCtx.Accumulated,
@@ -144,6 +147,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	if expression == "" {
 		return "", workflowExpressionContext{
 			Entity:           cloneStringAnyMap(ctx.Entity),
+			Event:            cloneStringAnyMap(ctx.Event),
 			Payload:          cloneStringAnyMap(ctx.Payload),
 			Policy:           cloneStringAnyMap(ctx.Policy),
 			Accumulated:      cloneAccumulatedItems(ctx.Accumulated),
@@ -174,6 +178,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	normalized = rewriteWorkflowExpressionEntityNullPresenceChecks(normalized)
 	normalizedCtx := workflowExpressionContext{
 		Entity:           cloneStringAnyMap(ctx.Entity),
+		Event:            cloneStringAnyMap(ctx.Event),
 		Payload:          cloneStringAnyMap(ctx.Payload),
 		Policy:           cloneStringAnyMap(ctx.Policy),
 		Accumulated:      cloneAccumulatedItems(ctx.Accumulated),
@@ -291,6 +296,8 @@ func workflowExpressionLookupContextValue(ref string, ctx workflowExpressionCont
 	switch {
 	case strings.HasPrefix(ref, "entity."):
 		return workflowExpressionLookupPath(ctx.Entity, strings.TrimPrefix(ref, "entity."))
+	case strings.HasPrefix(ref, "event."):
+		return workflowExpressionLookupPath(ctx.Event, strings.TrimPrefix(ref, "event."))
 	case strings.HasPrefix(ref, "payload."):
 		return workflowExpressionLookupPath(ctx.Payload, strings.TrimPrefix(ref, "payload."))
 	case strings.HasPrefix(ref, "policy."):

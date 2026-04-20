@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -32,6 +33,7 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 	}
 	queryCtx := workflowExpressionContext{
 		Entity:      cloneStringAnyMap(ctx.Entity.Raw()),
+		Event:       cloneStringAnyMap(ctx.Event.Raw()),
 		Payload:     cloneStringAnyMap(ctx.Payload.Raw()),
 		Policy:      cloneStringAnyMap(ctx.Policy.Raw()),
 		Accumulated: accumulatedItemsForCEL(ctx.Accumulated.Raw()),
@@ -782,32 +784,18 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 		out = map[string]any{}
 	}
 	envelope := pc.handlerEmitEnvelope(ctx, engineTriggerContext(req), strings.TrimSpace(eventType))
-	state := workflowStateFromEngine(req.State)
-	entityID := resolveEmittedEntityID(
-		pc.SemanticSource(),
-		req.FlowID.String(),
-		eventType,
-		*state,
-		req.Event,
-		req.EntityID.String(),
-		asString(envelope["entity_id"]),
-	)
-	if entityID == "" && !req.EntityID.IsZero() {
-		entityID = strings.TrimSpace(req.EntityID.String())
+	if emitSurface := runtimeengine.EmitSurfaceFromContext(ctx); emitSurface == runtimeengine.EmitSurfaceDeclarative {
+		if err := rejectAuthoredEnvelopeFields(out); err != nil {
+			return nil, err
+		}
 	}
-	if entityID != "" {
-		envelope["entity_id"] = entityID
-	}
-	for key, value := range envelope {
-		out[key] = value
-	}
-	if err := validatePipelineEmitPayload(pc.SemanticSource(), req.FlowID.String(), eventType, out); err != nil {
+	if err := validatePipelineEmitPayload(pc.SemanticSource(), req.FlowID.String(), eventType, out, envelope, runtimeengine.EmitSurfaceFromContext(ctx)); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType string, payload map[string]any) error {
+func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType string, payload, envelope map[string]any, surface runtimeengine.EmitSurface) error {
 	proof := semanticview.ResolveFlowEventProof(source, strings.TrimSpace(flowID), strings.TrimSpace(eventType))
 	if !proof.HasSchema {
 		return nil
@@ -820,11 +808,26 @@ func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType s
 		return nil
 	}
 	allowed := eventPayloadProperties(proof.Entry)
-	validationPayload := runtimeeventpayload.StripUndeclaredRuntimeOwnedCanonicalContext(payload, allowed)
+	validationPayload := cloneStringAnyMap(payload)
+	if surface != runtimeengine.EmitSurfaceDeclarative {
+		for key, value := range envelope {
+			validationPayload[key] = value
+		}
+		validationPayload = runtimeeventpayload.StripUndeclaredRuntimeOwnedCanonicalContext(validationPayload, allowed)
+	}
 	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, validationPayload); err != nil {
 		return fmt.Errorf("%w: event %s payload violates schema: %v", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), err)
 	}
 	return nil
+}
+
+func rejectAuthoredEnvelopeFields(payload map[string]any) error {
+	fields := runtimeeventpayload.RuntimeOwnedCanonicalContextFields(payload)
+	if len(fields) == 0 {
+		return nil
+	}
+	sort.Strings(fields)
+	return fmt.Errorf("%w: authored emit payload must not include platform-owned envelope field(s): %s", runtimeengine.ErrEmitPayloadContractViolation, strings.Join(fields, ", "))
 }
 
 func pipelineEmitPayloadProperties(source semanticview.Source, flowID, eventType string) map[string]struct{} {
@@ -1116,16 +1119,6 @@ func workflowBoolGatesAsMap(gates map[string]bool) map[string]any {
 }
 
 func engineTriggerContext(req runtimeengine.ExecutionRequest) workflowTriggerContext {
-	payload := parsePayloadMap(req.Event.Payload)
-	if len(payload) == 0 {
-		payload = map[string]any{}
-		if !req.EntityID.IsZero() {
-			payload["entity_id"] = req.EntityID.String()
-			if encoded, err := json.Marshal(payload); err == nil {
-				req.Event.Payload = encoded
-			}
-		}
-	}
 	return workflowTriggerContext{
 		Event: req.Event,
 		State: WorkflowState{

@@ -43,6 +43,7 @@ func ValidateConditionCEL(expression string, context WorkflowConditionContext) e
 func celValidationEnv(context WorkflowConditionContext) (*cel.Env, error) {
 	options := []cel.EnvOption{
 		cel.Variable("entity", cel.DynType),
+		cel.Variable("event", cel.DynType),
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
 		cel.Function("count_ge",
@@ -86,6 +87,7 @@ func WorkflowConditionMissingRecognizedPrefix(expression string, context Workflo
 func workflowConditionRecognizedPrefixes(context WorkflowConditionContext) []string {
 	prefixes := []string{
 		"payload.",
+		"event.",
 		"entity.",
 		"policy.",
 		"query_entities(",

@@ -217,6 +217,7 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 func evalWorkflowValueExpression(base BaseContext, state ExecutionState, expression string) (any, error) {
 	return workflowexpr.EvalValueExpression(expression, workflowexpr.ValueContext{
 		Entity:  base.Entity.Raw(),
+		Event:   base.Event.Raw(),
 		Payload: base.Payload.Raw(),
 		Policy:  base.Policy.Raw(),
 		FanOut:  state.FanOut,

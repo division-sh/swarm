@@ -4,7 +4,7 @@ import "strings"
 
 func IsRuntimeOwnedCanonicalContextField(key string) bool {
 	switch strings.TrimSpace(key) {
-	case "entity_id", "flow_instance", "trigger_event_type", "current_state", "task_id", "timer_handle":
+	case "entity_id", "flow_instance", "trigger_event_type", "current_state", "task_id", "timer_handle", "source_event_id", "emitted_at":
 		return true
 	default:
 		return false
@@ -42,6 +42,24 @@ func StripRuntimeOwnedCanonicalContext(payload map[string]any) map[string]any {
 			continue
 		}
 		out[key] = value
+	}
+	return out
+}
+
+func RuntimeOwnedCanonicalContextFields(payload map[string]any) []string {
+	if len(payload) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(payload))
+	for key := range payload {
+		key = strings.TrimSpace(key)
+		if key == "" || !IsRuntimeOwnedCanonicalContextField(key) {
+			continue
+		}
+		out = append(out, key)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
