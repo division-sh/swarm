@@ -1061,6 +1061,95 @@ Use save_entity_field for `+"`business_brief`"+`.
 	}
 }
 
+func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: verify-state-schema-pseudo-types
+version: "1.0.0"
+platform: ">=1.6.0"
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-pseudo-types`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+accumulator:
+  id: accumulator
+  execution_type: system_node
+  state_schema:
+    fields:
+      dimensions_received: dimension score receipts keyed by dimension name
+`)
+
+	var buf bytes.Buffer
+	code := runVerifyCommand(context.Background(), repoRoot(), []string{
+		"-contracts", root,
+	}, &buf)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
+	}
+	if out := buf.String(); !strings.Contains(out, "verify failed: load Swarm contracts:") || !strings.Contains(out, "state_schema field type") {
+		t.Fatalf("unexpected output = %q", out)
+	}
+}
+
+func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: verify-state-schema-float
+version: "1.0.0"
+platform: ">=1.6.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-float`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+task.assigned:
+  _source: external (state schema float verify test)
+  entity_id: string
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+accumulator:
+  id: accumulator
+  execution_type: system_node
+  subscribes_to: [task.assigned]
+  event_handlers:
+    task.assigned:
+      create_entity: true
+      advances_to: done
+  state_schema:
+    fields:
+      composite: float
+`)
+
+	var buf bytes.Buffer
+	code := runVerifyCommand(context.Background(), repoRoot(), []string{
+		"-contracts", root,
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
+	}
+	if out := buf.String(); !strings.Contains(out, "verify ok: contracts=") {
+		t.Fatalf("verify output missing success marker:\n%s", out)
+	}
+}
+
 func testWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	bundle.Platform.Platform.Name = "swarm"

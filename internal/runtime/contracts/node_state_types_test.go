@@ -1,0 +1,46 @@
+package contracts
+
+import "testing"
+
+func TestNormalizeNodeStateFieldType_AllowsCanonicalNodeStateTypes(t *testing.T) {
+	cases := map[string]string{
+		"text":           "text",
+		"string":         "string",
+		"integer":        "integer",
+		"float":          "float",
+		"numeric(8, 2)":  "numeric(8,2)",
+		"jsonb":          "jsonb",
+		"timestamptz":    "timestamptz",
+		"uuid":           "uuid",
+		"text[]":         "text[]",
+		"numeric(5,2)[]": "numeric(5,2)[]",
+	}
+	for raw, want := range cases {
+		t.Run(raw, func(t *testing.T) {
+			got, err := NormalizeNodeStateFieldType(raw)
+			if err != nil {
+				t.Fatalf("NormalizeNodeStateFieldType(%q): %v", raw, err)
+			}
+			if got != want {
+				t.Fatalf("NormalizeNodeStateFieldType(%q) = %q, want %q", raw, got, want)
+			}
+		})
+	}
+}
+
+func TestNormalizeNodeStateFieldType_RejectsPseudoTypes(t *testing.T) {
+	cases := []string{
+		"uuid (primary key)",
+		"text[] (scanner types dispatched)",
+		"timestamptz (null until done)",
+		"dimension score receipts keyed by dimension name",
+		"integer default 0",
+	}
+	for _, raw := range cases {
+		t.Run(raw, func(t *testing.T) {
+			if _, err := NormalizeNodeStateFieldType(raw); err == nil {
+				t.Fatalf("expected pseudo-type rejection for %q", raw)
+			}
+		})
+	}
+}

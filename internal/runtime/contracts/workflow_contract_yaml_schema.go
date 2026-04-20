@@ -426,9 +426,12 @@ func decodeNodeStateField(name string, node *yaml.Node) (NodeStateField, error) 
 	field := NodeStateField{Name: strings.TrimSpace(name)}
 	switch node.Kind {
 	case yaml.ScalarNode:
-		parsed := parseTypedFieldString(node.Value)
-		field.Type = parsed.Type
-		field.Default = parsed.Default
+		field.Type = strings.TrimSpace(node.Value)
+		normalizedType, err := NormalizeNodeStateFieldType(field.Type)
+		if err != nil {
+			return NodeStateField{}, fmt.Errorf("node state field %s: %w", field.Name, err)
+		}
+		field.Type = normalizedType
 		return field, nil
 	case yaml.MappingNode:
 		type alias NodeStateField
@@ -436,7 +439,11 @@ func decodeNodeStateField(name string, node *yaml.Node) (NodeStateField, error) 
 		if err := node.Decode(&aux); err != nil {
 			return NodeStateField{}, err
 		}
-		field.Type = aux.Type
+		normalizedType, err := NormalizeNodeStateFieldType(aux.Type)
+		if err != nil {
+			return NodeStateField{}, fmt.Errorf("node state field %s: %w", field.Name, err)
+		}
+		field.Type = normalizedType
 		field.Default = aux.Default
 		return field, nil
 	default:

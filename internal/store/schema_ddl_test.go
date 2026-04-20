@@ -16,17 +16,14 @@ func TestSchemaFieldTypeToDDL(t *testing.T) {
 		{schemaType: "text", wantDDL: "TEXT"},
 		{schemaType: "string", wantDDL: "TEXT"},
 		{schemaType: "integer", wantDDL: "BIGINT"},
+		{schemaType: "float", wantDDL: "DOUBLE PRECISION"},
+		{schemaType: "numeric", wantDDL: "NUMERIC"},
 		{schemaType: "numeric(12,2)", wantDDL: "NUMERIC(12,2)"},
 		{schemaType: "boolean", wantDDL: "BOOLEAN"},
 		{schemaType: "jsonb", wantDDL: "JSONB"},
 		{schemaType: "timestamp", wantDDL: "TIMESTAMPTZ"},
-		{schemaType: "timestamptz (set on state change)", wantDDL: "TIMESTAMPTZ"},
 		{schemaType: "uuid", wantDDL: "UUID"},
-		{schemaType: "uuid (null for non-derived)", wantDDL: "UUID"},
-		{schemaType: "integer default 0", wantDDL: "BIGINT"},
-		{schemaType: "numeric(5,2) (computed by node weighted_average)", wantDDL: "NUMERIC(5,2)"},
 		{schemaType: "text[]", wantDDL: "TEXT[]"},
-		{schemaType: "text[] (scanner types dispatched)", wantDDL: "TEXT[]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.schemaType, func(t *testing.T) {
@@ -223,6 +220,7 @@ func TestGenerateNodeStateTableDDLs(t *testing.T) {
 				Fields: []runtimecontracts.NodeStateField{
 					{Name: "attempts", Type: "integer"},
 					{Name: "last_error", Type: "text"},
+					{Name: "score", Type: "float"},
 				},
 			},
 		},
@@ -242,10 +240,28 @@ func TestGenerateNodeStateTableDDLs(t *testing.T) {
 	if !strings.Contains(createStmt, `"node_id" TEXT NOT NULL`) {
 		t.Fatalf("expected node_id column, got %q", createStmt)
 	}
-	if !strings.Contains(createStmt, `"attempts" BIGINT`) || !strings.Contains(createStmt, `"last_error" TEXT`) {
+	if !strings.Contains(createStmt, `"attempts" BIGINT`) || !strings.Contains(createStmt, `"last_error" TEXT`) || !strings.Contains(createStmt, `"score" DOUBLE PRECISION`) {
 		t.Fatalf("expected state_schema fields, got %q", createStmt)
 	}
 	if !strings.Contains(createStmt, `PRIMARY KEY ("entity_id", "node_id")`) {
 		t.Fatalf("expected composite primary key, got %q", createStmt)
+	}
+}
+
+func TestGenerateNodeStateTableDDLs_RejectsPseudoTypes(t *testing.T) {
+	nodes := map[string]runtimecontracts.SystemNodeContract{
+		"processing-node": {
+			StateTable: "processing_node_state",
+			StateSchema: runtimecontracts.NodeStateSchema{
+				Fields: []runtimecontracts.NodeStateField{
+					{Name: "received_items", Type: "dimension score receipts keyed by dimension name"},
+				},
+			},
+		},
+	}
+
+	_, err := GenerateNodeStateTableDDLs(nodes)
+	if err == nil || !strings.Contains(err.Error(), "not canonical") {
+		t.Fatalf("expected pseudo-type error, got %v", err)
 	}
 }
