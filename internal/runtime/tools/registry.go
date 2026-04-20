@@ -64,7 +64,7 @@ func runtimeToolHiddenFromAgents(name string) bool {
 }
 
 func registeredToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]RegisteredTool, error) {
-	entries := builtinRegisteredTools()
+	entries := builtinRegisteredTools(source, nil)
 	if source != nil {
 		for name, entry := range source.ToolEntries() {
 			name = strings.TrimSpace(name)
@@ -76,6 +76,9 @@ func registeredToolsForRuntime(source semanticview.Source, discovered map[string
 				return nil, err
 			}
 			if !include {
+				continue
+			}
+			if existing, ok := entries[name]; ok && existing.HandlerType == implementationPlatformBuiltin && registered.HandlerType == implementationPlatformBuiltin {
 				continue
 			}
 			entries[name] = registered
@@ -104,6 +107,9 @@ func registeredToolsForActor(source semanticview.Source, actor models.AgentConfi
 	if err != nil {
 		return nil, err
 	}
+	for name, entry := range builtinRegisteredTools(source, &actor) {
+		entries[name] = entry
+	}
 	candidates := map[string]struct{}{}
 	for name := range entries {
 		candidates[strings.TrimSpace(name)] = struct{}{}
@@ -124,6 +130,9 @@ func registeredToolsForActor(source semanticview.Source, actor models.AgentConfi
 				return nil, err
 			}
 			if !include {
+				continue
+			}
+			if existing, ok := entries[strings.TrimSpace(name)]; ok && existing.HandlerType == implementationPlatformBuiltin && registered.HandlerType == implementationPlatformBuiltin {
 				continue
 			}
 			entries[strings.TrimSpace(name)] = registered
@@ -211,21 +220,6 @@ func normalizeImplementationClass(name string, entry runtimecontracts.ToolSchema
 		}
 	}
 	return ""
-}
-
-func builtinRegisteredTools() map[string]RegisteredTool {
-	entries := builtinRuntimeContractSchemas()
-	out := make(map[string]RegisteredTool, len(entries))
-	for name, entry := range entries {
-		out[name] = RegisteredTool{
-			Name:        strings.TrimSpace(name),
-			Category:    strings.TrimSpace(entry.Category),
-			Description: strings.TrimSpace(entry.Description),
-			HandlerType: implementationPlatformBuiltin,
-			InputSchema: deepCloneMap(entry.InputSchema),
-		}
-	}
-	return out
 }
 
 func toolRequiredPermission(toolID string, entry runtimecontracts.ToolSchemaEntry) string {

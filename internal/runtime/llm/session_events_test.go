@@ -216,6 +216,45 @@ func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *test
 	}
 }
 
+func TestAnthropicAPIRuntime_StartSessionAugmentsSystemPromptWithDerivedToolSurface(t *testing.T) {
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil)
+	ctx := runtimeactors.WithActor(
+		sessions.WithScope(context.Background(), sessions.RuntimeModeTask.String(), "", "task-1"),
+		runtimeactors.AgentConfig{
+			ID: "agent-3",
+			NativeTools: runtimeactors.NativeToolConfig{
+				FileIO: true,
+			},
+		},
+	)
+
+	s, err := runtime.StartSession(ctx, "agent-3", "base prompt", []ToolDefinition{
+		{Name: "emit_market_research_scan_complete"},
+		{Name: "query_entities"},
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if s == nil {
+		t.Fatal("expected session")
+	}
+	if !strings.Contains(s.SystemPrompt, deliveryToolSurfaceMarker) {
+		t.Fatalf("expected derived delivery section in system prompt, got %q", s.SystemPrompt)
+	}
+	if !strings.Contains(s.SystemPrompt, "Available emit tools in this turn: emit_market_research_scan_complete") {
+		t.Fatalf("expected emit tool summary in system prompt, got %q", s.SystemPrompt)
+	}
+	if !strings.Contains(s.SystemPrompt, "Available non-emit tools in this turn: query_entities") {
+		t.Fatalf("expected non-emit tool summary in system prompt, got %q", s.SystemPrompt)
+	}
+	if !strings.Contains(s.SystemPrompt, "Available native CLI tools in this turn: Edit, Read, Write") {
+		t.Fatalf("expected native tool summary in system prompt, got %q", s.SystemPrompt)
+	}
+	if strings.Contains(s.SystemPrompt, "mcp__runtime-tools__query_entities") {
+		t.Fatalf("did not expect CLI-only MCP narration in API system prompt, got %q", s.SystemPrompt)
+	}
+}
+
 func TestPublishAgentStarted_LogsActiveTransitionOnlyAfterRealDeliveryMark(t *testing.T) {
 	publisher := &eventPublisherStub{markChanged: true}
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{

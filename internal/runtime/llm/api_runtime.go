@@ -82,6 +82,7 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 
 func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
 	scope := sessions.ScopeFromContext(ctx)
+	actor, _ := runtimeactors.ActorFromContext(ctx)
 	resolved, err := resolvedSessionScope(ctx, sessions.NormalizeConversationRuntimeMode(scope.ConversationMode), sessions.NormalizeSessionScope(scope.SessionScope), scope.ScopeKey)
 	if err != nil {
 		return nil, err
@@ -128,7 +129,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 			}
 			return ""
 		}(),
-		SystemPrompt: systemPrompt,
+		SystemPrompt: augmentAgentSystemPrompt(systemPrompt, actor, tools),
 		Tools:        tools,
 		Messages:     nil,
 	}
