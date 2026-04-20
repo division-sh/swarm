@@ -2366,6 +2366,65 @@ case:
 	}
 }
 
+func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesForScopedDuplicateIDs(t *testing.T) {
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: duplicate-agent-writer-coverage
+version: "1.0.0"
+platform: ">=1.6.0"
+flows:
+  - id: alpha
+    flow: alpha
+    mode: static
+  - id: beta
+    flow: beta
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: duplicate-agent-writer-coverage\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+
+	for _, flowID := range []string{"alpha", "beta"} {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "{}\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), `
+case:
+  business_brief:
+    type: text
+`)
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), `
+writer:
+  id: writer
+  type: factory
+  role: writer
+  prompt_ref: writer
+  model_tier: sonnet
+  conversation_mode: task
+  subscriptions: []
+  entity_writes:
+    case:
+      save:
+      - business_brief
+`)
+	}
+
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "entity_writer_coverage", "flow alpha entity_type case declares field business_brief") {
+		t.Fatalf("unexpected alpha entity_writer_coverage error, got %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "entity_writer_coverage", "flow beta entity_type case declares field business_brief") {
+		t.Fatalf("unexpected beta entity_writer_coverage error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsExpressionFieldReferenceForDeclaredFieldWrittenBySiblingStep(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)

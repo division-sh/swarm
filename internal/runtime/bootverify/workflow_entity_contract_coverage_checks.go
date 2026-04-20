@@ -21,6 +21,12 @@ type wave1WriteTarget struct {
 	Entity    bool
 }
 
+type wave1ScopedAgentRecord struct {
+	LogicalID string
+	Entry     runtimecontracts.AgentRegistryEntry
+	Source    runtimecontracts.ContractItemSource
+}
+
 func wave1SpecialClearTarget(target string) bool {
 	switch strings.TrimSpace(target) {
 	case "accumulator_state", "cycle_counters", "pending_dedup":
@@ -169,17 +175,12 @@ func wave1AgentExplicitEntityWriteCoverageByFlow(source semanticview.Source) map
 	if !ok || bundle == nil {
 		return out
 	}
-	for _, agentID := range wave1SortedAgentIDs(bundle) {
-		entry, ok := bundle.Agents[agentID]
-		if !ok || len(entry.EntityWrites) == 0 {
+	for _, record := range wave1ScopedAgentRecords(bundle) {
+		if len(record.Entry.EntityWrites) == 0 {
 			continue
 		}
-		agentSource, ok := bundle.AgentContractSource(agentID)
-		if !ok {
-			continue
-		}
-		for entityType, decl := range entry.EntityWrites {
-			contract, ok := wave1ResolveEntityWriteContract(source, agentSource, entityType)
+		for entityType, decl := range record.Entry.EntityWrites {
+			contract, ok := wave1ResolveEntityWriteContract(source, record.Source, entityType)
 			if !ok {
 				continue
 			}
@@ -310,18 +311,52 @@ func wave1AgentPromptEntityContract(source semanticview.Source, agentSource runt
 	return wave1EntityContractView{}, false
 }
 
-func wave1SortedAgentIDs(bundle *runtimecontracts.WorkflowContractBundle) []string {
+func wave1ScopedAgentRecords(bundle *runtimecontracts.WorkflowContractBundle) []wave1ScopedAgentRecord {
 	if bundle == nil {
 		return nil
 	}
-	out := make([]string, 0, len(bundle.Agents))
-	for agentID := range bundle.Agents {
-		agentID = strings.TrimSpace(agentID)
-		if agentID != "" {
-			out = append(out, agentID)
+	out := make([]wave1ScopedAgentRecord, 0)
+	for _, view := range bundle.ProjectViews() {
+		agentIDs := make([]string, 0, len(view.Agents))
+		for logicalID := range view.Agents {
+			logicalID = strings.TrimSpace(logicalID)
+			if logicalID != "" {
+				agentIDs = append(agentIDs, logicalID)
+			}
+		}
+		sort.Strings(agentIDs)
+		for _, logicalID := range agentIDs {
+			out = append(out, wave1ScopedAgentRecord{
+				LogicalID: logicalID,
+				Entry:     view.Agents[logicalID],
+				Source: runtimecontracts.ContractItemSource{
+					PackageKey: strings.TrimSpace(view.Paths.Key),
+					Layer:      "project",
+				},
+			})
 		}
 	}
-	sort.Strings(out)
+	for _, view := range bundle.FlowViews() {
+		agentIDs := make([]string, 0, len(view.Agents))
+		for logicalID := range view.Agents {
+			logicalID = strings.TrimSpace(logicalID)
+			if logicalID != "" {
+				agentIDs = append(agentIDs, logicalID)
+			}
+		}
+		sort.Strings(agentIDs)
+		for _, logicalID := range agentIDs {
+			out = append(out, wave1ScopedAgentRecord{
+				LogicalID: logicalID,
+				Entry:     view.Agents[logicalID],
+				Source: runtimecontracts.ContractItemSource{
+					PackageKey: strings.TrimSpace(view.Paths.PackageKey),
+					FlowID:     strings.TrimSpace(view.Paths.ID),
+					Layer:      "flow",
+				},
+			})
+		}
+	}
 	return out
 }
 
