@@ -44,6 +44,10 @@ func SchemaFieldTypeToDDL(schemaType string) (string, error) {
 		return "TEXT", nil
 	case "integer", "int", "bigint":
 		return "BIGINT", nil
+	case "float", "double", "real":
+		return "DOUBLE PRECISION", nil
+	case "numeric":
+		return "NUMERIC", nil
 	case "boolean":
 		return "BOOLEAN", nil
 	case "jsonb", "json":
@@ -232,7 +236,11 @@ func GenerateNodeStateTableDDLs(nodes map[string]runtimecontracts.SystemNodeCont
 				return nil, fmt.Errorf("node %s state table %s declares duplicate column %s", strings.TrimSpace(nodeID), tableName, columnName)
 			}
 			seenColumns[columnName] = struct{}{}
-			columnType, err := SchemaFieldTypeToDDL(field.Type)
+			normalizedType, err := runtimecontracts.NormalizeNodeStateFieldType(field.Type)
+			if err != nil {
+				return nil, fmt.Errorf("node %s state table %s field %s: %w", strings.TrimSpace(nodeID), tableName, columnName, err)
+			}
+			columnType, err := SchemaFieldTypeToDDL(normalizedType)
 			if err != nil {
 				return nil, fmt.Errorf("node %s state table %s field %s: %w", strings.TrimSpace(nodeID), tableName, columnName, err)
 			}
