@@ -402,6 +402,14 @@ func decodeNodeStateFields(node *yaml.Node) ([]NodeStateField, error) {
 		if err := node.Decode(&fields); err != nil {
 			return nil, err
 		}
+		for i := range fields {
+			fields[i].Name = strings.TrimSpace(fields[i].Name)
+			normalizedType, err := NormalizeNodeStateFieldType(fields[i].Type)
+			if err != nil {
+				return nil, fmt.Errorf("node state field %s: %w", fields[i].Name, err)
+			}
+			fields[i].Type = normalizedType
+		}
 		return fields, nil
 	case yaml.MappingNode:
 		fields := make([]NodeStateField, 0, len(node.Content)/2)

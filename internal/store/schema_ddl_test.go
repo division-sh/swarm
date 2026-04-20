@@ -42,6 +42,9 @@ func TestSchemaFieldTypeToDDLError(t *testing.T) {
 	if _, err := SchemaFieldTypeToDDL("object"); err == nil || !errors.Is(err, ErrUnknownSchemaType) {
 		t.Fatalf("expected unknown schema type error, got %v", err)
 	}
+	if _, err := SchemaFieldTypeToDDL("numeric (12,2)"); err == nil || !errors.Is(err, ErrUnknownSchemaType) {
+		t.Fatalf("expected spaced numeric type to fail fast, got %v", err)
+	}
 }
 
 func TestGeneratePlatformTableDDLs(t *testing.T) {
