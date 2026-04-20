@@ -12,6 +12,8 @@ func TestNormalizeNodeStateFieldType_AllowsCanonicalNodeStateTypes(t *testing.T)
 		"text":           "text",
 		"string":         "string",
 		"integer":        "integer",
+		"bool":           "boolean",
+		"boolean":        "boolean",
 		"float":          "float",
 		"numeric(8, 2)":  "numeric(8,2)",
 		"jsonb":          "jsonb",

@@ -35,7 +35,12 @@ func NormalizeNodeStateFieldType(raw string) (string, error) {
 	normalized := strings.ToLower(raw)
 	switch normalized {
 	case "text", "string", "integer", "int", "bigint", "float", "double", "real", "numeric", "boolean", "bool", "jsonb", "json", "timestamp", "timestamptz", "uuid":
-		return normalized, nil
+		switch normalized {
+		case "bool":
+			return "boolean", nil
+		default:
+			return normalized, nil
+		}
 	}
 
 	if strings.ContainsAny(raw, " \t\r\n") {
