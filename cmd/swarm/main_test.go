@@ -992,6 +992,75 @@ reader:
 	}
 }
 
+func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testing.T) {
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: verify-prompt-writer-coverage
+version: "1.0.0"
+platform: ">=1.6.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-prompt-writer-coverage`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
+case:
+  business_brief:
+    type: text
+    _unused_reason: verify prompt writer proof field
+  research_context:
+    type: text
+    _unused_reason: verify prompt writer proof field
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `
+writer:
+  id: writer
+  type: factory
+  role: writer
+  prompt_ref: writer
+  model_tier: sonnet
+  conversation_mode: task
+  subscriptions: []
+  entity_writes:
+    case:
+      save:
+      - research_context
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "prompts", "writer.md"), `
+Use save_entity_field for `+"`business_brief`"+`.
+`)
+
+	var buf bytes.Buffer
+	code := runVerifyCommand(context.Background(), repoRoot(), []string{
+		"-contracts", root,
+	}, &buf)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "entity_writer_coverage") {
+		t.Fatalf("verify output missing entity_writer_coverage:\n%s", out)
+	}
+	if !strings.Contains(out, "business_brief") {
+		t.Fatalf("verify output missing offending field:\n%s", out)
+	}
+}
+
 func testWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	bundle.Platform.Platform.Name = "swarm"

@@ -81,6 +81,7 @@ func (c *checkerContext) entityWriterCoverage() []Finding {
 			})
 		}
 	}
+	c.entityWriterCoverageFindings = append(c.entityWriterCoverageFindings, wave1PromptEntityWriteAuthorizationFindings(c.source)...)
 	return c.entityWriterCoverageFindings
 }
 
@@ -151,6 +152,185 @@ func wave1EntityWriterCoverageByFlow(source semanticview.Source) map[string]map[
 		}
 		out[contract.FlowID][target.Field] = struct{}{}
 	}
+	for flowID, fields := range wave1AgentExplicitEntityWriteCoverageByFlow(source) {
+		if out[flowID] == nil {
+			out[flowID] = map[string]struct{}{}
+		}
+		for field := range fields {
+			out[flowID][field] = struct{}{}
+		}
+	}
+	return out
+}
+
+func wave1AgentExplicitEntityWriteCoverageByFlow(source semanticview.Source) map[string]map[string]struct{} {
+	out := map[string]map[string]struct{}{}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return out
+	}
+	for _, agentID := range wave1SortedAgentIDs(bundle) {
+		entry, ok := bundle.Agents[agentID]
+		if !ok || len(entry.EntityWrites) == 0 {
+			continue
+		}
+		agentSource, ok := bundle.AgentContractSource(agentID)
+		if !ok {
+			continue
+		}
+		for entityType, decl := range entry.EntityWrites {
+			contract, ok := wave1ResolveEntityWriteContract(source, agentSource, entityType)
+			if !ok {
+				continue
+			}
+			if out[contract.FlowID] == nil {
+				out[contract.FlowID] = map[string]struct{}{}
+			}
+			for _, field := range decl.Create.Fields {
+				if _, declared := contract.Contract.Fields[field]; declared && !wave1EntityEnvelopeField(field) {
+					out[contract.FlowID][field] = struct{}{}
+				}
+			}
+			for _, field := range decl.Save.Fields {
+				if _, declared := contract.Contract.Fields[field]; declared && !wave1EntityEnvelopeField(field) {
+					out[contract.FlowID][field] = struct{}{}
+				}
+			}
+		}
+	}
+	return out
+}
+
+func wave1PromptEntityWriteAuthorizationFindings(source semanticview.Source) []Finding {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return nil
+	}
+	evidence, err := runtimecontracts.DerivePromptEntityWriteEvidence(bundle)
+	if err != nil {
+		return []Finding{{
+			CheckID:  "entity_writer_coverage",
+			Severity: SeverityHardInvalidity,
+			Message:  fmt.Sprintf("prompt entity write evidence derivation failed: %v", err),
+			Location: defaultFlowLabel(""),
+		}}
+	}
+	findings := make([]Finding, 0)
+	for _, item := range evidence {
+		entry, ok := bundle.Agents[item.AgentID]
+		if !ok {
+			continue
+		}
+		agentSource, ok := bundle.AgentContractSource(item.AgentID)
+		if !ok {
+			continue
+		}
+		contract, ok := wave1AgentPromptEntityContract(source, agentSource)
+		if !ok {
+			continue
+		}
+		writeDecl, ok := wave1PromptEntityWriteDecl(entry, contract)
+		if item.CreateEntity && (!ok || !writeDecl.Create.Declared()) {
+			findings = append(findings, Finding{
+				CheckID:  "entity_writer_coverage",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("agent %s prompt declares create_entity for flow %s entity_type %s without matching agents.yaml entity_writes.%s.create authorization", item.AgentID, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
+				Location: item.PromptFile,
+			})
+		}
+		if item.SaveEntity && (!ok || !writeDecl.Save.Declared()) {
+			findings = append(findings, Finding{
+				CheckID:  "entity_writer_coverage",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("agent %s prompt declares save_entity_field for flow %s entity_type %s without matching agents.yaml entity_writes.%s.save authorization", item.AgentID, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
+				Location: item.PromptFile,
+			})
+			continue
+		}
+		if !item.SaveEntity || writeDecl.Save.All {
+			continue
+		}
+		for _, field := range item.SaveFields {
+			if writeDecl.Save.AllowsField(field) {
+				continue
+			}
+			findings = append(findings, Finding{
+				CheckID:  "entity_writer_coverage",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("agent %s prompt declares save_entity_field for field %s on flow %s entity_type %s without matching agents.yaml entity_writes.%s.save authorization", item.AgentID, field, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
+				Location: item.PromptFile,
+			})
+		}
+	}
+	return findings
+}
+
+func wave1PromptEntityWriteDecl(entry runtimecontracts.AgentRegistryEntry, contract wave1EntityContractView) (runtimecontracts.AgentEntityWriteDecl, bool) {
+	if len(entry.EntityWrites) == 0 {
+		return runtimecontracts.AgentEntityWriteDecl{}, false
+	}
+	for key, value := range entry.EntityWrites {
+		key = strings.TrimSpace(key)
+		if key == contract.EntityType {
+			return value, true
+		}
+		if contract.FlowID != "" && key == contract.FlowID+"."+contract.EntityType {
+			return value, true
+		}
+	}
+	return runtimecontracts.AgentEntityWriteDecl{}, false
+}
+
+func wave1ResolveEntityWriteContract(source semanticview.Source, agentSource runtimecontracts.ContractItemSource, entityType string) (wave1EntityContractView, bool) {
+	entityType = strings.TrimSpace(entityType)
+	if entityType == "" {
+		return wave1EntityContractView{}, false
+	}
+	if flowID := strings.TrimSpace(agentSource.FlowID); flowID != "" {
+		view := wave1EntityContractForFlow(source, flowID)
+		if view.Defined {
+			if entityType == view.EntityType || entityType == flowID+"."+view.EntityType {
+				return view, true
+			}
+		}
+	}
+	for _, contract := range wave1DeclaredEntityContracts(source) {
+		if entityType == contract.EntityType {
+			return contract, true
+		}
+		if contract.FlowID != "" && entityType == contract.FlowID+"."+contract.EntityType {
+			return contract, true
+		}
+	}
+	return wave1EntityContractView{}, false
+}
+
+func wave1AgentPromptEntityContract(source semanticview.Source, agentSource runtimecontracts.ContractItemSource) (wave1EntityContractView, bool) {
+	if flowID := strings.TrimSpace(agentSource.FlowID); flowID != "" {
+		view := wave1EntityContractForFlow(source, flowID)
+		if view.Defined {
+			return view, true
+		}
+	}
+	root := wave1EntityContractForFlow(source, "")
+	if root.Defined {
+		return root, true
+	}
+	return wave1EntityContractView{}, false
+}
+
+func wave1SortedAgentIDs(bundle *runtimecontracts.WorkflowContractBundle) []string {
+	if bundle == nil {
+		return nil
+	}
+	out := make([]string, 0, len(bundle.Agents))
+	for agentID := range bundle.Agents {
+		agentID = strings.TrimSpace(agentID)
+		if agentID != "" {
+			out = append(out, agentID)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 
