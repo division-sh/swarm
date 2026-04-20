@@ -217,19 +217,11 @@ func wave1PromptEntityWriteAuthorizationFindings(source semanticview.Source) []F
 	}
 	findings := make([]Finding, 0)
 	for _, item := range evidence {
-		entry, ok := bundle.Agents[item.AgentID]
+		contract, ok := wave1AgentPromptEntityContract(source, item.Source)
 		if !ok {
 			continue
 		}
-		agentSource, ok := bundle.AgentContractSource(item.AgentID)
-		if !ok {
-			continue
-		}
-		contract, ok := wave1AgentPromptEntityContract(source, agentSource)
-		if !ok {
-			continue
-		}
-		writeDecl, ok := wave1PromptEntityWriteDecl(entry, contract)
+		writeDecl, ok := wave1PromptEntityWriteDecl(item.Entry, contract)
 		if item.CreateEntity && (!ok || !writeDecl.Create.Declared()) {
 			findings = append(findings, Finding{
 				CheckID:  "entity_writer_coverage",
@@ -269,14 +261,13 @@ func wave1PromptEntityWriteDecl(entry runtimecontracts.AgentRegistryEntry, contr
 	if len(entry.EntityWrites) == 0 {
 		return runtimecontracts.AgentEntityWriteDecl{}, false
 	}
-	for key, value := range entry.EntityWrites {
-		key = strings.TrimSpace(key)
-		if key == contract.EntityType {
+	if contract.FlowID != "" {
+		if value, ok := entry.EntityWrites[contract.FlowID+"."+contract.EntityType]; ok {
 			return value, true
 		}
-		if contract.FlowID != "" && key == contract.FlowID+"."+contract.EntityType {
-			return value, true
-		}
+	}
+	if value, ok := entry.EntityWrites[contract.EntityType]; ok {
+		return value, true
 	}
 	return runtimecontracts.AgentEntityWriteDecl{}, false
 }

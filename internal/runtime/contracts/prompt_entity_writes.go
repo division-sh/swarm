@@ -10,6 +10,8 @@ import (
 
 type PromptEntityWriteEvidence struct {
 	AgentID      string
+	Source       ContractItemSource
+	Entry        AgentRegistryEntry
 	PromptFile   string
 	CreateEntity bool
 	SaveEntity   bool
@@ -22,26 +24,13 @@ func DerivePromptEntityWriteEvidence(bundle *WorkflowContractBundle) ([]PromptEn
 	if bundle == nil {
 		return nil, fmt.Errorf("workflow contract bundle is required")
 	}
-	agentIDs := make([]string, 0, len(bundle.Agents))
-	for agentID := range bundle.Agents {
-		agentID = strings.TrimSpace(agentID)
-		if agentID != "" {
-			agentIDs = append(agentIDs, agentID)
-		}
-	}
-	sort.Strings(agentIDs)
-
 	out := make([]PromptEntityWriteEvidence, 0)
-	for _, agentID := range agentIDs {
-		entry, ok := bundle.Agents[agentID]
-		if !ok {
+	for _, record := range bundleAgentRecords(bundle) {
+		agentID := strings.TrimSpace(record.LogicalID)
+		if agentID == "" {
 			continue
 		}
-		source, ok := bundle.AgentContractSource(agentID)
-		if !ok {
-			continue
-		}
-		path, text, ok, err := loadPromptEntityWriteText(bundle, agentID, entry, source)
+		path, text, ok, err := loadPromptEntityWriteText(bundle, agentID, record.Entry, record.Source)
 		if err != nil {
 			return nil, err
 		}
@@ -54,17 +43,28 @@ func DerivePromptEntityWriteEvidence(bundle *WorkflowContractBundle) ([]PromptEn
 		}
 		out = append(out, PromptEntityWriteEvidence{
 			AgentID:      agentID,
+			Source:       record.Source,
+			Entry:        record.Entry,
 			PromptFile:   path,
 			CreateEntity: createEntity,
 			SaveEntity:   saveEntity,
 			SaveFields:   saveFields,
 		})
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].AgentID == out[j].AgentID {
+			if out[i].Source.FlowID == out[j].Source.FlowID {
+				return out[i].PromptFile < out[j].PromptFile
+			}
+			return out[i].Source.FlowID < out[j].Source.FlowID
+		}
+		return out[i].AgentID < out[j].AgentID
+	})
 	return out, nil
 }
 
 func loadPromptEntityWriteText(bundle *WorkflowContractBundle, agentID string, entry AgentRegistryEntry, source ContractItemSource) (string, string, bool, error) {
-	dirs := promptDirsForBundleAgent(bundle, agentID)
+	dirs := promptEntityWritePromptDirs(bundle, source)
 	if len(dirs) == 0 {
 		return "", "", false, nil
 	}
@@ -81,6 +81,30 @@ func loadPromptEntityWriteText(bundle *WorkflowContractBundle, agentID string, e
 		}
 	}
 	return "", "", false, nil
+}
+
+func promptEntityWritePromptDirs(bundle *WorkflowContractBundle, source ContractItemSource) []string {
+	if bundle == nil {
+		return nil
+	}
+	dirs := make([]string, 0, 4)
+	if flowID := strings.TrimSpace(source.FlowID); flowID != "" {
+		if flow, ok := bundle.FlowViewByID(flowID); ok && strings.TrimSpace(flow.Paths.PromptsDir) != "" {
+			dirs = append(dirs, flow.Paths.PromptsDir)
+		}
+	}
+	if pkgKey := strings.TrimSpace(source.PackageKey); pkgKey != "" {
+		for _, pkg := range bundle.ProjectViews() {
+			if strings.TrimSpace(pkg.Paths.Key) == pkgKey && strings.TrimSpace(pkg.Paths.ProjectPromptsDir) != "" {
+				dirs = append(dirs, pkg.Paths.ProjectPromptsDir)
+				break
+			}
+		}
+	}
+	if strings.TrimSpace(bundle.Paths.ProjectPromptsDir) != "" {
+		dirs = append(dirs, bundle.Paths.ProjectPromptsDir)
+	}
+	return uniqueStrings(dirs...)
 }
 
 func extractPromptEntityWriteEvidence(promptText string) (bool, bool, []string) {
@@ -100,7 +124,11 @@ func extractPromptEntityWriteEvidence(promptText string) (bool, bool, []string) 
 			if len(match) < 2 {
 				continue
 			}
-			fields = append(fields, strings.TrimSpace(match[1]))
+			field := strings.TrimSpace(match[1])
+			if field == "" || field == "save_entity_field" {
+				continue
+			}
+			fields = append(fields, field)
 		}
 	}
 	return createEntity, true, uniquePromptStrings(fields)
