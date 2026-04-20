@@ -2249,6 +2249,88 @@ func TestRun_AttributesReaderCoverageToResolvedRootContractOwner(t *testing.T) {
 	}
 }
 
+func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesList(t *testing.T) {
+	root := writePromptWriterCoverageFixture(t, `
+writer:
+  id: writer
+  role: writer
+  prompt_ref: writer
+  workspace_class: factory
+  manager_fallback: ops
+  entity_writes:
+    case:
+      save:
+      - business_brief
+`, `
+case:
+  business_brief:
+    type: text
+  untouched:
+    type: text
+    _unused_reason: prompt coverage proof
+`, "")
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "entity_writer_coverage", "business_brief") {
+		t.Fatalf("unexpected entity_writer_coverage error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsPromptCreateEntityWithoutEntityWritesAuthorization(t *testing.T) {
+	root := writePromptWriterCoverageFixture(t, `
+writer:
+  id: writer
+  role: writer
+  prompt_ref: writer
+  workspace_class: factory
+  manager_fallback: ops
+`, `
+case:
+  business_brief:
+    type: text
+    initial: seeded
+`, "Call create_entity using the delivered schema.\n")
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "entity_writer_coverage", "prompt declares create_entity") {
+		t.Fatalf("expected prompt create_entity authorization error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsPromptSaveEntityFieldWithoutMatchingEntityWritesAuthorization(t *testing.T) {
+	root := writePromptWriterCoverageFixture(t, `
+writer:
+  id: writer
+  role: writer
+  prompt_ref: writer
+  workspace_class: factory
+  manager_fallback: ops
+  entity_writes:
+    case:
+      save:
+      - research_context
+`, `
+case:
+  business_brief:
+    type: text
+    _unused_reason: prompt save auth proof
+  research_context:
+    type: text
+    _unused_reason: prompt save auth proof
+`, "Use save_entity_field for `business_brief`.\n")
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "entity_writer_coverage", "business_brief") {
+		t.Fatalf("expected prompt save_entity_field authorization error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsExpressionFieldReferenceForDeclaredFieldWrittenBySiblingStep(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
@@ -3615,6 +3697,42 @@ func loadWave1RootReaderCoverageFixtureBundle(t *testing.T) *runtimecontracts.Wo
 	t.Helper()
 	root := writeWave1RootReaderCoverageFixture(t)
 	return loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+}
+
+func writePromptWriterCoverageFixture(t *testing.T, agentsYAML, entitiesYAML, promptText string) string {
+	t.Helper()
+	root := t.TempDir()
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: prompt-writer-coverage
+version: "1.0.0"
+platform: ">=1.6.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: prompt-writer-coverage\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), entitiesYAML)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), agentsYAML)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), "{}\n")
+	if strings.TrimSpace(promptText) != "" {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "prompts", "writer.md"), promptText)
+	}
+	return root
 }
 
 func loadTier8Fixture(t *testing.T, fixture string) semanticview.Source {

@@ -851,27 +851,28 @@ type EventCatalogEntry struct {
 	Required          []string         `yaml:"required"`
 }
 type AgentRegistryEntry struct {
-	ID                     string         `yaml:"id"`
-	Type                   string         `yaml:"type"`
-	Role                   string         `yaml:"role"`
-	PromptRef              string         `yaml:"prompt_ref"`
-	Permissions            []string       `yaml:"permissions" json:"permissions,omitempty"`
-	PermissionsBundle      string         `yaml:"permissions_bundle" json:"permissions_bundle,omitempty"`
-	WorkspaceClass         string         `yaml:"workspace_class"`
-	ManagerFallback        string         `yaml:"manager_fallback"`
-	NodeType               string         `yaml:"node_type"`
-	ModelTier              string         `yaml:"model_tier"`
-	ConversationMode       string         `yaml:"conversation_mode"`
-	SessionScope           string         `yaml:"session_scope"`
-	MaxTurnsPerTask        int            `yaml:"max_turns_per_task"`
-	Subscriptions          []string       `yaml:"subscriptions"`
-	SubscriptionsBootstrap []string       `yaml:"subscriptions_bootstrap"`
-	SubscribesTo           []string       `yaml:"subscribes_to"`
-	Tools                  []string       `yaml:"tools"`
-	ToolsTier2             []string       `yaml:"tools_tier2"`
-	NativeTools            map[string]any `yaml:"native_tools"`
-	EmitEvents             []string       `yaml:"emit_events"`
-	Implementation         string         `yaml:"implementation"`
+	ID                     string                          `yaml:"id"`
+	Type                   string                          `yaml:"type"`
+	Role                   string                          `yaml:"role"`
+	PromptRef              string                          `yaml:"prompt_ref"`
+	EntityWrites           map[string]AgentEntityWriteDecl `yaml:"entity_writes"`
+	Permissions            []string                        `yaml:"permissions" json:"permissions,omitempty"`
+	PermissionsBundle      string                          `yaml:"permissions_bundle" json:"permissions_bundle,omitempty"`
+	WorkspaceClass         string                          `yaml:"workspace_class"`
+	ManagerFallback        string                          `yaml:"manager_fallback"`
+	NodeType               string                          `yaml:"node_type"`
+	ModelTier              string                          `yaml:"model_tier"`
+	ConversationMode       string                          `yaml:"conversation_mode"`
+	SessionScope           string                          `yaml:"session_scope"`
+	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
+	Subscriptions          []string                        `yaml:"subscriptions"`
+	SubscriptionsBootstrap []string                        `yaml:"subscriptions_bootstrap"`
+	SubscribesTo           []string                        `yaml:"subscribes_to"`
+	Tools                  []string                        `yaml:"tools"`
+	ToolsTier2             []string                        `yaml:"tools_tier2"`
+	NativeTools            map[string]any                  `yaml:"native_tools"`
+	EmitEvents             []string                        `yaml:"emit_events"`
+	Implementation         string                          `yaml:"implementation"`
 }
 
 func (e AgentRegistryEntry) ConfiguredTools() []string {
