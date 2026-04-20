@@ -2331,6 +2331,41 @@ case:
 	}
 }
 
+func TestRun_PromptEntityWritesPrefersFlowScopedAuthorization(t *testing.T) {
+	root := writePromptWriterCoverageFixture(t, `
+writer:
+  id: writer
+  type: factory
+  role: writer
+  prompt_ref: writer
+  model_tier: sonnet
+  conversation_mode: task
+  subscriptions: []
+  entity_writes:
+    case:
+      save:
+      - research_context
+    child.case:
+      save:
+      - business_brief
+`, `
+case:
+  business_brief:
+    type: text
+    _unused_reason: scoped auth precedence proof
+  research_context:
+    type: text
+    _unused_reason: scoped auth precedence proof
+`, "Use `save_entity_field` for `business_brief`.\n")
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "entity_writer_coverage", "business_brief") {
+		t.Fatalf("unexpected entity_writer_coverage error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsExpressionFieldReferenceForDeclaredFieldWrittenBySiblingStep(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
