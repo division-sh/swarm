@@ -297,13 +297,13 @@ func entityToolLeafSelectorNames(contract entityruntime.Contract) []string {
 		if err != nil {
 			continue
 		}
-		collectEntityToolLeafSelectors(contract, strings.TrimSpace(name), strings.TrimSpace(decl.Type), seen, &out)
+		collectEntityToolLeafSelectors(contract, strings.TrimSpace(name), strings.TrimSpace(decl.Type), seen, map[string]struct{}{}, &out)
 	}
 	sort.Strings(out)
 	return out
 }
 
-func collectEntityToolLeafSelectors(contract entityruntime.Contract, path, typeRef string, seen map[string]struct{}, out *[]string) {
+func collectEntityToolLeafSelectors(contract entityruntime.Contract, path, typeRef string, seen map[string]struct{}, visiting map[string]struct{}, out *[]string) {
 	typeRef = strings.TrimSpace(typeRef)
 	switch {
 	case deliveryListType(typeRef):
@@ -315,7 +315,12 @@ func collectEntityToolLeafSelectors(contract entityruntime.Contract, path, typeR
 		seen[path] = struct{}{}
 		*out = append(*out, path)
 	case deliveryNamedType(contract, typeRef):
-		named := contract.Types.Types[deliveryTypeName(contract, typeRef)]
+		typeName := deliveryTypeName(contract, typeRef)
+		if _, ok := visiting[typeName]; ok {
+			return
+		}
+		visiting[typeName] = struct{}{}
+		named := contract.Types.Types[typeName]
 		names := make([]string, 0, len(named.Fields))
 		for name := range named.Fields {
 			names = append(names, strings.TrimSpace(name))
@@ -323,8 +328,9 @@ func collectEntityToolLeafSelectors(contract entityruntime.Contract, path, typeR
 		sort.Strings(names)
 		for _, name := range names {
 			spec := named.Fields[name]
-			collectEntityToolLeafSelectors(contract, path+"."+name, spec.Type, seen, out)
+			collectEntityToolLeafSelectors(contract, path+"."+name, spec.Type, seen, visiting, out)
 		}
+		delete(visiting, typeName)
 	}
 }
 

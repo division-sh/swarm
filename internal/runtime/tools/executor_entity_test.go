@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -318,8 +317,8 @@ func TestEntityTools_SaveEntityFieldRejectsNestedWritePath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected nested write path to be rejected")
 	}
-	if !strings.Contains(err.Error(), "nested writes are not supported in Wave 1") {
-		t.Fatalf("err = %v, want nested write rejection", err)
+	if !strings.Contains(err.Error(), "invalid enum value mvp_spec.headline") {
+		t.Fatalf("err = %v, want delivery-boundary nested write rejection", err)
 	}
 }
 
@@ -815,8 +814,8 @@ func TestEntityTools_InvalidField(t *testing.T) {
 		"field":     "unknown_field",
 		"value":     "x",
 	})
-	if err == nil || !errors.Is(err, runtimetools.ErrUnknownEntityField) {
-		t.Fatalf("expected invalid field error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "invalid enum value unknown_field") {
+		t.Fatalf("expected delivery-boundary invalid field rejection, got %v", err)
 	}
 }
 
