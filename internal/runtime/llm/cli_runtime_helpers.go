@@ -493,6 +493,52 @@ func claudeAllowedToolsArgForActor(actor models.AgentConfig, tools []ToolDefinit
 }
 
 const cliToolInvocationMarker = "## Swarm Tool Invocation"
+const deliveryToolSurfaceMarker = "## Swarm Tool Surface"
+
+func AgentVisibleToolSummaryLinesForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
+	surface := AgentVisibleToolSurfaceForActor(actor, tools)
+	lines := make([]string, 0, 3)
+	emitLine := "(none declared)"
+	if len(surface.EmitToolNames) > 0 {
+		emitLine = strings.Join(surface.EmitToolNames, ", ")
+	}
+	lines = append(lines, "Available emit tools in this turn: "+emitLine)
+	if len(surface.NonEmitToolNames) > 0 {
+		lines = append(lines, "Available non-emit tools in this turn: "+strings.Join(surface.NonEmitToolNames, ", "))
+	}
+	if len(surface.NativeBuiltinTools) > 0 {
+		lines = append(lines, "Available native CLI tools in this turn: "+strings.Join(surface.NativeBuiltinTools, ", "))
+	}
+	return lines
+}
+
+func augmentAgentSystemPrompt(systemPrompt string, actor models.AgentConfig, tools []ToolDefinition) string {
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	if systemPrompt == "" {
+		return systemPrompt
+	}
+	if strings.Contains(systemPrompt, deliveryToolSurfaceMarker) {
+		return systemPrompt
+	}
+	lines := AgentVisibleToolSummaryLinesForActor(actor, tools)
+	if len(lines) == 0 {
+		return systemPrompt
+	}
+	var b strings.Builder
+	b.WriteString(systemPrompt)
+	b.WriteString("\n\n")
+	b.WriteString(deliveryToolSurfaceMarker)
+	b.WriteString("\n")
+	b.WriteString("Use only the tool definitions delivered in this session.\n")
+	b.WriteString("Publish events by calling the matching emit_* tool directly.\n")
+	b.WriteString("Do not return JSON envelopes as a substitute for event emission.\n")
+	for _, line := range lines {
+		b.WriteString("- ")
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String())
+}
 
 func augmentCLISystemPrompt(systemPrompt string, actor models.AgentConfig, tools []ToolDefinition) string {
 	systemPrompt = strings.TrimSpace(systemPrompt)
@@ -507,6 +553,7 @@ func augmentCLISystemPrompt(systemPrompt string, actor models.AgentConfig, tools
 	if len(surface.PromptRuntimeTools) == 0 && len(controlTools) == 0 {
 		return systemPrompt
 	}
+	summaryLines := AgentVisibleToolSummaryLinesForActor(actor, tools)
 	var b strings.Builder
 	b.WriteString(systemPrompt)
 	b.WriteString("\n\n")
@@ -547,6 +594,11 @@ func augmentCLISystemPrompt(systemPrompt string, actor models.AgentConfig, tools
 		b.WriteString("Claude CLI control tools available in this turn: ")
 		b.WriteString(strings.Join(controlTools, ", "))
 		b.WriteString(".\n")
+	}
+	for _, line := range summaryLines {
+		b.WriteString("- ")
+		b.WriteString(line)
+		b.WriteString("\n")
 	}
 	if hasToolPrefix(surface.LocalFallbackTools, "emit_") {
 		b.WriteString("When you need to publish an event, call the matching `emit_*` tool directly. Emit tools may not appear as MCP-prefixed variants in Claude CLI; Swarm will execute the exact `emit_*` call locally. Do not write JSON files under `/workspace/events` as a substitute for emission.\n")
