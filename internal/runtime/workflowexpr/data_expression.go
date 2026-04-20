@@ -32,6 +32,7 @@ var (
 
 type ValueContext struct {
 	Entity  map[string]any
+	Event   map[string]any
 	Payload map[string]any
 	Policy  map[string]any
 	FanOut  map[string]any
@@ -75,6 +76,7 @@ func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
 	}
 	out, _, err := program.Eval(map[string]any{
 		"entity":  NormalizeCELInputMap(ctx.Entity),
+		"event":   NormalizeCELInputMap(ctx.Event),
 		"payload": NormalizeCELInputMap(ctx.Payload),
 		"policy":  NormalizeCELInputMap(ctx.Policy),
 		"fan_out": NormalizeCELInputMap(ctx.FanOut),
@@ -303,6 +305,7 @@ func dataExpressionEnvForContext() (*cel.Env, error) {
 	dataExpressionEnvOnce.Do(func() {
 		dataExpressionEnv, dataExpressionEnvErr = cel.NewEnv(
 			cel.Variable("entity", cel.DynType),
+			cel.Variable("event", cel.DynType),
 			cel.Variable("payload", cel.DynType),
 			cel.Variable("policy", cel.DynType),
 			cel.Variable("fan_out", cel.DynType),

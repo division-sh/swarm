@@ -9,7 +9,7 @@ test-node:
       emit:
         event: item.exported
         fields:
-          id: payload.entity_id
+          id: event.entity_id
           name: entity.name
           status: entity.current_state
   state_schema:

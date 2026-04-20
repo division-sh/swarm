@@ -638,7 +638,7 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 			{
 				Message: llm.Message{Role: "assistant", Content: "Dispatching workflow now."},
 				ToolCalls: []llm.ToolCall{
-					{Name: "emit_scan_requested", Arguments: map[string]any{"entity_id": "corpus-1"}},
+					{Name: "emit_scan_requested", Arguments: map[string]any{}},
 				},
 			},
 			{Message: llm.Message{Role: "assistant", Content: "scan_requested emitted"}},
@@ -660,13 +660,7 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"scan.requested": {
-				Payload: runtimecontracts.EventPayloadSpec{
-					Type: "object",
-					Properties: map[string]runtimecontracts.EventFieldSpec{
-						"entity_id": {Type: "string"},
-					},
-					Required: []string{"entity_id"},
-				},
+				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
 			},
 		},
 	})
@@ -696,7 +690,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 			{
 				Message: llm.Message{Role: "assistant", Content: "Dispatching workflow now."},
 				ToolCalls: []llm.ToolCall{
-					{Name: "emit_scan_requested", Arguments: map[string]any{"entity_id": "corpus-1"}},
+					{Name: "emit_scan_requested", Arguments: map[string]any{}},
 				},
 			},
 			{Message: llm.Message{Role: "assistant", Content: "scan_requested emitted"}},
@@ -714,13 +708,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	}, rt, &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"scan.requested": {
-				Payload: runtimecontracts.EventPayloadSpec{
-					Type: "object",
-					Properties: map[string]runtimecontracts.EventFieldSpec{
-						"entity_id": {Type: "string"},
-					},
-					Required: []string{"entity_id"},
-				},
+				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
 			},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{

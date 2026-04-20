@@ -280,6 +280,7 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame
 		Source:  e.deps.Source,
 		FlowID:  req.FlowID.String(),
 		State:   state,
+		Event:   req.Event,
 		Payload: payload,
 	})
 	req.State = state
@@ -1159,6 +1160,7 @@ func mergeStateSnapshots(base, loaded StateSnapshot) StateSnapshot {
 
 func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx := WithPayload(frame.base, frame.payload)
+	ctx = WithEvent(ctx, frame.req.Event.ContextMap(frame.state.State.CurrentState))
 	ctx = WithAccumulated(ctx, frame.state.Accumulated)
 	ctx = WithFanOutItem(ctx, frame.state.FanOut)
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Metadata))
@@ -1390,7 +1392,6 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 		}
 	}
 	entityID := strings.TrimSpace(firstNonEmpty(
-		asString(payload["entity_id"]),
 		frame.req.EntityID.String(),
 	))
 	evt := events.Event{
@@ -1401,6 +1402,17 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 	}
 	if entityID != "" {
 		evt = evt.WithEntityID(entityID)
+	}
+	flowInstance := strings.Trim(strings.TrimSpace(firstNonEmpty(
+		frame.req.Event.FlowInstance(),
+		asString(frame.req.State.StateCarrier.Metadata["flow_path"]),
+	)), "/")
+	if flowInstance != "" {
+		evt = evt.WithFlowInstance(flowInstance)
+	}
+	evt.ParentEventID = strings.TrimSpace(frame.req.Event.ID)
+	if evt.TaskID == "" {
+		evt.TaskID = strings.TrimSpace(frame.req.Event.TaskID)
 	}
 	return EmitIntent{
 		Event:         evt,

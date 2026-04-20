@@ -1,4 +1,2 @@
-analysis.requested:
-  entity_id: string
-analysis.done:
-  entity_id: string
+analysis.requested: {}
+analysis.done: {}

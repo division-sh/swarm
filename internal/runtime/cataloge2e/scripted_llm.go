@@ -134,7 +134,7 @@ func defaultScriptedResponseForTools(session *llm.Session, content string) (llm.
 	if session == nil {
 		return llm.Response{}, false
 	}
-	eventType, entityID := parseAgentEventMessage(content)
+	eventType, _ := parseAgentEventMessage(content)
 	if strings.TrimSpace(eventType) == "" {
 		return llm.Response{}, false
 	}
@@ -148,15 +148,11 @@ func defaultScriptedResponseForTools(session *llm.Session, content string) (llm.
 	if len(emitTools) != 1 {
 		return llm.Response{}, false
 	}
-	args := map[string]any{}
-	if strings.TrimSpace(entityID) != "" {
-		args["entity_id"] = strings.TrimSpace(entityID)
-	}
 	return llm.Response{
 		Message: llm.Message{Role: "assistant", Content: ""},
 		ToolCalls: []llm.ToolCall{{
 			Name:      emitTools[0],
-			Arguments: args,
+			Arguments: map[string]any{},
 		}},
 	}, true
 }

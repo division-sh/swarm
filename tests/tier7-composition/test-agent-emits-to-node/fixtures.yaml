@@ -3,4 +3,4 @@ agent_fixtures:
     - on: task.assigned
       emits:
         - event: task.completed
-          payload: { entity_id: "{{entity_id}}" }
+          payload: {}

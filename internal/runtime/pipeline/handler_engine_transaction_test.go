@@ -197,8 +197,8 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
 		t.Fatalf("unmarshal emitted payload: %v", err)
 	}
-	if got := payload["entity_id"]; got != "env-ent" {
-		t.Fatalf("emitted payload entity_id = %#v, want env-ent", got)
+	if _, ok := payload["entity_id"]; ok {
+		t.Fatalf("emitted payload must not carry envelope entity_id: %#v", payload["entity_id"])
 	}
 }
 
@@ -1619,10 +1619,10 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
-				"entity_id":     runtimecontracts.CELExpression("payload.entity_id"),
-				"summary.stage": runtimecontracts.CELExpression("entity.current_state"),
-				"flags.ready":   runtimecontracts.CELExpression("true"),
-				"label":         runtimecontracts.CELExpression(`"done"`),
+				"summary.entity_id": runtimecontracts.CELExpression("event.entity_id"),
+				"summary.stage":     runtimecontracts.CELExpression("entity.current_state"),
+				"flags.ready":       runtimecontracts.CELExpression("true"),
+				"label":             runtimecontracts.CELExpression(`"done"`),
 			},
 		},
 	}, workflowTriggerContext{
@@ -1642,10 +1642,10 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if got := payload["entity_id"]; got != "ent-1" {
-		t.Fatalf("payload.entity_id = %#v, want ent-1", got)
-	}
 	summary, _ := payload["summary"].(map[string]any)
+	if got := summary["entity_id"]; got != "ent-1" {
+		t.Fatalf("payload.summary.entity_id = %#v, want ent-1", got)
+	}
 	if got := summary["stage"]; got != "queued" {
 		t.Fatalf("payload.summary.stage = %#v, want queued", got)
 	}
@@ -1655,6 +1655,9 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 	}
 	if got := payload["label"]; got != "done" {
 		t.Fatalf("payload.label = %#v, want done", got)
+	}
+	if _, ok := payload["entity_id"]; ok {
+		t.Fatalf("payload must not carry envelope entity_id: %#v", payload["entity_id"])
 	}
 }
 
@@ -2049,20 +2052,26 @@ func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t 
 	if got := payload["label"]; got != "done" {
 		t.Fatalf("payload.label = %#v, want done", got)
 	}
-	if got := payload["entity_id"]; got != "ent-1" {
-		t.Fatalf("payload.entity_id = %#v, want ent-1", got)
+	if _, ok := payload["entity_id"]; ok {
+		t.Fatalf("payload must not carry envelope entity_id: %#v", payload["entity_id"])
 	}
-	if got := payload["trigger_event_type"]; got != "custom.trigger" {
-		t.Fatalf("payload.trigger_event_type = %#v, want custom.trigger", got)
+	if _, ok := payload["trigger_event_type"]; ok {
+		t.Fatalf("payload must not carry envelope trigger_event_type: %#v", payload["trigger_event_type"])
 	}
-	if got := payload["current_state"]; got != "queued" {
-		t.Fatalf("payload.current_state = %#v, want queued", got)
+	if _, ok := payload["current_state"]; ok {
+		t.Fatalf("payload must not carry envelope current_state: %#v", payload["current_state"])
 	}
 	if _, ok := payload["legacy"]; ok {
 		t.Fatalf("legacy trigger payload leaked into emitted payload: %#v", payload["legacy"])
 	}
 	if _, ok := payload["legacy_entity"]; ok {
 		t.Fatalf("entity metadata leaked into emitted payload: %#v", payload["legacy_entity"])
+	}
+	if got := bus.publishedEvent(0).EntityID(); got != "ent-1" {
+		t.Fatalf("emitted event entity_id = %q, want ent-1", got)
+	}
+	if got := string(bus.publishedEvent(0).Type); got != "custom.emitted" {
+		t.Fatalf("emitted event type = %q, want custom.emitted", got)
 	}
 }
 
@@ -2093,20 +2102,23 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if got := payload["entity_id"]; got != "ent-1" {
-		t.Fatalf("payload.entity_id = %#v, want ent-1", got)
+	if _, ok := payload["entity_id"]; ok {
+		t.Fatalf("payload must not carry envelope entity_id: %#v", payload["entity_id"])
 	}
-	if got := payload["trigger_event_type"]; got != "custom.trigger" {
-		t.Fatalf("payload.trigger_event_type = %#v, want custom.trigger", got)
+	if _, ok := payload["trigger_event_type"]; ok {
+		t.Fatalf("payload must not carry envelope trigger_event_type: %#v", payload["trigger_event_type"])
 	}
-	if got := payload["current_state"]; got != "queued" {
-		t.Fatalf("payload.current_state = %#v, want queued", got)
+	if _, ok := payload["current_state"]; ok {
+		t.Fatalf("payload must not carry envelope current_state: %#v", payload["current_state"])
 	}
 	if _, ok := payload["score"]; ok {
 		t.Fatalf("guard escalation leaked trigger payload into emitted payload: %#v", payload["score"])
 	}
 	if _, ok := payload["legacy"]; ok {
 		t.Fatalf("guard escalation leaked legacy trigger payload into emitted payload: %#v", payload["legacy"])
+	}
+	if got := bus.publishedEvent(0).EntityID(); got != "ent-1" {
+		t.Fatalf("guard escalation event entity_id = %q, want ent-1", got)
 	}
 	if _, ok := payload["legacy_entity"]; ok {
 		t.Fatalf("guard escalation leaked entity metadata into emitted payload: %#v", payload["legacy_entity"])

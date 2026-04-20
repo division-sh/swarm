@@ -54,7 +54,6 @@ func (e Event) WithEntityID(entityID string) Event {
 	envelope.EntityID = entityID
 	envelope.Scope = inferEventScope(envelope.EntityID, envelope.FlowInstance)
 	e.Envelope = envelope
-	e.Payload = withEntityIDPayload(e.Payload, entityID)
 	return e
 }
 
@@ -67,8 +66,44 @@ func (e Event) WithFlowInstance(flowInstance string) Event {
 	envelope.FlowInstance = flowInstance
 	envelope.Scope = inferEventScope(envelope.EntityID, envelope.FlowInstance)
 	e.Envelope = envelope
-	e.Payload = withPayloadString(e.Payload, "flow_instance", flowInstance)
 	return e
+}
+
+func (e Event) ContextMap(currentState string) map[string]any {
+	out := map[string]any{}
+	if id := strings.TrimSpace(e.ID); id != "" {
+		out["id"] = id
+	}
+	if eventType := strings.TrimSpace(string(e.Type)); eventType != "" {
+		out["type"] = eventType
+		out["trigger_event_type"] = eventType
+	}
+	if sourceAgent := strings.TrimSpace(e.SourceAgent); sourceAgent != "" {
+		out["source_agent"] = sourceAgent
+	}
+	if taskID := strings.TrimSpace(e.TaskID); taskID != "" {
+		out["task_id"] = taskID
+	}
+	envelope := e.NormalizedEnvelope()
+	if envelope.EntityID != "" {
+		out["entity_id"] = envelope.EntityID
+	}
+	if envelope.FlowInstance != "" {
+		out["flow_instance"] = envelope.FlowInstance
+	}
+	if envelope.Scope != "" {
+		out["scope"] = string(envelope.Scope)
+	}
+	if currentState = strings.TrimSpace(currentState); currentState != "" {
+		out["current_state"] = currentState
+	}
+	if parentEventID := strings.TrimSpace(e.ParentEventID); parentEventID != "" {
+		out["source_event_id"] = parentEventID
+	}
+	if !e.CreatedAt.IsZero() {
+		out["emitted_at"] = e.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return out
 }
 
 func (e Event) EntityID() string {
@@ -123,30 +158,6 @@ func normalizeEventScope(scope EventScope) EventScope {
 	default:
 		return ""
 	}
-}
-
-func withEntityIDPayload(raw json.RawMessage, entityID string) json.RawMessage {
-	return withPayloadString(raw, "entity_id", entityID)
-}
-
-func withPayloadString(raw json.RawMessage, key, value string) json.RawMessage {
-	key = strings.TrimSpace(key)
-	value = strings.TrimSpace(value)
-	if key == "" || value == "" {
-		return raw
-	}
-	payload := map[string]any{}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
-			return raw
-		}
-	}
-	payload[key] = value
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return raw
-	}
-	return encoded
 }
 
 func asString(v any) string {

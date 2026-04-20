@@ -164,7 +164,6 @@ func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontra
 	}
 	eventType := eventidentity.ExternalizeForFlow(flowPath, []string{autoEmit}, autoEmit)
 	payload := map[string]any{
-		"entity_id":        flowEntityID,
 		"instance_id":      instanceID,
 		"template_id":      templateID,
 		"flow_path":        flowPath,

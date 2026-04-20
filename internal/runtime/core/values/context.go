@@ -4,6 +4,7 @@ import "swarm/internal/runtime/core/paths"
 
 type Context struct {
 	Entity      Bucket
+	Event       Bucket
 	Policy      Bucket
 	Metadata    Bucket
 	Gates       Bucket
@@ -16,6 +17,7 @@ type Context struct {
 func NewContext() Context {
 	return Context{
 		Entity:      Wrap(map[string]any{}),
+		Event:       Wrap(map[string]any{}),
 		Policy:      Wrap(map[string]any{}),
 		Metadata:    Wrap(map[string]any{}),
 		Gates:       Wrap(map[string]any{}),
@@ -29,6 +31,7 @@ func NewContext() Context {
 func (c Context) Clone() Context {
 	return Context{
 		Entity:      c.Entity.Clone(),
+		Event:       c.Event.Clone(),
 		Policy:      c.Policy.Clone(),
 		Metadata:    c.Metadata.Clone(),
 		Gates:       c.Gates.Clone(),
@@ -41,6 +44,11 @@ func (c Context) Clone() Context {
 
 func (c Context) WithPayload(payload map[string]any) Context {
 	c.Payload = Wrap(payload).Clone()
+	return c
+}
+
+func (c Context) WithEvent(event map[string]any) Context {
+	c.Event = Wrap(event).Clone()
 	return c
 }
 
@@ -58,6 +66,8 @@ func (c Context) Bucket(root paths.PathRoot) Bucket {
 	switch root {
 	case paths.RootEntity:
 		return c.Entity
+	case paths.RootEvent:
+		return c.Event
 	case paths.RootPolicy:
 		return c.Policy
 	case paths.RootMetadata:
