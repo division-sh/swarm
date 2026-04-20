@@ -227,6 +227,47 @@ func TestExecutor_ValidateRequestRejectsConflictingCompletionDialect(t *testing.
 	}
 }
 
+func TestExecutionScopeResolveOperand_AllowsEventRoot(t *testing.T) {
+	scope := newExecutionScope(
+		nil,
+		map[string]any{"entity_id": "payload-entity"},
+		map[string]any{"entity_id": "event-entity"},
+		nil,
+		nil,
+	)
+
+	got, err := scope.resolveOperand("event.entity_id", executionOperandDefaultNone)
+	if err != nil {
+		t.Fatalf("resolveOperand(event.entity_id) error: %v", err)
+	}
+	if got != "event-entity" {
+		t.Fatalf("resolveOperand(event.entity_id) = %#v, want event-entity", got)
+	}
+}
+
+func TestCompiledExecutionCondition_AllowsEventRoot(t *testing.T) {
+	compiled, err := compileExecutionCondition(`event.entity_id == "event-entity"`)
+	if err != nil {
+		t.Fatalf("compileExecutionCondition error: %v", err)
+	}
+
+	scope := newExecutionScope(
+		nil,
+		map[string]any{"entity_id": "payload-entity"},
+		map[string]any{"entity_id": "event-entity"},
+		nil,
+		nil,
+	)
+
+	ok, err := compiled.Eval(scope)
+	if err != nil {
+		t.Fatalf("compiled condition Eval error: %v", err)
+	}
+	if !ok {
+		t.Fatal("compiled condition evaluated false, want true")
+	}
+}
+
 func TestExecutor_ValidateRequestRejectsCreateEntityWithAccumulate(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),

@@ -481,6 +481,7 @@ func executionItems(value any) []any {
 type executionScope struct {
 	Item    any
 	Payload map[string]any
+	Event   map[string]any
 	Entity  map[string]any
 	Policy  map[string]any
 }
@@ -497,10 +498,11 @@ type compiledExecutionCondition struct {
 	program    cel.Program
 }
 
-func newExecutionScope(item any, payload, entity, policy map[string]any) executionScope {
+func newExecutionScope(item any, payload, event, entity, policy map[string]any) executionScope {
 	return executionScope{
 		Item:    normalizeCELValue(item),
 		Payload: normalizedCELInputMap(payload),
+		Event:   normalizedCELInputMap(event),
 		Entity:  normalizedCELInputMap(entity),
 		Policy:  normalizedCELInputMap(policy),
 	}
@@ -510,6 +512,7 @@ func (s executionScope) activation() map[string]any {
 	return map[string]any{
 		"item":    s.Item,
 		"payload": s.Payload,
+		"event":   s.Event,
 		"entity":  s.Entity,
 		"policy":  s.Policy,
 	}
@@ -520,6 +523,7 @@ func executionConditionEnv() (*cel.Env, error) {
 		executionConditionEnvRef, executionConditionEnvErr = cel.NewEnv(
 			cel.Variable("item", cel.DynType),
 			cel.Variable("payload", cel.DynType),
+			cel.Variable("event", cel.DynType),
 			cel.Variable("entity", cel.DynType),
 			cel.Variable("policy", cel.DynType),
 		)
@@ -629,6 +633,8 @@ func (s executionScope) lookupExplicitRoot(root paths.PathRoot, segments []strin
 	switch root {
 	case paths.RootPayload:
 		return lookupExecutionOperandPath(s.Payload, segments)
+	case paths.RootEvent:
+		return lookupExecutionOperandPath(s.Event, segments)
 	case paths.RootEntity:
 		return lookupExecutionOperandPath(s.Entity, segments)
 	case paths.RootPolicy:

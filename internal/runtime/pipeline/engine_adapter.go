@@ -810,9 +810,6 @@ func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType s
 	allowed := eventPayloadProperties(proof.Entry)
 	validationPayload := cloneStringAnyMap(payload)
 	if surface != runtimeengine.EmitSurfaceDeclarative {
-		for key, value := range envelope {
-			validationPayload[key] = value
-		}
 		validationPayload = runtimeeventpayload.StripUndeclaredRuntimeOwnedCanonicalContext(validationPayload, allowed)
 	}
 	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, validationPayload); err != nil {
