@@ -303,7 +303,25 @@ func emitSchemaForEventType(activeSchemas map[string]EmitSchema, eventType strin
 		return EmitSchema{}, false
 	}
 	schema, ok := activeSchemas[local]
-	return schema, ok
+	if ok {
+		return schema, true
+	}
+	var matched EmitSchema
+	matchCount := 0
+	for schemaEventType, schema := range activeSchemas {
+		if localEmitEventType(schemaEventType) != local {
+			continue
+		}
+		matched = schema
+		matchCount++
+		if matchCount > 1 {
+			return EmitSchema{}, false
+		}
+	}
+	if matchCount == 1 {
+		return matched, true
+	}
+	return EmitSchema{}, false
 }
 
 func missingProducerEventSchemas(producerRoles func() []string, producerEvents func(string) []string, registry map[string]EmitSchema) []string {
