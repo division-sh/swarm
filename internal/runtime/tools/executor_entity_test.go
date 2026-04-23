@@ -668,6 +668,75 @@ terminal_states: [killed]
 	}
 }
 
+func TestEntityTools_QueryEntitiesFilterAllowsDeclaredNestedLeaf(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutor(t)
+	_ = mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "review/inst-1",
+		"fields": map[string]any{
+			"status":   "open",
+			"metadata": map[string]any{"region": "us"},
+		},
+	})
+
+	out, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"filter": `entity.metadata.region == "us"`,
+		"select": []string{"status", "metadata.region"},
+		"limit":  10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities with declared nested leaf: %v", err)
+	}
+	result, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected query result map, got %#v", out)
+	}
+	rows, ok := result["results"].([]map[string]any)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("unexpected query results: %#v", result["results"])
+	}
+	if got := strings.TrimSpace(asString(rows[0]["status"])); got != "open" {
+		t.Fatalf("status = %q, want open", got)
+	}
+	if got := strings.TrimSpace(asString(rows[0]["metadata.region"])); got != "us" {
+		t.Fatalf("metadata.region = %q, want us", got)
+	}
+}
+
+func TestEntityTools_QueryEntitiesFilterRejectsUndeclaredFieldBeforeEvalWithNearestMatch(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutor(t)
+
+	_, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"filter": `entity.metadata.regoin == "us"`,
+		"limit":  10,
+	})
+	re, ok := runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "invalid_tool_input" {
+		t.Fatalf("expected invalid_tool_input, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "entity.metadata.regoin") {
+		t.Fatalf("expected undeclared filter field in error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "did you mean entity.metadata.region?") {
+		t.Fatalf("expected nearest-match guidance, got %v", err)
+	}
+}
+
+func TestEntityTools_QueryMetricsFilterRejectsUndeclaredFieldBeforeEval(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutor(t)
+
+	_, err := exec.Execute(ctx, "query_metrics", map[string]any{
+		"metric": "count",
+		"filter": `metadata.regoin == "us"`,
+	})
+	re, ok := runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "invalid_tool_input" {
+		t.Fatalf("expected invalid_tool_input, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "metadata.regoin") {
+		t.Fatalf("expected undeclared metric filter field in error, got %v", err)
+	}
+}
+
 func TestEntityTools_GetSubjectStatusReturnsEmptyForUnknownSubject(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
 	subjectID := uuid.NewString()

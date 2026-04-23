@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/cel-go/cel"
+	celast "github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/common/types"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/entityruntime"
@@ -219,6 +220,9 @@ func filterEntityStateRowsCEL(expression string, rows []map[string]any, schema e
 	if err != nil {
 		return nil, err
 	}
+	if err := validateEntityFilterExpression(env, expression, schema); err != nil {
+		return nil, err
+	}
 	ast, issues := env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
 		return nil, issues.Err()
@@ -262,6 +266,247 @@ func newEntityFilterEnv(schema entityToolSchema) (*cel.Env, error) {
 		decls = append(decls, cel.Variable(key, cel.DynType))
 	}
 	return cel.NewEnv(decls...)
+}
+
+type entityFilterSelectorReference struct {
+	Path         string
+	EntityScoped bool
+}
+
+func (r entityFilterSelectorReference) display() string {
+	path := strings.TrimSpace(r.Path)
+	if path == "" {
+		return ""
+	}
+	if r.EntityScoped {
+		return "entity." + path
+	}
+	return path
+}
+
+func validateEntityFilterExpression(env *cel.Env, expression string, schema entityToolSchema) error {
+	if env == nil {
+		return fmt.Errorf("entity filter environment is not configured")
+	}
+	parsed, issues := env.Parse(expression)
+	if issues != nil && issues.Err() != nil {
+		return issues.Err()
+	}
+	for _, ref := range entityFilterSelectorReferences(parsed) {
+		if err := validateEntityFilterSelectorReference(schema, ref); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func entityFilterSelectorReferences(parsed *cel.Ast) []entityFilterSelectorReference {
+	if parsed == nil || parsed.NativeRep() == nil {
+		return nil
+	}
+	root := celast.NavigateAST(parsed.NativeRep())
+	seen := map[string]struct{}{}
+	refs := make([]entityFilterSelectorReference, 0)
+	var visit func(expr celast.NavigableExpr)
+	visit = func(expr celast.NavigableExpr) {
+		if expr.Kind() == celast.SelectKind && !entityFilterSelectorHasParent(expr) {
+			if ref, ok := entityFilterSelectorReferenceFromExpr(expr); ok {
+				key := fmt.Sprintf("%t:%s", ref.EntityScoped, ref.Path)
+				if _, exists := seen[key]; !exists {
+					seen[key] = struct{}{}
+					refs = append(refs, ref)
+				}
+			}
+		}
+		for _, child := range expr.Children() {
+			visit(child)
+		}
+	}
+	visit(root)
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].EntityScoped != refs[j].EntityScoped {
+			return !refs[i].EntityScoped && refs[j].EntityScoped
+		}
+		return refs[i].Path < refs[j].Path
+	})
+	return refs
+}
+
+func entityFilterSelectorHasParent(expr celast.NavigableExpr) bool {
+	parent, ok := expr.Parent()
+	if !ok || parent.Kind() != celast.SelectKind {
+		return false
+	}
+	return parent.AsSelect().Operand().ID() == expr.ID()
+}
+
+func entityFilterSelectorReferenceFromExpr(expr celast.Expr) (entityFilterSelectorReference, bool) {
+	if expr == nil || expr.Kind() != celast.SelectKind {
+		return entityFilterSelectorReference{}, false
+	}
+	selector := expr.AsSelect()
+	base, ok := entityFilterSelectorBase(selector.Operand())
+	if !ok {
+		return entityFilterSelectorReference{}, false
+	}
+	path := strings.TrimSpace(base.Path)
+	field := strings.TrimSpace(selector.FieldName())
+	if path == "" {
+		path = field
+	} else {
+		path = path + "." + field
+	}
+	return entityFilterSelectorReference{Path: path, EntityScoped: base.EntityScoped}, true
+}
+
+func entityFilterSelectorBase(expr celast.Expr) (entityFilterSelectorReference, bool) {
+	if expr == nil {
+		return entityFilterSelectorReference{}, false
+	}
+	switch expr.Kind() {
+	case celast.IdentKind:
+		name := strings.TrimSpace(expr.AsIdent())
+		if name == "" {
+			return entityFilterSelectorReference{}, false
+		}
+		if name == "entity" {
+			return entityFilterSelectorReference{EntityScoped: true}, true
+		}
+		return entityFilterSelectorReference{Path: name}, true
+	case celast.SelectKind:
+		return entityFilterSelectorReferenceFromExpr(expr)
+	default:
+		return entityFilterSelectorReference{}, false
+	}
+}
+
+func validateEntityFilterSelectorReference(schema entityToolSchema, ref entityFilterSelectorReference) error {
+	if err := validateEntitySelector(schema, ref.Path); err != nil {
+		return decorateEntityFilterSelectorError(schema, ref, err)
+	}
+	return nil
+}
+
+func decorateEntityFilterSelectorError(schema entityToolSchema, ref entityFilterSelectorReference, err error) error {
+	if err == nil {
+		return nil
+	}
+	if !entityFilterUndeclaredPathError(err) {
+		return err
+	}
+	display := ref.display()
+	if display == "" {
+		return err
+	}
+	if suggestion := nearestEntityFilterSelector(schema, ref); suggestion != "" {
+		return fmt.Errorf("%w: undeclared field %s (did you mean %s?)", ErrUnknownEntityField, display, suggestion)
+	}
+	return fmt.Errorf("%w: undeclared field %s", ErrUnknownEntityField, display)
+}
+
+func entityFilterUndeclaredPathError(err error) bool {
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(text, "undeclared field") || strings.Contains(text, "undeclared path")
+}
+
+func nearestEntityFilterSelector(schema entityToolSchema, ref entityFilterSelectorReference) string {
+	candidates := entityToolSelectableFieldNames(schema.Contract)
+	if len(candidates) == 0 {
+		return ""
+	}
+	path := strings.TrimSpace(ref.Path)
+	if path == "" {
+		return ""
+	}
+	best := ""
+	bestScore := -1
+	inputParent, inputLeaf := entityFilterPathParentAndLeaf(path)
+	for _, candidate := range candidates {
+		score := levenshteinDistance(strings.ToLower(path), strings.ToLower(candidate))
+		candidateParent, candidateLeaf := entityFilterPathParentAndLeaf(candidate)
+		if inputParent != "" && candidateParent == inputParent {
+			if leafScore := levenshteinDistance(strings.ToLower(inputLeaf), strings.ToLower(candidateLeaf)); leafScore < score {
+				score = leafScore
+			}
+		}
+		if bestScore == -1 || score < bestScore || (score == bestScore && candidate < best) {
+			best = candidate
+			bestScore = score
+		}
+	}
+	if best == "" || bestScore > entityFilterSuggestionThreshold(path) {
+		return ""
+	}
+	if ref.EntityScoped {
+		return "entity." + best
+	}
+	return best
+}
+
+func entityFilterPathParentAndLeaf(path string) (string, string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", ""
+	}
+	idx := strings.LastIndex(path, ".")
+	if idx < 0 {
+		return "", path
+	}
+	return strings.TrimSpace(path[:idx]), strings.TrimSpace(path[idx+1:])
+}
+
+func entityFilterSuggestionThreshold(path string) int {
+	path = strings.TrimSpace(path)
+	switch {
+	case len(path) <= 6:
+		return 2
+	case len(path) <= 16:
+		return 3
+	default:
+		return 4
+	}
+}
+
+func levenshteinDistance(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if a == "" {
+		return len(b)
+	}
+	if b == "" {
+		return len(a)
+	}
+	prev := make([]int, len(b)+1)
+	curr := make([]int, len(b)+1)
+	for j := 0; j <= len(b); j++ {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+			insert := curr[j-1] + 1
+			delete := prev[j] + 1
+			replace := prev[j-1] + cost
+			curr[j] = minEntityFilterDistance(insert, delete, replace)
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(b)]
+}
+
+func minEntityFilterDistance(values ...int) int {
+	best := values[0]
+	for _, value := range values[1:] {
+		if value < best {
+			best = value
+		}
+	}
+	return best
 }
 
 func entityCELActivation(row map[string]any, schema entityToolSchema) map[string]any {
