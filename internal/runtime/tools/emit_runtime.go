@@ -224,6 +224,49 @@ func (r *EmitRegistry) ValidateEventPayloadAgainstSchema(eventType string, paylo
 	return ValidatePayloadAgainstSchema(r.SchemaForEventType(eventType).Schema, payload)
 }
 
+func (r *EmitRegistry) EventSchemaForActorTool(actor models.AgentConfig, toolName string) (string, EmitSchema, bool) {
+	if r == nil {
+		return "", EmitSchema{}, false
+	}
+	toolName = normalizeNativeToolName(toolName)
+	if toolName == "" {
+		return "", EmitSchema{}, false
+	}
+	if configured := UniqueNonEmpty(actor.EmitEvents); len(configured) > 0 {
+		var matchedEventType string
+		var matchedSchema EmitSchema
+		matchCount := 0
+		for _, eventType := range configured {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" || EmitToolName(eventType) != toolName {
+				continue
+			}
+			schema, ok := r.schemaForActorEvent(actor, eventType)
+			if !ok {
+				continue
+			}
+			matchedEventType = eventType
+			matchedSchema = schema
+			matchCount++
+		}
+		if matchCount == 1 {
+			return matchedEventType, matchedSchema, true
+		}
+		if matchCount > 1 {
+			return "", EmitSchema{}, false
+		}
+	}
+	eventType, ok := r.EventTypeFromToolName(toolName)
+	if !ok {
+		return "", EmitSchema{}, false
+	}
+	schema, ok := emitSchemaForEventType(r.activeSchemas, eventType)
+	if !ok {
+		return "", EmitSchema{}, false
+	}
+	return eventType, schema, true
+}
+
 func (r *EmitRegistry) IsEmitToolAllowedForRole(role, toolName string) bool {
 	if r == nil {
 		return false
@@ -244,7 +287,7 @@ func (r *EmitRegistry) IsEmitToolAllowedForActor(actor models.AgentConfig, toolN
 	if r == nil {
 		return false
 	}
-	eventType, ok := r.EventTypeFromToolName(toolName)
+	eventType, _, ok := r.EventSchemaForActorTool(actor, toolName)
 	if !ok {
 		return false
 	}

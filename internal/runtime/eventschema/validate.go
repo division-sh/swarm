@@ -172,7 +172,7 @@ func valueInEnum(value any, enumRaw any) bool {
 		switch t := enumRaw.(type) {
 		case []string:
 			for _, v := range t {
-				if strings.EqualFold(strings.TrimSpace(asString(value)), strings.TrimSpace(v)) {
+				if strings.TrimSpace(asString(value)) == strings.TrimSpace(v) {
 					return true
 				}
 			}
@@ -182,7 +182,7 @@ func valueInEnum(value any, enumRaw any) bool {
 		}
 	}
 	for _, v := range enum {
-		if strings.EqualFold(strings.TrimSpace(asString(value)), strings.TrimSpace(asString(v))) {
+		if strings.TrimSpace(asString(value)) == strings.TrimSpace(asString(v)) {
 			return true
 		}
 	}

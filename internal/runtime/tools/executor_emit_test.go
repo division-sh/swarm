@@ -266,6 +266,117 @@ func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 	}
 }
 
+func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testing.T) {
+	reviewFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Path:  "review",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"details": {Type: "ReviewRequest"},
+					},
+					Required: []string{"details"},
+				},
+			},
+		},
+	}
+	validationFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Path:  "validation",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"details": {Type: "ValidationRequest"},
+					},
+					Required: []string{"details"},
+				},
+			},
+		},
+	}
+	root := &runtimecontracts.FlowContractView{
+		Children: []runtimecontracts.FlowContractView{reviewFlow, validationFlow},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{
+			Enums: map[string]runtimecontracts.EnumTypeDecl{
+				"ReviewPriority":     {Values: []string{"urgent"}},
+				"ValidationPriority": {Values: []string{"low"}},
+			},
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"ReviewRequest": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"priority": {Type: "ReviewPriority"},
+					},
+				},
+				"ValidationRequest": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"priority": {Type: "ValidationPriority"},
+					},
+				},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"review":     &root.Children[0],
+				"validation": &root.Children[1],
+			},
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				"review":     &root.Children[0],
+				"validation": &root.Children[1],
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+
+	reviewActor := models.AgentConfig{
+		ID:         "review-agent",
+		Role:       "reviewer",
+		Mode:       "review",
+		FlowPath:   "review",
+		EmitEvents: []string{"review/task.requested"},
+	}
+	_, err := exec.handleEmitTool(context.Background(), reviewActor, "emit_task_requested", map[string]any{
+		"details": map[string]any{
+			"priority": "urgent",
+		},
+	})
+	if err != nil {
+		t.Fatalf("review handleEmitTool: %v", err)
+	}
+	if got, want := string(bus.event.Type), "review/task.requested"; got != want {
+		t.Fatalf("review published event type = %q, want %q", got, want)
+	}
+
+	validationActor := models.AgentConfig{
+		ID:         "validation-agent",
+		Role:       "validator",
+		Mode:       "validation",
+		FlowPath:   "validation",
+		EmitEvents: []string{"validation/task.requested"},
+	}
+	_, err = exec.handleEmitTool(context.Background(), validationActor, "emit_task_requested", map[string]any{
+		"details": map[string]any{
+			"priority": "low",
+		},
+	})
+	if err != nil {
+		t.Fatalf("validation handleEmitTool: %v", err)
+	}
+	if got, want := string(bus.event.Type), "validation/task.requested"; got != want {
+		t.Fatalf("validation published event type = %q, want %q", got, want)
+	}
+	if bus.count != 2 {
+		t.Fatalf("publish count = %d, want 2", bus.count)
+	}
+}
+
 func TestHandleEmitTool_FailsClosedOnNamedTypeViolation(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
