@@ -416,6 +416,10 @@ func defaultValue(contract Contract, typeRef string, explicit any) (any, error) 
 		return false, nil
 	case isTimestampType(contract, typeRef), isUUIDType(contract, typeRef):
 		return nil, nil
+	case isJSONObjectType(contract, typeRef):
+		return map[string]any{}, nil
+	case isJSONArrayType(contract, typeRef):
+		return []any{}, nil
 	case isEnumType(contract, typeRef):
 		enum := contract.Types.Enums[typeName(contract, typeRef)]
 		if len(enum.Values) == 0 {
@@ -491,6 +495,18 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 			return nil, fieldTypeError(fieldName, "must be boolean")
 		}
 		return boolean, nil
+	case isJSONObjectType(contract, typeRef):
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil, fieldTypeError(fieldName, "must be object")
+		}
+		return cloneMap(object), nil
+	case isJSONArrayType(contract, typeRef):
+		items, ok := listValues(value)
+		if !ok {
+			return nil, fieldTypeError(fieldName, "must be array")
+		}
+		return cloneValue(items), nil
 	case isTimestampType(contract, typeRef):
 		switch typed := value.(type) {
 		case time.Time:
@@ -581,6 +597,10 @@ func pathKind(contract Contract, typeRef string) string {
 		return "scalar"
 	case isBooleanType(contract, typeRef):
 		return "scalar"
+	case isJSONObjectType(contract, typeRef):
+		return "object"
+	case isJSONArrayType(contract, typeRef):
+		return "list"
 	case isTimestampType(contract, typeRef):
 		return "scalar"
 	case isUUIDType(contract, typeRef):
@@ -645,11 +665,20 @@ func isIntegerType(contract Contract, typeRef string) bool {
 
 func isNumericType(contract Contract, typeRef string) bool {
 	raw := strings.ToLower(strings.TrimSpace(typeName(contract, typeRef)))
-	return raw == "numeric" || strings.HasPrefix(raw, "numeric(")
+	return raw == "numeric" || raw == "number" || raw == "float" || raw == "double" || raw == "real" || strings.HasPrefix(raw, "numeric(")
 }
 
 func isBooleanType(contract Contract, typeRef string) bool {
 	return strings.EqualFold(typeName(contract, typeRef), "boolean")
+}
+
+func isJSONObjectType(contract Contract, typeRef string) bool {
+	raw := strings.ToLower(strings.TrimSpace(typeName(contract, typeRef)))
+	return raw == "json" || raw == "object"
+}
+
+func isJSONArrayType(contract Contract, typeRef string) bool {
+	return strings.EqualFold(typeName(contract, typeRef), "array")
 }
 
 func isTimestampType(contract Contract, typeRef string) bool {

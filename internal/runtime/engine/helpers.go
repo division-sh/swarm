@@ -168,6 +168,18 @@ func setParsedValuePath(target map[string]any, path paths.Path, value any) {
 	values.Wrap(target).SetPath(path, value)
 }
 
+func normalizeStateField(field string) string {
+	field = strings.TrimSpace(field)
+	switch {
+	case strings.HasPrefix(field, "entity."):
+		return strings.TrimSpace(strings.TrimPrefix(field, "entity."))
+	case strings.HasPrefix(field, "metadata."):
+		return strings.TrimSpace(strings.TrimPrefix(field, "metadata."))
+	default:
+		return field
+	}
+}
+
 func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapshot *StateSnapshot, spec runtimecontracts.WorkflowDataAccumulation) error {
 	if snapshot == nil || len(spec.Writes) == 0 {
 		return nil

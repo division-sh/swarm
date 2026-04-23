@@ -1415,6 +1415,53 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	}
 }
 
+func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSourceWithRootEntityContract(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	initial := testStateSnapshot("pending", map[string]any{
+		"dedup_key":         "dup-1",
+		"accumulated_total": 5,
+		"received_items":    []any{"a"},
+	}, nil, map[string]map[string]any{
+		"node-1": {
+			handlerAccumulatorBucketKey: map[string]any{"items": []any{"a"}},
+		},
+	})
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "root",
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup", "accumulator_state"}},
+		},
+		State: initial,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if _, ok := result.StateMutation.Metadata["dedup_key"]; ok {
+		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", result.StateMutation.Metadata)
+	}
+	if _, ok := result.StateMutation.Metadata["received_items"]; ok {
+		t.Fatalf("expected received_items to be cleared, metadata=%#v", result.StateMutation.Metadata)
+	}
+	if nodeBucket, ok := result.StateMutation.StateBuckets["node-1"]; ok {
+		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
+			t.Fatalf("expected accumulator bucket to be cleared, state_buckets=%#v", result.StateMutation.StateBuckets)
+		}
+	}
+}
+
 func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),
@@ -1485,6 +1532,40 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	}
 	if result.NextState != "scanning" {
 		t.Fatalf("NextState = %q", result.NextState)
+	}
+	if got := result.StateMutation.Metadata["fan_out_count"]; got != 0 {
+		t.Fatalf("fan_out_count metadata = %#v", got)
+	}
+}
+
+func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSourceWithRootEntityContract(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "root",
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"items":[]}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			FanOut: &runtimecontracts.FanOutSpec{
+				ItemsFrom: "payload.items",
+				Emit:      runtimecontracts.EmitSpec{Event: "item.process"},
+			},
+			AdvancesTo: "scanning",
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
 	}
 	if got := result.StateMutation.Metadata["fan_out_count"]; got != 0 {
 		t.Fatalf("fan_out_count metadata = %#v", got)

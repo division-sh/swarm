@@ -228,11 +228,11 @@ func validateHandlerEntityWriteTargets(source semanticview.Source, flowID string
 		}
 	}
 	if handler.Clear != nil {
-		if err := validateTarget("handler.clear", handler.Clear.Target); err != nil {
+		if err := validateHandlerClearTarget(source, flowID, handler.Clear.Target); err != nil {
 			return err
 		}
 		for _, target := range handler.Clear.Targets {
-			if err := validateTarget("handler.clear", target); err != nil {
+			if err := validateHandlerClearTarget(source, flowID, target); err != nil {
 				return err
 			}
 		}
@@ -274,6 +274,18 @@ func validateHandlerEntityWriteTargets(source semanticview.Source, flowID string
 	return nil
 }
 
+func validateHandlerClearTarget(source semanticview.Source, flowID, target string) error {
+	target = strings.TrimSpace(target)
+	if target == "" || specialHandlerClearTarget(target) {
+		return nil
+	}
+	_, _, _, err := resolveHandlerEntityWriteTarget(source, flowID, target)
+	if err != nil {
+		return fmt.Errorf("handler.clear target %q is invalid: %w", target, err)
+	}
+	return nil
+}
+
 func resolveHandlerEntityWriteTarget(source semanticview.Source, flowID, target string) (entityruntime.Contract, entityruntime.WriteTarget, bool, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -289,6 +301,11 @@ func resolveHandlerEntityWriteTarget(source semanticview.Source, flowID, target 
 		Path:      path,
 		RootField: strings.TrimSpace(rootField),
 		Nested:    strings.Contains(path, "."),
+	}
+	// #512 is the nested-write slice. Preserve legacy top-level handler targets
+	// while enforcing declared-path resolution only for dotted writes.
+	if !unvalidated.Nested {
+		return entityruntime.Contract{}, unvalidated, true, nil
 	}
 	contract, ok := entityruntime.ResolveForFlow(source, flowID)
 	if !ok {
@@ -818,9 +835,21 @@ func (e *Executor) stepCompute(frame *executionFrame) error {
 		return err
 	}
 	if storeAs := strings.TrimSpace(spec.StoreAs); storeAs != "" {
-		if err := e.writeStepValue(frame, storeAs, value); err != nil {
-			return err
+		if handlerTargetRequiresCanonicalWrite(storeAs) {
+			if err := e.writeStepValue(frame, storeAs, value); err != nil {
+				return err
+			}
+			return nil
 		}
+		field := normalizeStateField(storeAs)
+		if field == "" {
+			field = "computed"
+		}
+		frame.state.SetComputed(field, value)
+		frame.result.SetComputed(field, value)
+		frame.state.State.SetMetadata(field, value)
+		frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+		frame.result.StateMutation.SetMetadata(field, value)
 		return nil
 	}
 	frame.state.SetComputed("computed", value)
@@ -829,6 +858,31 @@ func (e *Executor) stepCompute(frame *executionFrame) error {
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	frame.result.StateMutation.SetMetadata("computed", value)
 	return nil
+}
+
+func handlerTargetRequiresCanonicalWrite(target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	parsed := paths.Parse(target)
+	if parsed.HasExplicitRoot() {
+		return true
+	}
+	path, entityTarget, err := entityruntime.EntityWritePath(target)
+	if err != nil || !entityTarget {
+		return false
+	}
+	return strings.Contains(path, ".")
+}
+
+func specialHandlerClearTarget(target string) bool {
+	switch strings.TrimSpace(target) {
+	case "accumulator_state", "cycle_counters", "pending_dedup":
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
@@ -842,9 +896,10 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	frame.state.FanOut = map[string]any{}
 	frame.state.SetFanOut("target", spec.Target)
 	frame.state.SetFanOut("count", len(items))
-	if err := e.writeStepValue(frame, "entity.fan_out_count", len(items)); err != nil {
-		return false, err
-	}
+	// fan_out_count is platform-populated runtime bookkeeping, not an authored
+	// entity write target.
+	frame.state.State.SetMetadata("fan_out_count", len(items))
+	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	if len(items) == 0 {
 		return false, nil
 	}
