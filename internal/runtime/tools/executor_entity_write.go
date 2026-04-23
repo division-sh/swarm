@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	models "swarm/internal/runtime/core/actors"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/entityruntime"
@@ -52,9 +54,6 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, err, "validate field")
 	}
-	if strings.TrimSpace(field.Path) != fieldName {
-		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, "nested writes are not supported in Wave 1")
-	}
 	currentFields := entityRowFieldMap(row)
 	value, err := normalizeEntityFieldValue(schema, field, payload["value"])
 	if err != nil {
@@ -65,7 +64,7 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		if currentErr != nil {
 			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, currentErr, "resolve immutable current value")
 		}
-		if currentValue, exists := materializedCurrent[fieldName]; exists && !valuesEqual(currentValue, value) {
+		if currentValue, exists := entityruntime.PathValue(materializedCurrent, field.Path); exists && !valuesEqual(currentValue, value) {
 			return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, "immutable field %s cannot be changed after create", fieldName)
 		}
 	}
@@ -83,14 +82,19 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 			_ = tx.Rollback()
 		}
 	}()
+	pathSegments, err := entityJSONPathSegments(field.Path)
+	if err != nil {
+		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, err.Error())
+	}
+	pathArray := pq.Array(pathSegments)
 
 	var oldValue []byte
 	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(fields -> $2, 'null'::jsonb)
+		SELECT COALESCE(COALESCE(fields, '{}'::jsonb) #> $2::text[], 'null'::jsonb)
 		FROM entity_state
 		WHERE entity_id = $1::uuid
 		FOR UPDATE
-	`, entityID, fieldName).Scan(&oldValue); err != nil {
+	`, entityID, pathArray).Scan(&oldValue); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, NewRuntimeError("not_found", "tool-executor", "exec_save_entity_field.lookup", false, "entity %s not found", entityID)
 		}
@@ -101,21 +105,21 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	if err := tx.QueryRowContext(ctx, `
 		UPDATE entity_state
 		SET
-			fields = jsonb_set(COALESCE(fields, '{}'::jsonb), ARRAY[$2], $3::jsonb, true),
+			fields = jsonb_set(COALESCE(fields, '{}'::jsonb), $2::text[], $3::jsonb, true),
 			revision = revision + 1,
 			updated_at = now()
 		WHERE entity_id = $1::uuid
 		RETURNING revision
-	`, entityID, fieldName, string(valueJSON)).Scan(&revision); err != nil {
+	`, entityID, pathArray, string(valueJSON)).Scan(&revision); err != nil {
 		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.update", true, err, "save entity field %s", fieldName)
 	}
 	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, entityID, runtimemutationlog.EntityStateProjection{
 		Fields: map[string]any{
-			fieldName: nullableJSONBytes(oldValue),
+			field.Path: nullableJSONBytes(oldValue),
 		},
 	}, runtimemutationlog.EntityStateProjection{
 		Fields: map[string]any{
-			fieldName: json.RawMessage(valueJSON),
+			field.Path: json.RawMessage(valueJSON),
 		},
 	}, runtimemutationlog.Writer{
 		Type:        "agent",
@@ -130,9 +134,29 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	committed = true
 	return map[string]any{
 		"entity_id": entityID,
-		"field":     fieldName,
+		"field":     field.Path,
 		"revision":  revision,
 	}, nil
+}
+
+func entityJSONPathSegments(path string) ([]string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("field is required")
+	}
+	if strings.Contains(path, "[") || strings.Contains(path, "]") {
+		return nil, fmt.Errorf("list index writes are not supported for path %s", path)
+	}
+	rawSegments := strings.Split(path, ".")
+	segments := make([]string, 0, len(rawSegments))
+	for _, segment := range rawSegments {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			return nil, fmt.Errorf("field is required")
+		}
+		segments = append(segments, segment)
+	}
+	return segments, nil
 }
 
 func nullableJSONBytes(raw []byte) any {

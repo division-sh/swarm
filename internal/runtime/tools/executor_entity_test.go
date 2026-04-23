@@ -305,20 +305,158 @@ func TestEntityTools_SearchEntitiesAcceptsAnnotatedJSONBFilter(t *testing.T) {
 	}
 }
 
-func TestEntityTools_SaveEntityFieldRejectsNestedWritePath(t *testing.T) {
+func TestEntityTools_SaveEntityFieldAllowsDeclaredNestedWritePath(t *testing.T) {
 	ctx, exec := newAnnotatedEntityToolExecutor(t)
-	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{"flow_instance": "validation/inst-1"})
+	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "validation/inst-1",
+		"fields": map[string]any{
+			"mvp_spec": map[string]any{
+				"headline": "old",
+				"approved": false,
+			},
+		},
+	})
 
-	_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+	out, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
 		"field":     "mvp_spec.headline",
 		"value":     "launch fast",
 	})
-	if err == nil {
-		t.Fatal("expected nested write path to be rejected")
+	if err != nil {
+		t.Fatalf("save_entity_field nested path: %v", err)
 	}
-	if !strings.Contains(err.Error(), "invalid enum value mvp_spec.headline") {
-		t.Fatalf("err = %v, want delivery-boundary nested write rejection", err)
+	saved, ok := out.(map[string]any)
+	if !ok || strings.TrimSpace(asString(saved["field"])) != "mvp_spec.headline" {
+		t.Fatalf("unexpected save_entity_field output: %#v", out)
+	}
+
+	got, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+	if err != nil {
+		t.Fatalf("get_entity after nested save: %v", err)
+	}
+	entity, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("expected entity map, got %#v", got)
+	}
+	fields, ok := entity["fields"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fields map, got %#v", entity["fields"])
+	}
+	mvpSpec, ok := fields["mvp_spec"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected mvp_spec object, got %#v", fields["mvp_spec"])
+	}
+	if got := strings.TrimSpace(asString(mvpSpec["headline"])); got != "launch fast" {
+		t.Fatalf("mvp_spec.headline = %q, want launch fast", got)
+	}
+	if approved, ok := mvpSpec["approved"].(bool); !ok || approved {
+		t.Fatalf("mvp_spec.approved = %#v, want false", mvpSpec["approved"])
+	}
+}
+
+func TestEntityTools_SaveEntityFieldAllowsNestedListWritePath(t *testing.T) {
+	ctx, exec := newAnnotatedEntityToolExecutor(t)
+	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "validation/inst-1",
+		"fields": map[string]any{
+			"validation_kit": map[string]any{
+				"checklist": []any{"ux"},
+			},
+		},
+	})
+
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "validation_kit.checklist",
+		"value":     []any{"ux", "brand"},
+	}); err != nil {
+		t.Fatalf("save_entity_field nested list path: %v", err)
+	}
+
+	got, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+	if err != nil {
+		t.Fatalf("get_entity after nested list save: %v", err)
+	}
+	entity, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("expected entity map, got %#v", got)
+	}
+	fields, ok := entity["fields"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fields map, got %#v", entity["fields"])
+	}
+	validationKit, ok := fields["validation_kit"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected validation_kit object, got %#v", fields["validation_kit"])
+	}
+	checklist, ok := validationKit["checklist"].([]any)
+	if !ok || len(checklist) != 2 {
+		t.Fatalf("validation_kit.checklist = %#v, want two items", validationKit["checklist"])
+	}
+}
+
+func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t *testing.T) {
+	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "get_entity", "save_entity_field"},
+	})
+	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "review/inst-1",
+		"fields": map[string]any{
+			"status":   "open",
+			"metadata": map[string]any{"region": "us"},
+		},
+	})
+
+	for _, tc := range []struct {
+		name  string
+		field string
+	}{
+		{name: "undeclared nested path", field: "metadata.regoin"},
+		{name: "envelope field", field: "entity_id"},
+		{name: "list index path", field: "validation_kit.checklist[0]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+				"entity_id": entityID,
+				"field":     tc.field,
+				"value":     "x",
+			})
+			re, ok := runtimetools.AsRuntimeError(err)
+			if err == nil || !ok || re.Code != "invalid_tool_input" {
+				t.Fatalf("expected invalid_tool_input, got %v", err)
+			}
+
+			var mutationCount int
+			if err := db.QueryRowContext(ctx, `
+				SELECT COUNT(*)
+				FROM entity_mutations
+				WHERE entity_id = $1::uuid AND field = $2
+			`, entityID, tc.field).Scan(&mutationCount); err != nil {
+				t.Fatalf("count entity mutations: %v", err)
+			}
+			if mutationCount != 0 {
+				t.Fatalf("mutation_count = %d, want 0 for %s", mutationCount, tc.field)
+			}
+
+			got, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+			if err != nil {
+				t.Fatalf("get_entity after invalid nested save: %v", err)
+			}
+			entity, ok := got.(map[string]any)
+			if !ok {
+				t.Fatalf("expected entity map, got %#v", got)
+			}
+			fields, ok := entity["fields"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected fields map, got %#v", entity["fields"])
+			}
+			metadata, ok := fields["metadata"].(map[string]any)
+			if !ok || strings.TrimSpace(asString(metadata["region"])) != "us" {
+				t.Fatalf("fields.metadata.region = %#v, want us", fields["metadata"])
+			}
+		})
 	}
 }
 
@@ -461,6 +599,64 @@ func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 	}
 	if newValue != `"closed"` {
 		t.Fatalf("mutation new_value = %s, want \"closed\"", newValue)
+	}
+	if writerType != "agent" {
+		t.Fatalf("mutation writer_type = %q, want agent", writerType)
+	}
+	if step != "save_entity_field" {
+		t.Fatalf("mutation handler_step = %q, want save_entity_field", step)
+	}
+}
+
+func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
+	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"create_entity", "get_entity", "save_entity_field"},
+	})
+	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "review/inst-1",
+		"fields": map[string]any{
+			"metadata": map[string]any{"region": "us"},
+		},
+	})
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "metadata.region",
+		"value":     "ca",
+	}); err != nil {
+		t.Fatalf("save_entity_field nested mutation: %v", err)
+	}
+
+	var (
+		field      string
+		oldValue   string
+		newValue   string
+		writerType string
+		step       string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(field, ''),
+			COALESCE(old_value::text, ''),
+			COALESCE(new_value::text, ''),
+			COALESCE(writer_type, ''),
+			COALESCE(handler_step, '')
+		FROM entity_mutations
+		WHERE entity_id = $1::uuid AND field = 'metadata.region'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, entityID).Scan(&field, &oldValue, &newValue, &writerType, &step); err != nil {
+		t.Fatalf("load nested entity mutation: %v", err)
+	}
+	if field != "metadata.region" {
+		t.Fatalf("mutation field = %q, want metadata.region", field)
+	}
+	if oldValue != `"us"` {
+		t.Fatalf("mutation old_value = %s, want \"us\"", oldValue)
+	}
+	if newValue != `"ca"` {
+		t.Fatalf("mutation new_value = %s, want \"ca\"", newValue)
 	}
 	if writerType != "agent" {
 		t.Fatalf("mutation writer_type = %q, want agent", writerType)

@@ -59,7 +59,7 @@ func genericEntityRuntimeContractSchemas() map[string]ContractSchemaEntry {
 		},
 		"save_entity_field": {
 			Category:    "entity_persistence",
-			Description: "Write a single declared top-level field on an entity.",
+			Description: "Write a single declared field or dotted subfield path on an entity.",
 			InputSchema: ObjectSchema(map[string]any{
 				"flow_instance": map[string]any{"type": "string"},
 				"entity_id":     map[string]any{"type": "string"},
@@ -138,6 +138,7 @@ func genericEntityRuntimeContractSchemas() map[string]ContractSchemaEntry {
 
 func entityToolSchemaEntriesForContract(contract entityruntime.Contract) map[string]ContractSchemaEntry {
 	topLevelFields := entityruntime.FieldNames(contract)
+	writablePaths := entityToolWritablePathNames(contract)
 	filterSelectors := entityToolLeafSelectorNames(contract)
 	selectableSelectors := entityToolSelectableFieldNames(contract)
 	filterProperties := make(map[string]any, len(filterSelectors))
@@ -160,8 +161,8 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract) map[str
 	for _, name := range selectableSelectors {
 		selectorEnum = append(selectorEnum, name)
 	}
-	fieldEnum := make([]any, 0, len(topLevelFields))
-	for _, name := range topLevelFields {
+	fieldEnum := make([]any, 0, len(writablePaths))
+	for _, name := range writablePaths {
 		fieldEnum = append(fieldEnum, name)
 	}
 	return map[string]ContractSchemaEntry{
@@ -190,7 +191,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract) map[str
 		},
 		"save_entity_field": {
 			Category:    "entity_persistence",
-			Description: "Write a single declared top-level field on an entity.",
+			Description: "Write a single declared field or dotted subfield path on an entity.",
 			InputSchema: ObjectSchema(map[string]any{
 				"flow_instance": map[string]any{"type": "string"},
 				"entity_id":     map[string]any{"type": "string"},
@@ -301,6 +302,49 @@ func entityToolLeafSelectorNames(contract entityruntime.Contract) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func entityToolWritablePathNames(contract entityruntime.Contract) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
+	for _, name := range entityruntime.FieldNames(contract) {
+		decl, err := entityruntime.FieldDecl(contract, name)
+		if err != nil {
+			continue
+		}
+		collectEntityToolWritablePaths(contract, strings.TrimSpace(name), strings.TrimSpace(decl.Type), seen, map[string]struct{}{}, &out)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func collectEntityToolWritablePaths(contract entityruntime.Contract, path, typeRef string, seen map[string]struct{}, visiting map[string]struct{}, out *[]string) {
+	path = strings.TrimSpace(path)
+	typeRef = strings.TrimSpace(typeRef)
+	if path == "" || typeRef == "" {
+		return
+	}
+	if _, ok := seen[path]; !ok {
+		seen[path] = struct{}{}
+		*out = append(*out, path)
+	}
+	if !deliveryNamedType(contract, typeRef) {
+		return
+	}
+	typeName := deliveryTypeName(contract, typeRef)
+	if _, ok := visiting[typeName]; ok {
+		return
+	}
+	visiting[typeName] = struct{}{}
+	named := contract.Types.Types[typeName]
+	for fieldName, spec := range named.Fields {
+		fieldName = strings.TrimSpace(fieldName)
+		if fieldName == "" {
+			continue
+		}
+		collectEntityToolWritablePaths(contract, path+"."+fieldName, strings.TrimSpace(spec.Type), seen, visiting, out)
+	}
+	delete(visiting, typeName)
 }
 
 func collectEntityToolLeafSelectors(contract entityruntime.Contract, path, typeRef string, seen map[string]struct{}, visiting map[string]struct{}, out *[]string) {

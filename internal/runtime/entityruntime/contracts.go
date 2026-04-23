@@ -268,24 +268,20 @@ func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metad
 }
 
 func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, error) {
-	if strings.Contains(strings.TrimSpace(fieldName), ".") {
-		field, err := ResolveLeafField(contract, fieldName)
-		if err != nil {
-			return nil, err
-		}
-		return normalizeValueForType(contract, strings.TrimSpace(fieldName), strings.TrimSpace(field.Type), value)
-	}
-	field, err := FieldDecl(contract, fieldName)
+	field, err := ResolveFieldPath(contract, fieldName)
 	if err != nil {
 		return nil, err
 	}
-	return normalizeValueForType(contract, strings.TrimSpace(fieldName), strings.TrimSpace(field.Type), value)
+	return normalizeValueForType(contract, strings.TrimSpace(field.Path), strings.TrimSpace(field.Type), value)
 }
 
-func ResolveLeafField(contract Contract, path string) (Field, error) {
+func ResolveFieldPath(contract Contract, path string) (Field, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return Field{}, fmt.Errorf("field is required")
+	}
+	if strings.Contains(path, "[") || strings.Contains(path, "]") {
+		return Field{}, fmt.Errorf("list index writes are not supported for path %s", path)
 	}
 	segments := strings.Split(path, ".")
 	if len(segments) == 0 {
@@ -297,29 +293,34 @@ func ResolveLeafField(contract Contract, path string) (Field, error) {
 		return Field{}, err
 	}
 	currentType := strings.TrimSpace(decl.Type)
-	if len(segments) == 1 {
-		kind, err := leafKind(contract, currentType)
-		if err != nil {
-			return Field{}, err
-		}
-		return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl}, nil
-	}
 	for _, segment := range segments[1:] {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			return Field{}, fmt.Errorf("field is required")
+		}
 		named, ok := contract.Types.Types[typeName(contract, currentType)]
 		if !ok {
 			return Field{}, fmt.Errorf("path %s does not resolve through a named type", path)
 		}
-		spec, ok := named.Fields[strings.TrimSpace(segment)]
+		spec, ok := named.Fields[segment]
 		if !ok {
 			return Field{}, fmt.Errorf("undeclared path %s", path)
 		}
 		currentType = strings.TrimSpace(spec.Type)
 	}
-	kind, err := leafKind(contract, currentType)
+	kind := pathKind(contract, currentType)
+	return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl}, nil
+}
+
+func ResolveLeafField(contract Contract, path string) (Field, error) {
+	field, err := ResolveFieldPath(contract, path)
 	if err != nil {
 		return Field{}, err
 	}
-	return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl}, nil
+	if field.LeafKind != "scalar" && field.LeafKind != "enum" {
+		return Field{}, fmt.Errorf("path does not resolve to scalar or enum leaf")
+	}
+	return field, nil
 }
 
 func PathValue(value map[string]any, path string) (any, bool) {
@@ -506,23 +507,36 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 }
 
 func leafKind(contract Contract, typeRef string) (string, error) {
-	switch {
-	case isTextType(typeRef):
-		return "scalar", nil
-	case isIntegerType(contract, typeRef):
-		return "scalar", nil
-	case isNumericType(contract, typeRef):
-		return "scalar", nil
-	case isBooleanType(contract, typeRef):
-		return "scalar", nil
-	case isTimestampType(contract, typeRef):
-		return "scalar", nil
-	case isUUIDType(contract, typeRef):
-		return "scalar", nil
-	case isEnumType(contract, typeRef):
-		return "enum", nil
+	switch kind := pathKind(contract, typeRef); kind {
+	case "scalar", "enum":
+		return kind, nil
 	default:
 		return "", fmt.Errorf("path does not resolve to scalar or enum leaf")
+	}
+}
+
+func pathKind(contract Contract, typeRef string) string {
+	switch {
+	case isTextType(typeRef):
+		return "scalar"
+	case isIntegerType(contract, typeRef):
+		return "scalar"
+	case isNumericType(contract, typeRef):
+		return "scalar"
+	case isBooleanType(contract, typeRef):
+		return "scalar"
+	case isTimestampType(contract, typeRef):
+		return "scalar"
+	case isUUIDType(contract, typeRef):
+		return "scalar"
+	case isEnumType(contract, typeRef):
+		return "enum"
+	case isNamedType(contract, typeRef):
+		return "object"
+	case isListType(typeRef):
+		return "list"
+	default:
+		return ""
 	}
 }
 
