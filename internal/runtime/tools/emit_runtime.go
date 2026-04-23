@@ -22,10 +22,16 @@ type EmitRegistry struct {
 func NewEmitRegistry(source semanticview.Source, provider runtimeauthority.Provider) *EmitRegistry {
 	provider = runtimeauthority.ProviderOrNoop(provider)
 	catalog := map[string]runtimecontracts.EventCatalogEntry{}
+	activeSchemas := map[string]EmitSchema{}
 	if source != nil {
 		catalog = source.ResolvedEventCatalog()
+		if bundle, ok := semanticview.Bundle(source); ok && bundle != nil {
+			activeSchemas = runtimecontracts.EventSchemaRegistryFromBundle(bundle)
+		}
 	}
-	activeSchemas := runtimecontracts.EventSchemaRegistryFromCatalog(catalog)
+	if len(activeSchemas) == 0 {
+		activeSchemas = runtimecontracts.EventSchemaRegistryFromCatalog(catalog)
+	}
 	generatedSchemas := make(map[string]struct{})
 	if source != nil {
 		for _, entry := range source.AgentEntries() {
@@ -178,6 +184,11 @@ func (r *EmitRegistry) schemaForActorEvent(actor models.AgentConfig, eventType s
 	proof := semanticview.ResolveFlowEventProof(r.source, flowID, eventType)
 	if !proof.HasSchema {
 		return EmitSchema{}, false
+	}
+	if bundle, ok := semanticview.Bundle(r.source); ok && bundle != nil {
+		if schema, _, ok := runtimecontracts.EventSchemaForFlowEvent(bundle, flowID, eventType); ok {
+			return schema, true
+		}
 	}
 	registry := runtimecontracts.EventSchemaRegistryFromCatalog(map[string]runtimecontracts.EventCatalogEntry{
 		proof.CatalogKey: proof.Entry,

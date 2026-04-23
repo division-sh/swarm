@@ -495,6 +495,42 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	}
 }
 
+func TestValidateAutoEmitPayload_RejectsListTypeViolation(t *testing.T) {
+	bundle := testFlowBundleWithAutoEmitEntry("task.started", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"instance_id":      {Type: "string"},
+				"template_id":      {Type: "string"},
+				"flow_path":        {Type: "string"},
+				"subject_id":       {Type: "string"},
+				"parent_entity_id": {Type: "string"},
+				"sources":          {Type: "[SourceID]"},
+			},
+		},
+		Required: []string{"instance_id", "template_id", "flow_path", "subject_id", "parent_entity_id", "sources"},
+	})
+	bundle.RootTypes = runtimecontracts.TypeCatalogDocument{
+		Scalars: map[string]runtimecontracts.ScalarTypeDecl{
+			"SourceID": {Base: "text"},
+		},
+	}
+
+	err := validateAutoEmitPayload(semanticview.Wrap(bundle), "review", "task.started", map[string]any{
+		"instance_id":      "inst-1",
+		"template_id":      "review",
+		"flow_path":        "review/inst-1",
+		"subject_id":       "ent-1",
+		"parent_entity_id": "ent-parent",
+		"sources":          "not-a-list",
+	})
+	if err == nil {
+		t.Fatal("expected list-type auto-emit failure")
+	}
+	if !strings.Contains(err.Error(), "$.sources must be array") {
+		t.Fatalf("validateAutoEmitPayload error = %v, want list-type detail", err)
+	}
+}
+
 func TestNormalizedStaticFlowEmitEvents_ExternalizesLocalEvents(t *testing.T) {
 	got := normalizedStaticFlowEmitEvents(
 		[]string{"analysis.done", "shared.event"},
