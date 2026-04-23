@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/workflowexpr"
 )
 
@@ -230,26 +231,16 @@ func workflowBuiltinEntityFields() map[string]struct{} {
 }
 
 func workflowEntityFieldNameFromTarget(target string) (string, bool) {
-	target = strings.TrimSpace(target)
-	if target == "" {
+	path, entityTarget, err := entityruntime.EntityWritePath(target)
+	if err != nil || !entityTarget {
 		return "", false
 	}
-	if strings.HasPrefix(target, "entity.") {
-		target = strings.TrimSpace(strings.TrimPrefix(target, "entity."))
-	} else if strings.HasPrefix(target, "metadata.") {
-		target = strings.TrimSpace(strings.TrimPrefix(target, "metadata."))
-	}
-	if target == "" {
+	field, _, _ := strings.Cut(path, ".")
+	field = strings.TrimSpace(field)
+	if field == "" {
 		return "", false
 	}
-	if idx := strings.IndexByte(target, '.'); idx >= 0 {
-		target = target[:idx]
-	}
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return "", false
-	}
-	return target, true
+	return field, true
 }
 
 func phaseAfter(current, threshold WorkflowEntityFieldLifecyclePhase) bool {

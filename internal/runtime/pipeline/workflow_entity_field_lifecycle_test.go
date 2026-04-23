@@ -57,6 +57,20 @@ func TestWorkflowEntityFieldsAvailableBeforeDataAccumulation_IncludesEarlierComp
 	}
 }
 
+func TestWorkflowEntityFieldsAvailableBeforeDataAccumulation_IncludesEarlierNestedComputeRootField(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Compute: &runtimecontracts.ComputeSpec{
+			Operation: runtimecontracts.ComputeOpCount,
+			StoreAs:   "entity.analysis.report_count",
+		},
+	}
+
+	available := WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler)
+	if _, ok := available["analysis"]; !ok {
+		t.Fatalf("analysis missing from data_accumulation availability: %#v", available)
+	}
+}
+
 func TestWorkflowEntityFieldsAvailableBeforeEmitFields_IncludesCreateEntityTopLevelWrites(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,

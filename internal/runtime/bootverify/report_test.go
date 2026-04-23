@@ -857,8 +857,51 @@ func TestRun_MapsPayloadCoverageMismatchToNamedError(t *testing.T) {
 	if !report.HasErrors() {
 		t.Fatalf("expected error report, got %#v", report.Findings)
 	}
-	if !reportContains(report.Errors(), "payload_field_coverage", `writes "foo"`) {
+	if !reportContains(report.Errors(), "payload_field_coverage", `target "foo" is invalid`) {
 		t.Fatalf("expected payload_field_coverage error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_MapsUndeclaredNestedEntityWriteTargetToPayloadCoverageError(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"Analysis": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"summary": {Type: "text"},
+					},
+				},
+			},
+		},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"subject": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"analysis": {Type: "Analysis"},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-1": {
+				ID: "node-1",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.completed": {
+						Compute: &runtimecontracts.ComputeSpec{
+							Operation: runtimecontracts.ComputeOpCount,
+							StoreAs:   "entity.analysis.missing",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !report.HasErrors() {
+		t.Fatalf("expected error report, got %#v", report.Findings)
+	}
+	if !reportContains(report.Errors(), "payload_field_coverage", `entity.analysis.missing`) {
+		t.Fatalf("expected nested payload_field_coverage error, got %#v", report.Errors())
 	}
 }
 
