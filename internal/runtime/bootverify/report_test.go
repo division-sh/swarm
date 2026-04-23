@@ -857,7 +857,7 @@ func TestRun_MapsPayloadCoverageMismatchToNamedError(t *testing.T) {
 	if !report.HasErrors() {
 		t.Fatalf("expected error report, got %#v", report.Findings)
 	}
-	if !reportContains(report.Errors(), "payload_field_coverage", `target "foo" is invalid`) {
+	if !reportContains(report.Errors(), "payload_field_coverage", `writes "foo" missing`) {
 		t.Fatalf("expected payload_field_coverage error, got %#v", report.Errors())
 	}
 }

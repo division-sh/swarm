@@ -556,6 +556,19 @@ func wave1ResolveWriteTargetPath(source semanticview.Source, target wave1WriteTa
 		return wave1ResolvedType{}, "", "", fmt.Errorf("target %q is not an entity write target", target.Target)
 	}
 	rootField, _, _ := strings.Cut(path, ".")
+	if !strings.Contains(path, ".") {
+		if view := wave1EntityContractForFlow(source, target.FlowID); view.Defined {
+			if _, ok := view.Contract.Fields[strings.TrimSpace(rootField)]; ok {
+				return wave1ResolvedType{}, strings.TrimSpace(view.FlowID), strings.TrimSpace(rootField), nil
+			}
+		}
+		if target.FlowID != "" && wave1FlowWritesRootField(source, target.FlowID, rootField) {
+			if root, ok := wave1RootFieldContract(source, rootField); ok {
+				return wave1ResolvedType{}, strings.TrimSpace(root.FlowID), strings.TrimSpace(rootField), nil
+			}
+		}
+		return wave1ResolvedType{}, strings.TrimSpace(target.FlowID), strings.TrimSpace(rootField), nil
+	}
 	leaf, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, target.FlowID, "entity."+path)
 	if err != nil {
 		return wave1ResolvedType{}, "", "", err
