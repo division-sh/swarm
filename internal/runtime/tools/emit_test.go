@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"path/filepath"
 	"testing"
 
 	runtimeauthority "swarm/internal/runtime/authority"
@@ -168,5 +169,23 @@ func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOw
 	}
 	if tools[0].Name != "emit_scan_requested" {
 		t.Fatalf("tool name = %q, want emit_scan_requested", tools[0].Name)
+	}
+}
+
+func TestEmitRegistry_DoesNotGenerateMissingSchemaForChildLocalAgentEmitFixture(t *testing.T) {
+	repoRoot, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatalf("repo root: %v", err)
+	}
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-required-agents-child")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
+
+	if missing := registry.GeneratedEmitSchemasForAgentRoles(); len(missing) != 0 {
+		t.Fatalf("generated missing schemas = %v, active schemas = %#v", missing, registry.activeSchemas)
 	}
 }
