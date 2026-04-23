@@ -2,6 +2,7 @@ package tools
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	runtimeauthority "swarm/internal/runtime/authority"
@@ -122,6 +123,73 @@ func TestEmitSchemaForEventType_UsesOnlyUniqueScopedLocalMatch(t *testing.T) {
 	}, "scan.requested")
 	if ok {
 		t.Fatal("ambiguous scoped local match should not resolve")
+	}
+}
+
+func TestGenerateEmitToolsForActor_FailsClosedOnDuplicateLocalToolNames(t *testing.T) {
+	reviewFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Path:  "review",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"priority": {Type: "string"},
+					},
+				},
+			},
+		},
+	}
+	validationFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Path:  "validation",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"priority": {Type: "string"},
+					},
+				},
+			},
+		},
+	}
+	root := &runtimecontracts.FlowContractView{
+		Children: []runtimecontracts.FlowContractView{reviewFlow, validationFlow},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"review":     &root.Children[0],
+				"validation": &root.Children[1],
+			},
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				"review":     &root.Children[0],
+				"validation": &root.Children[1],
+			},
+		},
+	}
+	registry := NewEmitRegistry(semanticview.Wrap(bundle), nil)
+	actor := models.AgentConfig{
+		ID:         "dual-scope-agent",
+		Role:       "reviewer",
+		Mode:       "review",
+		FlowPath:   "review",
+		EmitEvents: []string{"review/task.requested", "validation/task.requested"},
+	}
+
+	var warnings []string
+	tools := registry.GenerateEmitToolsForActor(actor, func(code, component, format string, args ...any) {
+		warnings = append(warnings, code)
+	})
+	if len(tools) != 0 {
+		t.Fatalf("tools = %#v, want none on duplicate local tool name collision", tools)
+	}
+	if !slices.Contains(warnings, "emit-tool-ambiguous-name-emit_task_requested") {
+		t.Fatalf("warnings = %#v, want duplicate-name warning", warnings)
+	}
+	if registry.IsEmitToolAllowedForActor(actor, "emit_task_requested") {
+		t.Fatal("expected duplicate local tool name collision to deny actor emit tool authorization")
 	}
 }
 

@@ -103,10 +103,24 @@ func (r *EmitRegistry) GenerateEmitToolsForEvents(eventTypes []string, warn func
 	if len(allowed) == 0 {
 		return nil
 	}
+	collisions := duplicateEmitToolNames(allowed)
 	tools := make([]llm.ToolDefinition, 0, len(allowed))
 	for _, eventType := range allowed {
 		eventType = strings.TrimSpace(eventType)
 		if eventType == "" {
+			continue
+		}
+		toolName := EmitToolName(eventType)
+		if collisions[toolName] > 1 {
+			if warn != nil {
+				warn(
+					"emit-tool-ambiguous-name-"+toolName,
+					"event-schema-registry",
+					"skipping emit tool generation for %q because emit tool name %q is ambiguous across configured events",
+					eventType,
+					toolName,
+				)
+			}
 			continue
 		}
 		schema, ok := emitSchemaForEventType(r.activeSchemas, eventType)
@@ -122,7 +136,7 @@ func (r *EmitRegistry) GenerateEmitToolsForEvents(eventTypes []string, warn func
 			continue
 		}
 		tools = append(tools, llm.ToolDefinition{
-			Name:        EmitToolName(eventType),
+			Name:        toolName,
 			Description: schema.Description,
 			Schema:      schema.Schema,
 		})
@@ -136,10 +150,24 @@ func (r *EmitRegistry) GenerateEmitToolsForActor(actor models.AgentConfig, warn 
 		return nil
 	}
 	if configured := UniqueNonEmpty(actor.EmitEvents); len(configured) > 0 {
+		collisions := duplicateEmitToolNames(configured)
 		tools := make([]llm.ToolDefinition, 0, len(configured))
 		for _, eventType := range configured {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" {
+				continue
+			}
+			toolName := EmitToolName(eventType)
+			if collisions[toolName] > 1 {
+				if warn != nil {
+					warn(
+						"emit-tool-ambiguous-name-"+toolName,
+						"event-schema-registry",
+						"skipping emit tool generation for %q because emit tool name %q is ambiguous across actor-configured events",
+						eventType,
+						toolName,
+					)
+				}
 				continue
 			}
 			schema, ok := r.schemaForActorEvent(actor, eventType)
@@ -155,7 +183,7 @@ func (r *EmitRegistry) GenerateEmitToolsForActor(actor models.AgentConfig, warn 
 				continue
 			}
 			tools = append(tools, llm.ToolDefinition{
-				Name:        EmitToolName(eventType),
+				Name:        toolName,
 				Description: schema.Description,
 				Schema:      schema.Schema,
 			})
@@ -331,6 +359,18 @@ func emitEventTypesEquivalent(left, right string) bool {
 		return true
 	}
 	return localEmitEventType(left) == localEmitEventType(right)
+}
+
+func duplicateEmitToolNames(eventTypes []string) map[string]int {
+	counts := make(map[string]int, len(eventTypes))
+	for _, eventType := range eventTypes {
+		eventType = strings.TrimSpace(eventType)
+		if eventType == "" {
+			continue
+		}
+		counts[EmitToolName(eventType)]++
+	}
+	return counts
 }
 
 func emitSchemaForEventType(activeSchemas map[string]EmitSchema, eventType string) (EmitSchema, bool) {
