@@ -204,3 +204,112 @@ func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 		t.Fatalf("publish count = %d, want 0", bus.count)
 	}
 }
+
+func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{
+			Scalars: map[string]runtimecontracts.ScalarTypeDecl{
+				"TraceID": {Base: "uuid"},
+				"Label":   {Base: "text"},
+			},
+			Enums: map[string]runtimecontracts.EnumTypeDecl{
+				"Mode": {Values: []string{"fast", "deep"}},
+			},
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"ScanDetails": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"source": {Type: "text"},
+						"count":  {Type: "integer"},
+					},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.completed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"mode":     {Type: "Mode"},
+						"details":  {Type: "ScanDetails"},
+						"labels":   {Type: "[Label]"},
+						"trace_id": {Type: "TraceID"},
+					},
+					Required: []string{"mode", "details", "labels", "trace_id"},
+				},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "market-research-agent",
+		Role:       "market_research",
+		EmitEvents: []string{"scan.completed"},
+	}
+
+	_, err := exec.handleEmitTool(context.Background(), actor, "emit_scan_completed", map[string]any{
+		"mode": "fast",
+		"details": map[string]any{
+			"source": "scanner-a",
+			"count":  2,
+		},
+		"labels":   []any{"a", "b"},
+		"trace_id": "11111111-1111-1111-1111-111111111111",
+	})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	if bus.count != 1 {
+		t.Fatalf("publish count = %d, want 1", bus.count)
+	}
+}
+
+func TestHandleEmitTool_FailsClosedOnNamedTypeViolation(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"ScanDetails": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"source": {Type: "text"},
+						"count":  {Type: "integer"},
+					},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.completed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"details": {Type: "ScanDetails"},
+					},
+					Required: []string{"details"},
+				},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "market-research-agent",
+		Role:       "market_research",
+		EmitEvents: []string{"scan.completed"},
+	}
+
+	_, err := exec.handleEmitTool(context.Background(), actor, "emit_scan_completed", map[string]any{
+		"details": "not-an-object",
+	})
+	if err == nil {
+		t.Fatal("expected named-type payload violation")
+	}
+	if !strings.Contains(err.Error(), "$.details must be object") {
+		t.Fatalf("handleEmitTool error = %v, want named-type detail", err)
+	}
+	if bus.count != 0 {
+		t.Fatalf("publish count = %d, want 0", bus.count)
+	}
+}

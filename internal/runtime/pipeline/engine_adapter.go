@@ -804,6 +804,12 @@ func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType s
 		proof.CatalogKey: proof.Entry,
 	})
 	schema, ok := registry[proof.CatalogKey]
+	if bundle, okBundle := semanticview.Bundle(source); okBundle && bundle != nil {
+		if resolved, _, okResolved := runtimecontracts.EventSchemaForFlowEvent(bundle, flowID, eventType); okResolved {
+			schema = resolved
+			ok = true
+		}
+	}
 	if !ok {
 		return nil
 	}

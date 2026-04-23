@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 func TestRuntimePayloadValidator_AllowsValidSchemaPayload(t *testing.T) {
@@ -148,5 +150,33 @@ func TestRuntimePayloadValidator_RejectsUndeclaredCallerPayloadFieldWhenAddition
 		}`))
 	if err == nil {
 		t.Fatal("expected undeclared caller payload field to be rejected")
+	}
+}
+
+func TestRuntimePayloadValidator_RejectsScalarAliasUUIDViolationFromEmitRegistrySnapshot(t *testing.T) {
+	t.Parallel()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{
+			Scalars: map[string]runtimecontracts.ScalarTypeDecl{
+				"TraceID": {Base: "uuid"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.completed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"trace_id": {Type: "TraceID"},
+					},
+					Required: []string{"trace_id"},
+				},
+			},
+		},
+	})
+	emitRegistry := runtimetools.NewEmitRegistry(source, nil)
+	validator := newRuntimePayloadValidator(nil, emitRegistry.EventSchemaSnapshot())
+
+	if err := validator("task.completed", []byte(`{"trace_id":"not-a-uuid"}`)); err == nil {
+		t.Fatal("expected scalar-alias uuid violation to be rejected")
 	}
 }

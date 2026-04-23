@@ -1128,6 +1128,31 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSur
 	}
 }
 
+func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *testing.T) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml":             "name: action-emit-enum\nversion: 1.0.0\ndescription: Action emit enum proof.\nplatform_version: \">=1.1.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
+		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
+		"events.yaml":              "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
+		"types.yaml":               "enums:\n  Mode: [fast, deep]\n",
+		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=1.1.0\"\nflows: []\n",
+		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
+		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  mode: Mode\n  required: [mode]\n",
+	})
+
+	err := validatePipelineEmitPayload(source, "child", "child.internal", map[string]any{
+		"mode": "invalid",
+	}, nil, runtimeengine.EmitSurfaceAction)
+	if err == nil {
+		t.Fatal("expected enum violation to fail closed on the action surface")
+	}
+	if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
+		t.Fatalf("validatePipelineEmitPayload error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
+	}
+	if !strings.Contains(err.Error(), "invalid enum value") {
+		t.Fatalf("validatePipelineEmitPayload error = %v, want enum detail", err)
+	}
+}
+
 func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsOnActionSurface(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
 	bundle, ok := semanticview.Bundle(source)

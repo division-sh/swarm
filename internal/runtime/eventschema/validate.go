@@ -3,7 +3,9 @@ package eventschema
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
@@ -61,8 +63,12 @@ func validateValue(path string, schema map[string]any, value any) error {
 	}
 	switch st {
 	case "string":
-		if _, ok := value.(string); !ok {
+		text, ok := value.(string)
+		if !ok {
 			return fmt.Errorf("schema validation failed: %s must be string", path)
+		}
+		if err := validateStringFormat(path, schema, text); err != nil {
+			return err
 		}
 	case "boolean":
 		if _, ok := value.(bool); !ok {
@@ -108,6 +114,8 @@ func validateValue(path string, schema map[string]any, value any) error {
 		if value != nil {
 			return fmt.Errorf("schema validation failed: %s must be null", path)
 		}
+	default:
+		return fmt.Errorf("schema validation failed: %s has unsupported schema type %q", path, st)
 	}
 	return nil
 }
@@ -138,6 +146,25 @@ func schemaProperties(raw any) map[string]map[string]any {
 
 func schemaAdditionalProps(raw any) bool { return runtimesharedjson.SchemaAdditionalProps(raw) }
 func requiredList(raw any) []string      { return runtimesharedjson.RequiredList(raw) }
+
+func validateStringFormat(path string, schema map[string]any, value string) error {
+	switch strings.TrimSpace(asString(schema["format"])) {
+	case "":
+		return nil
+	case "date-time":
+		if _, err := time.Parse(time.RFC3339, strings.TrimSpace(value)); err != nil {
+			return fmt.Errorf("schema validation failed: %s must be RFC3339 date-time", path)
+		}
+		return nil
+	case "uuid":
+		if _, err := uuid.Parse(strings.TrimSpace(value)); err != nil {
+			return fmt.Errorf("schema validation failed: %s must be uuid", path)
+		}
+		return nil
+	default:
+		return nil
+	}
+}
 
 func valueInEnum(value any, enumRaw any) bool {
 	enum, ok := enumRaw.([]any)
