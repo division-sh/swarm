@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	flowmodel "swarm/internal/runtime/flowmodel"
 )
 
 type EventSchema struct {
@@ -97,17 +99,9 @@ func EventSchemaForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType s
 	if bundle == nil || eventType == "" {
 		return EventSchema{}, "", false
 	}
-	entry, key, ok := bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
+	entry, key, types, ok := eventSchemaDeclarationForFlowEvent(bundle, flowID, eventType)
 	if !ok {
 		return EventSchema{}, "", false
-	}
-	types, found := eventDeclarationTypesForCatalogKey(bundle, key)
-	if !found {
-		if flowID != "" {
-			types = bundle.ResolvedTypeCatalogForFlow(flowID)
-		} else {
-			types = bundle.RootTypeCatalog()
-		}
 	}
 	return eventSchemaFromCatalogEntry(key, entry, types), key, true
 }
@@ -147,6 +141,134 @@ func appendEventSchemas(out map[string]EventSchema, bundle *WorkflowContractBund
 	}
 }
 
+func eventSchemaDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType string) (EventCatalogEntry, string, TypeCatalogDocument, bool) {
+	flowID = strings.TrimSpace(flowID)
+	eventType = strings.TrimSpace(eventType)
+	if bundle == nil || eventType == "" {
+		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
+	}
+	if bundle.FlowTree.Root == nil {
+		entry, key, ok := bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
+		if !ok {
+			return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
+		}
+		return entry, key, bundle.RootTypeCatalog(), true
+	}
+
+	targetKey := resolvedEventSchemaKey(bundle, flowID, eventType)
+	for _, declaration := range eventSchemaDeclarationPath(bundle, flowID) {
+		if entry, resolvedKey, ok := eventSchemaDeclarationEntry(bundle, declaration, targetKey); ok {
+			return entry, resolvedKey, declaration.types, true
+		}
+	}
+	for _, declaration := range eventSchemaAllDeclarationScopes(bundle) {
+		if entry, resolvedKey, ok := eventSchemaDeclarationEntry(bundle, declaration, targetKey); ok {
+			return entry, resolvedKey, declaration.types, true
+		}
+	}
+
+	entry, key, ok := bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
+	if !ok {
+		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
+	}
+	if flowID != "" {
+		return entry, key, bundle.ResolvedTypeCatalogForFlow(flowID), true
+	}
+	return entry, key, bundle.RootTypeCatalog(), true
+}
+
+type eventSchemaDeclarationScope struct {
+	flowID string
+	view   *FlowContractView
+	types  TypeCatalogDocument
+}
+
+func eventSchemaDeclarationPath(bundle *WorkflowContractBundle, flowID string) []eventSchemaDeclarationScope {
+	if bundle == nil || bundle.FlowTree.Root == nil {
+		return nil
+	}
+	var path []*FlowContractView
+	if strings.TrimSpace(flowID) == "" {
+		path = []*FlowContractView{bundle.FlowTree.Root}
+	} else {
+		path = flowmodel.CollectPathByID(bundle.FlowTree.Root, flowID, func(view *FlowContractView) string {
+			if view == nil {
+				return ""
+			}
+			return view.Paths.ID
+		}, flowViewChildren)
+	}
+	if len(path) == 0 {
+		return nil
+	}
+	out := make([]eventSchemaDeclarationScope, 0, len(path))
+	for i, view := range path {
+		if view == nil {
+			continue
+		}
+		scopeFlowID := ""
+		types := bundle.RootTypeCatalog()
+		if i > 0 {
+			scopeFlowID = strings.TrimSpace(view.Paths.ID)
+			types = bundle.ResolvedTypeCatalogForFlow(scopeFlowID)
+		}
+		out = append(out, eventSchemaDeclarationScope{
+			flowID: scopeFlowID,
+			view:   view,
+			types:  types,
+		})
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+func eventSchemaAllDeclarationScopes(bundle *WorkflowContractBundle) []eventSchemaDeclarationScope {
+	if bundle == nil || bundle.FlowTree.Root == nil {
+		return nil
+	}
+	out := []eventSchemaDeclarationScope{{
+		view:  bundle.FlowTree.Root,
+		types: bundle.RootTypeCatalog(),
+	}}
+	flowIDs := make([]string, 0, len(bundle.FlowTree.ByID))
+	for flowID := range bundle.FlowTree.ByID {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" {
+			continue
+		}
+		flowIDs = append(flowIDs, flowID)
+	}
+	sort.Strings(flowIDs)
+	for _, flowID := range flowIDs {
+		view := bundle.FlowTree.ByID[flowID]
+		if view == nil {
+			continue
+		}
+		out = append(out, eventSchemaDeclarationScope{
+			flowID: flowID,
+			view:   view,
+			types:  bundle.ResolvedTypeCatalogForFlow(flowID),
+		})
+	}
+	return out
+}
+
+func eventSchemaDeclarationEntry(bundle *WorkflowContractBundle, declaration eventSchemaDeclarationScope, targetKey string) (EventCatalogEntry, string, bool) {
+	if declaration.view == nil {
+		return EventCatalogEntry{}, "", false
+	}
+	for localKey, entry := range declaration.view.Events {
+		resolvedKey := resolvedEventSchemaKey(bundle, declaration.flowID, localKey)
+		if normalizedEventSchemaKey(resolvedKey) != normalizedEventSchemaKey(targetKey) {
+			continue
+		}
+		return entry, resolvedKey, true
+	}
+	return EventCatalogEntry{}, "", false
+}
+
 func resolvedEventSchemaKey(bundle *WorkflowContractBundle, flowID, eventType string) string {
 	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
@@ -162,46 +284,8 @@ func resolvedEventSchemaKey(bundle *WorkflowContractBundle, flowID, eventType st
 	return eventType
 }
 
-func eventDeclarationTypesForCatalogKey(bundle *WorkflowContractBundle, catalogKey string) (TypeCatalogDocument, bool) {
-	catalogKey = strings.TrimSpace(catalogKey)
-	if bundle == nil || catalogKey == "" {
-		return TypeCatalogDocument{}, false
-	}
-	if bundle.FlowTree.Root != nil {
-		if hasResolvedEventSchemaKey(bundle, "", bundle.FlowTree.Root.Events, catalogKey) {
-			return bundle.RootTypeCatalog(), true
-		}
-	} else if hasResolvedEventSchemaKey(bundle, "", bundle.Events, catalogKey) {
-		return bundle.RootTypeCatalog(), true
-	}
-	flowIDs := make([]string, 0, len(bundle.FlowTree.ByID))
-	for flowID := range bundle.FlowTree.ByID {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			continue
-		}
-		flowIDs = append(flowIDs, flowID)
-	}
-	sort.Strings(flowIDs)
-	for _, flowID := range flowIDs {
-		view := bundle.FlowTree.ByID[flowID]
-		if view == nil {
-			continue
-		}
-		if hasResolvedEventSchemaKey(bundle, flowID, view.Events, catalogKey) {
-			return bundle.ResolvedTypeCatalogForFlow(flowID), true
-		}
-	}
-	return TypeCatalogDocument{}, false
-}
-
-func hasResolvedEventSchemaKey(bundle *WorkflowContractBundle, flowID string, entries map[string]EventCatalogEntry, catalogKey string) bool {
-	for eventType := range entries {
-		if resolvedEventSchemaKey(bundle, flowID, eventType) == catalogKey {
-			return true
-		}
-	}
-	return false
+func normalizedEventSchemaKey(raw string) string {
+	return strings.Trim(strings.TrimSpace(raw), "/")
 }
 
 func eventSchemaForTypeRef(raw string, types TypeCatalogDocument, seen map[string]struct{}) (map[string]any, string) {
@@ -274,7 +358,7 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 		return map[string]any{"type": "string"}
 	case "integer":
 		return map[string]any{"type": "integer"}
-	case "numeric", "number":
+	case "numeric", "number", "float", "double", "real":
 		return map[string]any{"type": "number"}
 	case "boolean":
 		return map[string]any{"type": "boolean"}

@@ -8,6 +8,7 @@ func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypes(t *testing
 			Payload: EventPayloadSpec{
 				Properties: map[string]EventFieldSpec{
 					"corpus_path":   {Type: "string (required for corpus mode — path to signals file in /data)"},
+					"score":         {Type: "float"},
 					"subcategories": {Type: "array (required for saas_gap, local_services modes)"},
 				},
 			},
@@ -25,6 +26,10 @@ func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypes(t *testing
 	}
 	if corpusPath["description"] == "" {
 		t.Fatalf("corpus_path description = %#v", corpusPath["description"])
+	}
+	score, _ := props["score"].(map[string]any)
+	if score["type"] != "number" {
+		t.Fatalf("score type = %#v", score["type"])
 	}
 	subcategories, _ := props["subcategories"].(map[string]any)
 	if subcategories["type"] != "array" {
@@ -149,5 +154,92 @@ func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 	enumValues, _ := mode["enum"].([]any)
 	if len(enumValues) != 2 || enumValues[0] != "fast" || enumValues[1] != "deep" {
 		t.Fatalf("mode enum = %#v, want [fast deep]", mode["enum"])
+	}
+}
+
+func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *testing.T) {
+	reviewFlow := FlowContractView{
+		Paths: FlowContractPaths{ID: "review", Flow: "review"},
+		Path:  "review",
+		Events: map[string]EventCatalogEntry{
+			"task.requested": {
+				Payload: EventPayloadSpec{
+					Properties: map[string]EventFieldSpec{
+						"priority": {Type: "Priority"},
+					},
+				},
+			},
+		},
+	}
+	root := &FlowContractView{
+		Events: map[string]EventCatalogEntry{
+			"task.requested": {
+				Payload: EventPayloadSpec{
+					Properties: map[string]EventFieldSpec{
+						"priority": {Type: "Priority"},
+					},
+				},
+			},
+		},
+		Children: []FlowContractView{reviewFlow},
+	}
+	bundle := &WorkflowContractBundle{
+		RootTypes: TypeCatalogDocument{
+			Enums: map[string]EnumTypeDecl{
+				"Priority": {Values: []string{"low"}},
+			},
+		},
+		FlowTree: FlowTree{
+			Root: root,
+			ByID: map[string]*FlowContractView{
+				"review": &root.Children[0],
+			},
+		},
+		flowTypes: map[string]TypeCatalogDocument{
+			"review": {
+				Enums: map[string]EnumTypeDecl{
+					"Priority": {Values: []string{"urgent"}},
+				},
+			},
+		},
+	}
+
+	rootSchema, rootKey, ok := EventSchemaForFlowEvent(bundle, "", "task.requested")
+	if !ok {
+		t.Fatal("missing root event schema")
+	}
+	if rootKey != "task.requested" {
+		t.Fatalf("root key = %q, want task.requested", rootKey)
+	}
+	rootProps, _ := rootSchema.Schema["properties"].(map[string]any)
+	rootPriority, _ := rootProps["priority"].(map[string]any)
+	if got := rootPriority["enum"]; len(got.([]any)) != 1 || got.([]any)[0] != "low" {
+		t.Fatalf("root priority enum = %#v, want [low]", got)
+	}
+
+	reviewSchema, reviewKey, ok := EventSchemaForFlowEvent(bundle, "review", "task.requested")
+	if !ok {
+		t.Fatal("missing review event schema")
+	}
+	if reviewKey != "review/task.requested" {
+		t.Fatalf("review key = %q, want review/task.requested", reviewKey)
+	}
+	reviewProps, _ := reviewSchema.Schema["properties"].(map[string]any)
+	reviewPriority, _ := reviewProps["priority"].(map[string]any)
+	if got := reviewPriority["enum"]; len(got.([]any)) != 1 || got.([]any)[0] != "urgent" {
+		t.Fatalf("review priority enum = %#v, want [urgent]", got)
+	}
+
+	absoluteSchema, absoluteKey, ok := EventSchemaForFlowEvent(bundle, "", "review/task.requested")
+	if !ok {
+		t.Fatal("missing absolute review event schema")
+	}
+	if absoluteKey != "review/task.requested" {
+		t.Fatalf("absolute key = %q, want review/task.requested", absoluteKey)
+	}
+	absoluteProps, _ := absoluteSchema.Schema["properties"].(map[string]any)
+	absolutePriority, _ := absoluteProps["priority"].(map[string]any)
+	if got := absolutePriority["enum"]; len(got.([]any)) != 1 || got.([]any)[0] != "urgent" {
+		t.Fatalf("absolute priority enum = %#v, want [urgent]", got)
 	}
 }
