@@ -50,3 +50,22 @@ func TestValidatePayloadAgainstSchema_RejectsInvalidStringFormats(t *testing.T) 
 		})
 	}
 }
+
+func TestValidatePayloadAgainstSchema_RejectsCaseVariantEnumValue(t *testing.T) {
+	t.Parallel()
+
+	err := ValidatePayloadAgainstSchema(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"mode": map[string]any{
+				"type": "string",
+				"enum": []any{"fast"},
+			},
+		},
+		"required":             []any{"mode"},
+		"additionalProperties": false,
+	}, map[string]any{"mode": "FAST"})
+	if err == nil {
+		t.Fatal("expected case-variant enum value to fail")
+	}
+}

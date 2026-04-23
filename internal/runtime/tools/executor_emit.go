@@ -13,7 +13,7 @@ import (
 )
 
 func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
-	eventType, ok := e.emitRegistry.EventTypeFromToolName(toolName)
+	eventType, eventSchema, ok := e.emitRegistry.EventSchemaForActorTool(actor, toolName)
 	if !ok {
 		err := NewRuntimeError(
 			"invalid_emit_tool_name",
@@ -63,7 +63,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		return nil, err
 	}
 	postEnrichmentPayload := diagnosticPayloadMap(payloadMap)
-	if err := e.emitRegistry.ValidateEventPayloadAgainstSchema(schemaEventType, payloadMap); err != nil {
+	if err := ValidatePayloadAgainstSchema(eventSchema.Schema, payloadMap); err != nil {
 		wrapped := WrapRuntimeError(
 			"schema_validation_failed",
 			"tool-executor",
