@@ -299,12 +299,14 @@ func emitSchemaForEventType(activeSchemas map[string]EmitSchema, eventType strin
 		return schema, true
 	}
 	local := localEmitEventType(eventType)
-	if local == "" || local == eventType {
+	if local == "" {
 		return EmitSchema{}, false
 	}
-	schema, ok := activeSchemas[local]
-	if ok {
-		return schema, true
+	if local != eventType {
+		schema, ok := activeSchemas[local]
+		if ok {
+			return schema, true
+		}
 	}
 	var matched EmitSchema
 	matchCount := 0
