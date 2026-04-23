@@ -1,9 +1,11 @@
 package tools_test
 
 import (
+	"strings"
 	"testing"
 
 	models "swarm/internal/runtime/core/actors"
+	llm "swarm/internal/runtime/llm"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
 )
@@ -78,6 +80,11 @@ review_subject:
 	if containsAnyString(values, "entity_id") {
 		t.Fatalf("save_entity_field field enum = %#v, should not include envelope field entity_id", values)
 	}
+	summaryLines := llm.AgentVisibleToolSummaryLinesForActor(actor, defs)
+	wantWritablePathLine := "Writable entity paths for save_entity_field in this turn: " + strings.Join(anyStrings(values), ", ")
+	if !containsString(summaryLines, wantWritablePathLine) {
+		t.Fatalf("agent-visible writable path summary = %#v, want %q", summaryLines, wantWritablePathLine)
+	}
 
 	searchSchema := defByName["search_entities"]
 	searchProps, _ := searchSchema["properties"].(map[string]any)
@@ -118,6 +125,25 @@ review_subject:
 }
 
 func containsAnyString(values []any, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func anyStrings(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if got, ok := value.(string); ok {
+			out = append(out, got)
+		}
+	}
+	return out
+}
+
+func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
 			return true

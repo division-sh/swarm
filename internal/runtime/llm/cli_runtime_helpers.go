@@ -239,10 +239,11 @@ var claudeProviderBuiltinToolNames = []string{
 }
 
 type AgentVisibleToolSurface struct {
-	RuntimeToolNames   []string
-	EmitToolNames      []string
-	NonEmitToolNames   []string
-	NativeBuiltinTools []string
+	RuntimeToolNames    []string
+	EmitToolNames       []string
+	NonEmitToolNames    []string
+	NativeBuiltinTools  []string
+	WritableEntityPaths []string
 }
 
 type CLIExecutionToolSurface struct {
@@ -380,11 +381,56 @@ func AgentVisibleToolSurfaceForActor(actor models.AgentConfig, tools []ToolDefin
 	}
 
 	return AgentVisibleToolSurface{
-		RuntimeToolNames:   runtimeNames,
-		EmitToolNames:      emitNames,
-		NonEmitToolNames:   nonEmitNames,
-		NativeBuiltinTools: append([]string(nil), surface.ProviderBuiltinTools...),
+		RuntimeToolNames:    runtimeNames,
+		EmitToolNames:       emitNames,
+		NonEmitToolNames:    nonEmitNames,
+		NativeBuiltinTools:  append([]string(nil), surface.ProviderBuiltinTools...),
+		WritableEntityPaths: saveEntityFieldWritablePaths(tools),
 	}
+}
+
+func saveEntityFieldWritablePaths(tools []ToolDefinition) []string {
+	for _, tool := range tools {
+		if toolidentity.CanonicalName(tool.Name) != "save_entity_field" {
+			continue
+		}
+		schema, ok := tool.Schema.(map[string]any)
+		if !ok {
+			return nil
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			return nil
+		}
+		fieldSchema, ok := properties["field"].(map[string]any)
+		if !ok {
+			return nil
+		}
+		enumValues, ok := fieldSchema["enum"].([]any)
+		if !ok {
+			return nil
+		}
+		out := make([]string, 0, len(enumValues))
+		seen := make(map[string]struct{}, len(enumValues))
+		for _, value := range enumValues {
+			path, ok := value.(string)
+			if !ok {
+				continue
+			}
+			path = strings.TrimSpace(path)
+			if path == "" {
+				continue
+			}
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			out = append(out, path)
+		}
+		slices.Sort(out)
+		return out
+	}
+	return nil
 }
 
 func claudeControlToolNames() []string {
@@ -497,7 +543,7 @@ const deliveryToolSurfaceMarker = "## Swarm Tool Surface"
 
 func AgentVisibleToolSummaryLinesForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
 	surface := AgentVisibleToolSurfaceForActor(actor, tools)
-	lines := make([]string, 0, 3)
+	lines := make([]string, 0, 4)
 	emitLine := "(none declared)"
 	if len(surface.EmitToolNames) > 0 {
 		emitLine = strings.Join(surface.EmitToolNames, ", ")
@@ -508,6 +554,9 @@ func AgentVisibleToolSummaryLinesForActor(actor models.AgentConfig, tools []Tool
 	}
 	if len(surface.NativeBuiltinTools) > 0 {
 		lines = append(lines, "Available native CLI tools in this turn: "+strings.Join(surface.NativeBuiltinTools, ", "))
+	}
+	if len(surface.WritableEntityPaths) > 0 {
+		lines = append(lines, "Writable entity paths for save_entity_field in this turn: "+strings.Join(surface.WritableEntityPaths, ", "))
 	}
 	return lines
 }
