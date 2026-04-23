@@ -567,23 +567,25 @@ func (c *checkerContext) payloadFieldCoverage() []Finding {
 		}
 		seen[key] = struct{}{}
 
-		if target.Nested {
+		if target.Kind == "handler.clear" && wave1SpecialClearTarget(target.Field) {
+			continue
+		}
+		resolved, ownerFlowID, rootField, err := wave1ResolveWriteTargetPath(c.source, target)
+		if err != nil {
 			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
 				CheckID:  "payload_field_coverage",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s target %q is a nested entity write; Wave 1 permits top-level entity fields only", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Target),
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s target %q is invalid: %v", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Target, err),
 				Location: target.NodeID,
 			})
 			continue
 		}
-		if target.Kind == "handler.clear" && wave1SpecialClearTarget(target.Field) {
-			continue
-		}
-		if wave1EntityEnvelopeField(target.Field) {
+		_ = resolved
+		if wave1EntityEnvelopeField(rootField) {
 			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
 				CheckID:  "payload_field_coverage",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s targets envelope field %q; envelope fields are platform-owned", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Field),
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s targets envelope field %q; envelope fields are platform-owned", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, rootField),
 				Location: target.NodeID,
 			})
 			continue
@@ -598,11 +600,14 @@ func (c *checkerContext) payloadFieldCoverage() []Finding {
 			})
 			continue
 		}
-		if _, ok := contract.Contract.Fields[target.Field]; !ok {
+		if ownerFlowID != "" {
+			contract.FlowID = ownerFlowID
+		}
+		if _, ok := contract.Contract.Fields[rootField]; !ok {
 			c.payloadCoverageFindings = append(c.payloadCoverageFindings, Finding{
 				CheckID:  "payload_field_coverage",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes undeclared entity field %q on entity_type %s", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Field, contract.EntityType),
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes undeclared entity field %q on entity_type %s", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, rootField, contract.EntityType),
 				Location: target.NodeID,
 			})
 		}

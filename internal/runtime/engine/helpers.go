@@ -168,43 +168,42 @@ func setParsedValuePath(target map[string]any, path paths.Path, value any) {
 	values.Wrap(target).SetPath(path, value)
 }
 
-func normalizeStateField(field string) string {
-	field = strings.TrimSpace(field)
-	switch {
-	case strings.HasPrefix(field, "entity."):
-		return strings.TrimSpace(strings.TrimPrefix(field, "entity."))
-	case strings.HasPrefix(field, "metadata."):
-		return strings.TrimSpace(strings.TrimPrefix(field, "metadata."))
-	default:
-		return field
-	}
-}
-
 func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapshot *StateSnapshot, spec runtimecontracts.WorkflowDataAccumulation) error {
 	if snapshot == nil || len(spec.Writes) == 0 {
 		return nil
 	}
+	if snapshot.StateCarrier.Metadata == nil {
+		snapshot.StateCarrier.Metadata = map[string]any{}
+	}
 	for _, write := range spec.Writes {
-		target := normalizeStateField(write.Target())
+		target := strings.TrimSpace(write.Target())
 		if target == "" {
 			continue
 		}
+		parsed := paths.Parse(target)
+		switch parsed.Root {
+		case paths.RootEntity, paths.RootMetadata:
+			parsed = paths.Path{Segments: parsed.Segments}
+		case paths.RootUnknown:
+		default:
+			return fmt.Errorf("data_accumulation target %s: unsupported target scope", strings.TrimSpace(write.Target()))
+		}
 		switch {
 		case write.Value.HasLiteralValue():
-			snapshot.SetMetadata(target, write.Value.Literal)
+			setParsedValuePath(snapshot.StateCarrier.Metadata, parsed, write.Value.Literal)
 		case write.Value.HasCELValue():
 			value, err := evalWorkflowValueExpression(base, state, write.Value.CEL)
 			if err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", strings.TrimSpace(write.Target()), err)
 			}
-			snapshot.SetMetadata(target, value)
+			setParsedValuePath(snapshot.StateCarrier.Metadata, parsed, value)
 		default:
 			source := strings.TrimSpace(write.Source())
 			if source == "" {
 				continue
 			}
 			if value, ok := lookupPath(cloneStringAnyMap(base.Payload.Raw()), source); ok {
-				snapshot.SetMetadata(target, value)
+				setParsedValuePath(snapshot.StateCarrier.Metadata, parsed, value)
 			}
 		}
 	}

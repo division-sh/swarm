@@ -638,12 +638,13 @@ type WorkflowDataAccumulation struct {
 	SourceEvent string              `yaml:"source_event"`
 }
 type WorkflowDataWrite struct {
-	Field       string          `yaml:"-" json:"field,omitempty"`
-	SourceField string          `yaml:"source_field,omitempty" json:"source_field,omitempty"`
-	SourcePath  paths.Path      `yaml:"-" json:"-"`
-	TargetField string          `yaml:"target_field,omitempty" json:"target_field,omitempty"`
-	TargetPath  paths.Path      `yaml:"-" json:"-"`
-	Value       ExpressionValue `yaml:"value,omitempty" json:"value,omitempty"`
+	Field         string          `yaml:"-" json:"field,omitempty"`
+	SourceField   string          `yaml:"source_field,omitempty" json:"source_field,omitempty"`
+	SourcePath    paths.Path      `yaml:"-" json:"-"`
+	TargetField   string          `yaml:"target_field,omitempty" json:"target_field,omitempty"`
+	TargetPathRef string          `yaml:"target_path,omitempty" json:"target_path,omitempty"`
+	TargetPath    paths.Path      `yaml:"-" json:"-"`
+	Value         ExpressionValue `yaml:"value,omitempty" json:"value,omitempty"`
 }
 
 func (w WorkflowDataWrite) Source() string {
@@ -658,6 +659,8 @@ func (w WorkflowDataWrite) Source() string {
 }
 func (w WorkflowDataWrite) Target() string {
 	switch {
+	case strings.TrimSpace(w.TargetPathRef) != "":
+		return strings.TrimSpace(w.TargetPathRef)
 	case strings.TrimSpace(w.TargetField) != "":
 		return strings.TrimSpace(w.TargetField)
 	case strings.TrimSpace(w.Field) != "":

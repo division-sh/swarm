@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/entityruntime"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -37,8 +38,14 @@ func wave1SpecialClearTarget(target string) bool {
 }
 
 func wave1WriteTargetContract(source semanticview.Source, target wave1WriteTarget) (wave1EntityContractView, bool) {
-	if !target.Entity || target.Nested || wave1EntityEnvelopeField(target.Field) {
+	if !target.Entity || wave1EntityEnvelopeField(target.Field) {
 		return wave1EntityContractView{}, false
+	}
+	if _, ownerFlowID, _, err := wave1ResolveWriteTargetPath(source, target); err == nil {
+		view := wave1EntityContractForFlow(source, ownerFlowID)
+		if view.Defined {
+			return view, true
+		}
 	}
 	view := wave1EntityContractForFlow(source, target.FlowID)
 	if view.Defined {
@@ -146,17 +153,17 @@ func wave1DeclaredEntityContracts(source semanticview.Source) []wave1EntityContr
 func wave1EntityWriterCoverageByFlow(source semanticview.Source) map[string]map[string]struct{} {
 	out := map[string]map[string]struct{}{}
 	for _, target := range wave1AllEntityWriteTargets(source) {
-		if !target.Entity || target.Nested || wave1EntityEnvelopeField(target.Field) || wave1SpecialClearTarget(target.Field) {
+		if !target.Entity || wave1EntityEnvelopeField(target.Field) || wave1SpecialClearTarget(target.Field) {
 			continue
 		}
-		contract, ok := wave1WriteTargetContract(source, target)
-		if !ok {
+		_, ownerFlowID, rootField, err := wave1ResolveWriteTargetPath(source, target)
+		if err != nil {
 			continue
 		}
-		if out[contract.FlowID] == nil {
-			out[contract.FlowID] = map[string]struct{}{}
+		if out[ownerFlowID] == nil {
+			out[ownerFlowID] = map[string]struct{}{}
 		}
-		out[contract.FlowID][target.Field] = struct{}{}
+		out[ownerFlowID][rootField] = struct{}{}
 	}
 	for flowID, fields := range wave1AgentExplicitEntityWriteCoverageByFlow(source) {
 		if out[flowID] == nil {
@@ -538,6 +545,22 @@ func wave1ParseWriteTarget(flowID, nodeID, eventType, kind, target string) wave1
 	}
 	write.Field = strings.TrimSpace(target)
 	return write
+}
+
+func wave1ResolveWriteTargetPath(source semanticview.Source, target wave1WriteTarget) (wave1ResolvedType, string, string, error) {
+	path, entityTarget, err := entityruntime.EntityWritePath(target.Target)
+	if err != nil {
+		return wave1ResolvedType{}, "", "", err
+	}
+	if !entityTarget {
+		return wave1ResolvedType{}, "", "", fmt.Errorf("target %q is not an entity write target", target.Target)
+	}
+	rootField, _, _ := strings.Cut(path, ".")
+	leaf, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, target.FlowID, "entity."+path)
+	if err != nil {
+		return wave1ResolvedType{}, "", "", err
+	}
+	return leaf, ownerFlowID, strings.TrimSpace(rootField), nil
 }
 
 type wave1ResolvedExpressionRef struct {

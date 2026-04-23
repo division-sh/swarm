@@ -375,6 +375,40 @@ writes:
 	}
 }
 
+func TestWorkflowDataWriteDecode_PreservesTargetPathAuthoring(t *testing.T) {
+	var write WorkflowDataWrite
+	if err := yaml.Unmarshal([]byte(`
+source_field: summary
+target_path: entity.analysis.summary
+`), &write); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := write.Source(); got != "summary" {
+		t.Fatalf("Source() = %q", got)
+	}
+	if got := write.Target(); got != "entity.analysis.summary" {
+		t.Fatalf("Target() = %q", got)
+	}
+	if got := write.TargetPath.String(); got != "entity.analysis.summary" {
+		t.Fatalf("TargetPath = %q", got)
+	}
+}
+
+func TestWorkflowDataWriteDecode_RejectsConflictingTargetFieldAndTargetPath(t *testing.T) {
+	var write WorkflowDataWrite
+	err := yaml.Unmarshal([]byte(`
+source_field: summary
+target_field: analysis
+target_path: entity.analysis.summary
+`), &write)
+	if err == nil {
+		t.Fatal("expected conflicting target_field/target_path error")
+	}
+	if !strings.Contains(err.Error(), "target_field and target_path") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestWorkflowDataAccumulationDecode_RejectsLegacySourceAlias(t *testing.T) {
 	var spec WorkflowDataAccumulation
 	err := yaml.Unmarshal([]byte(`

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/semanticview"
 	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
@@ -25,6 +26,14 @@ type Field struct {
 	Type      string
 	LeafKind  string
 	FieldDecl runtimecontracts.EntityFieldDecl
+}
+
+type WriteTarget struct {
+	Raw       string
+	Path      string
+	RootField string
+	Field     Field
+	Nested    bool
 }
 
 func ResolveForActor(source semanticview.Source, actorID string) (Contract, bool) {
@@ -273,6 +282,53 @@ func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, e
 		return nil, err
 	}
 	return normalizeValueForType(contract, strings.TrimSpace(field.Path), strings.TrimSpace(field.Type), value)
+}
+
+func EntityWritePath(target string) (string, bool, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", false, fmt.Errorf("field is required")
+	}
+	parsed := paths.Parse(target)
+	if parsed.IsZero() {
+		return "", false, fmt.Errorf("field is required")
+	}
+	if parsed.HasExplicitRoot() {
+		switch parsed.Root {
+		case paths.RootEntity:
+			if len(parsed.Segments) == 0 {
+				return "", true, fmt.Errorf("field is required")
+			}
+			return strings.Join(parsed.Segments, "."), true, nil
+		case paths.RootMetadata:
+			return "", false, nil
+		default:
+			return "", false, nil
+		}
+	}
+	if len(parsed.Segments) == 0 {
+		return "", false, fmt.Errorf("field is required")
+	}
+	return strings.Join(parsed.Segments, "."), true, nil
+}
+
+func ResolveEntityWriteTarget(contract Contract, target string) (WriteTarget, bool, error) {
+	path, entityTarget, err := EntityWritePath(target)
+	if err != nil || !entityTarget {
+		return WriteTarget{Raw: strings.TrimSpace(target)}, entityTarget, err
+	}
+	field, err := ResolveFieldPath(contract, path)
+	if err != nil {
+		return WriteTarget{Raw: strings.TrimSpace(target), Path: path}, true, err
+	}
+	rootField, _, _ := strings.Cut(path, ".")
+	return WriteTarget{
+		Raw:       strings.TrimSpace(target),
+		Path:      path,
+		RootField: strings.TrimSpace(rootField),
+		Field:     field,
+		Nested:    strings.Contains(path, "."),
+	}, true, nil
 }
 
 func ResolveFieldPath(contract Contract, path string) (Field, error) {

@@ -12,6 +12,7 @@ import (
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/timeridentity"
 	runtimeengine "swarm/internal/runtime/engine"
+	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/workflowexpr"
 )
@@ -511,13 +512,10 @@ func accumulateReferencesEntity(spec *runtimecontracts.AccumulateSpec) bool {
 }
 
 func normalizeEntityWriteTarget(target string) string {
-	target = strings.TrimSpace(target)
-	switch {
-	case strings.HasPrefix(target, "entity."):
-		return strings.TrimSpace(strings.TrimPrefix(target, "entity."))
-	case strings.HasPrefix(target, "metadata."):
-		return strings.TrimSpace(strings.TrimPrefix(target, "metadata."))
-	default:
-		return target
+	path, entityTarget, err := entityruntime.EntityWritePath(target)
+	if err != nil || !entityTarget {
+		return ""
 	}
+	field, _, _ := strings.Cut(path, ".")
+	return strings.TrimSpace(field)
 }

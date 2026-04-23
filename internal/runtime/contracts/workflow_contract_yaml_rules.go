@@ -185,7 +185,7 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		switch strings.TrimSpace(node.Content[i].Value) {
-		case "", "field", "source_field", "target_field", "expression", "value":
+		case "", "field", "source_field", "target_field", "target_path", "expression", "value":
 		default:
 			return fmt.Errorf("unsupported workflow data write field %q", strings.TrimSpace(node.Content[i].Value))
 		}
@@ -194,6 +194,7 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 		Field       string    `yaml:"field"`
 		SourceField string    `yaml:"source_field"`
 		TargetField string    `yaml:"target_field"`
+		TargetPath  string    `yaml:"target_path"`
 		Expression  string    `yaml:"expression"`
 		Value       yaml.Node `yaml:"value"`
 	}
@@ -201,9 +202,10 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*w = WorkflowDataWrite{
-		Field:       strings.TrimSpace(aux.Field),
-		SourceField: strings.TrimSpace(aux.SourceField),
-		TargetField: strings.TrimSpace(aux.TargetField),
+		Field:         strings.TrimSpace(aux.Field),
+		SourceField:   strings.TrimSpace(aux.SourceField),
+		TargetField:   strings.TrimSpace(aux.TargetField),
+		TargetPathRef: strings.TrimSpace(aux.TargetPath),
 	}
 	switch aux.Value.Kind {
 	case 0:
@@ -482,28 +484,32 @@ func hydrateWorkflowDataWrite(w *WorkflowDataWrite) error {
 	w.Field = strings.TrimSpace(w.Field)
 	w.SourceField = strings.TrimSpace(w.SourceField)
 	w.TargetField = strings.TrimSpace(w.TargetField)
+	w.TargetPathRef = strings.TrimSpace(w.TargetPathRef)
 	w.Value.hydrate()
 	if err := validateExpressionValue(w.Value); err != nil {
 		return err
 	}
+	if w.TargetField != "" && w.TargetPathRef != "" {
+		return fmt.Errorf("workflow data write must not declare both target_field and target_path")
+	}
 	switch {
 	case w.Field != "":
-		if w.SourceField != "" || w.TargetField != "" || !w.Value.IsZero() {
+		if w.SourceField != "" || w.TargetField != "" || w.TargetPathRef != "" || !w.Value.IsZero() {
 			return fmt.Errorf("workflow data write %q must use bare direct form only", w.Field)
 		}
 	case w.SourceField != "":
-		if w.TargetField == "" || !w.Value.IsZero() {
-			return fmt.Errorf("workflow data write with source_field %q must also declare target_field and no value/expression", w.SourceField)
+		if (w.TargetField == "" && w.TargetPathRef == "") || !w.Value.IsZero() {
+			return fmt.Errorf("workflow data write with source_field %q must also declare target_field or target_path and no value/expression", w.SourceField)
 		}
 		if paths.Parse(w.SourceField).HasExplicitRoot() {
 			return fmt.Errorf("workflow data source_field %q must be payload-local, not scoped", w.SourceField)
 		}
 	case !w.Value.IsZero():
-		if w.TargetField == "" {
-			return fmt.Errorf("workflow data write with value/expression must declare target_field")
+		if w.TargetField == "" && w.TargetPathRef == "" {
+			return fmt.Errorf("workflow data write with value/expression must declare target_field or target_path")
 		}
 		if w.Value.HasRefValue() {
-			return fmt.Errorf("workflow data write %q cannot use ref expressions", w.TargetField)
+			return fmt.Errorf("workflow data write %q cannot use ref expressions", w.Target())
 		}
 	default:
 		return fmt.Errorf("workflow data write must use one canonical form")

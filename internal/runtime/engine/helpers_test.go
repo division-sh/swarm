@@ -284,6 +284,41 @@ func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testi
 	}
 }
 
+func TestApplyDataAccumulationToState_WritesNestedTargetPath(t *testing.T) {
+	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{
+		"analysis": map[string]any{
+			"summary":      "stale",
+			"report_count": 2,
+		},
+	}, nil, nil)}
+	base := BaseContext{
+		Payload: values.Wrap(map[string]any{
+			"summary": "ready",
+		}),
+	}
+	spec := runtimecontracts.WorkflowDataAccumulation{
+		Writes: []runtimecontracts.WorkflowDataWrite{{
+			SourceField:   "summary",
+			TargetPathRef: "entity.analysis.summary",
+		}},
+	}
+
+	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec); err != nil {
+		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
+	}
+
+	analysis, ok := state.StateCarrier.Metadata["analysis"].(map[string]any)
+	if !ok {
+		t.Fatalf("analysis = %#v", state.StateCarrier.Metadata["analysis"])
+	}
+	if got := analysis["summary"]; got != "ready" {
+		t.Fatalf("analysis.summary = %#v, want ready", got)
+	}
+	if got := analysis["report_count"]; got != 2 {
+		t.Fatalf("analysis.report_count = %#v, want 2", got)
+	}
+}
+
 func TestApplyDataAccumulationToState_FailsClosedOnCELRuntimeError(t *testing.T) {
 	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
 	base := BaseContext{

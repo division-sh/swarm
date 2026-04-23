@@ -15,6 +15,8 @@ import (
 	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/core/timeridentity"
 	"swarm/internal/runtime/core/values"
+	"swarm/internal/runtime/entityruntime"
+	"swarm/internal/runtime/semanticview"
 )
 
 type Step string
@@ -132,7 +134,171 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if err := validateHandlerComputeSpecs(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
+	if err := validateHandlerEntityWriteTargets(e.deps.Source, req.FlowID.String(), req.Handler); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
 	return nil
+}
+
+func validateHandlerEntityWriteTargets(source semanticview.Source, flowID string, handler runtimecontracts.SystemNodeEventHandler) error {
+	validateTarget := func(kind, target string) error {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			return nil
+		}
+		contract, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(source, flowID, target)
+		if err != nil {
+			return fmt.Errorf("%s target %q: %w", kind, target, err)
+		}
+		if !entityTarget {
+			return nil
+		}
+		if strings.Contains(resolved.Path, "[") || strings.Contains(resolved.Path, "]") {
+			return fmt.Errorf("%s target %q: list index writes are not supported", kind, target)
+		}
+		if resolved.Nested && contract.Entity.Fields == nil {
+			return fmt.Errorf("%s target %q: entity contract is unavailable", kind, target)
+		}
+		return nil
+	}
+	validateWrites := func(kind string, writes []runtimecontracts.WorkflowDataWrite) error {
+		for _, write := range writes {
+			if err := validateTarget(kind, write.Target()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	validateRule := func(kind string, rule runtimecontracts.HandlerRuleEntry) error {
+		if err := validateWrites(kind+".data_accumulation", rule.DataAccumulation.Writes); err != nil {
+			return err
+		}
+		if rule.Compute != nil {
+			if err := validateTarget(kind+".compute", rule.Compute.StoreAs); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var validateQuery func(kind string, query *runtimecontracts.QuerySpec) error
+	validateQuery = func(kind string, query *runtimecontracts.QuerySpec) error {
+		if query == nil {
+			return nil
+		}
+		if err := validateTarget(kind+".query", query.StoreAs); err != nil {
+			return err
+		}
+		for i := range query.Queries {
+			if err := validateQuery(kind+".query", &query.Queries[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := validateQuery("handler", handler.Query); err != nil {
+		return err
+	}
+	if err := validateWrites("handler.data_accumulation", handler.DataAccumulation.Writes); err != nil {
+		return err
+	}
+	if handler.Compute != nil {
+		if err := validateTarget("handler.compute", handler.Compute.StoreAs); err != nil {
+			return err
+		}
+	}
+	if handler.Filter != nil {
+		if err := validateTarget("handler.filter", handler.Filter.StoreAs); err != nil {
+			return err
+		}
+	}
+	if handler.GroupBy != nil {
+		if err := validateTarget("handler.group_by", handler.GroupBy.StoreAs); err != nil {
+			return err
+		}
+	}
+	if handler.Reduce != nil {
+		if err := validateTarget("handler.reduce", handler.Reduce.StoreAs); err != nil {
+			return err
+		}
+	}
+	if handler.Count != nil {
+		if err := validateTarget("handler.count", handler.Count.StoreAs); err != nil {
+			return err
+		}
+	}
+	if handler.Clear != nil {
+		if err := validateTarget("handler.clear", handler.Clear.Target); err != nil {
+			return err
+		}
+		for _, target := range handler.Clear.Targets {
+			if err := validateTarget("handler.clear", target); err != nil {
+				return err
+			}
+		}
+	}
+	for _, rule := range handler.Rules {
+		if err := validateRule("handler.rule", rule); err != nil {
+			return err
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		if err := validateRule("handler.on_complete", rule); err != nil {
+			return err
+		}
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			if err := validateRule("handler.accumulate.on_complete", rule); err != nil {
+				return err
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			if err := validateRule("handler.accumulate.on_timeout", *handler.Accumulate.OnTimeout); err != nil {
+				return err
+			}
+		}
+	}
+	for _, branch := range handler.Branch {
+		if branch.Then != nil {
+			if err := validateRule("handler.branch.then", *branch.Then); err != nil {
+				return err
+			}
+		}
+		if branch.Else != nil {
+			if err := validateRule("handler.branch.else", *branch.Else); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func resolveHandlerEntityWriteTarget(source semanticview.Source, flowID, target string) (entityruntime.Contract, entityruntime.WriteTarget, bool, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return entityruntime.Contract{}, entityruntime.WriteTarget{}, false, fmt.Errorf("field is required")
+	}
+	path, entityTarget, err := entityruntime.EntityWritePath(target)
+	if err != nil || !entityTarget {
+		return entityruntime.Contract{}, entityruntime.WriteTarget{Raw: target}, entityTarget, err
+	}
+	rootField, _, _ := strings.Cut(path, ".")
+	unvalidated := entityruntime.WriteTarget{
+		Raw:       target,
+		Path:      path,
+		RootField: strings.TrimSpace(rootField),
+		Nested:    strings.Contains(path, "."),
+	}
+	contract, ok := entityruntime.ResolveForFlow(source, flowID)
+	if !ok {
+		if !strings.Contains(path, ".") {
+			return entityruntime.Contract{}, unvalidated, true, nil
+		}
+		return entityruntime.Contract{}, unvalidated, true, fmt.Errorf("flow %s has no declared entity contract", strings.TrimSpace(flowID))
+	}
+	resolved, _, err := entityruntime.ResolveEntityWriteTarget(contract, target)
+	return contract, resolved, true, err
 }
 
 func validateHandlerComputeSpecs(handler runtimecontracts.SystemNodeEventHandler) error {
@@ -436,7 +602,9 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 		}
 		value = selected
 	}
-	e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.query"), value)
+	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.query"), value); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -585,7 +753,9 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 			filtered = append(filtered, item)
 		}
 	}
-	e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.filter"), filtered)
+	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.filter"), filtered); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -598,7 +768,9 @@ func (e *Executor) stepReduce(frame *executionFrame) error {
 	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
 	items := executionItems(sourceValue)
 	value := executionReduceValue(items, strings.TrimSpace(spec.Operation))
-	e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.reduce"), value)
+	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.reduce"), value); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -629,7 +801,9 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 			count++
 		}
 	}
-	e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.count"), count)
+	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.count"), count); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -643,15 +817,17 @@ func (e *Executor) stepCompute(frame *executionFrame) error {
 	if err != nil {
 		return err
 	}
-	field := normalizeStateField(spec.StoreAs)
-	if field == "" {
-		field = "computed"
+	if storeAs := strings.TrimSpace(spec.StoreAs); storeAs != "" {
+		if err := e.writeStepValue(frame, storeAs, value); err != nil {
+			return err
+		}
+		return nil
 	}
-	frame.state.SetComputed(field, value)
-	frame.result.SetComputed(field, value)
-	frame.state.State.SetMetadata(field, value)
+	frame.state.SetComputed("computed", value)
+	frame.result.SetComputed("computed", value)
+	frame.state.State.SetMetadata("computed", value)
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
-	frame.result.StateMutation.SetMetadata(field, value)
+	frame.result.StateMutation.SetMetadata("computed", value)
 	return nil
 }
 
@@ -666,7 +842,9 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	frame.state.FanOut = map[string]any{}
 	frame.state.SetFanOut("target", spec.Target)
 	frame.state.SetFanOut("count", len(items))
-	e.writeStepValue(frame, "entity.fan_out_count", len(items))
+	if err := e.writeStepValue(frame, "entity.fan_out_count", len(items)); err != nil {
+		return false, err
+	}
 	if len(items) == 0 {
 		return false, nil
 	}
@@ -724,7 +902,9 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 		existing, _ := grouped[key].([]any)
 		grouped[key] = append(existing, item)
 	}
-	e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.group_by"), grouped)
+	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.group_by"), grouped); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -959,7 +1139,9 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 		case "pending_dedup":
 			delete(frame.state.State.StateCarrier.Metadata, "dedup_key")
 		default:
-			e.clearStepValue(frame, target)
+			if err := e.clearStepValue(frame, target); err != nil {
+				return err
+			}
 		}
 	}
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
@@ -1170,45 +1352,66 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	return ctx
 }
 
-func (e *Executor) writeStepValue(frame *executionFrame, target string, value any) {
+func (e *Executor) writeStepValue(frame *executionFrame, target string, value any) error {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return
+		return nil
 	}
 	parsed := paths.Parse(target)
 	switch parsed.Root {
 	case paths.RootComputed:
 		frame.state.SetComputed(strings.Join(parsed.Segments, "."), value)
 		frame.result.SetComputed(strings.Join(parsed.Segments, "."), value)
+		return nil
 	case paths.RootAccumulated:
 		frame.state.SetAccumulated(strings.Join(parsed.Segments, "."), value)
+		return nil
 	case paths.RootFanOut:
 		frame.state.SetFanOut(strings.Join(parsed.Segments, "."), value)
-	default:
-		if frame.state.State.StateCarrier.Metadata == nil {
-			frame.state.State.StateCarrier.Metadata = map[string]any{}
-		}
-		switch {
-		case parsed.Root == paths.RootEntity || parsed.Root == paths.RootMetadata:
-			setParsedValuePath(frame.state.State.StateCarrier.Metadata, paths.Path{Segments: parsed.Segments}, value)
-		case parsed.HasExplicitRoot():
-			setParsedValuePath(frame.state.State.StateCarrier.Metadata, paths.Path{Segments: parsed.Segments}, value)
-		default:
-			setParsedValuePath(frame.state.State.StateCarrier.Metadata, parsed, value)
-		}
-		frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+		return nil
 	}
+	if frame.state.State.StateCarrier.Metadata == nil {
+		frame.state.State.StateCarrier.Metadata = map[string]any{}
+	}
+	storagePath := parsed
+	if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
+		return err
+	} else if entityTarget {
+		storagePath = paths.Parse(resolved.Path)
+		if value != nil && len(resolved.Field.Path) != 0 {
+			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.FlowID.String())
+			if !ok {
+				return fmt.Errorf("flow %s has no declared entity contract", strings.TrimSpace(frame.req.FlowID.String()))
+			}
+			normalized, normalizeErr := entityruntime.NormalizeFieldValue(contract, resolved.Path, value)
+			if normalizeErr != nil {
+				return normalizeErr
+			}
+			value = normalized
+		}
+	} else if parsed.HasExplicitRoot() {
+		storagePath = paths.Path{Segments: parsed.Segments}
+	}
+	setParsedValuePath(frame.state.State.StateCarrier.Metadata, storagePath, value)
+	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	return nil
 }
 
-func (e *Executor) clearStepValue(frame *executionFrame, target string) {
+func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return
+		return nil
 	}
 	parsed := paths.Parse(target)
 	if !parsed.HasExplicitRoot() {
+		if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
+			return err
+		} else if entityTarget {
+			executionDeletePath(frame.state.State.StateCarrier.Metadata, strings.Split(resolved.Path, "."))
+			return nil
+		}
 		executionDeletePath(frame.state.State.StateCarrier.Metadata, strings.Split(target, "."))
-		return
+		return nil
 	}
 	switch parsed.Root {
 	case paths.RootComputed:
@@ -1219,10 +1422,19 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) {
 	case paths.RootFanOut:
 		delete(frame.state.FanOut, strings.Join(parsed.Segments, "."))
 	case paths.RootEntity, paths.RootMetadata:
+		if parsed.Root == paths.RootEntity {
+			if _, resolved, _, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
+				return err
+			} else {
+				executionDeletePath(frame.state.State.StateCarrier.Metadata, strings.Split(resolved.Path, "."))
+			}
+			return nil
+		}
 		executionDeletePath(frame.state.State.StateCarrier.Metadata, parsed.Segments)
 	default:
 		delete(frame.state.State.StateCarrier.Metadata, target)
 	}
+	return nil
 }
 
 func (e *Executor) executionContext(frame *executionFrame, step Step) ExecutionContext {
@@ -1335,8 +1547,41 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 }
 
 func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecontracts.WorkflowDataAccumulation) error {
-	if err := applyDataAccumulationToState(e.currentContext(frame), frame.state, &frame.state.State, spec); err != nil {
-		return err
+	current := e.currentContext(frame)
+	for _, write := range spec.Writes {
+		target := strings.TrimSpace(write.Target())
+		if target == "" {
+			continue
+		}
+		switch parsed := paths.Parse(target); parsed.Root {
+		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootGates, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
+			return fmt.Errorf("data_accumulation target %s: unsupported target scope", target)
+		}
+		if write.Value.HasLiteralValue() {
+			if err := e.writeStepValue(frame, target, write.Value.Literal); err != nil {
+				return fmt.Errorf("data_accumulation target %s: %w", target, err)
+			}
+			continue
+		}
+		if write.Value.HasCELValue() {
+			value, err := evalWorkflowValueExpression(current, frame.state, write.Value.CEL)
+			if err != nil {
+				return fmt.Errorf("data_accumulation target %s: %w", target, err)
+			}
+			if err := e.writeStepValue(frame, target, value); err != nil {
+				return fmt.Errorf("data_accumulation target %s: %w", target, err)
+			}
+			continue
+		}
+		source := strings.TrimSpace(write.Source())
+		if source == "" {
+			continue
+		}
+		if value, ok := lookupPath(cloneStringAnyMap(current.Payload.Raw()), source); ok {
+			if err := e.writeStepValue(frame, target, value); err != nil {
+				return fmt.Errorf("data_accumulation target %s: %w", target, err)
+			}
+		}
 	}
 	frame.state.State.SetMetadata("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type)))
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)

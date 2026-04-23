@@ -28,6 +28,28 @@ func sourceWithPolicy(values map[string]any) semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: policy})
 }
 
+func stubSourceWithRootEntityContract() semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"Analysis": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"summary":      {Type: "text"},
+						"report_count": {Type: "integer"},
+					},
+				},
+			},
+		},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"subject": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"analysis": {Type: "Analysis"},
+				},
+			},
+		},
+	})
+}
+
 func sourceWithKilledState() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -1268,6 +1290,128 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 	ctx, ok := payload["discovery_context"].(map[string]any)
 	if !ok || ctx["source"] != "corpus" {
 		t.Fatalf("discovery_context = %#v", payload["discovery_context"])
+	}
+}
+
+func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSourceWithRootEntityContract(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"summary":"ready"}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{{
+					SourceField:   "summary",
+					TargetPathRef: "entity.analysis.summary",
+				}},
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{
+			"analysis": map[string]any{
+				"summary":      "stale",
+				"report_count": 2,
+			},
+		}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	analysis, ok := result.StateMutation.Metadata["analysis"].(map[string]any)
+	if !ok {
+		t.Fatalf("analysis = %#v", result.StateMutation.Metadata["analysis"])
+	}
+	if got := analysis["summary"]; got != "ready" {
+		t.Fatalf("analysis.summary = %#v, want ready", got)
+	}
+	if got := analysis["report_count"]; got != 2 {
+		t.Fatalf("analysis.report_count = %#v, want 2", got)
+	}
+}
+
+func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSourceWithRootEntityContract(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Compute: &runtimecontracts.ComputeSpec{
+				Operation: runtimecontracts.ComputeOpCount,
+				StoreAs:   "entity.analysis.missing",
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil {
+		t.Fatal("expected invalid config error")
+	}
+	if !strings.Contains(err.Error(), "invalid config") {
+		t.Fatalf("error = %v, want invalid config", err)
+	}
+	if !strings.Contains(err.Error(), "entity.analysis.missing") {
+		t.Fatalf("error = %v, want target path context", err)
+	}
+}
+
+func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSourceWithRootEntityContract(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Clear: &runtimecontracts.ClearSpec{Target: "entity.analysis.summary"},
+		},
+		State: testStateSnapshot("pending", map[string]any{
+			"analysis": map[string]any{
+				"summary":      "stale",
+				"report_count": 2,
+			},
+		}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	analysis, ok := result.StateMutation.Metadata["analysis"].(map[string]any)
+	if !ok {
+		t.Fatalf("analysis = %#v", result.StateMutation.Metadata["analysis"])
+	}
+	if _, exists := analysis["summary"]; exists {
+		t.Fatalf("analysis.summary unexpectedly present: %#v", analysis)
+	}
+	if got := analysis["report_count"]; got != 2 {
+		t.Fatalf("analysis.report_count = %#v, want 2", got)
 	}
 }
 
