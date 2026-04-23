@@ -49,3 +49,30 @@ func TestReconstructEntityStateProjection_RoundTripsTrackedEntityState(t *testin
 		t.Fatalf("Accumulator = %#v", got.Accumulator)
 	}
 }
+
+func TestReconstructEntityStateProjection_AppliesNestedFieldMutationsOverTopLevelObjects(t *testing.T) {
+	got, err := ReconstructEntityStateProjection([]ProjectionMutation{
+		{Field: "metadata", NewValue: map[string]any{"region": "us", "score_band": "low"}},
+		{Field: "metadata.region", NewValue: "ca"},
+		{Field: "status", NewValue: "open"},
+	})
+	if err != nil {
+		t.Fatalf("ReconstructEntityStateProjection: %v", err)
+	}
+	metadata, ok := got.Fields["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("Fields = %#v", got.Fields)
+	}
+	if metadata["region"] != "ca" {
+		t.Fatalf("metadata.region = %#v, want ca", metadata["region"])
+	}
+	if metadata["score_band"] != "low" {
+		t.Fatalf("metadata.score_band = %#v, want low", metadata["score_band"])
+	}
+	if got.Fields["status"] != "open" {
+		t.Fatalf("Fields = %#v", got.Fields)
+	}
+	if _, ok := got.Fields["metadata.region"]; ok {
+		t.Fatalf("Fields contains literal dotted key: %#v", got.Fields)
+	}
+}

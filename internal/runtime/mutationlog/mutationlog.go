@@ -297,11 +297,53 @@ func applyProjectionMapValue(target map[string]any, key string, value any, bucke
 		return ErrInvalidMutationLogWriter(fmt.Sprintf("%s mutation key is required", strings.TrimSpace(bucket)))
 	}
 	if value == nil {
-		delete(target, key)
+		deleteProjectionMapValue(target, strings.Split(key, "."))
 		return nil
 	}
-	target[key] = value
+	applyProjectionNestedMapValue(target, strings.Split(key, "."), value)
 	return nil
+}
+
+func applyProjectionNestedMapValue(target map[string]any, path []string, value any) {
+	if len(path) == 0 {
+		return
+	}
+	segment := strings.TrimSpace(path[0])
+	if segment == "" {
+		return
+	}
+	if len(path) == 1 {
+		target[segment] = value
+		return
+	}
+	next, _ := target[segment].(map[string]any)
+	if next == nil {
+		next = map[string]any{}
+		target[segment] = next
+	}
+	applyProjectionNestedMapValue(next, path[1:], value)
+}
+
+func deleteProjectionMapValue(target map[string]any, path []string) bool {
+	if len(path) == 0 {
+		return len(target) == 0
+	}
+	segment := strings.TrimSpace(path[0])
+	if segment == "" {
+		return len(target) == 0
+	}
+	if len(path) == 1 {
+		delete(target, segment)
+		return len(target) == 0
+	}
+	next, ok := target[segment].(map[string]any)
+	if !ok || next == nil {
+		return len(target) == 0
+	}
+	if empty := deleteProjectionMapValue(next, path[1:]); empty {
+		delete(target, segment)
+	}
+	return len(target) == 0
 }
 
 func normalizeRunID(runID string) string {
