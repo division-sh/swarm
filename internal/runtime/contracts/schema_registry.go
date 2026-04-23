@@ -155,14 +155,14 @@ func eventSchemaDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, 
 		return entry, key, bundle.RootTypeCatalog(), true
 	}
 
-	targetKey := resolvedEventSchemaKey(bundle, flowID, eventType)
+	targetKeys := eventSchemaLookupKeys(bundle, flowID, eventType)
 	for _, declaration := range eventSchemaDeclarationPath(bundle, flowID) {
-		if entry, resolvedKey, ok := eventSchemaDeclarationEntry(bundle, declaration, targetKey); ok {
+		if entry, resolvedKey, ok := eventSchemaDeclarationEntry(bundle, declaration, targetKeys); ok {
 			return entry, resolvedKey, declaration.types, true
 		}
 	}
 	for _, declaration := range eventSchemaAllDeclarationScopes(bundle) {
-		if entry, resolvedKey, ok := eventSchemaDeclarationEntry(bundle, declaration, targetKey); ok {
+		if entry, resolvedKey, ok := eventSchemaDeclarationEntry(bundle, declaration, targetKeys); ok {
 			return entry, resolvedKey, declaration.types, true
 		}
 	}
@@ -255,18 +255,28 @@ func eventSchemaAllDeclarationScopes(bundle *WorkflowContractBundle) []eventSche
 	return out
 }
 
-func eventSchemaDeclarationEntry(bundle *WorkflowContractBundle, declaration eventSchemaDeclarationScope, targetKey string) (EventCatalogEntry, string, bool) {
+func eventSchemaDeclarationEntry(bundle *WorkflowContractBundle, declaration eventSchemaDeclarationScope, targetKeys []string) (EventCatalogEntry, string, bool) {
 	if declaration.view == nil {
 		return EventCatalogEntry{}, "", false
 	}
 	for localKey, entry := range declaration.view.Events {
 		resolvedKey := resolvedEventSchemaKey(bundle, declaration.flowID, localKey)
-		if normalizedEventSchemaKey(resolvedKey) != normalizedEventSchemaKey(targetKey) {
-			continue
+		for _, targetKey := range targetKeys {
+			if normalizedEventSchemaKey(resolvedKey) != normalizedEventSchemaKey(targetKey) {
+				continue
+			}
+			return entry, resolvedKey, true
 		}
-		return entry, resolvedKey, true
 	}
 	return EventCatalogEntry{}, "", false
+}
+
+func eventSchemaLookupKeys(bundle *WorkflowContractBundle, flowID, eventType string) []string {
+	keys := []string{resolvedEventSchemaKey(bundle, flowID, eventType)}
+	if key := instanceScopedEventSchemaKey(bundle, eventType); key != "" {
+		keys = append(keys, key)
+	}
+	return uniqueNormalizedEventSchemaKeys(keys...)
 }
 
 func resolvedEventSchemaKey(bundle *WorkflowContractBundle, flowID, eventType string) string {
@@ -282,6 +292,88 @@ func resolvedEventSchemaKey(bundle *WorkflowContractBundle, flowID, eventType st
 		return resolved
 	}
 	return eventType
+}
+
+func instanceScopedEventSchemaKey(bundle *WorkflowContractBundle, eventType string) string {
+	if bundle == nil {
+		return ""
+	}
+	eventType = normalizedEventSchemaKey(eventType)
+	idx := strings.LastIndex(eventType, "/")
+	if idx <= 0 || idx+1 >= len(eventType) {
+		return ""
+	}
+	eventPath := normalizedEventSchemaKey(eventType[:idx])
+	if eventPath == "" || eventSchemaFlowIDForPath(bundle, eventPath) != "" {
+		return ""
+	}
+	semanticPath := eventSchemaSemanticScopeFromInstancePath(eventPath)
+	if semanticPath == "" {
+		return ""
+	}
+	flowID := eventSchemaFlowIDForPath(bundle, semanticPath)
+	if flowID == "" {
+		return ""
+	}
+	return resolvedEventSchemaKey(bundle, flowID, eventType[idx+1:])
+}
+
+func eventSchemaFlowIDForPath(bundle *WorkflowContractBundle, flowPath string) string {
+	flowPath = normalizedEventSchemaKey(flowPath)
+	if bundle == nil || flowPath == "" {
+		return ""
+	}
+	if view := bundle.FlowTree.ByPath[flowPath]; view != nil {
+		return strings.TrimSpace(view.Paths.ID)
+	}
+	flowIDs := make([]string, 0, len(bundle.FlowTree.ByID))
+	for flowID := range bundle.FlowTree.ByID {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" {
+			continue
+		}
+		flowIDs = append(flowIDs, flowID)
+	}
+	sort.Strings(flowIDs)
+	for _, flowID := range flowIDs {
+		view := bundle.FlowTree.ByID[flowID]
+		if view == nil {
+			continue
+		}
+		if normalizedEventSchemaKey(view.Path) == flowPath {
+			return flowID
+		}
+	}
+	return ""
+}
+
+func eventSchemaSemanticScopeFromInstancePath(instancePath string) string {
+	instancePath = normalizedEventSchemaKey(instancePath)
+	if instancePath == "" {
+		return ""
+	}
+	idx := strings.LastIndex(instancePath, "/")
+	if idx <= 0 {
+		return ""
+	}
+	return normalizedEventSchemaKey(instancePath[:idx])
+}
+
+func uniqueNormalizedEventSchemaKeys(values ...string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = normalizedEventSchemaKey(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func normalizedEventSchemaKey(raw string) string {

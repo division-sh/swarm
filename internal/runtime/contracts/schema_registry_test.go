@@ -242,4 +242,17 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 	if got := absolutePriority["enum"]; len(got.([]any)) != 1 || got.([]any)[0] != "urgent" {
 		t.Fatalf("absolute priority enum = %#v, want [urgent]", got)
 	}
+
+	instanceSchema, instanceKey, ok := EventSchemaForFlowEvent(bundle, "review", "review/inst-1/task.requested")
+	if !ok {
+		t.Fatal("missing instance-scoped review event schema")
+	}
+	if instanceKey != "review/task.requested" {
+		t.Fatalf("instance key = %q, want review/task.requested", instanceKey)
+	}
+	instanceProps, _ := instanceSchema.Schema["properties"].(map[string]any)
+	instancePriority, _ := instanceProps["priority"].(map[string]any)
+	if got := instancePriority["enum"]; len(got.([]any)) != 1 || got.([]any)[0] != "urgent" {
+		t.Fatalf("instance priority enum = %#v, want [urgent]", got)
+	}
 }

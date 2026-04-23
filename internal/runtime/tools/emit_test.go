@@ -104,6 +104,26 @@ func TestEmitRegistry_KeepsRuntimeSourcesIsolated(t *testing.T) {
 	}
 }
 
+func TestEmitSchemaForEventType_UsesOnlyUniqueScopedLocalMatch(t *testing.T) {
+	scanSchema := EmitSchema{Description: "scan"}
+	reviewSchema := EmitSchema{Description: "review"}
+
+	schema, ok := emitSchemaForEventType(map[string]EmitSchema{
+		"review/scan.requested": scanSchema,
+	}, "review/inst-1/scan.requested")
+	if !ok || schema.Description != "scan" {
+		t.Fatalf("unique scoped schema = %#v, %v; want scan,true", schema, ok)
+	}
+
+	_, ok = emitSchemaForEventType(map[string]EmitSchema{
+		"review/scan.requested":     scanSchema,
+		"validation/scan.requested": reviewSchema,
+	}, "scan.requested")
+	if ok {
+		t.Fatal("ambiguous scoped local match should not resolve")
+	}
+}
+
 func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOwningFlowProof(t *testing.T) {
 	reviewFlow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
