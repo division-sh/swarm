@@ -42,9 +42,22 @@ func TestFormatEventForAgent_UsesPostCompositionToolSurface(t *testing.T) {
 		{Name: "get_entity"},
 		{Name: "emit_example"},
 		{Name: "read_file"},
+		{
+			Name: "save_entity_field",
+			Schema: map[string]any{
+				"properties": map[string]any{
+					"field": map[string]any{
+						"enum": []any{"metadata", "metadata.region", "status"},
+					},
+				},
+			},
+		},
 	})
-	if !strings.Contains(formatted, "Available non-emit tools in this turn: get_entity, read_file") {
+	if !strings.Contains(formatted, "Available non-emit tools in this turn: get_entity, read_file, save_entity_field") {
 		t.Fatalf("expected post-composition non-emit summary, got %q", formatted)
+	}
+	if !strings.Contains(formatted, "Writable entity paths for save_entity_field in this turn: metadata, metadata.region, status") {
+		t.Fatalf("expected writable path summary, got %q", formatted)
 	}
 	if strings.Contains(formatted, "schedule") {
 		t.Fatalf("expected raw contract-only tool to stay out of event summary, got %q", formatted)

@@ -231,6 +231,16 @@ func TestAnthropicAPIRuntime_StartSessionAugmentsSystemPromptWithDerivedToolSurf
 	s, err := runtime.StartSession(ctx, "agent-3", "base prompt", []ToolDefinition{
 		{Name: "emit_market_research_scan_complete"},
 		{Name: "query_entities"},
+		{
+			Name: "save_entity_field",
+			Schema: map[string]any{
+				"properties": map[string]any{
+					"field": map[string]any{
+						"enum": []any{"metadata", "metadata.region", "status"},
+					},
+				},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
@@ -246,6 +256,9 @@ func TestAnthropicAPIRuntime_StartSessionAugmentsSystemPromptWithDerivedToolSurf
 	}
 	if !strings.Contains(s.SystemPrompt, "Available non-emit tools in this turn: query_entities") {
 		t.Fatalf("expected non-emit tool summary in system prompt, got %q", s.SystemPrompt)
+	}
+	if !strings.Contains(s.SystemPrompt, "Writable entity paths for save_entity_field in this turn: metadata, metadata.region, status") {
+		t.Fatalf("expected writable path summary in system prompt, got %q", s.SystemPrompt)
 	}
 	if !strings.Contains(s.SystemPrompt, "Available native CLI tools in this turn: Edit, Read, Write") {
 		t.Fatalf("expected native tool summary in system prompt, got %q", s.SystemPrompt)
@@ -500,6 +513,26 @@ func TestClaudeCLIRuntimePrompt_HidesNativeCapabilityFallbackToolsFromPostamble(
 	}
 	if strings.Contains(prompt, "Claude CLI native tools available in this turn") {
 		t.Fatalf("did not expect native builtin prompt section, got %q", prompt)
+	}
+}
+
+func TestClaudeCLIRuntimePrompt_IncludesWritableEntityPathSummary(t *testing.T) {
+	actor := runtimeactors.AgentConfig{
+		ID:   "analysis-agent",
+		Role: "analysis",
+	}
+	prompt := augmentCLISystemPrompt("base prompt", actor, []ToolDefinition{
+		{Name: "save_entity_field", Schema: map[string]any{
+			"properties": map[string]any{
+				"field": map[string]any{
+					"enum": []any{"status", "metadata.region", "metadata"},
+				},
+			},
+		}},
+	})
+
+	if !strings.Contains(prompt, "Writable entity paths for save_entity_field in this turn: metadata, metadata.region, status") {
+		t.Fatalf("expected writable path summary in prompt, got %q", prompt)
 	}
 }
 
