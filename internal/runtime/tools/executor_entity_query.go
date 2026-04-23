@@ -381,6 +381,13 @@ func entityFilterSelectorBase(expr celast.Expr) (entityFilterSelectorReference, 
 }
 
 func validateEntityFilterSelectorReference(schema entityToolSchema, ref entityFilterSelectorReference) error {
+	if ref.EntityScoped {
+		path := strings.TrimSpace(ref.Path)
+		if path == "" {
+			return fmt.Errorf("%w: query filter selectors must not use the entity root", ErrUnknownEntityField)
+		}
+		return fmt.Errorf("%w: query filter selectors must not use entity.%s; use %s instead", ErrUnknownEntityField, path, path)
+	}
 	if err := validateEntitySelector(schema, ref.Path); err != nil {
 		return decorateEntityFilterSelectorError(schema, ref, err)
 	}
