@@ -377,6 +377,78 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	}
 }
 
+func TestHandleEmitTool_FailsClosedOnSameActorDuplicateLeafScopedSchemas(t *testing.T) {
+	reviewFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Path:  "review",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"priority": {Type: "string"},
+					},
+					Required: []string{"priority"},
+				},
+			},
+		},
+	}
+	validationFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Path:  "validation",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"priority": {Type: "string"},
+					},
+					Required: []string{"priority"},
+				},
+			},
+		},
+	}
+	root := &runtimecontracts.FlowContractView{
+		Children: []runtimecontracts.FlowContractView{reviewFlow, validationFlow},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"review":     &root.Children[0],
+				"validation": &root.Children[1],
+			},
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				"review":     &root.Children[0],
+				"validation": &root.Children[1],
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "dual-scope-agent",
+		Role:       "reviewer",
+		Mode:       "review",
+		FlowPath:   "review",
+		EmitEvents: []string{"review/task.requested", "validation/task.requested"},
+	}
+
+	_, err := exec.handleEmitTool(context.Background(), actor, "emit_task_requested", map[string]any{
+		"priority": "urgent",
+	})
+	if err == nil {
+		t.Fatal("expected same-actor duplicate local tool name collision to fail closed")
+	}
+	if !strings.Contains(err.Error(), "invalid emit tool name") {
+		t.Fatalf("error = %v, want invalid emit tool name", err)
+	}
+	if bus.count != 0 {
+		t.Fatalf("publish count = %d, want 0", bus.count)
+	}
+}
+
 func TestHandleEmitTool_FailsClosedOnNamedTypeViolation(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
