@@ -66,8 +66,17 @@ review_subject:
 	saveProps, _ := saveSchema["properties"].(map[string]any)
 	fieldEnum, _ := saveProps["field"].(map[string]any)
 	values, _ := fieldEnum["enum"].([]any)
-	if len(values) != 4 {
-		t.Fatalf("save_entity_field field enum = %#v", values)
+	if !containsAnyString(values, "status") {
+		t.Fatalf("save_entity_field field enum = %#v, want status", values)
+	}
+	if !containsAnyString(values, "metadata") {
+		t.Fatalf("save_entity_field field enum = %#v, want metadata", values)
+	}
+	if !containsAnyString(values, "metadata.region") {
+		t.Fatalf("save_entity_field field enum = %#v, want metadata.region", values)
+	}
+	if containsAnyString(values, "entity_id") {
+		t.Fatalf("save_entity_field field enum = %#v, should not include envelope field entity_id", values)
 	}
 
 	searchSchema := defByName["search_entities"]

@@ -65,18 +65,11 @@ func (s entityToolSchema) declaredField(name string) (entityruntime.Field, error
 	if name == "" {
 		return entityruntime.Field{}, fmt.Errorf("field is required")
 	}
-	if strings.Contains(name, ".") {
-		return entityruntime.Field{}, fmt.Errorf("%w: nested writes are not supported in Wave 1", ErrUnknownEntityField)
-	}
-	decl, err := entityruntime.FieldDecl(s.Contract, name)
+	field, err := entityruntime.ResolveFieldPath(s.Contract, name)
 	if err != nil {
 		return entityruntime.Field{}, fmt.Errorf("%w: %v", ErrUnknownEntityField, err)
 	}
-	return entityruntime.Field{
-		Path:      name,
-		Type:      strings.TrimSpace(decl.Type),
-		FieldDecl: decl,
-	}, nil
+	return field, nil
 }
 
 func normalizeEntityFieldValue(schema entityToolSchema, field entityruntime.Field, value any) (any, error) {
