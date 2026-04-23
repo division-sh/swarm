@@ -679,7 +679,7 @@ func TestEntityTools_QueryEntitiesFilterAllowsDeclaredNestedLeaf(t *testing.T) {
 	})
 
 	out, err := exec.Execute(ctx, "query_entities", map[string]any{
-		"filter": `entity.metadata.region == "us"`,
+		"filter": `metadata.region == "us"`,
 		"select": []string{"status", "metadata.region"},
 		"limit":  10,
 	})
@@ -706,18 +706,37 @@ func TestEntityTools_QueryEntitiesFilterRejectsUndeclaredFieldBeforeEvalWithNear
 	ctx, exec := newEntityToolTestExecutor(t)
 
 	_, err := exec.Execute(ctx, "query_entities", map[string]any{
-		"filter": `entity.metadata.regoin == "us"`,
+		"filter": `metadata.regoin == "us"`,
 		"limit":  10,
 	})
 	re, ok := runtimetools.AsRuntimeError(err)
 	if err == nil || !ok || re.Code != "invalid_tool_input" {
 		t.Fatalf("expected invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "entity.metadata.regoin") {
+	if !strings.Contains(err.Error(), "metadata.regoin") {
 		t.Fatalf("expected undeclared filter field in error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "did you mean entity.metadata.region?") {
+	if !strings.Contains(err.Error(), "did you mean metadata.region?") {
 		t.Fatalf("expected nearest-match guidance, got %v", err)
+	}
+}
+
+func TestEntityTools_QueryEntitiesFilterRejectsEntityScopedSelectors(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutor(t)
+
+	_, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"filter": `entity.metadata.region == "us"`,
+		"limit":  10,
+	})
+	re, ok := runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "invalid_tool_input" {
+		t.Fatalf("expected invalid_tool_input, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "must not use entity.metadata.region") {
+		t.Fatalf("expected entity-scoped selector rejection, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "use metadata.region instead") {
+		t.Fatalf("expected direct selector guidance, got %v", err)
 	}
 }
 
