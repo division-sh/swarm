@@ -47,6 +47,26 @@ func TestSchemaFieldTypeToDDLError(t *testing.T) {
 	}
 }
 
+func TestNodeStateFieldTypeToDDL_AllowsNamedTypesAsJSONB(t *testing.T) {
+	cases := map[string]string{
+		"DimensionScore":   "JSONB",
+		"[DimensionScore]": "JSONB",
+		"DimensionScore[]": "JSONB",
+		"text[]":           "TEXT[]",
+	}
+	for schemaType, wantDDL := range cases {
+		t.Run(schemaType, func(t *testing.T) {
+			got, err := NodeStateFieldTypeToDDL(schemaType)
+			if err != nil {
+				t.Fatalf("NodeStateFieldTypeToDDL(%q): %v", schemaType, err)
+			}
+			if got != wantDDL {
+				t.Fatalf("NodeStateFieldTypeToDDL(%q) = %q, want %q", schemaType, got, wantDDL)
+			}
+		})
+	}
+}
+
 func TestGeneratePlatformTableDDLs(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
 	spec.PlatformTables.Tables = map[string]struct {
@@ -224,6 +244,7 @@ func TestGenerateNodeStateTableDDLs(t *testing.T) {
 					{Name: "attempts", Type: "integer"},
 					{Name: "last_error", Type: "text"},
 					{Name: "score", Type: "float"},
+					{Name: "dimensions_received", Type: "[DimensionScore]"},
 				},
 			},
 		},
@@ -243,7 +264,7 @@ func TestGenerateNodeStateTableDDLs(t *testing.T) {
 	if !strings.Contains(createStmt, `"node_id" TEXT NOT NULL`) {
 		t.Fatalf("expected node_id column, got %q", createStmt)
 	}
-	if !strings.Contains(createStmt, `"attempts" BIGINT`) || !strings.Contains(createStmt, `"last_error" TEXT`) || !strings.Contains(createStmt, `"score" DOUBLE PRECISION`) {
+	if !strings.Contains(createStmt, `"attempts" BIGINT`) || !strings.Contains(createStmt, `"last_error" TEXT`) || !strings.Contains(createStmt, `"score" DOUBLE PRECISION`) || !strings.Contains(createStmt, `"dimensions_received" JSONB`) {
 		t.Fatalf("expected state_schema fields, got %q", createStmt)
 	}
 	if !strings.Contains(createStmt, `PRIMARY KEY ("entity_id", "node_id")`) {

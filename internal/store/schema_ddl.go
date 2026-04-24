@@ -66,6 +66,17 @@ func SchemaFieldTypeToDDL(schemaType string) (string, error) {
 	return "", fmt.Errorf("%w %q", ErrUnknownSchemaType, schemaType)
 }
 
+func NodeStateFieldTypeToDDL(schemaType string) (string, error) {
+	normalized, err := runtimecontracts.NormalizeNodeStateFieldType(schemaType)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := runtimecontracts.NodeStateNamedTypeName(normalized); ok {
+		return "JSONB", nil
+	}
+	return SchemaFieldTypeToDDL(normalized)
+}
+
 func GeneratePlatformTableDDLs(spec runtimecontracts.PlatformSpecDocument) ([]SchemaTableDDL, error) {
 	if len(spec.PlatformTables.Tables) == 0 {
 		return nil, fmt.Errorf("platform spec platform_tables.tables.*.ddl is required")
@@ -239,11 +250,7 @@ func GenerateNodeStateTableDDLs(nodes map[string]runtimecontracts.SystemNodeCont
 				return nil, fmt.Errorf("node %s state table %s declares duplicate column %s", strings.TrimSpace(nodeID), tableName, columnName)
 			}
 			seenColumns[columnName] = struct{}{}
-			normalizedType, err := runtimecontracts.NormalizeNodeStateFieldType(field.Type)
-			if err != nil {
-				return nil, fmt.Errorf("node %s state table %s field %s: %w", strings.TrimSpace(nodeID), tableName, columnName, err)
-			}
-			columnType, err := SchemaFieldTypeToDDL(normalizedType)
+			columnType, err := NodeStateFieldTypeToDDL(field.Type)
 			if err != nil {
 				return nil, fmt.Errorf("node %s state table %s field %s: %w", strings.TrimSpace(nodeID), tableName, columnName, err)
 			}

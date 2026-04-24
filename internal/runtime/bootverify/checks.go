@@ -108,6 +108,9 @@ type checkerContext struct {
 	stateReachabilityLoaded   bool
 	stateReachabilityFindings []Finding
 
+	nodeStateSchemaLoaded   bool
+	nodeStateSchemaFindings []Finding
+
 	producesDriftLoaded   bool
 	producesDriftFindings []Finding
 
@@ -187,6 +190,7 @@ var bootCheckRegistry = []Check{
 	{ID: "condition_policy_alignment", Severity: "warning", Run: checkConditionPolicyAlignment},
 	{ID: "state_machine_coherence", Severity: "error", Run: checkStateMachineCoherence},
 	{ID: "semantic_drift_unreachable_state", Severity: "warning", Run: checkSemanticDriftUnreachableState},
+	{ID: "node_state_schema_typed_counterpart", Severity: SeverityHardInvalidity, Run: checkNodeStateSchemaTypedCounterpart},
 	{ID: "required_agents_match", Severity: "error", Run: checkRequiredAgentsMatch},
 	{ID: "handler_field_compliance", Severity: "error", Run: checkHandlerFieldCompliance},
 	{ID: "tool_resolution", Severity: "warning", Run: checkToolResolution},
@@ -235,8 +239,11 @@ func newCheckerContext(ctx context.Context, source semanticview.Source, opts Opt
 	}
 }
 
-func checkPayloadFieldCoverage(c *checkerContext) []Finding       { return c.payloadFieldCoverage() }
-func checkStateMachineCoherence(c *checkerContext) []Finding      { return c.stateMachineCoherence() }
+func checkPayloadFieldCoverage(c *checkerContext) []Finding  { return c.payloadFieldCoverage() }
+func checkStateMachineCoherence(c *checkerContext) []Finding { return c.stateMachineCoherence() }
+func checkNodeStateSchemaTypedCounterpart(c *checkerContext) []Finding {
+	return c.nodeStateSchemaTypedCounterpart()
+}
 func checkRequiredAgentsMatch(c *checkerContext) []Finding        { return c.requiredAgentsMatch() }
 func checkHandlerFieldCompliance(c *checkerContext) []Finding     { return c.handlerFieldCompliance() }
 func checkToolResolution(c *checkerContext) []Finding             { return c.toolResolution() }

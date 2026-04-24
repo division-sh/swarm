@@ -3135,8 +3135,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 43 {
-		t.Fatalf("bootCheckRegistry count = %d, want 43", got)
+	if got := len(bootCheckRegistry); got != 44 {
+		t.Fatalf("bootCheckRegistry count = %d, want 44", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)

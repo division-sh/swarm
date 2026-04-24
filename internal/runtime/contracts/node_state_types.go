@@ -7,6 +7,7 @@ import (
 )
 
 var nodeStateNumericTypePattern = regexp.MustCompile(`(?i)^numeric\(\s*(\d+)\s*,\s*(\d+)\s*\)$`)
+var nodeStateNamedTypePattern = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 
 // NormalizeNodeStateFieldType enforces the supported canonical vocabulary for
 // node-local accumulator/state fields. Unlike the Wave 1 entity/event contract
@@ -17,6 +18,16 @@ func NormalizeNodeStateFieldType(raw string) (string, error) {
 	if raw == "" {
 		return "", fmt.Errorf("state_schema field type is required")
 	}
+	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
+		base := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(raw, "["), "]"))
+		if base == "" {
+			return "", fmt.Errorf("state_schema list type requires an element type")
+		}
+		if !nodeStateNamedTypePattern.MatchString(base) {
+			return "", fmt.Errorf("unsupported state_schema named list type %q; use [NamedType] for declared types.yaml references", raw)
+		}
+		return "[" + base + "]", nil
+	}
 	if strings.HasSuffix(raw, "[]") {
 		base := strings.TrimSpace(strings.TrimSuffix(raw, "[]"))
 		if base == "" {
@@ -25,6 +36,9 @@ func NormalizeNodeStateFieldType(raw string) (string, error) {
 		normalizedBase, err := NormalizeNodeStateFieldType(base)
 		if err != nil {
 			return "", err
+		}
+		if named, ok := NodeStateNamedTypeName(normalizedBase); ok {
+			return "[" + named + "]", nil
 		}
 		return normalizedBase + "[]", nil
 	}
@@ -46,5 +60,26 @@ func NormalizeNodeStateFieldType(raw string) (string, error) {
 	if strings.ContainsAny(raw, " \t\r\n") {
 		return "", fmt.Errorf("state_schema field type %q is not canonical; descriptive notes and inline modifiers must not appear in type declarations", raw)
 	}
-	return "", fmt.Errorf("unsupported state_schema field type %q; use a canonical scalar, numeric(p,s), or [] form", raw)
+	if nodeStateNamedTypePattern.MatchString(raw) {
+		return raw, nil
+	}
+	return "", fmt.Errorf("unsupported state_schema field type %q; use a canonical scalar, numeric(p,s), [NamedType], or [] form", raw)
+}
+
+func NodeStateNamedTypeName(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
+		raw = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(raw, "["), "]"))
+	}
+	if !nodeStateNamedTypePattern.MatchString(raw) {
+		return "", false
+	}
+	return raw, true
+}
+
+func IsNodeStateJSONBType(raw string) bool {
+	return strings.EqualFold(strings.TrimSpace(raw), "jsonb")
 }
