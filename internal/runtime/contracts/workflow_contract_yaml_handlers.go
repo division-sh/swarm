@@ -78,17 +78,27 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("UNDEFINED-FIELD: emit field %q not in platform spec", key)
 			}
 		}
-		type shadow struct {
-			Event  string                     `yaml:"event"`
-			Fields map[string]ExpressionValue `yaml:"fields"`
-		}
-		var aux shadow
-		if err := node.Decode(&aux); err != nil {
-			return err
+		var event string
+		fields := map[string]ExpressionValue{}
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			value := node.Content[i+1]
+			switch key {
+			case "event":
+				if err := value.Decode(&event); err != nil {
+					return err
+				}
+			case "fields":
+				decoded, err := decodeEmitFieldsNode(value)
+				if err != nil {
+					return err
+				}
+				fields = decoded
+			}
 		}
 		*e = EmitSpec{
-			Event:  strings.TrimSpace(aux.Event),
-			Fields: cloneExpressionValueMap(aux.Fields),
+			Event:  strings.TrimSpace(event),
+			Fields: fields,
 		}
 		if e.EventType() == "" && len(e.Fields) > 0 {
 			return fmt.Errorf("INVALID-EMIT: emit.event is required when emit.fields is present")
@@ -96,6 +106,52 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 		return nil
 	default:
 		return fmt.Errorf("unsupported emit yaml node kind %d", node.Kind)
+	}
+}
+
+func decodeEmitFieldsNode(node *yaml.Node) (map[string]ExpressionValue, error) {
+	if node == nil {
+		return nil, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("INVALID-EMIT: emit.fields must be a mapping")
+	}
+	fields := make(map[string]ExpressionValue, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		target := strings.TrimSpace(node.Content[i].Value)
+		if target == "" {
+			continue
+		}
+		value, err := decodeEmitFieldValueNode(node.Content[i+1])
+		if err != nil {
+			return nil, fmt.Errorf("INVALID-EMIT: emit.fields.%s: %w", target, err)
+		}
+		fields[target] = value
+	}
+	return fields, nil
+}
+
+func decodeEmitFieldValueNode(node *yaml.Node) (ExpressionValue, error) {
+	if node == nil {
+		return ExpressionValue{}, nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			return ExpressionValue{}, nil
+		}
+		return CELExpression(node.Value), nil
+	case yaml.MappingNode:
+		var expr ExpressionValue
+		if err := node.Decode(&expr); err != nil {
+			return ExpressionValue{}, err
+		}
+		return expr, nil
+	default:
+		return ExpressionValue{}, fmt.Errorf("field value must be a scalar CEL expression or explicit expression mapping")
 	}
 }
 

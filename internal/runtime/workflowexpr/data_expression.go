@@ -80,6 +80,7 @@ func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
 		"payload": NormalizeCELInputMap(ctx.Payload),
 		"policy":  NormalizeCELInputMap(ctx.Policy),
 		"fan_out": NormalizeCELInputMap(ctx.FanOut),
+		"item":    NormalizeCELValue(ctx.FanOut["item"]),
 	})
 	if err != nil {
 		return nil, err
@@ -272,6 +273,18 @@ func NormalizeCELValue(value any) any {
 			out = append(out, NormalizeCELValue(item))
 		}
 		return out
+	case []ref.Val:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, NormalizeCELValue(item))
+		}
+		return out
+	case map[ref.Val]ref.Val:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[fmt.Sprint(NormalizeCELValue(key))] = NormalizeCELValue(item)
+		}
+		return out
 	case map[string]any:
 		out := make(map[string]any, len(typed))
 		for key, item := range typed {
@@ -309,6 +322,7 @@ func dataExpressionEnvForContext() (*cel.Env, error) {
 			cel.Variable("payload", cel.DynType),
 			cel.Variable("policy", cel.DynType),
 			cel.Variable("fan_out", cel.DynType),
+			cel.Variable("item", cel.DynType),
 		)
 	})
 	return dataExpressionEnv, dataExpressionEnvErr

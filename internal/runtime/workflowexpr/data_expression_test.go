@@ -30,6 +30,19 @@ func TestEvalValueExpression_FailsClosedOnMissingEntityValueRead(t *testing.T) {
 	}
 }
 
+func TestEvalValueExpression_ExposesFanOutItemAlias(t *testing.T) {
+	value, err := EvalValueExpression(`[item]`, ValueContext{
+		FanOut: map[string]any{"item": "industry-a"},
+	})
+	if err != nil {
+		t.Fatalf("EvalValueExpression error = %v", err)
+	}
+	got, ok := value.([]any)
+	if !ok || len(got) != 1 || got[0] != "industry-a" {
+		t.Fatalf("EvalValueExpression value = %#v, want [industry-a]", value)
+	}
+}
+
 func TestValidateValueExpression_RejectsAccumulatedNamespace(t *testing.T) {
 	err := ValidateValueExpression(`accumulated.size()`)
 	if err == nil {

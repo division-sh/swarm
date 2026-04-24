@@ -1542,6 +1542,76 @@ func TestRun_RejectsAccumulatedNamespaceInEmitFieldExpressions(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsYAMLScalarEmitFieldsAsExpressions(t *testing.T) {
+	var handler runtimecontracts.SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+emit:
+  event: item.scored
+  fields:
+    bad: accumulated.size()
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": handler,
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "emit_field_expression_validation", "accumulated.size()") {
+		t.Fatalf("expected YAML scalar emit.fields expression to fail validation, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AcceptsYAMLScalarFanOutEmitItemExpressions(t *testing.T) {
+	var handler runtimecontracts.SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+fan_out:
+  items_from: payload.industries
+  target: market-research-agent
+  emit:
+    event: market_research.industry_assigned
+    fields:
+      industry: item
+      taxonomy_categories: "[item]"
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"market_research.industry_assigned": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"industry":            {Type: "text"},
+						"taxonomy_categories": {Type: "text[]"},
+					},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"scan-orchestrator": {
+				ID: "scan-orchestrator",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"scan.requested": handler,
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if reportContains(report.Errors(), "emit_field_expression_validation", "item") {
+		t.Fatalf("unexpected item expression validation error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_PreservesPermissionMismatchWarningsDuringMigration(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-permission-tool-mismatch")
 

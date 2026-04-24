@@ -8,6 +8,8 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/core/values"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestArrivalIdentifier_PriorityOrder(t *testing.T) {
@@ -111,6 +113,8 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 			"nested.score":   runtimecontracts.CELExpression("payload.score"),
 			"nested.state":   runtimecontracts.CELExpression("entity.current_state"),
 			"literal.string": runtimecontracts.CELExpression(`"hello"`),
+			"explicit.ref":   runtimecontracts.RefExpression("payload.score"),
+			"explicit.value": runtimecontracts.LiteralExpression("ready"),
 		},
 	})
 	if err != nil {
@@ -130,6 +134,16 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 	if !ok || literal["string"] != "hello" {
 		t.Fatalf("literal transform wrong: %#v", transformed)
 	}
+	explicit, ok := transformed["explicit"].(map[string]any)
+	if !ok {
+		t.Fatalf("explicit transform missing: %#v", transformed)
+	}
+	if got := explicit["ref"]; got != 9 {
+		t.Fatalf("explicit.ref = %#v, want 9", got)
+	}
+	if got := explicit["value"]; got != "ready" {
+		t.Fatalf("explicit.value = %#v, want ready", got)
+	}
 }
 
 func TestEmitFieldsPayload_NormalizesWholeNumberJSONInputs(t *testing.T) {
@@ -146,6 +160,52 @@ func TestEmitFieldsPayload_NormalizesWholeNumberJSONInputs(t *testing.T) {
 	}
 	if got := transformed["score"]; got != 50 {
 		t.Fatalf("score = %#v, want 50", got)
+	}
+}
+
+func TestEmitFieldsPayload_EvaluatesYAMLLoadedScalarEmitFieldsAsCEL(t *testing.T) {
+	var spec runtimecontracts.EmitSpec
+	if err := yaml.Unmarshal([]byte(`
+event: signals.category_ready
+fields:
+  mode: payload.mode
+  batch: "{'scan_id': payload.scan_id, 'geography': payload.geography}"
+  count: 0
+  quoted_literal: "'ready'"
+  explicit_literal:
+    literal: ready
+`), &spec); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	base := BaseContext{
+		Payload: values.Wrap(map[string]any{
+			"mode":      "corpus",
+			"scan_id":   "scan-1",
+			"geography": "us",
+		}),
+	}
+	transformed, err := emitFieldsPayload(base, ExecutionState{}, spec)
+	if err != nil {
+		t.Fatalf("emitFieldsPayload(...) error = %v", err)
+	}
+	if got := transformed["mode"]; got != "corpus" {
+		t.Fatalf("mode = %#v, want corpus", got)
+	}
+	batch, ok := transformed["batch"].(map[string]any)
+	if !ok {
+		t.Fatalf("batch = %#v, want object", transformed["batch"])
+	}
+	if batch["scan_id"] != "scan-1" || batch["geography"] != "us" {
+		t.Fatalf("batch = %#v, want scan/geography from payload", batch)
+	}
+	if got := transformed["count"]; got != 0 {
+		t.Fatalf("count = %#v, want 0", got)
+	}
+	if got := transformed["quoted_literal"]; got != "ready" {
+		t.Fatalf("quoted_literal = %#v, want ready", got)
+	}
+	if got := transformed["explicit_literal"]; got != "ready" {
+		t.Fatalf("explicit_literal = %#v, want ready", got)
 	}
 }
 

@@ -253,12 +253,12 @@ func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontr
 		if target == "" {
 			continue
 		}
-		if !valueSpec.HasCELValue() {
-			continue
-		}
-		value, err := evalWorkflowValueExpression(base, state, valueSpec.CEL)
+		value, ok, err := evalExpressionValue(base, state, valueSpec)
 		if err != nil {
 			return nil, fmt.Errorf("emit field %s: %w", target, err)
+		}
+		if !ok {
+			continue
 		}
 		setParsedValuePath(payload, paths.Parse(target), value)
 	}
