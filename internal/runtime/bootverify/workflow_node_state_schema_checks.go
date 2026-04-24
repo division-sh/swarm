@@ -51,11 +51,11 @@ func (c *checkerContext) nodeStateSchemaTypedCounterpart() []Finding {
 				continue
 			}
 			if namedType, ok := runtimecontracts.NodeStateNamedTypeName(normalizedType); ok {
-				if _, declared := types.Types[namedType]; !declared {
+				if !nodeStateDeclaredTypeCatalogRef(types, namedType) {
 					c.nodeStateSchemaFindings = append(c.nodeStateSchemaFindings, Finding{
 						CheckID:  "node_state_schema_typed_counterpart",
 						Severity: SeverityHardInvalidity,
-						Message:  fmt.Sprintf("flow %s node %s state_schema field %s references undeclared named type %s; node state_schema named references must be declared in types.yaml", defaultFlowLabel(flowID), nodeID, fieldName, namedType),
+						Message:  fmt.Sprintf("flow %s node %s state_schema field %s references undeclared type catalog name %s; node state_schema named references must be declared in types.yaml", defaultFlowLabel(flowID), nodeID, fieldName, namedType),
 						Location: nodeID,
 					})
 				}
@@ -82,6 +82,23 @@ func (c *checkerContext) nodeStateSchemaTypedCounterpart() []Finding {
 		}
 	}
 	return c.nodeStateSchemaFindings
+}
+
+func nodeStateDeclaredTypeCatalogRef(types runtimecontracts.TypeCatalogDocument, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	if _, ok := types.Types[name]; ok {
+		return true
+	}
+	if _, ok := types.Enums[name]; ok {
+		return true
+	}
+	if _, ok := types.Scalars[name]; ok {
+		return true
+	}
+	return false
 }
 
 func nodeStateResolvedTypes(source semanticview.Source, flowID string) runtimecontracts.TypeCatalogDocument {

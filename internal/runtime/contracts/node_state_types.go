@@ -81,5 +81,10 @@ func NodeStateNamedTypeName(raw string) (string, bool) {
 }
 
 func IsNodeStateJSONBType(raw string) bool {
-	return strings.EqualFold(strings.TrimSpace(raw), "jsonb")
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "json", "jsonb":
+		return true
+	default:
+		return false
+	}
 }

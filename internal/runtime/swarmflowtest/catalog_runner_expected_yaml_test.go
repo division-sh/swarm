@@ -99,7 +99,7 @@ test-node:
   state_schema:
     fields:
       expected_count: integer
-      received_items: jsonb
+      received_items: text[]
 `,
 		"{}\n",
 		`
