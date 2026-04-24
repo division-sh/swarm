@@ -25,9 +25,14 @@ func builtinRegisteredTools(source semanticview.Source, actor *models.AgentConfi
 }
 
 func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.AgentConfig) map[string]ContractSchemaEntry {
-	out := genericEntityRuntimeContractSchemas()
+	readTargetSchema := entityReadTargetInputSchema(source)
+	out := genericEntityRuntimeContractSchemas(readTargetSchema)
 	if contract, ok := resolveEntityToolContract(source, actor); ok {
-		for name, entry := range entityToolSchemaEntriesForContract(contract) {
+		readContracts := entityruntime.ReadTargetContracts(source)
+		if len(readContracts) == 0 {
+			readContracts = []entityruntime.Contract{contract}
+		}
+		for name, entry := range entityToolSchemaEntriesForContract(contract, readContracts, readTargetSchema) {
 			out[name] = entry
 		}
 	}
@@ -46,7 +51,7 @@ func resolveEntityToolContract(source semanticview.Source, actor *models.AgentCo
 	return entityruntime.ResolveForFlow(source, "")
 }
 
-func genericEntityRuntimeContractSchemas() map[string]ContractSchemaEntry {
+func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[string]ContractSchemaEntry {
 	anyValueSchema := map[string]any{}
 	return map[string]ContractSchemaEntry{
 		"get_entity": {
@@ -93,6 +98,7 @@ func genericEntityRuntimeContractSchemas() map[string]ContractSchemaEntry {
 			Category:    "entity_persistence",
 			Description: "Query entity_state rows using validated selectors and optional grouping.",
 			InputSchema: ObjectSchema(map[string]any{
+				"entity_type":   deepCloneJSONValue(readTargetSchema),
 				"flow_instance": map[string]any{"type": "string"},
 				"filter":        map[string]any{"type": "string"},
 				"select": map[string]any{
@@ -107,6 +113,7 @@ func genericEntityRuntimeContractSchemas() map[string]ContractSchemaEntry {
 			Category:    "entity_persistence",
 			Description: "Query entity_state rows by state, metadata, and declared field matches.",
 			InputSchema: ObjectSchema(map[string]any{
+				"entity_type":   deepCloneJSONValue(readTargetSchema),
 				"subject_id":    map[string]any{"type": "string"},
 				"flow_instance": map[string]any{"type": "string"},
 				"current_state": map[string]any{"type": "string"},
@@ -123,6 +130,7 @@ func genericEntityRuntimeContractSchemas() map[string]ContractSchemaEntry {
 			Category:    "entity_persistence",
 			Description: "Aggregate metrics across entity_state rows.",
 			InputSchema: ObjectSchema(map[string]any{
+				"entity_type":   deepCloneJSONValue(readTargetSchema),
 				"flow_instance": map[string]any{"type": "string"},
 				"metric": map[string]any{
 					"type": "string",
@@ -136,18 +144,14 @@ func genericEntityRuntimeContractSchemas() map[string]ContractSchemaEntry {
 	}
 }
 
-func entityToolSchemaEntriesForContract(contract entityruntime.Contract) map[string]ContractSchemaEntry {
+func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readContracts []entityruntime.Contract, readTargetSchema map[string]any) map[string]ContractSchemaEntry {
 	topLevelFields := entityruntime.FieldNames(contract)
 	writablePaths := entityToolWritablePathNames(contract)
-	filterSelectors := entityToolLeafSelectorNames(contract)
-	selectableSelectors := entityToolSelectableFieldNames(contract)
+	filterSelectors := entityToolReadLeafSelectorNames(readContracts)
+	selectableSelectors := entityToolReadSelectableFieldNames(readContracts)
 	filterProperties := make(map[string]any, len(filterSelectors))
 	for _, name := range filterSelectors {
-		field, err := entityruntime.ResolveLeafField(contract, name)
-		if err != nil {
-			continue
-		}
-		filterProperties[name] = entityContractJSONSchema(contract, field.Type, map[string]struct{}{})
+		filterProperties[name] = entityToolReadFilterPropertySchema(readContracts, name)
 	}
 	fieldProperties := make(map[string]any, len(topLevelFields))
 	for _, name := range topLevelFields {
@@ -206,6 +210,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract) map[str
 			Category:    "entity_persistence",
 			Description: "Query entity_state rows by state, metadata, and declared field matches.",
 			InputSchema: ObjectSchema(map[string]any{
+				"entity_type":   deepCloneJSONValue(readTargetSchema),
 				"subject_id":    map[string]any{"type": "string"},
 				"flow_instance": map[string]any{"type": "string"},
 				"current_state": map[string]any{"type": "string"},
@@ -222,6 +227,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract) map[str
 			Category:    "entity_persistence",
 			Description: "Query entity_state rows using validated selectors and optional grouping.",
 			InputSchema: ObjectSchema(map[string]any{
+				"entity_type":   deepCloneJSONValue(readTargetSchema),
 				"flow_instance": map[string]any{"type": "string"},
 				"filter":        map[string]any{"type": "string"},
 				"select": map[string]any{
@@ -242,6 +248,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract) map[str
 			Category:    "entity_persistence",
 			Description: "Aggregate metrics across entity_state rows.",
 			InputSchema: ObjectSchema(map[string]any{
+				"entity_type":   deepCloneJSONValue(readTargetSchema),
 				"flow_instance": map[string]any{"type": "string"},
 				"metric": map[string]any{
 					"type": "string",
@@ -266,6 +273,66 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract) map[str
 			}, "subject_id"),
 		},
 	}
+}
+
+func entityReadTargetInputSchema(source semanticview.Source) map[string]any {
+	schema := map[string]any{
+		"type":        "string",
+		"description": "Optional read target entity contract. Use the delivered flow-qualified form, for example flow_id.entity_type; omitted defaults to the caller flow-owned entity contract.",
+	}
+	names := entityruntime.ReadTargetNames(source)
+	if len(names) > 0 {
+		enum := make([]any, 0, len(names))
+		for _, name := range names {
+			enum = append(enum, name)
+		}
+		schema["enum"] = enum
+	}
+	return schema
+}
+
+func entityToolReadSelectableFieldNames(contracts []entityruntime.Contract) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
+	for _, contract := range contracts {
+		for _, name := range entityToolSelectableFieldNames(contract) {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func entityToolReadLeafSelectorNames(contracts []entityruntime.Contract) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
+	for _, contract := range contracts {
+		for _, name := range entityToolLeafSelectorNames(contract) {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func entityToolReadFilterPropertySchema(contracts []entityruntime.Contract, name string) map[string]any {
+	name = strings.TrimSpace(name)
+	for _, contract := range contracts {
+		field, err := entityruntime.ResolveLeafField(contract, name)
+		if err != nil {
+			continue
+		}
+		return entityContractJSONSchema(contract, field.Type, map[string]struct{}{})
+	}
+	return map[string]any{}
 }
 
 func entityToolSelectableFieldNames(contract entityruntime.Contract) []string {
