@@ -84,6 +84,44 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 	}
 }
 
+func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesConfiguredBuilderRootInputs(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	targetRunID := uuid.NewString()
+	retiredRunID := uuid.NewString()
+	nonBuilderRunID := uuid.NewString()
+	now := time.Unix(1700000000, 0).UTC()
+	for _, runID := range []string{targetRunID, retiredRunID, nonBuilderRunID} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO runs (run_id, status, started_at)
+			VALUES ($1::uuid, 'running', $2)
+		`, runID, now); err != nil {
+			t.Fatalf("seed run %s: %v", runID, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES
+			($1::uuid, gen_random_uuid(), 'scan.corpus_file_requested', 'global', '{}'::jsonb, 'builder', 'agent', $4),
+			($2::uuid, gen_random_uuid(), 'scan.requested', 'global', '{}'::jsonb, 'builder', 'agent', $5),
+			($3::uuid, gen_random_uuid(), 'system.directive', 'global', '{}'::jsonb, 'operator', 'agent', $6)
+	`, targetRunID, retiredRunID, nonBuilderRunID, now.Add(-3*time.Minute), now.Add(-2*time.Minute), now.Add(-1*time.Minute)); err != nil {
+		t.Fatalf("seed events: %v", err)
+	}
+
+	got, err := pg.ResolveLatestRunDebugRunID(ctx, []string{"scan.corpus_file_requested", "system.directive"})
+	if err != nil {
+		t.Fatalf("ResolveLatestRunDebugRunID: %v", err)
+	}
+	if got != targetRunID {
+		t.Fatalf("latest run = %q, want %q", got, targetRunID)
+	}
+}
+
 func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMutations(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

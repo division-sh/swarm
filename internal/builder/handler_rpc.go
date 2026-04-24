@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecredentials "swarm/internal/runtime/credentials"
+	runtimerunstart "swarm/internal/runtime/runstart"
 )
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +103,17 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 			return nil, &RPCError{Code: -32602, Message: "run_id is required"}
 		}
 		inputs, _ := params["inputs"].(map[string]any)
+		if source := h.currentSemanticSource(); source != nil {
+			inputEvents := make([]string, 0, len(inputs))
+			for eventName := range inputs {
+				if strings.TrimSpace(eventName) != "" {
+					inputEvents = append(inputEvents, eventName)
+				}
+			}
+			if _, err := runtimerunstart.ValidateInputEvents(source, inputEvents); err != nil {
+				return nil, &RPCError{Code: -32602, Message: err.Error()}
+			}
+		}
 		breakpoints := asStringSlice(params["breakpoints"])
 		if err := h.runHub.startRun(ctx, runID, inputs, breakpoints); err != nil {
 			return nil, internalError(err)

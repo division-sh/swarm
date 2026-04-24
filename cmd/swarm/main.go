@@ -34,6 +34,7 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimerunstart "swarm/internal/runtime/runstart"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
@@ -318,17 +319,20 @@ type runStatusMutation struct {
 }
 
 type runStatusOptions struct {
-	LogsOnly      bool
-	LogsAllLevels bool
-	Component     string
+	LogsOnly        bool
+	LogsAllLevels   bool
+	Component       string
+	RootStartEvents []string
 }
 
 func runStatusCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", "", "Optional path to Swarm runtime config")
+	contractsPath := fs.String("contracts", "", "Path to Swarm contract bundle root")
+	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	storeMode := fs.String("store", "postgres", "Store mode: postgres")
-	runID := fs.String("run-id", "", "Run ID to inspect; defaults to latest run with scan.requested")
+	runID := fs.String("run-id", "", "Run ID to inspect; defaults to latest run started from a routable root input")
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	logsOnly := fs.Bool("logs", false, "Show runtime log-focused status output")
 	logsAll := fs.Bool("logs-all", false, "Include info-level runtime logs in status output")
@@ -372,10 +376,22 @@ func runStatusCommand(ctx context.Context, repo string, args []string, out io.Wr
 		}
 		return 1
 	}
+	rootStartEvents := []string(nil)
+	if strings.TrimSpace(*runID) == "" {
+		var err error
+		rootStartEvents, err = statusRootStartEvents(repo, *contractsPath, *platformSpecPath)
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "status failed: load root start inputs: %v\n", err)
+			}
+			return 1
+		}
+	}
 	report, err := loadRunStatusReport(ctx, stores.Postgres, strings.TrimSpace(*runID), runStatusOptions{
-		LogsOnly:      *logsOnly,
-		LogsAllLevels: *logsAll,
-		Component:     strings.TrimSpace(*component),
+		LogsOnly:        *logsOnly,
+		LogsAllLevels:   *logsAll,
+		Component:       strings.TrimSpace(*component),
+		RootStartEvents: rootStartEvents,
 	})
 	if err != nil {
 		if out != nil {
@@ -401,7 +417,7 @@ func loadRunStatusReport(ctx context.Context, pg *store.PostgresStore, runID str
 		return runStatusReport{}, errors.New("postgres store is required")
 	}
 	if strings.TrimSpace(runID) == "" {
-		resolvedRunID, err := pg.ResolveLatestRunDebugRunID(ctx)
+		resolvedRunID, err := pg.ResolveLatestRunDebugRunID(ctx, opts.RootStartEvents)
 		if err != nil {
 			return runStatusReport{}, err
 		}
@@ -430,6 +446,23 @@ func loadRunStatusReport(ctx context.Context, pg *store.PostgresStore, runID str
 	report.Heuristics = append([]string(nil), operational.Heuristics...)
 
 	return report, nil
+}
+
+func statusRootStartEvents(repoRoot, contractsPath, platformSpecPath string) ([]string, error) {
+	resolvedContractsPath := resolveContractsPath(repoRoot, contractsPath)
+	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, resolvePath(repoRoot, platformSpecPath))
+	if err != nil {
+		return nil, err
+	}
+	set, err := runtimerunstart.DeriveRootInputSet(semanticview.Wrap(bundle))
+	if err != nil {
+		return nil, err
+	}
+	return set.Routable, nil
 }
 
 func logLimitForStatus(opts runStatusOptions) int {

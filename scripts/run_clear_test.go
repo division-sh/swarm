@@ -50,6 +50,18 @@ func TestRunClear_ProvisionsBuilderAuthTokenAndUsesBearerForRPC(t *testing.T) {
 	if !strings.Contains(result.rpcBody, `"method":"run.start"`) {
 		t.Fatalf("rpc body = %q, want run.start request", result.rpcBody)
 	}
+	if !strings.Contains(result.rpcBody, `"scan.corpus_file_requested"`) {
+		t.Fatalf("rpc body = %q, want typed corpus root input", result.rpcBody)
+	}
+	if strings.Contains(result.rpcBody, `"scan.requested"`) {
+		t.Fatalf("rpc body = %q, want no retired scan.requested input", result.rpcBody)
+	}
+	if !strings.Contains(result.rpcBody, `"request":{"geography":"US"}`) {
+		t.Fatalf("rpc body = %q, want typed request geography", result.rpcBody)
+	}
+	if !strings.Contains(result.rpcBody, `"corpus_path":"/data/test-signals-25.jsonl"`) {
+		t.Fatalf("rpc body = %q, want corpus_path payload", result.rpcBody)
+	}
 	if !strings.Contains(result.stdout, `"status":"started"`) {
 		t.Fatalf("stdout = %q, want started response", result.stdout)
 	}
@@ -471,6 +483,8 @@ printf '{}'
 		"SWARM_BUILDER_AUTH_TOKEN",
 		"SWARM_TOOL_GATEWAY_URL",
 		"SWARM_TOOL_GATEWAY_CONTAINER_URL",
+		"RUN_CLEAR_INPUT_EVENT",
+		"RUN_CLEAR_INPUT_PAYLOAD_JSON",
 	), []string{
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"PYTHON_OPERATOR_TOKEN_SINK=" + operatorTokenSink,

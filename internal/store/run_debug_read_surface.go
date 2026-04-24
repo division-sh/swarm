@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -229,22 +230,27 @@ func (s *PostgresStore) requireRunDebugCapabilities(ctx context.Context) error {
 	return RequireCanonicalRunDebugCapabilities(caps, catalog)
 }
 
-func (s *PostgresStore) ResolveLatestRunDebugRunID(ctx context.Context) (string, error) {
+func (s *PostgresStore) ResolveLatestRunDebugRunID(ctx context.Context, rootStartEvents []string) (string, error) {
 	if s == nil || s.DB == nil {
 		return "", fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunDebugCapabilities(ctx); err != nil {
 		return "", err
 	}
+	rootStartEvents = normalizeRunDebugRootStartEvents(rootStartEvents)
+	if len(rootStartEvents) == 0 {
+		return "", fmt.Errorf("no routable root start inputs configured")
+	}
 	var runID string
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COALESCE(run_id::text, '')
 		FROM events
-		WHERE event_name = 'scan.requested'
+		WHERE event_name = ANY($1)
 		  AND run_id IS NOT NULL
+		  AND produced_by = 'builder'
 		ORDER BY created_at DESC
 		LIMIT 1
-	`).Scan(&runID); err != nil {
+	`, pq.Array(rootStartEvents)).Scan(&runID); err != nil {
 		if err == sql.ErrNoRows {
 			return "", fmt.Errorf("no current run found")
 		}
@@ -255,6 +261,24 @@ func (s *PostgresStore) ResolveLatestRunDebugRunID(ctx context.Context) (string,
 		return "", fmt.Errorf("no current run found")
 	}
 	return runID, nil
+}
+
+func normalizeRunDebugRootStartEvents(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]RunDebugRunSummary, error) {
