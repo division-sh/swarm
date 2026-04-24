@@ -25,6 +25,20 @@ func TestDeriveRootInputSetRequiresDeclaredAndRoutableRootInput(t *testing.T) {
 	}
 }
 
+func TestValidateInputEventsRejectsDeclaredUnroutableRootInput(t *testing.T) {
+	const eventName = "scan.unroutable_requested"
+	bundle := rootInputTestBundle(eventName)
+	bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
+		ID:           "scan-orchestrator",
+		SubscribesTo: []string{"scan.other_requested"},
+	}
+	bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
+
+	if _, err := ValidateInputEvents(semanticview.Wrap(bundle), []string{eventName}); err == nil {
+		t.Fatal("expected declared but unroutable root input to fail")
+	}
+}
+
 func rootInputTestBundle(eventName string) *runtimecontracts.WorkflowContractBundle {
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},

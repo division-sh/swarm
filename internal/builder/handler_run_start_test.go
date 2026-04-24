@@ -68,6 +68,48 @@ func TestHandlerRunStartRejectsUndeclaredInputBeforePublish(t *testing.T) {
 	}
 }
 
+func TestHandlerRunStartRejectsDeclaredUnroutableInputBeforePublish(t *testing.T) {
+	const eventName = "scan.unroutable_requested"
+	bundle := runStartInputBundle(eventName)
+	bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
+		ID:           "scan-orchestrator",
+		SubscribesTo: []string{"scan.other_requested"},
+	}
+	bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
+	source := semanticview.Wrap(bundle)
+	store := &runStartAppendStore{}
+	bus, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := NewHandler(Options{
+		AuthToken:      testBuilderAuthToken,
+		SemanticSource: source,
+		CurrentRuntime: func() *runtimepkg.Runtime {
+			return &runtimepkg.Runtime{Bus: bus}
+		},
+	})
+
+	resp := callBuilderRPCRaw(t, handler, Request{
+		JSONRPC: "2.0",
+		ID:      "reject-unroutable",
+		Method:  "run.start",
+		Params: map[string]any{
+			"run_id": "run-123",
+			"inputs": map[string]any{
+				eventName: map[string]any{"topic": "declared-but-unroutable"},
+			},
+		},
+	})
+
+	if resp.Error == nil || resp.Error.Code != -32602 {
+		t.Fatalf("rpc error = %+v, want invalid params", resp.Error)
+	}
+	if len(store.appended) != 0 {
+		t.Fatalf("published events = %#v, want none before invalid input failure", store.appended)
+	}
+}
+
 func TestHandlerRunStartAcceptsDeclaredRoutableInput(t *testing.T) {
 	const eventName = "scan.corpus_file_requested"
 	source := semanticview.Wrap(runStartInputBundle(eventName))
