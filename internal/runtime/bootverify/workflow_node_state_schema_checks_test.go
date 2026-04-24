@@ -9,19 +9,23 @@ import (
 )
 
 func TestRun_ReportsNodeStateJSONBWithTypedCounterpart(t *testing.T) {
-	bundle := nodeStateSchemaTypingBundle()
-	bundle.Nodes["scoring-node"] = runtimecontracts.SystemNodeContract{
-		ID:         "scoring-node",
-		StateTable: "scoring_state",
-		StateSchema: runtimecontracts.NodeStateSchema{Fields: []runtimecontracts.NodeStateField{
-			{Name: "dimensions_received", Type: "jsonb"},
-		}},
-	}
+	for _, fieldType := range []string{"jsonb", "json"} {
+		t.Run(fieldType, func(t *testing.T) {
+			bundle := nodeStateSchemaTypingBundle()
+			bundle.Nodes["scoring-node"] = runtimecontracts.SystemNodeContract{
+				ID:         "scoring-node",
+				StateTable: "scoring_state",
+				StateSchema: runtimecontracts.NodeStateSchema{Fields: []runtimecontracts.NodeStateField{
+					{Name: "dimensions_received", Type: fieldType},
+				}},
+			}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.HardInvalidities(), "node_state_schema_typed_counterpart", "dimensions_received is jsonb but has typed downstream counterpart entity_type vertical scores:[DimensionScore]") {
-		t.Fatalf("expected node-state typed-counterpart hard invalidity, got %#v", report.HardInvalidities())
+			if !reportContains(report.HardInvalidities(), "node_state_schema_typed_counterpart", "dimensions_received is jsonb but has typed downstream counterpart entity_type vertical scores:[DimensionScore]") {
+				t.Fatalf("expected node-state typed-counterpart hard invalidity, got %#v", report.HardInvalidities())
+			}
+		})
 	}
 }
 
@@ -57,7 +61,7 @@ func TestRun_ReportsUndeclaredNodeStateNamedType(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.HardInvalidities(), "node_state_schema_typed_counterpart", "references undeclared named type MissingScore") {
+	if !reportContains(report.HardInvalidities(), "node_state_schema_typed_counterpart", "references undeclared type catalog name MissingScore") {
 		t.Fatalf("expected undeclared node-state named type hard invalidity, got %#v", report.HardInvalidities())
 	}
 }
@@ -82,10 +86,35 @@ func TestRun_AllowsDeclaredNodeStateNamedType(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsDeclaredNodeStateScalarAndEnumRefs(t *testing.T) {
+	bundle := nodeStateSchemaTypingBundle()
+	bundle.RootTypes.Scalars["ScoreID"] = runtimecontracts.ScalarTypeDecl{Base: "text"}
+	bundle.RootTypes.Enums["ScoreStatus"] = runtimecontracts.EnumTypeDecl{Values: []string{"ready", "done"}}
+	bundle.Nodes["scoring-node"] = runtimecontracts.SystemNodeContract{
+		ID:         "scoring-node",
+		StateTable: "scoring_state",
+		StateSchema: runtimecontracts.NodeStateSchema{Fields: []runtimecontracts.NodeStateField{
+			{Name: "score_id", Type: "ScoreID"},
+			{Name: "score_status", Type: "ScoreStatus"},
+		}},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.HardInvalidities(), "node_state_schema_typed_counterpart", "score_id") {
+		t.Fatalf("unexpected node-state scalar ref hard invalidity, got %#v", report.HardInvalidities())
+	}
+	if reportContains(report.HardInvalidities(), "node_state_schema_typed_counterpart", "score_status") {
+		t.Fatalf("unexpected node-state enum ref hard invalidity, got %#v", report.HardInvalidities())
+	}
+}
+
 func nodeStateSchemaTypingBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{},
 		RootTypes: runtimecontracts.TypeCatalogDocument{
+			Scalars: map[string]runtimecontracts.ScalarTypeDecl{},
+			Enums:   map[string]runtimecontracts.EnumTypeDecl{},
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"DimensionScore": {
 					Fields: map[string]runtimecontracts.TypeFieldSpec{

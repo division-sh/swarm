@@ -28,4 +28,4 @@ test-node:
     fields:
       expected_count: integer
       composite: float
-      received_items: jsonb
+      received_items: text[]
