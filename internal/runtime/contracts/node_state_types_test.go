@@ -9,18 +9,21 @@ import (
 
 func TestNormalizeNodeStateFieldType_AllowsCanonicalNodeStateTypes(t *testing.T) {
 	cases := map[string]string{
-		"text":           "text",
-		"string":         "string",
-		"integer":        "integer",
-		"bool":           "boolean",
-		"boolean":        "boolean",
-		"float":          "float",
-		"numeric(8, 2)":  "numeric(8,2)",
-		"jsonb":          "jsonb",
-		"timestamptz":    "timestamptz",
-		"uuid":           "uuid",
-		"text[]":         "text[]",
-		"numeric(5,2)[]": "numeric(5,2)[]",
+		"text":             "text",
+		"string":           "string",
+		"integer":          "integer",
+		"bool":             "boolean",
+		"boolean":          "boolean",
+		"float":            "float",
+		"numeric(8, 2)":    "numeric(8,2)",
+		"jsonb":            "jsonb",
+		"timestamptz":      "timestamptz",
+		"uuid":             "uuid",
+		"text[]":           "text[]",
+		"numeric(5,2)[]":   "numeric(5,2)[]",
+		"DimensionScore":   "DimensionScore",
+		"[DimensionScore]": "[DimensionScore]",
+		"DimensionScore[]": "[DimensionScore]",
 	}
 	for raw, want := range cases {
 		t.Run(raw, func(t *testing.T) {
