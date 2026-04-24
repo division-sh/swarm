@@ -93,6 +93,9 @@ type checkerContext struct {
 	entityReaderCoverageLoaded   bool
 	entityReaderCoverageFindings []Finding
 
+	crossSurfaceNamedTypeUseLoaded   bool
+	crossSurfaceNamedTypeUseFindings []Finding
+
 	handlerLoaded   bool
 	handlerFindings []Finding
 
@@ -215,6 +218,7 @@ var bootCheckRegistry = []Check{
 	{ID: "emit_field_expression_validation", Severity: "error", Run: checkEmitFieldExpressionValidation},
 	{ID: "expression_field_reference_validation", Severity: "warning", Run: checkExpressionFieldReferenceValidation},
 	{ID: "entity_reader_coverage", Severity: SeverityLintEvidence, Run: checkEntityReaderCoverage},
+	{ID: "cross_surface_named_type_use", Severity: SeverityLintEvidence, Run: checkCrossSurfaceNamedTypeUse},
 	{ID: "transition_ownership_validation", Severity: "error", Run: checkTransitionOwnershipValidation},
 	{ID: "event_runtime_wiring_validation", Severity: "error", Run: checkEventRuntimeWiringValidation},
 	{ID: "timer_validation", Severity: "error", Run: checkTimerValidation},
@@ -263,6 +267,9 @@ func checkPlatformMetadataValidation(c *checkerContext) []Finding  { return c.pl
 func checkGateSchemaValidation(c *checkerContext) []Finding        { return c.gateSchemaValidation() }
 func checkDeprecatedContractAlias(c *checkerContext) []Finding     { return c.deprecatedAliases() }
 func checkPromptSchemaGuardStructural(c *checkerContext) []Finding { return c.promptSchemaGuard() }
+func checkCrossSurfaceNamedTypeUse(c *checkerContext) []Finding {
+	return c.crossSurfaceNamedTypeUse()
+}
 
 func (c *checkerContext) permissions() []Finding {
 	if c.permissionLoaded {
