@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -239,6 +240,113 @@ func (r *EmitRegistry) GeneratedEmitSchemasForAgentRoles() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func ValidateGeneratedEmitToolSchemasForSource(source semanticview.Source) []error {
+	if source == nil {
+		return nil
+	}
+	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
+	var errs []error
+	for _, actor := range providerSchemaValidationActors(source) {
+		for _, tool := range registry.GenerateEmitToolsForActor(actor, nil) {
+			if err := llm.ValidateProviderToolSchema(tool.Name, tool.Schema); err != nil {
+				errs = append(errs, fmt.Errorf("agent %s: %w", strings.TrimSpace(actor.ID), err))
+			}
+		}
+	}
+	return errs
+}
+
+func providerSchemaValidationActors(source semanticview.Source) []models.AgentConfig {
+	if source == nil {
+		return nil
+	}
+	var actors []models.AgentConfig
+	seen := map[string]struct{}{}
+	appendActor := func(actor models.AgentConfig) {
+		key := strings.Join([]string{
+			strings.TrimSpace(actor.ID),
+			strings.TrimSpace(actor.Role),
+			strings.TrimSpace(actor.Mode),
+			strings.Join(UniqueNonEmpty(actor.EmitEvents), ","),
+		}, "|")
+		if key == "" {
+			return
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		actors = append(actors, actor)
+	}
+	for _, scope := range source.ProjectScopes() {
+		for _, id := range sortedEmitSchemaAgentIDs(scope.Agents) {
+			entry := scope.Agents[id]
+			appendActor(models.AgentConfig{
+				ID:               strings.TrimSpace(id),
+				Type:             strings.TrimSpace(entry.Type),
+				Role:             strings.TrimSpace(entry.Role),
+				ModelTier:        strings.TrimSpace(entry.ModelTier),
+				ConversationMode: strings.TrimSpace(entry.ConversationMode),
+				SessionScope:     strings.TrimSpace(entry.SessionScope),
+				MaxTurnsPerTask:  entry.MaxTurnsPerTask,
+				Subscriptions:    UniqueNonEmpty(append(append([]string{}, entry.Subscriptions...), append(entry.SubscriptionsBootstrap, entry.SubscribesTo...)...)),
+				EmitEvents:       UniqueNonEmpty(entry.EmitEvents),
+				Tools:            UniqueNonEmpty(entry.ConfiguredTools()),
+				Permissions:      UniqueNonEmpty(entry.Permissions),
+			})
+		}
+	}
+	for _, scope := range source.FlowScopes() {
+		for _, id := range sortedEmitSchemaAgentIDs(scope.Agents) {
+			entry := scope.Agents[id]
+			appendActor(models.AgentConfig{
+				ID:               strings.TrimSpace(id),
+				Type:             strings.TrimSpace(entry.Type),
+				Role:             strings.TrimSpace(entry.Role),
+				Mode:             strings.TrimSpace(scope.ID),
+				ModelTier:        strings.TrimSpace(entry.ModelTier),
+				ConversationMode: strings.TrimSpace(entry.ConversationMode),
+				SessionScope:     strings.TrimSpace(entry.SessionScope),
+				MaxTurnsPerTask:  entry.MaxTurnsPerTask,
+				Subscriptions:    UniqueNonEmpty(append(append([]string{}, entry.Subscriptions...), append(entry.SubscriptionsBootstrap, entry.SubscribesTo...)...)),
+				EmitEvents:       UniqueNonEmpty(entry.EmitEvents),
+				Tools:            UniqueNonEmpty(entry.ConfiguredTools()),
+				Permissions:      UniqueNonEmpty(entry.Permissions),
+				FlowPath:         strings.Trim(strings.TrimSpace(scope.Path), "/"),
+			})
+		}
+	}
+	for _, id := range sortedEmitSchemaAgentIDs(source.AgentEntries()) {
+		entry := source.AgentEntries()[id]
+		appendActor(models.AgentConfig{
+			ID:               strings.TrimSpace(id),
+			Type:             strings.TrimSpace(entry.Type),
+			Role:             strings.TrimSpace(entry.Role),
+			ModelTier:        strings.TrimSpace(entry.ModelTier),
+			ConversationMode: strings.TrimSpace(entry.ConversationMode),
+			SessionScope:     strings.TrimSpace(entry.SessionScope),
+			MaxTurnsPerTask:  entry.MaxTurnsPerTask,
+			Subscriptions:    UniqueNonEmpty(append(append([]string{}, entry.Subscriptions...), append(entry.SubscriptionsBootstrap, entry.SubscribesTo...)...)),
+			EmitEvents:       UniqueNonEmpty(entry.EmitEvents),
+			Tools:            UniqueNonEmpty(entry.ConfiguredTools()),
+			Permissions:      UniqueNonEmpty(entry.Permissions),
+		})
+	}
+	return actors
+}
+
+func sortedEmitSchemaAgentIDs(agents map[string]runtimecontracts.AgentRegistryEntry) []string {
+	ids := make([]string, 0, len(agents))
+	for id := range agents {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (r *EmitRegistry) EventSchemaSnapshot() map[string]EmitSchema {
