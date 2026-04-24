@@ -3,12 +3,14 @@ package tools
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	runtimeauthority "swarm/internal/runtime/authority"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/flowmodel"
+	llm "swarm/internal/runtime/llm"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -237,6 +239,92 @@ func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOw
 	}
 	if tools[0].Name != "emit_scan_requested" {
 		t.Fatalf("tool name = %q, want emit_scan_requested", tools[0].Name)
+	}
+}
+
+func TestGenerateEmitToolsForActor_ProviderSchemaNormalizesPrecisionRefs(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"RequiredCapabilities": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"automation_with_unlock": {Type: "numeric(5,2)"},
+					},
+				},
+			},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"market-research-agent": {
+				ID:         "market-research-agent",
+				Role:       "market_research",
+				EmitEvents: []string{"category.assessed"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"category.assessed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"required_capabilities": {Type: "RequiredCapabilities"},
+						"scores":                {Type: "[numeric(5,2)]"},
+					},
+					Required: []string{"required_capabilities"},
+				},
+			},
+		},
+	})
+	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
+
+	defs := registry.GenerateEmitToolsForActor(models.AgentConfig{
+		ID:         "market-research-agent",
+		Role:       "market_research",
+		EmitEvents: []string{"category.assessed"},
+	}, nil)
+	if len(defs) != 1 {
+		t.Fatalf("tool count = %d, want 1 (%#v)", len(defs), defs)
+	}
+	if err := llm.ValidateProviderToolDefinitions(defs); err != nil {
+		t.Fatalf("ValidateProviderToolDefinitions: %v", err)
+	}
+	props := defs[0].Schema.(map[string]any)["properties"].(map[string]any)
+	requiredCapabilities := props["required_capabilities"].(map[string]any)
+	capabilityProps := requiredCapabilities["properties"].(map[string]any)
+	automation := capabilityProps["automation_with_unlock"].(map[string]any)
+	if got := automation["type"]; got != "number" {
+		t.Fatalf("automation type = %#v, want number", got)
+	}
+	scores := props["scores"].(map[string]any)
+	scoreItems := scores["items"].(map[string]any)
+	if got := scoreItems["type"]; got != "number" {
+		t.Fatalf("scores item type = %#v, want number", got)
+	}
+}
+
+func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"market-research-agent": {
+				ID:         "market-research-agent",
+				Role:       "market_research",
+				EmitEvents: []string{"category.assessed"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"category.assessed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"unsupported": {Type: "NotDeclared"},
+					},
+				},
+			},
+		},
+	})
+
+	errs := ValidateGeneratedEmitToolSchemasForSource(source)
+	if len(errs) != 1 {
+		t.Fatalf("errors = %#v, want one provider schema error", errs)
+	}
+	if got := errs[0].Error(); !strings.Contains(got, "unsupported JSON Schema type \"NotDeclared\"") {
+		t.Fatalf("error = %q, want unsupported type", got)
 	}
 }
 

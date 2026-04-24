@@ -111,7 +111,7 @@ func normalizeEventFieldType(raw string) (string, string) {
 	if raw == "" {
 		return "", ""
 	}
-	for _, base := range []string{"string", "integer", "number", "boolean", "object", "array"} {
+	for _, base := range []string{"string", "integer", "number", "numeric", "boolean", "object", "array"} {
 		if raw == base {
 			return base, ""
 		}
@@ -119,10 +119,33 @@ func normalizeEventFieldType(raw string) (string, string) {
 			desc := strings.TrimSpace(strings.TrimPrefix(raw, base))
 			desc = strings.TrimLeft(desc, " -:\t")
 			desc = strings.TrimSpace(strings.Trim(desc, "()"))
+			if base == "numeric" && isNumericPrecisionModifier(desc) {
+				return base, ""
+			}
 			return base, desc
 		}
 	}
 	return raw, ""
+}
+
+func isNumericPrecisionModifier(value string) bool {
+	left, right, ok := strings.Cut(strings.TrimSpace(value), ",")
+	if !ok {
+		return false
+	}
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if left == "" || right == "" {
+		return false
+	}
+	for _, part := range []string{left, right} {
+		for _, ch := range part {
+			if ch < '0' || ch > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func appendEventSchemas(out map[string]EventSchema, bundle *WorkflowContractBundle, flowID string, entries map[string]EventCatalogEntry, types TypeCatalogDocument) {
@@ -399,7 +422,7 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 	if isEventListType(typeRef) {
 		return map[string]any{
 			"type":  "array",
-			"items": eventSchemaForResolvedType(eventListItemType(typeRef), types, seen),
+			"items": eventSchemaForTypeRefSchema(eventListItemType(typeRef), types, seen),
 		}
 	}
 	if enumName, ok := eventEnumTypeName(types, typeRef); ok {
@@ -435,7 +458,7 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 				continue
 			}
 			spec := named.Fields[fieldName]
-			props[fieldName] = eventSchemaForResolvedType(spec.Type, types, seen)
+			props[fieldName] = eventSchemaForTypeRefSchema(spec.Type, types, seen)
 			required = append(required, fieldName)
 		}
 		return map[string]any{
@@ -473,6 +496,11 @@ func eventTypeName(types TypeCatalogDocument, typeRef string) string {
 		return strings.TrimSpace(scalar.Base)
 	}
 	return typeRef
+}
+
+func eventSchemaForTypeRefSchema(raw string, types TypeCatalogDocument, seen map[string]struct{}) map[string]any {
+	schema, _ := eventSchemaForTypeRef(raw, types, seen)
+	return schema
 }
 
 func eventNamedTypeName(types TypeCatalogDocument, typeRef string) (string, bool) {

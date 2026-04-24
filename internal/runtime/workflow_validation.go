@@ -25,6 +25,7 @@ type WorkflowContractValidationResult struct {
 	BootReport                  runtimebootverify.Report
 	ToolImplementationWarnings  []error
 	MissingEmitSchemaEventTypes []string
+	GeneratedEmitSchemaErrors   []error
 }
 
 func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store) WorkflowContractValidationOptions {
@@ -77,6 +78,10 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 			sample = sample[:10]
 		}
 		return result, fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries (sample: %s)", len(result.MissingEmitSchemaEventTypes), strings.Join(sample, ", "))
+	}
+	result.GeneratedEmitSchemaErrors = runtimetools.ValidateGeneratedEmitToolSchemasForSource(source)
+	if len(result.GeneratedEmitSchemaErrors) > 0 {
+		return result, fmt.Errorf("generated emit tool schema validation failed:\n%s", formatValidationErrors(result.GeneratedEmitSchemaErrors))
 	}
 
 	return result, nil

@@ -37,6 +37,45 @@ func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypes(t *testing
 	}
 }
 
+func TestEventSchemaRegistryFromCatalog_NormalizesPrecisionQualifiedTypeRefsRecursively(t *testing.T) {
+	schema := eventSchemaFromCatalogEntry("category.assessed", EventCatalogEntry{
+		Payload: EventPayloadSpec{
+			Properties: map[string]EventFieldSpec{
+				"score":        {Type: "numeric(5,2)"},
+				"capabilities": {Type: "RequiredCapabilities"},
+				"history":      {Type: "[RequiredCapabilities]"},
+			},
+		},
+	}, TypeCatalogDocument{
+		Types: map[string]NamedTypeDecl{
+			"RequiredCapabilities": {
+				Fields: map[string]TypeFieldSpec{
+					"automation_with_unlock": {Type: "numeric(5,2)"},
+				},
+			},
+		},
+	})
+
+	props, _ := schema.Schema["properties"].(map[string]any)
+	score, _ := props["score"].(map[string]any)
+	if got := score["type"]; got != "number" {
+		t.Fatalf("score type = %#v, want number", got)
+	}
+	capabilities, _ := props["capabilities"].(map[string]any)
+	capabilityProps, _ := capabilities["properties"].(map[string]any)
+	automation, _ := capabilityProps["automation_with_unlock"].(map[string]any)
+	if got := automation["type"]; got != "number" {
+		t.Fatalf("nested automation type = %#v, want number", got)
+	}
+	history, _ := props["history"].(map[string]any)
+	items, _ := history["items"].(map[string]any)
+	itemProps, _ := items["properties"].(map[string]any)
+	itemAutomation, _ := itemProps["automation_with_unlock"].(map[string]any)
+	if got := itemAutomation["type"]; got != "number" {
+		t.Fatalf("list item automation type = %#v, want number", got)
+	}
+}
+
 func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 	reviewFlow := FlowContractView{
 		Paths: FlowContractPaths{ID: "review", Flow: "review"},

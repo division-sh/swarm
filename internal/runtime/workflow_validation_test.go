@@ -113,6 +113,75 @@ func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T
 	}
 }
 
+func TestValidateWorkflowContractSurfaceRejectsInvalidGeneratedEmitToolSchema(t *testing.T) {
+	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+		"agent-1": {ID: "agent-1", Role: "agent", EmitEvents: []string{"ready.event"}},
+		"agent-2": {ID: "agent-2", Role: "consumer", Subscriptions: []string{"ready.event"}},
+	}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
+		"ready.event": {
+			Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{
+					"unsupported": {Type: "NotDeclared"},
+				},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+
+	result, err := ValidateWorkflowContractSurface(context.Background(), source, DefaultWorkflowContractValidationOptions(nil))
+	if err == nil || !strings.Contains(err.Error(), "generated emit tool schema validation failed") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want generated schema failure", err)
+	}
+	if len(result.GeneratedEmitSchemaErrors) != 1 {
+		t.Fatalf("GeneratedEmitSchemaErrors = %#v, want one error", result.GeneratedEmitSchemaErrors)
+	}
+	if got := result.GeneratedEmitSchemaErrors[0].Error(); !strings.Contains(got, "unsupported JSON Schema type \"NotDeclared\"") {
+		t.Fatalf("GeneratedEmitSchemaErrors[0] = %q, want unsupported type", got)
+	}
+}
+
+func TestValidateWorkflowContractSurfaceAllowsPrecisionQualifiedGeneratedEmitToolSchema(t *testing.T) {
+	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.RootTypes = runtimecontracts.TypeCatalogDocument{
+		Types: map[string]runtimecontracts.NamedTypeDecl{
+			"RequiredCapabilities": {
+				Fields: map[string]runtimecontracts.TypeFieldSpec{
+					"automation_with_unlock": {Type: "numeric(5,2)"},
+				},
+			},
+		},
+	}
+	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+		"agent-1": {ID: "agent-1", Role: "agent", EmitEvents: []string{"ready.event"}},
+		"agent-2": {ID: "agent-2", Role: "consumer", Subscriptions: []string{"ready.event"}},
+	}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
+		"ready.event": {
+			Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{
+					"capabilities": {Type: "RequiredCapabilities"},
+					"amounts":      {Type: "[numeric(10,2)]"},
+				},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+
+	result, err := ValidateWorkflowContractSurface(context.Background(), source, DefaultWorkflowContractValidationOptions(nil))
+	if err != nil {
+		t.Fatalf("ValidateWorkflowContractSurface: %v", err)
+	}
+	if len(result.GeneratedEmitSchemaErrors) != 0 {
+		t.Fatalf("GeneratedEmitSchemaErrors = %#v, want none", result.GeneratedEmitSchemaErrors)
+	}
+}
+
 func TestValidateWorkflowContractSurface_FatalToolImplementationWarningsFollowSharedOptions(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	bundle := testRuntimeWorkflowValidationBundle()
