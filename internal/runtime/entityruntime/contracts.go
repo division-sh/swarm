@@ -48,6 +48,104 @@ func ResolveForActor(source semanticview.Source, actorID string) (Contract, bool
 	return ResolveForFlow(source, contractSource.FlowID)
 }
 
+func ResolveForReadTarget(source semanticview.Source, actorID, target string) (Contract, bool, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		contract, ok := ResolveForActor(source, actorID)
+		return contract, ok, nil
+	}
+	if source == nil {
+		return Contract{}, false, fmt.Errorf("workflow source is not configured")
+	}
+	if idx := strings.LastIndex(target, "."); idx > 0 && idx < len(target)-1 {
+		flowID := strings.TrimSpace(target[:idx])
+		entityType := strings.TrimSpace(target[idx+1:])
+		contract, ok := ResolveForFlow(source, flowID)
+		if !ok {
+			return Contract{}, false, fmt.Errorf("entity_type %q does not resolve to a flow-owned entity contract", target)
+		}
+		if !strings.EqualFold(contract.EntityType, entityType) {
+			return Contract{}, false, fmt.Errorf("entity_type %q resolves to flow %q, which owns %q", target, flowID, contract.EntityType)
+		}
+		return contract, true, nil
+	}
+
+	matches := make([]Contract, 0, 2)
+	for _, contract := range ReadTargetContracts(source) {
+		if strings.EqualFold(contract.EntityType, target) {
+			matches = append(matches, contract)
+		}
+	}
+	switch len(matches) {
+	case 1:
+		return matches[0], true, nil
+	case 0:
+		return Contract{}, false, fmt.Errorf("entity_type %q does not resolve to a flow-owned entity contract", target)
+	default:
+		names := make([]string, 0, len(matches))
+		for _, contract := range matches {
+			names = append(names, CanonicalReadTargetName(contract))
+		}
+		sort.Strings(names)
+		return Contract{}, false, fmt.Errorf("entity_type %q is ambiguous; use one of: %s", target, strings.Join(names, ", "))
+	}
+}
+
+func ReadTargetContracts(source semanticview.Source) []Contract {
+	if source == nil {
+		return nil
+	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return nil
+	}
+	flowIDs := make([]string, 0, len(source.FlowSchemaEntries()))
+	for flowID := range source.FlowSchemaEntries() {
+		flowID = strings.TrimSpace(flowID)
+		if flowID != "" {
+			flowIDs = append(flowIDs, flowID)
+		}
+	}
+	sort.Strings(flowIDs)
+	out := make([]Contract, 0, len(flowIDs)+len(bundle.RootEntityContracts()))
+	for _, flowID := range flowIDs {
+		if contract, ok := ResolveForFlow(source, flowID); ok {
+			out = append(out, contract)
+		}
+	}
+	if len(bundle.RootEntityContracts()) == 1 {
+		if contract, ok := ResolveForFlow(source, ""); ok {
+			out = append(out, contract)
+		}
+	}
+	return out
+}
+
+func ReadTargetNames(source semanticview.Source) []string {
+	contracts := ReadTargetContracts(source)
+	names := make([]string, 0, len(contracts))
+	for _, contract := range contracts {
+		name := CanonicalReadTargetName(contract)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func CanonicalReadTargetName(contract Contract) string {
+	entityType := strings.TrimSpace(contract.EntityType)
+	flowID := strings.TrimSpace(contract.FlowID)
+	if entityType == "" {
+		return ""
+	}
+	if flowID == "" {
+		return entityType
+	}
+	return flowID + "." + entityType
+}
+
 func ResolveForFlowInstance(source semanticview.Source, flowInstance string) (Contract, bool) {
 	return ResolveForFlow(source, ResolveFlowIDForInstance(source, flowInstance))
 }

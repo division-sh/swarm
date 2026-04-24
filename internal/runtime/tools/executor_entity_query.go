@@ -11,6 +11,7 @@ import (
 	celast "github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/common/types"
 	models "swarm/internal/runtime/core/actors"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
 )
@@ -20,11 +21,11 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 	if err != nil {
 		return nil, err
 	}
-	schema, err := entityToolSchemaForActor(source, actor.ID)
+	schema, err := entityToolSchemaForReadTarget(source, actor.ID, payload)
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.schema", false, err, "resolve entity contract")
 	}
-	filterSQL, args := entityStateBaseQuery(source, actor, payload, true)
+	filterSQL, args := entityStateBaseQueryForContract(source, schema.Contract, payload, true)
 	currentStateFilter := strings.TrimSpace(asString(payload["current_state"]))
 	if currentStateFilter != "" {
 		args = append(args, currentStateFilter)
@@ -89,11 +90,11 @@ func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConf
 	if err != nil {
 		return nil, err
 	}
-	schema, err := entityToolSchemaForActor(source, actor.ID)
+	schema, err := entityToolSchemaForReadTarget(source, actor.ID, payload)
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.schema", false, err, "resolve entity contract")
 	}
-	filterSQL, args := entityStateBaseQuery(source, actor, payload, true)
+	filterSQL, args := entityStateBaseQueryForContract(source, schema.Contract, payload, true)
 	whereClause := joinEntityStateWhere(filterSQL)
 	rows, err := queryEntityStateRows(ctx, db, whereClause+" ORDER BY created_at DESC", args...)
 	if err != nil {
@@ -132,7 +133,7 @@ func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfi
 	if err != nil {
 		return nil, err
 	}
-	schema, err := entityToolSchemaForActor(source, actor.ID)
+	schema, err := entityToolSchemaForReadTarget(source, actor.ID, payload)
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.schema", false, err, "resolve entity contract")
 	}
@@ -155,7 +156,7 @@ func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfi
 			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.group_by", false, err, "validate group_by")
 		}
 	}
-	filterSQL, args := entityStateBaseQuery(source, actor, payload, true)
+	filterSQL, args := entityStateBaseQueryForContract(source, schema.Contract, payload, true)
 	whereClause := joinEntityStateWhere(filterSQL)
 	rows, err := queryEntityStateRows(ctx, db, whereClause+" ORDER BY created_at DESC", args...)
 	if err != nil {
@@ -184,13 +185,18 @@ func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfi
 }
 
 func entityStateBaseQuery(source semanticview.Source, actor models.AgentConfig, payload map[string]any, includeFlowInstance bool) ([]string, []any) {
+	contract, _ := entityruntime.ResolveForActor(source, actor.ID)
+	return entityStateBaseQueryForContract(source, contract, payload, includeFlowInstance)
+}
+
+func entityStateBaseQueryForContract(source semanticview.Source, contract entityruntime.Contract, payload map[string]any, includeFlowInstance bool) ([]string, []any) {
 	clauses := make([]string, 0, 4)
 	args := make([]any, 0, 4)
 	if subjectID := strings.TrimSpace(asString(payload["subject_id"])); subjectID != "" {
 		args = append(args, subjectID)
 		clauses = append(clauses, fmt.Sprintf("subject_id = $%d::uuid", len(args)))
 	}
-	flowRoot := actorFlowOwnershipRoot(source, actor.ID)
+	flowRoot := entityReadFlowScopeRoot(source, contract)
 	if flowRoot != "" {
 		args = append(args, flowRoot, flowRoot+"/%")
 		clauses = append(clauses, fmt.Sprintf("(flow_instance = $%d OR flow_instance LIKE $%d)", len(args)-1, len(args)))
@@ -202,6 +208,14 @@ func entityStateBaseQuery(source semanticview.Source, actor models.AgentConfig, 
 		}
 	}
 	return clauses, args
+}
+
+func entityReadFlowScopeRoot(source semanticview.Source, contract entityruntime.Contract) string {
+	flowID := strings.TrimSpace(contract.FlowID)
+	if source == nil || flowID == "" {
+		return ""
+	}
+	return runtimeflowidentity.ScopeKey(source, flowID)
 }
 
 func joinEntityStateWhere(clauses []string) string {
@@ -309,6 +323,15 @@ func entityFilterSelectorReferences(parsed *cel.Ast) []entityFilterSelectorRefer
 	refs := make([]entityFilterSelectorReference, 0)
 	var visit func(expr celast.NavigableExpr)
 	visit = func(expr celast.NavigableExpr) {
+		if expr.Kind() == celast.IdentKind && !entityFilterSelectorHasParent(expr) {
+			if ref, ok := entityFilterSelectorBase(expr); ok {
+				key := fmt.Sprintf("%t:%s", ref.EntityScoped, ref.Path)
+				if _, exists := seen[key]; !exists {
+					seen[key] = struct{}{}
+					refs = append(refs, ref)
+				}
+			}
+		}
 		if expr.Kind() == celast.SelectKind && !entityFilterSelectorHasParent(expr) {
 			if ref, ok := entityFilterSelectorReferenceFromExpr(expr); ok {
 				key := fmt.Sprintf("%t:%s", ref.EntityScoped, ref.Path)

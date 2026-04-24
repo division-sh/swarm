@@ -952,6 +952,166 @@ func TestEntityTools_QueryMetricsFilterRejectsUndeclaredFieldBeforeEval(t *testi
 	}
 }
 
+func TestEntityTools_ReadToolsUseExplicitTargetContract(t *testing.T) {
+	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
+		"discovery": {
+			EntitiesYAML: `
+campaign:
+  status: text
+`,
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "researcher", Role: "researcher", Tools: []string{"query_entities", "query_metrics", "search_entities"}}),
+		},
+		"signal-search": {
+			EntitiesYAML: `
+signal:
+  signal_strength: integer
+  processed: boolean
+  status: text
+`,
+		},
+	})
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+		ID:    "researcher",
+		Role:  "researcher",
+		Tools: []string{"query_entities", "query_metrics", "search_entities"},
+	}, bundle)
+	subjectID := uuid.NewString()
+	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "discovery/run-1", "campaign", "active", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "signal-search/run-1", "signal", "active", map[string]any{
+		"signal_strength": 80,
+		"processed":       false,
+		"status":          "new",
+	}, time.Now().UTC().Truncate(time.Second))
+
+	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"entity_type": "signal-search.signal",
+		"filter":      `signal_strength >= 70 && processed == false`,
+		"select":      []string{"signal_strength", "processed"},
+		"limit":       10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities explicit target: %v", err)
+	}
+	queryResult, ok := queryOut.(map[string]any)
+	if !ok {
+		t.Fatalf("expected query result map, got %#v", queryOut)
+	}
+	queryRows, ok := queryResult["results"].([]map[string]any)
+	if !ok || len(queryRows) != 1 {
+		t.Fatalf("query results = %#v, want one signal row", queryResult["results"])
+	}
+	if got := fmt.Sprint(queryRows[0]["signal_strength"]); got != "80" {
+		t.Fatalf("signal_strength = %q, want 80", got)
+	}
+
+	searchOut, err := exec.Execute(ctx, "search_entities", map[string]any{
+		"entity_type":   "signal-search.signal",
+		"current_state": "active",
+		"filter":        map[string]any{"processed": false},
+		"limit":         10,
+	})
+	if err != nil {
+		t.Fatalf("search_entities explicit target: %v", err)
+	}
+	searchResult, ok := searchOut.(map[string]any)
+	if !ok {
+		t.Fatalf("expected search result map, got %#v", searchOut)
+	}
+	searchRows, ok := searchResult["results"].([]map[string]any)
+	if !ok || len(searchRows) != 1 {
+		t.Fatalf("search results = %#v, want one signal row", searchResult["results"])
+	}
+	if got := strings.TrimSpace(asString(searchRows[0]["entity_type"])); got != "signal" {
+		t.Fatalf("search entity_type = %q, want signal", got)
+	}
+
+	metricOut, err := exec.Execute(ctx, "query_metrics", map[string]any{
+		"entity_type": "signal-search.signal",
+		"metric":      "sum",
+		"field":       "signal_strength",
+		"filter":      `processed == false`,
+	})
+	if err != nil {
+		t.Fatalf("query_metrics explicit target: %v", err)
+	}
+	metricResult, ok := metricOut.(map[string]any)
+	if !ok {
+		t.Fatalf("expected metric result map, got %#v", metricOut)
+	}
+	if got := testNumericValue(metricResult["value"]); got != 80 {
+		t.Fatalf("metric value = %#v, want 80", metricResult["value"])
+	}
+}
+
+func TestEntityTools_ReadTargetValidationRejectsUndeclaredBeforeEval(t *testing.T) {
+	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
+		"discovery": {
+			EntitiesYAML: `
+campaign:
+  status: text
+`,
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "researcher", Role: "researcher", Tools: []string{"query_entities", "query_metrics", "search_entities"}}),
+		},
+		"signal-search": {
+			EntitiesYAML: `
+signal:
+  signal_strength: integer
+  processed: boolean
+`,
+		},
+	})
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+		ID:    "researcher",
+		Role:  "researcher",
+		Tools: []string{"query_entities", "query_metrics", "search_entities"},
+	}, bundle)
+
+	_, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"entity_type": "signal-search.signal",
+		"filter":      `signal_strenght >= 70`,
+	})
+	re, ok := runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "invalid_tool_input" {
+		t.Fatalf("expected query_entities invalid_tool_input, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "signal_strenght") || !strings.Contains(err.Error(), "did you mean signal_strength?") {
+		t.Fatalf("expected nearest-match target diagnostic, got %v", err)
+	}
+
+	_, err = exec.Execute(ctx, "query_metrics", map[string]any{
+		"entity_type": "signal-search.signal",
+		"metric":      "sum",
+		"field":       "signal_strenght",
+	})
+	re, ok = runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "invalid_tool_input" {
+		t.Fatalf("expected query_metrics invalid_tool_input, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "signal_strenght") {
+		t.Fatalf("expected target field diagnostic, got %v", err)
+	}
+
+	_, err = exec.Execute(ctx, "search_entities", map[string]any{
+		"entity_type": "signal-search.signal",
+		"filter":      map[string]any{"signal_strenght": 80},
+	})
+	re, ok = runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "invalid_tool_input" {
+		t.Fatalf("expected search_entities invalid_tool_input, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "signal_strenght") {
+		t.Fatalf("expected target object-filter field diagnostic, got %v", err)
+	}
+
+	_, err = exec.Execute(ctx, "query_entities", map[string]any{
+		"filter": `signal_strength >= 70`,
+	})
+	re, ok = runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "invalid_tool_input" {
+		t.Fatalf("expected default actor contract to reject target-only field, got %v", err)
+	}
+}
+
 func TestEntityTools_GetSubjectStatusReturnsEmptyForUnknownSubject(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
 	subjectID := uuid.NewString()
@@ -1516,6 +1676,19 @@ func asString(v any) string {
 		return t
 	default:
 		return ""
+	}
+}
+
+func testNumericValue(v any) float64 {
+	switch n := v.(type) {
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case float64:
+		return n
+	default:
+		return 0
 	}
 }
 

@@ -37,6 +37,21 @@ func entityToolSchemaForActor(source semanticview.Source, actorID string) (entit
 	return entityToolSchema{Defined: true, Contract: contract}, nil
 }
 
+func entityToolSchemaForReadTarget(source semanticview.Source, actorID string, payload map[string]any) (entityToolSchema, error) {
+	if source == nil {
+		return entityToolSchema{}, fmt.Errorf("workflow source is not configured")
+	}
+	target := strings.TrimSpace(asString(payload["entity_type"]))
+	contract, ok, err := entityruntime.ResolveForReadTarget(source, actorID, target)
+	if err != nil {
+		return entityToolSchema{}, err
+	}
+	if !ok {
+		return entityToolSchema{}, fmt.Errorf("flow-owned entity contract is not available for actor %s", strings.TrimSpace(actorID))
+	}
+	return entityToolSchema{Defined: true, Contract: contract}, nil
+}
+
 func entityToolSchemaForEntityRow(source semanticview.Source, row map[string]any) (entityToolSchema, error) {
 	if source == nil {
 		return entityToolSchema{}, fmt.Errorf("workflow source is not configured")

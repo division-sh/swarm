@@ -88,6 +88,11 @@ review_subject:
 
 	searchSchema := defByName["search_entities"]
 	searchProps, _ := searchSchema["properties"].(map[string]any)
+	searchTarget, _ := searchProps["entity_type"].(map[string]any)
+	searchTargets, _ := searchTarget["enum"].([]any)
+	if !containsAnyString(searchTargets, "review.review_subject") {
+		t.Fatalf("search_entities entity_type enum = %#v, want review.review_subject", searchTargets)
+	}
 	filterSchema, _ := searchProps["filter"].(map[string]any)
 	filterProps, _ := filterSchema["properties"].(map[string]any)
 	if _, ok := filterProps["metadata.region"]; !ok {
@@ -102,6 +107,11 @@ review_subject:
 
 	querySchema := defByName["query_entities"]
 	queryProps, _ := querySchema["properties"].(map[string]any)
+	queryTarget, _ := queryProps["entity_type"].(map[string]any)
+	queryTargets, _ := queryTarget["enum"].([]any)
+	if !containsAnyString(queryTargets, "review.review_subject") {
+		t.Fatalf("query_entities entity_type enum = %#v, want review.review_subject", queryTargets)
+	}
 	selectSchema, _ := queryProps["select"].(map[string]any)
 	selectItems, _ := selectSchema["items"].(map[string]any)
 	selectEnum, _ := selectItems["enum"].([]any)
@@ -114,6 +124,11 @@ review_subject:
 
 	metricSchema := defByName["query_metrics"]
 	metricProps, _ := metricSchema["properties"].(map[string]any)
+	metricTarget, _ := metricProps["entity_type"].(map[string]any)
+	metricTargets, _ := metricTarget["enum"].([]any)
+	if !containsAnyString(metricTargets, "review.review_subject") {
+		t.Fatalf("query_metrics entity_type enum = %#v, want review.review_subject", metricTargets)
+	}
 	metricField, _ := metricProps["field"].(map[string]any)
 	metricFieldEnum, _ := metricField["enum"].([]any)
 	if !containsAnyString(metricFieldEnum, "status") {
