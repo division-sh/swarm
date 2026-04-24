@@ -542,6 +542,55 @@ expression: entity.score + 1
 	}
 }
 
+func TestExpressionValueDecode_PreservesScalarAsLiteralOutsideEmitFields(t *testing.T) {
+	var expr ExpressionValue
+	if err := yaml.Unmarshal([]byte(`target_state`), &expr); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if expr.Kind != ExpressionKindLiteral {
+		t.Fatalf("Kind = %q, want %q", expr.Kind, ExpressionKindLiteral)
+	}
+	if got := expr.Literal; got != "target_state" {
+		t.Fatalf("Literal = %#v, want target_state", got)
+	}
+}
+
+func TestEmitSpecDecode_ScalarFieldsHydrateAsCELOnlyOnEmitFields(t *testing.T) {
+	var spec EmitSpec
+	if err := yaml.Unmarshal([]byte(`
+event: signals.category_ready
+fields:
+  mode: payload.mode
+  batch: "{'scan_id': payload.scan_id, 'geography': payload.geography}"
+  count: 0
+  quoted_literal: "'ready'"
+  explicit_literal:
+    literal: ready
+  explicit_ref:
+    ref: payload.mode
+`), &spec); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	cases := map[string]string{
+		"mode":           "payload.mode",
+		"batch":          "{'scan_id': payload.scan_id, 'geography': payload.geography}",
+		"count":          "0",
+		"quoted_literal": "'ready'",
+	}
+	for field, want := range cases {
+		expr := spec.Fields[field]
+		if expr.Kind != ExpressionKindCEL || expr.CEL != want {
+			t.Fatalf("Fields[%s] = %#v, want CEL %q", field, expr, want)
+		}
+	}
+	if expr := spec.Fields["explicit_literal"]; expr.Kind != ExpressionKindLiteral || expr.Literal != "ready" {
+		t.Fatalf("explicit_literal = %#v, want literal ready", expr)
+	}
+	if expr := spec.Fields["explicit_ref"]; expr.Kind != ExpressionKindRef || expr.Ref != "payload.mode" {
+		t.Fatalf("explicit_ref = %#v, want ref payload.mode", expr)
+	}
+}
+
 func TestHandlerRuleEntryDecode_PreservesRuleLevelFanOut(t *testing.T) {
 	var rule HandlerRuleEntry
 	if err := yaml.Unmarshal([]byte(`
