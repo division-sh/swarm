@@ -283,10 +283,15 @@ func providerSchemaValidationActors(source semanticview.Source) []models.AgentCo
 	for _, scope := range source.ProjectScopes() {
 		for _, id := range sortedEmitSchemaAgentIDs(scope.Agents) {
 			entry := scope.Agents[id]
+			proof := semanticview.ResolveAgentSessionScopeProof(source, semanticview.AgentSessionScopeLocator{
+				AgentID:         id,
+				ProjectScopeKey: scope.Key,
+			})
 			appendActor(models.AgentConfig{
 				ID:               strings.TrimSpace(id),
 				Type:             strings.TrimSpace(entry.Type),
 				Role:             strings.TrimSpace(entry.Role),
+				Mode:             strings.TrimSpace(proof.OwningFlowID),
 				ModelTier:        strings.TrimSpace(entry.ModelTier),
 				ConversationMode: strings.TrimSpace(entry.ConversationMode),
 				SessionScope:     strings.TrimSpace(entry.SessionScope),
@@ -295,6 +300,7 @@ func providerSchemaValidationActors(source semanticview.Source) []models.AgentCo
 				EmitEvents:       UniqueNonEmpty(entry.EmitEvents),
 				Tools:            UniqueNonEmpty(entry.ConfiguredTools()),
 				Permissions:      UniqueNonEmpty(entry.Permissions),
+				FlowPath:         strings.Trim(strings.TrimSpace(proof.FlowPath), "/"),
 			})
 		}
 	}

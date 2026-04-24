@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -325,6 +326,100 @@ func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t
 	}
 	if got := errs[0].Error(); !strings.Contains(got, "unsupported JSON Schema type \"NotDeclared\"") {
 		t.Fatalf("error = %q, want unsupported type", got)
+	}
+}
+
+func TestValidateGeneratedEmitToolSchemasForSourceUsesPackageOwningFlowMode(t *testing.T) {
+	root := t.TempDir()
+	writeEmitFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: provider-schema-validation
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: support
+    flow: support
+    mode: static
+  - id: other
+    flow: other
+    mode: static
+`)
+	writeEmitFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: uuid\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-schema-validation\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
+name: support
+version: "1.0.0"
+flows: []
+`)
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+name: support
+initial_state: waiting
+states:
+  - waiting
+`)
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "tools.yaml"), "{}\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+local.done:
+  unsupported: NotDeclared
+`)
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
+flow-agent:
+  id: flow-agent
+  role: flow_agent
+  emit_events:
+    - local.done
+`)
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "package.yaml"), `
+name: other
+version: "1.0.0"
+flows: []
+`)
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "schema.yaml"), `
+name: other
+initial_state: waiting
+states:
+  - waiting
+`)
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "policy.yaml"), "{}\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "tools.yaml"), "{}\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "events.yaml"), `
+local.done:
+  ok: string
+`)
+	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "agents.yaml"), "{}\n")
+
+	repoRoot, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatalf("repo root: %v", err)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	errs := ValidateGeneratedEmitToolSchemasForSource(semanticview.Wrap(bundle))
+	if len(errs) != 1 {
+		t.Fatalf("errors = %#v, want one provider schema error", errs)
+	}
+	got := errs[0].Error()
+	for _, want := range []string{"flow-agent", "emit_local_done", "unsupported JSON Schema type \"NotDeclared\""} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func writeEmitFixtureFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(content, "\n")), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
 	}
 }
 
