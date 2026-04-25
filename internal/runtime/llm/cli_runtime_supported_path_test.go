@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -80,15 +81,16 @@ fi
 count=$((count + 1))
 printf '%s' "$count" > "$state_file"
 cat > "$capture_dir/$count.stdin"
-if [ "$count" -eq 1 ]; then
+if grep -q '"name":"read_file"' "$capture_dir/$count.stdin"; then
+  printf '%s\n' '{"type":"result","result":"done"}'
+  exit 0
+fi
   printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"Read","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool-emit-1","name":"emit_category_assessed","input":{"category":"payments"}}},"session_id":"provider-sess-1"}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":1},"session_id":"provider-sess-1"}'
   exit 0
-fi
-printf '%s\n' '{"type":"result","result":"done"}'
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
@@ -196,9 +198,9 @@ printf '%s\n' '{"type":"result","result":"done"}'
 		t.Fatalf("emitted events = %#v", recorder.Snapshot())
 	}
 
-	secondInput, err := os.ReadFile(filepath.Join(captureDir, "2.stdin"))
+	secondInput, err := capturedToolResultInput(captureDir)
 	if err != nil {
-		t.Fatalf("read second stdin: %v", err)
+		t.Fatalf("read tool-result stdin: %v", err)
 	}
 	var payload []map[string]any
 	if err := json.Unmarshal(secondInput, &payload); err != nil {
@@ -225,4 +227,22 @@ printf '%s\n' '{"type":"result","result":"done"}'
 	if len(content) != len(huge) {
 		t.Fatalf("read result content len = %d, want %d", len(content), len(huge))
 	}
+}
+
+func capturedToolResultInput(captureDir string) ([]byte, error) {
+	matches, err := filepath.Glob(filepath.Join(captureDir, "*.stdin"))
+	if err != nil {
+		return nil, err
+	}
+	slices.Sort(matches)
+	for _, match := range matches {
+		data, err := os.ReadFile(match)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Contains(data, []byte(`"name":"read_file"`)) && bytes.Contains(data, []byte(`"ok":true`)) {
+			return data, nil
+		}
+	}
+	return nil, os.ErrNotExist
 }
