@@ -5,6 +5,7 @@ trigger:
 
 expected:
   handler_outcome: success
+  emitted_events: [work.begin]
   flow_entities:
     flow-a:
       entity_state: processed

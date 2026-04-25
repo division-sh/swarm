@@ -714,8 +714,8 @@ func (b *WorkflowContractBundle) RuntimeEventOwners(eventType string) []string {
 	if b == nil {
 		return nil
 	}
-	rawEventType := strings.TrimSpace(eventType)
-	owners := append([]string{}, b.Semantics.EventOwners[rawEventType]...)
+	rawEventType := eventidentity.Normalize(eventType)
+	owners := b.runtimeEventOwnersForQuery(rawEventType)
 	for nodeID, handlers := range b.Semantics.NodeHandlers {
 		for pattern := range handlers {
 			pattern = strings.TrimSpace(pattern)
@@ -733,6 +733,34 @@ func (b *WorkflowContractBundle) RuntimeEventOwners(eventType string) []string {
 		}
 	}
 	return owners
+}
+
+func (b *WorkflowContractBundle) runtimeEventOwnersForQuery(eventType string) []string {
+	eventType = eventidentity.Normalize(eventType)
+	if b == nil || eventType == "" {
+		return nil
+	}
+	if owners := b.Semantics.EventOwners[eventType]; len(owners) > 0 {
+		return append([]string{}, owners...)
+	}
+	if strings.Contains(eventType, "/") {
+		return nil
+	}
+
+	var matched []string
+	for canonical, owners := range b.Semantics.EventOwners {
+		canonical = eventidentity.Normalize(canonical)
+		if eventidentity.LeafName(canonical) != eventType {
+			continue
+		}
+		if matched != nil {
+			// A local name that resolves to more than one canonical owner is
+			// ambiguous; callers must use the scoped event identity.
+			return nil
+		}
+		matched = append([]string{}, owners...)
+	}
+	return matched
 }
 
 func (b *WorkflowContractBundle) localizeNodeEventType(nodeID, eventType string) string {

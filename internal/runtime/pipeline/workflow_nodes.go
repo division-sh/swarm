@@ -586,16 +586,17 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 	if eventType == "" {
 		return false, nil
 	}
+	handledAny := false
 	for _, node := range pc.WorkflowNodes() {
 		handled, err := pc.executeNodeHandlerPlanResult(ctx, strings.TrimSpace(node.ID), evt)
 		if err != nil {
-			return handled, err
+			return handledAny || handled, err
 		}
 		if handled {
-			return true, nil
+			handledAny = true
 		}
 	}
-	return false, nil
+	return handledAny, nil
 }
 
 func deriveWorkflowEventDelivery(entry runtimecontracts.EventCatalogEntry) (consume bool, visible bool) {
