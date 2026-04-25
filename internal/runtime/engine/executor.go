@@ -17,6 +17,7 @@ import (
 	"swarm/internal/runtime/core/values"
 	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/runtime/workflowexpr"
 )
 
 type Step string
@@ -910,7 +911,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		}
 		frame.state.SetFanOut("item", item)
 		payload := map[string]any{}
-		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, spec.Emit)
+		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, spec.Emit, workflowexpr.ValueExpressionOptions{AllowBareItem: true})
 		if err != nil {
 			return false, err
 		}
@@ -1101,7 +1102,7 @@ func (e *Executor) stepTransform(frame *executionFrame) error {
 	}
 	// Resolve emit.fields against the current execution context so
 	// data_accumulation and rule-selected writes are visible to emitted payloads.
-	transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec)
+	transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{})
 	if err != nil {
 		return err
 	}
@@ -1619,7 +1620,7 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			continue
 		}
 		if write.Value.HasCELValue() {
-			value, err := evalWorkflowValueExpression(current, frame.state, write.Value.CEL)
+			value, err := evalWorkflowValueExpression(current, frame.state, write.Value.CEL, workflowexpr.ValueExpressionOptions{})
 			if err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", target, err)
 			}

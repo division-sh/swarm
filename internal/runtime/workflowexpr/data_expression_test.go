@@ -31,15 +31,27 @@ func TestEvalValueExpression_FailsClosedOnMissingEntityValueRead(t *testing.T) {
 }
 
 func TestEvalValueExpression_ExposesFanOutItemAlias(t *testing.T) {
-	value, err := EvalValueExpression(`[item]`, ValueContext{
+	value, err := EvalValueExpressionWithOptions(`[item]`, ValueContext{
 		FanOut: map[string]any{"item": "industry-a"},
-	})
+	}, ValueExpressionOptions{AllowBareItem: true})
 	if err != nil {
 		t.Fatalf("EvalValueExpression error = %v", err)
 	}
 	got, ok := value.([]any)
 	if !ok || len(got) != 1 || got[0] != "industry-a" {
 		t.Fatalf("EvalValueExpression value = %#v, want [industry-a]", value)
+	}
+}
+
+func TestEvalValueExpression_RejectsBareItemByDefault(t *testing.T) {
+	if err := ValidateValueExpression(`item`); err == nil {
+		t.Fatal("expected bare item to be rejected by default")
+	}
+	_, err := EvalValueExpression(`item`, ValueContext{
+		FanOut: map[string]any{"item": "industry-a"},
+	})
+	if err == nil {
+		t.Fatal("expected bare item eval to be rejected by default")
 	}
 }
 

@@ -78,7 +78,7 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation {
 					continue
 				}
-				if err := workflowexpr.ValidateValueExpression(expr.Expression); err != nil {
+				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem}); err != nil {
 					c.dataAccumulationExprFindings = append(c.dataAccumulationExprFindings, Finding{
 						CheckID:  "data_accumulation_expression_validation",
 						Severity: "error",
@@ -105,7 +105,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleEmitFields {
 					continue
 				}
-				if err := workflowexpr.ValidateValueExpression(expr.Expression); err != nil {
+				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem}); err != nil {
 					c.emitFieldExprFindings = append(c.emitFieldExprFindings, Finding{
 						CheckID:  "emit_field_expression_validation",
 						Severity: "error",
@@ -249,6 +249,7 @@ type expressionReference struct {
 	Expression      string
 	Phase           runtimepipeline.WorkflowEntityFieldLifecyclePhase
 	SelfTargetField string
+	AllowBareItem   bool
 }
 
 type handlerCondition struct {
@@ -389,7 +390,7 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 			out = append(out, expressionReference{Kind: "count condition", Expression: condition, Phase: runtimepipeline.WorkflowEntityFieldLifecycleCount})
 		}
 	}
-	appendEmitExpressions := func(kindPrefix string, spec runtimecontracts.EmitSpec) {
+	appendEmitExpressions := func(kindPrefix string, spec runtimecontracts.EmitSpec, allowBareItem bool) {
 		for key, value := range spec.Fields {
 			expr := strings.TrimSpace(value.CEL)
 			if expr == "" && value.Kind == runtimecontracts.ExpressionKindRef {
@@ -397,40 +398,41 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 			}
 			if expr != "" {
 				out = append(out, expressionReference{
-					Kind:       kindPrefix + " emit field " + strings.TrimSpace(key),
-					Expression: expr,
-					Phase:      runtimepipeline.WorkflowEntityFieldLifecycleEmitFields,
+					Kind:          kindPrefix + " emit field " + strings.TrimSpace(key),
+					Expression:    expr,
+					Phase:         runtimepipeline.WorkflowEntityFieldLifecycleEmitFields,
+					AllowBareItem: allowBareItem,
 				})
 			}
 		}
 	}
-	appendEmitExpressions("handler", handler.Emit)
+	appendEmitExpressions("handler", handler.Emit, false)
 	if handler.FanOut != nil {
-		appendEmitExpressions("fan_out", handler.FanOut.Emit)
+		appendEmitExpressions("fan_out", handler.FanOut.Emit, true)
 	}
 	for _, rule := range handler.Rules {
-		appendEmitExpressions("rule", rule.Emit)
+		appendEmitExpressions("rule", rule.Emit, false)
 		if rule.FanOut != nil {
-			appendEmitExpressions("rule fan_out", rule.FanOut.Emit)
+			appendEmitExpressions("rule fan_out", rule.FanOut.Emit, true)
 		}
 	}
 	for _, rule := range handler.OnComplete {
-		appendEmitExpressions("on_complete", rule.Emit)
+		appendEmitExpressions("on_complete", rule.Emit, false)
 		if rule.FanOut != nil {
-			appendEmitExpressions("on_complete fan_out", rule.FanOut.Emit)
+			appendEmitExpressions("on_complete fan_out", rule.FanOut.Emit, true)
 		}
 	}
 	if handler.Accumulate != nil {
 		for _, rule := range handler.Accumulate.OnComplete {
-			appendEmitExpressions("accumulate.on_complete", rule.Emit)
+			appendEmitExpressions("accumulate.on_complete", rule.Emit, false)
 			if rule.FanOut != nil {
-				appendEmitExpressions("accumulate.on_complete fan_out", rule.FanOut.Emit)
+				appendEmitExpressions("accumulate.on_complete fan_out", rule.FanOut.Emit, true)
 			}
 		}
 		if handler.Accumulate.OnTimeout != nil {
-			appendEmitExpressions("accumulate.on_timeout", handler.Accumulate.OnTimeout.Emit)
+			appendEmitExpressions("accumulate.on_timeout", handler.Accumulate.OnTimeout.Emit, false)
 			if handler.Accumulate.OnTimeout.FanOut != nil {
-				appendEmitExpressions("accumulate.on_timeout fan_out", handler.Accumulate.OnTimeout.FanOut.Emit)
+				appendEmitExpressions("accumulate.on_timeout fan_out", handler.Accumulate.OnTimeout.FanOut.Emit, true)
 			}
 		}
 	}

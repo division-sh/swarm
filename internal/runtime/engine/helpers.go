@@ -137,7 +137,7 @@ func resolveRef(base BaseContext, state ExecutionState, ref string) any {
 	return value
 }
 
-func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecontracts.ExpressionValue) (any, bool, error) {
+func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecontracts.ExpressionValue, opts workflowexpr.ValueExpressionOptions) (any, bool, error) {
 	if expr.IsZero() {
 		return nil, false, nil
 	}
@@ -150,7 +150,7 @@ func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecon
 		}
 		return nil, false, nil
 	case runtimecontracts.ExpressionKindCEL:
-		value, err := evalWorkflowValueExpression(base, state, expr.CEL)
+		value, err := evalWorkflowValueExpression(base, state, expr.CEL, opts)
 		if err != nil {
 			return nil, false, err
 		}
@@ -204,7 +204,7 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 		case write.Value.HasLiteralValue():
 			setParsedValuePath(snapshot.StateCarrier.Metadata, parsed, write.Value.Literal)
 		case write.Value.HasCELValue():
-			value, err := evalWorkflowValueExpression(base, state, write.Value.CEL)
+			value, err := evalWorkflowValueExpression(base, state, write.Value.CEL, workflowexpr.ValueExpressionOptions{})
 			if err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", strings.TrimSpace(write.Target()), err)
 			}
@@ -225,14 +225,14 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 	return nil
 }
 
-func evalWorkflowValueExpression(base BaseContext, state ExecutionState, expression string) (any, error) {
-	return workflowexpr.EvalValueExpression(expression, workflowexpr.ValueContext{
+func evalWorkflowValueExpression(base BaseContext, state ExecutionState, expression string, opts workflowexpr.ValueExpressionOptions) (any, error) {
+	return workflowexpr.EvalValueExpressionWithOptions(expression, workflowexpr.ValueContext{
 		Entity:  base.Entity.Raw(),
 		Event:   base.Event.Raw(),
 		Payload: base.Payload.Raw(),
 		Policy:  base.Policy.Raw(),
 		FanOut:  state.FanOut,
-	})
+	}, opts)
 }
 
 func normalizeCELValue(value any) any {
@@ -243,7 +243,7 @@ func normalizedCELInputMap(source map[string]any) map[string]any {
 	return workflowexpr.NormalizeCELInputMap(source)
 }
 
-func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontracts.EmitSpec) (map[string]any, error) {
+func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontracts.EmitSpec, opts workflowexpr.ValueExpressionOptions) (map[string]any, error) {
 	if len(spec.Fields) == 0 {
 		return nil, nil
 	}
@@ -253,7 +253,7 @@ func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontr
 		if target == "" {
 			continue
 		}
-		value, ok, err := evalExpressionValue(base, state, valueSpec)
+		value, ok, err := evalExpressionValue(base, state, valueSpec, opts)
 		if err != nil {
 			return nil, fmt.Errorf("emit field %s: %w", target, err)
 		}
