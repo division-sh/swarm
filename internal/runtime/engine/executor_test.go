@@ -1293,6 +1293,85 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 	}
 }
 
+func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	const (
+		targetEntityID     = "validation-entity"
+		targetFlowInstance = "validation/inst-1"
+		sourceEntityID     = "scoring-entity"
+		sourceFlowInstance = "scoring/inst-1"
+	)
+	manifestations := []string{
+		"validation.started",
+		"validation.package_ready",
+		"brand.requested",
+		"cto.spec_review_requested",
+		"spec.revision_requested",
+	}
+	for _, eventType := range manifestations {
+		t.Run(eventType, func(t *testing.T) {
+			state := testStateSnapshot("researching", map[string]any{
+				"flow_path": targetFlowInstance,
+			}, nil, map[string]map[string]any{})
+			state.EntityID = identity.NormalizeEntityID(targetEntityID)
+			result, err := exec.Execute(context.Background(), ExecutionRequest{
+				EntityID: targetEntityID,
+				NodeID:   "validation-router",
+				FlowID:   "validation",
+				Event: (events.Event{
+					ID:      "evt-1",
+					Type:    "scoring/vertical.resumed",
+					Payload: json.RawMessage(`{"vertical_id":"` + sourceEntityID + `"}`),
+				}).WithEntityID(sourceEntityID).WithFlowInstance(sourceFlowInstance),
+				Handler: runtimecontracts.SystemNodeEventHandler{
+					Emit: runtimecontracts.EmitSpec{
+						Event: eventType,
+						Fields: map[string]runtimecontracts.ExpressionValue{
+							"source_entity_id":     runtimecontracts.CELExpression("event.entity_id"),
+							"source_flow_instance": runtimecontracts.CELExpression("event.flow_instance"),
+						},
+					},
+				},
+				State: state,
+			})
+			if err != nil {
+				t.Fatalf("Execute error: %v", err)
+			}
+			if got := len(result.EmitIntents); got != 1 {
+				t.Fatalf("EmitIntents count = %d, want 1", got)
+			}
+			emitted := result.EmitIntents[0].Event
+			if got := emitted.EntityID(); got != targetEntityID {
+				t.Fatalf("emitted entity_id = %q, want target validation entity %q", got, targetEntityID)
+			}
+			if got := emitted.FlowInstance(); got != targetFlowInstance {
+				t.Fatalf("emitted flow_instance = %q, want target validation flow %q", got, targetFlowInstance)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(emitted.Payload, &payload); err != nil {
+				t.Fatalf("unmarshal payload: %v", err)
+			}
+			if got := payload["source_entity_id"]; got != sourceEntityID {
+				t.Fatalf("source_entity_id = %#v, want explicit source entity %q", got, sourceEntityID)
+			}
+			if got := payload["source_flow_instance"]; got != sourceFlowInstance {
+				t.Fatalf("source_flow_instance = %#v, want explicit source flow %q", got, sourceFlowInstance)
+			}
+		})
+	}
+}
+
 func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSourceWithRootEntityContract(),
