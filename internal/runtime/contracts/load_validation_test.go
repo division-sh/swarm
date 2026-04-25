@@ -153,6 +153,27 @@ func TestLoadWorkflowContractBundleRejectsTier8DialectFixtures(t *testing.T) {
 	}
 }
 
+func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalAuthoritativeOwners(t *testing.T) {
+	repoRoot := contractRepoRoot(t)
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	if owners := bundle.RuntimeEventOwners("work.begin"); len(owners) != 0 {
+		t.Fatalf("expected no authoritative owners for root work.begin, got %v", owners)
+	}
+	if owners := bundle.RuntimeEventOwners("flow-a/work.begin"); !hasAll(owners, "alpha-intake") || hasAny(owners, "beta-intake") {
+		t.Fatalf("expected only alpha-intake to own flow-a/work.begin, got %v", owners)
+	}
+	if owners := bundle.RuntimeEventOwners("flow-b/work.begin"); !hasAll(owners, "beta-intake") || hasAny(owners, "alpha-intake") {
+		t.Fatalf("expected only beta-intake to own flow-b/work.begin, got %v", owners)
+	}
+}
+
 func contractErrorContains(err error, substr string) bool {
 	if err == nil || strings.TrimSpace(substr) == "" {
 		return false
@@ -167,4 +188,30 @@ func contractErrorContains(err error, substr string) bool {
 	}
 	text := err.Error()
 	return strings.Contains(text, substr)
+}
+
+func hasAll(values []string, wants ...string) bool {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[strings.TrimSpace(value)] = struct{}{}
+	}
+	for _, want := range wants {
+		if _, ok := seen[strings.TrimSpace(want)]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func hasAny(values []string, wants ...string) bool {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[strings.TrimSpace(value)] = struct{}{}
+	}
+	for _, want := range wants {
+		if _, ok := seen[strings.TrimSpace(want)]; ok {
+			return true
+		}
+	}
+	return false
 }

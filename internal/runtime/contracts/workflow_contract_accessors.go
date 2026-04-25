@@ -717,23 +717,16 @@ func (b *WorkflowContractBundle) RuntimeEventOwners(eventType string) []string {
 	rawEventType := strings.TrimSpace(eventType)
 	owners := append([]string{}, b.Semantics.EventOwners[rawEventType]...)
 	for nodeID, handlers := range b.Semantics.NodeHandlers {
-		localEventType := b.localizeNodeEventType(nodeID, rawEventType)
-		if _, ok := handlers[localEventType]; ok {
-			owners = appendIfMissingString(owners, nodeID)
-			continue
-		}
-		if rawEventType != "" && rawEventType != localEventType {
-			if _, ok := handlers[rawEventType]; ok {
-				owners = appendIfMissingString(owners, nodeID)
+		for pattern := range handlers {
+			pattern = strings.TrimSpace(pattern)
+			if pattern == "" || !strings.Contains(pattern, "*") {
 				continue
 			}
-		}
-		for pattern := range handlers {
-			if handlerPatternMatches(pattern, localEventType) {
-				owners = appendIfMissingString(owners, nodeID)
-				break
+			canonicalPattern := strings.TrimSpace(b.ResolveNodeEventReference(nodeID, pattern))
+			if canonicalPattern == "" {
+				canonicalPattern = pattern
 			}
-			if rawEventType != "" && rawEventType != localEventType && handlerPatternMatches(pattern, rawEventType) {
+			if handlerPatternMatches(canonicalPattern, rawEventType) {
 				owners = appendIfMissingString(owners, nodeID)
 				break
 			}
