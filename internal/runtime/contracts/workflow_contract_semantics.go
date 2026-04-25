@@ -95,7 +95,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				continue
 			}
 			handlers[rawEventType] = handler
-			ownerEventType := strings.TrimSpace(bundle.ResolveNodeEventReference(nodeID, rawEventType))
+			ownerEventType := strings.TrimSpace(bundle.resolveNodeEventOwnerPattern(nodeID, rawEventType))
 			if ownerEventType == "" {
 				ownerEventType = rawEventType
 			}
