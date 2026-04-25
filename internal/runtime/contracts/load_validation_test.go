@@ -174,6 +174,58 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalAuthoritativeOwners(t *
 	}
 }
 
+func TestRuntimeEventOwnersScopesFlowLocalWildcardHandlers(t *testing.T) {
+	repoRoot := contractRepoRoot(t)
+	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: wildcard-owner-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: child
+    flow: child
+`)
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wildcard-owner-test\n")
+	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "child", "package.yaml"), "name: child\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+initial_state: active
+terminal_states: [done]
+states: [active, done]
+pins:
+  outputs:
+    events: [task.done]
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+task.done:
+  entity_id: string
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+child-wildcard:
+  id: child-wildcard
+  execution_type: system_node
+  subscribes_to: [task.*]
+  event_handlers:
+    task.*:
+      advances_to: done
+`)
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	if owners := bundle.RuntimeEventOwners("child/task.done"); !hasAll(owners, "child-wildcard") {
+		t.Fatalf("expected child-wildcard to own child/task.done through flow-local wildcard, got %v", owners)
+	}
+}
+
 func contractErrorContains(err error, substr string) bool {
 	if err == nil || strings.TrimSpace(substr) == "" {
 		return false
