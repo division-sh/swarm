@@ -28,7 +28,7 @@ func entityToolExistingFlowInstanceMatches(source semanticview.Source, requested
 	if !ok {
 		return false
 	}
-	return runtimeflowidentity.OwnedByScope(root, stored)
+	return stored == root || strings.HasPrefix(stored, root+"/")
 }
 
 func appendEntityToolExistingFlowInstanceFilter(source semanticview.Source, clauses []string, args []any, requested string) ([]string, []any) {
