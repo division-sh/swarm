@@ -1542,6 +1542,32 @@ func TestRun_RejectsAccumulatedNamespaceInEmitFieldExpressions(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsDisallowedRefNamespaceInEmitFieldExpressions(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						Emit: runtimecontracts.EmitSpec{
+							Event: "item.scored",
+							Fields: map[string]runtimecontracts.ExpressionValue{
+								"bad": runtimecontracts.RefExpression("accumulated.count"),
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "emit_field_expression_validation", "accumulated.count") {
+		t.Fatalf("expected accumulated namespace in emit.fields ref to fail validation, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsYAMLScalarEmitFieldsAsExpressions(t *testing.T) {
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`

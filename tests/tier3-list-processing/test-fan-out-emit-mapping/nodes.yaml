@@ -10,5 +10,5 @@ routing-node:
         emit:
           event: routed.a
           fields:
-            kind: item.kind
+            item: item
       advances_to: routing

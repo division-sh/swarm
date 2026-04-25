@@ -391,7 +391,11 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 	}
 	appendEmitExpressions := func(kindPrefix string, spec runtimecontracts.EmitSpec) {
 		for key, value := range spec.Fields {
-			if expr := strings.TrimSpace(value.CEL); expr != "" {
+			expr := strings.TrimSpace(value.CEL)
+			if expr == "" && value.Kind == runtimecontracts.ExpressionKindRef {
+				expr = strings.TrimSpace(value.Ref)
+			}
+			if expr != "" {
 				out = append(out, expressionReference{
 					Kind:       kindPrefix + " emit field " + strings.TrimSpace(key),
 					Expression: expr,
