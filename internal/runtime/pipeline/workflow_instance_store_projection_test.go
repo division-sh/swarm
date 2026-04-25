@@ -18,14 +18,12 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 
 	store := NewWorkflowInstanceStore(db)
 	storageRef := uuid.NewString()
-	subjectID := uuid.NewString()
 	parentID := uuid.NewString()
 	now := time.Now().UTC().Round(time.Microsecond)
 
 	instance := WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      storageRef,
-		SubjectID:       subjectID,
 		WorkflowName:    "projection-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "active",
@@ -94,8 +92,11 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	if got := strings.TrimSpace(asString(loaded.Metadata["storage_ref"])); got != storageRef {
 		t.Fatalf("Metadata storage_ref = %#v, want %q", loaded.Metadata["storage_ref"], storageRef)
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["subject_id"])); got != subjectID {
-		t.Fatalf("Metadata subject_id = %#v, want %q", loaded.Metadata["subject_id"], subjectID)
+	if got := strings.TrimSpace(asString(loaded.Metadata["subject_id"])); got != "" {
+		t.Fatalf("Metadata subject_id = %#v, want empty", loaded.Metadata["subject_id"])
+	}
+	if got := strings.TrimSpace(loaded.SubjectID); got != "" {
+		t.Fatalf("SubjectID = %q, want empty", got)
 	}
 	if gates := workflowStateGatesAsBools(loaded.Metadata); !gates["g_ready"] {
 		t.Fatalf("Metadata gates = %#v, want g_ready=true", loaded.Metadata["gates"])

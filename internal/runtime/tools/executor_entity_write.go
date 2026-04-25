@@ -263,12 +263,8 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	if strings.TrimSpace(asString(payload["entity_type"])) != "" {
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.entity_type", false, "entity_type is inferred from flow_instance and must not be supplied")
 	}
-	subjectID := strings.TrimSpace(asString(payload["subject_id"]))
-	if subjectID == "" {
-		subjectID = entityID
-	}
-	if _, err := uuid.Parse(subjectID); err != nil {
-		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.subject_id", false, "subject_id must be uuid")
+	if strings.TrimSpace(asString(payload["subject_id"])) != "" {
+		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.subject_id", false, "subject_id is deprecated; use explicit payload/config fields for business correlation")
 	}
 	name := strings.TrimSpace(asString(payload["name"]))
 	currentState := strings.TrimSpace(asString(payload["initial_state"]))
@@ -313,11 +309,11 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3, $4, NULLIF($5, ''),
-			$6, '{}'::jsonb, $7::jsonb, '{}'::jsonb, 1,
-			$8, $8, $8
+			$1::uuid, NULL, $2, $3, NULLIF($4, ''),
+			$5, '{}'::jsonb, $6::jsonb, '{}'::jsonb, 1,
+			$7, $7, $7
 		)
-	`, entityID, subjectID, flowInstance, contract.EntityType, name, currentState, string(fieldsJSON), now); err != nil {
+	`, entityID, flowInstance, contract.EntityType, name, currentState, string(fieldsJSON), now); err != nil {
 		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_create_entity.insert", false, err, "create entity %s", entityID)
 	}
 	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, entityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
@@ -336,7 +332,6 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	committed = true
 	return map[string]any{
 		"entity_id":     entityID,
-		"subject_id":    subjectID,
 		"current_state": currentState,
 		"created_at":    now.Format(time.RFC3339Nano),
 	}, nil

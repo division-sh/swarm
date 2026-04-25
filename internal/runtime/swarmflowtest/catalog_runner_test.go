@@ -58,6 +58,7 @@ type catalogExpectedDocument struct {
 		SubjectID              string                              `yaml:"subject_id"`
 		EntityState            string                              `yaml:"entity_state"`
 		EmittedEvents          []string                            `yaml:"emitted_events"`
+		CausalEvents           []string                            `yaml:"causal_events"`
 		EntityFields           map[string]any                      `yaml:"entity_fields"`
 		Gates                  map[string]any                      `yaml:"gates"`
 		GatesSet               []string                            `yaml:"gates_set"`
@@ -86,6 +87,7 @@ type catalogExpectedPerEntity struct {
 	EntityFields    map[string]any `yaml:"entity_fields"`
 	Gates           map[string]any `yaml:"gates"`
 	EmittedEvents   []string       `yaml:"emitted_events"`
+	CausalEvents    []string       `yaml:"causal_events"`
 	DeadLetter      bool           `yaml:"dead_letter"`
 }
 

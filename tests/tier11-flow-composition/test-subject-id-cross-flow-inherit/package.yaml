@@ -1,9 +1,8 @@
 name: test-subject-id-cross-flow-inherit
 version: 1.0.0
 description: >
-  Second flow inherits subject_id from the source entity. Parent entity
-  has no subject_id set (null), so child copies the parent entity_id as
-  its subject_id per spec v1.6.0 propagation rules.
+  Second flow receives explicit business data from the triggering payload,
+  while event source_event_id preserves the causal chain across flows.
 platform_version: ">=1.6.0"
 flows:
 - id: scoring

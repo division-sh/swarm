@@ -993,16 +993,15 @@ func TestResolveHandlerEntityIDForFlowPreservesCrossFlowEntityWithoutCreateEntit
 	}
 }
 
-func TestResolveHandlerEntityIDForRootUsesSubjectEntityForFlowScopedInbound(t *testing.T) {
+func TestResolveHandlerEntityIDForRootKeepsFlowScopedInboundEntity(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "pipeline.complete"},
 	}
 	const inboundEntityID = "ent-child"
-	const subjectEntityID = "ent-root"
 	state := WorkflowState{
 		EntityID: inboundEntityID,
 		Metadata: map[string]any{
-			"subject_id": subjectEntityID,
+			"subject_id": "ent-root",
 		},
 	}
 
@@ -1010,14 +1009,14 @@ func TestResolveHandlerEntityIDForRootUsesSubjectEntityForFlowScopedInbound(t *t
 		Type: events.EventType("child/grandchild/task.done"),
 	}.WithEntityID(inboundEntityID), &state)
 
-	if gotID != subjectEntityID {
-		t.Fatalf("entityID = %q, want subject/root %q", gotID, subjectEntityID)
+	if gotID != inboundEntityID {
+		t.Fatalf("entityID = %q, want inbound %q", gotID, inboundEntityID)
 	}
 	if got := gotEvt.EntityID(); got != inboundEntityID {
 		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, inboundEntityID)
 	}
-	if state.EntityID != subjectEntityID {
-		t.Fatalf("state entity_id = %q, want %q", state.EntityID, subjectEntityID)
+	if state.EntityID != inboundEntityID {
+		t.Fatalf("state entity_id = %q, want %q", state.EntityID, inboundEntityID)
 	}
 }
 
@@ -1142,10 +1141,10 @@ vertical:
 		t.Fatalf("state status = %q, want cleared", state.Status)
 	}
 	if state.Metadata == nil {
-		t.Fatal("state metadata = nil, want subject_id preserved")
+		t.Fatal("state metadata = nil, want create entity metadata")
 	}
-	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != inboundEntityID {
-		t.Fatalf("state subject_id = %q, want %q", got, inboundEntityID)
+	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != "" {
+		t.Fatalf("state subject_id = %q, want empty", got)
 	}
 	if got := strings.TrimSpace(asString(state.Metadata["parent_entity_id"])); got != inboundEntityID {
 		t.Fatalf("state parent_entity_id = %q, want %q", got, inboundEntityID)
@@ -1192,10 +1191,10 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 		t.Fatalf("snapshot current_state = %q, want queued", snapshot.CurrentState)
 	}
 	if snapshot.Metadata == nil {
-		t.Fatal("snapshot metadata = nil, want subject metadata")
+		t.Fatal("snapshot metadata = nil, want persisted metadata")
 	}
 	if got := strings.TrimSpace(asString(snapshot.Metadata["subject_id"])); got != "ent-parent" {
-		t.Fatalf("snapshot subject_id = %q, want ent-parent", got)
+		t.Fatalf("snapshot subject_id = %q, want preserved compatibility metadata", got)
 	}
 	if got := snapshot.Metadata["revision_count"]; got != 0 {
 		t.Fatalf("snapshot revision_count = %#v, want 0", got)
@@ -1227,7 +1226,7 @@ func TestExecuteNodeContractHandlerRejectsMalformedPersistedGateShape(t *testing
 	}
 }
 
-func TestResolveHandlerEntityIDForFlowCreateEntitySeedsFirstFlowSubjectID(t *testing.T) {
+func TestResolveHandlerEntityIDForFlowCreateEntityDoesNotSeedSubjectID(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	state := WorkflowState{}
 
@@ -1239,10 +1238,10 @@ func TestResolveHandlerEntityIDForFlowCreateEntitySeedsFirstFlowSubjectID(t *tes
 		t.Fatal("expected fresh entity id")
 	}
 	if state.Metadata == nil {
-		t.Fatal("state metadata = nil, want subject_id")
+		t.Fatal("state metadata = nil, want create entity metadata")
 	}
-	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != gotID {
-		t.Fatalf("state subject_id = %q, want %q", got, gotID)
+	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != "" {
+		t.Fatalf("state subject_id = %q, want empty", got)
 	}
 }
 
@@ -1903,7 +1902,7 @@ node-a:
 	}
 }
 
-func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotEmitChildContinuation(t *testing.T) {
+func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropagateToRoot(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1988,14 +1987,8 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotEmitChild
 	if got := strings.TrimSpace(child.CurrentState); got != "waiting" {
 		t.Fatalf("child current_state = %q, want waiting", got)
 	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("published count = %d, want 1", got)
-	}
-	if got := string(bus.publishedEvent(0).Type); got != "pipeline.complete" {
-		t.Fatalf("published type = %q, want pipeline.complete", got)
-	}
-	if got := bus.publishedEvent(0).EntityID(); got != rootEntityID {
-		t.Fatalf("published entity_id = %q, want %q", got, rootEntityID)
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("published count = %d, want 0 without subject-link back-propagation", got)
 	}
 }
 

@@ -47,7 +47,6 @@ type catalogExpectedDocument struct {
 	Expected struct {
 		BootResult          string                           `yaml:"boot_result"`
 		HandlerOutcome      string                           `yaml:"handler_outcome"`
-		SubjectID           string                           `yaml:"subject_id"`
 		EntityState         string                           `yaml:"entity_state"`
 		ParentState         string                           `yaml:"parent_state"`
 		FlowBState          string                           `yaml:"flow_b_state"`
@@ -55,6 +54,7 @@ type catalogExpectedDocument struct {
 		EntityFields        map[string]any                   `yaml:"entity_fields"`
 		Gates               map[string]bool                  `yaml:"gates"`
 		EmittedEvents       []string                         `yaml:"emitted_events"`
+		CausalEvents        []string                         `yaml:"causal_events"`
 		AgentReceived       map[string][]string              `yaml:"agent_received"`
 		DeadLetter          bool                             `yaml:"dead_letter"`
 		ChainDepthExceeded  bool                             `yaml:"chain_depth_exceeded"`
@@ -65,15 +65,14 @@ type catalogExpectedDocument struct {
 }
 
 type catalogEntityExpected struct {
-	HandlerOutcome  string          `yaml:"handler_outcome"`
-	Exists          *bool           `yaml:"exists"`
-	SubjectID       string          `yaml:"subject_id"`
-	SubjectIDIsSelf *bool           `yaml:"subject_id_is_self"`
-	EntityState     string          `yaml:"entity_state"`
-	EntityFields    map[string]any  `yaml:"entity_fields"`
-	Gates           map[string]bool `yaml:"gates"`
-	EmittedEvents   []string        `yaml:"emitted_events"`
-	DeadLetter      bool            `yaml:"dead_letter"`
+	HandlerOutcome string          `yaml:"handler_outcome"`
+	Exists         *bool           `yaml:"exists"`
+	EntityState    string          `yaml:"entity_state"`
+	EntityFields   map[string]any  `yaml:"entity_fields"`
+	Gates          map[string]bool `yaml:"gates"`
+	EmittedEvents  []string        `yaml:"emitted_events"`
+	CausalEvents   []string        `yaml:"causal_events"`
+	DeadLetter     bool            `yaml:"dead_letter"`
 }
 
 func (d catalogExpectedDocument) triggerSequence() []catalogTriggerStep {
@@ -487,6 +486,8 @@ func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDo
 
 func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID string, want []string, flowPrefix string, source semanticview.Source) bool {
 	h.t.Helper()
+	relevantEventIDs := catalogCausalEventIDs(h.t, h.db, h.startedAt, h.publishedIDs)
+	relevantEntityIDs := catalogCausalEntityIDs(h.t, h.db, h.startedAt, h.publishedIDs, entityID)
 	rows, err := h.db.QueryContext(ctx, `
 		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
 		FROM events
@@ -515,7 +516,11 @@ func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID 
 		if _, skip := h.publishedIDs[strings.TrimSpace(eventID)]; skip {
 			continue
 		}
-		if strings.TrimSpace(payloadEntityID) != strings.TrimSpace(entityID) {
+		eventID = strings.TrimSpace(eventID)
+		payloadEntityID = strings.TrimSpace(payloadEntityID)
+		_, causalEvent := relevantEventIDs[eventID]
+		_, causalEntity := relevantEntityIDs[payloadEntityID]
+		if !causalEvent && !causalEntity {
 			continue
 		}
 		eventName = strings.TrimSpace(eventName)

@@ -173,7 +173,6 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 		instance.Metadata = map[string]any{}
 	}
 	instance.StorageRef = strings.TrimSpace(instance.StorageRef)
-	instance.SubjectID = strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"])))
 	identity, err := workflowInstancePersistedIdentity(nil, instance)
 	if err != nil {
 		return err
@@ -889,7 +888,7 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		return workflowInstancePersistedProjection{}, fmt.Errorf("workflow instance storage_ref %q disagrees with canonical storage_ref %q", storageRef, persistedIdentity.StorageRef)
 	}
 	control := workflowInstancePersistedControl{
-		SubjectID:         strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"]))),
+		SubjectID:         "",
 		StorageRef:        strings.TrimSpace(persistedIdentity.StorageRef),
 		Slug:              strings.TrimSpace(asString(instance.Metadata["slug"])),
 		Name:              strings.TrimSpace(asString(instance.Metadata["name"])),
@@ -940,9 +939,6 @@ func (p workflowInstancePersistedProjection) Metadata() map[string]any {
 	}
 	if strings.TrimSpace(p.Control.StorageRef) != "" {
 		metadata["storage_ref"] = strings.TrimSpace(p.Control.StorageRef)
-	}
-	if strings.TrimSpace(p.Control.SubjectID) != "" {
-		metadata["subject_id"] = strings.TrimSpace(p.Control.SubjectID)
 	}
 	if strings.TrimSpace(p.Control.InstanceID) != "" {
 		metadata["instance_id"] = strings.TrimSpace(p.Control.InstanceID)

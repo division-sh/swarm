@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -34,19 +32,19 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 	}
 	if entityID != "" && strings.TrimSpace(expected.Expected.EntityState) != "" {
 		if flowPrefix != "" {
-			assertFlowState(t, h.workflow, h.bundle, entityID, flowPrefix, expected.Expected.EntityState)
+			assertFlowState(t, h, entityID, flowPrefix, expected.Expected.EntityState)
 		} else {
 			assertEntityState(t, h.db, h.workflow, entityID, expected.Expected.EntityState)
 		}
 	}
 	if entityID != "" {
-		assertEntitySubjectID(t, h.workflow, entityID, expected.Expected.SubjectID)
-		assertFlowState(t, h.workflow, h.bundle, entityID, "", expected.Expected.ParentState)
-		assertFlowState(t, h.workflow, h.bundle, entityID, "flow-b", expected.Expected.FlowBState)
-		assertSubjectFlowEntities(t, h.workflow, h.bundle, entityID, expected.Expected.FlowEntities)
+		assertFlowState(t, h, entityID, "", expected.Expected.ParentState)
+		assertFlowState(t, h, entityID, "flow-b", expected.Expected.FlowBState)
+		assertCausalFlowEntities(t, h, entityID, expected.Expected.FlowEntities)
 		assertEntityFields(t, h.workflow, entityID, expected.Expected.EntityFields)
 		assertGates(t, h.workflow, entityID, expected.Expected.Gates)
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, expected.Expected.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
+		assertCausalEvents(t, h, expected.Expected.CausalEvents, flowPrefix)
 		assertDeadLetter(t, h.db, h.startedAt, entityID, expected.Expected.DeadLetter)
 		assertChainDepthExceeded(t, h.db, h.startedAt, entityID, expected.Expected.ChainDepthExceeded)
 	}
@@ -59,50 +57,40 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 	}
 }
 
-func assertSubjectFlowEntities(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, bundle *runtimecontracts.WorkflowContractBundle, subjectID string, want map[string]catalogEntityExpected) {
+func assertCausalFlowEntities(t testing.TB, h *runtimeHarness, rootEntityID string, want map[string]catalogEntityExpected) {
 	t.Helper()
 	if len(want) == 0 {
 		return
 	}
+	if h == nil {
+		t.Fatal("runtime harness is required for flow entity assertions")
+	}
+	candidateEntityIDs := catalogCausalEntityIDs(t, h.db, h.startedAt, h.publishedIDs, rootEntityID)
 	for flowID, expected := range want {
 		flowID = strings.TrimSpace(flowID)
-		got, found, err := catalogFlowInstanceForSubject(workflow, semanticview.Wrap(bundle), strings.TrimSpace(subjectID), flowID)
+		requireCausal := expected.Exists != nil && !*expected.Exists
+		got, found, err := catalogFlowInstanceForCausalFlow(h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, flowID, requireCausal)
 		if err != nil {
-			t.Fatalf("load subject flow instance %s/%s: %v", subjectID, flowID, err)
+			t.Fatalf("load causal flow instance %s: %v", flowID, err)
 		}
 		if expected.Exists != nil && !*expected.Exists {
 			if found {
-				t.Fatalf("subject flow instance %s/%s unexpectedly exists: entity_id=%s state=%s", subjectID, flowID, got.InstanceID, got.CurrentState)
+				t.Fatalf("causal flow instance %s unexpectedly exists: entity_id=%s state=%s", flowID, got.InstanceID, got.CurrentState)
 			}
 			continue
 		}
 		if !found {
-			t.Fatalf("subject flow instance for %s/%s not found", subjectID, flowID)
-		}
-		if wantSubjectID := strings.TrimSpace(expected.SubjectID); wantSubjectID != "" {
-			if gotSubjectID := strings.TrimSpace(got.SubjectID); gotSubjectID != wantSubjectID {
-				t.Fatalf("subject flow instance %s/%s subject_id = %q, want %q", subjectID, flowID, gotSubjectID, wantSubjectID)
-			}
-		}
-		if expected.SubjectIDIsSelf != nil {
-			gotSubjectID := strings.TrimSpace(got.SubjectID)
-			gotEntityID := strings.TrimSpace(got.InstanceID)
-			if *expected.SubjectIDIsSelf && gotSubjectID != gotEntityID {
-				t.Fatalf("subject flow instance %s/%s subject_id = %q, want self entity_id %q", subjectID, flowID, gotSubjectID, gotEntityID)
-			}
-			if !*expected.SubjectIDIsSelf && gotSubjectID == gotEntityID {
-				t.Fatalf("subject flow instance %s/%s subject_id unexpectedly equals entity_id %q", subjectID, flowID, gotEntityID)
-			}
+			t.Fatalf("causal flow instance for %s not found; causal entity ids=%v", flowID, mapKeys(candidateEntityIDs))
 		}
 		if wantState := strings.TrimSpace(expected.EntityState); wantState != "" {
 			if gotState := strings.TrimSpace(got.CurrentState); gotState != wantState {
-				t.Fatalf("subject flow instance %s/%s state = %q, want %q", subjectID, flowID, gotState, wantState)
+				t.Fatalf("causal flow instance %s state = %q, want %q", flowID, gotState, wantState)
 			}
 		}
 		if len(expected.EntityFields) > 0 {
 			for key, wantValue := range expected.EntityFields {
 				if gotValue := got.Metadata[strings.TrimSpace(key)]; fmt.Sprintf("%#v", gotValue) != fmt.Sprintf("%#v", wantValue) {
-					t.Fatalf("subject flow instance %s/%s field %s = %#v, want %#v", subjectID, flowID, key, gotValue, wantValue)
+					t.Fatalf("causal flow instance %s field %s = %#v, want %#v", flowID, key, gotValue, wantValue)
 				}
 			}
 		}
@@ -110,7 +98,7 @@ func assertSubjectFlowEntities(t testing.TB, workflow *runtimepipeline.WorkflowI
 			gates := catalogBoolGates(got.Metadata)
 			for key, wantValue := range expected.Gates {
 				if gotValue := gates[strings.TrimSpace(key)]; gotValue != wantValue {
-					t.Fatalf("subject flow instance %s/%s gate %s = %v, want %v", subjectID, flowID, key, gotValue, wantValue)
+					t.Fatalf("causal flow instance %s gate %s = %v, want %v", flowID, key, gotValue, wantValue)
 				}
 			}
 		}
@@ -131,58 +119,11 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 		if strings.TrimSpace(want.EntityState) != "" {
 			assertEntityState(t, h.db, h.workflow, entityID, want.EntityState)
 		}
-		assertEntitySubjectID(t, h.workflow, entityID, want.SubjectID)
-		assertEntitySubjectIDSelf(t, h.workflow, entityID, want.SubjectIDIsSelf)
 		assertEntityFields(t, h.workflow, entityID, want.EntityFields)
 		assertGates(t, h.workflow, entityID, want.Gates)
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, want.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
+		assertCausalEvents(t, h, want.CausalEvents, flowPrefix)
 		assertDeadLetter(t, h.db, h.startedAt, entityID, want.DeadLetter)
-	}
-}
-
-func assertEntitySubjectID(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, entityID, wantSubjectID string) {
-	t.Helper()
-	wantSubjectID = strings.TrimSpace(wantSubjectID)
-	if wantSubjectID == "" {
-		return
-	}
-	if workflow == nil {
-		t.Fatal("workflow instance store is required")
-	}
-	instance, ok, err := workflow.Load(context.Background(), strings.TrimSpace(entityID))
-	if err != nil {
-		t.Fatalf("load workflow instance %s for subject assertion: %v", entityID, err)
-	}
-	if !ok {
-		t.Fatalf("workflow instance %s not found for subject assertion", entityID)
-	}
-	if got := strings.TrimSpace(instance.SubjectID); got != wantSubjectID {
-		t.Fatalf("entity %s subject_id = %q, want %q", entityID, got, wantSubjectID)
-	}
-}
-
-func assertEntitySubjectIDSelf(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, entityID string, wantSelf *bool) {
-	t.Helper()
-	if wantSelf == nil {
-		return
-	}
-	if workflow == nil {
-		t.Fatal("workflow instance store is required")
-	}
-	instance, ok, err := workflow.Load(context.Background(), strings.TrimSpace(entityID))
-	if err != nil {
-		t.Fatalf("load workflow instance %s for subject self assertion: %v", entityID, err)
-	}
-	if !ok {
-		t.Fatalf("workflow instance %s not found for subject self assertion", entityID)
-	}
-	gotSubjectID := strings.TrimSpace(instance.SubjectID)
-	gotEntityID := strings.TrimSpace(instance.InstanceID)
-	if *wantSelf && gotSubjectID != gotEntityID {
-		t.Fatalf("entity %s subject_id = %q, want self entity_id %q", entityID, gotSubjectID, gotEntityID)
-	}
-	if !*wantSelf && gotSubjectID == gotEntityID {
-		t.Fatalf("entity %s subject_id unexpectedly equals entity_id %q", entityID, gotEntityID)
 	}
 }
 
@@ -282,16 +223,16 @@ func assertEntityState(t testing.TB, db *sql.DB, workflow *runtimepipeline.Workf
 	}
 }
 
-func assertFlowState(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, bundle *runtimecontracts.WorkflowContractBundle, entityID, flowID, wantState string) {
+func assertFlowState(t testing.TB, h *runtimeHarness, entityID, flowID, wantState string) {
 	t.Helper()
 	wantState = strings.TrimSpace(wantState)
 	if wantState == "" {
 		return
 	}
-	if workflow == nil {
+	if h == nil || h.workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
-	instance, ok, err := workflow.Load(context.Background(), strings.TrimSpace(entityID))
+	instance, ok, err := h.workflow.Load(context.Background(), strings.TrimSpace(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance %s for flow state: %v", entityID, err)
 	}
@@ -300,12 +241,13 @@ func assertFlowState(t testing.TB, workflow *runtimepipeline.WorkflowInstanceSto
 	}
 	got := strings.TrimSpace(instance.CurrentState)
 	if flowID != "" {
-		matched, found, err := catalogFlowInstanceForSubject(workflow, semanticview.Wrap(bundle), strings.TrimSpace(entityID), strings.TrimSpace(flowID))
+		candidateEntityIDs := catalogCausalEntityIDs(t, h.db, h.startedAt, h.publishedIDs, entityID)
+		matched, found, err := catalogFlowInstanceForCausalFlow(h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, strings.TrimSpace(flowID), false)
 		if err != nil {
-			t.Fatalf("load subject flow instance %s/%s: %v", entityID, flowID, err)
+			t.Fatalf("load causal flow instance %s: %v", flowID, err)
 		}
 		if !found {
-			t.Fatalf("subject flow instance for %s/%s not found", entityID, flowID)
+			t.Fatalf("causal flow instance for %s not found", flowID)
 		}
 		got = strings.TrimSpace(matched.CurrentState)
 	}
@@ -314,7 +256,7 @@ func assertFlowState(t testing.TB, workflow *runtimepipeline.WorkflowInstanceSto
 	}
 }
 
-func catalogFlowInstanceForSubject(workflow *runtimepipeline.WorkflowInstanceStore, source semanticview.Source, subjectID, flowID string) (runtimepipeline.WorkflowInstance, bool, error) {
+func catalogFlowInstanceForCausalFlow(workflow *runtimepipeline.WorkflowInstanceStore, source semanticview.Source, candidateEntityIDs map[string]struct{}, flowID string, requireCausal bool) (runtimepipeline.WorkflowInstance, bool, error) {
 	if workflow == nil {
 		return runtimepipeline.WorkflowInstance{}, false, nil
 	}
@@ -322,7 +264,6 @@ func catalogFlowInstanceForSubject(workflow *runtimepipeline.WorkflowInstanceSto
 	if err != nil {
 		return runtimepipeline.WorkflowInstance{}, false, err
 	}
-	subjectID = strings.TrimSpace(subjectID)
 	flowID = strings.TrimSpace(flowID)
 	candidates := map[string]struct{}{}
 	if flowID != "" {
@@ -340,32 +281,50 @@ func catalogFlowInstanceForSubject(workflow *runtimepipeline.WorkflowInstanceSto
 			}
 		}
 	}
+	matchFlow := func(row runtimepipeline.WorkflowInstance) bool {
+		if len(candidates) == 0 {
+			return false
+		}
+		rowWorkflow := strings.TrimSpace(row.WorkflowName)
+		rowStorage := strings.Trim(strings.TrimSpace(row.StorageRef), "/")
+		for candidate := range candidates {
+			candidate = strings.Trim(candidate, "/")
+			switch {
+			case candidate == "":
+			case rowWorkflow == candidate:
+				return true
+			case rowStorage == candidate:
+				return true
+			}
+		}
+		return false
+	}
+	matchCausal := func(row runtimepipeline.WorkflowInstance) bool {
+		if len(candidateEntityIDs) > 0 {
+			rowEntityID := strings.TrimSpace(asString(row.Metadata["entity_id"]))
+			if rowEntityID == "" {
+				rowEntityID = strings.TrimSpace(row.InstanceID)
+			}
+			if rowEntityID == "" {
+				rowEntityID = runtimepipeline.FlowInstanceEntityID(row.StorageRef)
+			}
+			if _, ok := candidateEntityIDs[rowEntityID]; !ok {
+				return false
+			}
+		}
+		return true
+	}
 	for _, row := range rows {
-		if strings.TrimSpace(row.SubjectID) != subjectID {
-			continue
+		if matchCausal(row) && matchFlow(row) {
+			return row, true, nil
 		}
-		if len(candidates) > 0 {
-			rowWorkflow := strings.TrimSpace(row.WorkflowName)
-			rowStorage := strings.Trim(strings.TrimSpace(row.StorageRef), "/")
-			matched := false
-			for candidate := range candidates {
-				candidate = strings.Trim(candidate, "/")
-				switch {
-				case candidate == "":
-				case rowWorkflow == candidate:
-					matched = true
-				case rowStorage == candidate:
-					matched = true
-				}
-				if matched {
-					break
-				}
-			}
-			if !matched {
-				continue
+	}
+	if !requireCausal {
+		for _, row := range rows {
+			if matchFlow(row) {
+				return row, true, nil
 			}
 		}
-		return row, true, nil
 	}
 	return runtimepipeline.WorkflowInstance{}, false, nil
 }
@@ -411,7 +370,11 @@ func workflowStateDebugRows(db *sql.DB) (string, error) {
 
 func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs map[string]struct{}, entityID string, want []string, flowPrefix string, source semanticview.Source) {
 	t.Helper()
-	relevantEntityIDs := catalogSubjectEntityIDs(t, db, entityID)
+	if want == nil {
+		return
+	}
+	relevantEventIDs := catalogCausalEventIDs(t, db, since, publishedIDs)
+	relevantEntityIDs := catalogCausalEntityIDs(t, db, since, publishedIDs, entityID)
 	rows, err := db.QueryContext(context.Background(), `
 		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
 		FROM events
@@ -440,7 +403,11 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 		if _, ok := publishedIDs[strings.TrimSpace(eventID)]; ok {
 			continue
 		}
-		if _, ok := relevantEntityIDs[strings.TrimSpace(payloadEntityID)]; !ok {
+		eventID = strings.TrimSpace(eventID)
+		payloadEntityID = strings.TrimSpace(payloadEntityID)
+		_, causalEvent := relevantEventIDs[eventID]
+		_, causalEntity := relevantEntityIDs[payloadEntityID]
+		if !causalEvent && !causalEntity {
 			continue
 		}
 		eventName = strings.TrimSpace(eventName)
@@ -467,56 +434,160 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 	}
 }
 
-func catalogSubjectEntityIDs(t testing.TB, db *sql.DB, entityID string) map[string]struct{} {
+type catalogStoredEvent struct {
+	ID              string
+	Name            string
+	SourceEventID   string
+	PayloadEntityID string
+}
+
+func catalogEventsSince(t testing.TB, db *sql.DB, since time.Time) []catalogStoredEvent {
 	t.Helper()
-	entityID = strings.TrimSpace(entityID)
-	out := map[string]struct{}{}
-	if entityID == "" {
-		return out
-	}
-	out[entityID] = struct{}{}
 	if db == nil {
-		return out
-	}
-	parsedEntityID, err := uuid.Parse(entityID)
-	if err != nil {
-		return out
-	}
-	subjectID := parsedEntityID.String()
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT COALESCE(subject_id::text, entity_id::text)
-		FROM entity_state
-		WHERE entity_id = $1::uuid
-		LIMIT 1
-	`, parsedEntityID.String()).Scan(&subjectID); err != nil && err != sql.ErrNoRows {
-		t.Fatalf("query subject id for %s: %v", entityID, err)
-	}
-	if _, err := uuid.Parse(subjectID); err != nil {
-		return out
+		return nil
 	}
 	rows, err := db.QueryContext(context.Background(), `
-		SELECT entity_id::text
-		FROM entity_state
-		WHERE subject_id = $1::uuid OR entity_id = $1::uuid
-	`, subjectID)
+		SELECT
+			event_id::text,
+			event_name,
+			COALESCE(source_event_id::text, ''),
+			COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
+		FROM events
+		WHERE created_at >= $1
+		ORDER BY created_at ASC, event_id ASC
+	`, since)
 	if err != nil {
-		t.Fatalf("query subject entity ids for %s via subject %s: %v", entityID, subjectID, err)
+		t.Fatalf("query causal events: %v", err)
 	}
 	defer rows.Close()
+	out := []catalogStoredEvent{}
 	for rows.Next() {
-		var candidate string
-		if err := rows.Scan(&candidate); err != nil {
-			t.Fatalf("scan subject entity id: %v", err)
+		var row catalogStoredEvent
+		if err := rows.Scan(&row.ID, &row.Name, &row.SourceEventID, &row.PayloadEntityID); err != nil {
+			t.Fatalf("scan causal event: %v", err)
 		}
-		candidate = strings.TrimSpace(candidate)
-		if candidate != "" {
-			out[candidate] = struct{}{}
+		row.ID = strings.TrimSpace(row.ID)
+		row.Name = strings.TrimSpace(row.Name)
+		row.SourceEventID = strings.TrimSpace(row.SourceEventID)
+		row.PayloadEntityID = strings.TrimSpace(row.PayloadEntityID)
+		if row.ID != "" {
+			out = append(out, row)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate subject entity ids: %v", err)
+		t.Fatalf("iterate causal events: %v", err)
 	}
 	return out
+}
+
+func catalogCausalEventIDs(t testing.TB, db *sql.DB, since time.Time, publishedIDs map[string]struct{}) map[string]struct{} {
+	t.Helper()
+	out := map[string]struct{}{}
+	for eventID := range publishedIDs {
+		if eventID = strings.TrimSpace(eventID); eventID != "" {
+			out[eventID] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		return out
+	}
+	rows := catalogEventsSince(t, db, since)
+	changed := true
+	for changed {
+		changed = false
+		for _, row := range rows {
+			if _, seen := out[row.ID]; seen {
+				continue
+			}
+			if _, parentSeen := out[row.SourceEventID]; parentSeen {
+				out[row.ID] = struct{}{}
+				changed = true
+			}
+		}
+	}
+	return out
+}
+
+func catalogCausalEntityIDs(t testing.TB, db *sql.DB, since time.Time, publishedIDs map[string]struct{}, fallbackEntityID string) map[string]struct{} {
+	t.Helper()
+	eventIDs := catalogCausalEventIDs(t, db, since, publishedIDs)
+	out := map[string]struct{}{}
+	if fallbackEntityID = strings.TrimSpace(fallbackEntityID); fallbackEntityID != "" {
+		out[fallbackEntityID] = struct{}{}
+	}
+	if len(eventIDs) == 0 {
+		return out
+	}
+	for _, row := range catalogEventsSince(t, db, since) {
+		if _, ok := eventIDs[row.ID]; !ok {
+			continue
+		}
+		if row.PayloadEntityID != "" {
+			out[row.PayloadEntityID] = struct{}{}
+		}
+	}
+	return out
+}
+
+func mapKeys(values map[string]struct{}) []string {
+	out := make([]string, 0, len(values))
+	for key := range values {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+func assertCausalEvents(t testing.TB, h *runtimeHarness, want []string, flowPrefix string) {
+	t.Helper()
+	if len(want) == 0 {
+		return
+	}
+	if h == nil || h.db == nil {
+		t.Fatal("runtime harness database is required for causal_events assertions")
+	}
+	wantNames := make(map[string]struct{}, len(want))
+	for _, name := range want {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			wantNames[name] = struct{}{}
+		}
+	}
+	rows := catalogEventsSince(t, h.db, h.startedAt)
+	source := semanticview.Wrap(h.bundle)
+	parentIDs := map[string]struct{}{}
+	for eventID := range h.publishedIDs {
+		if eventID = strings.TrimSpace(eventID); eventID != "" {
+			parentIDs[eventID] = struct{}{}
+		}
+	}
+	if len(parentIDs) == 0 {
+		t.Fatalf("causal_events = %v requires a published root event", want)
+	}
+	for index, wantName := range want {
+		wantName = strings.TrimSpace(wantName)
+		if wantName == "" {
+			continue
+		}
+		var matched catalogStoredEvent
+		found := false
+		for _, row := range rows {
+			observedName := normalizeCatalogObservedEventName(row.Name, flowPrefix, source, wantNames)
+			_, isRoot := parentIDs[row.ID]
+			_, isChild := parentIDs[row.SourceEventID]
+			if observedName == wantName && (isChild || (index == 0 && isRoot)) {
+				matched = row
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("causal_events[%d] = %q not found from parents=%v", index, wantName, mapKeys(parentIDs))
+		}
+		parentIDs = map[string]struct{}{matched.ID: {}}
+	}
 }
 
 func normalizeCatalogObservedEventName(eventName, flowPrefix string, source semanticview.Source, want map[string]struct{}) string {

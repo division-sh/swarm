@@ -186,11 +186,10 @@ func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 						"instance_id":      {Type: "string"},
 						"template_id":      {Type: "string"},
 						"flow_path":        {Type: "string"},
-						"subject_id":       {Type: "string"},
 						"parent_entity_id": {Type: "string"},
 					},
 				},
-				Required: []string{"instance_id", "template_id", "flow_path", "subject_id", "parent_entity_id"},
+				Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id"},
 			},
 		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
@@ -341,7 +340,7 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 		flowPath,
 		instanceID,
 		runtimepipeline.FlowInstanceEntityID(flowPath),
-		sourceEntityID,
+		"",
 		sourceEntityID,
 	)
 	return runtimepipeline.FlowInstanceActivationRequest{
@@ -502,12 +501,11 @@ func TestValidateAutoEmitPayload_RejectsListTypeViolation(t *testing.T) {
 				"instance_id":      {Type: "string"},
 				"template_id":      {Type: "string"},
 				"flow_path":        {Type: "string"},
-				"subject_id":       {Type: "string"},
 				"parent_entity_id": {Type: "string"},
 				"sources":          {Type: "[SourceID]"},
 			},
 		},
-		Required: []string{"instance_id", "template_id", "flow_path", "subject_id", "parent_entity_id", "sources"},
+		Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id", "sources"},
 	})
 	bundle.RootTypes = runtimecontracts.TypeCatalogDocument{
 		Scalars: map[string]runtimecontracts.ScalarTypeDecl{
@@ -519,7 +517,6 @@ func TestValidateAutoEmitPayload_RejectsListTypeViolation(t *testing.T) {
 		"instance_id":      "inst-1",
 		"template_id":      "review",
 		"flow_path":        "review/inst-1",
-		"subject_id":       "ent-1",
 		"parent_entity_id": "ent-parent",
 		"sources":          "not-a-list",
 	})
@@ -567,13 +564,12 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 				"instance_id":      {Type: "string"},
 				"template_id":      {Type: "string"},
 				"flow_path":        {Type: "string"},
-				"subject_id":       {Type: "string"},
 				"parent_entity_id": {Type: "string"},
 				"name":             {Type: "string"},
 				"priority":         {Type: "integer"},
 			},
 		},
-		Required: []string{"instance_id", "template_id", "flow_path", "subject_id", "parent_entity_id"},
+		Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id"},
 	})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -591,9 +587,6 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	got := instances.upserts[0]
 	if got.StorageRef != "review/inst-1" {
 		t.Fatalf("storage_ref = %q, want review/inst-1", got.StorageRef)
-	}
-	if got.SubjectID != "ent-1" {
-		t.Fatalf("subject_id = %q, want ent-1", got.SubjectID)
 	}
 	if got.Metadata["entity_id"] != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
 		t.Fatalf("metadata entity_id = %#v, want %q", got.Metadata["entity_id"], runtimepipeline.FlowInstanceEntityID("review/inst-1"))

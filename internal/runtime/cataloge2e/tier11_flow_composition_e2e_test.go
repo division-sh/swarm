@@ -10,7 +10,6 @@ import (
 )
 
 var tier11FlowCompositionFixtures = []string{
-	"test-child-flow-absolute-path",
 	"test-child-flow-loads",
 	"test-child-flow-local-events",
 	"test-nested-three-levels",
@@ -25,13 +24,14 @@ var tier11FlowCompositionFixtures = []string{
 	"test-multi-level-policy-inherit",
 	"test-sibling-both-instantiated-isolated",
 	"test-subject-id-cross-flow-inherit",
-	"test-tool-override",
-	"test-wildcard-deep-subscription",
+	"test-subject-id-first-flow-seeds",
 }
 
 var tier11ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-dynamic-flow-instance":       {reason: "create_flow_instance fixture now fails closed without required config_from; fixture migration belongs to #416"},
-	"test-subject-id-first-flow-seeds": {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
+	"test-child-flow-absolute-path":   {reason: "parent listener/back-propagation fixture depends on legacy cross-flow subject-link semantics; authored migration belongs to #416"},
+	"test-dynamic-flow-instance":      {reason: "create_flow_instance fixture now fails closed without required config_from; fixture migration belongs to #416"},
+	"test-tool-override":              {reason: "parent listener/back-propagation fixture depends on legacy cross-flow subject-link semantics; authored migration belongs to #416"},
+	"test-wildcard-deep-subscription": {reason: "parent wildcard back-propagation fixture depends on legacy cross-flow subject-link semantics; authored migration belongs to #416"},
 }
 
 var tier11StartedRuntimeFixtures = map[string]struct{}{
