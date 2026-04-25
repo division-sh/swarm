@@ -696,7 +696,7 @@ func defaultRuntimeConfig() (*config.Config, error) {
 			},
 			ClaudeCLI: config.ClaudeCLIConfig{
 				Command:              envOrDefault("SWARM_CLAUDE_CLI_COMMAND", "claude"),
-				Timeout:              envDuration("SWARM_CLAUDE_CLI_TIMEOUT", 15*time.Minute),
+				Timeout:              envDuration("SWARM_CLAUDE_CLI_TIMEOUT", time.Hour),
 				OutputFormat:         envOrDefault("SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "stream-json"),
 				Retries:              envInt("SWARM_CLAUDE_CLI_RETRIES", 1),
 				NoSessionPersistence: envBool("SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", false),
