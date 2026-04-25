@@ -1704,10 +1704,10 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 	if entityID != "" {
 		evt = evt.WithEntityID(entityID)
 	}
-	flowInstance := strings.Trim(strings.TrimSpace(firstNonEmpty(
-		asString(frame.req.State.StateCarrier.Metadata["flow_path"]),
-		frame.req.Event.FlowInstance(),
-	)), "/")
+	flowInstance := firstNonEmpty(
+		normalizedFlowInstanceCandidate(asString(frame.req.State.StateCarrier.Metadata["flow_path"])),
+		normalizedFlowInstanceCandidate(frame.req.Event.FlowInstance()),
+	)
 	if flowInstance != "" {
 		evt = evt.WithFlowInstance(flowInstance)
 	}
@@ -1720,6 +1720,10 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 		ChainDepth:    chainDepth,
 		ParentEventID: strings.TrimSpace(frame.req.Event.ID),
 	}, nil
+}
+
+func normalizedFlowInstanceCandidate(value string) string {
+	return strings.Trim(strings.TrimSpace(value), "/")
 }
 
 func (e *Executor) queueEmitIntent(frame *executionFrame, eventType string, payload map[string]any) (bool, error) {

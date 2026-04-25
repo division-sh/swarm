@@ -1372,6 +1372,46 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 	}
 }
 
+func TestExecutor_EmitIntentFallsBackToInboundFlowWhenStateFlowPathNormalizesEmpty(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "root",
+		Event: (events.Event{
+			ID:      "evt-1",
+			Type:    "root.started",
+			Payload: json.RawMessage(`{}`),
+		}).WithEntityID("entity-1").WithFlowInstance("source/inst-1"),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Emit: runtimecontracts.EmitSpec{Event: "root.done"},
+		},
+		State: testStateSnapshot("pending", map[string]any{
+			"flow_path": "/",
+		}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := len(result.EmitIntents); got != 1 {
+		t.Fatalf("EmitIntents count = %d, want 1", got)
+	}
+	if got := result.EmitIntents[0].Event.FlowInstance(); got != "source/inst-1" {
+		t.Fatalf("emitted flow_instance = %q, want inbound fallback source/inst-1", got)
+	}
+}
+
 func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSourceWithRootEntityContract(),
