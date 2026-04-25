@@ -1705,8 +1705,8 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 		evt = evt.WithEntityID(entityID)
 	}
 	flowInstance := strings.Trim(strings.TrimSpace(firstNonEmpty(
-		frame.req.Event.FlowInstance(),
 		asString(frame.req.State.StateCarrier.Metadata["flow_path"]),
+		frame.req.Event.FlowInstance(),
 	)), "/")
 	if flowInstance != "" {
 		evt = evt.WithFlowInstance(flowInstance)
