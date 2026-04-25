@@ -1648,7 +1648,7 @@ operating_case:
 `,
 		},
 	})
-	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 	firstID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "validation/case-1",
 		"fields": map[string]any{
@@ -1663,6 +1663,11 @@ operating_case:
 			"score":  20,
 		},
 	})
+	deepID := uuid.NewString()
+	seedEntityStateRow(t, db, deepID, deepID, "validation/nested/case-3", "validation_case", "queued", map[string]any{
+		"status": "open",
+		"score":  30,
+	}, time.Now().UTC().Truncate(time.Second))
 
 	for name, flowInstance := range map[string]string{
 		"declared root": "validation",
@@ -1685,6 +1690,16 @@ operating_case:
 		"flow_instance": "operating",
 	}); err == nil || !strings.Contains(err.Error(), "flow_instance does not match entity ownership") {
 		t.Fatalf("get_entity wrong root error = %v, want flow_instance mismatch", err)
+	}
+	deepOut, err := exec.Execute(ctx, "get_entity", map[string]any{
+		"entity_id":     deepID,
+		"flow_instance": "validation",
+	})
+	if err != nil {
+		t.Fatalf("get_entity declared root for deep descendant: %v", err)
+	}
+	if got := strings.TrimSpace(asString(deepOut.(map[string]any)["entity_id"])); got != deepID {
+		t.Fatalf("get_entity deep descendant entity_id = %q, want %s", got, deepID)
 	}
 
 	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
@@ -1721,8 +1736,8 @@ operating_case:
 		t.Fatalf("query_entities declared root: %v", err)
 	}
 	queryRows := queryOut.(map[string]any)["results"].([]map[string]any)
-	if len(queryRows) != 2 {
-		t.Fatalf("query_entities root rows = %#v, want 2", queryRows)
+	if len(queryRows) != 3 {
+		t.Fatalf("query_entities root rows = %#v, want 3", queryRows)
 	}
 	queryExactOut, err := exec.Execute(ctx, "query_entities", map[string]any{
 		"flow_instance": "validation/case-2",
@@ -1756,8 +1771,8 @@ operating_case:
 	if err != nil {
 		t.Fatalf("search_entities declared root: %v", err)
 	}
-	if total := searchOut.(map[string]any)["total"].(int); total != 2 {
-		t.Fatalf("search_entities root total = %d, want 2", total)
+	if total := searchOut.(map[string]any)["total"].(int); total != 3 {
+		t.Fatalf("search_entities root total = %d, want 3", total)
 	}
 	searchExactOut, err := exec.Execute(ctx, "search_entities", map[string]any{
 		"flow_instance": "validation/case-1",
@@ -1787,8 +1802,8 @@ operating_case:
 	if err != nil {
 		t.Fatalf("query_metrics declared root: %v", err)
 	}
-	if got := testNumericValue(metricsOut.(map[string]any)["value"]); got != 2 {
-		t.Fatalf("query_metrics root count = %#v, want 2", metricsOut)
+	if got := testNumericValue(metricsOut.(map[string]any)["value"]); got != 3 {
+		t.Fatalf("query_metrics root count = %#v, want 3", metricsOut)
 	}
 	metricsExactOut, err := exec.Execute(ctx, "query_metrics", map[string]any{
 		"flow_instance": "validation/case-1",
