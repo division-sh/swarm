@@ -90,17 +90,21 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		handlers := make(map[string]SystemNodeEventHandler, len(node.EventHandlers))
 		source, _ := bundle.NodeContractSource(nodeID)
 		for eventType, handler := range node.EventHandlers {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" {
+			rawEventType := strings.TrimSpace(eventType)
+			if rawEventType == "" {
 				continue
 			}
-			handlers[eventType] = handler
-			semantics.EventOwners[eventType] = appendIfMissingString(semantics.EventOwners[eventType], nodeID)
+			handlers[rawEventType] = handler
+			ownerEventType := strings.TrimSpace(bundle.ResolveNodeEventReference(nodeID, rawEventType))
+			if ownerEventType == "" {
+				ownerEventType = rawEventType
+			}
+			semantics.EventOwners[ownerEventType] = appendIfMissingString(semantics.EventOwners[ownerEventType], nodeID)
 			transition := HandlerTransitionSemantic{
-				ID:               fmt.Sprintf("%s:%s", nodeID, eventType),
+				ID:               fmt.Sprintf("%s:%s", nodeID, rawEventType),
 				NodeID:           nodeID,
 				FlowID:           strings.TrimSpace(source.FlowID),
-				EventType:        eventType,
+				EventType:        rawEventType,
 				Action:           handler.Action,
 				Guard:            handler.Guard,
 				AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
@@ -134,7 +138,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 			if semantics.HandlerTransitionIndex[nodeID] == nil {
 				semantics.HandlerTransitionIndex[nodeID] = map[string]HandlerTransitionSemantic{}
 			}
-			semantics.HandlerTransitionIndex[nodeID][eventType] = transition
+			semantics.HandlerTransitionIndex[nodeID][rawEventType] = transition
 		}
 		semantics.NodeHandlers[nodeID] = handlers
 	}
