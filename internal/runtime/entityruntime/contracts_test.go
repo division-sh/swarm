@@ -38,16 +38,19 @@ func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 	contract := Contract{
 		Entity: runtimecontracts.EntityContract{
 			Fields: map[string]runtimecontracts.EntityFieldDecl{
-				"tags": {Type: "[text]"},
-				"spec": {Type: "Spec"},
+				"tags":          {Type: "[text]"},
+				"legacy_tags":   {Type: "[text][]"},
+				"prefixed_tags": {Type: "[][text]"},
+				"spec":          {Type: "Spec"},
 			},
 		},
 		Types: runtimecontracts.TypeCatalogDocument{
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"Spec": {
 					Fields: map[string]runtimecontracts.TypeFieldSpec{
-						"features": {Type: "[Feature]"},
-						"notes":    {Type: "[text]"},
+						"features":        {Type: "[Feature]"},
+						"legacy_features": {Type: "[Feature][]"},
+						"notes":           {Type: "[text]"},
 					},
 				},
 				"Feature": {
@@ -66,12 +69,21 @@ func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 	if !reflect.DeepEqual(materialized["tags"], []any{}) {
 		t.Fatalf("tags default = %#v, want empty list", materialized["tags"])
 	}
+	if !reflect.DeepEqual(materialized["legacy_tags"], []any{}) {
+		t.Fatalf("legacy_tags default = %#v, want empty list", materialized["legacy_tags"])
+	}
+	if !reflect.DeepEqual(materialized["prefixed_tags"], []any{}) {
+		t.Fatalf("prefixed_tags default = %#v, want empty list", materialized["prefixed_tags"])
+	}
 	spec, ok := materialized["spec"].(map[string]any)
 	if !ok {
 		t.Fatalf("spec default = %#v, want object", materialized["spec"])
 	}
 	if !reflect.DeepEqual(spec["features"], []any{}) {
 		t.Fatalf("spec.features default = %#v, want empty list", spec["features"])
+	}
+	if !reflect.DeepEqual(spec["legacy_features"], []any{}) {
+		t.Fatalf("spec.legacy_features default = %#v, want empty list", spec["legacy_features"])
 	}
 	if !reflect.DeepEqual(spec["notes"], []any{}) {
 		t.Fatalf("spec.notes default = %#v, want empty list", spec["notes"])
@@ -83,6 +95,13 @@ func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(features, []any{map[string]any{"name": "Search"}}) {
 		t.Fatalf("features = %#v, want normalized feature list", features)
+	}
+	legacyFeatures, err := NormalizeFieldValue(contract, "spec.legacy_features", []any{[]any{map[string]any{"name": "Search"}}})
+	if err != nil {
+		t.Fatalf("NormalizeFieldValue(spec.legacy_features): %v", err)
+	}
+	if !reflect.DeepEqual(legacyFeatures, []any{[]any{map[string]any{"name": "Search"}}}) {
+		t.Fatalf("legacyFeatures = %#v, want normalized nested feature list", legacyFeatures)
 	}
 
 	if _, err := NormalizeFieldValue(contract, "spec.features", map[string]any{"name": "Search"}); err == nil {

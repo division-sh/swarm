@@ -3,4 +3,4 @@ item:
   status: string
   priority: string
   score: number
-  gates: GateState
+  gate_state: GateState
