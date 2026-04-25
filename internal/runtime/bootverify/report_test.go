@@ -1638,6 +1638,59 @@ fan_out:
 	}
 }
 
+func TestRun_RejectsBareItemInHandlerEmitFields(t *testing.T) {
+	var handler runtimecontracts.SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+emit:
+  event: item.scored
+  fields:
+    bad: item
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": handler,
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "emit_field_expression_validation", "item") {
+		t.Fatalf("expected bare item in handler emit.fields to fail validation, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsBareItemInDataAccumulationExpressions(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+							Writes: []runtimecontracts.WorkflowDataWrite{
+								{TargetField: "last_item", Value: runtimecontracts.CELExpression("item")},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "data_accumulation_expression_validation", "item") {
+		t.Fatalf("expected bare item in data_accumulation expression to fail validation, got %#v", report.Errors())
+	}
+}
+
 func TestRun_PreservesPermissionMismatchWarningsDuringMigration(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-permission-tool-mismatch")
 

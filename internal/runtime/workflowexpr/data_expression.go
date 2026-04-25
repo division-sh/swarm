@@ -13,9 +13,12 @@ import (
 )
 
 var (
-	dataExpressionEnvOnce sync.Once
-	dataExpressionEnv     *cel.Env
-	dataExpressionEnvErr  error
+	dataExpressionEnvOnce             sync.Once
+	dataExpressionEnv                 *cel.Env
+	dataExpressionEnvErr              error
+	dataExpressionWithBareItemEnvOnce sync.Once
+	dataExpressionWithBareItemEnv     *cel.Env
+	dataExpressionWithBareItemEnvErr  error
 
 	workflowExpressionEntityReferencePattern        = regexp.MustCompile(`entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 	workflowExpressionEntityPresencePattern         = regexp.MustCompile(`["']([a-zA-Z_][a-zA-Z0-9_]*)["']\s+in\s+entity\b`)
@@ -38,8 +41,16 @@ type ValueContext struct {
 	FanOut  map[string]any
 }
 
+type ValueExpressionOptions struct {
+	AllowBareItem bool
+}
+
 func ValidateValueExpression(expression string) error {
-	env, err := dataExpressionEnvForContext()
+	return ValidateValueExpressionWithOptions(expression, ValueExpressionOptions{})
+}
+
+func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionOptions) error {
+	env, err := dataExpressionEnvForContext(opts)
 	if err != nil {
 		return err
 	}
@@ -55,7 +66,11 @@ func ValidateValueExpression(expression string) error {
 }
 
 func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
-	env, err := dataExpressionEnvForContext()
+	return EvalValueExpressionWithOptions(expression, ctx, ValueExpressionOptions{})
+}
+
+func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts ValueExpressionOptions) (any, error) {
+	env, err := dataExpressionEnvForContext(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -74,14 +89,17 @@ func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, _, err := program.Eval(map[string]any{
+	activation := map[string]any{
 		"entity":  NormalizeCELInputMap(ctx.Entity),
 		"event":   NormalizeCELInputMap(ctx.Event),
 		"payload": NormalizeCELInputMap(ctx.Payload),
 		"policy":  NormalizeCELInputMap(ctx.Policy),
 		"fan_out": NormalizeCELInputMap(ctx.FanOut),
-		"item":    NormalizeCELValue(ctx.FanOut["item"]),
-	})
+	}
+	if opts.AllowBareItem {
+		activation["item"] = NormalizeCELValue(ctx.FanOut["item"])
+	}
+	out, _, err := program.Eval(activation)
 	if err != nil {
 		return nil, err
 	}
@@ -314,18 +332,31 @@ func NormalizeCELInputMap(source map[string]any) map[string]any {
 	return normalized
 }
 
-func dataExpressionEnvForContext() (*cel.Env, error) {
+func dataExpressionEnvForContext(opts ValueExpressionOptions) (*cel.Env, error) {
+	if opts.AllowBareItem {
+		dataExpressionWithBareItemEnvOnce.Do(func() {
+			dataExpressionWithBareItemEnv, dataExpressionWithBareItemEnvErr = newDataExpressionEnv(true)
+		})
+		return dataExpressionWithBareItemEnv, dataExpressionWithBareItemEnvErr
+	}
 	dataExpressionEnvOnce.Do(func() {
-		dataExpressionEnv, dataExpressionEnvErr = cel.NewEnv(
-			cel.Variable("entity", cel.DynType),
-			cel.Variable("event", cel.DynType),
-			cel.Variable("payload", cel.DynType),
-			cel.Variable("policy", cel.DynType),
-			cel.Variable("fan_out", cel.DynType),
-			cel.Variable("item", cel.DynType),
-		)
+		dataExpressionEnv, dataExpressionEnvErr = newDataExpressionEnv(false)
 	})
 	return dataExpressionEnv, dataExpressionEnvErr
+}
+
+func newDataExpressionEnv(allowBareItem bool) (*cel.Env, error) {
+	variables := []cel.EnvOption{
+		cel.Variable("entity", cel.DynType),
+		cel.Variable("event", cel.DynType),
+		cel.Variable("payload", cel.DynType),
+		cel.Variable("policy", cel.DynType),
+		cel.Variable("fan_out", cel.DynType),
+	}
+	if allowBareItem {
+		variables = append(variables, cel.Variable("item", cel.DynType))
+	}
+	return cel.NewEnv(variables...)
 }
 
 func rewriteOutsideStringLiterals(expression string, rewrite func(string) string) string {

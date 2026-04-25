@@ -8,6 +8,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/core/values"
+	"swarm/internal/runtime/workflowexpr"
 
 	"gopkg.in/yaml.v3"
 )
@@ -116,7 +117,7 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 			"explicit.ref":   runtimecontracts.RefExpression("payload.score"),
 			"explicit.value": runtimecontracts.LiteralExpression("ready"),
 		},
-	})
+	}, workflowexpr.ValueExpressionOptions{})
 	if err != nil {
 		t.Fatalf("emitFieldsPayload(...) error = %v", err)
 	}
@@ -154,7 +155,7 @@ func TestEmitFieldsPayload_NormalizesWholeNumberJSONInputs(t *testing.T) {
 		Fields: map[string]runtimecontracts.ExpressionValue{
 			"score": runtimecontracts.CELExpression("payload.raw_score * 2"),
 		},
-	})
+	}, workflowexpr.ValueExpressionOptions{})
 	if err != nil {
 		t.Fatalf("emitFieldsPayload(...) error = %v", err)
 	}
@@ -184,7 +185,7 @@ fields:
 			"geography": "us",
 		}),
 	}
-	transformed, err := emitFieldsPayload(base, ExecutionState{}, spec)
+	transformed, err := emitFieldsPayload(base, ExecutionState{}, spec, workflowexpr.ValueExpressionOptions{})
 	if err != nil {
 		t.Fatalf("emitFieldsPayload(...) error = %v", err)
 	}
