@@ -680,11 +680,8 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	if !passThrough {
 		t.Fatal("expected nested descendant completion to remain visible downstream")
 	}
-	if len(emitted) != 1 || string(emitted[0].Type) != "pipeline.complete" {
-		t.Fatalf("emitted = %#v, want [pipeline.complete]", emitted)
-	}
-	if got := emitted[0].EntityID(); got != rootEntityID {
-		t.Fatalf("emitted entity_id = %q, want %q", got, rootEntityID)
+	if len(emitted) != 0 {
+		t.Fatalf("emitted = %#v, want none without subject-link back-propagation", emitted)
 	}
 
 	child, found, err := pc.workflowStore.Load(context.Background(), childEntityID)
@@ -772,8 +769,8 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	if len(emitted) != 1 || string(emitted[0].Type) != "pipeline.complete" {
 		t.Fatalf("emitted = %#v, want [pipeline.complete]", emitted)
 	}
-	if got := emitted[0].EntityID(); got != rootEntityID {
-		t.Fatalf("emitted entity_id = %q, want %q", got, rootEntityID)
+	if got := emitted[0].EntityID(); got != childRowID {
+		t.Fatalf("emitted entity_id = %q, want child target %q", got, childRowID)
 	}
 }
 
@@ -851,7 +848,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	if len(emitted) != 1 || string(emitted[0].Type) != "pipeline.complete" {
 		t.Fatalf("emitted = %#v, want [pipeline.complete]", emitted)
 	}
-	if got := emitted[0].EntityID(); got != rootEntityID {
-		t.Fatalf("emitted entity_id = %q, want %q", got, rootEntityID)
+	if got := emitted[0].EntityID(); got != childRowID {
+		t.Fatalf("emitted entity_id = %q, want child target %q", got, childRowID)
 	}
 }

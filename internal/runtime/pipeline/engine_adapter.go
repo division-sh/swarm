@@ -145,9 +145,6 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 				StateCarrier:    carrier,
 				EnteredStateAt:  instance.EnteredStageAt,
 			}
-			if strings.TrimSpace(instance.SubjectID) != "" {
-				out.StateCarrier.Metadata["subject_id"] = strings.TrimSpace(instance.SubjectID)
-			}
 			out.StateCarrier.Gates = workflowStateGatesForScope(
 				r.coordinator.SemanticSource(),
 				pipelineFlowScope(ctx),
@@ -201,11 +198,6 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 			applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
 		}); err != nil {
 			return err
-		}
-		if len(mutation.StateCarrier.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
-			if err := r.coordinator.projectWorkflowSubjectGates(ctx, entityID.String()); err != nil {
-				return err
-			}
 		}
 	}
 	if next := strings.TrimSpace(mutation.NextState); next != "" {
@@ -920,9 +912,6 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	}
 	if mutation.StateCarrier.Metadata != nil || len(mutation.StateCarrier.Gates) > 0 {
 		instance.Metadata = mutation.StateCarrier.PersistedMetadata()
-	}
-	if instance.Metadata != nil && strings.TrimSpace(instance.SubjectID) == "" {
-		instance.SubjectID = workflowInstanceIdentity(source, *instance).SubjectID
 	}
 	if mutation.StateCarrier.StateBuckets != nil {
 		instance.StateBuckets = mutation.StateCarrier.PersistedStateBuckets()

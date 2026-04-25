@@ -14,21 +14,22 @@ import (
 	"swarm/internal/testutil"
 )
 
-func TestCatalogSubjectEntityIDs_UsesResolvedSubjectID(t *testing.T) {
+func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	rootID := "11111111-1111-1111-1111-111111111111"
 	childID := "22222222-2222-2222-2222-222222222222"
 	grandchildID := "33333333-3333-3333-3333-333333333333"
+	pg := &store.PostgresStore{DB: db}
+	startedAt := time.Now().UTC().Add(-time.Second)
 
 	for _, stmt := range []struct {
-		entityID  string
-		subjectID string
-		flow      string
-		state     string
+		entityID string
+		flow     string
+		state    string
 	}{
-		{entityID: rootID, subjectID: rootID, flow: rootID, state: "done"},
-		{entityID: childID, subjectID: rootID, flow: "child", state: "completed"},
-		{entityID: grandchildID, subjectID: rootID, flow: "grandchild", state: "finished"},
+		{entityID: rootID, flow: rootID, state: "done"},
+		{entityID: childID, flow: "child", state: "completed"},
+		{entityID: grandchildID, flow: "grandchild", state: "finished"},
 	} {
 		if _, err := db.ExecContext(context.Background(), `
 			INSERT INTO entity_state (
@@ -36,24 +37,50 @@ func TestCatalogSubjectEntityIDs_UsesResolvedSubjectID(t *testing.T) {
 				gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 			)
 			VALUES (
-				$1::uuid, $2::uuid, $3, 'default', $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+				$1::uuid, NULL, $2, 'default', $3, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 			)
-		`, stmt.entityID, stmt.subjectID, stmt.flow, stmt.state); err != nil {
+		`, stmt.entityID, stmt.flow, stmt.state); err != nil {
 			t.Fatalf("insert entity_state %s: %v", stmt.entityID, err)
 		}
 	}
 
-	gotFromRoot := catalogSubjectEntityIDs(t, db, rootID)
-	if len(gotFromRoot) != 3 {
-		t.Fatalf("root subject entity ids len = %d, want 3 (%v)", len(gotFromRoot), gotFromRoot)
+	rootEventID := uuid.NewString()
+	childEventID := uuid.NewString()
+	grandchildEventID := uuid.NewString()
+	if err := pg.AppendEvent(context.Background(), (events.Event{
+		ID:        rootEventID,
+		Type:      "root.started",
+		Payload:   []byte(`{"entity_id":"` + rootID + `"}`),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID(rootID)); err != nil {
+		t.Fatalf("append root event: %v", err)
 	}
-	gotFromChild := catalogSubjectEntityIDs(t, db, childID)
-	if len(gotFromChild) != 3 {
-		t.Fatalf("child subject entity ids len = %d, want 3 (%v)", len(gotFromChild), gotFromChild)
+	if err := pg.AppendEvent(context.Background(), (events.Event{
+		ID:            childEventID,
+		Type:          "child.started",
+		Payload:       []byte(`{"entity_id":"` + childID + `"}`),
+		ParentEventID: rootEventID,
+		CreatedAt:     time.Now().UTC(),
+	}).WithEntityID(childID)); err != nil {
+		t.Fatalf("append child event: %v", err)
+	}
+	if err := pg.AppendEvent(context.Background(), (events.Event{
+		ID:            grandchildEventID,
+		Type:          "grandchild.done",
+		Payload:       []byte(`{"entity_id":"` + grandchildID + `"}`),
+		ParentEventID: childEventID,
+		CreatedAt:     time.Now().UTC(),
+	}).WithEntityID(grandchildID)); err != nil {
+		t.Fatalf("append grandchild event: %v", err)
+	}
+
+	got := catalogCausalEntityIDs(t, db, startedAt, map[string]struct{}{rootEventID: {}}, rootID)
+	if len(got) != 3 {
+		t.Fatalf("causal entity ids len = %d, want 3 (%v)", len(got), got)
 	}
 	for _, candidate := range []string{rootID, childID, grandchildID} {
-		if _, ok := gotFromChild[candidate]; !ok {
-			t.Fatalf("child subject entity ids missing %s (%v)", candidate, gotFromChild)
+		if _, ok := got[candidate]; !ok {
+			t.Fatalf("causal entity ids missing %s (%v)", candidate, got)
 		}
 	}
 }

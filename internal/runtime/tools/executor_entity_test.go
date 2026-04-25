@@ -42,8 +42,8 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected get_entity output: %#v", out)
 	}
-	if got := strings.TrimSpace(asString(created["subject_id"])); got != entityID {
-		t.Fatalf("create_entity subject_id = %q, want %q", got, entityID)
+	if got := strings.TrimSpace(asString(created["subject_id"])); got != "" {
+		t.Fatalf("create_entity subject_id = %q, want empty compatibility field", got)
 	}
 	if got := strings.TrimSpace(asString(created["current_state"])); got != "queued" {
 		t.Fatalf("create_entity current_state = %q, want queued", got)
@@ -62,8 +62,8 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	if strings.TrimSpace(asString(entity["flow_instance"])) != "review/inst-1" {
 		t.Fatalf("flow_instance = %#v, want review/inst-1", entity["flow_instance"])
 	}
-	if got := strings.TrimSpace(asString(entity["subject_id"])); got != entityID {
-		t.Fatalf("subject_id = %q, want %q", got, entityID)
+	if got := strings.TrimSpace(asString(entity["subject_id"])); got != "" {
+		t.Fatalf("subject_id = %q, want empty compatibility field", got)
 	}
 	fields, ok := entity["fields"].(map[string]any)
 	if !ok || strings.TrimSpace(asString(fields["status"])) != "open" {
@@ -1444,6 +1444,20 @@ func TestEntityTools_CreateEntityRejectsCallerSuppliedEntityType(t *testing.T) {
 	}
 }
 
+func TestEntityTools_CreateEntityRejectsCallerSuppliedSubjectID(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutor(t)
+	_, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"subject_id":    uuid.NewString(),
+		"flow_instance": "review/inst-1",
+		"fields": map[string]any{
+			"status": "open",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "subject_id is deprecated") {
+		t.Fatalf("expected caller-supplied subject_id rejection, got %v", err)
+	}
+}
+
 func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutorWithActor(t, models.AgentConfig{
 		ID:    "tester",
@@ -1551,7 +1565,7 @@ analysis:
 	}
 }
 
-func TestEntityTools_SaveEntityFieldAllowsSameFlowWriteWithForeignSubject(t *testing.T) {
+func TestEntityTools_SaveEntityFieldAllowsSameFlowWriteWithoutSubjectLink(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
 			EntitiesYAML: `
@@ -1566,9 +1580,7 @@ analysis:
 		Role:  "analyzer",
 		Tools: []string{"create_entity", "save_entity_field", "get_entity"},
 	}, bundle)
-	subjectID := uuid.NewString()
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
-		"subject_id":    subjectID,
 		"flow_instance": "analyzer-flow/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -1580,7 +1592,7 @@ analysis:
 		"field":     "status",
 		"value":     "closed",
 	}); err != nil {
-		t.Fatalf("save_entity_field same flow with foreign subject: %v", err)
+		t.Fatalf("save_entity_field same flow without subject link: %v", err)
 	}
 }
 
@@ -1858,7 +1870,6 @@ foreign:
 		"composite_score": 72,
 	}, time.Now().UTC().Truncate(time.Second))
 	validationID := mustCreateEntityID(t, ctx, exec, map[string]any{
-		"subject_id":    subjectID,
 		"flow_instance": "analyzer-flow/validation-1",
 		"initial_state": "researching",
 		"fields": map[string]any{

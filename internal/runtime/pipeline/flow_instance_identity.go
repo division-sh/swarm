@@ -32,7 +32,7 @@ func StoredFlowInstance(source semanticview.Source, instance WorkflowInstance) r
 		materializedPath,
 		strings.TrimSpace(firstNonEmptyString(asString(instance.Metadata["instance_id"]), instance.InstanceID)),
 		entityID,
-		strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"]))),
+		"",
 		strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
 	)
 }
@@ -58,7 +58,7 @@ func workflowInstancePersistedIdentity(source semanticview.Source, instance Work
 		flowPath,
 		instanceID,
 		entityID,
-		strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"]))),
+		"",
 		asString(instance.Metadata["parent_entity_id"]),
 	)
 }
@@ -78,7 +78,7 @@ func workflowStateIdentity(source semanticview.Source, flowID string, state Work
 		asString(state.Metadata["flow_path"]),
 		asString(state.Metadata["instance_id"]),
 		strings.TrimSpace(state.EntityID),
-		asString(state.Metadata["subject_id"]),
+		"",
 		asString(state.Metadata["parent_entity_id"]),
 	)
 }

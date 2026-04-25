@@ -59,13 +59,6 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 	sourceEntityID := strings.TrimSpace(entityID)
 	instance := runtimeflowidentity.Derive(pc.SemanticSource(), templateID, instanceID)
 	instance.ParentEntityID = sourceEntityID
-	instance.SubjectID = strings.TrimSpace(asString(triggerCtx.State.Metadata["subject_id"]))
-	if instance.SubjectID == "" {
-		instance.SubjectID = sourceEntityID
-	}
-	if instance.SubjectID == "" {
-		instance.SubjectID = instance.EntityID
-	}
 	req := FlowInstanceActivationRequest{
 		ContractBundle: pc.SemanticSource(),
 		Instance:       instance,

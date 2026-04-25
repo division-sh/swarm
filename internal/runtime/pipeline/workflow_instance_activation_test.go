@@ -83,8 +83,11 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 	if captured.Config["priority"] != float64(1) && captured.Config["priority"] != 1 {
 		t.Fatalf("config priority = %#v, want 1", captured.Config["priority"])
 	}
-	if captured.Instance.SubjectID != "ent-1" {
-		t.Fatalf("subject id = %q, want ent-1", captured.Instance.SubjectID)
+	if captured.Instance.SubjectID != "" {
+		t.Fatalf("subject id = %q, want empty", captured.Instance.SubjectID)
+	}
+	if captured.Instance.ParentEntityID != "ent-1" {
+		t.Fatalf("parent entity id = %q, want ent-1", captured.Instance.ParentEntityID)
 	}
 }
 

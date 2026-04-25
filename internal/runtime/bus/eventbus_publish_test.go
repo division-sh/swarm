@@ -1420,8 +1420,8 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 	if !found {
 		t.Fatal("expected root instance")
 	}
-	if got := strings.TrimSpace(root.CurrentState); got != "done" {
-		t.Fatalf("root current_state = %q, want done", got)
+	if got := strings.TrimSpace(root.CurrentState); got != "idle" {
+		t.Fatalf("root current_state = %q, want idle without subject-link back-propagation", got)
 	}
 
 	var emitted []string
@@ -1443,8 +1443,8 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 	if contains(emitted, "child/step.result") {
 		t.Fatalf("events = %v, do not want child/step.result", emitted)
 	}
-	if !contains(emitted, "pipeline.complete") {
-		t.Fatalf("events = %v, want pipeline.complete", emitted)
+	if contains(emitted, "pipeline.complete") {
+		t.Fatalf("events = %v, do not want pipeline.complete without subject-link back-propagation", emitted)
 	}
 }
 
@@ -1520,7 +1520,7 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 	if !found {
 		t.Fatal("expected root instance")
 	}
-	if got := strings.TrimSpace(root.CurrentState); got != "done" {
+	if got := strings.TrimSpace(root.CurrentState); got != "idle" {
 		rows, _ := db.QueryContext(context.Background(), `SELECT event_name, COALESCE(entity_id::text,''), COALESCE(flow_instance,'') FROM events ORDER BY created_at ASC, event_id ASC`)
 		dump := make([]string, 0)
 		if rows != nil {
@@ -1533,7 +1533,7 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 			}
 		}
 		instances, _ := runtimepipeline.NewWorkflowInstanceStore(db).List(context.Background())
-		t.Fatalf("root current_state = %q, want done; events=%v instances=%#v", got, dump, instances)
+		t.Fatalf("root current_state = %q, want idle without subject-link back-propagation; events=%v instances=%#v", got, dump, instances)
 	}
 
 	instances, err := runtimepipeline.NewWorkflowInstanceStore(db).List(context.Background())
@@ -1577,8 +1577,8 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 	if contains(emitted, "child/step.result") {
 		t.Fatalf("events = %v, do not want child/step.result", emitted)
 	}
-	if !contains(emitted, "pipeline.complete") {
-		t.Fatalf("events = %v, want pipeline.complete", emitted)
+	if contains(emitted, "pipeline.complete") {
+		t.Fatalf("events = %v, do not want pipeline.complete without subject-link back-propagation", emitted)
 	}
 }
 
@@ -1651,7 +1651,7 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 	if !found {
 		t.Fatal("expected root instance")
 	}
-	if got := strings.TrimSpace(root.CurrentState); got != "done" {
+	if got := strings.TrimSpace(root.CurrentState); got != "pending" {
 		rows, _ := db.QueryContext(context.Background(), `SELECT event_name, COALESCE(entity_id::text,''), COALESCE(flow_instance,''), COALESCE(payload::text,'') FROM events ORDER BY created_at ASC, event_id ASC`)
 		dump := make([]string, 0)
 		if rows != nil {
@@ -1664,7 +1664,7 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 			}
 		}
 		instances, _ := runtimepipeline.NewWorkflowInstanceStore(db).List(context.Background())
-		t.Fatalf("root current_state = %q, want done; root metadata=%#v events=%v instances=%#v", got, root.Metadata, dump, instances)
+		t.Fatalf("root current_state = %q, want pending without subject-link back-propagation; root metadata=%#v events=%v instances=%#v", got, root.Metadata, dump, instances)
 	}
 }
 

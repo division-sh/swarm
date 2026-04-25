@@ -102,57 +102,6 @@ func (pc *PipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, en
 	})
 }
 
-func (pc *PipelineCoordinator) projectWorkflowSubjectGates(ctx context.Context, entityID string) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return nil
-	}
-	entityID = strings.TrimSpace(entityID)
-	if entityID == "" {
-		return nil
-	}
-	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
-	if err != nil || !ok {
-		return err
-	}
-	instanceIdentity := workflowInstanceIdentity(pc.SemanticSource(), instance)
-	subjectID := strings.TrimSpace(firstNonEmptyString(instanceIdentity.SubjectID, entityID))
-	if subjectID == "" || subjectID == entityID {
-		return nil
-	}
-	scopeKey := strings.TrimSpace(instanceIdentity.ScopeKey)
-	if scopeKey == "" {
-		return nil
-	}
-	prefix := strings.Trim(scopeKey, "/") + "/"
-	scoped := map[string]bool{}
-	for key, value := range workflowStateGatesAsBools(instance.Metadata) {
-		if strings.HasPrefix(strings.TrimSpace(key), prefix) {
-			scoped[strings.TrimSpace(key)] = value
-		}
-	}
-	return pc.workflowStore.Mutate(ctx, subjectID, func(subject *WorkflowInstance) {
-		metadata := cloneStringAnyMap(subject.Metadata)
-		if metadata == nil {
-			metadata = map[string]any{}
-		}
-		gates := workflowStateGatesAsBools(metadata)
-		for key := range gates {
-			if strings.HasPrefix(strings.TrimSpace(key), prefix) {
-				delete(gates, key)
-			}
-		}
-		for key, value := range scoped {
-			gates[key] = value
-		}
-		if len(gates) == 0 {
-			delete(metadata, "gates")
-		} else {
-			metadata["gates"] = workflowBoolGatesAsMap(gates)
-		}
-		subject.Metadata = metadata
-	})
-}
-
 func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, bucketID string, payload map[string]any) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return nil

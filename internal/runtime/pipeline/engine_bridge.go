@@ -277,15 +277,6 @@ func resolveHandlerEntityIDForFlow(
 		instanceID := uuid.NewString()
 		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
 		instance.ParentEntityID = sourceEntityID
-		if state != nil && state.Metadata != nil {
-			instance.SubjectID = strings.TrimSpace(asString(state.Metadata["subject_id"]))
-		}
-		if instance.SubjectID == "" {
-			instance.SubjectID = sourceEntityID
-		}
-		if instance.SubjectID == "" {
-			instance.SubjectID = instance.EntityID
-		}
 		entityID = instance.EntityID
 		if state != nil {
 			state.EntityID = entityID
@@ -299,13 +290,6 @@ func resolveHandlerEntityIDForFlow(
 	if state != nil && handlerMaterializesEntity(source, flowID, handler) {
 		state.Metadata = workflowMaterializeEntityMetadata(source, flowID, state.Metadata)
 	}
-	if strings.TrimSpace(flowID) == "" && state != nil {
-		subjectID := strings.TrimSpace(workflowStateIdentity(source, "", *state).SubjectID)
-		if subjectID != "" && subjectID != entityID {
-			entityID = subjectID
-			state.EntityID = subjectID
-		}
-	}
 	if state != nil && strings.TrimSpace(state.EntityID) == "" {
 		state.EntityID = entityID
 	}
@@ -316,9 +300,6 @@ func workflowCreateEntityMetadata(source semanticview.Source, flowID string, ins
 	metadata := workflowEntitySchemaInitialValues(source, flowID)
 	if metadata == nil {
 		metadata = map[string]any{}
-	}
-	if instance.SubjectID != "" {
-		metadata["subject_id"] = instance.SubjectID
 	}
 	if instance.InstancePath != "" {
 		metadata["flow_path"] = instance.InstancePath

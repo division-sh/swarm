@@ -1,5 +1,5 @@
 name: intake
 version: 1.0.0
-description: First flow to create an entity. subject_id should self-seed.
+description: First flow to create an entity from explicit payload correlation.
 platform_version: ">=1.6.0"
 flows: []

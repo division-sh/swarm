@@ -66,7 +66,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if flowEntityID == "" {
 		return fmt.Errorf("derive flow entity id for %s", flowPath)
 	}
-	sourceEntityID := strings.TrimSpace(instance.SubjectID)
+	parentEntityID := strings.TrimSpace(instance.ParentEntityID)
 	initialState := strings.TrimSpace(schema.InitialState)
 	if initialState == "" {
 		initialState = strings.TrimSpace(req.InitialState)
@@ -74,13 +74,12 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if initialState == "" {
 		initialState = "pending"
 	}
-	autoEmitEvent, autoEmitName, err := buildAutoEmitOnCreateEvent(req.ContractBundle, schema, templateID, flowPath, instanceID, flowEntityID, sourceEntityID, strings.TrimSpace(instance.ParentEntityID), req.Config)
+	autoEmitEvent, autoEmitName, err := buildAutoEmitOnCreateEvent(req.ContractBundle, schema, templateID, flowPath, instanceID, flowEntityID, parentEntityID, req.Config)
 	if err != nil {
 		return err
 	}
 	if err := am.workflowInstances.Upsert(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      instanceID,
-		SubjectID:       strings.TrimSpace(sourceEntityID),
 		StorageRef:      flowPath,
 		WorkflowName:    templateID,
 		WorkflowVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
@@ -90,8 +89,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			"entity_id":        flowEntityID,
 			"instance_id":      instanceID,
 			"flow_path":        flowPath,
-			"subject_id":       strings.TrimSpace(sourceEntityID),
-			"parent_entity_id": strings.TrimSpace(instance.ParentEntityID),
+			"parent_entity_id": parentEntityID,
 		},
 	}); err != nil {
 		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
@@ -157,7 +155,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	return nil
 }
 
-func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontracts.FlowSchemaDocument, templateID, flowPath, instanceID, flowEntityID, sourceEntityID, parentEntityID string, config map[string]any) (events.Event, string, error) {
+func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontracts.FlowSchemaDocument, templateID, flowPath, instanceID, flowEntityID, parentEntityID string, config map[string]any) (events.Event, string, error) {
 	autoEmit := strings.TrimSpace(schema.AutoEmitOnCreate.Event)
 	if autoEmit == "" {
 		return events.Event{}, "", nil
@@ -167,7 +165,6 @@ func buildAutoEmitOnCreateEvent(source semanticview.Source, schema runtimecontra
 		"instance_id":      instanceID,
 		"template_id":      templateID,
 		"flow_path":        flowPath,
-		"subject_id":       strings.TrimSpace(sourceEntityID),
 		"parent_entity_id": strings.TrimSpace(parentEntityID),
 	}
 	for key, value := range config {
