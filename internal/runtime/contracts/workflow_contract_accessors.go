@@ -722,7 +722,7 @@ func (b *WorkflowContractBundle) RuntimeEventOwners(eventType string) []string {
 			if pattern == "" || !strings.Contains(pattern, "*") {
 				continue
 			}
-			canonicalPattern := strings.TrimSpace(b.ResolveNodeEventReference(nodeID, pattern))
+			canonicalPattern := strings.TrimSpace(b.resolveNodeEventOwnerPattern(nodeID, pattern))
 			if canonicalPattern == "" {
 				canonicalPattern = pattern
 			}
@@ -761,6 +761,29 @@ func (b *WorkflowContractBundle) runtimeEventOwnersForQuery(eventType string) []
 		matched = append([]string{}, owners...)
 	}
 	return matched
+}
+
+func (b *WorkflowContractBundle) resolveNodeEventOwnerPattern(nodeID, pattern string) string {
+	pattern = eventidentity.Normalize(pattern)
+	if b == nil || pattern == "" {
+		return pattern
+	}
+	flowID := b.nodeFlowID(nodeID)
+	scope := b.nodeEventScope(nodeID)
+	resolved := strings.TrimSpace(scope.ResolveSubscriptionPattern(pattern, b.flowEventDescendants(flowID)))
+	if resolved == "" || resolved != pattern || strings.Contains(pattern, "/") {
+		return resolved
+	}
+	path := eventidentity.Normalize(scope.Path)
+	if path == "" {
+		return resolved
+	}
+	for _, localEvent := range scope.LocalEvents {
+		if eventidentity.MatchPattern(pattern, localEvent) {
+			return path + "/" + pattern
+		}
+	}
+	return resolved
 }
 
 func (b *WorkflowContractBundle) localizeNodeEventType(nodeID, eventType string) string {
