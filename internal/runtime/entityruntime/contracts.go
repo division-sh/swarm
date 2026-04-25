@@ -790,6 +790,7 @@ func isUUIDType(contract Contract, typeRef string) bool {
 func isListType(typeRef string) bool {
 	typeRef = strings.TrimSpace(typeRef)
 	return strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">") ||
+		strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") ||
 		strings.HasSuffix(typeRef, "[]") ||
 		strings.HasPrefix(typeRef, "[]")
 }
@@ -799,6 +800,8 @@ func listItemType(typeRef string) string {
 	switch {
 	case strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">"):
 		return strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])
+	case strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]"):
+		return strings.TrimSpace(typeRef[1 : len(typeRef)-1])
 	case strings.HasSuffix(typeRef, "[]"):
 		return strings.TrimSpace(typeRef[:len(typeRef)-2])
 	case strings.HasPrefix(typeRef, "[]"):
