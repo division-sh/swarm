@@ -738,6 +738,53 @@ func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
 	}
 }
 
+func TestPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaults(t *testing.T) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `
+name: runtime-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: review
+    flow: review
+    mode: static
+`,
+		"schema.yaml": "name: runtime-test\n",
+		"flows/review/schema.yaml": `
+name: review
+mode: static
+initial_state: queued
+states: [queued]
+`,
+		"flows/review/entities.yaml": `
+review_entity:
+  status:
+    type: text
+    initial: pending
+`,
+	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected temp workflow bundle")
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	repo := pipelineEngineStateRepo{
+		coordinator: &PipelineCoordinator{
+			workflowStore: NewWorkflowInstanceStore(db),
+			module:        &previewWorkflowModule{bundle: bundle},
+		},
+	}
+
+	loaded, ok, err := repo.LoadState(withPipelineFlowScope(context.Background(), "review"), identity.NormalizeEntityID(FlowInstanceEntityID("review/inst-missing")))
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if ok {
+		t.Fatalf("LoadState ok=true for missing entity, loaded metadata=%#v", loaded.Metadata)
+	}
+}
+
 func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)

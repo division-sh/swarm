@@ -90,10 +90,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	if entityID != "" {
 		emitted = emitted.WithEntityID(entityID)
 	}
-	flowInstance := strings.Trim(strings.TrimSpace(actor.CanonicalFlowPath()), "/")
-	if flowInstance == "" {
-		flowInstance = strings.Trim(strings.TrimSpace(inbound.FlowInstance()), "/")
-	}
+	flowInstance := emitFlowInstanceForActorEvent(actor, inbound)
 	if flowInstance != "" {
 		emitted = emitted.WithFlowInstance(flowInstance)
 	}
@@ -125,6 +122,24 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		"event_id":   emitted.ID,
 		"event_type": eventType,
 	}, nil
+}
+
+func emitFlowInstanceForActorEvent(actor models.AgentConfig, inbound events.Event) string {
+	actorFlow := strings.Trim(strings.TrimSpace(actor.CanonicalFlowPath()), "/")
+	inboundFlow := strings.Trim(strings.TrimSpace(inbound.FlowInstance()), "/")
+	if inboundFlow != "" && flowWithinActorScope(actorFlow, inboundFlow) {
+		return inboundFlow
+	}
+	return actorFlow
+}
+
+func flowWithinActorScope(actorFlow, inboundFlow string) bool {
+	actorFlow = strings.Trim(strings.TrimSpace(actorFlow), "/")
+	inboundFlow = strings.Trim(strings.TrimSpace(inboundFlow), "/")
+	if actorFlow == "" || inboundFlow == "" {
+		return false
+	}
+	return inboundFlow == actorFlow || strings.HasPrefix(inboundFlow, actorFlow+"/")
 }
 
 func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eventType string) string {
