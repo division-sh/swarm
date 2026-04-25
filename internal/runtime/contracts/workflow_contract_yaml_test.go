@@ -591,6 +591,22 @@ fields:
 	}
 }
 
+func TestEmitSpecDecode_RejectsUnstructuredObjectFieldMappings(t *testing.T) {
+	var spec EmitSpec
+	err := yaml.Unmarshal([]byte(`
+event: signals.category_ready
+fields:
+  batch:
+    scan_id: payload.scan_id
+`), &spec)
+	if err == nil {
+		t.Fatal("expected unstructured emit.fields object mapping to be rejected")
+	}
+	if !strings.Contains(err.Error(), "explicit expression keys") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestHandlerRuleEntryDecode_PreservesRuleLevelFanOut(t *testing.T) {
 	var rule HandlerRuleEntry
 	if err := yaml.Unmarshal([]byte(`

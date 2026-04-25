@@ -145,6 +145,9 @@ func decodeEmitFieldValueNode(node *yaml.Node) (ExpressionValue, error) {
 		}
 		return CELExpression(node.Value), nil
 	case yaml.MappingNode:
+		if err := validateEmitFieldExpressionMappingNode(node); err != nil {
+			return ExpressionValue{}, err
+		}
 		var expr ExpressionValue
 		if err := node.Decode(&expr); err != nil {
 			return ExpressionValue{}, err
@@ -153,6 +156,27 @@ func decodeEmitFieldValueNode(node *yaml.Node) (ExpressionValue, error) {
 	default:
 		return ExpressionValue{}, fmt.Errorf("field value must be a scalar CEL expression or explicit expression mapping")
 	}
+}
+
+func validateEmitFieldExpressionMappingNode(node *yaml.Node) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	semanticKeys := 0
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		switch key {
+		case "literal", "ref", "cel", "expression":
+			semanticKeys++
+		case "kind":
+		default:
+			return fmt.Errorf("field value mapping must use explicit expression keys literal, ref, cel, or expression; found %q", key)
+		}
+	}
+	if semanticKeys == 0 {
+		return fmt.Errorf("field value mapping must declare literal, ref, cel, or expression")
+	}
+	return nil
 }
 
 func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
