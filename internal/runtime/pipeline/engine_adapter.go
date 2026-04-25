@@ -126,34 +126,28 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 	if entityID.IsZero() {
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	state := r.coordinator.currentWorkflowState(ctx, entityID.String())
 	flowID := strings.TrimSpace(pipelineFlowScope(ctx))
-	carrier, err := runtimeengine.StateCarrierFromPersisted(workflowMaterializeEntityMetadata(r.coordinator.SemanticSource(), flowID, state.Metadata), nil)
-	if err != nil {
-		return runtimeengine.StateSnapshot{}, false, err
-	}
-	out := runtimeengine.StateSnapshot{
-		EntityID:     entityID,
-		CurrentState: strings.TrimSpace(string(state.Stage)),
-		StateCarrier: carrier,
-	}
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.Enabled() {
 		instance, ok, err := r.coordinator.workflowStore.Load(ctx, entityID.String())
 		if err != nil {
 			return runtimeengine.StateSnapshot{}, false, err
 		}
 		if ok {
-			out.WorkflowName = strings.TrimSpace(instance.WorkflowName)
-			out.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
 			carrier, err := runtimeengine.StateCarrierFromPersisted(workflowMaterializeEntityMetadata(r.coordinator.SemanticSource(), strings.TrimSpace(instance.WorkflowName), instance.Metadata), instance.StateBuckets)
 			if err != nil {
 				return runtimeengine.StateSnapshot{}, false, err
 			}
-			out.StateCarrier = carrier
+			out := runtimeengine.StateSnapshot{
+				EntityID:        entityID,
+				WorkflowName:    strings.TrimSpace(instance.WorkflowName),
+				WorkflowVersion: strings.TrimSpace(instance.WorkflowVersion),
+				CurrentState:    strings.TrimSpace(instance.CurrentState),
+				StateCarrier:    carrier,
+				EnteredStateAt:  instance.EnteredStageAt,
+			}
 			if strings.TrimSpace(instance.SubjectID) != "" {
 				out.StateCarrier.Metadata["subject_id"] = strings.TrimSpace(instance.SubjectID)
 			}
-			out.CurrentState = strings.TrimSpace(instance.CurrentState)
 			out.StateCarrier.Gates = workflowStateGatesForScope(
 				r.coordinator.SemanticSource(),
 				pipelineFlowScope(ctx),
@@ -171,9 +165,23 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 					Cancelled: timer.Cancelled,
 				})
 			}
+			return out, true, nil
 		}
+		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	return out, true, nil
+	state := r.coordinator.currentWorkflowState(ctx, entityID.String())
+	if strings.TrimSpace(string(state.Stage)) == "" && len(state.Metadata) == 0 {
+		return runtimeengine.StateSnapshot{}, false, nil
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(workflowMaterializeEntityMetadata(r.coordinator.SemanticSource(), flowID, state.Metadata), nil)
+	if err != nil {
+		return runtimeengine.StateSnapshot{}, false, err
+	}
+	return runtimeengine.StateSnapshot{
+		EntityID:     entityID,
+		CurrentState: strings.TrimSpace(string(state.Stage)),
+		StateCarrier: carrier,
+	}, true, nil
 }
 
 func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identity.EntityID, mutation runtimeengine.StateMutation) error {

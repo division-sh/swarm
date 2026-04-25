@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/flowmodel"
@@ -99,6 +100,121 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 	}
 	if bus.count != 1 {
 		t.Fatalf("publish count = %d, want 1", bus.count)
+	}
+}
+
+func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"research.completed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Type: "object",
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"summary": {Type: "string"},
+					},
+					Required: []string{"summary"},
+				},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"validation": {
+					Paths: runtimecontracts.FlowContractPaths{
+						ID:   "validation",
+						Flow: "validation",
+					},
+					Events: map[string]runtimecontracts.EventCatalogEntry{
+						"research.completed": {},
+					},
+					Path: "validation",
+				},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "business-research-agent",
+		Role:       "business_research",
+		Mode:       "validation",
+		FlowPath:   "validation",
+		EmitEvents: []string{"research.completed"},
+	}
+	inbound := (events.Event{
+		Type: events.EventType("validation/validation.started"),
+	}).WithEntityID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").WithFlowInstance("validation/inst-1")
+	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
+
+	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{
+		"summary": "research done",
+	})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	if got, want := bus.event.EntityID(), "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"; got != want {
+		t.Fatalf("published event entity_id = %q, want %q", got, want)
+	}
+	if got, want := bus.event.FlowInstance(), "validation/inst-1"; got != want {
+		t.Fatalf("published event flow_instance = %q, want %q", got, want)
+	}
+}
+
+func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"research.completed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Type: "object",
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"summary": {Type: "string"},
+					},
+					Required: []string{"summary"},
+				},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"validation": {
+					Paths: runtimecontracts.FlowContractPaths{
+						ID:   "validation",
+						Flow: "validation",
+					},
+					Events: map[string]runtimecontracts.EventCatalogEntry{
+						"research.completed": {},
+					},
+					Path: "validation",
+				},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "business-research-agent",
+		Role:       "business_research",
+		Mode:       "validation",
+		FlowPath:   "validation",
+		EmitEvents: []string{"research.completed"},
+	}
+	inbound := (events.Event{
+		Type: events.EventType("scoring/vertical.shortlisted"),
+	}).WithEntityID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").WithFlowInstance("scoring/inst-1")
+	ctx := runtimebus.WithInboundEvent(context.Background(), inbound)
+
+	_, err := exec.handleEmitTool(ctx, actor, "emit_research_completed", map[string]any{
+		"summary": "research done",
+	})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	if got, want := bus.event.FlowInstance(), "validation"; got != want {
+		t.Fatalf("published event flow_instance = %q, want %q", got, want)
 	}
 }
 

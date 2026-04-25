@@ -1344,6 +1344,7 @@ node-a:
 	if got := instance.Metadata["revision_count"]; got != float64(0) && got != 0 {
 		t.Fatalf("persisted revision_count = %#v, want 0", got)
 	}
+	assertCreatedChildFlowIdentityCoherent(t, db, "validation", entityID, emitted, instance)
 
 	rows, err := db.QueryContext(context.Background(), `
 		SELECT field, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
@@ -1373,6 +1374,133 @@ node-a:
 		t.Fatalf("expected initial-value mutation for revision_count, got %#v", initialMutations)
 	} else if got[2] != "create_entity" {
 		t.Fatalf("revision_count initial mutation metadata = %#v, want handler_step create_entity", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bus := &recordingPipelineBus{}
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `
+name: runtime-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: review
+    flow: review
+    mode: static
+`,
+		"schema.yaml": "name: runtime-test\n",
+		"flows/review/schema.yaml": `
+name: review
+mode: static
+initial_state: queued
+states: [queued]
+`,
+		"flows/review/entities.yaml": `
+review_entity:
+  status:
+    type: text
+    initial: pending
+`,
+		"flows/review/nodes.yaml": `
+node-a:
+  id: node-a
+  execution_type: system_node
+`,
+	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected temp workflow bundle")
+	}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		db:             db,
+		workflowStore:  NewWorkflowInstanceStore(db),
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module: &previewWorkflowModule{
+			bundle: bundle,
+			workflow: NewWorkflowDefinition("review", []WorkflowStage{
+				{Name: "queued"},
+			}, nil),
+		},
+	}
+
+	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		Guard:        &runtimecontracts.GuardSpec{Check: `entity.status == "pending"`},
+		Emit: runtimecontracts.EmitSpec{
+			Event: "review.created",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"status": runtimecontracts.CELExpression("entity.status"),
+			},
+		},
+	}, workflowTriggerContext{
+		Event: events.Event{Type: events.EventType("candidate.ready")},
+		State: WorkflowState{},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	emitted := bus.publishedEvent(0)
+	entityID := emitted.EntityID()
+	if entityID == "" {
+		t.Fatal("expected emitted event to carry created entity id")
+	}
+	instance, ok, err := pc.workflowStore.Load(context.Background(), entityID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected created entity to persist")
+	}
+	if got := instance.Metadata["status"]; got != "pending" {
+		t.Fatalf("persisted status = %#v, want pending", got)
+	}
+	assertCreatedChildFlowIdentityCoherent(t, db, "review", entityID, emitted, instance)
+}
+
+func assertCreatedChildFlowIdentityCoherent(t *testing.T, db *sql.DB, flowID, entityID string, emitted events.Event, instance WorkflowInstance) {
+	t.Helper()
+	instanceID := strings.TrimSpace(asString(instance.Metadata["instance_id"]))
+	if instanceID == "" {
+		t.Fatalf("created %s entity %s missing instance_id metadata: %#v", flowID, entityID, instance.Metadata)
+	}
+	flowPath := flowID + "/" + instanceID
+	if got := strings.TrimSpace(instance.StorageRef); got != flowPath {
+		t.Fatalf("created %s entity storage_ref = %q, want %q", flowID, got, flowPath)
+	}
+	if got := strings.TrimSpace(asString(instance.Metadata["storage_ref"])); got != flowPath {
+		t.Fatalf("created %s entity metadata storage_ref = %q, want %q", flowID, got, flowPath)
+	}
+	if got := strings.TrimSpace(asString(instance.Metadata["flow_path"])); got != flowPath {
+		t.Fatalf("created %s entity flow_path = %q, want %q", flowID, got, flowPath)
+	}
+	if got := entityID; got != FlowInstanceEntityID(flowPath) {
+		t.Fatalf("created %s entity id = %q, want %q for flow path %q", flowID, got, FlowInstanceEntityID(flowPath), flowPath)
+	}
+	if got := emitted.FlowInstance(); got != flowPath {
+		t.Fatalf("created %s emitted flow_instance = %q, want %q", flowID, got, flowPath)
+	}
+	var rowOwner string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT flow_instance
+		FROM entity_state
+		WHERE entity_id = $1::uuid
+	`, entityID).Scan(&rowOwner); err != nil {
+		t.Fatalf("query created %s entity_state owner: %v", flowID, err)
+	}
+	if got := strings.TrimSpace(rowOwner); got != flowPath {
+		t.Fatalf("created %s entity_state.flow_instance = %q, want %q", flowID, got, flowPath)
 	}
 }
 
