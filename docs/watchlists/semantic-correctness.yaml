@@ -305,6 +305,7 @@ nodes:
       - adjacent entity-tool surfaces either bypass shared type normalization entirely or carry stale local interpreters of schema type handling
     representative_issues:
       - 402
+      - 525
     common_framing_mistakes:
       too_broad:
         - entity tools are broken
@@ -312,6 +313,29 @@ nodes:
       too_narrow:
         - one save_entity_field error string
         - one validation-agent transcript line
+    current_action_pressure: active
+  - id: entity_tool_bracket_list_type_ref_normalization_drift
+    title: Entity-Tool Bracket-List Type-Ref Normalization Drift
+    parent_class: runtime entity-tool semantics drift from authored entity_schema type annotations
+    canonical_owners:
+      - shared entity contract value normalization in internal/runtime/entityruntime/contracts.go
+      - entity-tool adapter normalization in internal/runtime/tools/entity_schema.go
+      - entity-tool result materialization in internal/runtime/tools/executor_entity.go
+    why_this_node_exists: authored Wave 1 entity contracts use bracket-form list refs such as [text] and [NamedType], but entityruntime previously recognized only list<T>, T[], and []T, so generic entity tools could reject valid declared fields on supported paths.
+    known_manifestations:
+      - get_entity result materialization rejects named objects containing bracket-list fields
+      - search_entities, query_entities, and query_metrics result materialization reject the same fields before filtering, projection, or aggregation
+      - save_entity_field and create_entity can reject valid values for fields whose declared type or nested named-type leaf uses bracket-list refs
+    representative_issues:
+      - 525
+    common_framing_mistakes:
+      too_broad:
+        - rewrite the entire contract type system
+        - merge event schema lowering and entityruntime in the same PR
+      too_narrow:
+        - one get_entity transcript error
+        - one query_entities materialization failure
+        - read-only materialization when write and create consume the same owner
     current_action_pressure: active
   - id: primitive_only_cross_flow_authored_contract_migration
     title: Primitive-Only Cross-Flow Authored Contract Migration

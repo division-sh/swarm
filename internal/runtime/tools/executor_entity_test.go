@@ -1043,6 +1043,146 @@ signal:
 	}
 }
 
+func TestEntityTools_BracketListTypeRefsAcrossConsumers(t *testing.T) {
+	actor := models.AgentConfig{
+		ID:    "validator",
+		Role:  "validator",
+		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
+	}
+	bundle := loadWave1EntityToolBundle(t, actor, "validation", "validation_case", `
+types:
+  Feature:
+    name: text
+  BrandCandidate:
+    name: text
+  MvpSpec:
+    core_features: "[Feature]"
+    out_of_scope: "[text]"
+  Brand:
+    alternatives: "[BrandCandidate]"
+  ValidationKit:
+    risk_flags: "[text]"
+`, `
+validation_case:
+  mvp_spec:
+    type: MvpSpec
+    initial: {}
+  brand:
+    type: Brand
+    initial: {}
+  validation_kit:
+    type: ValidationKit
+    initial: {}
+  score: integer
+`)
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+
+	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "validation/case-1",
+		"fields": map[string]any{
+			"score": 7,
+		},
+	})
+	_ = mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "validation/case-2",
+		"fields": map[string]any{
+			"mvp_spec": map[string]any{
+				"core_features": []any{map[string]any{"name": "Import"}},
+				"out_of_scope":  []any{"mobile"},
+			},
+			"score": 3,
+		},
+	})
+	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET current_state = 'marginal_review' WHERE entity_id = $1::uuid`, entityID); err != nil {
+		t.Fatalf("seed current_state: %v", err)
+	}
+
+	getOut, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+	if err != nil {
+		t.Fatalf("get_entity bracket-list fields: %v", err)
+	}
+	getEntity := getOut.(map[string]any)
+	getFields := getEntity["fields"].(map[string]any)
+	if features := getFields["mvp_spec"].(map[string]any)["core_features"]; len(features.([]any)) != 0 {
+		t.Fatalf("mvp_spec.core_features default = %#v, want empty list", features)
+	}
+	if alternatives := getFields["brand"].(map[string]any)["alternatives"]; len(alternatives.([]any)) != 0 {
+		t.Fatalf("brand.alternatives default = %#v, want empty list", alternatives)
+	}
+	if riskFlags := getFields["validation_kit"].(map[string]any)["risk_flags"]; len(riskFlags.([]any)) != 0 {
+		t.Fatalf("validation_kit.risk_flags default = %#v, want empty list", riskFlags)
+	}
+
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "mvp_spec.core_features",
+		"value": []any{
+			map[string]any{"name": "Guided setup"},
+		},
+	}); err != nil {
+		t.Fatalf("save_entity_field bracket list-of-named: %v", err)
+	}
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "validation_kit.risk_flags",
+		"value":     []any{"pricing risk"},
+	}); err != nil {
+		t.Fatalf("save_entity_field bracket list-of-text: %v", err)
+	}
+
+	searchOut, err := exec.Execute(ctx, "search_entities", map[string]any{
+		"current_state": "marginal_review",
+		"filter":        map[string]any{"score": 7},
+		"limit":         10,
+	})
+	if err != nil {
+		t.Fatalf("search_entities bracket-list materialization: %v", err)
+	}
+	searchRows := searchOut.(map[string]any)["results"].([]map[string]any)
+	if len(searchRows) != 1 {
+		t.Fatalf("search results = %#v, want one row", searchRows)
+	}
+	if _, err := exec.Execute(ctx, "search_entities", map[string]any{
+		"filter": map[string]any{"mvp_spec.core_features": []any{map[string]any{"name": "Guided setup"}}},
+		"limit":  10,
+	}); err == nil || strings.Contains(err.Error(), "unsupported type") {
+		t.Fatalf("search_entities composite list filter = %v, want fail-closed validation before unsupported type", err)
+	}
+
+	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"filter": `score == 7`,
+		"select": []string{"score"},
+		"limit":  10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities bracket-list materialization: %v", err)
+	}
+	queryRows := queryOut.(map[string]any)["results"].([]map[string]any)
+	if len(queryRows) != 1 {
+		t.Fatalf("query results = %#v, want one row", queryRows)
+	}
+
+	metricOut, err := exec.Execute(ctx, "query_metrics", map[string]any{
+		"metric": "sum",
+		"field":  "score",
+		"filter": `score == 7`,
+	})
+	if err != nil {
+		t.Fatalf("query_metrics bracket-list materialization: %v", err)
+	}
+	if got := testNumericValue(metricOut.(map[string]any)["value"]); got != 7 {
+		t.Fatalf("metric value = %#v, want 7", metricOut)
+	}
+
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "mvp_spec.core_features",
+		"value":     map[string]any{"name": "not a list"},
+	}); err == nil {
+		t.Fatalf("save_entity_field bracket list accepted object, want invalid_tool_input")
+	}
+}
+
 func TestEntityTools_ReadTargetValidationRejectsUndeclaredBeforeEval(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"discovery": {
