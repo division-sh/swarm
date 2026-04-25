@@ -174,7 +174,7 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalAuthoritativeOwners(t *
 	}
 }
 
-func TestRuntimeEventOwnersScopesFlowLocalWildcardHandlers(t *testing.T) {
+func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOwners(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -182,17 +182,19 @@ name: wildcard-owner-test
 version: "1.0.0"
 platform_version: ">=1.0.0"
 flows:
-  - id: child
-    flow: child
+  - id: flow-a
+    flow: flow-a
+  - id: flow-b
+    flow: flow-b
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wildcard-owner-test\n")
 	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "child", "package.yaml"), "name: child\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
-name: child
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "package.yaml"), "name: flow-a\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "schema.yaml"), `
+name: flow-a
 initial_state: active
 terminal_states: [done]
 states: [active, done]
@@ -200,15 +202,40 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "policy.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "agents.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "events.yaml"), `
 task.done:
   entity_id: string
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
-child-wildcard:
-  id: child-wildcard
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "nodes.yaml"), `
+flow-a-wildcard:
+  id: flow-a-wildcard
+  execution_type: system_node
+  subscribes_to: [task.*]
+  event_handlers:
+    task.*:
+      advances_to: done
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "package.yaml"), "name: flow-b\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "schema.yaml"), `
+name: flow-b
+initial_state: active
+terminal_states: [done]
+states: [active, done]
+pins:
+  outputs:
+    events: [task.done]
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "policy.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "agents.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "events.yaml"), `
+task.done:
+  entity_id: string
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "nodes.yaml"), `
+flow-b-wildcard:
+  id: flow-b-wildcard
   execution_type: system_node
   subscribes_to: [task.*]
   event_handlers:
@@ -221,8 +248,14 @@ child-wildcard:
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
-	if owners := bundle.RuntimeEventOwners("child/task.done"); !hasAll(owners, "child-wildcard") {
-		t.Fatalf("expected child-wildcard to own child/task.done through flow-local wildcard, got %v", owners)
+	if owners := bundle.RuntimeEventOwners("task.done"); len(owners) != 0 {
+		t.Fatalf("expected no authoritative owners for ambiguous root task.done, got %v", owners)
+	}
+	if owners := bundle.RuntimeEventOwners("flow-a/task.done"); !hasAll(owners, "flow-a-wildcard") || hasAny(owners, "flow-b-wildcard") {
+		t.Fatalf("expected only flow-a-wildcard to own flow-a/task.done, got %v", owners)
+	}
+	if owners := bundle.RuntimeEventOwners("flow-b/task.done"); !hasAll(owners, "flow-b-wildcard") || hasAny(owners, "flow-a-wildcard") {
+		t.Fatalf("expected only flow-b-wildcard to own flow-b/task.done, got %v", owners)
 	}
 }
 
