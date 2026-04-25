@@ -202,10 +202,7 @@ func entityStateBaseQueryForContract(source semanticview.Source, contract entity
 		clauses = append(clauses, fmt.Sprintf("(flow_instance = $%d OR flow_instance LIKE $%d)", len(args)-1, len(args)))
 	}
 	if includeFlowInstance {
-		if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
-			args = append(args, flowInstance)
-			clauses = append(clauses, fmt.Sprintf("flow_instance = $%d", len(args)))
-		}
+		clauses, args = appendEntityToolExistingFlowInstanceFilter(source, clauses, args, asString(payload["flow_instance"]))
 	}
 	return clauses, args
 }

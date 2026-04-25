@@ -26,8 +26,8 @@ func (e *Executor) execGetEntity(ctx context.Context, _ models.AgentConfig, inpu
 	if !found {
 		return nil, NewRuntimeError("not_found", "tool-executor", "exec_get_entity.lookup", false, "entity %s not found", entityID)
 	}
-	if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
-		if strings.Trim(strings.TrimSpace(asString(entity["flow_instance"])), "/") != flowInstance {
+	if flowInstance := normalizeEntityToolFlowInstance(asString(payload["flow_instance"])); flowInstance != "" {
+		if !entityToolExistingFlowInstanceMatches(source, flowInstance, asString(entity["flow_instance"])) {
 			return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_get_entity.flow_instance", false, "flow_instance does not match entity ownership")
 		}
 	}
