@@ -37,8 +37,8 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	if !found {
 		return nil, NewRuntimeError("not_found", "tool-executor", "exec_save_entity_field.lookup", false, "entity %s not found", entityID)
 	}
-	if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
-		if strings.Trim(strings.TrimSpace(asString(row["flow_instance"])), "/") != flowInstance {
+	if flowInstance := normalizeEntityToolFlowInstance(asString(payload["flow_instance"])); flowInstance != "" {
+		if !entityToolExistingFlowInstanceMatches(source, flowInstance, asString(row["flow_instance"])) {
 			return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.flow_instance", false, "flow_instance does not match entity ownership")
 		}
 	}

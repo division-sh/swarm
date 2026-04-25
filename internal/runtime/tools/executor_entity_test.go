@@ -1626,6 +1626,192 @@ foreign:
 	}
 }
 
+func TestEntityTools_ExistingEntityFlowInstanceAcceptsDeclaredRootAndExactPath(t *testing.T) {
+	actor := models.AgentConfig{
+		ID:    "validator",
+		Role:  "validator",
+		Tools: []string{"create_entity", "get_entity", "save_entity_field", "query_entities", "query_metrics", "search_entities"},
+	}
+	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
+		"validation": {
+			EntitiesYAML: `
+validation_case:
+  status: text
+  score: integer
+`,
+			AgentsYAML: entityToolAgentYAML(actor),
+		},
+		"operating": {
+			EntitiesYAML: `
+operating_case:
+  status: text
+`,
+		},
+	})
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	firstID := mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "validation/case-1",
+		"fields": map[string]any{
+			"status": "open",
+			"score":  10,
+		},
+	})
+	secondID := mustCreateEntityID(t, ctx, exec, map[string]any{
+		"flow_instance": "validation/case-2",
+		"fields": map[string]any{
+			"status": "open",
+			"score":  20,
+		},
+	})
+
+	for name, flowInstance := range map[string]string{
+		"declared root": "validation",
+		"exact path":    "validation/case-1",
+	} {
+		out, err := exec.Execute(ctx, "get_entity", map[string]any{
+			"entity_id":     firstID,
+			"flow_instance": flowInstance,
+		})
+		if err != nil {
+			t.Fatalf("get_entity %s: %v", name, err)
+		}
+		entity := out.(map[string]any)
+		if got := strings.TrimSpace(asString(entity["entity_id"])); got != firstID {
+			t.Fatalf("get_entity %s entity_id = %q, want %s", name, got, firstID)
+		}
+	}
+	if _, err := exec.Execute(ctx, "get_entity", map[string]any{
+		"entity_id":     firstID,
+		"flow_instance": "operating",
+	}); err == nil || !strings.Contains(err.Error(), "flow_instance does not match entity ownership") {
+		t.Fatalf("get_entity wrong root error = %v, want flow_instance mismatch", err)
+	}
+
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id":     firstID,
+		"flow_instance": "validation",
+		"field":         "status",
+		"value":         "root-saved",
+	}); err != nil {
+		t.Fatalf("save_entity_field declared root: %v", err)
+	}
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id":     firstID,
+		"flow_instance": "validation/case-1",
+		"field":         "status",
+		"value":         "exact-saved",
+	}); err != nil {
+		t.Fatalf("save_entity_field exact path: %v", err)
+	}
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id":     firstID,
+		"flow_instance": "operating",
+		"field":         "status",
+		"value":         "wrong-root",
+	}); err == nil || !strings.Contains(err.Error(), "flow_instance does not match entity ownership") {
+		t.Fatalf("save_entity_field wrong root error = %v, want flow_instance mismatch", err)
+	}
+
+	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"flow_instance": "validation",
+		"select":        []string{"status", "score"},
+		"limit":         10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities declared root: %v", err)
+	}
+	queryRows := queryOut.(map[string]any)["results"].([]map[string]any)
+	if len(queryRows) != 2 {
+		t.Fatalf("query_entities root rows = %#v, want 2", queryRows)
+	}
+	queryExactOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"flow_instance": "validation/case-2",
+		"select":        []string{"status", "score"},
+		"limit":         10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities exact path: %v", err)
+	}
+	queryExactRows := queryExactOut.(map[string]any)["results"].([]map[string]any)
+	if len(queryExactRows) != 1 || strings.TrimSpace(asString(queryExactRows[0]["entity_id"])) != secondID {
+		t.Fatalf("query_entities exact rows = %#v, want %s", queryExactRows, secondID)
+	}
+	queryWrongOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"flow_instance": "operating",
+		"select":        []string{"status"},
+		"limit":         10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities wrong root: %v", err)
+	}
+	if rows := queryWrongOut.(map[string]any)["results"].([]map[string]any); len(rows) != 0 {
+		t.Fatalf("query_entities wrong root rows = %#v, want none", rows)
+	}
+
+	searchOut, err := exec.Execute(ctx, "search_entities", map[string]any{
+		"flow_instance": "validation",
+		"current_state": "queued",
+		"limit":         10,
+	})
+	if err != nil {
+		t.Fatalf("search_entities declared root: %v", err)
+	}
+	if total := searchOut.(map[string]any)["total"].(int); total != 2 {
+		t.Fatalf("search_entities root total = %d, want 2", total)
+	}
+	searchExactOut, err := exec.Execute(ctx, "search_entities", map[string]any{
+		"flow_instance": "validation/case-1",
+		"limit":         10,
+	})
+	if err != nil {
+		t.Fatalf("search_entities exact path: %v", err)
+	}
+	if total := searchExactOut.(map[string]any)["total"].(int); total != 1 {
+		t.Fatalf("search_entities exact total = %d, want 1", total)
+	}
+	searchWrongOut, err := exec.Execute(ctx, "search_entities", map[string]any{
+		"flow_instance": "operating",
+		"limit":         10,
+	})
+	if err != nil {
+		t.Fatalf("search_entities wrong root: %v", err)
+	}
+	if total := searchWrongOut.(map[string]any)["total"].(int); total != 0 {
+		t.Fatalf("search_entities wrong root total = %d, want 0", total)
+	}
+
+	metricsOut, err := exec.Execute(ctx, "query_metrics", map[string]any{
+		"flow_instance": "validation",
+		"metric":        "count",
+	})
+	if err != nil {
+		t.Fatalf("query_metrics declared root: %v", err)
+	}
+	if got := testNumericValue(metricsOut.(map[string]any)["value"]); got != 2 {
+		t.Fatalf("query_metrics root count = %#v, want 2", metricsOut)
+	}
+	metricsExactOut, err := exec.Execute(ctx, "query_metrics", map[string]any{
+		"flow_instance": "validation/case-1",
+		"metric":        "count",
+	})
+	if err != nil {
+		t.Fatalf("query_metrics exact path: %v", err)
+	}
+	if got := testNumericValue(metricsExactOut.(map[string]any)["value"]); got != 1 {
+		t.Fatalf("query_metrics exact count = %#v, want 1", metricsExactOut)
+	}
+	metricsWrongOut, err := exec.Execute(ctx, "query_metrics", map[string]any{
+		"flow_instance": "operating",
+		"metric":        "count",
+	})
+	if err != nil {
+		t.Fatalf("query_metrics wrong root: %v", err)
+	}
+	if got := testNumericValue(metricsWrongOut.(map[string]any)["value"]); got != 0 {
+		t.Fatalf("query_metrics wrong root count = %#v, want 0", metricsWrongOut)
+	}
+}
+
 func TestEntityTools_FlowOwnedActorCanReadForeignEntityAndWriteOwnEntity(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {

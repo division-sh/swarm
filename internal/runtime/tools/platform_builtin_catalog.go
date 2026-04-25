@@ -58,7 +58,7 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 			Category:    "entity_persistence",
 			Description: "Read a full entity_state row by entity id.",
 			InputSchema: ObjectSchema(map[string]any{
-				"flow_instance": map[string]any{"type": "string"},
+				"flow_instance": existingEntityFlowInstanceSchema(),
 				"entity_id":     map[string]any{"type": "string"},
 			}, "entity_id"),
 		},
@@ -66,7 +66,7 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 			Category:    "entity_persistence",
 			Description: "Write a single declared field or dotted subfield path on an entity.",
 			InputSchema: ObjectSchema(map[string]any{
-				"flow_instance": map[string]any{"type": "string"},
+				"flow_instance": existingEntityFlowInstanceSchema(),
 				"entity_id":     map[string]any{"type": "string"},
 				"field":         map[string]any{"type": "string"},
 				"value":         anyValueSchema,
@@ -99,7 +99,7 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 			Description: "Query entity_state rows using validated selectors and optional grouping.",
 			InputSchema: ObjectSchema(map[string]any{
 				"entity_type":   deepCloneJSONValue(readTargetSchema),
-				"flow_instance": map[string]any{"type": "string"},
+				"flow_instance": existingEntityFlowInstanceSchema(),
 				"filter":        map[string]any{"type": "string"},
 				"select": map[string]any{
 					"type":  "array",
@@ -115,7 +115,7 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 			InputSchema: ObjectSchema(map[string]any{
 				"entity_type":   deepCloneJSONValue(readTargetSchema),
 				"subject_id":    map[string]any{"type": "string"},
-				"flow_instance": map[string]any{"type": "string"},
+				"flow_instance": existingEntityFlowInstanceSchema(),
 				"current_state": map[string]any{"type": "string"},
 				"filter": map[string]any{
 					"type":                 "object",
@@ -131,7 +131,7 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 			Description: "Aggregate metrics across entity_state rows.",
 			InputSchema: ObjectSchema(map[string]any{
 				"entity_type":   deepCloneJSONValue(readTargetSchema),
-				"flow_instance": map[string]any{"type": "string"},
+				"flow_instance": existingEntityFlowInstanceSchema(),
 				"metric": map[string]any{
 					"type": "string",
 					"enum": []any{"count", "sum", "avg", "min", "max"},
@@ -141,6 +141,13 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 				"filter":   map[string]any{"type": "string"},
 			}, "metric"),
 		},
+	}
+}
+
+func existingEntityFlowInstanceSchema() map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"description": "Optional existing-entity flow guard/filter. Accepts a concrete flow instance path or a declared semantic flow root; roots match descendant instances.",
 	}
 }
 
@@ -189,7 +196,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 			Category:    "entity_persistence",
 			Description: "Read a full entity_state row by entity id.",
 			InputSchema: ObjectSchema(map[string]any{
-				"flow_instance": map[string]any{"type": "string"},
+				"flow_instance": existingEntityFlowInstanceSchema(),
 				"entity_id":     map[string]any{"type": "string"},
 			}, "entity_id"),
 		},
@@ -197,7 +204,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 			Category:    "entity_persistence",
 			Description: "Write a single declared field or dotted subfield path on an entity.",
 			InputSchema: ObjectSchema(map[string]any{
-				"flow_instance": map[string]any{"type": "string"},
+				"flow_instance": existingEntityFlowInstanceSchema(),
 				"entity_id":     map[string]any{"type": "string"},
 				"field": map[string]any{
 					"type": "string",
@@ -212,7 +219,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 			InputSchema: ObjectSchema(map[string]any{
 				"entity_type":   deepCloneJSONValue(readTargetSchema),
 				"subject_id":    map[string]any{"type": "string"},
-				"flow_instance": map[string]any{"type": "string"},
+				"flow_instance": existingEntityFlowInstanceSchema(),
 				"current_state": map[string]any{"type": "string"},
 				"filter": map[string]any{
 					"type":                 "object",
@@ -228,7 +235,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 			Description: "Query entity_state rows using validated selectors and optional grouping.",
 			InputSchema: ObjectSchema(map[string]any{
 				"entity_type":   deepCloneJSONValue(readTargetSchema),
-				"flow_instance": map[string]any{"type": "string"},
+				"flow_instance": existingEntityFlowInstanceSchema(),
 				"filter":        map[string]any{"type": "string"},
 				"select": map[string]any{
 					"type": "array",
@@ -249,7 +256,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 			Description: "Aggregate metrics across entity_state rows.",
 			InputSchema: ObjectSchema(map[string]any{
 				"entity_type":   deepCloneJSONValue(readTargetSchema),
-				"flow_instance": map[string]any{"type": "string"},
+				"flow_instance": existingEntityFlowInstanceSchema(),
 				"metric": map[string]any{
 					"type": "string",
 					"enum": []any{"count", "sum", "avg", "min", "max"},
