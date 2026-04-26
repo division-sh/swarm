@@ -2049,6 +2049,7 @@ type entityToolFlowFixture struct {
 	TypesYAML    string
 	EntitiesYAML string
 	AgentsYAML   string
+	ToolsYAML    string
 }
 
 func loadWave1EntityToolMultiFlowBundle(t *testing.T, flows map[string]entityToolFlowFixture) *runtimecontracts.WorkflowContractBundle {
@@ -2101,6 +2102,9 @@ terminal_states: [finished, closed, killed]
 		}
 		if strings.TrimSpace(fixture.AgentsYAML) != "" {
 			writeEntityToolFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), fixture.AgentsYAML)
+		}
+		if strings.TrimSpace(fixture.ToolsYAML) != "" {
+			writeEntityToolFixtureFile(t, filepath.Join(root, "flows", flowID, "tools.yaml"), fixture.ToolsYAML)
 		}
 	}
 

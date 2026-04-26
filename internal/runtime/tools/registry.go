@@ -198,7 +198,8 @@ func removeUnavailableEntityScopedUniversalTools(entries map[string]RegisteredTo
 		return
 	}
 	for name := range entries {
-		if isEntityScopedUniversalRuntimeTool(name) {
+		tool := entries[name]
+		if tool.HandlerType == implementationPlatformBuiltin && isEntityScopedUniversalRuntimeTool(name) {
 			delete(entries, name)
 		}
 	}
