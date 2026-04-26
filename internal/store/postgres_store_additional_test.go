@@ -725,15 +725,17 @@ func TestPostgresStore_EnsureSchemaTables_DropsDeprecatedEntitySubjectCompatibil
 		DDL         string `yaml:"ddl"`
 	}{
 		"entity_state": {
-			DDL: "CREATE TABLE IF NOT EXISTS entity_state (\n    entity_id UUID PRIMARY KEY\n);",
+			DDL: "CREATE TABLE IF NOT EXISTS entity_state (\n    entity_id UUID PRIMARY KEY,\n    subject_id UUID,\n    flow_instance TEXT,\n    INDEX idx_entity_subject (subject_id) WHERE subject_id IS NOT NULL\n);",
 		},
 	}
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs(entity_state ddl): %v", err)
 	}
-	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
-		t.Fatalf("EnsureSchemaTables(entity_state ddl): %v", err)
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+			t.Fatalf("EnsureSchemaTables(entity_state ddl) attempt %d: %v", attempt, err)
+		}
 	}
 
 	var (
