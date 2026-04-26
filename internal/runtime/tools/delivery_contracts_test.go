@@ -228,6 +228,65 @@ vertical:
 	}
 }
 
+func TestToolDefinitionsForActor_PreserveNonPlatformEntityToolNameOverrideWithoutActorContract(t *testing.T) {
+	lifecycle := models.AgentConfig{
+		ID:           "lifecycle-coordinator",
+		Role:         "lifecycle-coordinator",
+		SessionScope: "global",
+		Tools:        []string{"get_entity"},
+	}
+	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
+		"lifecycle": {
+			AgentsYAML: entityToolAgentYAML(lifecycle),
+			ToolsYAML: `
+get_entity:
+  description: Lifecycle-owned external lookup override.
+  handler_type: http
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+    required: [query]
+  http:
+    method: POST
+    url: https://example.invalid/get_entity
+`,
+		},
+		"validation": {
+			EntitiesYAML: `
+validation_case:
+  status: text
+`,
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "validator", Role: "validator"}),
+		},
+	})
+
+	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+		WorkflowSource: semanticview.Wrap(bundle),
+	})
+	defs := exec.ToolDefinitionsForActor(lifecycle)
+	defByName := make(map[string]llm.ToolDefinition, len(defs))
+	for _, def := range defs {
+		defByName[def.Name] = def
+	}
+	def, ok := defByName["get_entity"]
+	if !ok {
+		t.Fatalf("expected non-platform get_entity override to remain visible, got %v", toolDefinitionNames(defs))
+	}
+	if got := strings.TrimSpace(def.Description); got != "Lifecycle-owned external lookup override." {
+		t.Fatalf("get_entity description = %q, want scoped override", got)
+	}
+	schema, _ := def.Schema.(map[string]any)
+	props, _ := schema["properties"].(map[string]any)
+	if _, ok := props["query"]; !ok {
+		t.Fatalf("get_entity override schema = %#v, want query property", schema)
+	}
+	if _, ok := props["entity_id"]; ok {
+		t.Fatalf("get_entity override schema = %#v, should not be platform entity schema", schema)
+	}
+}
+
 func containsAnyString(values []any, want string) bool {
 	for _, value := range values {
 		if value == want {
