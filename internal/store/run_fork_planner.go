@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"swarm/internal/runtime/mutationlog"
 )
 
@@ -85,6 +86,19 @@ type runForkEventCursor struct {
 	EventID   string
 	EventName string
 	CreatedAt time.Time
+}
+
+type runForkAdmissionEvidence struct {
+	Pending       []RunForkPendingWork
+	RelevantTimer bool
+	RelevantRoute bool
+	ActiveSession bool
+	ActiveTurn    bool
+}
+
+type runForkSourceFacts struct {
+	EntityIDs     []string
+	FlowInstances []string
 }
 
 func RequireCanonicalRunForkPlannerCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
@@ -187,7 +201,11 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 	}
 	plan.PendingWork = pending
 	plan.PendingWorkCount = len(pending)
-	plan.UnsupportedBlockers = runForkUnsupportedBlockers(catalog, pending)
+	evidence, err := s.loadRunForkAdmissionEvidence(ctx, catalog, runID, cursor, entities, pending)
+	if err != nil {
+		return RunForkPlan{}, err
+	}
+	plan.UnsupportedBlockers = runForkUnsupportedBlockers(evidence)
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
 	plan.ExecutionReady = plan.UnsupportedBlockerCount == 0
 	return plan, nil
@@ -499,7 +517,182 @@ func classifyRunForkPendingWork(item RunForkPendingWork, deadLetter bool) string
 	}
 }
 
-func runForkUnsupportedBlockers(catalog schemaColumnCatalog, pending []RunForkPendingWork) []RunForkUnsupportedBlocker {
+func (s *PostgresStore) loadRunForkAdmissionEvidence(ctx context.Context, catalog schemaColumnCatalog, runID string, cursor runForkEventCursor, entities []RunForkEntityState, pending []RunForkPendingWork) (runForkAdmissionEvidence, error) {
+	facts, err := s.loadRunForkSourceFacts(ctx, runID, cursor, entities)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
+	relevantTimer, err := s.hasRunForkRelevantTimer(ctx, catalog, facts, cursor)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
+	relevantRoute, err := s.hasRunForkRelevantRoute(ctx, catalog, facts, cursor)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
+	activeSession := runForkPendingReferencesActiveSession(pending)
+	if !activeSession {
+		activeSession, err = s.hasRunForkActiveSession(ctx, catalog, runID, cursor)
+		if err != nil {
+			return runForkAdmissionEvidence{}, err
+		}
+	}
+	activeTurn := runForkPendingReferencesActiveSession(pending)
+	if !activeTurn {
+		activeTurn, err = s.hasRunForkActiveTurn(ctx, catalog, runID, cursor)
+		if err != nil {
+			return runForkAdmissionEvidence{}, err
+		}
+	}
+	return runForkAdmissionEvidence{
+		Pending:       pending,
+		RelevantTimer: relevantTimer,
+		RelevantRoute: relevantRoute,
+		ActiveSession: activeSession,
+		ActiveTurn:    activeTurn,
+	}, nil
+}
+
+func (s *PostgresStore) loadRunForkSourceFacts(ctx context.Context, runID string, cursor runForkEventCursor, entities []RunForkEntityState) (runForkSourceFacts, error) {
+	entitySet := map[string]struct{}{}
+	flowSet := map[string]struct{}{}
+	for _, entity := range entities {
+		if entityID := strings.TrimSpace(entity.EntityID); entityID != "" {
+			entitySet[entityID] = struct{}{}
+		}
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT COALESCE(entity_id::text, ''), COALESCE(flow_instance, '')
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND (created_at, event_id) <= ($2::timestamptz, $3::uuid)
+	`, runID, cursor.CreatedAt, cursor.EventID)
+	if err != nil {
+		return runForkSourceFacts{}, fmt.Errorf("load fork source facts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var entityID, flowInstance string
+		if err := rows.Scan(&entityID, &flowInstance); err != nil {
+			return runForkSourceFacts{}, fmt.Errorf("scan fork source facts: %w", err)
+		}
+		if entityID = strings.TrimSpace(entityID); entityID != "" {
+			entitySet[entityID] = struct{}{}
+		}
+		if flowInstance = strings.TrimSpace(flowInstance); flowInstance != "" {
+			flowSet[flowInstance] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return runForkSourceFacts{}, fmt.Errorf("read fork source facts: %w", err)
+	}
+	return runForkSourceFacts{
+		EntityIDs:     stringSetValues(entitySet),
+		FlowInstances: stringSetValues(flowSet),
+	}, nil
+}
+
+func (s *PostgresStore) hasRunForkRelevantTimer(ctx context.Context, catalog schemaColumnCatalog, facts runForkSourceFacts, cursor runForkEventCursor) (bool, error) {
+	if !catalog.hasColumns("timers", "entity_id", "flow_instance", "created_at") {
+		return false, nil
+	}
+	if len(facts.EntityIDs) == 0 && len(facts.FlowInstances) == 0 {
+		return false, nil
+	}
+	var exists bool
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM timers
+			WHERE created_at <= $1::timestamptz
+			  AND (
+					(entity_id IS NOT NULL AND entity_id::text = ANY($2::text[]))
+					OR
+					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($3::text[]))
+			  )
+		)
+	`, cursor.CreatedAt, pq.Array(facts.EntityIDs), pq.Array(facts.FlowInstances)).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check fork timer blockers: %w", err)
+	}
+	return exists, nil
+}
+
+func (s *PostgresStore) hasRunForkRelevantRoute(ctx context.Context, catalog schemaColumnCatalog, facts runForkSourceFacts, cursor runForkEventCursor) (bool, error) {
+	if !catalog.hasColumns("routing_rules", "flow_instance", "source_flow", "created_at") {
+		return false, nil
+	}
+	if len(facts.FlowInstances) == 0 {
+		return false, nil
+	}
+	var exists bool
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM routing_rules
+			WHERE created_at <= $1::timestamptz
+			  AND (
+					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($2::text[]))
+					OR
+					(COALESCE(source_flow, '') <> '' AND source_flow = ANY($2::text[]))
+			  )
+		)
+	`, cursor.CreatedAt, pq.Array(facts.FlowInstances)).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check fork route blockers: %w", err)
+	}
+	return exists, nil
+}
+
+func (s *PostgresStore) hasRunForkActiveSession(ctx context.Context, catalog schemaColumnCatalog, runID string, cursor runForkEventCursor) (bool, error) {
+	if !catalog.hasColumns("agent_sessions", "run_id", "status", "created_at") {
+		return false, nil
+	}
+	activePredicate := "COALESCE(status, '') IN ('active', 'suspended')"
+	if catalog.hasColumns("agent_sessions", "terminated_at") {
+		activePredicate = "(COALESCE(status, '') IN ('active', 'suspended') OR (COALESCE(status, '') = 'terminated' AND terminated_at > $2::timestamptz))"
+	}
+	var exists bool
+	if err := s.DB.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM agent_sessions
+			WHERE run_id = $1::uuid
+			  AND created_at <= $2::timestamptz
+			  AND %s
+		)
+	`, activePredicate), runID, cursor.CreatedAt).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check fork session blockers: %w", err)
+	}
+	return exists, nil
+}
+
+func (s *PostgresStore) hasRunForkActiveTurn(ctx context.Context, catalog schemaColumnCatalog, runID string, cursor runForkEventCursor) (bool, error) {
+	if !catalog.hasColumns("agent_turns", "run_id", "session_id", "created_at") ||
+		!catalog.hasColumns("agent_sessions", "session_id", "run_id", "status", "created_at") {
+		return false, nil
+	}
+	activePredicate := "COALESCE(s.status, '') IN ('active', 'suspended')"
+	if catalog.hasColumns("agent_sessions", "terminated_at") {
+		activePredicate = "(COALESCE(s.status, '') IN ('active', 'suspended') OR (COALESCE(s.status, '') = 'terminated' AND s.terminated_at > $2::timestamptz))"
+	}
+	var exists bool
+	if err := s.DB.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM agent_turns t
+			INNER JOIN agent_sessions s ON s.session_id = t.session_id
+			WHERE t.run_id = $1::uuid
+			  AND s.run_id = $1::uuid
+			  AND t.created_at <= $2::timestamptz
+			  AND s.created_at <= $2::timestamptz
+			  AND %s
+		)
+	`, activePredicate), runID, cursor.CreatedAt).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check fork active turn blockers: %w", err)
+	}
+	return exists, nil
+}
+
+func runForkUnsupportedBlockers(evidence runForkAdmissionEvidence) []RunForkUnsupportedBlocker {
 	blockers := []RunForkUnsupportedBlocker{}
 	add := func(code, message string) {
 		for _, existing := range blockers {
@@ -509,22 +702,49 @@ func runForkUnsupportedBlockers(catalog schemaColumnCatalog, pending []RunForkPe
 		}
 		blockers = append(blockers, RunForkUnsupportedBlocker{Code: code, Message: message})
 	}
-	if len(pending) > 0 {
+	if runForkHasUnsupportedPendingWork(evidence.Pending) {
 		add("delivery_history_unproven", "event_deliveries stores current delivery state; arbitrary historical delivery transitions at the fork point are not append-only proven")
 	}
-	if catalog.hasTable("timers") {
+	if evidence.RelevantTimer {
 		add("timer_history_unproven", "timers are current-state rows and timer creation/cancellation is not represented in the mutation log")
 	}
-	if catalog.hasTable("routing_rules") {
+	if evidence.RelevantRoute {
 		add("flow_route_history_unproven", "routing_rules are current-state rows and cannot prove historical flow-route membership at the fork point")
 	}
-	for _, item := range pending {
-		if strings.TrimSpace(item.ActiveSessionID) == "" {
-			continue
-		}
-		add("session_history_unproven", "delivery active_session_id references current session rows without append-only session-state proof at the fork point")
-		add("active_turn_history_unproven", "active turn ownership at the fork point cannot be proven from current delivery/session rows alone")
-		break
+	if evidence.ActiveSession {
+		add("session_history_unproven", "source-run session facts reference current session rows without append-only session-state proof at the fork point")
+	}
+	if evidence.ActiveTurn {
+		add("active_turn_history_unproven", "active turn ownership at the fork point cannot be proven from current session/turn rows alone")
 	}
 	return blockers
+}
+
+func runForkHasUnsupportedPendingWork(pending []RunForkPendingWork) bool {
+	for _, item := range pending {
+		if item.Classification != RunForkPendingClassificationDeliveredCompleted {
+			return true
+		}
+	}
+	return false
+}
+
+func runForkPendingReferencesActiveSession(pending []RunForkPendingWork) bool {
+	for _, item := range pending {
+		if strings.TrimSpace(item.ActiveSessionID) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSetValues(set map[string]struct{}) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for value := range set {
+		out = append(out, value)
+	}
+	return out
 }

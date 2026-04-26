@@ -203,12 +203,140 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	}
 	for _, code := range []string{
 		"delivery_history_unproven",
-		"timer_history_unproven",
-		"flow_route_history_unproven",
 		"session_history_unproven",
 		"active_turn_history_unproven",
 	} {
 		if !blockers[code] {
+			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
+		}
+	}
+	for _, code := range []string{"timer_history_unproven", "flow_route_history_unproven"} {
+		if blockers[code] {
+			t.Fatalf("unexpected unrelated blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
+		}
+	}
+}
+
+func TestRunForkPlanner_StateOnlyPlanExecutionReadyWithEmptyAndUnrelatedTimerRouteTables(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000210, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.state', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, runID, eventID, entityID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'planner-test', 'seed', $4)
+	`, runID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed mutation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO timers (
+			timer_name, entity_id, flow_instance, fire_event, fire_at, owner_node, task_type, status, created_at
+		)
+		VALUES ('unrelated', $1::uuid, 'flow-other/1', 'timer.fire', $2, 'other-node', 'timer', 'active', $3)
+	`, uuid.NewString(), at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed unrelated timer: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO routing_rules (
+			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at
+		)
+		VALUES ('other.event', 'node', 'other-node', 'flow-other/1', 'flow-other', true, 'active', $1)
+	`, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed unrelated route: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if !plan.ExecutionReady {
+		t.Fatalf("ExecutionReady = false, want true for state-only plan; blockers=%#v", plan.UnsupportedBlockers)
+	}
+	if plan.UnsupportedBlockerCount != 0 {
+		t.Fatalf("UnsupportedBlockerCount = %d, want 0; blockers=%#v", plan.UnsupportedBlockerCount, plan.UnsupportedBlockers)
+	}
+	if plan.ReconstructedEntityCount != 1 {
+		t.Fatalf("ReconstructedEntityCount = %d, want 1", plan.ReconstructedEntityCount)
+	}
+}
+
+func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000220, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.timer_route', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, runID, eventID, entityID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"waiting"'::jsonb, $3::uuid, 'platform', 'planner-test', 'seed', $4)
+	`, runID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed mutation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO timers (
+			timer_name, entity_id, flow_instance, fire_event, fire_at, owner_node, task_type, status, created_at
+		)
+		VALUES ('relevant', $1::uuid, 'flow-a/1', 'timer.fire', $2, 'node-a', 'timer', 'active', $3)
+	`, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed relevant timer: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO routing_rules (
+			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at
+		)
+		VALUES ('fork.timer_route', 'node', 'node-a', 'flow-a/1', 'flow-a', true, 'active', $1)
+	`, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed relevant route: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if plan.ExecutionReady {
+		t.Fatal("ExecutionReady = true, want false for relevant timer/route facts")
+	}
+	for _, code := range []string{"timer_history_unproven", "flow_route_history_unproven"} {
+		if !runForkTestHasBlocker(plan, code) {
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
 		}
 	}
@@ -447,13 +575,29 @@ func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testi
 	`, eventID, at); err != nil {
 		t.Fatalf("seed receipt-only processing facts: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, started_at, delivered_at, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-done', 'delivered', 0, 'ok', $3, $3, $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed delivered processing fact: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
+		)
+		VALUES ($1::uuid, 'agent', 'agent-done', 'success', 'ok', '{}'::jsonb, $2)
+	`, eventID, at); err != nil {
+		t.Fatalf("seed delivered receipt: %v", err)
+	}
 
 	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	if plan.PendingWorkCount != 2 || len(plan.PendingWork) != 2 {
-		t.Fatalf("pending work count = %d/%d, want 2 receipt-only processing facts; items=%#v", plan.PendingWorkCount, len(plan.PendingWork), plan.PendingWork)
+	if plan.PendingWorkCount != 3 || len(plan.PendingWork) != 3 {
+		t.Fatalf("pending work count = %d/%d, want 3 completed processing facts; items=%#v", plan.PendingWorkCount, len(plan.PendingWork), plan.PendingWork)
 	}
 	got := map[string]RunForkPendingWork{}
 	for _, item := range plan.PendingWork {
@@ -462,12 +606,13 @@ func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testi
 	for key, wantOutcome := range map[string]string{
 		"platform/pipeline": "success",
 		"node/node-a":       "no_op",
+		"agent/agent-done":  "success",
 	} {
 		item, ok := got[key]
 		if !ok {
-			t.Fatalf("missing receipt-only processing fact %s; all=%#v", key, got)
+			t.Fatalf("missing completed processing fact %s; all=%#v", key, got)
 		}
-		if item.DeliveryID != "" {
+		if key != "agent/agent-done" && item.DeliveryID != "" {
 			t.Fatalf("%s delivery_id = %q, want empty for receipt-only row", key, item.DeliveryID)
 		}
 		if item.Classification != RunForkPendingClassificationDeliveredCompleted {
@@ -475,6 +620,75 @@ func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testi
 		}
 		if item.ReceiptOutcome != wantOutcome || item.ReceiptAt == nil {
 			t.Fatalf("%s receipt = outcome %q at %v, want outcome %q with timestamp", key, item.ReceiptOutcome, item.ReceiptAt, wantOutcome)
+		}
+	}
+	if !plan.ExecutionReady {
+		t.Fatalf("ExecutionReady = false, want true for completed-only delivery/receipt facts; blockers=%#v", plan.UnsupportedBlockers)
+	}
+	if runForkTestHasBlocker(plan, "delivery_history_unproven") {
+		t.Fatalf("completed-only delivery/receipt facts emitted delivery blocker: %#v", plan.UnsupportedBlockers)
+	}
+}
+
+func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	sessionID := uuid.NewString()
+	turnID := uuid.NewString()
+	at := time.Unix(1700000290, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.session', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (
+			agent_id, role, model_tier, llm_backend, conversation_mode, created_at
+		)
+		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session', $1)
+	`, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', 'global', 'global', 'session', 'active', $3, $3)
+	`, sessionID, runID, at.Add(-time.Second)); err != nil {
+		t.Fatalf("seed active session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_turns (
+			turn_id, run_id, agent_id, session_id, runtime_mode, trigger_event_id, trigger_event_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'session', $4::uuid, 'fork.session', $5)
+	`, turnID, runID, sessionID, eventID, at); err != nil {
+		t.Fatalf("seed active turn: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if plan.ExecutionReady {
+		t.Fatal("ExecutionReady = true, want false for source-run active session/turn facts")
+	}
+	for _, code := range []string{"session_history_unproven", "active_turn_history_unproven"} {
+		if !runForkTestHasBlocker(plan, code) {
+			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
 		}
 	}
 }
@@ -515,4 +729,13 @@ func TestRunForkPlanner_FailsClosedWhenDeadLettersUnavailable(t *testing.T) {
 	if !strings.Contains(err.Error(), "dead_letters") {
 		t.Fatalf("PlanRunFork error = %v, want dead_letters capability failure", err)
 	}
+}
+
+func runForkTestHasBlocker(plan RunForkPlan, code string) bool {
+	for _, blocker := range plan.UnsupportedBlockers {
+		if blocker.Code == code {
+			return true
+		}
+	}
+	return false
 }
