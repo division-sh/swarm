@@ -830,9 +830,9 @@ func buildInitialPrompt(s *Session, firstMessage string) string {
 		for _, t := range s.Tools {
 			b.WriteString("- ")
 			b.WriteString(t.Name)
-			if t.Description != "" {
+			if delivered := strings.TrimSpace(DeliveredToolDescription(t)); delivered != "" {
 				b.WriteString(": ")
-				b.WriteString(t.Description)
+				b.WriteString(delivered)
 			}
 			b.WriteString("\n")
 		}
