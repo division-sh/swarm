@@ -536,7 +536,7 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 			{Name: "workflow_custom_tool", Description: "global"},
 		},
 		actorDefs: []llm.ToolDefinition{
-			{Name: "query_entities", Description: "actor scoped"},
+			{Name: "query_entities", Description: "actor scoped", Usage: "Use CEL equality with ==."},
 		},
 	}, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
@@ -561,6 +561,9 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 	}
 	if tools[0].Name != "query_entities" {
 		t.Fatalf("tool name = %q, want query_entities", tools[0].Name)
+	}
+	if !strings.Contains(tools[0].Description, "actor scoped\n\nUsage:\nUse CEL equality with ==.") {
+		t.Fatalf("tool description = %q, want usage appended", tools[0].Description)
 	}
 }
 

@@ -54,6 +54,9 @@ type checkerContext struct {
 	toolLoaded   bool
 	toolFindings []Finding
 
+	toolUsageLoaded   bool
+	toolUsageFindings []Finding
+
 	runtimeToolNamesLoaded bool
 	runtimeToolNames       map[string]struct{}
 
@@ -197,6 +200,7 @@ var bootCheckRegistry = []Check{
 	{ID: "required_agents_match", Severity: "error", Run: checkRequiredAgentsMatch},
 	{ID: "handler_field_compliance", Severity: "error", Run: checkHandlerFieldCompliance},
 	{ID: "tool_resolution", Severity: "warning", Run: checkToolResolution},
+	{ID: "platform_tool_usage_hints", Severity: SeverityHardInvalidity, Run: checkPlatformToolUsageHints},
 	{ID: "prompt_exists", Severity: "warning", Run: checkPromptExists},
 	{ID: "produces_drift", Severity: "warning", Run: checkProducesDrift},
 	{ID: "invalid_field_detection", Severity: "error", Run: checkInvalidFieldDetection},
@@ -251,6 +255,7 @@ func checkNodeStateSchemaTypedCounterpart(c *checkerContext) []Finding {
 func checkRequiredAgentsMatch(c *checkerContext) []Finding        { return c.requiredAgentsMatch() }
 func checkHandlerFieldCompliance(c *checkerContext) []Finding     { return c.handlerFieldCompliance() }
 func checkToolResolution(c *checkerContext) []Finding             { return c.toolResolution() }
+func checkPlatformToolUsageHints(c *checkerContext) []Finding     { return c.platformToolUsageHints() }
 func checkPromptExists(c *checkerContext) []Finding               { return c.promptExists() }
 func checkInvalidFieldDetection(c *checkerContext) []Finding      { return c.invalidFieldDetection() }
 func checkPolicyConflictDetection(c *checkerContext) []Finding    { return c.policyConflicts() }
@@ -502,6 +507,30 @@ func (c *checkerContext) toolResolution() []Finding {
 		}
 	}
 	return c.toolFindings
+}
+
+func (c *checkerContext) platformToolUsageHints() []Finding {
+	if c.toolUsageLoaded {
+		return c.toolUsageFindings
+	}
+	c.toolUsageLoaded = true
+	for _, item := range runtimetools.ValidateUsageHintCoverage(c.source, c.mcpDiscovered()) {
+		severity := SeverityLintEvidence
+		if item.Severity == "error" {
+			severity = SeverityHardInvalidity
+		}
+		location := strings.TrimSpace(item.ToolName)
+		if location == "" {
+			location = "runtime-tools"
+		}
+		c.toolUsageFindings = append(c.toolUsageFindings, Finding{
+			CheckID:  "platform_tool_usage_hints",
+			Severity: severity,
+			Message:  item.Message,
+			Location: location,
+		})
+	}
+	return c.toolUsageFindings
 }
 
 func (c *checkerContext) runtimeAvailableToolNames() map[string]struct{} {

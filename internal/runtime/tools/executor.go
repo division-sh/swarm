@@ -194,6 +194,7 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 		filtered = append(filtered, llm.ToolDefinition{
 			Name:        name,
 			Description: strings.TrimSpace(entry.Description),
+			Usage:       strings.TrimSpace(entry.Usage),
 			Schema:      deepCloneJSONValue(entry.InputSchema),
 		})
 	}

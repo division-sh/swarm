@@ -1,0 +1,67 @@
+package llm
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"swarm/internal/config"
+	"swarm/internal/runtime/sessions"
+)
+
+func TestDeliveredToolDescription_AppendsUsageWithoutProtocolExtension(t *testing.T) {
+	def := ToolDefinition{
+		Name:        "query_entities",
+		Description: "Query entity_state rows.",
+		Usage:       "Use CEL equality with ==.",
+	}
+
+	got := DeliveredToolDescription(def)
+	if !strings.Contains(got, "Query entity_state rows.\n\nUsage:\nUse CEL equality with ==.") {
+		t.Fatalf("delivered description = %q", got)
+	}
+}
+
+func TestDeliveredToolDescription_DoesNotDuplicateUsageBlock(t *testing.T) {
+	def := ToolDefinition{
+		Name:        "query_entities",
+		Description: "Query entity_state rows.\n\nUsage:\nUse CEL equality with ==.",
+		Usage:       "Use CEL equality with ==.",
+	}
+
+	got := DeliveredToolDescription(def)
+	if strings.Count(got, "Usage:") != 1 {
+		t.Fatalf("delivered description duplicated usage block: %q", got)
+	}
+}
+
+func TestAnthropicAPIRuntimeBuildRequest_DeliversUsageInToolDescription(t *testing.T) {
+	runtime := NewAnthropicAPIRuntime(&config.Config{
+		LLM: config.LLMConfig{
+			ClaudeAPI: config.ClaudeAPIConfig{DefaultModel: "claude-test"},
+		},
+	}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil)
+	session := &Session{
+		ID: "session-1",
+		Messages: []Message{{
+			Role:    "user",
+			Content: "work",
+		}},
+		Tools: []ToolDefinition{{
+			Name:        "query_entities",
+			Description: "Query entity_state rows.",
+			Usage:       "Use CEL equality with ==.",
+		}},
+	}
+
+	req, err := runtime.buildRequest(context.Background(), session, Message{Role: "user", Content: "continue"})
+	if err != nil {
+		t.Fatalf("buildRequest: %v", err)
+	}
+	if len(req.Tools) != 1 {
+		t.Fatalf("tool count = %d, want 1", len(req.Tools))
+	}
+	if !strings.Contains(req.Tools[0].Description, "\n\nUsage:\nUse CEL equality with ==.") {
+		t.Fatalf("tool description = %q, want usage block", req.Tools[0].Description)
+	}
+}

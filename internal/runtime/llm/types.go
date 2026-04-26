@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"strings"
 
 	models "swarm/internal/runtime/core/actors"
 )
@@ -10,6 +11,26 @@ type ToolDefinition struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Schema      any    `json:"schema,omitempty"`
+	Usage       string `json:"-"`
+}
+
+func DeliveredToolDescription(def ToolDefinition) string {
+	return DescriptionWithUsage(def.Description, def.Usage)
+}
+
+func DescriptionWithUsage(description, usage string) string {
+	description = strings.TrimSpace(description)
+	usage = strings.TrimSpace(usage)
+	if usage == "" {
+		return description
+	}
+	if description == "" {
+		return "Usage:\n" + usage
+	}
+	if strings.Contains(description, "\n\nUsage:\n") {
+		return description
+	}
+	return description + "\n\nUsage:\n" + usage
 }
 
 type Message struct {
