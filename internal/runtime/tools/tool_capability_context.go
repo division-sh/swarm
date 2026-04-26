@@ -17,6 +17,7 @@ func capabilityForTool(actor models.AgentConfig, toolName string, requestAllowed
 		Visible:            decision.allowed,
 		Callable:           decision.allowed,
 		ContextRequirement: toolContextRequirementPolicy(name),
+		StartupProbeMode:   toolStartupProbeModePolicy(name),
 		AuthorizationClass: string(decision.class),
 	}
 	if len(requestAllowed) > 0 {

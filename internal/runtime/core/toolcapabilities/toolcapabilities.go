@@ -20,12 +20,20 @@ const (
 	ContextRequirementTurnContext  ContextRequirement = "turn_context"
 )
 
+type StartupProbeMode string
+
+const (
+	StartupProbeModeVisibilityOnly  StartupProbeMode = "visibility_only"
+	StartupProbeModeCallEmptyObject StartupProbeMode = "call_empty_object"
+)
+
 type Capability struct {
 	Name               string             `json:"name"`
 	Kind               ToolKind           `json:"kind,omitempty"`
 	Visible            bool               `json:"visible"`
 	Callable           bool               `json:"callable"`
 	ContextRequirement ContextRequirement `json:"context_requirement,omitempty"`
+	StartupProbeMode   StartupProbeMode   `json:"startup_probe_mode,omitempty"`
 	DenialReason       string             `json:"denial_reason,omitempty"`
 	AuthorizationClass string             `json:"authorization_class,omitempty"`
 }

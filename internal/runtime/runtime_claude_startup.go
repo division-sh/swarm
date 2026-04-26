@@ -106,8 +106,8 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 			if err != nil {
 				return fmt.Errorf("provider-native startup probe failed for agent %s: %w", agentID, err)
 			}
-			expectedVisible := llm.PlannedCanonicalVisibleToolsForActor(agentCfg, sessionTools)
-			actualVisible := llm.ObservedCanonicalVisibleToolsForActor(agentCfg, sessionTools, probeResp)
+			expectedVisible := llm.PlannedProviderNativeVisibleToolsForActor(agentCfg, sessionTools)
+			actualVisible := llm.ObservedProviderNativeVisibleToolsForActor(agentCfg, sessionTools, probeResp)
 			if !equalSortedStrings(actualVisible, expectedVisible) {
 				return fmt.Errorf("provider-native startup probe returned unexpected visible tool surface for agent %s: expected [%s], got [%s]", agentID, strings.Join(expectedVisible, ", "), strings.Join(actualVisible, ", "))
 			}
@@ -145,9 +145,12 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		if !equalSortedStrings(actualNames, expectedNames) {
 			return fmt.Errorf("mcp tools/list returned unexpected tool surface for agent %s: expected [%s], got [%s]", agentID, strings.Join(expectedNames, ", "), strings.Join(actualNames, ", "))
 		}
-		probeName, ok := selectStartupCallableTool(actualTools, capabilities)
+		probeName, ok, err := selectStartupCallableTool(actualTools, capabilities)
+		if err != nil {
+			return fmt.Errorf("mcp startup probe select callable tool for agent %s: %w", agentID, err)
+		}
 		if !ok {
-			return fmt.Errorf("mcp startup probe found no probe-safe callable non-emit tool for agent %s", agentID)
+			continue
 		}
 		binding, enabled, err = llm.BuildMCPHTTPBinding(agentCtx, cfg, turnStore, &llm.Session{
 			AgentID: agentID,
@@ -244,7 +247,7 @@ func equalSortedStrings(left []string, right []string) bool {
 	return true
 }
 
-func selectStartupCallableTool(tools []runtimemcp.ToolDef, capabilities toolcapabilities.Set) (string, bool) {
+func selectStartupCallableTool(tools []runtimemcp.ToolDef, capabilities toolcapabilities.Set) (string, bool, error) {
 	for _, tool := range tools {
 		name := strings.TrimSpace(tool.Name)
 		if name == "" {
@@ -254,12 +257,15 @@ func selectStartupCallableTool(tools []runtimemcp.ToolDef, capabilities toolcapa
 		if !ok || !capability.Callable || capability.Kind == toolcapabilities.KindEmit {
 			continue
 		}
-		if !schemaAllowsEmptyObjectArguments(tool.InputSchema) {
+		if capability.StartupProbeMode != toolcapabilities.StartupProbeModeCallEmptyObject {
 			continue
 		}
-		return name, true
+		if !schemaAllowsEmptyObjectArguments(tool.InputSchema) {
+			return "", false, fmt.Errorf("tool %s is marked startup-probe call_empty_object but its schema requires arguments", name)
+		}
+		return name, true, nil
 	}
-	return "", false
+	return "", false, nil
 }
 
 func schemaAllowsEmptyObjectArguments(schema any) bool {
