@@ -619,11 +619,11 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 		},
 		Instances: stubInstances{
 			rows: []runtimepipeline.WorkflowInstance{
-				{InstanceID: "wf-1", SubjectID: "subj-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
-				{InstanceID: "wf-2", SubjectID: "subj-1", WorkflowName: "order", CurrentState: "done", UpdatedAt: now.Add(-time.Minute)},
+				{InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
+				{InstanceID: "wf-2", WorkflowName: "order", CurrentState: "done", UpdatedAt: now.Add(-time.Minute)},
 			},
 			byID: map[string]runtimepipeline.WorkflowInstance{
-				"wf-1": {InstanceID: "wf-1", SubjectID: "subj-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
+				"wf-1": {InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
 			},
 		},
 		Runtime: &stubRuntimeControl{},
@@ -706,29 +706,6 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("instance aggregate status=%d body=%s", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/instances/aggregate?group_by=subject_id&subject_id=subj-1", nil)
-	setOperatorAuth(req)
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("instance aggregate by subject status=%d body=%s", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/subjects/subj-1/status", nil)
-	setOperatorAuth(req)
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("subject status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	var subject subjectStatusResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &subject); err != nil {
-		t.Fatalf("unmarshal subject status: %v", err)
-	}
-	if subject.SubjectID != "subj-1" || subject.LatestState != "active" || subject.EntityCount != 2 {
-		t.Fatalf("unexpected subject status: %+v", subject)
 	}
 
 	rec = httptest.NewRecorder()

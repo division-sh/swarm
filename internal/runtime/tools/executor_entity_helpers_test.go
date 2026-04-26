@@ -18,25 +18,24 @@ func TestOrderedEntityFieldNamesFromInput_NormalizesSortsAndDedupes(t *testing.T
 
 func TestEntityStateBaseQuery_OptionallyIncludesFlowInstance(t *testing.T) {
 	payload := map[string]any{
-		"subject_id":    "subject-1",
 		"flow_instance": " review/inst-1 ",
 	}
 
 	clausesWithoutFlow, argsWithoutFlow := entityStateBaseQuery(nil, models.AgentConfig{}, payload, false)
 	whereWithoutFlow := joinEntityStateWhere(clausesWithoutFlow)
-	if whereWithoutFlow != " WHERE subject_id = $1::uuid" {
+	if whereWithoutFlow != "" {
 		t.Fatalf("where without flow = %q", whereWithoutFlow)
 	}
-	if !reflect.DeepEqual(argsWithoutFlow, []any{"subject-1"}) {
+	if !reflect.DeepEqual(argsWithoutFlow, []any{}) {
 		t.Fatalf("args without flow = %#v", argsWithoutFlow)
 	}
 
 	clausesWithFlow, argsWithFlow := entityStateBaseQuery(nil, models.AgentConfig{}, payload, true)
 	whereWithFlow := joinEntityStateWhere(clausesWithFlow)
-	if whereWithFlow != " WHERE subject_id = $1::uuid AND flow_instance = $2" {
+	if whereWithFlow != " WHERE flow_instance = $1" {
 		t.Fatalf("where with flow = %q", whereWithFlow)
 	}
-	if !reflect.DeepEqual(argsWithFlow, []any{"subject-1", "review/inst-1"}) {
+	if !reflect.DeepEqual(argsWithFlow, []any{"review/inst-1"}) {
 		t.Fatalf("args with flow = %#v", argsWithFlow)
 	}
 }
@@ -54,6 +53,10 @@ func TestExistingEntityFlowInstanceSchemaDocumentsRootSemantics(t *testing.T) {
 	createProperties := entries["create_entity"].InputSchema["properties"].(map[string]any)
 	if _, ok := createProperties["subject_id"]; ok {
 		t.Fatalf("create_entity schema should not expose subject_id: %#v", createProperties)
+	}
+	searchProperties := entries["search_entities"].InputSchema["properties"].(map[string]any)
+	if _, ok := searchProperties["subject_id"]; ok {
+		t.Fatalf("search_entities schema should not expose subject_id: %#v", searchProperties)
 	}
 	createFlowSchema := createProperties["flow_instance"].(map[string]any)
 	if _, ok := createFlowSchema["description"]; ok {

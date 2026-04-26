@@ -55,7 +55,6 @@ type catalogExpectedDocument struct {
 		ErrorContains          string                              `yaml:"error_contains"`
 		HandlerOutcome         string                              `yaml:"handler_outcome"`
 		ChainDepthExceeded     bool                                `yaml:"chain_depth_exceeded"`
-		SubjectID              string                              `yaml:"subject_id"`
 		EntityState            string                              `yaml:"entity_state"`
 		EmittedEvents          []string                            `yaml:"emitted_events"`
 		CausalEvents           []string                            `yaml:"causal_events"`
@@ -79,16 +78,14 @@ type catalogExpectedDocument struct {
 }
 
 type catalogExpectedPerEntity struct {
-	HandlerOutcome  string         `yaml:"handler_outcome"`
-	Exists          *bool          `yaml:"exists"`
-	SubjectID       string         `yaml:"subject_id"`
-	SubjectIDIsSelf *bool          `yaml:"subject_id_is_self"`
-	EntityState     string         `yaml:"entity_state"`
-	EntityFields    map[string]any `yaml:"entity_fields"`
-	Gates           map[string]any `yaml:"gates"`
-	EmittedEvents   []string       `yaml:"emitted_events"`
-	CausalEvents    []string       `yaml:"causal_events"`
-	DeadLetter      bool           `yaml:"dead_letter"`
+	HandlerOutcome string         `yaml:"handler_outcome"`
+	Exists         *bool          `yaml:"exists"`
+	EntityState    string         `yaml:"entity_state"`
+	EntityFields   map[string]any `yaml:"entity_fields"`
+	Gates          map[string]any `yaml:"gates"`
+	EmittedEvents  []string       `yaml:"emitted_events"`
+	CausalEvents   []string       `yaml:"causal_events"`
+	DeadLetter     bool           `yaml:"dead_letter"`
 }
 
 type catalogRunResult struct {

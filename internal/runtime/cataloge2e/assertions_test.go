@@ -33,11 +33,11 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	} {
 		if _, err := db.ExecContext(context.Background(), `
 			INSERT INTO entity_state (
-				entity_id, subject_id, flow_instance, entity_type, current_state,
+				entity_id, flow_instance, entity_type, current_state,
 				gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 			)
 			VALUES (
-				$1::uuid, NULL, $2, 'default', $3, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+				$1::uuid, $2, 'default', $3, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 			)
 		`, stmt.entityID, stmt.flow, stmt.state); err != nil {
 			t.Fatalf("insert entity_state %s: %v", stmt.entityID, err)
@@ -223,11 +223,11 @@ func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID
 	t.Helper()
 	if _, err := h.db.ExecContext(context.Background(), `
 		INSERT INTO entity_state (
-			entity_id, subject_id, flow_instance, entity_type, current_state,
+			entity_id, flow_instance, entity_type, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $1::uuid, 'root', 'default', $2,
+			$1::uuid, 'root', 'default', $2,
 			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 		)
 	`, entityID, state); err != nil {

@@ -34,6 +34,9 @@ func TestStateCarrierFromPersistedRoundTrip(t *testing.T) {
 	}
 
 	persistedMetadata := carrier.PersistedMetadata()
+	if _, exists := persistedMetadata["subject_id"]; exists {
+		t.Fatalf("persisted metadata should exclude deprecated subject_id: %#v", persistedMetadata)
+	}
 	if gates, ok := persistedMetadata["gates"].(map[string]any); !ok || gates["ready"] != true {
 		t.Fatalf("persisted metadata gates = %#v", persistedMetadata["gates"])
 	}

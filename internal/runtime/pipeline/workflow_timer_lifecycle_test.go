@@ -636,7 +636,6 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      childEntityID,
-		SubjectID:       rootEntityID,
 		StorageRef:      "child/inst-1",
 		WorkflowName:    "child",
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -644,7 +643,6 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		Metadata: map[string]any{
 			"entity_id":        childEntityID,
 			"flow_path":        "child/inst-1",
-			"subject_id":       rootEntityID,
 			"parent_entity_id": rootEntityID,
 		},
 	}); err != nil {
@@ -652,7 +650,6 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	}
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      grandchildEntityID,
-		SubjectID:       rootEntityID,
 		StorageRef:      "child/grandchild/inst-1",
 		WorkflowName:    "grandchild",
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -660,7 +657,6 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		Metadata: map[string]any{
 			"entity_id":        grandchildEntityID,
 			"flow_path":        "child/grandchild/inst-1",
-			"subject_id":       rootEntityID,
 			"parent_entity_id": childEntityID,
 		},
 	}); err != nil {
@@ -733,7 +729,6 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	}
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      childRowID,
-		SubjectID:       rootEntityID,
 		StorageRef:      childFlowPath,
 		WorkflowName:    "child",
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -741,7 +736,6 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 		Metadata: map[string]any{
 			"entity_id":        childRowID,
 			"flow_path":        childFlowPath,
-			"subject_id":       rootEntityID,
 			"parent_entity_id": rootEntityID,
 		},
 	}); err != nil {
@@ -811,7 +805,6 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	}
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      childRowID,
-		SubjectID:       rootEntityID,
 		StorageRef:      childFlowPath,
 		WorkflowName:    "child",
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -819,7 +812,6 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 		Metadata: map[string]any{
 			"entity_id":        childRowID,
 			"flow_path":        childFlowPath,
-			"subject_id":       rootEntityID,
 			"parent_entity_id": rootEntityID,
 		},
 	}); err != nil {

@@ -1345,19 +1345,16 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 	for _, instance := range []runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      rootEntityID,
-			SubjectID:       rootEntityID,
 			StorageRef:      rootEntityID,
 			WorkflowName:    bundle.WorkflowName(),
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "idle",
 			Metadata: map[string]any{
-				"entity_id":  rootEntityID,
-				"subject_id": rootEntityID,
+				"entity_id": rootEntityID,
 			},
 		},
 		{
 			InstanceID:      childEntityID,
-			SubjectID:       rootEntityID,
 			StorageRef:      "child/inst-1",
 			WorkflowName:    "child",
 			WorkflowVersion: bundle.WorkflowVersion(),
@@ -1365,13 +1362,11 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 			Metadata: map[string]any{
 				"entity_id":        childEntityID,
 				"flow_path":        "child/inst-1",
-				"subject_id":       rootEntityID,
 				"parent_entity_id": rootEntityID,
 			},
 		},
 		{
 			InstanceID:      grandchildEntityID,
-			SubjectID:       rootEntityID,
 			StorageRef:      "child/grandchild/inst-1",
 			WorkflowName:    "grandchild",
 			WorkflowVersion: bundle.WorkflowVersion(),
@@ -1379,7 +1374,6 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 			Metadata: map[string]any{
 				"entity_id":        grandchildEntityID,
 				"flow_path":        "child/grandchild/inst-1",
-				"subject_id":       rootEntityID,
 				"parent_entity_id": childEntityID,
 			},
 		},
@@ -1618,14 +1612,12 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	if err := runtimepipeline.NewWorkflowInstanceStore(db).Upsert(context.Background(), runtimepipeline.WorkflowInstance{
 		InstanceID:      rootEntityID,
-		SubjectID:       rootEntityID,
 		StorageRef:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "pending",
 		Metadata: map[string]any{
-			"entity_id":  rootEntityID,
-			"subject_id": rootEntityID,
+			"entity_id": rootEntityID,
 		},
 	}); err != nil {
 		t.Fatalf("seed root instance: %v", err)

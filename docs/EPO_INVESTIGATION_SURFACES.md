@@ -339,7 +339,6 @@ The current live schema makes these fields especially useful:
   - `runtime_descriptor`
 - `entity_state`
   - `entity_id`
-  - `subject_id`
   - `flow_instance`
   - `entity_type`
   - `slug`

@@ -42,8 +42,8 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected get_entity output: %#v", out)
 	}
-	if got := strings.TrimSpace(asString(created["subject_id"])); got != "" {
-		t.Fatalf("create_entity subject_id = %q, want empty compatibility field", got)
+	if _, ok := created["subject_id"]; ok {
+		t.Fatalf("create_entity returned deprecated subject_id field: %#v", created)
 	}
 	if got := strings.TrimSpace(asString(created["current_state"])); got != "queued" {
 		t.Fatalf("create_entity current_state = %q, want queued", got)
@@ -62,8 +62,8 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	if strings.TrimSpace(asString(entity["flow_instance"])) != "review/inst-1" {
 		t.Fatalf("flow_instance = %#v, want review/inst-1", entity["flow_instance"])
 	}
-	if got := strings.TrimSpace(asString(entity["subject_id"])); got != "" {
-		t.Fatalf("subject_id = %q, want empty compatibility field", got)
+	if _, ok := entity["subject_id"]; ok {
+		t.Fatalf("get_entity returned deprecated subject_id field: %#v", entity)
 	}
 	fields, ok := entity["fields"].(map[string]any)
 	if !ok || strings.TrimSpace(asString(fields["status"])) != "open" {
@@ -805,65 +805,6 @@ func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 	}
 }
 
-func TestEntityTools_GetSubjectStatusAggregatesFlowLocalEntities(t *testing.T) {
-	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
-		"scoring": {
-			SchemaYAML: `
-name: scoring
-mode: static
-initial_state: marginal_review
-states: [marginal_review, killed]
-terminal_states: [killed]
-`,
-		},
-		"validation": {
-			SchemaYAML: `
-name: validation
-mode: static
-initial_state: researching
-states: [researching, killed]
-terminal_states: [killed]
-`,
-		},
-	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"get_subject_status"},
-	}, bundle)
-	subjectID := uuid.NewString()
-	scoringID := uuid.NewString()
-	validationID := uuid.NewString()
-	now := time.Now().UTC().Truncate(time.Second)
-	seedEntityStateRow(t, db, scoringID, subjectID, "scoring/score-1", "vertical", "marginal_review", map[string]any{"status": "open"}, now.Add(-time.Hour))
-	seedEntityStateRow(t, db, validationID, subjectID, "validation/validation-1", "validation_entity", "researching", map[string]any{"status": "open"}, now)
-
-	out, err := exec.Execute(ctx, "get_subject_status", map[string]any{"subject_id": subjectID})
-	if err != nil {
-		t.Fatalf("get_subject_status: %v", err)
-	}
-	status, ok := out.(map[string]any)
-	if !ok {
-		t.Fatalf("expected status map, got %#v", out)
-	}
-	if got := strings.TrimSpace(asString(status["subject_id"])); got != subjectID {
-		t.Fatalf("subject_id = %q, want %q", got, subjectID)
-	}
-	entities, ok := status["entities"].([]map[string]any)
-	if !ok || len(entities) != 2 {
-		t.Fatalf("entities = %#v, want 2 rows", status["entities"])
-	}
-	if got := strings.TrimSpace(asString(status["latest_flow"])); got != "validation" {
-		t.Fatalf("latest_flow = %q, want validation", got)
-	}
-	if got := strings.TrimSpace(asString(status["latest_state"])); got != "researching" {
-		t.Fatalf("latest_state = %q, want researching", got)
-	}
-	if allTerminal, ok := status["all_terminal"].(bool); !ok || allTerminal {
-		t.Fatalf("all_terminal = %#v, want false", status["all_terminal"])
-	}
-}
-
 func TestEntityTools_QueryEntitiesFilterAllowsDeclaredNestedLeaf(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
 	_ = mustCreateEntityID(t, ctx, exec, map[string]any{
@@ -1249,139 +1190,6 @@ signal:
 	re, ok = runtimetools.AsRuntimeError(err)
 	if err == nil || !ok || re.Code != "invalid_tool_input" {
 		t.Fatalf("expected default actor contract to reject target-only field, got %v", err)
-	}
-}
-
-func TestEntityTools_GetSubjectStatusReturnsEmptyForUnknownSubject(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
-	subjectID := uuid.NewString()
-
-	out, err := exec.Execute(ctx, "get_subject_status", map[string]any{"subject_id": subjectID})
-	if err != nil {
-		t.Fatalf("get_subject_status: %v", err)
-	}
-	status, ok := out.(map[string]any)
-	if !ok {
-		t.Fatalf("expected status map, got %#v", out)
-	}
-	entities, ok := status["entities"].([]map[string]any)
-	if !ok || len(entities) != 0 {
-		t.Fatalf("entities = %#v, want empty", status["entities"])
-	}
-	if allTerminal, ok := status["all_terminal"].(bool); !ok || !allTerminal {
-		t.Fatalf("all_terminal = %#v, want true", status["all_terminal"])
-	}
-	if got := strings.TrimSpace(asString(status["latest_flow"])); got != "" {
-		t.Fatalf("latest_flow = %q, want empty", got)
-	}
-	if got := strings.TrimSpace(asString(status["latest_state"])); got != "" {
-		t.Fatalf("latest_state = %q, want empty", got)
-	}
-}
-
-func TestEntityTools_GetSubjectStatusAllTerminalTrueWhenAllFlowsTerminal(t *testing.T) {
-	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
-		"scoring": {
-			SchemaYAML: `
-name: scoring
-mode: static
-initial_state: queued
-states: [queued, killed]
-terminal_states: [killed]
-`,
-		},
-		"validation": {
-			SchemaYAML: `
-name: validation
-mode: static
-initial_state: queued
-states: [queued, killed]
-terminal_states: [killed]
-`,
-		},
-	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"get_subject_status"},
-	}, bundle)
-	subjectID := uuid.NewString()
-	now := time.Now().UTC().Truncate(time.Second)
-	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "scoring/score-1", "vertical", "killed", map[string]any{"status": "closed"}, now)
-	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "validation/validation-1", "validation_entity", "killed", map[string]any{"status": "closed"}, now)
-
-	out, err := exec.Execute(ctx, "get_subject_status", map[string]any{"subject_id": subjectID})
-	if err != nil {
-		t.Fatalf("get_subject_status: %v", err)
-	}
-	status := out.(map[string]any)
-	if allTerminal, ok := status["all_terminal"].(bool); !ok || !allTerminal {
-		t.Fatalf("all_terminal = %#v, want true", status["all_terminal"])
-	}
-}
-
-func TestEntityTools_GetSubjectStatusSingleFlowSubject(t *testing.T) {
-	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
-		"scoring": {
-			SchemaYAML: `
-name: scoring
-mode: static
-initial_state: active
-states: [active, killed]
-terminal_states: [killed]
-`,
-		},
-	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"get_subject_status"},
-	}, bundle)
-	subjectID := uuid.NewString()
-	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, subjectID, "scoring/score-1", "vertical", "active", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
-
-	out, err := exec.Execute(ctx, "get_subject_status", map[string]any{"subject_id": subjectID})
-	if err != nil {
-		t.Fatalf("get_subject_status: %v", err)
-	}
-	status := out.(map[string]any)
-	entities, ok := status["entities"].([]map[string]any)
-	if !ok || len(entities) != 1 {
-		t.Fatalf("entities = %#v, want one row", status["entities"])
-	}
-	if got := strings.TrimSpace(asString(status["latest_flow"])); got != "scoring" {
-		t.Fatalf("latest_flow = %q, want scoring", got)
-	}
-	if got := strings.TrimSpace(asString(status["latest_state"])); got != "active" {
-		t.Fatalf("latest_state = %q, want active", got)
-	}
-}
-
-func TestEntityTools_GetSubjectStatusPrefersDeeperFlowOnEqualEnteredStateAt(t *testing.T) {
-	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-nested-three-levels")
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
-		ID:    "tester",
-		Role:  "operator",
-		Tools: []string{"get_subject_status"},
-	}, bundle)
-	subjectID := uuid.NewString()
-	childID := uuid.NewString()
-	grandchildID := uuid.NewString()
-	sameMoment := time.Now().UTC().Truncate(time.Second)
-	seedEntityStateRow(t, db, childID, subjectID, "child/child-1", "child_entity", "waiting", map[string]any{"status": "open"}, sameMoment)
-	seedEntityStateRow(t, db, grandchildID, subjectID, "child/grandchild/grandchild-1", "grandchild_entity", "ready", map[string]any{"status": "open"}, sameMoment)
-
-	out, err := exec.Execute(ctx, "get_subject_status", map[string]any{"subject_id": subjectID})
-	if err != nil {
-		t.Fatalf("get_subject_status: %v", err)
-	}
-	status := out.(map[string]any)
-	if got := strings.TrimSpace(asString(status["latest_flow"])); got != "grandchild" {
-		t.Fatalf("latest_flow = %q, want grandchild", got)
-	}
-	if got := strings.TrimSpace(asString(status["latest_state"])); got != "ready" {
-		t.Fatalf("latest_state = %q, want ready", got)
 	}
 }
 
@@ -1904,7 +1712,7 @@ func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Exe
 	ctx, exec, _ := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
 		ID:    "tester",
 		Role:  "operator",
-		Tools: []string{"create_entity", "get_entity", "get_subject_status", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
+		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	})
 	return ctx, exec
 }
@@ -1978,7 +1786,7 @@ func newEntityToolTestHarness(t *testing.T) (context.Context, *runtimetools.Exec
 	return newEntityToolTestHarnessWithActor(t, models.AgentConfig{
 		ID:    "tester",
 		Role:  "operator",
-		Tools: []string{"create_entity", "get_entity", "get_subject_status", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
+		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	})
 }
 
@@ -2192,11 +2000,8 @@ terminal_states: [finished, closed, killed]
 	return bundle
 }
 
-func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, subjectID, flowInstance, entityType, currentState string, fields map[string]any, enteredAt time.Time) {
+func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, _ string, flowInstance, entityType, currentState string, fields map[string]any, enteredAt time.Time) {
 	t.Helper()
-	if strings.TrimSpace(subjectID) == "" {
-		subjectID = entityID
-	}
 	if enteredAt.IsZero() {
 		enteredAt = time.Now().UTC()
 	}
@@ -2206,16 +2011,16 @@ func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, subjectID, flowInsta
 	}
 	if _, err := db.Exec(`
 		INSERT INTO entity_state (
-			entity_id, subject_id, flow_instance, entity_type, name,
+			entity_id, flow_instance, entity_type, name,
 			current_state, gates, fields, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3, $4, '',
-			$5, '{}'::jsonb, $6::jsonb, '{}'::jsonb, 1,
-			$7, $7, $7
+			$1::uuid, $2, $3, '',
+			$4, '{}'::jsonb, $5::jsonb, '{}'::jsonb, 1,
+			$6, $6, $6
 		)
-	`, entityID, subjectID, flowInstance, entityType, currentState, string(fieldsJSON), enteredAt); err != nil {
+	`, entityID, flowInstance, entityType, currentState, string(fieldsJSON), enteredAt); err != nil {
 		t.Fatalf("seed entity_state(%s): %v", entityID, err)
 	}
 }

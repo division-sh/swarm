@@ -44,9 +44,7 @@ func TestFlowInstanceIdentity_CreateEntityUsesScopeKeyForPathAndLogicalInstanceF
 	}
 	state := &WorkflowState{
 		EntityID: "11111111-1111-1111-1111-111111111111",
-		Metadata: map[string]any{
-			"subject_id": "11111111-1111-1111-1111-111111111111",
-		},
+		Metadata: map[string]any{},
 	}
 
 	entityID, _ := resolveHandlerEntityIDForFlow(source, "child", handler, state.EntityID, mustEvent("child/validate.start", state.EntityID), state)
@@ -99,7 +97,6 @@ func TestFlowInstanceIdentity_ResolveEmittedEntityID(t *testing.T) {
 		EntityID: "ent-child",
 		Metadata: map[string]any{
 			"flow_path":        "child/inst-1",
-			"subject_id":       "ent-parent",
 			"parent_entity_id": "ent-parent",
 		},
 	}
@@ -115,7 +112,6 @@ func TestFlowInstanceIdentity_ResolveEmittedEntityID(t *testing.T) {
 	rootState := WorkflowState{
 		EntityID: "ent-child",
 		Metadata: map[string]any{
-			"subject_id":       "ent-root",
 			"parent_entity_id": "ent-root",
 		},
 	}
@@ -126,7 +122,6 @@ func TestFlowInstanceIdentity_ResolveEmittedEntityID(t *testing.T) {
 	if got := resolveEmittedEntityID(source, "scoring", "scoring/scoring.requested", WorkflowState{
 		EntityID: "ent-child",
 		Metadata: map[string]any{
-			"subject_id":       "ent-root",
 			"parent_entity_id": "ent-root",
 		},
 	}, mustEvent("vertical.discovered", "ent-root"), "ent-child", "ent-root"); got != "ent-child" {

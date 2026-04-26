@@ -104,7 +104,7 @@ func TestStoredCoordinates_SeparateScopeFromConcretePath(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := Stored(nil, tc.workflowName, tc.flowPath, "", "", "", "")
+			got := Stored(nil, tc.workflowName, tc.flowPath, "", "", "")
 			if got.ScopeKey != tc.wantScope {
 				t.Fatalf("Stored(%q, %q).ScopeKey = %q, want %q", tc.workflowName, tc.flowPath, got.ScopeKey, tc.wantScope)
 			}
@@ -119,7 +119,7 @@ func TestStoredCoordinates_SeparateScopeFromConcretePath(t *testing.T) {
 }
 
 func TestStoredPersisted_KeepsStorageRefSeparateFromSemanticIdentity(t *testing.T) {
-	got, err := StoredPersisted(nil, "child", "11111111-1111-1111-1111-111111111111", "", "11111111-1111-1111-1111-111111111111", "", "", "")
+	got, err := StoredPersisted(nil, "child", "11111111-1111-1111-1111-111111111111", "", "11111111-1111-1111-1111-111111111111", "", "")
 	if err != nil {
 		t.Fatalf("StoredPersisted(static): %v", err)
 	}
@@ -138,7 +138,7 @@ func TestStoredPersisted_KeepsStorageRefSeparateFromSemanticIdentity(t *testing.
 }
 
 func TestStoredPersisted_RejectsInstanceIDThatDisagreesWithConcretePath(t *testing.T) {
-	_, err := StoredPersisted(nil, "grandchild", "child/grandchild/inst-1", "child/grandchild/inst-1", "inst-2", "", "", "")
+	_, err := StoredPersisted(nil, "grandchild", "child/grandchild/inst-1", "child/grandchild/inst-1", "inst-2", "", "")
 	if err == nil {
 		t.Fatal("expected StoredPersisted to reject mismatched instance id")
 	}
@@ -167,7 +167,7 @@ func TestStoredRoute_CanonicalizesScopeInstanceAndPath(t *testing.T) {
 		t.Fatalf("DeriveRoute = %#v, want %#v", derived, route)
 	}
 
-	instance := Stored(nil, "grandchild", "child/grandchild/inst-1", "inst-1", "", "", "")
+	instance := Stored(nil, "grandchild", "child/grandchild/inst-1", "inst-1", "", "")
 	if got := instance.Route(); got != route {
 		t.Fatalf("Instance.Route() = %#v, want %#v", got, route)
 	}

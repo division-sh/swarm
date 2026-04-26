@@ -188,8 +188,8 @@ Future-facing CLI note:
 
 Legacy note:
 
-- `/api/subjects/{id}/status` still exists on current head
-- but `subject` is deprecated and should not be treated as a future-facing `swarm investigate` surface
+- the old subject status API was removed with the post-boundary subject-link cleanup
+- `subject` is deprecated and must not be treated as a future-facing `swarm investigate` surface
 
 These are not only passive read surfaces.
 

@@ -101,8 +101,10 @@ The runtime should reason with these concepts explicitly:
   - persisted entity row id for that flow entity
 - `parent_entity_id`
   - entity that handed off or owns the next local flow entity
-- `subject_id`
-  - business-object lineage id across flow-local entities
+- explicit authored payload/config fields
+  - business correlation carried by product-authored data rather than a platform subject-link primitive
+- `source_event_id`
+  - causal debugging and proof chain across flow-local entities
 
 Key distinction:
 

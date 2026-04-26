@@ -112,7 +112,6 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 
 func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *testing.T) {
 	instance := &WorkflowInstance{
-		SubjectID: "11111111-1111-1111-1111-111111111111",
 		Metadata: map[string]any{
 			"flow_path": "child/inst-1",
 		},
@@ -122,9 +121,6 @@ func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *
 
 	applyEngineStateMutation(instance, mutation, nil, nil, "")
 
-	if got := strings.TrimSpace(instance.SubjectID); got != "11111111-1111-1111-1111-111111111111" {
-		t.Fatalf("SubjectID = %#v, want preserved canonical subject owner", got)
-	}
 	if !workflowStateGatesAsBools(instance.Metadata)["g_ready"] {
 		t.Fatalf("gates = %#v, want g_ready=true", instance.Metadata["gates"])
 	}
@@ -163,9 +159,7 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 		WorkflowName:    "root",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",
-		Metadata: map[string]any{
-			"subject_id": entityID,
-		},
+		Metadata:        map[string]any{},
 	}); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
@@ -213,11 +207,9 @@ func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeacti
 
 	const flowPath = "review/inst-1"
 	entityID := FlowInstanceEntityID(flowPath)
-	const subjectID = "11111111-1111-1111-1111-111111111111"
 	const parentEntityID = "22222222-2222-2222-2222-222222222222"
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      "inst-1",
-		SubjectID:       subjectID,
 		StorageRef:      flowPath,
 		WorkflowName:    "review",
 		WorkflowVersion: "v-test",
@@ -226,7 +218,6 @@ func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeacti
 			"entity_id":        entityID,
 			"instance_id":      "inst-1",
 			"flow_path":        flowPath,
-			"subject_id":       subjectID,
 			"parent_entity_id": parentEntityID,
 		},
 	}); err != nil {
@@ -331,14 +322,12 @@ func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumula
 
 func TestApplyEngineStateMutationDoesNotCaptureSubjectIDFromMetadata(t *testing.T) {
 	instance := &WorkflowInstance{}
-	mutation := testEngineStateMutation(map[string]any{
-		"subject_id": "11111111-1111-1111-1111-111111111111",
-	}, nil, nil)
+	mutation := testEngineStateMutation(map[string]any{}, nil, nil)
 
 	applyEngineStateMutation(instance, mutation, nil, nil, "")
 
-	if got := instance.SubjectID; got != "" {
-		t.Fatalf("SubjectID = %q, want no propagated subject id", got)
+	if got := strings.TrimSpace(asString(instance.Metadata["subject_id"])); got != "" {
+		t.Fatalf("metadata subject_id = %q, want removed", got)
 	}
 }
 
@@ -371,14 +360,11 @@ func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
 	entityID := "11111111-1111-1111-1111-111111111111"
 	if err := store.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      entityID,
-		SubjectID:       entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "flow-a",
 		WorkflowVersion: "1.6.0",
 		CurrentState:    "pending",
-		Metadata: map[string]any{
-			"subject_id": entityID,
-		},
+		Metadata:        map[string]any{},
 	}); err != nil {
 		t.Fatalf("upsert flow-a entity: %v", err)
 	}

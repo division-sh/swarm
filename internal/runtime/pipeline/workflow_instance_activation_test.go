@@ -83,9 +83,6 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 	if captured.Config["priority"] != float64(1) && captured.Config["priority"] != 1 {
 		t.Fatalf("config priority = %#v, want 1", captured.Config["priority"])
 	}
-	if captured.Instance.SubjectID != "" {
-		t.Fatalf("subject id = %q, want empty", captured.Instance.SubjectID)
-	}
 	if captured.Instance.ParentEntityID != "ent-1" {
 		t.Fatalf("parent entity id = %q, want ent-1", captured.Instance.ParentEntityID)
 	}
@@ -204,7 +201,6 @@ func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T
 			EntityID: "ent-child",
 			Metadata: map[string]any{
 				"flow_path":        "child/inst-1",
-				"subject_id":       "ent-parent",
 				"parent_entity_id": "ent-parent",
 			},
 		},
@@ -262,7 +258,6 @@ pins:
 		State: WorkflowState{
 			EntityID: "ent-child",
 			Metadata: map[string]any{
-				"subject_id":       "ent-root",
 				"parent_entity_id": "ent-root",
 			},
 		},

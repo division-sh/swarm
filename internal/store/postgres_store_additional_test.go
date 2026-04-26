@@ -699,7 +699,7 @@ func TestPostgresStore_EnsureSchemaTables_PhasesConversationAuditRunIDCompatibil
 	}
 }
 
-func TestPostgresStore_EnsureSchemaTables_PhasesEntitySubjectIDCompatibilityBeforeDependentDDL(t *testing.T) {
+func TestPostgresStore_EnsureSchemaTables_DropsDeprecatedEntitySubjectCompatibility(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -709,10 +709,14 @@ func TestPostgresStore_EnsureSchemaTables_PhasesEntitySubjectIDCompatibilityBefo
 	}
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE entity_state (
-			entity_id UUID PRIMARY KEY
+			entity_id UUID PRIMARY KEY,
+			subject_id UUID
 		)
 	`); err != nil {
 		t.Fatalf("create legacy entity_state: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE INDEX idx_entity_subject ON entity_state(subject_id) WHERE subject_id IS NOT NULL`); err != nil {
+		t.Fatalf("create legacy idx_entity_subject: %v", err)
 	}
 
 	var spec runtimecontracts.PlatformSpecDocument
@@ -721,15 +725,15 @@ func TestPostgresStore_EnsureSchemaTables_PhasesEntitySubjectIDCompatibilityBefo
 		DDL         string `yaml:"ddl"`
 	}{
 		"entity_state": {
-			DDL: "CREATE TABLE IF NOT EXISTS entity_state (\n    entity_id UUID PRIMARY KEY,\n    subject_id UUID\n);\nCREATE INDEX IF NOT EXISTS idx_entity_subject ON entity_state(subject_id) WHERE subject_id IS NOT NULL;",
+			DDL: "CREATE TABLE IF NOT EXISTS entity_state (\n    entity_id UUID PRIMARY KEY\n);",
 		},
 	}
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs(entity_state dependent ddl): %v", err)
+		t.Fatalf("GeneratePlatformTableDDLs(entity_state ddl): %v", err)
 	}
 	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
-		t.Fatalf("EnsureSchemaTables(entity_state dependent ddl): %v", err)
+		t.Fatalf("EnsureSchemaTables(entity_state ddl): %v", err)
 	}
 
 	var (
@@ -747,11 +751,11 @@ func TestPostgresStore_EnsureSchemaTables_PhasesEntitySubjectIDCompatibilityBefo
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(to_regclass('idx_entity_subject')::text, '')`).Scan(&indexName); err != nil {
 		t.Fatalf("check idx_entity_subject: %v", err)
 	}
-	if !hasSubjectID {
-		t.Fatal("subject_id column missing after EnsureSchemaTables")
+	if hasSubjectID {
+		t.Fatal("subject_id column still exists after EnsureSchemaTables")
 	}
-	if indexName != "idx_entity_subject" {
-		t.Fatalf("idx_entity_subject regclass = %q, want idx_entity_subject", indexName)
+	if indexName != "" {
+		t.Fatalf("idx_entity_subject regclass = %q, want dropped", indexName)
 	}
 }
 

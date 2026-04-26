@@ -775,7 +775,6 @@ func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReade
 		WorkflowVersion: module.SemanticSource().WorkflowVersion(),
 		CurrentState:    "collecting",
 		Metadata: map[string]any{
-			"subject_id":     entityID,
 			"expected_count": 3,
 		},
 	}); err != nil {

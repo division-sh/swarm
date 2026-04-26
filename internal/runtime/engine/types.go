@@ -62,6 +62,7 @@ func (c StateCarrier) EntityContext(entityID identity.EntityID, currentState, wo
 	if out == nil {
 		out = map[string]any{}
 	}
+	delete(out, "subject_id")
 	out["entity_id"] = entityID.String()
 	out["current_state"] = strings.TrimSpace(currentState)
 	out["workflow_name"] = strings.TrimSpace(workflowName)
@@ -75,6 +76,7 @@ func (c StateCarrier) PersistedMetadata() map[string]any {
 	if out == nil {
 		out = map[string]any{}
 	}
+	delete(out, "subject_id")
 	if len(c.Gates) == 0 {
 		delete(out, "gates")
 		return out

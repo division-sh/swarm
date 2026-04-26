@@ -513,8 +513,8 @@ Likely causes:
 Current mitigations:
 
 - flow-scoped entity model
-- `subject_id` lineage
-- subject-aware status views
+- explicit business-correlation payload/config fields
+- source-event causal-chain proof
 
 Improvement items:
 
