@@ -991,6 +991,92 @@ signal:
 	}
 }
 
+func TestEntityTools_RootActorImplicitReadToolsDoNotReadChildFlowRows(t *testing.T) {
+	actor := models.AgentConfig{
+		ID:    "rooter",
+		Role:  "rooter",
+		Tools: []string{"query_entities", "search_entities", "query_metrics"},
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	root := t.TempDir()
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	writeEntityToolFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: root-read-bundle
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+`)
+	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-read-bundle\n")
+	writeEntityToolFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+root_subject:
+  status: text
+  score: integer
+`)
+	writeEntityToolFixtureFile(t, filepath.Join(root, "agents.yaml"), entityToolAgentYAML(actor))
+	writeEntityToolFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+mode: static
+initial_state: active
+states: [active, done]
+terminal_states: [done]
+`)
+	writeEntityToolFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
+child_subject:
+  status: text
+  score: integer
+`)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", root, err)
+	}
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	rootID := uuid.NewString()
+	childID := uuid.NewString()
+	seedEntityStateRow(t, db, rootID, rootID, "", "root_subject", "active", map[string]any{
+		"status": "root",
+		"score":  7,
+	}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, db, childID, childID, "child/run-1", "child_subject", "active", map[string]any{
+		"status": "child",
+		"score":  99,
+	}, time.Now().UTC().Truncate(time.Second))
+
+	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"select": []string{"status", "score"},
+		"limit":  10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities root actor: %v", err)
+	}
+	queryRows := queryOut.(map[string]any)["results"].([]map[string]any)
+	if len(queryRows) != 1 || strings.TrimSpace(asString(queryRows[0]["entity_id"])) != rootID {
+		t.Fatalf("query_entities rows = %#v, want only root row %s", queryRows, rootID)
+	}
+
+	searchOut, err := exec.Execute(ctx, "search_entities", map[string]any{"limit": 10})
+	if err != nil {
+		t.Fatalf("search_entities root actor: %v", err)
+	}
+	searchRows := searchOut.(map[string]any)["results"].([]map[string]any)
+	if len(searchRows) != 1 || strings.TrimSpace(asString(searchRows[0]["entity_id"])) != rootID {
+		t.Fatalf("search_entities rows = %#v, want only root row %s", searchRows, rootID)
+	}
+	if total := searchOut.(map[string]any)["total"].(int); total != 1 {
+		t.Fatalf("search_entities total = %d, want 1", total)
+	}
+
+	metricOut, err := exec.Execute(ctx, "query_metrics", map[string]any{"metric": "count"})
+	if err != nil {
+		t.Fatalf("query_metrics root actor: %v", err)
+	}
+	if got := testNumericValue(metricOut.(map[string]any)["value"]); got != 1 {
+		t.Fatalf("query_metrics count = %#v, want 1", metricOut)
+	}
+}
+
 func TestEntityTools_BracketListTypeRefsAcrossConsumers(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:    "validator",

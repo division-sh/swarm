@@ -50,6 +50,19 @@ func entityReadRowOwnedByActor(source semanticview.Source, actorID string, row m
 	return entityReadContractOwnedByActor(source, actorID, contract)
 }
 
+func filterEntityReadRowsForActor(source semanticview.Source, actorID string, rows []map[string]any) []map[string]any {
+	if len(rows) == 0 {
+		return rows
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if entityReadRowOwnedByActor(source, actorID, row) {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 func enforceEntityReadOwnership(source semanticview.Source, actor models.AgentConfig, entityID string, row map[string]any, operation string) error {
 	if entityReadRowOwnedByActor(source, actor.ID, row) {
 		return nil

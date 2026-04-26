@@ -69,6 +69,7 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.materialize", false, err, "materialize query results")
 	}
+	rows = filterEntityReadRowsForActor(source, actor.ID, rows)
 	total := len(rows)
 	if offset >= len(rows) {
 		rows = []map[string]any{}
@@ -104,6 +105,7 @@ func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConf
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_entities.materialize", false, err, "materialize query results")
 	}
+	rows = filterEntityReadRowsForActor(source, actor.ID, rows)
 	filtered, err := filterEntityStateRowsCEL(strings.TrimSpace(asString(payload["filter"])), rows, schema)
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.filter", false, err, "evaluate CEL filter")
@@ -166,6 +168,7 @@ func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfi
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_metrics.materialize", false, err, "materialize query results")
 	}
+	rows = filterEntityReadRowsForActor(source, actor.ID, rows)
 	filtered, err := filterEntityStateRowsCEL(strings.TrimSpace(asString(payload["filter"])), rows, schema)
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.filter", false, err, "evaluate CEL filter")
