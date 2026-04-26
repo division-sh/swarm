@@ -295,6 +295,69 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	}
 }
 
+func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000260, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, started_at, delivered_at, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'agent', 'completed-after-fork', 'delivered', 0, 'ok', $3, $4, $3),
+			($1::uuid, $2::uuid, 'agent', 'started-after-fork', 'delivered', 0, 'ok', $4, $5, $3)
+	`, runID, eventID, at, at.Add(time.Minute), at.Add(2*time.Minute)); err != nil {
+		t.Fatalf("seed deliveries: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	got := map[string]RunForkPendingWork{}
+	for _, item := range plan.PendingWork {
+		got[item.SubscriberID] = item
+	}
+	inProgress := got["completed-after-fork"]
+	if inProgress.Classification != RunForkPendingClassificationInProgress {
+		t.Fatalf("completed-after-fork classification = %q, want %q; item=%#v", inProgress.Classification, RunForkPendingClassificationInProgress, inProgress)
+	}
+	if inProgress.Status != "in_progress" {
+		t.Fatalf("completed-after-fork status = %q, want in_progress", inProgress.Status)
+	}
+	if inProgress.DeliveredAt != nil {
+		t.Fatalf("completed-after-fork delivered_at = %v, want nil because completion happened after fork", inProgress.DeliveredAt)
+	}
+	pending := got["started-after-fork"]
+	if pending.Classification != RunForkPendingClassificationPending {
+		t.Fatalf("started-after-fork classification = %q, want %q; item=%#v", pending.Classification, RunForkPendingClassificationPending, pending)
+	}
+	if pending.Status != "pending" {
+		t.Fatalf("started-after-fork status = %q, want pending", pending.Status)
+	}
+	if pending.StartedAt != nil || pending.DeliveredAt != nil {
+		t.Fatalf("started-after-fork timestamps = started %v delivered %v, want both nil at fork", pending.StartedAt, pending.DeliveredAt)
+	}
+}
+
 func TestRunForkPlanner_FailsClosedWhenMutationLogUnavailable(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
