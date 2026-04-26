@@ -417,6 +417,49 @@ func TestValidateClaudeMCPToolsForManagedAgents_ComparesProviderNativeSurfaceOnl
 	}
 }
 
+func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedProviderNativeTool(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
+		ID:   "trend-research-agent",
+		Role: "trend_research",
+		NativeTools: runtimeactors.NativeToolConfig{
+			WebSearch: true,
+		},
+		Config: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: []llm.ToolDefinition{
+			{Name: "query_entities", Schema: map[string]any{"type": "object", "properties": map[string]any{}}},
+			{Name: "emit_trend_identified", Schema: map[string]any{"type": "object", "properties": map[string]any{}}},
+		},
+		caps: map[string]toolcapabilities.Capability{
+			"query_entities":        {Name: "query_entities", Visible: true, Callable: true, ContextRequirement: toolcapabilities.ContextRequirementActorContext},
+			"emit_trend_identified": {Name: "emit_trend_identified", Kind: toolcapabilities.KindEmit, Visible: true, Callable: true},
+		},
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{
+		resp: &llm.Response{
+			VisibleTools: []string{"WebSearch", "Bash"},
+		},
+	}
+
+	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, probe, turns, exec, manager)
+	if err == nil || !strings.Contains(err.Error(), "unexpected visible tool surface") {
+		t.Fatalf("expected provider-native visible-surface mismatch, got %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"trend-research-agent"}) {
+		t.Fatalf("probe calls = %#v, want startup visible-surface probe", probe.calls)
+	}
+	if len(exec.executed) != 0 {
+		t.Fatalf("executed = %#v, want no MCP startup probe after provider-native mismatch", exec.executed)
+	}
+}
+
 func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenNativeBuiltinVisibleSurfaceMismatches(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.RuntimeMode = "cli_test"
