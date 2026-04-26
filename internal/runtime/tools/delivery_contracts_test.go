@@ -52,6 +52,9 @@ review_subject:
 	if _, ok := props["entity_type"]; ok {
 		t.Fatalf("create_entity schema should not expose entity_type: %#v", props)
 	}
+	if _, ok := props["subject_id"]; ok {
+		t.Fatalf("create_entity schema should not expose subject_id: %#v", props)
+	}
 	fields, _ := props["fields"].(map[string]any)
 	fieldProps, _ := fields["properties"].(map[string]any)
 	if _, ok := fieldProps["status"]; !ok {

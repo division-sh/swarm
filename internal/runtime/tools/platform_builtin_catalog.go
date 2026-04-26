@@ -76,7 +76,6 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 			Category:    "entity_persistence",
 			Description: "Create a new entity_state row from the inferred flow-owned contract.",
 			InputSchema: ObjectSchema(map[string]any{
-				"subject_id":    map[string]any{"type": "string"},
 				"flow_instance": map[string]any{"type": "string"},
 				"name":          map[string]any{"type": "string"},
 				"initial_state": map[string]any{"type": "string"},
@@ -181,7 +180,6 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 			Category:    "entity_persistence",
 			Description: "Create a new entity_state row from the inferred flow-owned contract.",
 			InputSchema: ObjectSchema(map[string]any{
-				"subject_id":    map[string]any{"type": "string"},
 				"flow_instance": map[string]any{"type": "string"},
 				"name":          map[string]any{"type": "string"},
 				"initial_state": map[string]any{"type": "string"},
