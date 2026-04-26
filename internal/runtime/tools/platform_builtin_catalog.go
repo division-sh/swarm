@@ -25,10 +25,10 @@ func builtinRegisteredTools(source semanticview.Source, actor *models.AgentConfi
 }
 
 func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.AgentConfig) map[string]ContractSchemaEntry {
-	readTargetSchema := entityReadTargetInputSchema(source)
+	readContracts := actorOwnedReadTargetContracts(source, actor)
+	readTargetSchema := entityReadTargetInputSchemaForContracts(readContracts)
 	out := genericEntityRuntimeContractSchemas(readTargetSchema)
 	if contract, ok := resolveEntityToolContract(source, actor); ok {
-		readContracts := entityruntime.ReadTargetContracts(source)
 		if len(readContracts) == 0 {
 			readContracts = []entityruntime.Contract{contract}
 		}
@@ -265,11 +265,21 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 }
 
 func entityReadTargetInputSchema(source semanticview.Source) map[string]any {
+	return entityReadTargetInputSchemaForContracts(entityruntime.ReadTargetContracts(source))
+}
+
+func entityReadTargetInputSchemaForContracts(contracts []entityruntime.Contract) map[string]any {
 	schema := map[string]any{
 		"type":        "string",
 		"description": "Optional read target entity contract. Use the delivered flow-qualified form, for example flow_id.entity_type; omitted defaults to the caller flow-owned entity contract.",
 	}
-	names := entityruntime.ReadTargetNames(source)
+	names := make([]string, 0, len(contracts))
+	for _, contract := range contracts {
+		if name := entityruntime.CanonicalReadTargetName(contract); name != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
 	if len(names) > 0 {
 		enum := make([]any, 0, len(names))
 		for _, name := range names {

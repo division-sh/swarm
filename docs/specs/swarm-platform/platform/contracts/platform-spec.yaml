@@ -2617,8 +2617,7 @@ flow_model:
       - '2. Destination flow handler receives the event (input pin) with create_entity: true.'
       - '3. Destination creates its OWN entity row — new entity_id, own current_state, own fields.'
       - '4. Data from the source entity is passed via the event payload or create_flow_instance
-        config_from bindings. Compatibility residual: current runtime get_entity may still read the
-        source entity read-only; final primitive-only enforcement is tracked separately.'
+        config_from bindings. Direct runtime entity reads do not cross flow ownership boundaries.'
       enforcement: 'Input pin events that introduce a new business object into a static flow (mode: static)
         with initial_state MUST use create_entity: true on the receiving handler. Boot error otherwise.
         Exemptions: (1) stateless flows (initial_state: null) — no entity state machine. (2) Template flows
@@ -2628,10 +2627,9 @@ flow_model:
       rule: 'save_entity_field checks that the target entity''s stored flow_instance resolves to the same
         semantic ownership scope as the calling agent''s actor flow. A different ownership scope is rejected.
         This is a platform enforcement, not a convention.'
-      reads: 'Compatibility residual: cross-flow entity reads are currently allowed. An agent in validation
-        can get_entity on a scoring entity to read composite_score, dimension evidence, etc. This is
-        read-only — the scoring entity is immutable from validation''s perspective. This read allowance
-        is not the final primitive-only target and is tracked separately from this spec cleanup slice.'
+      reads: 'Cross-flow entity reads through agent-facing entity tools are prohibited. Agents consume
+        declared event payload fields or create_flow_instance config_from bindings for business data,
+        and use source_event_id causal chains for debugging proof.'
     business_correlation:
       description: 'The platform does not create a lineage primitive for a business object that spans
         flows. Products carry business correlation explicitly through declared event payload fields and
