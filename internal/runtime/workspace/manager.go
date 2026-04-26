@@ -289,9 +289,17 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 	}
 
 	if m.db != nil {
-		runID, err := runtimecurrentstate.RequireRunID(ctx)
+		runID, ok, err := runtimecurrentstate.RunIDFromContext(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			out := make([]string, 0, len(set))
+			for c := range set {
+				out = append(out, c)
+			}
+			sort.Strings(out)
+			return out, nil
 		}
 		rows, err := m.db.QueryContext(ctx, `
 			SELECT DISTINCT COALESCE(NULLIF(es.slug, ''), '')
