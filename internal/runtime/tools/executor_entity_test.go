@@ -19,6 +19,7 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
+	"swarm/internal/store"
 	"swarm/internal/testutil"
 )
 
@@ -747,6 +748,90 @@ func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 	}
 	if _, exists := entity["flow_states"]; exists {
 		t.Fatalf("unexpected legacy flow_states in entity payload: %#v", entity)
+	}
+}
+
+func TestEntityTools_GetEntityReturnsForkLocalMaterializedRevision(t *testing.T) {
+	actor := models.AgentConfig{
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"get_entity"},
+	}
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
+types: {}
+`, `
+accounts:
+  status: text
+`)
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000710, 0).UTC()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed source run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.revision', $3::uuid, 'review/inst-1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, sourceRunID, eventID, entityID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $4),
+			($1::uuid, $2::uuid, 'status', 'null'::jsonb, '"open"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $4)
+	`, sourceRunID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed mutations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'review/inst-1', 'default', 'done',
+			'{}'::jsonb, '{"status":"closed"}'::jsonb, '{}'::jsonb, 7, $3, $3, $3
+		)
+	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
+		t.Fatalf("seed source entity_state: %v", err)
+	}
+	result, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+		SQLDB:          db,
+		WorkflowSource: semanticview.Wrap(bundle),
+	})
+	forkCtx := runtimetools.WithActor(runtimecorrelation.WithRunID(context.Background(), result.ForkRunID), actor)
+	out, err := exec.Execute(forkCtx, "get_entity", map[string]any{"entity_id": entityID})
+	if err != nil {
+		t.Fatalf("get_entity fork entity: %v", err)
+	}
+	entity, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected entity map, got %#v", out)
+	}
+	if got := int(testNumericValue(entity["revision"])); got != 1 {
+		t.Fatalf("fork get_entity revision = %d, want fork-local revision 1", got)
+	}
+	fields, ok := entity["fields"].(map[string]any)
+	if !ok || strings.TrimSpace(asString(fields["status"])) != "open" {
+		t.Fatalf("fork get_entity fields = %#v, want status=open", entity["fields"])
+	}
+	if got := strings.TrimSpace(asString(entity["current_state"])); got != "queued" {
+		t.Fatalf("fork get_entity current_state = %q, want queued", got)
 	}
 }
 
