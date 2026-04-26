@@ -131,6 +131,43 @@ func TestGeneratePlatformTableDDLs_ExtractsInlineUniquePartialIndex(t *testing.T
 	}
 }
 
+func TestGeneratePlatformTableDDLs_StripsDeprecatedEntitySubjectDDL(t *testing.T) {
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"entity_state": {
+			DDL: "CREATE TABLE entity_state (\n    entity_id UUID PRIMARY KEY,\n    subject_id UUID,\n    flow_instance TEXT NOT NULL,\n    INDEX idx_entity_subject (subject_id) WHERE subject_id IS NOT NULL,\n    INDEX idx_entity_state_flow (flow_instance)\n);",
+		},
+	}
+
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 platform DDL plan, got %d", len(plans))
+	}
+	for _, statement := range plans[0].Statements {
+		if strings.Contains(statement, "subject_id") {
+			t.Fatalf("deprecated subject_id DDL survived: %q", statement)
+		}
+		if strings.Contains(statement, "idx_entity_subject") {
+			t.Fatalf("deprecated idx_entity_subject DDL survived: %q", statement)
+		}
+	}
+	if plans[0].ColumnCount != 2 {
+		t.Fatalf("column count = %d, want 2", plans[0].ColumnCount)
+	}
+	if len(plans[0].Statements) != 2 {
+		t.Fatalf("statements = %#v, want create table plus surviving flow index", plans[0].Statements)
+	}
+	if got := plans[0].Statements[1]; !strings.Contains(got, `CREATE INDEX IF NOT EXISTS "idx_entity_state_flow" ON "entity_state"(flow_instance)`) {
+		t.Fatalf("expected non-subject inline index to survive, got %q", got)
+	}
+}
+
 func TestGeneratePlatformTableDDLs_OrdersRunsBeforeEvents(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
 	spec.PlatformTables.Tables = map[string]struct {
