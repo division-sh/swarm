@@ -78,6 +78,9 @@ func main() {
 	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) == "status" {
 		os.Exit(runStatusCommand(context.Background(), repo, os.Args[2:], os.Stdout))
 	}
+	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) == "fork" {
+		os.Exit(runForkCommand(context.Background(), repo, os.Args[2:], os.Stdout))
+	}
 	configPath := flag.String("config", "", "Optional path to Swarm runtime config")
 	contractsPath := flag.String("contracts", "", "Path to Swarm contract bundle root")
 	platformSpecPath := flag.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
@@ -321,6 +324,114 @@ type runStatusOptions struct {
 	LogsOnly      bool
 	LogsAllLevels bool
 	Component     string
+}
+
+func runForkCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
+	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	configPath := fs.String("config", "", "Optional path to Swarm runtime config")
+	storeMode := fs.String("store", "postgres", "Store mode: postgres")
+	runID := fs.String("run", "", "Source run ID to plan from")
+	at := fs.String("at", "", "Fork point event UUID or RFC3339 timestamp")
+	dryRun := fs.Bool("dry-run", false, "Plan the fork without mutating runtime state")
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: %v\n", err)
+		}
+		return 2
+	}
+	if !*dryRun {
+		if out != nil {
+			fmt.Fprintln(out, "fork failed: mutating fork execution is not implemented; use --dry-run")
+		}
+		return 2
+	}
+	if err := loadRepoDotEnv(repo); err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: load .env: %v\n", err)
+		}
+		return 1
+	}
+	cfg, err := loadRuntimeConfig(resolvePath(repo, *configPath))
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: load config: %v\n", err)
+		}
+		return 1
+	}
+	stores, err := buildStores(ctx, *storeMode, cfg)
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: init stores: %v\n", err)
+		}
+		return 1
+	}
+	defer closeDB(stores.SQLDB)
+	if stores.Postgres == nil {
+		if out != nil {
+			fmt.Fprintln(out, "fork failed: postgres store required")
+		}
+		return 1
+	}
+	plan, err := stores.Postgres.PlanRunFork(ctx, store.RunForkPlanRequest{
+		SourceRunID: strings.TrimSpace(*runID),
+		At:          strings.TrimSpace(*at),
+	})
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: %v\n", err)
+		}
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(plan); err != nil {
+			fmt.Fprintf(out, "fork failed: encode json: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	printRunForkPlan(out, plan)
+	return 0
+}
+
+func printRunForkPlan(w io.Writer, plan store.RunForkPlan) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, "Fork plan for run %s\n", plan.SourceRunID)
+	if strings.TrimSpace(plan.SourceRunStatus) != "" {
+		fmt.Fprintf(w, "Source Status: %s\n", plan.SourceRunStatus)
+	}
+	fmt.Fprintf(w, "Fork Point: %s (%s) at %s\n", plan.ForkPoint.EventName, plan.ForkPoint.EventID, plan.ForkPoint.Timestamp.Format(time.RFC3339Nano))
+	fmt.Fprintf(w, "Summary: events_at_fork=%d reconstructed_entities=%d pending_work=%d unsupported_blockers=%d execution_ready=%t\n",
+		plan.EventCountAtFork,
+		plan.ReconstructedEntityCount,
+		plan.PendingWorkCount,
+		plan.UnsupportedBlockerCount,
+		plan.ExecutionReady,
+	)
+	if len(plan.UnsupportedBlockers) > 0 {
+		fmt.Fprintln(w, "Unsupported Blockers:")
+		for _, blocker := range plan.UnsupportedBlockers {
+			fmt.Fprintf(w, "  %s: %s\n", blocker.Code, blocker.Message)
+		}
+	}
+	if len(plan.PendingWork) > 0 {
+		fmt.Fprintln(w, "Pending Work:")
+		for _, item := range plan.PendingWork {
+			fmt.Fprintf(w, "  %s %s subscriber=%s/%s status=%s class=%s\n",
+				item.EventID,
+				item.EventName,
+				item.SubscriberType,
+				item.SubscriberID,
+				item.Status,
+				item.Classification,
+			)
+		}
+	}
 }
 
 func runStatusCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
