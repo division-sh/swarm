@@ -65,3 +65,18 @@ func TestAnthropicAPIRuntimeBuildRequest_DeliversUsageInToolDescription(t *testi
 		t.Fatalf("tool description = %q, want usage block", req.Tools[0].Description)
 	}
 }
+
+func TestBuildInitialPrompt_DeliversUsageInPromptTransportFallback(t *testing.T) {
+	prompt := buildInitialPrompt(&Session{
+		SystemPrompt: "system",
+		Tools: []ToolDefinition{{
+			Name:        "query_entities",
+			Description: "Query entity_state rows.",
+			Usage:       "Use CEL equality with ==.",
+		}},
+	}, "continue")
+
+	if !strings.Contains(prompt, "- query_entities: Query entity_state rows.\n\nUsage:\nUse CEL equality with ==.") {
+		t.Fatalf("prompt = %q, want delivered usage in tool description", prompt)
+	}
+}
