@@ -214,6 +214,87 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	}
 }
 
+func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000250, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, started_at, delivered_at, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'node', 'node-dead', 'failed', 1, 'retryable_error', $3, NULL, $3),
+			($1::uuid, $2::uuid, 'node', 'node-ok', 'delivered', 0, 'ok', NULL, $3, $3),
+			($1::uuid, $2::uuid, 'agent', 'agent-ok', 'delivered', 0, 'ok', NULL, $3, $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed deliveries: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
+		)
+		VALUES
+			($1::uuid, 'node', 'node-ok', 'success', 'ok', '{}'::jsonb, $2),
+			($1::uuid, 'agent', 'agent-ok', 'success', 'ok', '{}'::jsonb, $2)
+	`, eventID, at); err != nil {
+		t.Fatalf("seed receipts: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO dead_letters (
+			original_event_id, original_event, original_payload, flow_instance,
+			failure_type, error_message, retry_count, handler_node, created_at
+		)
+		VALUES
+			($1::uuid, 'fork.work', '{}'::jsonb, 'runtime', 'handler_error', 'node failed', 1, 'node-dead', $2),
+			($1::uuid, 'fork.work', '{}'::jsonb, 'runtime', 'retry_exhausted', 'different node failed', 3, 'node-other', $2)
+	`, eventID, at); err != nil {
+		t.Fatalf("seed dead letters: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if plan.PendingWorkCount != 3 || len(plan.PendingWork) != 3 {
+		t.Fatalf("pending work count = %d/%d, want 3 without dead-letter row multiplication; items=%#v", plan.PendingWorkCount, len(plan.PendingWork), plan.PendingWork)
+	}
+	got := map[string]string{}
+	for _, item := range plan.PendingWork {
+		got[item.SubscriberID] = item.Classification
+	}
+	want := map[string]string{
+		"node-dead": RunForkPendingClassificationDeadLetter,
+		"node-ok":   RunForkPendingClassificationDeliveredCompleted,
+		"agent-ok":  RunForkPendingClassificationDeliveredCompleted,
+	}
+	for subscriber, classification := range want {
+		if got[subscriber] != classification {
+			t.Fatalf("classification[%s] = %q, want %q; all=%#v", subscriber, got[subscriber], classification, got)
+		}
+	}
+	if _, ok := got["node-other"]; ok {
+		t.Fatalf("dead-letter-only handler became pending work row; all=%#v", got)
+	}
+}
+
 func TestRunForkPlanner_FailsClosedWhenMutationLogUnavailable(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -230,5 +311,24 @@ func TestRunForkPlanner_FailsClosedWhenMutationLogUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "entity_mutations") {
 		t.Fatalf("PlanRunFork error = %v, want entity_mutations capability failure", err)
+	}
+}
+
+func TestRunForkPlanner_FailsClosedWhenDeadLettersUnavailable(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DROP TABLE dead_letters`); err != nil {
+		t.Fatalf("drop dead_letters: %v", err)
+	}
+	_, err := pg.PlanRunFork(ctx, RunForkPlanRequest{
+		SourceRunID: uuid.NewString(),
+		At:          uuid.NewString(),
+	})
+	if err == nil {
+		t.Fatal("PlanRunFork error = nil, want fail-closed missing dead_letters error")
+	}
+	if !strings.Contains(err.Error(), "dead_letters") {
+		t.Fatalf("PlanRunFork error = %v, want dead_letters capability failure", err)
 	}
 }
