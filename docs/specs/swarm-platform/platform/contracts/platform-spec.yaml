@@ -2625,8 +2625,9 @@ flow_model:
         (mode: template) — entity creation happens via create_flow_instance, not create_entity.'
     cross_flow_writes:
       description: 'Cross-flow entity writes are prohibited by the platform.'
-      rule: 'save_entity_field checks that the target entity''s flow_instance matches the calling agent''s
-        flow. Mismatch = rejected. This is a platform enforcement, not a convention.'
+      rule: 'save_entity_field checks that the target entity''s stored flow_instance resolves to the same
+        semantic ownership scope as the calling agent''s actor flow. A different ownership scope is rejected.
+        This is a platform enforcement, not a convention.'
       reads: 'Compatibility residual: cross-flow entity reads are currently allowed. An agent in validation
         can get_entity on a scoring entity to read composite_score, dimension evidence, etc. This is
         read-only — the scoring entity is immutable from validation''s perspective. This read allowance
