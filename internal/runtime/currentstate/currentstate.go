@@ -15,13 +15,31 @@ type Identity struct {
 }
 
 func RequireRunID(ctx context.Context) (string, error) {
+	runID, ok, err := RunIDFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("entity_state current-state run_id is required")
+	}
+	return runID, nil
+}
+
+func RunIDFromContext(ctx context.Context) (string, bool, error) {
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	if runID == "" {
 		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
 			runID = strings.TrimSpace(inbound.RunID)
 		}
 	}
-	return ValidateRunID(runID)
+	if runID == "" {
+		return "", false, nil
+	}
+	runID, err := ValidateRunID(runID)
+	if err != nil {
+		return "", true, err
+	}
+	return runID, true, nil
 }
 
 func ValidateRunID(runID string) (string, error) {

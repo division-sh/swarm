@@ -11,6 +11,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/testutil"
 )
 
 func TestWorkspaceClassesForSource(t *testing.T) {
@@ -178,6 +179,21 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 	joined := strings.Join(created, " ")
 	if !strings.Contains(joined, "workspaces_flow_shared-work-001:/workspace") {
 		t.Fatalf("expected shared flow workspace volume, got %v", created)
+	}
+}
+
+func TestRuntimeWorkspaceContainersWithoutRunContextReturnsStaticContainers(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	manager := NewDockerManager(db)
+	containers, err := manager.RuntimeWorkspaceContainers(context.Background())
+	if err != nil {
+		t.Fatalf("RuntimeWorkspaceContainers: %v", err)
+	}
+	got := strings.Join(containers, ",")
+	for _, expected := range []string{"swarm-scaffold", "swarm-system"} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("containers = %v, want %s", containers, expected)
+		}
 	}
 }
 

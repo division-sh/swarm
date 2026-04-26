@@ -16,6 +16,16 @@ func TestRequireIdentityRequiresRunID(t *testing.T) {
 	}
 }
 
+func TestRunIDFromContextReportsAbsentRunID(t *testing.T) {
+	runID, ok, err := RunIDFromContext(context.Background())
+	if err != nil {
+		t.Fatalf("RunIDFromContext: %v", err)
+	}
+	if ok || runID != "" {
+		t.Fatalf("RunIDFromContext = (%q, %v), want absent", runID, ok)
+	}
+}
+
 func TestRequireIdentityAcceptsRunScopedEntity(t *testing.T) {
 	runID := uuid.NewString()
 	entityID := uuid.NewString()

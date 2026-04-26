@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -36,6 +37,10 @@ func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID,
 }
 
 func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, provider string) (runtime.InboundTarget, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return runtime.InboundTarget{}, err
+	}
 	entityKey = strings.TrimSpace(entityKey)
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if entityKey == "" {
@@ -44,10 +49,25 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, pro
 	if provider == "" {
 		return runtime.InboundTarget{}, fmt.Errorf("provider is required")
 	}
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	runID, ok, err := runtimecurrentstate.RunIDFromContext(ctx)
 	if err != nil {
 		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: %w", err)
 	}
+	if ok {
+		return s.resolveInboundTargetForRun(ctx, entityKey, provider, runID)
+	}
+	if caps.EntityState != SchemaFlavorCanonical || !caps.EntityRunID {
+		if caps.EntityState != SchemaFlavorCanonical {
+			return runtime.InboundTarget{}, unsupportedSchemaCapability("entity_state", caps.EntityState)
+		}
+		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: entity_state.run_id schema capability is required")
+	}
+
+	return s.resolveInboundTargetUnambiguous(ctx, entityKey, provider)
+}
+
+func (s *PostgresStore) resolveInboundTargetForRun(ctx context.Context, entityKey, provider, runID string) (runtime.InboundTarget, error) {
+	_ = provider
 
 	var target runtime.InboundTarget
 	const q = `
@@ -61,7 +81,7 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, pro
 		LIMIT 1
 	`
 	if err := s.DB.QueryRowContext(ctx, q, entityKey, runID).Scan(&target.EntityID, &target.EntitySlug); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
+		if err == sql.ErrNoRows {
 			return runtime.InboundTarget{}, fmt.Errorf("entity not found for key: %s", entityKey)
 		}
 		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: %w", err)
@@ -70,6 +90,49 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, pro
 		target.EntitySlug = entityKey
 	}
 	return target, nil
+}
+
+func (s *PostgresStore) resolveInboundTargetUnambiguous(ctx context.Context, entityKey, provider string) (runtime.InboundTarget, error) {
+	_ = provider
+
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT
+			entity_id::text,
+			COALESCE(NULLIF(slug, ''), ''),
+			run_id::text
+		FROM entity_state
+		WHERE slug = $1 OR entity_id::text = $1
+		ORDER BY CASE WHEN slug = $1 THEN 0 ELSE 1 END, created_at DESC, updated_at DESC
+		LIMIT 2
+	`, entityKey)
+	if err != nil {
+		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: %w", err)
+	}
+	defer rows.Close()
+
+	var matches []runtime.InboundTarget
+	for rows.Next() {
+		var target runtime.InboundTarget
+		var runID string
+		if err := rows.Scan(&target.EntityID, &target.EntitySlug, &runID); err != nil {
+			return runtime.InboundTarget{}, fmt.Errorf("scan inbound target: %w", err)
+		}
+		if target.EntitySlug == "" {
+			target.EntitySlug = entityKey
+		}
+		matches = append(matches, target)
+	}
+	if err := rows.Err(); err != nil {
+		return runtime.InboundTarget{}, fmt.Errorf("iterate inbound targets: %w", err)
+	}
+	switch len(matches) {
+	case 0:
+		return runtime.InboundTarget{}, fmt.Errorf("entity not found for key: %s", entityKey)
+	case 1:
+		return matches[0], nil
+	default:
+		return runtime.InboundTarget{}, fmt.Errorf("entity key %s is ambiguous across runs; run_id is required", entityKey)
+	}
 }
 
 func (s *PostgresStore) PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error) {
