@@ -99,6 +99,17 @@ func PlannedCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []Tool
 	return plannedCanonicalVisibleToolsForActor(actor, tools)
 }
 
+func ObservedProviderNativeVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition, resp *Response) []string {
+	if resp == nil {
+		return nil
+	}
+	return filterProviderNativeVisibleToolsForActor(actor, tools, resp.VisibleTools)
+}
+
+func PlannedProviderNativeVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
+	return providerNativeCanonicalVisibleToolsForActor(actor, tools)
+}
+
 func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []string, target *workspace.Target, input string) (*Response, error) {
 	timeout := r.effectiveCLITimeout(ctx)
 	if target == nil || !target.Enabled() {

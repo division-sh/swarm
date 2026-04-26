@@ -105,6 +105,10 @@ active_issues:
     title: Outbox sweeper repeatedly fails committed replay scope lookup on supported run
     maps_to:
       - delivery_and_replay_ownership
+  - id: 544
+    title: Startup MCP validation can flake on partial provider-visible tool surface and unsafe query_entities probe
+    maps_to:
+      - transport_policy_and_surface_parity
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -121,6 +125,7 @@ nodes:
       - supported no-read_file turns can emit runtime_read_file follow-up artifacts for oversized tool results even though the same turn surface cannot call read_file
       - oversized file-backed tool results on supported Claude helper turns can leak provider scratch paths back into later runtime read_file calls
       - CLI native tools can still use mixed provider-plus-platform fallback semantics, so visible turn surface does not equal callable provider-native truth for bash, web_search, and file_io
+      - startup validation can compare provider-native init output against the full runtime MCP/local fallback surface and can select ordinary semantic tools as startup probes because their schemas accept empty objects
     representative_issues:
       - 111
       - 136
@@ -129,6 +134,7 @@ nodes:
       - 406
       - 381
       - 444
+      - 544
     common_framing_mistakes:
       too_broad:
         - tool transport is inconsistent

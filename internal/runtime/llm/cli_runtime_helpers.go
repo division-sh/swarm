@@ -482,6 +482,60 @@ func filterCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolD
 	return filtered
 }
 
+func providerNativeCanonicalVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
+	surface := cliExecutionToolSurfaceForActor(actor, tools)
+	if len(surface.ProviderBuiltinTools) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(surface.ProviderBuiltinTools))
+	seen := make(map[string]struct{}, len(surface.ProviderBuiltinTools))
+	for _, name := range surface.ProviderBuiltinTools {
+		canonical := toolidentity.CanonicalName(name)
+		if canonical == "" {
+			continue
+		}
+		if _, ok := seen[canonical]; ok {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		out = append(out, canonical)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func filterProviderNativeVisibleToolsForActor(actor models.AgentConfig, tools []ToolDefinition, observed []string) []string {
+	if len(observed) == 0 {
+		return nil
+	}
+	expected := providerNativeCanonicalVisibleToolsForActor(actor, tools)
+	if len(expected) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(expected))
+	for _, name := range expected {
+		allowed[name] = struct{}{}
+	}
+	filtered := make([]string, 0, len(observed))
+	seen := make(map[string]struct{}, len(observed))
+	for _, name := range observed {
+		canonical := toolidentity.CanonicalName(name)
+		if canonical == "" || isCLIControlToolName(canonical) {
+			continue
+		}
+		if _, ok := allowed[canonical]; !ok {
+			continue
+		}
+		if _, ok := seen[canonical]; ok {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		filtered = append(filtered, canonical)
+	}
+	slices.Sort(filtered)
+	return filtered
+}
+
 func claudeAllowedToolNamesForActor(actor models.AgentConfig, tools []ToolDefinition) []string {
 	surface := cliExecutionToolSurfaceForActor(actor, tools)
 	allowed := make([]string, 0, len(surface.ProviderMCPTools)+len(surface.LocalFallbackTools)+len(surface.ProviderBuiltinTools)+len(claudeControlToolNames()))
