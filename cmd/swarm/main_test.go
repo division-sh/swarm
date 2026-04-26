@@ -401,6 +401,96 @@ func TestRunForkCommand_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
 	}
 }
 
+func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000310, 0).UTC()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.cli.materialize', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, runID, eventID, entityID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'cli-test', 'seed', $4),
+			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"CLI Entity"'::jsonb, $3::uuid, 'platform', 'cli-test', 'seed', $4)
+	`, runID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed mutations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, name,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'CLI Entity',
+			'ready', '{}'::jsonb, '{"name":"CLI Entity"}'::jsonb, '{}'::jsonb, 1,
+			$3, $3, $3
+		)
+	`, runID, entityID, at); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
+	}
+	var buf bytes.Buffer
+	code := runForkCommand(ctx, t.TempDir(), []string{
+		"--materialize-only",
+		"--run", runID,
+		"--at", eventID,
+		"--json",
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+	}
+	var result store.RunForkMaterialization
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("decode fork materialization json: %v\n%s", err, buf.String())
+	}
+	if result.SourceRunID != runID || result.ForkRunID == "" || result.ForkRunStatus != store.RunForkMaterializedStatus {
+		t.Fatalf("materialization result = %#v", result)
+	}
+	var forkState string
+	if err := db.QueryRowContext(ctx, `
+		SELECT current_state
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, result.ForkRunID, entityID).Scan(&forkState); err != nil {
+		t.Fatalf("load fork entity_state: %v", err)
+	}
+	if forkState != "ready" {
+		t.Fatalf("fork state = %q, want ready", forkState)
+	}
+}
+
+func TestRunForkCommand_NonDryRunWithoutMaterializeOnlyStaysFailClosed(t *testing.T) {
+	var buf bytes.Buffer
+	code := runForkCommand(context.Background(), t.TempDir(), []string{
+		"--run", uuid.NewString(),
+		"--at", uuid.NewString(),
+	}, &buf)
+	if code != 2 {
+		t.Fatalf("runForkCommand code=%d, want 2; output=%s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "mutating fork execution is not implemented; use --dry-run") {
+		t.Fatalf("output = %q, want fail-closed fork execution message", buf.String())
+	}
+}
+
 func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 	t.Helper()
 	values := map[string]string{}

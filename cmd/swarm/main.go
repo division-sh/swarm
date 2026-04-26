@@ -334,6 +334,7 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 	runID := fs.String("run", "", "Source run ID to plan from")
 	at := fs.String("at", "", "Fork point event UUID or RFC3339 timestamp")
 	dryRun := fs.Bool("dry-run", false, "Plan the fork without mutating runtime state")
+	materializeOnly := fs.Bool("materialize-only", false, "Create fork run and materialize state snapshot without resuming execution")
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	if err := fs.Parse(args); err != nil {
 		if out != nil {
@@ -341,7 +342,13 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 		}
 		return 2
 	}
-	if !*dryRun {
+	if *dryRun && *materializeOnly {
+		if out != nil {
+			fmt.Fprintln(out, "fork failed: --dry-run and --materialize-only are mutually exclusive")
+		}
+		return 2
+	}
+	if !*dryRun && !*materializeOnly {
 		if out != nil {
 			fmt.Fprintln(out, "fork failed: mutating fork execution is not implemented; use --dry-run")
 		}
@@ -374,6 +381,29 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 		}
 		return 1
 	}
+	if *materializeOnly {
+		result, err := stores.Postgres.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{
+			SourceRunID: strings.TrimSpace(*runID),
+			At:          strings.TrimSpace(*at),
+		})
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: %v\n", err)
+			}
+			return 1
+		}
+		if *asJSON {
+			enc := json.NewEncoder(out)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(result); err != nil {
+				fmt.Fprintf(out, "fork failed: encode json: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+		printRunForkMaterialization(out, result)
+		return 0
+	}
 	plan, err := stores.Postgres.PlanRunFork(ctx, store.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(*runID),
 		At:          strings.TrimSpace(*at),
@@ -395,6 +425,20 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 	}
 	printRunForkPlan(out, plan)
 	return 0
+}
+
+func printRunForkMaterialization(w io.Writer, result store.RunForkMaterialization) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, "Fork materialized for run %s\n", result.SourceRunID)
+	fmt.Fprintf(w, "Fork Run: %s status=%s\n", result.ForkRunID, result.ForkRunStatus)
+	fmt.Fprintf(w, "Fork Point: %s (%s) at %s\n", result.ForkPoint.EventName, result.ForkPoint.EventID, result.ForkPoint.Timestamp.Format(time.RFC3339Nano))
+	fmt.Fprintf(w, "Summary: materialized_entities=%d delivery_resume_blocked=%t source_status_unchanged=%t\n",
+		result.MaterializedEntityCount,
+		result.DeliveryResumeBlocked,
+		result.SourceRunStatusUnchanged,
+	)
 }
 
 func printRunForkPlan(w io.Writer, plan store.RunForkPlan) {
