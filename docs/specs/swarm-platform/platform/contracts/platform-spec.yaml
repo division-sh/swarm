@@ -2642,11 +2642,14 @@ flow_model:
         that event in their own state machine; the platform does not back-propagate terminal state across
         flows.'
     ownership_semantics:
-      description: 'Entity write ownership is determined by the entity_state.flow_instance owner. The
-        platform does not infer cross-flow ownership from path prefixes, parent/child relationships, or
-        shared business correlation data.'
+      description: 'Entity write ownership is determined by the semantic ownership scope derived from
+        entity_state.flow_instance and the actor flow contract. The platform does not infer cross-flow
+        ownership from arbitrary path prefixes, parent/child relationships, or shared business correlation
+        data.'
       rules:
-      - 'A handler may write only entities owned by its own concrete flow instance.'
+      - 'A handler may write only entities whose owner flow resolves to the same semantic ownership
+        scope as the handler''s actor flow. Template instances that share a semantic flow scope are not
+        isolated from each other by instance ID in the current runtime.'
       - 'Parent flows do NOT own descendant flow instance writes. scoring does not own validation
         entities. Root does not own child flow entities.'
       - 'Sibling flows do NOT own each other. scoring and validation are peers — neither can write
