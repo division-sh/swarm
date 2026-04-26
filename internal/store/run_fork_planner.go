@@ -107,6 +107,7 @@ func RequireCanonicalRunForkPlannerCapabilities(caps StoreSchemaCapabilities, ca
 		"events":           {"event_id", "run_id", "event_name", "created_at"},
 		"event_deliveries": {"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count", "reason_code", "active_session_id", "started_at", "delivered_at", "created_at"},
 		"event_receipts":   {"event_id", "subscriber_type", "subscriber_id", "outcome", "reason_code", "processed_at"},
+		"dead_letters":     {"original_event_id", "handler_node", "created_at"},
 		"entity_mutations": {"mutation_id", "run_id", "entity_id", "field", "new_value", "caused_by_event", "created_at"},
 	}
 	for tableName, columns := range required {
@@ -336,7 +337,15 @@ func (s *PostgresStore) loadRunForkPendingWork(ctx context.Context, runID string
 			d.delivered_at,
 			COALESCE(r.outcome, ''),
 			r.processed_at,
-			CASE WHEN dl.original_event_id IS NULL THEN FALSE ELSE TRUE END
+			EXISTS (
+				SELECT 1
+				FROM dead_letters dl
+				WHERE dl.original_event_id = e.event_id
+				  AND dl.created_at <= $2::timestamptz
+				  AND COALESCE(dl.handler_node, '') <> ''
+				  AND COALESCE(d.subscriber_type, '') = 'node'
+				  AND dl.handler_node = d.subscriber_id
+			)
 		FROM events e
 		INNER JOIN event_deliveries d ON d.event_id = e.event_id
 		LEFT JOIN event_receipts r
@@ -344,9 +353,6 @@ func (s *PostgresStore) loadRunForkPendingWork(ctx context.Context, runID string
 		   AND r.subscriber_type = d.subscriber_type
 		   AND r.subscriber_id = d.subscriber_id
 		   AND r.processed_at <= $2::timestamptz
-		LEFT JOIN dead_letters dl
-			ON dl.original_event_id = e.event_id
-		   AND dl.created_at <= $2::timestamptz
 		WHERE e.run_id = $1::uuid
 		  AND (e.created_at, e.event_id) <= ($2::timestamptz, $3::uuid)
 		  AND d.created_at <= $2::timestamptz
