@@ -358,6 +358,63 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 	}
 }
 
+func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000270, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, started_at, delivered_at, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'agent', 'failed-after-fork', 'failed', 2, 'retry_exhausted', $3, $4, $3),
+			($1::uuid, $2::uuid, 'agent', 'pending-then-failed-after-fork', 'failed', 2, 'retry_exhausted', $4, $5, $3)
+	`, runID, eventID, at, at.Add(time.Minute), at.Add(2*time.Minute)); err != nil {
+		t.Fatalf("seed deliveries: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	got := map[string]RunForkPendingWork{}
+	for _, item := range plan.PendingWork {
+		got[item.SubscriberID] = item
+	}
+	inProgress := got["failed-after-fork"]
+	if inProgress.Classification != RunForkPendingClassificationInProgress {
+		t.Fatalf("failed-after-fork classification = %q, want %q; item=%#v", inProgress.Classification, RunForkPendingClassificationInProgress, inProgress)
+	}
+	if inProgress.RetryCount != 0 || inProgress.ReasonCode != "" {
+		t.Fatalf("failed-after-fork terminal metadata leaked: retry_count=%d reason_code=%q", inProgress.RetryCount, inProgress.ReasonCode)
+	}
+	pending := got["pending-then-failed-after-fork"]
+	if pending.Classification != RunForkPendingClassificationPending {
+		t.Fatalf("pending-then-failed-after-fork classification = %q, want %q; item=%#v", pending.Classification, RunForkPendingClassificationPending, pending)
+	}
+	if pending.RetryCount != 0 || pending.ReasonCode != "" {
+		t.Fatalf("pending-then-failed-after-fork terminal metadata leaked: retry_count=%d reason_code=%q", pending.RetryCount, pending.ReasonCode)
+	}
+}
+
 func TestRunForkPlanner_FailsClosedWhenMutationLogUnavailable(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
