@@ -3337,6 +3337,51 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 	_ = time.Second
 }
 
+func TestManagerStore_LoadRoutingRules_DoesNotJoinRunScopedEntityState(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runA := uuid.NewString()
+	runB := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+	`, runA, runB); err != nil {
+		t.Fatalf("insert runs: %v", err)
+	}
+	for _, runID := range []string{runA, runB} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO entity_state (
+				run_id, entity_id, flow_instance, entity_type, slug, name, current_state
+			)
+			VALUES ($1::uuid, $2::uuid, 'shared-flow', 'default', 'shared', 'Shared', 'active')
+		`, runID, entityID); err != nil {
+			t.Fatalf("insert entity_state for run %s: %v", runID, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO routing_rules (
+			event_pattern, subscriber_type, subscriber_id, flow_instance,
+			is_wildcard, is_materialized, status, created_at
+		)
+		VALUES ('work.*', 'agent', 'worker', 'shared-flow', true, false, 'active', now())
+	`); err != nil {
+		t.Fatalf("insert routing rule: %v", err)
+	}
+
+	rules, err := pg.LoadRoutingRules(ctx)
+	if err != nil {
+		t.Fatalf("LoadRoutingRules: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("LoadRoutingRules returned %d rules, want 1: %#v", len(rules), rules)
+	}
+	if rules[0].EntityID != "" {
+		t.Fatalf("LoadRoutingRules entity_id = %q, want empty persisted route identity", rules[0].EntityID)
+	}
+}
+
 func TestManagerStore_EnsureEntitySchema(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

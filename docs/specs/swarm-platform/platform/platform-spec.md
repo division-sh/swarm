@@ -1535,12 +1535,13 @@ CREATE TABLE event_receipts (
 
 ### entity_state
 
-- `description`: Current state of every entity. This IS the entity registry — no separate registry table. slug and name are top-level columns for fast lookup/display without JSONB queries. entity_type distinguishes entity kinds within a flow (e.g., order, instance, ticket). fields JSONB holds all contract-driven entity fields. Generic store reads use entity_state for listing, filtering, and lookup.
+- `description`: Current run-scoped state of every entity. This IS the run-scoped entity registry — no separate registry table. Current-state identity is (run_id, entity_id), allowing source and fork runs to preserve the same entity_id while diverging independently. slug and name are top-level columns for fast lookup/display without JSONB queries. entity_type records the inferred flow-scoped entity contract for the row; callers do not author or choose multiple entity kinds inside one flow in Wave 1. fields JSONB holds all contract-driven entity fields. Generic store reads use entity_state for run-scoped listing, filtering, and lookup.
 ### ddl
 
 ```sql
 CREATE TABLE entity_state (
-    entity_id         UUID PRIMARY KEY,
+    run_id            UUID NOT NULL REFERENCES runs(run_id),
+    entity_id         UUID NOT NULL,
     flow_instance     TEXT NOT NULL,
     entity_type       TEXT NOT NULL DEFAULT 'default',
     slug              TEXT,
@@ -1553,10 +1554,12 @@ CREATE TABLE entity_state (
     entered_state_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    INDEX idx_entity_flow (flow_instance, current_state),
-    INDEX idx_entity_state (current_state),
-    INDEX idx_entity_type (entity_type),
-    INDEX idx_entity_slug (slug) WHERE slug IS NOT NULL
+    PRIMARY KEY (run_id, entity_id),
+    INDEX idx_entity_flow (run_id, flow_instance, current_state),
+    INDEX idx_entity_state (run_id, current_state),
+    INDEX idx_entity_type (run_id, entity_type),
+    INDEX idx_entity_slug (run_id, slug) WHERE slug IS NOT NULL,
+    INDEX idx_entity_cross_run (entity_id)
 );
 ```
 

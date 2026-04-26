@@ -97,7 +97,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]runtimemanager.PersistedRoutingRule, error) {
 	const q = `
 		SELECT
-			COALESCE(es.entity_id::text, ''),
+			'',
 			rr.event_pattern,
 			rr.subscriber_id,
 			rr.subscriber_id,
@@ -106,7 +106,6 @@ func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]runtimemanager.
 			COALESCE(rr.source_flow, ''),
 			0
 		FROM routing_rules rr
-		LEFT JOIN entity_state es ON es.flow_instance = rr.flow_instance
 		WHERE rr.status = 'active'
 		  AND rr.subscriber_type = 'agent'
 		  AND rr.is_materialized = false
