@@ -109,7 +109,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 	if err := ensureRunForkNotAlreadyMaterialized(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID); err != nil {
 		return RunForkMaterialization{}, err
 	}
-	metadata, err := loadRunForkEntityMetadata(ctx, tx, plan.SourceRunID, plan.Entities)
+	metadata, err := loadRunForkEntityMetadata(ctx, tx, plan)
 	if err != nil {
 		return RunForkMaterialization{}, err
 	}
@@ -168,40 +168,105 @@ func ensureRunForkNotAlreadyMaterialized(ctx context.Context, tx *sql.Tx, forkRu
 	return fmt.Errorf("fork materialization already exists for source run %s at event %s: %s", sourceRunID, forkEventID, existing)
 }
 
-func loadRunForkEntityMetadata(ctx context.Context, tx *sql.Tx, sourceRunID string, entities []RunForkEntityState) (map[string]runForkEntityMetadata, error) {
-	out := make(map[string]runForkEntityMetadata, len(entities))
-	for _, entity := range entities {
+func loadRunForkEntityMetadata(ctx context.Context, tx *sql.Tx, plan RunForkPlan) (map[string]runForkEntityMetadata, error) {
+	out := make(map[string]runForkEntityMetadata, len(plan.Entities))
+	for _, entity := range plan.Entities {
 		entityID := strings.TrimSpace(entity.EntityID)
 		if entityID == "" {
 			return nil, fmt.Errorf("fork entity_id is required")
 		}
-		var meta runForkEntityMetadata
-		var slug, name sql.NullString
-		if err := tx.QueryRowContext(ctx, `
-			SELECT COALESCE(flow_instance, ''), COALESCE(entity_type, ''), slug, name
-			FROM entity_state
-			WHERE run_id = $1::uuid
-			  AND entity_id = $2::uuid
-		`, sourceRunID, entityID).Scan(&meta.FlowInstance, &meta.EntityType, &slug, &name); err != nil {
-			if err == sql.ErrNoRows {
-				return nil, fmt.Errorf("source entity_state metadata for entity %s is required for fork materialization", entityID)
-			}
-			return nil, fmt.Errorf("load source entity_state metadata for %s: %w", entityID, err)
+		flowInstance, err := loadRunForkEntityFlowInstance(ctx, tx, plan, entityID)
+		if err != nil {
+			return nil, err
 		}
-		meta.FlowInstance = strings.TrimSpace(meta.FlowInstance)
-		meta.EntityType = strings.TrimSpace(meta.EntityType)
+		entityType, err := runForkEntityTypeFromForkPoint(ctx, tx, plan.SourceRunID, entityID, entity.Fields)
+		if err != nil {
+			return nil, err
+		}
+		meta := runForkEntityMetadata{
+			FlowInstance: flowInstance,
+			EntityType:   entityType,
+			Slug:         stringFieldValue(entity.Fields, "slug"),
+			Name:         stringFieldValue(entity.Fields, "name"),
+		}
 		if meta.FlowInstance == "" || meta.EntityType == "" {
 			return nil, fmt.Errorf("source entity_state metadata for entity %s must include flow_instance and entity_type", entityID)
-		}
-		if slug.Valid {
-			meta.Slug = strings.TrimSpace(slug.String)
-		}
-		if name.Valid {
-			meta.Name = strings.TrimSpace(name.String)
 		}
 		out[entityID] = meta
 	}
 	return out, nil
+}
+
+func loadRunForkEntityFlowInstance(ctx context.Context, tx *sql.Tx, plan RunForkPlan, entityID string) (string, error) {
+	var flowInstance string
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(flow_instance, '')
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+		  AND COALESCE(flow_instance, '') <> ''
+		  AND (created_at, event_id) <= ($3::timestamptz, $4::uuid)
+		ORDER BY created_at DESC, event_id DESC
+		LIMIT 1
+	`, plan.SourceRunID, entityID, plan.ForkPoint.Timestamp, plan.ForkPoint.EventID).Scan(&flowInstance)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("fork-point flow_instance metadata for entity %s is required for fork materialization", entityID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("load fork-point flow_instance metadata for %s: %w", entityID, err)
+	}
+	flowInstance = strings.TrimSpace(flowInstance)
+	if flowInstance == "" {
+		return "", fmt.Errorf("fork-point flow_instance metadata for entity %s is required for fork materialization", entityID)
+	}
+	return flowInstance, nil
+}
+
+func runForkEntityTypeFromForkPoint(ctx context.Context, tx *sql.Tx, sourceRunID, entityID string, fields map[string]any) (string, error) {
+	entityType := stringFieldValue(fields, "entity_type")
+	if entityType != "" {
+		return entityType, nil
+	}
+	var currentEntityType string
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(NULLIF(entity_type, ''), 'default')
+		FROM entity_state
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+	`, sourceRunID, entityID).Scan(&currentEntityType)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("source entity_state metadata for entity %s is required for fork materialization", entityID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("load source entity_type guard for %s: %w", entityID, err)
+	}
+	currentEntityType = strings.TrimSpace(currentEntityType)
+	if currentEntityType == "" || currentEntityType == "default" {
+		return "default", nil
+	}
+	return "", fmt.Errorf("fork-point entity_type metadata for entity %s is required for non-default source entity_type %q", entityID, currentEntityType)
+}
+
+func stringFieldValue(fields map[string]any, key string) string {
+	value, ok := fields[strings.TrimSpace(key)]
+	if !ok {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case json.RawMessage:
+		var out string
+		if err := json.Unmarshal(typed, &out); err == nil {
+			return strings.TrimSpace(out)
+		}
+	case []byte:
+		var out string
+		if err := json.Unmarshal(typed, &out); err == nil {
+			return strings.TrimSpace(out)
+		}
+	}
+	return ""
 }
 
 func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, forkRunID string, plan RunForkPlan, entity RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {

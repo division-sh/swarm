@@ -43,10 +43,14 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		VALUES
 			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $5),
 			($1::uuid, $2::uuid, 'title', 'null'::jsonb, '"before-title"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $5),
+			($1::uuid, $2::uuid, 'slug', 'null'::jsonb, '"before-slug"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $5),
+			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"Before Name"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $5),
 			($1::uuid, $2::uuid, 'gates.ready', 'null'::jsonb, 'true'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $5),
 			($1::uuid, $2::uuid, 'accumulator.score', 'null'::jsonb, '7'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $5),
 			($1::uuid, $2::uuid, 'current_state', '"queued"'::jsonb, '"done"'::jsonb, $4::uuid, 'platform', 'materializer-test', 'after', $6),
-			($1::uuid, $2::uuid, 'title', '"before-title"'::jsonb, '"after-title"'::jsonb, $4::uuid, 'platform', 'materializer-test', 'after', $6)
+			($1::uuid, $2::uuid, 'title', '"before-title"'::jsonb, '"after-title"'::jsonb, $4::uuid, 'platform', 'materializer-test', 'after', $6),
+			($1::uuid, $2::uuid, 'slug', '"before-slug"'::jsonb, '"after-slug"'::jsonb, $4::uuid, 'platform', 'materializer-test', 'after', $6),
+			($1::uuid, $2::uuid, 'name', '"Before Name"'::jsonb, '"After Name"'::jsonb, $4::uuid, 'platform', 'materializer-test', 'after', $6)
 	`, sourceRunID, entityID, firstEventID, secondEventID, at, at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
@@ -57,8 +61,8 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'entity-one', 'Entity One',
-			'done', '{"ready": true}'::jsonb, '{"title": "after-title"}'::jsonb, '{"score": 9}'::jsonb, 4,
+			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'after-slug', 'After Name',
+			'done', '{"ready": true}'::jsonb, '{"title": "after-title", "slug": "after-slug", "name": "After Name"}'::jsonb, '{"score": 9}'::jsonb, 4,
 			$3, $3, $3
 		)
 	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
@@ -119,6 +123,17 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	if forkState != "queued" || forkTitle != "before-title" {
 		t.Fatalf("fork state/title = %s/%s, want queued/before-title", forkState, forkTitle)
 	}
+	var forkSlug, forkName string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(slug, ''), COALESCE(name, '')
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, result.ForkRunID, entityID).Scan(&forkSlug, &forkName); err != nil {
+		t.Fatalf("load fork display metadata: %v", err)
+	}
+	if forkSlug != "before-slug" || forkName != "Before Name" {
+		t.Fatalf("fork display metadata = %s/%s, want before-slug/Before Name", forkSlug, forkName)
+	}
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
 		SET fields = jsonb_set(fields, '{title}', '"fork-title"'::jsonb, true)
@@ -137,7 +152,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		t.Fatalf("source title after fork divergence = %q, want after-title", sourceTitle)
 	}
 
-	for _, field := range []string{"current_state", "title", "gates.ready", "accumulator.score"} {
+	for _, field := range []string{"current_state", "title", "slug", "name", "gates.ready", "accumulator.score"} {
 		var count int
 		if err := db.QueryRowContext(ctx, `
 			SELECT COUNT(*)
