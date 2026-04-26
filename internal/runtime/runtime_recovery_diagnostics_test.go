@@ -10,7 +10,9 @@ import (
 
 	"swarm/internal/config"
 	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -24,6 +26,7 @@ func (startupRecoveryTestLease) Release(context.Context) error { return nil }
 
 type startupRecoveryManagerStore struct {
 	loadErr error
+	agents  []runtimemanager.PersistedAgent
 }
 
 func (s startupRecoveryManagerStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
@@ -34,7 +37,7 @@ func (s startupRecoveryManagerStore) LoadAgents(context.Context) ([]runtimemanag
 	if s.loadErr != nil {
 		return nil, s.loadErr
 	}
-	return nil, nil
+	return append([]runtimemanager.PersistedAgent(nil), s.agents...), nil
 }
 
 func (startupRecoveryManagerStore) MarkAgentTerminated(context.Context, string) error { return nil }
@@ -165,6 +168,7 @@ func (startupRecoveryCapabilityEventStore) SupportsPersistedReplay() bool { retu
 
 type startupRecoveryEventStore struct {
 	missing  []events.PersistedReplayEvent
+	routes   []runtimeflowidentity.Route
 	claimErr error
 }
 
@@ -184,6 +188,18 @@ func (startupRecoveryEventStore) UpsertCommittedReplayScope(context.Context, str
 
 func (startupRecoveryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
+}
+
+func (startupRecoveryEventStore) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
+	return nil
+}
+
+func (startupRecoveryEventStore) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+	return nil
+}
+
+func (s startupRecoveryEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+	return append([]runtimeflowidentity.Route(nil), s.routes...), nil
 }
 
 func (s startupRecoveryEventStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
@@ -386,7 +402,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "active schedules")
 }
 
-func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForReplayEligibleWork(t *testing.T) {
+func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testing.T) {
 	ctx := context.Background()
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
@@ -395,12 +411,20 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForReplayEligibleWork(t
 		missing: []events.PersistedReplayEvent{{
 			Event: events.Event{ID: "evt-1", Type: "support.item_created"},
 		}},
+		routes: []runtimeflowidentity.Route{
+			runtimeflowidentity.DeriveRoute("child", "inst-1"),
+		},
+	}
+	managerStore := &startupRecoveryManagerStore{
+		agents: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{ID: "persisted-agent"},
+		}},
 	}
 
 	rt, err := NewRuntime(ctx, testRecoveryDiagnosticsConfig(false), Stores{
 		SQLDB:        db,
 		EventStore:   eventStore,
-		ManagerStore: &recoveryGuardManagerStore{},
+		ManagerStore: managerStore,
 	}, RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
@@ -410,22 +434,50 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForReplayEligibleWork(t
 		t.Fatalf("NewRuntime: %v", err)
 	}
 
-	err = rt.Start(ctx)
-	if err == nil || !strings.Contains(err.Error(), "events missing pipeline receipts") {
-		t.Fatalf("Start error = %v, want replay-eligible denial", err)
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
 	}
+	defer func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}()
 
-	level, _, _, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, message, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
 	if level != "warn" {
 		t.Fatalf("log level = %q, want warn", level)
 	}
-	if got := detailString(detail["decision_outcome"]); got != "denied" {
-		t.Fatalf("decision_outcome = %q, want denied", got)
+	if message != "Runtime startup allowed with manager recovery skipped" {
+		t.Fatalf("log message = %q, want manager recovery skipped", message)
+	}
+	if errorText != "" {
+		t.Fatalf("log error = %q, want empty", errorText)
+	}
+	if got := detailString(detail["decision_outcome"]); got != "allowed" {
+		t.Fatalf("decision_outcome = %q, want allowed", got)
+	}
+	if got := detailString(detail["decision_reason_code"]); got != string(startupRecoveryReasonDisabledWithManagerWork) {
+		t.Fatalf("decision_reason_code = %q, want %q", got, startupRecoveryReasonDisabledWithManagerWork)
+	}
+	if !detailBool(detail["manager_recoverable_work_present"]) {
+		t.Fatalf("manager_recoverable_work_present = %#v, want true", detail["manager_recoverable_work_present"])
+	}
+	if detailBool(detail["startup_blocking_recoverable_work_present"]) {
+		t.Fatalf("startup_blocking_recoverable_work_present = %#v, want false", detail["startup_blocking_recoverable_work_present"])
+	}
+	if got := detailInt(detail["persisted_agent_count"]); got != 1 {
+		t.Fatalf("persisted_agent_count = %d, want 1", got)
+	}
+	if got := detailInt(detail["persisted_flow_instance_route_count"]); got != 1 {
+		t.Fatalf("persisted_flow_instance_route_count = %d, want 1", got)
 	}
 	if !detailBool(detail["replay_eligible_event_present"]) {
 		t.Fatalf("replay_eligible_event_present = %#v, want true", detail["replay_eligible_event_present"])
 	}
-	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "events missing pipeline receipts")
+	classes := detailClasses(detail["recoverable_work_classes"])
+	assertContainsClass(t, classes, "persisted agents")
+	assertContainsClass(t, classes, "persisted flow instance routes")
+	assertContainsClass(t, classes, "events missing pipeline receipts")
 }
 
 func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {

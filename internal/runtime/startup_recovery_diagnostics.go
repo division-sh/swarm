@@ -21,13 +21,14 @@ const (
 type startupRecoveryReasonCode string
 
 const (
-	startupRecoveryReasonDisabledNoWork   startupRecoveryReasonCode = "recovery_disabled_no_persisted_work"
-	startupRecoveryReasonDisabledWithWork startupRecoveryReasonCode = "recovery_disabled_with_persisted_work"
-	startupRecoveryReasonEnabledNoWork    startupRecoveryReasonCode = "recovery_enabled_no_persisted_work"
-	startupRecoveryReasonEnabledWithWork  startupRecoveryReasonCode = "recovery_enabled_with_persisted_work"
-	startupRecoveryReasonInspectFailed    startupRecoveryReasonCode = "startup_recovery_inspection_failed"
-	startupRecoveryReasonScheduleRestore  startupRecoveryReasonCode = "schedule_restore_failed"
-	startupRecoveryReasonRecoverFailed    startupRecoveryReasonCode = "startup_recovery_failed"
+	startupRecoveryReasonDisabledNoWork          startupRecoveryReasonCode = "recovery_disabled_no_persisted_work"
+	startupRecoveryReasonDisabledWithWork        startupRecoveryReasonCode = "recovery_disabled_with_persisted_work"
+	startupRecoveryReasonDisabledWithManagerWork startupRecoveryReasonCode = "recovery_disabled_with_manager_snapshot_work"
+	startupRecoveryReasonEnabledNoWork           startupRecoveryReasonCode = "recovery_enabled_no_persisted_work"
+	startupRecoveryReasonEnabledWithWork         startupRecoveryReasonCode = "recovery_enabled_with_persisted_work"
+	startupRecoveryReasonInspectFailed           startupRecoveryReasonCode = "startup_recovery_inspection_failed"
+	startupRecoveryReasonScheduleRestore         startupRecoveryReasonCode = "schedule_restore_failed"
+	startupRecoveryReasonRecoverFailed           startupRecoveryReasonCode = "startup_recovery_failed"
 )
 
 type startupRecoverySnapshot struct {
@@ -41,6 +42,10 @@ func (s startupRecoverySnapshot) HasRecoverableWork() bool {
 	return s.ActiveScheduleCount > 0 || s.Manager.HasRecoverableWork()
 }
 
+func (s startupRecoverySnapshot) HasStartupBlockingRecoverableWork() bool {
+	return s.ActiveScheduleCount > 0
+}
+
 func (s startupRecoverySnapshot) WorkClasses() []string {
 	classes := make([]string, 0, 1+len(s.Manager.Classes()))
 	if s.ActiveScheduleCount > 0 {
@@ -51,6 +56,13 @@ func (s startupRecoverySnapshot) WorkClasses() []string {
 	return classes
 }
 
+func (s startupRecoverySnapshot) StartupBlockingWorkClasses() []string {
+	if s.ActiveScheduleCount <= 0 {
+		return nil
+	}
+	return []string{"active schedules"}
+}
+
 func (s startupRecoverySnapshot) Detail() map[string]any {
 	detail := map[string]any{
 		"recovery_on_startup":          s.RecoveryOnStartup,
@@ -59,7 +71,10 @@ func (s startupRecoverySnapshot) Detail() map[string]any {
 	if s.InspectionComplete {
 		detail["active_schedule_count"] = s.ActiveScheduleCount
 		detail["recoverable_work_present"] = s.HasRecoverableWork()
+		detail["startup_blocking_recoverable_work_present"] = s.HasStartupBlockingRecoverableWork()
+		detail["manager_recoverable_work_present"] = s.Manager.HasRecoverableWork()
 		detail["recoverable_work_classes"] = s.WorkClasses()
+		detail["startup_blocking_recoverable_work_classes"] = s.StartupBlockingWorkClasses()
 		for key, value := range s.Manager.Detail() {
 			detail[key] = value
 		}
@@ -96,9 +111,11 @@ func newStartupRecoveryDecisionReport(snapshot startupRecoverySnapshot) startupR
 		report.ReasonCode = startupRecoveryReasonEnabledWithWork
 	case snapshot.RecoveryOnStartup:
 		report.ReasonCode = startupRecoveryReasonEnabledNoWork
-	case snapshot.HasRecoverableWork():
+	case snapshot.HasStartupBlockingRecoverableWork():
 		report.Outcome = startupRecoveryOutcomeDenied
 		report.ReasonCode = startupRecoveryReasonDisabledWithWork
+	case snapshot.Manager.HasRecoverableWork():
+		report.ReasonCode = startupRecoveryReasonDisabledWithManagerWork
 	default:
 		report.ReasonCode = startupRecoveryReasonDisabledNoWork
 	}
@@ -109,7 +126,7 @@ func (r startupRecoveryDecisionReport) denialError() error {
 	if r.Outcome != startupRecoveryOutcomeDenied {
 		return nil
 	}
-	return fmt.Errorf("runtime.recovery_on_startup=false but persisted runtime-owned work exists: %s", strings.Join(r.Snapshot.WorkClasses(), ", "))
+	return fmt.Errorf("runtime.recovery_on_startup=false but persisted runtime-owned work exists: %s", strings.Join(r.Snapshot.StartupBlockingWorkClasses(), ", "))
 }
 
 func (r startupRecoveryDecisionReport) message() string {
@@ -118,6 +135,11 @@ func (r startupRecoveryDecisionReport) message() string {
 		return "Runtime startup denied by recovery admission"
 	case startupRecoveryOutcomeDegraded:
 		return "Runtime startup recovery completed in a degraded state"
+	case startupRecoveryOutcomeAllowed:
+		if r.ReasonCode == startupRecoveryReasonDisabledWithManagerWork {
+			return "Runtime startup allowed with manager recovery skipped"
+		}
+		return "Runtime startup recovery decision recorded"
 	default:
 		return "Runtime startup recovery decision recorded"
 	}
@@ -130,6 +152,9 @@ func (r startupRecoveryDecisionReport) level() string {
 	case startupRecoveryOutcomeDegraded:
 		return "error"
 	default:
+		if r.ReasonCode == startupRecoveryReasonDisabledWithManagerWork {
+			return "warn"
+		}
 		return "info"
 	}
 }
