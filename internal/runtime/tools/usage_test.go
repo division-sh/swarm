@@ -77,3 +77,40 @@ func TestValidateUsageHintCoverage_RejectsGeneratedEmitHintMentioningCEL(t *test
 	}
 	t.Fatalf("findings = %#v, want generated emit CEL usage rejection", findings)
 }
+
+func TestValidateUsageHintCoverage_CoversRoleDerivedEmitTools(t *testing.T) {
+	original := emitToolUsageHint
+	emitToolUsageHint = "Use CEL"
+	t.Cleanup(func() { emitToolUsageHint = original })
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-instance-1": {
+				ID:   "agent-instance-1",
+				Role: "reviewer",
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"reviewer": {
+				Produces: []string{"review.completed"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"review.completed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+				},
+			},
+		},
+	})
+
+	findings := ValidateUsageHintCoverage(source, nil)
+	for _, finding := range findings {
+		if finding.ToolName == "emit_review_completed" && finding.Severity == "error" && strings.Contains(finding.Message, "must not instruct") {
+			return
+		}
+	}
+	t.Fatalf("findings = %#v, want role-derived generated emit usage rejection", findings)
+}

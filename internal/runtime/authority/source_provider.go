@@ -227,8 +227,8 @@ func buildProducerRegistry(source semanticview.Source) map[string][]string {
 		return map[string][]string{}
 	}
 	agentEvents := make(map[string][]string)
-	for role, entry := range source.AgentEntries() {
-		role = canonicalRole(firstNonEmpty(role, entry.Role))
+	for key, entry := range source.AgentEntries() {
+		role := canonicalRole(firstNonEmpty(entry.Role, key))
 		if role == "" {
 			continue
 		}
