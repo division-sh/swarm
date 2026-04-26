@@ -323,7 +323,7 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 		INSERT INTO routing_rules (
 			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at
 		)
-		VALUES ('fork.timer_route', 'node', 'node-a', 'flow-a/1', 'flow-a', true, 'active', $1)
+		VALUES ('fork.timer_route', 'node', 'node-a', 'flow-a/2', 'flow-a', true, 'active', $1)
 	`, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed relevant route: %v", err)
 	}

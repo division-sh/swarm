@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/mutationlog"
 )
 
@@ -99,6 +100,7 @@ type runForkAdmissionEvidence struct {
 type runForkSourceFacts struct {
 	EntityIDs     []string
 	FlowInstances []string
+	SourceFlows   []string
 }
 
 func RequireCanonicalRunForkPlannerCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
@@ -556,6 +558,7 @@ func (s *PostgresStore) loadRunForkAdmissionEvidence(ctx context.Context, catalo
 func (s *PostgresStore) loadRunForkSourceFacts(ctx context.Context, runID string, cursor runForkEventCursor, entities []RunForkEntityState) (runForkSourceFacts, error) {
 	entitySet := map[string]struct{}{}
 	flowSet := map[string]struct{}{}
+	sourceFlowSet := map[string]struct{}{}
 	for _, entity := range entities {
 		if entityID := strings.TrimSpace(entity.EntityID); entityID != "" {
 			entitySet[entityID] = struct{}{}
@@ -581,6 +584,9 @@ func (s *PostgresStore) loadRunForkSourceFacts(ctx context.Context, runID string
 		}
 		if flowInstance = strings.TrimSpace(flowInstance); flowInstance != "" {
 			flowSet[flowInstance] = struct{}{}
+			if sourceFlow := runtimeflowidentity.SemanticScope(flowInstance); sourceFlow != "" {
+				sourceFlowSet[sourceFlow] = struct{}{}
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -589,6 +595,7 @@ func (s *PostgresStore) loadRunForkSourceFacts(ctx context.Context, runID string
 	return runForkSourceFacts{
 		EntityIDs:     stringSetValues(entitySet),
 		FlowInstances: stringSetValues(flowSet),
+		SourceFlows:   stringSetValues(sourceFlowSet),
 	}, nil
 }
 
@@ -621,7 +628,7 @@ func (s *PostgresStore) hasRunForkRelevantRoute(ctx context.Context, catalog sch
 	if !catalog.hasColumns("routing_rules", "flow_instance", "source_flow", "created_at") {
 		return false, nil
 	}
-	if len(facts.FlowInstances) == 0 {
+	if len(facts.FlowInstances) == 0 && len(facts.SourceFlows) == 0 {
 		return false, nil
 	}
 	var exists bool
@@ -633,10 +640,10 @@ func (s *PostgresStore) hasRunForkRelevantRoute(ctx context.Context, catalog sch
 			  AND (
 					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($2::text[]))
 					OR
-					(COALESCE(source_flow, '') <> '' AND source_flow = ANY($2::text[]))
+					(COALESCE(source_flow, '') <> '' AND source_flow = ANY($3::text[]))
 			  )
 		)
-	`, cursor.CreatedAt, pq.Array(facts.FlowInstances)).Scan(&exists); err != nil {
+	`, cursor.CreatedAt, pq.Array(facts.FlowInstances), pq.Array(facts.SourceFlows)).Scan(&exists); err != nil {
 		return false, fmt.Errorf("check fork route blockers: %w", err)
 	}
 	return exists, nil
