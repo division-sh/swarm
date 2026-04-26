@@ -508,13 +508,13 @@ func filterProviderNativeVisibleToolsForActor(actor models.AgentConfig, tools []
 	if len(observed) == 0 {
 		return nil
 	}
-	expected := providerNativeCanonicalVisibleToolsForActor(actor, tools)
-	if len(expected) == 0 {
-		return nil
-	}
-	allowed := make(map[string]struct{}, len(expected))
-	for _, name := range expected {
-		allowed[name] = struct{}{}
+	providerNative := make(map[string]struct{}, len(claudeProviderBuiltinToolNames))
+	for _, name := range claudeProviderBuiltinToolNames {
+		canonical := toolidentity.CanonicalName(name)
+		if canonical == "" {
+			continue
+		}
+		providerNative[canonical] = struct{}{}
 	}
 	filtered := make([]string, 0, len(observed))
 	seen := make(map[string]struct{}, len(observed))
@@ -523,7 +523,7 @@ func filterProviderNativeVisibleToolsForActor(actor models.AgentConfig, tools []
 		if canonical == "" || isCLIControlToolName(canonical) {
 			continue
 		}
-		if _, ok := allowed[canonical]; !ok {
+		if _, ok := providerNative[canonical]; !ok {
 			continue
 		}
 		if _, ok := seen[canonical]; ok {
