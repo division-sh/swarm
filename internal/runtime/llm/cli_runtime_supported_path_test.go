@@ -81,7 +81,7 @@ fi
 count=$((count + 1))
 printf '%s' "$count" > "$state_file"
 cat > "$capture_dir/$count.stdin"
-if grep -q '"name":"read_file"' "$capture_dir/$count.stdin" && grep -q '"ok":true' "$capture_dir/$count.stdin"; then
+if [ "$count" -gt 1 ] && grep -q '"name":"read_file"' "$capture_dir/$count.stdin" && grep -q '"ok":true' "$capture_dir/$count.stdin"; then
   printf '%s\n' '{"type":"result","result":"done"}'
   exit 0
 fi
