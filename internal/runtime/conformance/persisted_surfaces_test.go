@@ -754,11 +754,18 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 }
 
 func TestAccumulatorCompletionOutcomeSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
-	ctx := context.Background()
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 	pg := &store.PostgresStore{DB: db}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
@@ -1946,8 +1953,15 @@ func TestCanonicalRuntimeLogTurnBlockSurface_RoundTripsThroughConversationReader
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites(t *testing.T) {
-	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 
 	requireMutationSurface(t, db)
 
@@ -1991,13 +2005,13 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		t.Fatalf("update workflow instance: %v", err)
 	}
 
-	if err := trackedMutationStateMatchesEntityState(db, entityID); err != nil {
+	if err := trackedMutationStateMatchesEntityState(db, runID, entityID); err != nil {
 		t.Fatalf("trackedMutationStateMatchesEntityState(workflow): %v", err)
 	}
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t *testing.T) {
-	ctx, exec, db := newEntityToolConformanceHarness(t)
+	ctx, exec, db, runID := newEntityToolConformanceHarness(t)
 
 	requireMutationSurface(t, db)
 
@@ -2027,31 +2041,31 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 		t.Fatalf("save_entity_field: %v", err)
 	}
 
-	if err := trackedMutationStateMatchesEntityState(db, entityID); err != nil {
+	if err := trackedMutationStateMatchesEntityState(db, runID, entityID); err != nil {
 		t.Fatalf("trackedMutationStateMatchesEntityState(tool): %v", err)
 	}
 }
 
 func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *testing.T) {
-	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 
 	requireMutationSurface(t, db)
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator
-		)
-		VALUES (
-			$1::uuid, 'mutation-flow/inst-1', 'default', 'queued', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
-		)
-	`, entityID); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
-	runID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id) VALUES ($1::uuid)`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'mutation-flow/inst-1', 'default', 'queued', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
+		)
+	`, runID, entityID); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -2063,7 +2077,7 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 		t.Fatalf("seed malformed mutation: %v", err)
 	}
 
-	err := trackedMutationStateMatchesEntityState(db, entityID)
+	err := trackedMutationStateMatchesEntityState(db, runID, entityID)
 	if err == nil || !strings.Contains(err.Error(), "gates mutation key is required") {
 		t.Fatalf("trackedMutationStateMatchesEntityState error = %v, want malformed gates failure", err)
 	}
@@ -2153,7 +2167,7 @@ func countTurnSummaryBlocks(blocks []dashboardserver.ConversationTurnBlock) int 
 	return count
 }
 
-func trackedMutationStateMatchesEntityState(db *sql.DB, entityID string) error {
+func trackedMutationStateMatchesEntityState(db *sql.DB, runID, entityID string) error {
 	var (
 		currentState string
 		fieldsRaw    []byte
@@ -2166,9 +2180,9 @@ func trackedMutationStateMatchesEntityState(db *sql.DB, entityID string) error {
 			COALESCE(fields, '{}'::jsonb),
 			COALESCE(gates, '{}'::jsonb),
 			COALESCE(accumulator, '{}'::jsonb)
-		FROM entity_state
-		WHERE entity_id = $1::uuid
-	`, entityID).Scan(&currentState, &fieldsRaw, &gatesRaw, &accRaw); err != nil {
+			FROM entity_state
+			WHERE run_id = $1::uuid AND entity_id = $2::uuid
+		`, runID, entityID).Scan(&currentState, &fieldsRaw, &gatesRaw, &accRaw); err != nil {
 		return fmt.Errorf("load entity_state projection: %w", err)
 	}
 
@@ -2192,10 +2206,10 @@ func trackedMutationStateMatchesEntityState(db *sql.DB, entityID string) error {
 
 	rows, err := db.QueryContext(context.Background(), `
 		SELECT field, new_value
-		FROM entity_mutations
-		WHERE entity_id = $1::uuid
-		ORDER BY created_at ASC, mutation_id ASC
-	`, entityID)
+			FROM entity_mutations
+			WHERE run_id = $1::uuid AND entity_id = $2::uuid
+			ORDER BY created_at ASC, mutation_id ASC
+		`, runID, entityID)
 	if err != nil {
 		return fmt.Errorf("query mutations: %w", err)
 	}
@@ -2294,9 +2308,16 @@ func mustCanonicalJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
-func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB) {
+func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB, string) {
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
 		SQLDB: db,
 		WorkflowSource: runtimesemanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -2314,12 +2335,13 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 			},
 		}),
 	})
-	ctx := runtimetools.WithActor(context.Background(), runtimeactors.AgentConfig{
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx = runtimetools.WithActor(ctx, runtimeactors.AgentConfig{
 		ID:    "tester",
 		Role:  "operator",
 		Tools: []string{"create_entity", "save_entity_field"},
 	})
-	return ctx, exec, db
+	return ctx, exec, db, runID
 }
 
 func readString(value any) string {

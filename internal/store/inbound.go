@@ -9,6 +9,7 @@ import (
 
 	"swarm/internal/runtime"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 )
 
 func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
@@ -43,6 +44,10 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, pro
 	if provider == "" {
 		return runtime.InboundTarget{}, fmt.Errorf("provider is required")
 	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: %w", err)
+	}
 
 	var target runtime.InboundTarget
 	const q = `
@@ -50,12 +55,12 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, pro
 			entity_id::text,
 			COALESCE(NULLIF(slug, ''), '')
 		FROM entity_state
-		WHERE slug = $1
-		   OR entity_id::text = $1
+		WHERE run_id = $2::uuid
+		  AND (slug = $1 OR entity_id::text = $1)
 		ORDER BY CASE WHEN slug = $1 THEN 0 ELSE 1 END, created_at DESC, updated_at DESC
 		LIMIT 1
 	`
-	if err := s.DB.QueryRowContext(ctx, q, entityKey).Scan(&target.EntityID, &target.EntitySlug); err != nil {
+	if err := s.DB.QueryRowContext(ctx, q, entityKey, runID).Scan(&target.EntityID, &target.EntitySlug); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
 			return runtime.InboundTarget{}, fmt.Errorf("entity not found for key: %s", entityKey)
 		}

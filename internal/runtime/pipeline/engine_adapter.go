@@ -15,6 +15,7 @@ import (
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
 	runtimeregistry "swarm/internal/runtime/core/registry"
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/entityruntime"
 	runtimeeventpayload "swarm/internal/runtime/eventpayload"
@@ -345,19 +346,23 @@ func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext,
 			return 0, err
 		}
 	}
-	return queryEntityStateCount(e.coordinator.db, e.coordinator.SemanticSource(), contract, parsed)
+	return queryEntityStateCount(asString(ctx.Event["run_id"]), e.coordinator.db, e.coordinator.SemanticSource(), contract, parsed)
 }
 
-func queryEntityStateCount(db *sql.DB, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
+func queryEntityStateCount(runID string, db *sql.DB, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
 	if db == nil {
 		return 0, nil
 	}
+	runID, err := runtimecurrentstate.ValidateRunID(runID)
+	if err != nil {
+		return 0, err
+	}
 	flowRoot := runtimeflowidentity.ScopeKey(source, contract.FlowID)
-	where := ""
-	var args []any
+	where := " WHERE run_id = $1::uuid"
+	args := []any{runID}
 	if flowRoot != "" {
-		args = []any{flowRoot, flowRoot + "/%"}
-		where = " WHERE (flow_instance = $1 OR flow_instance LIKE $2)"
+		args = append(args, flowRoot, flowRoot+"/%")
+		where += " AND (flow_instance = $2 OR flow_instance LIKE $3)"
 	}
 	rows, err := db.QueryContext(context.Background(), `
 		SELECT COALESCE(fields, '{}'::jsonb), current_state

@@ -95,7 +95,7 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 		t.Fatal("expected coordinator")
 	}
 
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -112,7 +112,7 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
 
-	if handled := pc.executeNodeHandlerPlan(context.Background(), "test-node", evt); !handled {
+	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "test-node", evt); !handled {
 		t.Fatal("expected timer.scheduled handler to be handled")
 	}
 	if len(store.schedules) != 1 {
@@ -156,7 +156,7 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 		t.Fatal("expected coordinator")
 	}
 
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -177,7 +177,7 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	if !handled {
 		t.Fatal("expected timer.scheduled to be interceptable")
 	}
-	passThrough, emitted, err := pc.Intercept(context.Background(), evt)
+	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), evt)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestPersistWorkflowTimerCancellation_ReleasesClaimAfterCanonicalCancel(t *t
 		TaskID:       "timer-a",
 	}
 
-	pc.persistWorkflowTimerCancellation(context.Background(), sc)
+	pc.persistWorkflowTimerCancellation(testPipelineCoordinatorRunContext(t, pc), sc)
 
 	if got := store.cancelOwned; got != 1 {
 		t.Fatalf("cancel owned calls = %d, want 1", got)
@@ -246,7 +246,7 @@ func TestPersistWorkflowTimerCancellation_StillCancelsSchedulerWhenClaimReleaseF
 		t.Fatalf("Register(schedule): %v", err)
 	}
 
-	pc.persistWorkflowTimerCancellation(context.Background(), sc)
+	pc.persistWorkflowTimerCancellation(testPipelineCoordinatorRunContext(t, pc), sc)
 
 	if got := store.cancelOwned; got != 1 {
 		t.Fatalf("cancel owned calls = %d, want 1", got)
@@ -277,7 +277,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -294,10 +294,10 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
 
-	if handled := pc.executeNodeHandlerPlan(context.Background(), "dispatcher", evt); handled {
+	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "dispatcher", evt); handled {
 		t.Fatal("dispatcher should not handle child/task.done")
 	}
-	instance, ok, err := pc.workflowStore.Load(context.Background(), "ent-001")
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), "ent-001")
 	if err != nil {
 		t.Fatalf("load workflow instance after wrong node execution: %v", err)
 	}
@@ -308,10 +308,10 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 		t.Fatalf("state after wrong node execution = %q, want waiting", got)
 	}
 
-	if handled := pc.executeNodeHandlerPlan(context.Background(), "listener", evt); !handled {
+	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "listener", evt); !handled {
 		t.Fatal("listener should handle child/task.done")
 	}
-	instance, ok, err = pc.workflowStore.Load(context.Background(), "ent-001")
+	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), "ent-001")
 	if err != nil {
 		t.Fatalf("load workflow instance after listener execution: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 		t.Fatal("expected coordinator")
 	}
 
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -363,7 +363,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 		CreatedAt:   start,
 	}.WithEntityID("ent-001")
 
-	if handled := pc.executeNodeHandlerPlan(context.Background(), "test-node", evt); !handled {
+	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "test-node", evt); !handled {
 		t.Fatal("expected item.arrived handler to be handled")
 	}
 	if len(store.schedules) != 1 {
@@ -417,7 +417,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 		t.Fatal("expected coordinator")
 	}
 
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -434,7 +434,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 		Payload:     []byte(`{"entity_id":"ent-001","item_id":"a"}`),
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
-	if handled := pc.executeNodeHandlerPlan(context.Background(), "test-node", evt); !handled {
+	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "test-node", evt); !handled {
 		t.Fatal("expected item.arrived handler to be handled")
 	}
 
@@ -454,7 +454,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 		}),
 		CreatedAt: time.Now().UTC(),
 	}.WithEntityID("ent-001")
-	if handled := pc.executeNodeHandlerPlan(context.Background(), "test-node", timeoutEvt); !handled {
+	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "test-node", timeoutEvt); !handled {
 		t.Fatal("expected accumulate.timeout handler to be handled")
 	}
 	if len(store.cancels) != 1 {
@@ -489,7 +489,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -506,10 +506,10 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
 
-	if handled := pc.executeNodeHandlerPlan(context.Background(), "child-worker", trigger); !handled {
+	if handled := pc.executeNodeHandlerPlan(testPipelineCoordinatorRunContext(t, pc), "child-worker", trigger); !handled {
 		t.Fatal("child-worker should handle work.requested through the input-pin alias")
 	}
-	instance, ok, err := pc.workflowStore.Load(context.Background(), "ent-001")
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), "ent-001")
 	if err != nil {
 		t.Fatalf("load workflow instance after child-worker execution: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 		t.Fatalf("root state after child-worker execution = %q, want ready", got)
 	}
 
-	listenerCtx := withPipelineFlowScope(context.Background(), "child")
+	listenerCtx := withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child")
 	completion := events.Event{
 		ID:          "evt-child-work-completed",
 		Type:        events.EventType("child/work.completed"),
@@ -532,9 +532,9 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if !ok {
 		t.Fatal("parent-listener handler missing for child/work.completed")
 	}
-	result, err := pc.executeNodeContractHandler(withPipelineFlowScope(context.Background(), "child"), "parent-listener", handler, workflowTriggerContext{
+	result, err := pc.executeNodeContractHandler(withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child"), "parent-listener", handler, workflowTriggerContext{
 		Event: completion,
-		State: pc.currentWorkflowState(withPipelineFlowScope(context.Background(), ""), "ent-001"),
+		State: pc.currentWorkflowState(withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), ""), "ent-001"),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -546,7 +546,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if handled := pc.executeNodeHandlerPlan(listenerCtx, "parent-listener", completion); !handled {
 		t.Fatal("parent-listener should clear inherited child flow scope and handle child/work.completed")
 	}
-	instance, ok, err = pc.workflowStore.Load(context.Background(), "ent-001")
+	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), "ent-001")
 	if err != nil {
 		t.Fatalf("load workflow instance after parent-listener execution: %v", err)
 	}
@@ -580,7 +580,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      "ent-001",
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -597,7 +597,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		Payload:     []byte(`{"entity_id":"ent-001"}`),
 		CreatedAt:   time.Now().UTC(),
 	}.WithEntityID("ent-001")
-	passThrough, emitted, err := pc.Intercept(context.Background(), completion)
+	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}
@@ -634,7 +634,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	childEntityID := FlowInstanceEntityID("child/inst-1")
 	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      childEntityID,
 		StorageRef:      "child/inst-1",
 		WorkflowName:    "child",
@@ -648,7 +648,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	}); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      grandchildEntityID,
 		StorageRef:      "child/grandchild/inst-1",
 		WorkflowName:    "grandchild",
@@ -663,7 +663,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
 
-	passThrough, emitted, err := pc.Intercept(context.Background(), (events.Event{
+	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), (events.Event{
 		ID:          "evt-nested-done",
 		Type:        events.EventType("child/grandchild/micro.done"),
 		SourceAgent: "cataloge2e",
@@ -680,7 +680,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		t.Fatalf("emitted = %#v, want none without subject-link back-propagation", emitted)
 	}
 
-	child, found, err := pc.workflowStore.Load(context.Background(), childEntityID)
+	child, found, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), childEntityID)
 	if err != nil {
 		t.Fatalf("load child instance: %v", err)
 	}
@@ -719,7 +719,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 		childFlowPath = "child/9c38251c-4fba-4a18-9afc-774ede7cc866"
 	)
 	childRowID := FlowInstanceEntityID(childFlowPath)
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -727,7 +727,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	}); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      childRowID,
 		StorageRef:      childFlowPath,
 		WorkflowName:    "child",
@@ -747,7 +747,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, want handled", handled, consume)
 	}
 
-	passThrough, emitted, err := pc.Intercept(context.Background(), (events.Event{
+	passThrough, emitted, err := pc.Intercept(testPipelineCoordinatorRunContext(t, pc), (events.Event{
 		ID:          "evt-nested-done-parent-targeted",
 		Type:        events.EventType("child/grandchild/micro.done"),
 		SourceAgent: "cataloge2e",
@@ -795,7 +795,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 		childFlowPath = "child/9c38251c-4fba-4a18-9afc-774ede7cc866"
 	)
 	childRowID := FlowInstanceEntityID(childFlowPath)
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -803,7 +803,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	}); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      childRowID,
 		StorageRef:      childFlowPath,
 		WorkflowName:    "child",
@@ -822,7 +822,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 		t.Fatalf("BeginTx: %v", err)
 	}
 	t.Cleanup(func() { _ = tx.Rollback() })
-	ctx := WithPipelineSQLTxContext(context.Background(), tx)
+	ctx := WithPipelineSQLTxContext(testPipelineCoordinatorRunContext(t, pc), tx)
 
 	passThrough, emitted, err := pc.Intercept(ctx, (events.Event{
 		ID:          "evt-nested-done-tx",

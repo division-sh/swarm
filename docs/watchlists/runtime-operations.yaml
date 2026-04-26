@@ -109,6 +109,14 @@ active_issues:
     title: Startup MCP validation can flake on partial provider-visible tool surface and unsafe query_entities probe
     maps_to:
       - transport_policy_and_surface_parity
+  - id: 549
+    title: Define run-isolated entity-state ownership before mutating timestamp fork execution
+    maps_to:
+      - run_isolated_current_state_ownership
+  - id: 550
+    title: Promote run-scoped entity_state identity model for mutating fork isolation
+    maps_to:
+      - run_isolated_current_state_ownership
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -179,6 +187,31 @@ nodes:
         - persistence is nonatomic
       too_narrow:
         - one update statement races
+    current_action_pressure: active
+  - id: run_isolated_current_state_ownership
+    title: Run-Isolated Current State Ownership
+    parent_class: runtime replay, recovery, historical-state reconstruction, and current-state ownership
+    canonical_owners:
+      - run-scoped current-state identity model for entity_state
+      - explicit runtime/store current-state context owner for all entity_state reads, writes, queries, and ownership checks
+      - entity_mutations.run_id as append-only history and reconstruction owner
+    why_this_node_exists: mutating timestamp forks require source and fork runs to diverge safely while preserving entity identity; global entity_state keyed only by entity_id lets forked execution collide with or overwrite source state
+    known_manifestations:
+      - entity_state previously had no run_id and used entity_id as a global primary key
+      - state-only fork dry-run can be execution-ready, but mutating execution cannot materialize isolated current-state rows until live current state is run-scoped
+      - runtime entity tools and workflow projection read and write entity_state by entity_id without run context
+      - inbound routing, route ownership, workspace, digest, budget, and tests consume global current-state semantics
+    representative_issues:
+      - 549
+      - 550
+    common_framing_mistakes:
+      too_broad:
+        - implement all mutating fork execution in one PR
+        - merge delivery, timer, route, session, and current-state migration into one undifferentiated replay rewrite
+      too_narrow:
+        - enable swarm fork by changing only CLI or run_fork_planner
+        - add a local entity_state copy helper while leaving global readers and writers live
+        - add run_id to one query without defining the canonical current-state context owner
     current_action_pressure: active
   - id: boot_wiring_dependency_ownership
     title: Boot Wiring Dependency Ownership

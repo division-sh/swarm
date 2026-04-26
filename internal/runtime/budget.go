@@ -14,6 +14,7 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	models "swarm/internal/runtime/core/actors"
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	llm "swarm/internal/runtime/llm"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
@@ -160,6 +161,13 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 	if t == nil || t.db == nil {
 		return
 	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		if t.logger != nil {
+			handleRuntimeLogPersistenceError("budget", "evaluate_run_context_missing", t.logger.Warn(ctx, "budget", "evaluate_run_context_missing", nil, err))
+		}
+		return
+	}
 	// Evaluate system-wide budget.
 	if err := t.evaluateAndEmit(ctx, ""); err != nil {
 		if t.logger != nil {
@@ -171,9 +179,10 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 	rows, err := t.db.QueryContext(ctx, `
 		SELECT entity_id::text
 		FROM entity_state
-		WHERE NOT (current_state = ANY($1::text[]))
+		WHERE run_id = $1::uuid
+		  AND NOT (current_state = ANY($2::text[]))
 		ORDER BY created_at ASC
-	`, pq.Array(t.TerminalInstanceStates()))
+	`, runID, pq.Array(t.TerminalInstanceStates()))
 	if err != nil {
 		return
 	}
@@ -326,12 +335,17 @@ func (t *BudgetTracker) resolveSpendFlowInstance(ctx context.Context, entityID s
 	if entityID == "" {
 		return "global", nil
 	}
+	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
+	if err != nil {
+		return "", err
+	}
 	var flowInstance string
 	if err := t.db.QueryRowContext(ctx, `
 		SELECT COALESCE(flow_instance, '')
 		FROM entity_state
-		WHERE entity_id = $1::uuid
-	`, entityID).Scan(&flowInstance); err != nil {
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+	`, identity.RunID, identity.EntityID).Scan(&flowInstance); err != nil {
 		return "", fmt.Errorf("resolve spend flow_instance for entity %s: %w", entityID, err)
 	}
 	flowInstance = strings.TrimSpace(flowInstance)

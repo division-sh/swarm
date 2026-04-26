@@ -29,6 +29,21 @@ import (
 	"swarm/internal/testutil"
 )
 
+const eventBusTestRunID = "99999999-9999-9999-9999-999999999999"
+
+func eventBusTestRunContext(t *testing.T, db *sql.DB) context.Context {
+	t.Helper()
+	ctx := runtimecorrelation.WithRunID(context.Background(), eventBusTestRunID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, eventBusTestRunID); err != nil {
+		t.Fatalf("seed event bus test run: %v", err)
+	}
+	return ctx
+}
+
 type fixtureWorkflowModule struct {
 	source         semanticview.Source
 	workflow       *runtimepipeline.WorkflowDefinition
@@ -1342,6 +1357,7 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 	childEntityID := runtimepipeline.FlowInstanceEntityID("child/inst-1")
 	grandchildEntityID := runtimepipeline.FlowInstanceEntityID("child/grandchild/inst-1")
 	store := runtimepipeline.NewWorkflowInstanceStore(db)
+	ctx := eventBusTestRunContext(t, db)
 	for _, instance := range []runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      rootEntityID,
@@ -1378,25 +1394,26 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 			},
 		},
 	} {
-		if err := store.Upsert(context.Background(), instance); err != nil {
+		if err := store.Upsert(ctx, instance); err != nil {
 			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
 		}
 	}
 
-	if err := eb.Publish(context.Background(), (events.Event{
+	if err := eb.Publish(ctx, (events.Event{
 		ID:          "11111111-2222-3333-4444-555555555555",
 		Type:        events.EventType("child/grandchild/micro.done"),
 		SourceAgent: "cataloge2e",
+		RunID:       eventBusTestRunID,
 		Payload:     []byte(`{"entity_id":"` + grandchildEntityID + `"}`),
 		CreatedAt:   time.Now().UTC(),
 	}).WithEntityID(grandchildEntityID)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if err := eb.WaitForQuiescence(context.Background()); err != nil {
+	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
 
-	child, found, err := store.Load(context.Background(), childEntityID)
+	child, found, err := store.Load(ctx, childEntityID)
 	if err != nil {
 		t.Fatalf("load child instance: %v", err)
 	}
@@ -1407,7 +1424,7 @@ func TestEventBusPublish_NestedDescendantCompletionDoesNotEmitChildContinuation(
 		t.Fatalf("child current_state = %q, want waiting", got)
 	}
 
-	root, found, err := store.Load(context.Background(), rootEntityID)
+	root, found, err := store.Load(ctx, rootEntityID)
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}
@@ -1485,7 +1502,9 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 	}
 
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
-	if err := runtimepipeline.NewWorkflowInstanceStore(db).Upsert(context.Background(), runtimepipeline.WorkflowInstance{
+	ctx := eventBusTestRunContext(t, db)
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	if err := workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -1494,20 +1513,21 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := eb.Publish(context.Background(), (events.Event{
+	if err := eb.Publish(ctx, (events.Event{
 		ID:          "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 		Type:        events.EventType("pipeline.start"),
 		SourceAgent: "cataloge2e",
+		RunID:       eventBusTestRunID,
 		Payload:     []byte(`{"entity_id":"` + rootEntityID + `"}`),
 		CreatedAt:   time.Now().UTC(),
 	}).WithEntityID(rootEntityID)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if err := eb.WaitForQuiescence(context.Background()); err != nil {
+	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
 
-	root, found, err := runtimepipeline.NewWorkflowInstanceStore(db).Load(context.Background(), rootEntityID)
+	root, found, err := workflowStore.Load(ctx, rootEntityID)
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}
@@ -1526,11 +1546,11 @@ func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChil
 				}
 			}
 		}
-		instances, _ := runtimepipeline.NewWorkflowInstanceStore(db).List(context.Background())
+		instances, _ := workflowStore.List(ctx)
 		t.Fatalf("root current_state = %q, want idle without subject-link back-propagation; events=%v instances=%#v", got, dump, instances)
 	}
 
-	instances, err := runtimepipeline.NewWorkflowInstanceStore(db).List(context.Background())
+	instances, err := workflowStore.List(ctx)
 	if err != nil {
 		t.Fatalf("list workflow instances: %v", err)
 	}
@@ -1610,7 +1630,9 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 	}
 
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
-	if err := runtimepipeline.NewWorkflowInstanceStore(db).Upsert(context.Background(), runtimepipeline.WorkflowInstance{
+	ctx := eventBusTestRunContext(t, db)
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	if err := workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      rootEntityID,
 		StorageRef:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
@@ -1623,20 +1645,21 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := eb.Publish(context.Background(), (events.Event{
+	if err := eb.Publish(ctx, (events.Event{
 		ID:          "11111111-2222-3333-4444-555555555555",
 		Type:        events.EventType("validate.requested"),
 		SourceAgent: "cataloge2e",
+		RunID:       eventBusTestRunID,
 		Payload:     []byte(`{"entity_id":"` + rootEntityID + `"}`),
 		CreatedAt:   time.Now().UTC(),
 	}).WithEntityID(rootEntityID)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if err := eb.WaitForQuiescence(context.Background()); err != nil {
+	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
 
-	root, found, err := runtimepipeline.NewWorkflowInstanceStore(db).Load(context.Background(), rootEntityID)
+	root, found, err := workflowStore.Load(ctx, rootEntityID)
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}
@@ -1655,7 +1678,7 @@ func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
 				}
 			}
 		}
-		instances, _ := runtimepipeline.NewWorkflowInstanceStore(db).List(context.Background())
+		instances, _ := workflowStore.List(ctx)
 		t.Fatalf("root current_state = %q, want pending without subject-link back-propagation; root metadata=%#v events=%v instances=%#v", got, root.Metadata, dump, instances)
 	}
 }

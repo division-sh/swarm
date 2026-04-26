@@ -8,6 +8,7 @@ import (
 
 	"github.com/lib/pq"
 	"swarm/internal/runtime"
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -55,12 +56,17 @@ func normalizeTerminalStates(states []string) []string {
 }
 
 func (s *Source) CountActiveInstances(ctx context.Context) (int, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return 0, err
+	}
 	var n int
-	err := s.db.QueryRowContext(ctx, `
+	err = s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM entity_state
-		WHERE NOT (current_state = ANY($1::text[]))
-	`, pq.Array(s.terminalStates)).Scan(&n)
+		WHERE run_id = $1::uuid
+		  AND NOT (current_state = ANY($2::text[]))
+	`, runID, pq.Array(s.terminalStates)).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count active instances: %w", err)
 	}
@@ -68,6 +74,10 @@ func (s *Source) CountActiveInstances(ctx context.Context) (int, error) {
 }
 
 func (s *Source) ListInstanceDigestRows(ctx context.Context, limit int) ([]runtime.InstanceDigestRow, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 10
 	}
@@ -78,12 +88,13 @@ func (s *Source) ListInstanceDigestRows(ctx context.Context, limit int) ([]runti
 			es.current_state,
 			es.updated_at
 		FROM entity_state es
-		WHERE NOT (es.current_state = ANY($2::text[]))
+		WHERE es.run_id = $2::uuid
+		  AND NOT (es.current_state = ANY($3::text[]))
 		ORDER BY es.updated_at DESC, es.created_at ASC
 		LIMIT $1
 	`
 
-	rows, err := s.db.QueryContext(ctx, q, limit, pq.Array(s.terminalStates))
+	rows, err := s.db.QueryContext(ctx, q, limit, runID, pq.Array(s.terminalStates))
 	if err != nil {
 		return nil, fmt.Errorf("list digest rows: %w", err)
 	}

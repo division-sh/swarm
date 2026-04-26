@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/testutil"
 )
@@ -36,20 +37,28 @@ func TestSource_FiltersTerminalStatesFromDigestReads(t *testing.T) {
 
 	activeID := uuid.NewString()
 	doneID := uuid.NewString()
-	if _, err := db.ExecContext(context.Background(), `
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, slug, name, current_state,
+			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		) VALUES
-			($1::uuid, 'review/inst-1', 'default', 'active-co', 'ActiveCo', 'active',
+			($1::uuid, $2::uuid, 'review/inst-1', 'default', 'active-co', 'ActiveCo', 'active',
 			 '{}'::jsonb, '{"name":"ActiveCo"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
-			($2::uuid, 'review/inst-2', 'default', 'done-co', 'DoneCo', 'done',
+			($1::uuid, $3::uuid, 'review/inst-2', 'default', 'done-co', 'DoneCo', 'done',
 			 '{}'::jsonb, '{"name":"DoneCo"}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
-	`, activeID, doneID); err != nil {
+	`, runID, activeID, doneID); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
 
-	n, err := source.CountActiveInstances(context.Background())
+	n, err := source.CountActiveInstances(ctx)
 	if err != nil {
 		t.Fatalf("CountActiveInstances: %v", err)
 	}
@@ -57,7 +66,7 @@ func TestSource_FiltersTerminalStatesFromDigestReads(t *testing.T) {
 		t.Fatalf("CountActiveInstances = %d, want 1", n)
 	}
 
-	rows, err := source.ListInstanceDigestRows(context.Background(), 10)
+	rows, err := source.ListInstanceDigestRows(ctx, 10)
 	if err != nil {
 		t.Fatalf("ListInstanceDigestRows: %v", err)
 	}

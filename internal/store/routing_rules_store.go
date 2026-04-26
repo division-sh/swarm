@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	runtimemanager "swarm/internal/runtime/manager"
 )
 
@@ -163,12 +164,17 @@ func (s *PostgresStore) DeactivateRoutingRulesByEntity(ctx context.Context, enti
 }
 
 func routingRuleFlowInstance(ctx context.Context, s *PostgresStore, entityID string) (string, error) {
+	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
+	if err != nil {
+		return "", fmt.Errorf("lookup routing rule flow instance: %w", err)
+	}
 	var flowInstance string
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT flow_instance
 		FROM entity_state
-		WHERE entity_id = $1::uuid
-	`, entityID).Scan(&flowInstance); err != nil {
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+	`, identity.RunID, identity.EntityID).Scan(&flowInstance); err != nil {
 		return "", fmt.Errorf("lookup routing rule flow instance: %w", err)
 	}
 	flowInstance = strings.TrimSpace(flowInstance)

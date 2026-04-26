@@ -9,9 +9,14 @@ import (
 	"testing"
 	"time"
 
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
+
+func catalogRuntimeContext() context.Context {
+	return runtimecorrelation.WithRunID(context.Background(), catalogRuntimeRunID)
+}
 
 func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catalogExpectedDocument) {
 	t.Helper()
@@ -134,7 +139,7 @@ func assertGates(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, 
 	if workflow == nil {
 		t.Fatal("workflow instance store is required for gates assertions")
 	}
-	instance, ok, err := workflow.Load(context.Background(), strings.TrimSpace(entityID))
+	instance, ok, err := workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance %s for gates: %v", entityID, err)
 	}
@@ -168,7 +173,7 @@ func assertEntityFields(t testing.TB, workflow *runtimepipeline.WorkflowInstance
 	if workflow == nil {
 		t.Fatal("workflow instance store is required for entity_fields assertions")
 	}
-	instance, ok, err := workflow.Load(context.Background(), strings.TrimSpace(entityID))
+	instance, ok, err := workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance %s for entity_fields: %v", entityID, err)
 	}
@@ -206,7 +211,7 @@ func assertEntityState(t testing.TB, db *sql.DB, workflow *runtimepipeline.Workf
 	if workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
-	instance, ok, err := workflow.Load(context.Background(), strings.TrimSpace(entityID))
+	instance, ok, err := workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance %s: %v", entityID, err)
 	}
@@ -231,7 +236,7 @@ func assertFlowState(t testing.TB, h *runtimeHarness, entityID, flowID, wantStat
 	if h == nil || h.workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
-	instance, ok, err := h.workflow.Load(context.Background(), strings.TrimSpace(entityID))
+	instance, ok, err := h.workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance %s for flow state: %v", entityID, err)
 	}
@@ -259,7 +264,7 @@ func catalogFlowInstanceForCausalFlow(workflow *runtimepipeline.WorkflowInstance
 	if workflow == nil {
 		return runtimepipeline.WorkflowInstance{}, false, nil
 	}
-	rows, err := workflow.List(context.Background())
+	rows, err := workflow.List(catalogRuntimeContext())
 	if err != nil {
 		return runtimepipeline.WorkflowInstance{}, false, err
 	}

@@ -13,6 +13,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
@@ -683,6 +684,15 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
+	const runID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 
 	routeStore := &flowActivationTestRouteStore{}
 	bus := &flowActivationTestBus{routeStore: routeStore}
@@ -692,10 +702,10 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	const subjectID = "11111111-1111-1111-1111-111111111111"
 	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
 
-	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+	if err := am.ActivateFlowInstance(ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := store.Mutate(context.Background(), req.Instance.EntityID, func(instance *runtimepipeline.WorkflowInstance) {
+	if err := store.Mutate(ctx, req.Instance.EntityID, func(instance *runtimepipeline.WorkflowInstance) {
 		instance.CurrentState = "completed"
 	}); err != nil {
 		t.Fatalf("Mutate: %v", err)
@@ -709,7 +719,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	}
 	am.mu.Unlock()
 
-	if err := am.DeactivateFlowInstanceModel(context.Background(), runtimepipeline.FlowInstanceDeactivationRequest{
+	if err := am.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 		ContractBundle: semanticview.Wrap(bundle),
 		Instance:       req.Instance,
 		FinalState:     "completed",
@@ -739,7 +749,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 		t.Fatalf("routing_rules.status = %q, want inactive", routeStatus)
 	}
 
-	instance, ok, err := store.Load(context.Background(), req.Instance.EntityID)
+	instance, ok, err := store.Load(ctx, req.Instance.EntityID)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

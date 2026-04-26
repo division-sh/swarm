@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	runtimemutationlog "swarm/internal/runtime/mutationlog"
 )
 
@@ -290,6 +291,10 @@ func (s *WorkflowInstanceStore) Delete(context.Context, string) error {
 }
 
 func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, forUpdate bool) (WorkflowInstance, bool, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return WorkflowInstance{}, false, err
+	}
 	var (
 		item         WorkflowInstance
 		gatesRaw     []byte
@@ -325,13 +330,14 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 		FROM entity_state es
 		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
 		WHERE es.entity_id = ANY($1::uuid[])
+		  AND es.run_id = $2::uuid
 		ORDER BY es.created_at DESC, es.entity_id DESC
 		LIMIT 1
 	`
 	if forUpdate {
 		query += ` FOR UPDATE OF es`
 	}
-	err := dbQueryRowContext(ctx, s.db, query, pqStringArray(keys)).Scan(
+	err = dbQueryRowContext(ctx, s.db, query, pqStringArray(keys), runID).Scan(
 		&item.InstanceID,
 		&item.WorkflowName,
 		&item.WorkflowVersion,
@@ -399,6 +405,10 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 }
 
 func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstance, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := dbQueryContext(ctx, s.db, `
 		SELECT
 			es.entity_id::text,
@@ -420,8 +430,9 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			es.updated_at
 		FROM entity_state es
 		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.run_id = $1::uuid
 		ORDER BY es.created_at ASC
-	`)
+	`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -510,6 +521,10 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 }
 
 func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return err
+	}
 	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
 	if err != nil {
 		return err
@@ -522,7 +537,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 			}
 		}()
 	}
-	previous, err := loadTrackedEntityStateProjection(ctx, tx, rowID)
+	previous, err := loadTrackedEntityStateProjection(ctx, tx, runID, rowID)
 	if err != nil {
 		return err
 	}
@@ -566,16 +581,16 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, slug, name,
+			run_id, entity_id, flow_instance, entity_type, slug, name,
 			current_state, gates, fields, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2, $3, NULLIF($4,''), NULLIF($5,''),
-			$6, $7::jsonb, $8::jsonb, $9::jsonb, 1,
-			$10, now(), now()
+			$1::uuid, $2::uuid, $3, $4, NULLIF($5,''), NULLIF($6,''),
+			$7, $8::jsonb, $9::jsonb, $10::jsonb, 1,
+			$11, now(), now()
 		)
-		ON CONFLICT (entity_id) DO UPDATE SET
+		ON CONFLICT (run_id, entity_id) DO UPDATE SET
 			flow_instance = EXCLUDED.flow_instance,
 			entity_type = EXCLUDED.entity_type,
 			slug = EXCLUDED.slug,
@@ -587,7 +602,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 			revision = entity_state.revision + 1,
 			entered_state_at = EXCLUDED.entered_state_at,
 			updated_at = now()
-	`, rowID, storageRef, projection.Control.EntityType, projection.Control.Slug, projection.Control.Name, instance.CurrentState,
+	`, runID, rowID, storageRef, projection.Control.EntityType, projection.Control.Slug, projection.Control.Name, instance.CurrentState,
 		jsonOrDefault(gatesJSON, "{}"),
 		jsonOrDefault(fieldsJSON, "{}"),
 		jsonOrDefault(accumulatorState, "{}"),
@@ -742,7 +757,7 @@ func oldValueOrNil(value any, ok bool) any {
 	return value
 }
 
-func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, entityID string) (runtimemutationlog.EntityStateProjection, error) {
+func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, runID, entityID string) (runtimemutationlog.EntityStateProjection, error) {
 	if tx == nil || strings.TrimSpace(entityID) == "" {
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}
@@ -759,9 +774,10 @@ func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, entityID 
 			COALESCE(gates, '{}'::jsonb),
 			COALESCE(accumulator, '{}'::jsonb)
 		FROM entity_state
-		WHERE entity_id = $1::uuid
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
 		FOR UPDATE
-	`, entityID).Scan(&currentState, &fieldsRaw, &gatesRaw, &accRaw)
+	`, runID, entityID).Scan(&currentState, &fieldsRaw, &gatesRaw, &accRaw)
 	if err == sql.ErrNoRows {
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}

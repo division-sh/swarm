@@ -12,6 +12,7 @@ import (
 	"github.com/lib/pq"
 	models "swarm/internal/runtime/core/actors"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	"swarm/internal/runtime/entityruntime"
 	runtimemutationlog "swarm/internal/runtime/mutationlog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -26,6 +27,10 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	entityID, err := parseEntityID(payload["entity_id"])
 	if err != nil {
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.entity_id", false, err.Error())
+	}
+	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
+	if err != nil {
+		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.run_context", true, err, "resolve entity_state run context")
 	}
 	if err := enforceEntityWriteOwnership(ctx, db, source, actor, entityID, e.runtimeLogSink()); err != nil {
 		return nil, err
@@ -90,11 +95,12 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 
 	var oldValue []byte
 	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(COALESCE(fields, '{}'::jsonb) #> $2::text[], 'null'::jsonb)
+		SELECT COALESCE(COALESCE(fields, '{}'::jsonb) #> $3::text[], 'null'::jsonb)
 		FROM entity_state
-		WHERE entity_id = $1::uuid
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
 		FOR UPDATE
-	`, entityID, pathArray).Scan(&oldValue); err != nil {
+	`, identity.RunID, identity.EntityID, pathArray).Scan(&oldValue); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, NewRuntimeError("not_found", "tool-executor", "exec_save_entity_field.lookup", false, "entity %s not found", entityID)
 		}
@@ -109,8 +115,9 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 			revision = revision + 1,
 			updated_at = now()
 		WHERE entity_id = $1::uuid
+		  AND run_id = $4::uuid
 		RETURNING revision
-	`, entityID, pathArray, string(valueJSON)).Scan(&revision); err != nil {
+	`, identity.EntityID, pathArray, string(valueJSON), identity.RunID).Scan(&revision); err != nil {
 		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.update", true, err, "save entity field %s", fieldName)
 	}
 	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, entityID, runtimemutationlog.EntityStateProjection{
@@ -172,8 +179,12 @@ func enforceEntityWriteOwnership(ctx context.Context, db *sql.DB, source semanti
 	if flowRoot == "" || db == nil {
 		return nil
 	}
+	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
+	if err != nil {
+		return WrapRuntimeError("query_failed", "tool-executor", "entity_write_ownership.run_context", true, err, "resolve entity_state run context")
+	}
 	var flowInstance sql.NullString
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(flow_instance, '') FROM entity_state WHERE entity_id = $1::uuid`, entityID).Scan(&flowInstance); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(flow_instance, '') FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, identity.RunID, identity.EntityID).Scan(&flowInstance); err != nil {
 		if err == sql.ErrNoRows {
 			return nil
 		}
@@ -241,6 +252,10 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	if err != nil {
 		return nil, err
 	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_create_entity.run_context", true, err, "resolve entity_state run context")
+	}
 	if strings.TrimSpace(asString(payload["entity_id"])) != "" {
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.entity_id", false, "entity_id is platform-minted and must not be supplied")
 	}
@@ -304,16 +319,16 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	}()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, name,
+			run_id, entity_id, flow_instance, entity_type, name,
 			current_state, gates, fields, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2, $3, NULLIF($4, ''),
-			$5, '{}'::jsonb, $6::jsonb, '{}'::jsonb, 1,
-			$7, $7, $7
+			$1::uuid, $2::uuid, $3, $4, NULLIF($5, ''),
+			$6, '{}'::jsonb, $7::jsonb, '{}'::jsonb, 1,
+			$8, $8, $8
 		)
-	`, entityID, flowInstance, contract.EntityType, name, currentState, string(fieldsJSON), now); err != nil {
+	`, runID, entityID, flowInstance, contract.EntityType, name, currentState, string(fieldsJSON), now); err != nil {
 		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_create_entity.insert", false, err, "create entity %s", entityID)
 	}
 	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, entityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/config"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/testutil"
 )
@@ -74,12 +75,20 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
-	ctx := context.Background()
+	const runID = "55555555-5555-5555-5555-555555555555"
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	if err := pg.Ping(ctx); err != nil {
 		t.Fatalf("Ping: %v", err)
 	}
 
 	entityID := uuid.NewString()
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES ('testco', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
@@ -88,13 +97,13 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, slug, name, current_state,
+			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, 'testco', 'default', 'testco', 'TestCo', 'active',
+			$1::uuid, $2::uuid, 'testco', 'default', 'testco', 'TestCo', 'active',
 			'{}'::jsonb, '{"users_total":10,"mrr":1234}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 		)
-	`, entityID); err != nil {
+	`, runID, entityID); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
 

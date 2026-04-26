@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimesessions "swarm/internal/runtime/sessions"
 )
@@ -327,12 +328,17 @@ func (s *PostgresStore) EnsureEntitySchema(ctx context.Context, entityID string)
 	if _, err := uuid.Parse(strings.TrimSpace(entityID)); err != nil {
 		return nil
 	}
+	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
+	if err != nil {
+		return fmt.Errorf("lookup entity slug: %w", err)
+	}
 	var slug string
-	err := s.DB.QueryRowContext(ctx, `
+	err = s.DB.QueryRowContext(ctx, `
 		SELECT COALESCE(NULLIF(slug, ''), '')
 		FROM entity_state
-		WHERE entity_id = $1::uuid
-	`, entityID).Scan(&slug)
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+	`, identity.RunID, identity.EntityID).Scan(&slug)
 	if err != nil {
 		return fmt.Errorf("lookup entity slug: %w", err)
 	}
