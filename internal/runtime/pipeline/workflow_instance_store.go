@@ -29,7 +29,6 @@ type SchedulePersistence interface {
 
 type WorkflowInstance struct {
 	InstanceID        string
-	SubjectID         string
 	StorageRef        string
 	WorkflowName      string
 	WorkflowVersion   string
@@ -74,7 +73,6 @@ type workflowInstancePersistedProjection struct {
 }
 
 type workflowInstancePersistedControl struct {
-	SubjectID         string
 	StorageRef        string
 	Slug              string
 	Name              string
@@ -298,7 +296,6 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 		fieldsRaw    []byte
 		configRaw    []byte
 		accRaw       []byte
-		subjectID    sql.NullString
 		flowInstance string
 		entityType   string
 		slug         sql.NullString
@@ -309,7 +306,6 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 	query := `
 		SELECT
 			es.entity_id::text,
-			es.subject_id::text,
 			COALESCE(fi.flow_template, ''),
 			COALESCE(fi.config->>'workflow_version', ''),
 			COALESCE(fi.status, ''),
@@ -337,7 +333,6 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 	}
 	err := dbQueryRowContext(ctx, s.db, query, pqStringArray(keys)).Scan(
 		&item.InstanceID,
-		&subjectID,
 		&item.WorkflowName,
 		&item.WorkflowVersion,
 		&status,
@@ -361,13 +356,11 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 	if err != nil {
 		return WorkflowInstance{}, false, err
 	}
-	item.SubjectID = strings.TrimSpace(subjectID.String)
 	item.Status = strings.TrimSpace(status.String)
 	if terminatedAt.Valid {
 		item.TerminatedAt = terminatedAt.Time
 	}
 	projection, err := decodeWorkflowInstancePersistedProjection(fieldsRaw, gatesRaw, accRaw, configRaw, workflowInstancePersistedControl{
-		SubjectID:  item.SubjectID,
 		StorageRef: strings.TrimSpace(flowInstance),
 		Slug:       slug.String,
 		Name:       name.String,
@@ -384,7 +377,6 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 		StorageRef:   projection.Control.StorageRef,
 		WorkflowName: item.WorkflowName,
 		Metadata:     item.Metadata,
-		SubjectID:    item.SubjectID,
 	})
 	if err != nil {
 		return WorkflowInstance{}, false, err
@@ -410,7 +402,6 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 	rows, err := dbQueryContext(ctx, s.db, `
 		SELECT
 			es.entity_id::text,
-			es.subject_id::text,
 			COALESCE(fi.flow_template, ''),
 			COALESCE(fi.config->>'workflow_version', ''),
 			COALESCE(fi.status, ''),
@@ -443,7 +434,6 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			fieldsRaw    []byte
 			configRaw    []byte
 			accRaw       []byte
-			subjectID    sql.NullString
 			flowInstance string
 			entityType   string
 			slug         sql.NullString
@@ -453,7 +443,6 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 		)
 		if err := rows.Scan(
 			&item.InstanceID,
-			&subjectID,
 			&item.WorkflowName,
 			&item.WorkflowVersion,
 			&status,
@@ -473,13 +462,11 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 		); err != nil {
 			return nil, err
 		}
-		item.SubjectID = strings.TrimSpace(subjectID.String)
 		item.Status = strings.TrimSpace(status.String)
 		if terminatedAt.Valid {
 			item.TerminatedAt = terminatedAt.Time
 		}
 		projection, err := decodeWorkflowInstancePersistedProjection(fieldsRaw, gatesRaw, accRaw, configRaw, workflowInstancePersistedControl{
-			SubjectID:  item.SubjectID,
 			StorageRef: strings.TrimSpace(flowInstance),
 			Slug:       slug.String,
 			Name:       name.String,
@@ -496,7 +483,6 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			StorageRef:   projection.Control.StorageRef,
 			WorkflowName: item.WorkflowName,
 			Metadata:     item.Metadata,
-			SubjectID:    item.SubjectID,
 		})
 		if err != nil {
 			return nil, err
@@ -580,17 +566,16 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, subject_id, flow_instance, entity_type, slug, name,
+			entity_id, flow_instance, entity_type, slug, name,
 			current_state, gates, fields, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, NULLIF($2,'')::uuid, $3, $4, NULLIF($5,''), NULLIF($6,''),
-			$7, $8::jsonb, $9::jsonb, $10::jsonb, 1,
-			$11, now(), now()
+			$1::uuid, $2, $3, NULLIF($4,''), NULLIF($5,''),
+			$6, $7::jsonb, $8::jsonb, $9::jsonb, 1,
+			$10, now(), now()
 		)
 		ON CONFLICT (entity_id) DO UPDATE SET
-			subject_id = COALESCE(entity_state.subject_id, EXCLUDED.subject_id),
 			flow_instance = EXCLUDED.flow_instance,
 			entity_type = EXCLUDED.entity_type,
 			slug = EXCLUDED.slug,
@@ -602,7 +587,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 			revision = entity_state.revision + 1,
 			entered_state_at = EXCLUDED.entered_state_at,
 			updated_at = now()
-	`, rowID, projection.Control.SubjectID, storageRef, projection.Control.EntityType, projection.Control.Slug, projection.Control.Name, instance.CurrentState,
+	`, rowID, storageRef, projection.Control.EntityType, projection.Control.Slug, projection.Control.Name, instance.CurrentState,
 		jsonOrDefault(gatesJSON, "{}"),
 		jsonOrDefault(fieldsJSON, "{}"),
 		jsonOrDefault(accumulatorState, "{}"),
@@ -888,7 +873,6 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		return workflowInstancePersistedProjection{}, fmt.Errorf("workflow instance storage_ref %q disagrees with canonical storage_ref %q", storageRef, persistedIdentity.StorageRef)
 	}
 	control := workflowInstancePersistedControl{
-		SubjectID:         "",
 		StorageRef:        strings.TrimSpace(persistedIdentity.StorageRef),
 		Slug:              strings.TrimSpace(asString(instance.Metadata["slug"])),
 		Name:              strings.TrimSpace(asString(instance.Metadata["name"])),
@@ -905,7 +889,7 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		control.FlowPath = strings.TrimSpace(persistedIdentity.InstancePath)
 	}
 	for _, key := range []string{
-		"slug", "name", "entity_type", "subject_id", "parent_entity_id",
+		"slug", "name", "entity_type", "parent_entity_id",
 		"instance_id", "storage_ref", "flow_path", "instance_kind",
 		"template_version", "workflow_version", "transition_history",
 	} {

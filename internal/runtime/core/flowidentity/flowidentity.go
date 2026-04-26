@@ -17,7 +17,6 @@ type Instance struct {
 	InstanceID     string
 	InstancePath   string
 	EntityID       string
-	SubjectID      string
 	ParentEntityID string
 	HasStoredPath  bool
 }
@@ -191,7 +190,6 @@ func Stored(
 	materializedPath,
 	instanceID,
 	entityID,
-	subjectID,
 	parentEntityID string,
 ) Instance {
 	workflowName = strings.TrimSpace(workflowName)
@@ -212,7 +210,6 @@ func Stored(
 		InstanceID:     strings.TrimSpace(instanceID),
 		InstancePath:   instancePath,
 		EntityID:       strings.TrimSpace(entityID),
-		SubjectID:      strings.TrimSpace(subjectID),
 		ParentEntityID: strings.TrimSpace(parentEntityID),
 		HasStoredPath:  materializedPath != "",
 	}
@@ -225,10 +222,9 @@ func StoredPersisted(
 	instancePath,
 	instanceID,
 	entityID,
-	subjectID,
 	parentEntityID string,
 ) (Persisted, error) {
-	instance := Stored(source, workflowName, instancePath, instanceID, entityID, subjectID, parentEntityID)
+	instance := Stored(source, workflowName, instancePath, instanceID, entityID, parentEntityID)
 	storageRef = normalizeRef(storageRef)
 	if instance.InstancePath != "" {
 		if logical := LogicalInstanceID(instance.InstancePath); logical != "" && SemanticScopeFromInstancePath(instance.InstancePath) != "" {

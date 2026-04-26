@@ -23,7 +23,6 @@ type wave1ResolvedType struct {
 
 var wave1EnvelopeTypes = map[string]wave1ResolvedType{
 	"entity_id":        {Kind: "scalar", Type: "uuid"},
-	"subject_id":       {Kind: "scalar", Type: "uuid"},
 	"flow_instance":    {Kind: "scalar", Type: "text"},
 	"entity_type":      {Kind: "scalar", Type: "text"},
 	"name":             {Kind: "scalar", Type: "text"},

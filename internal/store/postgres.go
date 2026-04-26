@@ -153,13 +153,13 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	if !catalog.hasTable("entity_state") {
 		return nil
 	}
-	if !catalog.hasColumns("entity_state", "subject_id") {
-		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE entity_state ADD COLUMN IF NOT EXISTS subject_id UUID`); err != nil {
-			return fmt.Errorf("ensure entity_state.subject_id column: %w", err)
-		}
+	if _, err := s.DB.ExecContext(ctx, `DROP INDEX IF EXISTS idx_entity_subject`); err != nil {
+		return fmt.Errorf("drop deprecated entity_state.subject_id index: %w", err)
 	}
-	if _, err := s.DB.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_entity_subject ON entity_state(subject_id) WHERE subject_id IS NOT NULL`); err != nil {
-		return fmt.Errorf("ensure entity_state.subject_id index: %w", err)
+	if catalog.hasColumns("entity_state", "subject_id") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE entity_state DROP COLUMN IF EXISTS subject_id`); err != nil {
+			return fmt.Errorf("drop deprecated entity_state.subject_id column: %w", err)
+		}
 	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err

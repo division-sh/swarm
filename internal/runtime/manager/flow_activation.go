@@ -358,7 +358,7 @@ func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, 
 		entityID = canonicalEntityID
 	}
 	return am.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
-		Instance: runtimeflowidentity.Stored(nil, templateID, flowPath, instanceID, entityID, "", ""),
+		Instance: runtimeflowidentity.Stored(nil, templateID, flowPath, instanceID, entityID, ""),
 	})
 }
 

@@ -281,9 +281,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
-		Metadata: map[string]any{
-			"subject_id": entityID,
-		},
+		Metadata:        map[string]any{},
 	}); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -342,9 +340,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
-		Metadata: map[string]any{
-			"subject_id": entityID,
-		},
+		Metadata:        map[string]any{},
 	}); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -413,7 +409,6 @@ func TestExecuteNodeContractHandlerLogsAccumulatorCompletionCommittedOutcome(t *
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
 		Metadata: map[string]any{
-			"subject_id":     entityID,
 			"expected_count": 2,
 		},
 	}); err != nil {
@@ -497,7 +492,6 @@ func TestExecuteNodeContractHandlerLogsAccumulatorCompletionEvaluationFailure(t 
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
 		Metadata: map[string]any{
-			"subject_id":     entityID,
 			"expected_count": 1,
 		},
 	}); err != nil {
@@ -560,7 +554,6 @@ func TestExecuteNodeContractHandlerLogsAccumulatorCompletionCommitFailure(t *tes
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
 		Metadata: map[string]any{
-			"subject_id":     entityID,
 			"expected_count": 1,
 		},
 	}); err != nil {
@@ -643,7 +636,6 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Metadata: map[string]any{
-			"subject_id":     entityID,
 			"revision_count": 0,
 		},
 	}); err != nil {
@@ -714,9 +706,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
-		Metadata: map[string]any{
-			"subject_id": entityID,
-		},
+		Metadata:        map[string]any{},
 	}); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -780,9 +770,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
-		Metadata: map[string]any{
-			"subject_id": entityID,
-		},
+		Metadata:        map[string]any{},
 	}); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1000,9 +988,7 @@ func TestResolveHandlerEntityIDForRootKeepsFlowScopedInboundEntity(t *testing.T)
 	const inboundEntityID = "ent-child"
 	state := WorkflowState{
 		EntityID: inboundEntityID,
-		Metadata: map[string]any{
-			"subject_id": "ent-root",
-		},
+		Metadata: map[string]any{},
 	}
 
 	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "", handler, inboundEntityID, events.Event{
@@ -1031,7 +1017,6 @@ func TestResolveHandlerEntityIDForFlowKeepsInboundEntityForDescendantScopedInbou
 		Metadata: map[string]any{
 			"flow_path":        "child/grandchild/inst-1",
 			"parent_entity_id": parentEntityID,
-			"subject_id":       "ent-root",
 		},
 	}
 
@@ -1063,7 +1048,6 @@ func TestResolveHandlerEntityIDForFlowDoesNotRetargetSameFlowInstancePath(t *tes
 		Metadata: map[string]any{
 			"flow_path":        "child/inst-1",
 			"parent_entity_id": rootID,
-			"subject_id":       rootID,
 		},
 	}
 
@@ -1175,7 +1159,6 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 		EntityID: "ent-parent",
 		Stage:    WorkflowStateID("queued"),
 		Metadata: map[string]any{
-			"subject_id":     "ent-parent",
 			"revision_count": 0,
 			"is_duplicate":   false,
 		},
@@ -1192,9 +1175,6 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 	}
 	if snapshot.Metadata == nil {
 		t.Fatal("snapshot metadata = nil, want persisted metadata")
-	}
-	if got := strings.TrimSpace(asString(snapshot.Metadata["subject_id"])); got != "ent-parent" {
-		t.Fatalf("snapshot subject_id = %q, want preserved compatibility metadata", got)
 	}
 	if got := snapshot.Metadata["revision_count"]; got != 0 {
 		t.Fatalf("snapshot revision_count = %#v, want 0", got)
@@ -1932,7 +1912,6 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropa
 	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
 	if err := store.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      childEntityID,
-		SubjectID:       rootEntityID,
 		StorageRef:      "child/inst-1",
 		WorkflowName:    "child",
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -1940,7 +1919,6 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropa
 		Metadata: map[string]any{
 			"entity_id":        childEntityID,
 			"flow_path":        "child/inst-1",
-			"subject_id":       rootEntityID,
 			"parent_entity_id": rootEntityID,
 		},
 	}); err != nil {
@@ -1948,7 +1926,6 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropa
 	}
 	if err := store.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      grandchildEntityID,
-		SubjectID:       rootEntityID,
 		StorageRef:      "child/grandchild/inst-1",
 		WorkflowName:    "grandchild",
 		WorkflowVersion: bundle.WorkflowVersion(),
@@ -1956,7 +1933,6 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropa
 		Metadata: map[string]any{
 			"entity_id":        grandchildEntityID,
 			"flow_path":        "child/grandchild/inst-1",
-			"subject_id":       rootEntityID,
 			"parent_entity_id": childEntityID,
 		},
 	}); err != nil {

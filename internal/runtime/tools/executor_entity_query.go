@@ -192,10 +192,6 @@ func entityStateBaseQuery(source semanticview.Source, actor models.AgentConfig, 
 func entityStateBaseQueryForContract(source semanticview.Source, contract entityruntime.Contract, payload map[string]any, includeFlowInstance bool) ([]string, []any) {
 	clauses := make([]string, 0, 4)
 	args := make([]any, 0, 4)
-	if subjectID := strings.TrimSpace(asString(payload["subject_id"])); subjectID != "" {
-		args = append(args, subjectID)
-		clauses = append(clauses, fmt.Sprintf("subject_id = $%d::uuid", len(args)))
-	}
 	flowRoot := entityReadFlowScopeRoot(source, contract)
 	if flowRoot != "" {
 		args = append(args, flowRoot, flowRoot+"/%")

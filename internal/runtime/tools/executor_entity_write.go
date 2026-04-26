@@ -304,12 +304,12 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	}()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, subject_id, flow_instance, entity_type, name,
+			entity_id, flow_instance, entity_type, name,
 			current_state, gates, fields, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, NULL, $2, $3, NULLIF($4, ''),
+			$1::uuid, $2, $3, NULLIF($4, ''),
 			$5, '{}'::jsonb, $6::jsonb, '{}'::jsonb, 1,
 			$7, $7, $7
 		)

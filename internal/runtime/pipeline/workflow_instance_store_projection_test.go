@@ -95,9 +95,6 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	if got := strings.TrimSpace(asString(loaded.Metadata["subject_id"])); got != "" {
 		t.Fatalf("Metadata subject_id = %#v, want empty", loaded.Metadata["subject_id"])
 	}
-	if got := strings.TrimSpace(loaded.SubjectID); got != "" {
-		t.Fatalf("SubjectID = %q, want empty", got)
-	}
 	if gates := workflowStateGatesAsBools(loaded.Metadata); !gates["g_ready"] {
 		t.Fatalf("Metadata gates = %#v, want g_ready=true", loaded.Metadata["gates"])
 	}

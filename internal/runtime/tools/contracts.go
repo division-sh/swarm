@@ -24,7 +24,6 @@ var supportedRuntimeToolNames = map[string]struct{}{
 	"get_entity":         {},
 	"save_entity_field":  {},
 	"create_entity":      {},
-	"get_subject_status": {},
 	"query_entities":     {},
 	"search_entities":    {},
 	"query_metrics":      {},

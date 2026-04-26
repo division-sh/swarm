@@ -340,7 +340,6 @@ func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, temp
 		flowPath,
 		instanceID,
 		runtimepipeline.FlowInstanceEntityID(flowPath),
-		"",
 		sourceEntityID,
 	)
 	return runtimepipeline.FlowInstanceActivationRequest{

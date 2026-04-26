@@ -5,6 +5,9 @@
 ### Clarified: CLI native_tools are provider-native only
 The platform spec now makes the shipped CLI rule explicit: `bash`, `web_search`, and `file_io` are provider-native capabilities only. The platform does not inject fallback tools to satisfy `native_tools` on CLI, unsupported capabilities fail closed, and visible native-tool surface must equal callable truth for the same turn.
 
+### Removed: subject-link runtime cleanup surfaces
+The runtime no longer exposes subject-link schema/tool/operator cleanup surfaces. Business correlation moves through explicit authored payload/config fields, and causal debugging uses `source_event_id`. Final canonical platform-spec adoption remains tracked separately.
+
 ## v1.6.0 (2026-04-02)
 
 ### Breaking: Flow-Scoped Entity State (`flow_model.state_composition`)
@@ -17,20 +20,12 @@ One entity belongs to exactly one flow. No shared mutable state across flow boun
 
 **Boot validation**: input pin handlers in stateful flows MUST declare `create_entity: true`. Boot error otherwise.
 
-**subject_id**: new platform-owned column on entity_state. Links flow-local entities into one business identity. Auto-populated on create_entity — first flow: subject_id = entity_id; subsequent flows: copied from source entity. Immutable once set. Products do not declare it in entity_schema.
-
-**get_subject_status**: new platform tool. Returns all flow entities for a subject with states, terminal flags, latest active flow. Latest flow determined by entered_state_at (most recent non-terminal transition), tiebreaker: flow depth in package.yaml.
-
-**entity_state DDL**: added `subject_id UUID` column with index.
+**Subject-link note:** the original v1.6 flow-scoped entity draft introduced a platform-owned business-link column and lifecycle status tool. That model has since been superseded by explicit authored payload/config business correlation plus `source_event_id` causal proof.
 
 **Runtime implementation required:**
-- [ ] Add subject_id column to entity_state (migration)
-- [ ] Auto-populate subject_id in create_entity step
 - [ ] Enforce cross-flow write prohibition in save_entity_field
 - [ ] Boot validation: input pin + stateful flow → require create_entity: true
 - [ ] Remove flow_states write path
-- [ ] Implement get_subject_status tool
-- [ ] Update get_entity to include subject_id in response
 
 **Backward compatibility:** enforced at platform >= 1.6.0. Products on >= 1.5.0 use the previous shared-row model.
 

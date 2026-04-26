@@ -16,7 +16,6 @@ import (
 
 var entityStateTopLevelFields = map[string]struct{}{
 	"entity_id":        {},
-	"subject_id":       {},
 	"flow_instance":    {},
 	"entity_type":      {},
 	"name":             {},
@@ -99,7 +98,6 @@ func entityStateRowQuery(suffix string) string {
 		FROM (
 			SELECT
 				entity_id::text AS entity_id,
-				subject_id::text AS subject_id,
 				COALESCE(flow_instance, '') AS flow_instance,
 				COALESCE(entity_type, '') AS entity_type,
 				name,
@@ -118,7 +116,7 @@ func entityStateRowQuery(suffix string) string {
 
 func queryEntityStateRows(ctx context.Context, db *sql.DB, suffix string, args ...any) ([]map[string]any, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT entity_id::text, subject_id::text, COALESCE(flow_instance, ''), COALESCE(entity_type, ''), name, current_state,
+		SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(entity_type, ''), name, current_state,
 		       COALESCE(gates, '{}'::jsonb), COALESCE(fields, '{}'::jsonb), COALESCE(accumulator, '{}'::jsonb),
 		       revision, entered_state_at, created_at, updated_at
 		FROM entity_state`+suffix, args...)
@@ -130,14 +128,12 @@ func queryEntityStateRows(ctx context.Context, db *sql.DB, suffix string, args .
 	out := make([]map[string]any, 0)
 	for rows.Next() {
 		var entityID, flowInstance, entityType, currentState string
-		var subjectID sql.NullString
 		var name sql.NullString
 		var gatesRaw, fieldsRaw, accumulatorRaw []byte
 		var revision int
 		var enteredStateAt, createdAt, updatedAt time.Time
 		if err := rows.Scan(
 			&entityID,
-			&subjectID,
 			&flowInstance,
 			&entityType,
 			&name,
@@ -166,7 +162,6 @@ func queryEntityStateRows(ctx context.Context, db *sql.DB, suffix string, args .
 		}
 		row := map[string]any{
 			"entity_id":        entityID,
-			"subject_id":       nullStringValue(subjectID),
 			"flow_instance":    flowInstance,
 			"entity_type":      entityType,
 			"name":             nullStringValue(name),

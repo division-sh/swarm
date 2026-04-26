@@ -86,13 +86,6 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 				},
 			}, "flow_instance"),
 		},
-		"get_subject_status": {
-			Category:    "entity_persistence",
-			Description: "Query the lifecycle of a business object across flow-local entities.",
-			InputSchema: ObjectSchema(map[string]any{
-				"subject_id": map[string]any{"type": "string"},
-			}, "subject_id"),
-		},
 		"query_entities": {
 			Category:    "entity_persistence",
 			Description: "Query entity_state rows using validated selectors and optional grouping.",
@@ -113,7 +106,6 @@ func genericEntityRuntimeContractSchemas(readTargetSchema map[string]any) map[st
 			Description: "Query entity_state rows by state, metadata, and declared field matches.",
 			InputSchema: ObjectSchema(map[string]any{
 				"entity_type":   deepCloneJSONValue(readTargetSchema),
-				"subject_id":    map[string]any{"type": "string"},
 				"flow_instance": existingEntityFlowInstanceSchema(),
 				"current_state": map[string]any{"type": "string"},
 				"filter": map[string]any{
@@ -216,7 +208,6 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 			Description: "Query entity_state rows by state, metadata, and declared field matches.",
 			InputSchema: ObjectSchema(map[string]any{
 				"entity_type":   deepCloneJSONValue(readTargetSchema),
-				"subject_id":    map[string]any{"type": "string"},
 				"flow_instance": existingEntityFlowInstanceSchema(),
 				"current_state": map[string]any{"type": "string"},
 				"filter": map[string]any{
@@ -269,13 +260,6 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 				},
 				"filter": map[string]any{"type": "string"},
 			}, "metric"),
-		},
-		"get_subject_status": {
-			Category:    "entity_persistence",
-			Description: "Query the lifecycle of a business object across flow-local entities.",
-			InputSchema: ObjectSchema(map[string]any{
-				"subject_id": map[string]any{"type": "string"},
-			}, "subject_id"),
 		},
 	}
 }

@@ -74,7 +74,8 @@ expected:
 expected:
   flow_entities:
     child-flow:
-      subject_id: <uuid>
+      causal_events:
+        - source_event_id: <uuid>
       entity_state: processed
     other-flow:
       exists: false
@@ -135,7 +136,7 @@ These are bugs that actually broke the Empire pipeline in production. Tests for 
 
 4. **Cross-flow event localization** — event delivered as `scoring/vertical.shortlisted` but handler key is `vertical.shortlisted`. Handler lookup fails silently. Tier 11: test that cross-flow pin-wired events match local handler keys.
 
-5. **subject_id lineage not verified end-to-end** — unit tests exist but no fixture asserts that child flow entity's subject_id points back to parent. Tier 11.
+5. **source_event_id causal chain not verified end-to-end** — fixtures should assert that child flow proof follows the emitted event causal chain rather than a platform subject-link primitive. Tier 11.
 
 6. **Sibling flow isolation incomplete** — existing `test-child-flow-sibling-isolation` only triggers flow-a, never asserts flow-b state. Tier 11.
 
@@ -145,7 +146,7 @@ These are bugs that actually broke the Empire pipeline in production. Tests for 
 
 9. **Cross-flow write prohibition** — agent in flow A writes to entity in flow B. Must be rejected. Tier 11: end-to-end test (not just unit test).
 
-10. **Timer fires only for owning flow's entity** — timer in flow A should not affect entity in flow B with same subject_id. Tier 5 or 11.
+10. **Timer fires only for owning flow's entity** — timer in flow A should not affect a separate flow-local entity that is only business-correlated through authored data. Tier 5 or 11.
 
 ### What Good Looks Like
 
