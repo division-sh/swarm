@@ -142,6 +142,56 @@ review_subject:
 	}
 }
 
+func TestToolDefinitionsForActor_ExcludeForeignReadTargets(t *testing.T) {
+	actor := models.AgentConfig{
+		ID:    "researcher",
+		Role:  "researcher",
+		Tools: []string{"search_entities", "query_entities", "query_metrics"},
+	}
+	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
+		"discovery": {
+			EntitiesYAML: `
+campaign:
+  status: text
+`,
+			AgentsYAML: entityToolAgentYAML(actor),
+		},
+		"signal-search": {
+			EntitiesYAML: `
+signal:
+  signal_strength: integer
+  processed: boolean
+`,
+		},
+	})
+
+	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+		WorkflowSource: semanticview.Wrap(bundle),
+	})
+	defs := exec.ToolDefinitionsForActor(actor)
+	defByName := make(map[string]map[string]any, len(defs))
+	for _, def := range defs {
+		schema, _ := def.Schema.(map[string]any)
+		defByName[def.Name] = schema
+	}
+
+	for _, toolName := range []string{"search_entities", "query_entities", "query_metrics"} {
+		schema := defByName[toolName]
+		if schema == nil {
+			t.Fatalf("expected %s definition", toolName)
+		}
+		props, _ := schema["properties"].(map[string]any)
+		target, _ := props["entity_type"].(map[string]any)
+		targets, _ := target["enum"].([]any)
+		if !containsAnyString(targets, "discovery.campaign") {
+			t.Fatalf("%s entity_type enum = %#v, want discovery.campaign", toolName, targets)
+		}
+		if containsAnyString(targets, "signal-search.signal") {
+			t.Fatalf("%s entity_type enum = %#v, should not expose foreign read target", toolName, targets)
+		}
+	}
+}
+
 func containsAnyString(values []any, want string) bool {
 	for _, value := range values {
 		if value == want {

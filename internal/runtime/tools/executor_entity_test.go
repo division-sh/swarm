@@ -893,7 +893,7 @@ func TestEntityTools_QueryMetricsFilterRejectsUndeclaredFieldBeforeEval(t *testi
 	}
 }
 
-func TestEntityTools_ReadToolsUseExplicitTargetContract(t *testing.T) {
+func TestEntityTools_ReadToolsRejectForeignExplicitTargetContract(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"discovery": {
 			EntitiesYAML: `
@@ -925,13 +925,13 @@ signal:
 	}, time.Now().UTC().Truncate(time.Second))
 
 	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
-		"entity_type": "signal-search.signal",
-		"filter":      `signal_strength >= 70 && processed == false`,
-		"select":      []string{"signal_strength", "processed"},
+		"entity_type": "discovery.campaign",
+		"filter":      `status == "open"`,
+		"select":      []string{"status"},
 		"limit":       10,
 	})
 	if err != nil {
-		t.Fatalf("query_entities explicit target: %v", err)
+		t.Fatalf("query_entities owned explicit target: %v", err)
 	}
 	queryResult, ok := queryOut.(map[string]any)
 	if !ok {
@@ -939,48 +939,55 @@ signal:
 	}
 	queryRows, ok := queryResult["results"].([]map[string]any)
 	if !ok || len(queryRows) != 1 {
-		t.Fatalf("query results = %#v, want one signal row", queryResult["results"])
+		t.Fatalf("query results = %#v, want one campaign row", queryResult["results"])
 	}
-	if got := fmt.Sprint(queryRows[0]["signal_strength"]); got != "80" {
-		t.Fatalf("signal_strength = %q, want 80", got)
-	}
-
-	searchOut, err := exec.Execute(ctx, "search_entities", map[string]any{
-		"entity_type":   "signal-search.signal",
-		"current_state": "active",
-		"filter":        map[string]any{"processed": false},
-		"limit":         10,
-	})
-	if err != nil {
-		t.Fatalf("search_entities explicit target: %v", err)
-	}
-	searchResult, ok := searchOut.(map[string]any)
-	if !ok {
-		t.Fatalf("expected search result map, got %#v", searchOut)
-	}
-	searchRows, ok := searchResult["results"].([]map[string]any)
-	if !ok || len(searchRows) != 1 {
-		t.Fatalf("search results = %#v, want one signal row", searchResult["results"])
-	}
-	if got := strings.TrimSpace(asString(searchRows[0]["entity_type"])); got != "signal" {
-		t.Fatalf("search entity_type = %q, want signal", got)
+	if got := strings.TrimSpace(asString(queryRows[0]["status"])); got != "open" {
+		t.Fatalf("status = %q, want open", got)
 	}
 
-	metricOut, err := exec.Execute(ctx, "query_metrics", map[string]any{
-		"entity_type": "signal-search.signal",
-		"metric":      "sum",
-		"field":       "signal_strength",
-		"filter":      `processed == false`,
-	})
-	if err != nil {
-		t.Fatalf("query_metrics explicit target: %v", err)
-	}
-	metricResult, ok := metricOut.(map[string]any)
-	if !ok {
-		t.Fatalf("expected metric result map, got %#v", metricOut)
-	}
-	if got := testNumericValue(metricResult["value"]); got != 80 {
-		t.Fatalf("metric value = %#v, want 80", metricResult["value"])
+	for _, tc := range []struct {
+		name  string
+		tool  string
+		input map[string]any
+	}{
+		{
+			name: "query_entities",
+			tool: "query_entities",
+			input: map[string]any{
+				"entity_type": "signal-search.signal",
+				"filter":      `status == "new"`,
+				"select":      []string{"status"},
+				"limit":       10,
+			},
+		},
+		{
+			name: "search_entities",
+			tool: "search_entities",
+			input: map[string]any{
+				"entity_type":   "signal-search.signal",
+				"current_state": "active",
+				"filter":        map[string]any{"status": "new"},
+				"limit":         10,
+			},
+		},
+		{
+			name: "query_metrics",
+			tool: "query_metrics",
+			input: map[string]any{
+				"entity_type": "signal-search.signal",
+				"metric":      "count",
+				"filter":      `status == "new"`,
+			},
+		},
+	} {
+		_, err := exec.Execute(ctx, tc.tool, tc.input)
+		re, ok := runtimetools.AsRuntimeError(err)
+		if err == nil || !ok || re.Code != "invalid_tool_input" {
+			t.Fatalf("%s expected invalid_tool_input, got %v", tc.name, err)
+		}
+		if !strings.Contains(err.Error(), "outside caller flow scope") && !strings.Contains(err.Error(), "invalid enum value signal-search.signal") {
+			t.Fatalf("%s expected cross-flow target rejection, got %v", tc.name, err)
+		}
 	}
 }
 
@@ -1148,40 +1155,52 @@ signal:
 	}, bundle)
 
 	_, err := exec.Execute(ctx, "query_entities", map[string]any{
-		"entity_type": "signal-search.signal",
-		"filter":      `signal_strenght >= 70`,
+		"entity_type": "discovery.campaign",
+		"filter":      `statu == "open"`,
 	})
 	re, ok := runtimetools.AsRuntimeError(err)
 	if err == nil || !ok || re.Code != "invalid_tool_input" {
 		t.Fatalf("expected query_entities invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "signal_strenght") || !strings.Contains(err.Error(), "did you mean signal_strength?") {
+	if !strings.Contains(err.Error(), "statu") || !strings.Contains(err.Error(), "did you mean status?") {
 		t.Fatalf("expected nearest-match target diagnostic, got %v", err)
 	}
 
 	_, err = exec.Execute(ctx, "query_metrics", map[string]any{
-		"entity_type": "signal-search.signal",
+		"entity_type": "discovery.campaign",
 		"metric":      "sum",
-		"field":       "signal_strenght",
+		"field":       "statu",
 	})
 	re, ok = runtimetools.AsRuntimeError(err)
 	if err == nil || !ok || re.Code != "invalid_tool_input" {
 		t.Fatalf("expected query_metrics invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "signal_strenght") {
+	if !strings.Contains(err.Error(), "statu") {
 		t.Fatalf("expected target field diagnostic, got %v", err)
 	}
 
 	_, err = exec.Execute(ctx, "search_entities", map[string]any{
-		"entity_type": "signal-search.signal",
-		"filter":      map[string]any{"signal_strenght": 80},
+		"entity_type": "discovery.campaign",
+		"filter":      map[string]any{"statu": "open"},
 	})
 	re, ok = runtimetools.AsRuntimeError(err)
 	if err == nil || !ok || re.Code != "invalid_tool_input" {
 		t.Fatalf("expected search_entities invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "signal_strenght") {
+	if !strings.Contains(err.Error(), "statu") {
 		t.Fatalf("expected target object-filter field diagnostic, got %v", err)
+	}
+
+	_, err = exec.Execute(ctx, "query_entities", map[string]any{
+		"entity_type": "signal-search.signal",
+		"filter":      `signal_strenght >= 70`,
+	})
+	re, ok = runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "invalid_tool_input" {
+		t.Fatalf("expected foreign query_entities invalid_tool_input, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "outside caller flow scope") && !strings.Contains(err.Error(), "invalid enum value signal-search.signal") {
+		t.Fatalf("expected foreign target rejection before field validation, got %v", err)
 	}
 
 	_, err = exec.Execute(ctx, "query_entities", map[string]any{
@@ -1404,7 +1423,7 @@ analysis:
 	}
 }
 
-func TestEntityTools_GetEntityAllowsCrossFlowRead(t *testing.T) {
+func TestEntityTools_GetEntityRejectsCrossFlowRead(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
 			EntitiesYAML: `
@@ -1430,19 +1449,13 @@ foreign:
 	entityID := uuid.NewString()
 	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "open", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
 
-	out, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
-	if err != nil {
-		t.Fatalf("get_entity cross-flow read: %v", err)
+	_, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+	re, ok := runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "cross_flow_read_forbidden" {
+		t.Fatalf("expected cross_flow_read_forbidden, got %v", err)
 	}
-	entity, ok := out.(map[string]any)
-	if !ok {
-		t.Fatalf("expected entity map, got %#v", out)
-	}
-	if got := strings.TrimSpace(asString(entity["flow_instance"])); got != "other-flow/inst-1" {
-		t.Fatalf("flow_instance = %q, want other-flow/inst-1", got)
-	}
-	if got := strings.TrimSpace(asString(entity["current_state"])); got != "open" {
-		t.Fatalf("current_state = %q, want open", got)
+	if !strings.Contains(err.Error(), "owned by flow_instance other-flow/inst-1") {
+		t.Fatalf("expected foreign owner in rejection, got %v", err)
 	}
 }
 
@@ -1647,7 +1660,7 @@ operating_case:
 	}
 }
 
-func TestEntityTools_FlowOwnedActorCanReadForeignEntityAndWriteOwnEntity(t *testing.T) {
+func TestEntityTools_FlowOwnedActorCannotReadForeignEntityAndCanWriteOwnEntity(t *testing.T) {
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"analyzer-flow": {
 			EntitiesYAML: `
@@ -1685,17 +1698,13 @@ foreign:
 		},
 	})
 
-	out, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": scoringID})
-	if err != nil {
-		t.Fatalf("get_entity scoring context: %v", err)
+	_, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": scoringID})
+	re, ok := runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "cross_flow_read_forbidden" {
+		t.Fatalf("expected cross_flow_read_forbidden, got %v", err)
 	}
-	entity, ok := out.(map[string]any)
-	if !ok {
-		t.Fatalf("expected entity map, got %#v", out)
-	}
-	fields, ok := entity["fields"].(map[string]any)
-	if !ok || strings.TrimSpace(asString(fields["name"])) != "Example Vertical" {
-		t.Fatalf("unexpected scoring fields: %#v", entity["fields"])
+	if !strings.Contains(err.Error(), "owned by flow_instance other-flow/score-1") {
+		t.Fatalf("expected foreign owner in rejection, got %v", err)
 	}
 
 	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{

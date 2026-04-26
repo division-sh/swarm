@@ -49,6 +49,13 @@ func entityToolSchemaForReadTarget(source semanticview.Source, actorID string, p
 	if !ok {
 		return entityToolSchema{}, fmt.Errorf("flow-owned entity contract is not available for actor %s", strings.TrimSpace(actorID))
 	}
+	if !entityReadContractOwnedByActor(source, actorID, contract) {
+		targetLabel := target
+		if targetLabel == "" {
+			targetLabel = entityruntime.CanonicalReadTargetName(contract)
+		}
+		return entityToolSchema{}, fmt.Errorf("entity_type %q resolves outside caller flow scope", targetLabel)
+	}
 	return entityToolSchema{Defined: true, Contract: contract}, nil
 }
 

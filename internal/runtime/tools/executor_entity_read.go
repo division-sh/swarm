@@ -6,7 +6,7 @@ import (
 	models "swarm/internal/runtime/core/actors"
 )
 
-func (e *Executor) execGetEntity(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
+func (e *Executor) execGetEntity(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	db, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
@@ -21,6 +21,9 @@ func (e *Executor) execGetEntity(ctx context.Context, _ models.AgentConfig, inpu
 	}
 	if !found {
 		return nil, NewRuntimeError("not_found", "tool-executor", "exec_get_entity.lookup", false, "entity %s not found", entityID)
+	}
+	if err := enforceEntityReadOwnership(source, actor, entityID, entity, "entity_read_ownership.enforce"); err != nil {
+		return nil, err
 	}
 	if flowInstance := normalizeEntityToolFlowInstance(asString(payload["flow_instance"])); flowInstance != "" {
 		if !entityToolExistingFlowInstanceMatches(source, flowInstance, asString(entity["flow_instance"])) {
