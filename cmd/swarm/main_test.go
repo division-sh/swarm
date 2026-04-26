@@ -370,15 +370,6 @@ func TestRunForkCommand_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', $3)
-	`, runID, eventID, at); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
-
 	var buf bytes.Buffer
 	code := runForkCommand(ctx, t.TempDir(), []string{
 		"--dry-run",
@@ -399,11 +390,14 @@ func TestRunForkCommand_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
 	if plan.ForkPoint.EventID != eventID {
 		t.Fatalf("ForkPoint.EventID = %q, want %q", plan.ForkPoint.EventID, eventID)
 	}
-	if plan.PendingWorkCount != 1 || plan.PendingWork[0].Classification != store.RunForkPendingClassificationPending {
-		t.Fatalf("pending work = %#v", plan.PendingWork)
+	if plan.PendingWorkCount != 0 || len(plan.PendingWork) != 0 {
+		t.Fatalf("pending work = %#v, want none", plan.PendingWork)
 	}
-	if plan.ExecutionReady {
-		t.Fatal("ExecutionReady = true, want false while unsupported blockers remain")
+	if !plan.ExecutionReady {
+		t.Fatalf("ExecutionReady = false, want true for state-only dry-run; blockers=%#v", plan.UnsupportedBlockers)
+	}
+	if plan.UnsupportedBlockerCount != 0 {
+		t.Fatalf("UnsupportedBlockerCount = %d, want 0; blockers=%#v", plan.UnsupportedBlockerCount, plan.UnsupportedBlockers)
 	}
 }
 
