@@ -1428,7 +1428,7 @@ product/                          # root flow
 - `cross_flow_writes`: Cross-flow entity writes are prohibited by the platform. save_entity_field rejects a target entity whose flow_instance does not match the calling agent's flow. Compatibility residual: cross-flow entity reads are currently allowed read-only, are not the final primitive-only target, and remain tracked separately from this spec cleanup slice.
 - `business_correlation`: The platform does not create a lineage primitive for a business object that spans flows. Products carry business correlation explicitly through declared event payload fields and create_flow_instance config_from bindings. Causal debugging and proof use the source_event_id event chain.
 - `terminality`: Terminal states are flow-local. If another flow must react to a terminal outcome, the producing flow emits a declared output event with the required business payload. Consumers handle that event in their own state machine; the platform does not back-propagate terminal state across flows.
-- `ownership_semantics`: Entity write ownership is determined by the entity_state.flow_instance owner. The platform does not infer cross-flow ownership from path prefixes, parent/child relationships, or shared business correlation data.
+- `ownership_semantics`: Entity write ownership is determined by the semantic ownership scope derived from entity_state.flow_instance and the actor flow contract. The platform does not infer cross-flow ownership from arbitrary path prefixes, parent/child relationships, or shared business correlation data. Template instances that share a semantic flow scope are not isolated from each other by instance ID in the current runtime.
 # versioning
 
 Platform and products version independently.
