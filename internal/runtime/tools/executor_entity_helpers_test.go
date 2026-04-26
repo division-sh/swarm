@@ -52,6 +52,9 @@ func TestExistingEntityFlowInstanceSchemaDocumentsRootSemantics(t *testing.T) {
 		}
 	}
 	createProperties := entries["create_entity"].InputSchema["properties"].(map[string]any)
+	if _, ok := createProperties["subject_id"]; ok {
+		t.Fatalf("create_entity schema should not expose subject_id: %#v", createProperties)
+	}
 	createFlowSchema := createProperties["flow_instance"].(map[string]any)
 	if _, ok := createFlowSchema["description"]; ok {
 		t.Fatalf("create_entity flow_instance gained existing-entity guidance: %#v", createFlowSchema)

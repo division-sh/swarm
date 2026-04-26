@@ -68,8 +68,7 @@ func assertCausalFlowEntities(t testing.TB, h *runtimeHarness, rootEntityID stri
 	candidateEntityIDs := catalogCausalEntityIDs(t, h.db, h.startedAt, h.publishedIDs, rootEntityID)
 	for flowID, expected := range want {
 		flowID = strings.TrimSpace(flowID)
-		requireCausal := expected.Exists != nil && !*expected.Exists
-		got, found, err := catalogFlowInstanceForCausalFlow(h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, flowID, requireCausal)
+		got, found, err := catalogFlowInstanceForCausalFlow(h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, flowID, true)
 		if err != nil {
 			t.Fatalf("load causal flow instance %s: %v", flowID, err)
 		}
@@ -301,16 +300,18 @@ func catalogFlowInstanceForCausalFlow(workflow *runtimepipeline.WorkflowInstance
 	}
 	matchCausal := func(row runtimepipeline.WorkflowInstance) bool {
 		if len(candidateEntityIDs) > 0 {
-			rowEntityID := strings.TrimSpace(asString(row.Metadata["entity_id"]))
-			if rowEntityID == "" {
-				rowEntityID = strings.TrimSpace(row.InstanceID)
+			rowEntityIDs := []string{
+				strings.TrimSpace(asString(row.Metadata["entity_id"])),
+				strings.TrimSpace(asString(row.Metadata["parent_entity_id"])),
+				strings.TrimSpace(row.InstanceID),
+				runtimepipeline.FlowInstanceEntityID(row.StorageRef),
 			}
-			if rowEntityID == "" {
-				rowEntityID = runtimepipeline.FlowInstanceEntityID(row.StorageRef)
+			for _, rowEntityID := range rowEntityIDs {
+				if _, ok := candidateEntityIDs[rowEntityID]; ok {
+					return true
+				}
 			}
-			if _, ok := candidateEntityIDs[rowEntityID]; !ok {
-				return false
-			}
+			return false
 		}
 		return true
 	}
