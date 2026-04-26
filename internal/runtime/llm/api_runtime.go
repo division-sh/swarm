@@ -375,7 +375,7 @@ func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, inpu
 	for _, t := range s.Tools {
 		tool := anthropicTool{
 			Name:        t.Name,
-			Description: t.Description,
+			Description: DeliveredToolDescription(t),
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		}
 		if t.Schema != nil {

@@ -62,6 +62,7 @@ func GenerateEmitTools(
 		tools = append(tools, llm.ToolDefinition{
 			Name:        EmitToolName(eventType),
 			Description: schema.Description,
+			Usage:       EmitToolUsage(),
 			Schema:      schema.Schema,
 		})
 	}

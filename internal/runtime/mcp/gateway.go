@@ -584,8 +584,8 @@ func (g *Gateway) mcpToolsForActor(actor models.AgentConfig, allowed map[string]
 			"additionalProperties": true,
 		})
 		if ok {
-			if strings.TrimSpace(def.Description) != "" {
-				desc = def.Description
+			if delivered := strings.TrimSpace(llm.DeliveredToolDescription(def)); delivered != "" {
+				desc = delivered
 			}
 			if def.Schema != nil {
 				schema = def.Schema

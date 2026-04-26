@@ -613,6 +613,7 @@ func nativeFallbackToolDefinitions(cfg models.AgentConfig, modelRuntime llm.Runt
 		defs = append(defs, llm.ToolDefinition{
 			Name:        "bash",
 			Description: "Execute a shell command locally in the agent workspace and return stdout, stderr, exit code, and duration.",
+			Usage:       runtimetools.NativeFallbackToolUsage("bash"),
 			Schema: runtimetools.ObjectSchema(map[string]any{
 				"command":         map[string]any{"type": "string"},
 				"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 300},
@@ -623,6 +624,7 @@ func nativeFallbackToolDefinitions(cfg models.AgentConfig, modelRuntime llm.Runt
 		defs = append(defs, llm.ToolDefinition{
 			Name:        "web_search",
 			Description: "Search the web and return normalized results with title, url, and snippet.",
+			Usage:       runtimetools.NativeFallbackToolUsage("web_search"),
 			Schema: runtimetools.ObjectSchema(map[string]any{
 				"query":       map[string]any{"type": "string"},
 				"max_results": map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
@@ -634,6 +636,7 @@ func nativeFallbackToolDefinitions(cfg models.AgentConfig, modelRuntime llm.Runt
 			llm.ToolDefinition{
 				Name:        "read_file",
 				Description: "Read a file from the agent workspace or mounted read-only data/contracts paths.",
+				Usage:       runtimetools.NativeFallbackToolUsage("read_file"),
 				Schema: runtimetools.ObjectSchema(map[string]any{
 					"path": map[string]any{"type": "string"},
 				}, "path"),
@@ -641,6 +644,7 @@ func nativeFallbackToolDefinitions(cfg models.AgentConfig, modelRuntime llm.Runt
 			llm.ToolDefinition{
 				Name:        "write_file",
 				Description: "Write a file within the agent workspace.",
+				Usage:       runtimetools.NativeFallbackToolUsage("write_file"),
 				Schema: runtimetools.ObjectSchema(map[string]any{
 					"path":    map[string]any{"type": "string"},
 					"content": map[string]any{"type": "string"},

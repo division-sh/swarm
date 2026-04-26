@@ -23,6 +23,7 @@ type RegisteredTool struct {
 	Name               string
 	Category           string
 	Description        string
+	Usage              string
 	RequiredPermission string
 	HandlerType        implementationClass
 	InputSchema        map[string]any
@@ -53,6 +54,7 @@ func toolDefinitionsForRuntime(source semanticview.Source, discovered map[string
 		defs = append(defs, llm.ToolDefinition{
 			Name:        name,
 			Description: strings.TrimSpace(entry.Description),
+			Usage:       strings.TrimSpace(entry.Usage),
 			Schema:      deepCloneJSONValue(entry.InputSchema),
 		})
 	}
@@ -78,6 +80,7 @@ func toolDefinitionsForActor(source semanticview.Source, actor models.AgentConfi
 		defs = append(defs, llm.ToolDefinition{
 			Name:        name,
 			Description: strings.TrimSpace(entry.Description),
+			Usage:       strings.TrimSpace(entry.Usage),
 			Schema:      deepCloneJSONValue(entry.InputSchema),
 		})
 	}
@@ -115,11 +118,12 @@ func registeredToolsForRuntime(source semanticview.Source, discovered map[string
 			continue
 		}
 		schema, _ := tool.InputSchema.(map[string]any)
+		schema = deepCloneMap(schema)
 		entries[name] = RegisteredTool{
 			Name:          name,
 			Description:   strings.TrimSpace(tool.Description),
 			HandlerType:   implementationMCP,
-			InputSchema:   deepCloneJSONValue(schema).(map[string]any),
+			InputSchema:   schema,
 			MCPServerName: strings.TrimSpace(tool.ServerName),
 			MCPRemoteName: strings.TrimSpace(tool.RemoteName),
 		}
@@ -210,6 +214,7 @@ func registeredToolFromContract(name string, entry runtimecontracts.ToolSchemaEn
 		Name:               strings.TrimSpace(name),
 		Category:           strings.TrimSpace(entry.Category),
 		Description:        strings.TrimSpace(entry.Description),
+		Usage:              runtimeOwnedToolUsage(name),
 		RequiredPermission: strings.TrimSpace(toolRequiredPermission(name, entry)),
 		HandlerType:        handlerType,
 		InputSchema:        inputSchema,

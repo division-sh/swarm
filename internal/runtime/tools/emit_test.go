@@ -51,6 +51,12 @@ func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.
 	}, nil)
 	for _, def := range tools {
 		if def.Name == "emit_scan_requested" {
+			if strings.TrimSpace(def.Usage) == "" {
+				t.Fatal("emit_scan_requested usage hint is empty")
+			}
+			if strings.Contains(strings.ToLower(def.Usage), "cel") {
+				t.Fatalf("emit usage should not mention CEL: %q", def.Usage)
+			}
 			return
 		}
 	}

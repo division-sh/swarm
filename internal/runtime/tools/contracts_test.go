@@ -46,6 +46,26 @@ func TestContractDefinitionsForSource_UsesProvidedSource(t *testing.T) {
 	t.Fatal("expected source-backed agent_message definition")
 }
 
+func TestContractDefinitionsForSource_AttachesPlatformUsageHints(t *testing.T) {
+	defs, err := ContractDefinitionsForSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err != nil {
+		t.Fatalf("ContractDefinitionsForSource: %v", err)
+	}
+	for _, def := range defs {
+		if def.Name != "query_entities" {
+			continue
+		}
+		if !strings.Contains(def.Usage, "filter is CEL") {
+			t.Fatalf("query_entities usage = %q, want CEL guidance", def.Usage)
+		}
+		if strings.Contains(def.Description, "Usage:") {
+			t.Fatalf("canonical description should not be pre-concatenated: %q", def.Description)
+		}
+		return
+	}
+	t.Fatal("expected query_entities definition")
+}
+
 func TestContractDefinitionsForSource_DoesNotExposeCreateFlowInstance(t *testing.T) {
 	defs, err := ContractDefinitionsForSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
 	if err != nil {

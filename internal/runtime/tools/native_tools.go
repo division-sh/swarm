@@ -20,6 +20,7 @@ func nativeFallbackRegisteredTool(actor models.AgentConfig, name string) (Regist
 		return RegisteredTool{
 			Name:        name,
 			Description: "Execute a shell command locally in the agent workspace.",
+			Usage:       runtimeOwnedToolUsage(name),
 			HandlerType: implementationPlatformBuiltin,
 			InputSchema: ObjectSchema(map[string]any{
 				"command":         map[string]any{"type": "string"},
@@ -33,6 +34,7 @@ func nativeFallbackRegisteredTool(actor models.AgentConfig, name string) (Regist
 		return RegisteredTool{
 			Name:        name,
 			Description: "Search the web and return normalized results.",
+			Usage:       runtimeOwnedToolUsage(name),
 			HandlerType: implementationPlatformBuiltin,
 			InputSchema: ObjectSchema(map[string]any{
 				"query":       map[string]any{"type": "string"},
@@ -46,6 +48,7 @@ func nativeFallbackRegisteredTool(actor models.AgentConfig, name string) (Regist
 		return RegisteredTool{
 			Name:        name,
 			Description: "Read a file from the workspace or mounted read-only paths.",
+			Usage:       runtimeOwnedToolUsage(name),
 			HandlerType: implementationPlatformBuiltin,
 			InputSchema: ObjectSchema(map[string]any{
 				"path": map[string]any{"type": "string"},
@@ -58,6 +61,7 @@ func nativeFallbackRegisteredTool(actor models.AgentConfig, name string) (Regist
 		return RegisteredTool{
 			Name:        name,
 			Description: "Write a file within the agent workspace.",
+			Usage:       runtimeOwnedToolUsage(name),
 			HandlerType: implementationPlatformBuiltin,
 			InputSchema: ObjectSchema(map[string]any{
 				"path":    map[string]any{"type": "string"},
@@ -91,6 +95,7 @@ func nativeFallbackToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 		defs = append(defs, llm.ToolDefinition{
 			Name:        tool.Name,
 			Description: strings.TrimSpace(tool.Description),
+			Usage:       strings.TrimSpace(tool.Usage),
 			Schema:      deepCloneJSONValue(tool.InputSchema),
 		})
 	}

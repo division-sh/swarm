@@ -17,6 +17,7 @@ func builtinRegisteredTools(source semanticview.Source, actor *models.AgentConfi
 			Name:        strings.TrimSpace(name),
 			Category:    strings.TrimSpace(entry.Category),
 			Description: strings.TrimSpace(entry.Description),
+			Usage:       runtimeOwnedToolUsage(name),
 			HandlerType: implementationPlatformBuiltin,
 			InputSchema: deepCloneMap(entry.InputSchema),
 		}

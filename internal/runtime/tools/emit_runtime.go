@@ -139,6 +139,7 @@ func (r *EmitRegistry) GenerateEmitToolsForEvents(eventTypes []string, warn func
 		tools = append(tools, llm.ToolDefinition{
 			Name:        toolName,
 			Description: schema.Description,
+			Usage:       EmitToolUsage(),
 			Schema:      schema.Schema,
 		})
 	}
@@ -186,6 +187,7 @@ func (r *EmitRegistry) GenerateEmitToolsForActor(actor models.AgentConfig, warn 
 			tools = append(tools, llm.ToolDefinition{
 				Name:        toolName,
 				Description: schema.Description,
+				Usage:       EmitToolUsage(),
 				Schema:      schema.Schema,
 			})
 		}
