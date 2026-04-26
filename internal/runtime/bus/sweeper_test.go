@@ -389,6 +389,75 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 	}
 }
 
+func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinues(t *testing.T) {
+	store := &sweeperTestStore{
+		events: []events.PersistedReplayEvent{
+			{Event: events.Event{
+				ID:        "evt-markerless",
+				Type:      events.EventType("custom.markerless"),
+				CreatedAt: time.Now().UTC(),
+			}},
+			{Event: events.Event{
+				ID:        "evt-good-after-markerless",
+				Type:      events.EventType("custom.good"),
+				CreatedAt: time.Now().UTC(),
+			}},
+		},
+		deliveries: map[string][]string{
+			"evt-markerless":            {"agent-missing"},
+			"evt-good-after-markerless": {"agent-good"},
+		},
+		scopes: map[string]runtimereplayclaim.CommittedReplayScope{
+			"evt-good-after-markerless": runtimereplayclaim.CommittedReplayScopeSubscribed,
+		},
+	}
+	logger := &recordingLoggerHook{}
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{Logger: logger})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	goodCh := eb.Subscribe("agent-good")
+	missingCh := eb.Subscribe("agent-missing")
+
+	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("swept count = %d, want 1", count)
+	}
+	if got := store.receipts["evt-markerless"]; got != "error" {
+		t.Fatalf("markerless receipt status = %q, want error", got)
+	}
+	if got := store.receiptErrs["evt-markerless"]; got != runtimereplayclaim.ErrMissingCommittedReplayScope.Error() {
+		t.Fatalf("markerless receipt error = %q, want missing committed replay scope", got)
+	}
+	if got := store.receipts["evt-good-after-markerless"]; got != "processed" {
+		t.Fatalf("good receipt status = %q, want processed", got)
+	}
+	foundTerminalLog := false
+	for _, entry := range logger.entries {
+		if entry.Action == "outbox_replay_scope_unavailable" {
+			foundTerminalLog = true
+		}
+		if entry.Action == "outbox_sweep_failed" {
+			t.Fatal("SweepUndispatched should not emit the global sweep-failed warning for terminal markerless rows")
+		}
+	}
+	if !foundTerminalLog {
+		t.Fatal("expected explicit terminal committed replay-scope warning")
+	}
+	waitForNoEvent(t, missingCh)
+	select {
+	case evt := <-goodCh:
+		if evt.ID != "evt-good-after-markerless" {
+			t.Fatalf("delivered event id = %q, want evt-good-after-markerless", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected good event after markerless row to be replayed")
+	}
+}
+
 func TestSweepUndispatched_ClaimsReplayOwnershipBeforeDispatch(t *testing.T) {
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{

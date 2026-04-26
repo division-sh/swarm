@@ -101,6 +101,10 @@ active_issues:
     title: Reconcile stale active agent sessions against the delivery frontier on the supported path
     maps_to:
       - runtime_lifecycle_observability
+  - id: 547
+    title: Outbox sweeper repeatedly fails committed replay scope lookup on supported run
+    maps_to:
+      - delivery_and_replay_ownership
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -141,10 +145,12 @@ nodes:
       - direct-recipient delivery as a shadow semantic path
       - retry counters and delivery-state updates not atomic
       - replayed deliveries and restored timers without explicit shared-store ownership
+      - markerless replay-eligible events can repeatedly fail committed replay-scope lookup on the supported outbox sweeper path
     representative_issues:
       - 112
       - 144
       - 145
+      - 547
     common_framing_mistakes:
       too_broad:
         - delivery is flaky

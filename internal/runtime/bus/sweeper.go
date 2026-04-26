@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"swarm/internal/events"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
@@ -114,8 +115,19 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			return redelivered, err
 		}
 		if err := eb.PublishPersistedRecipients(ctx, evt, recipients); err != nil {
+			if errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
+				if recordErr := eb.markCommittedReplayScopeUnavailable(ctx, evt, err); recordErr != nil {
+					_ = lease.Release(ctx)
+					return redelivered, recordErr
+				}
+				_ = lease.Release(ctx)
+				continue
+			}
 			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
-				eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
+				if recordErr := eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error()); recordErr != nil {
+					_ = lease.Release(ctx)
+					return redelivered, recordErr
+				}
 			}
 			_ = lease.Release(ctx)
 			return redelivered, err
@@ -125,6 +137,21 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 		redelivered++
 	}
 	return redelivered, nil
+}
+
+func (eb *EventBus) markCommittedReplayScopeUnavailable(ctx context.Context, evt events.Event, cause error) error {
+	errText := strings.TrimSpace(cause.Error())
+	if errText == "" {
+		errText = runtimereplayclaim.ErrMissingCommittedReplayScope.Error()
+	}
+	if err := eb.markPipelineReceipt(ctx, evt.ID, "error", errText); err != nil {
+		return err
+	}
+	eb.logRuntime(ctx, "warn", "Persisted event replay skipped because committed replay scope is unavailable", "eventbus", "outbox_replay_scope_unavailable", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
+		"reason":          "missing_committed_replay_scope",
+		"parent_event_id": strings.TrimSpace(evt.ParentEventID),
+	}, errText, 0)
+	return nil
 }
 
 func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, eventID string) ([]string, error) {
