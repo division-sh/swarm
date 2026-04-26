@@ -32,6 +32,27 @@ func TestNewSourceProvider_UsesDeclaredAgentEmitEventsOnly(t *testing.T) {
 	}
 }
 
+func TestNewSourceProvider_UsesDeclaredRoleForProducerEvents(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-instance-1": {
+				ID:         "agent-instance-1",
+				Role:       "reviewer",
+				EmitEvents: []string{"review.completed"},
+			},
+		},
+	}
+
+	provider := NewSourceProvider(semanticview.Wrap(bundle))
+	got := provider.ProducerEventsForRole("reviewer")
+	if len(got) != 1 || got[0] != "review.completed" {
+		t.Fatalf("ProducerEventsForRole(reviewer) = %#v, want [review.completed]", got)
+	}
+	if got := provider.ProducerEventsForRole("agent-instance-1"); len(got) != 0 {
+		t.Fatalf("ProducerEventsForRole(agent-instance-1) = %#v, want nil/empty", got)
+	}
+}
+
 func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
 	provider := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{

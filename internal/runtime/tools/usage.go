@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	models "swarm/internal/runtime/core/actors"
+	runtimeauthority "swarm/internal/runtime/authority"
 	llm "swarm/internal/runtime/llm"
 	runtimemcp "swarm/internal/runtime/mcp"
 	"swarm/internal/runtime/semanticview"
@@ -127,20 +127,9 @@ func validateEmitToolUsageHintCoverage(source semanticview.Source) []UsageHintFi
 	if source == nil {
 		return nil
 	}
-	registry := NewEmitRegistry(source, nil)
-	agentIDs := make([]string, 0, len(source.AgentEntries()))
-	for agentID := range source.AgentEntries() {
-		agentIDs = append(agentIDs, strings.TrimSpace(agentID))
-	}
-	sort.Strings(agentIDs)
+	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 	findings := make([]UsageHintFinding, 0)
-	for _, agentID := range agentIDs {
-		entry := source.AgentEntries()[agentID]
-		actor := models.AgentConfig{
-			ID:         coalesceNonEmpty(entry.ID, agentID),
-			Role:       coalesceNonEmpty(entry.ID, agentID),
-			EmitEvents: append([]string{}, entry.EmitEvents...),
-		}
+	for _, actor := range providerSchemaValidationActors(source) {
 		for _, def := range registry.GenerateEmitToolsForActor(actor, nil) {
 			usage := strings.TrimSpace(def.Usage)
 			if usage == "" {
