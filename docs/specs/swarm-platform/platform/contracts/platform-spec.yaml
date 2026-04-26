@@ -3165,6 +3165,15 @@ run_model:
       loading new contracts, and resuming execution. The system automatically determines which events need
       to be re-delivered. The original run is frozen. The forked run gets independent execution.'
     command: 'swarm fork --run <run_id> --at <event_id|timestamp> [--contracts <path>]'
+    dry_run_command: 'swarm fork --run <run_id> --at <event_id|timestamp> --dry-run [--json]'
+    planning_admission: 'The dry-run form is a read-only planning/admission surface. It resolves the fork
+      point, reconstructs provable state, classifies replay candidates, and returns execution_ready=false
+      with named unsupported blockers whenever persisted recorder facts cannot prove safe execution. Dry-run
+      MUST NOT create a forked run, mark the source run forked, copy entity state, redeliver events, or change
+      runtime delivery/session/timer state.'
+    planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
+      Builder, dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
+      fork planning with direct SQL joins.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'

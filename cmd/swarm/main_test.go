@@ -349,6 +349,91 @@ func TestLoadRunStatusReport_UsesCanonicalPersistedRunIDForRuntimeLogsAndMutatio
 	}
 }
 
+func TestRunForkCommand_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000300, 0).UTC()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.cli', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+
+	var buf bytes.Buffer
+	code := runForkCommand(ctx, t.TempDir(), []string{
+		"--dry-run",
+		"--run", runID,
+		"--at", eventID,
+		"--json",
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+	}
+	var plan store.RunForkPlan
+	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
+		t.Fatalf("decode fork plan json: %v\n%s", err, buf.String())
+	}
+	if plan.SourceRunID != runID {
+		t.Fatalf("SourceRunID = %q, want %q", plan.SourceRunID, runID)
+	}
+	if plan.ForkPoint.EventID != eventID {
+		t.Fatalf("ForkPoint.EventID = %q, want %q", plan.ForkPoint.EventID, eventID)
+	}
+	if plan.PendingWorkCount != 1 || plan.PendingWork[0].Classification != store.RunForkPendingClassificationPending {
+		t.Fatalf("pending work = %#v", plan.PendingWork)
+	}
+	if plan.ExecutionReady {
+		t.Fatal("ExecutionReady = true, want false while unsupported blockers remain")
+	}
+}
+
+func setPostgresEnvFromDSN(t *testing.T, dsn string) {
+	t.Helper()
+	values := map[string]string{}
+	for _, part := range strings.Fields(dsn) {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		values[key] = value
+	}
+	for _, item := range []struct {
+		env string
+		key string
+	}{
+		{"PGHOST", "host"},
+		{"PGPORT", "port"},
+		{"PGDATABASE", "dbname"},
+		{"PGUSER", "user"},
+		{"PGPASSWORD", "password"},
+		{"SWARM_DB_SSLMODE", "sslmode"},
+	} {
+		if value := strings.TrimSpace(values[item.key]); value != "" {
+			t.Setenv(item.env, value)
+		}
+	}
+}
+
 func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) {
 	t.Setenv("SWARM_LLM_RUNTIME_MODE", "api")
 	t.Setenv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", "4")
