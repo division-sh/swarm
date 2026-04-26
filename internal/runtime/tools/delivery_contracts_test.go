@@ -192,6 +192,42 @@ signal:
 	}
 }
 
+func TestToolDefinitionsForActor_HideEntityScopedUniversalToolsWithoutActorContract(t *testing.T) {
+	lifecycle := models.AgentConfig{
+		ID:           "lifecycle-coordinator",
+		Role:         "lifecycle-coordinator",
+		SessionScope: "global",
+		Tools:        []string{"schedule"},
+	}
+	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
+		"validation": {
+			EntitiesYAML: `
+validation_case:
+  status: text
+`,
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "validator", Role: "validator"}),
+		},
+		"scoring": {
+			EntitiesYAML: `
+vertical:
+  status: text
+`,
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "scorer", Role: "scorer"}),
+		},
+	})
+
+	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+		WorkflowSource: semanticview.Wrap(bundle),
+	})
+	defs := exec.ToolDefinitionsForActor(lifecycle)
+	names := toolDefinitionNames(defs)
+	for _, toolName := range []string{"get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"} {
+		if containsString(names, toolName) {
+			t.Fatalf("expected %s to be hidden for actor with no entity contract/read scope, got %v", toolName, names)
+		}
+	}
+}
+
 func containsAnyString(values []any, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -209,6 +245,14 @@ func anyStrings(values []any) []string {
 		}
 	}
 	return out
+}
+
+func toolDefinitionNames(defs []llm.ToolDefinition) []string {
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		names = append(names, def.Name)
+	}
+	return names
 }
 
 func containsString(values []string, want string) bool {
