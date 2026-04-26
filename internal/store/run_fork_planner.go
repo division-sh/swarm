@@ -328,13 +328,23 @@ func (s *PostgresStore) loadRunForkPendingWork(ctx context.Context, runID string
 			d.delivery_id::text,
 			COALESCE(d.subscriber_type, ''),
 			COALESCE(d.subscriber_id, ''),
-			COALESCE(d.status, ''),
+			CASE
+				WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.status, '')
+				WHEN d.started_at IS NOT NULL AND d.started_at <= $2::timestamptz THEN 'in_progress'
+				ELSE 'pending'
+			END,
 			COALESCE(d.retry_count, 0),
 			COALESCE(d.reason_code, ''),
-			COALESCE(d.active_session_id::text, ''),
+			CASE
+				WHEN d.started_at IS NOT NULL
+				 AND d.started_at <= $2::timestamptz
+				 AND (d.delivered_at IS NULL OR d.delivered_at > $2::timestamptz)
+				THEN COALESCE(d.active_session_id::text, '')
+				ELSE ''
+			END,
 			d.created_at,
-			d.started_at,
-			d.delivered_at,
+			CASE WHEN d.started_at <= $2::timestamptz THEN d.started_at ELSE NULL END,
+			CASE WHEN d.delivered_at <= $2::timestamptz THEN d.delivered_at ELSE NULL END,
 			COALESCE(r.outcome, ''),
 			r.processed_at,
 			EXISTS (
