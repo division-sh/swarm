@@ -63,11 +63,11 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 		},
 	}
 
-	if err := store.Upsert(context.Background(), instance); err != nil {
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
 		t.Fatalf("upsert workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(context.Background(), storageRef)
+	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), storageRef)
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -148,11 +148,11 @@ func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPath
 		StateBuckets: map[string]any{},
 	}
 
-	if err := store.Upsert(context.Background(), instance); err != nil {
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
 		t.Fatalf("upsert static workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(context.Background(), storageRef)
+	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), storageRef)
 	if err != nil {
 		t.Fatalf("load static workflow instance: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 
 			store := NewWorkflowInstanceStore(db)
 			storageRef := "storage-ref"
-			if err := store.Upsert(context.Background(), WorkflowInstance{
+			if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
 				InstanceID:      "inst-1",
 				StorageRef:      storageRef,
 				WorkflowName:    "projection-flow",
@@ -258,7 +258,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 				t.Fatalf("mutate malformed persisted shape: %v", err)
 			}
 
-			loaded, ok, err := store.Load(context.Background(), storageRef)
+			loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), storageRef)
 			if tc.wantContains == "" {
 				if err != nil {
 					t.Fatalf("load with slash-only flow_path: %v", err)

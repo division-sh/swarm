@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/testutil"
 )
@@ -15,7 +16,8 @@ import (
 func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	const runID = "44444444-4444-4444-4444-444444444444"
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 
 	// UpsertAgent: missing id.
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: runtimeactors.AgentConfig{}}); err == nil {
@@ -25,6 +27,13 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	// EnsureEntitySchema: invalid/missing slug.
 	vid := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES ('entity-no-slug', 'test', 'static', '{}'::jsonb, 'active', now())
 	`); err != nil {
@@ -32,13 +41,13 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, current_state,
+			run_id, entity_id, flow_instance, entity_type, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, 'entity-no-slug', 'default', 'operating',
+			$1::uuid, $2::uuid, 'entity-no-slug', 'default', 'operating',
 			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 		)
-	`, vid); err != nil {
+	`, runID, vid); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
 	if err := pg.EnsureEntitySchema(ctx, vid); err == nil {

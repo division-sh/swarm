@@ -29,7 +29,7 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 			},
 		},
 	}
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
@@ -39,7 +39,7 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	if err := pc.updateEntityState(context.Background(), entityID, "done", "flow.transitioned"); err != nil {
+	if err := pc.updateEntityState(testPipelineCoordinatorRunContext(t, pc), entityID, "done", "flow.transitioned"); err != nil {
 		t.Fatalf("updateEntityState: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 	store := NewWorkflowInstanceStore(db)
 	entityID := uuid.NewString()
 
-	if err := store.Upsert(context.Background(), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
@@ -105,7 +105,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	if err := store.Upsert(context.Background(), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
@@ -150,7 +150,7 @@ func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
 	pc := testMutationLoggingCoordinator(db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
-	if err := pc.applyWorkflowGateMutation(context.Background(), entityID, "workflow.ready", "g_ready", false); err != nil {
+	if err := pc.applyWorkflowGateMutation(testPipelineCoordinatorRunContext(t, pc), entityID, "workflow.ready", "g_ready", false); err != nil {
 		t.Fatalf("applyWorkflowGateMutation: %v", err)
 	}
 
@@ -169,7 +169,7 @@ func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
 	pc := testMutationLoggingCoordinator(db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
-	if err := pc.recordWorkflowEvidence(context.Background(), entityID, "research", map[string]any{"summary": "done"}); err != nil {
+	if err := pc.recordWorkflowEvidence(testPipelineCoordinatorRunContext(t, pc), entityID, "research", map[string]any{"summary": "done"}); err != nil {
 		t.Fatalf("recordWorkflowEvidence: %v", err)
 	}
 
@@ -216,7 +216,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := pc.updateEntityState(context.Background(), entityID, "done", "flow.transitioned")
+		err := pc.updateEntityState(testPipelineCoordinatorRunContext(t, pc), entityID, "done", "flow.transitioned")
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("updateEntityState err = %v, want entity_mutations failure", err)
 		}
@@ -230,7 +230,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := pc.applyWorkflowGateMutation(context.Background(), entityID, "workflow.ready", "g_ready", false)
+		err := pc.applyWorkflowGateMutation(testPipelineCoordinatorRunContext(t, pc), entityID, "workflow.ready", "g_ready", false)
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("applyWorkflowGateMutation err = %v, want entity_mutations failure", err)
 		}
@@ -244,7 +244,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := pc.recordWorkflowEvidence(context.Background(), entityID, "research", map[string]any{"summary": "done"})
+		err := pc.recordWorkflowEvidence(testPipelineCoordinatorRunContext(t, pc), entityID, "research", map[string]any{"summary": "done"})
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("recordWorkflowEvidence err = %v, want entity_mutations failure", err)
 		}
@@ -268,7 +268,7 @@ func testMutationLoggingCoordinator(db *sql.DB) *PipelineCoordinator {
 
 func seedMutationLoggingInstance(t *testing.T, store *WorkflowInstanceStore, entityID string) {
 	t.Helper()
-	if err := store.Upsert(context.Background(), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",

@@ -161,6 +161,85 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 			return fmt.Errorf("drop deprecated entity_state.subject_id column: %w", err)
 		}
 	}
+	if !catalog.hasColumns("entity_state", "run_id") {
+		var rows int
+		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state`).Scan(&rows); err != nil {
+			return fmt.Errorf("inspect entity_state rows before run_id migration: %w", err)
+		}
+		if rows > 0 {
+			return fmt.Errorf("entity_state.run_id migration requires explicit run ownership; refusing to infer run_id for %d existing rows", rows)
+		}
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE entity_state ADD COLUMN run_id UUID NOT NULL REFERENCES runs(run_id)`); err != nil {
+			return fmt.Errorf("add entity_state.run_id column: %w", err)
+		}
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		DO $$
+		DECLARE pk_name TEXT;
+		BEGIN
+			SELECT c.conname
+			INTO pk_name
+			FROM pg_constraint c
+			WHERE c.conrelid = 'entity_state'::regclass
+			  AND c.contype = 'p'
+			  AND NOT (
+				c.conkey = ARRAY[
+					(SELECT attnum FROM pg_attribute WHERE attrelid = 'entity_state'::regclass AND attname = 'run_id'),
+					(SELECT attnum FROM pg_attribute WHERE attrelid = 'entity_state'::regclass AND attname = 'entity_id')
+				]
+			  );
+			IF pk_name IS NOT NULL THEN
+				EXECUTE format('ALTER TABLE entity_state DROP CONSTRAINT %I', pk_name);
+			END IF;
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_constraint c
+				WHERE c.conrelid = 'entity_state'::regclass
+				  AND c.contype = 'p'
+				  AND c.conkey = ARRAY[
+					(SELECT attnum FROM pg_attribute WHERE attrelid = 'entity_state'::regclass AND attname = 'run_id'),
+					(SELECT attnum FROM pg_attribute WHERE attrelid = 'entity_state'::regclass AND attname = 'entity_id')
+				  ]
+			) THEN
+				ALTER TABLE entity_state ADD PRIMARY KEY (run_id, entity_id);
+			END IF;
+		END
+		$$;
+	`); err != nil {
+		return fmt.Errorf("ensure entity_state run-scoped primary key: %w", err)
+	}
+	for _, stmt := range []string{
+		`DROP INDEX IF EXISTS idx_entity_flow`,
+		`DROP INDEX IF EXISTS idx_entity_state`,
+		`DROP INDEX IF EXISTS idx_entity_type`,
+		`DROP INDEX IF EXISTS idx_entity_slug`,
+	} {
+		if _, err := s.DB.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("ensure entity_state run-scoped indexes: %w", err)
+		}
+	}
+	catalog, err = loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
+		return err
+	}
+	indexes := []struct {
+		stmt    string
+		columns []string
+	}{
+		{`CREATE INDEX IF NOT EXISTS idx_entity_flow ON entity_state(run_id, flow_instance, current_state)`, []string{"run_id", "flow_instance", "current_state"}},
+		{`CREATE INDEX IF NOT EXISTS idx_entity_state ON entity_state(run_id, current_state)`, []string{"run_id", "current_state"}},
+		{`CREATE INDEX IF NOT EXISTS idx_entity_type ON entity_state(run_id, entity_type)`, []string{"run_id", "entity_type"}},
+		{`CREATE INDEX IF NOT EXISTS idx_entity_slug ON entity_state(run_id, slug) WHERE slug IS NOT NULL`, []string{"run_id", "slug"}},
+		{`CREATE INDEX IF NOT EXISTS idx_entity_cross_run ON entity_state(entity_id)`, []string{"entity_id"}},
+	}
+	for _, index := range indexes {
+		if !catalog.hasColumns("entity_state", index.columns...) {
+			continue
+		}
+		if _, err := s.DB.ExecContext(ctx, index.stmt); err != nil {
+			return fmt.Errorf("ensure entity_state run-scoped indexes: %w", err)
+		}
+	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
 }

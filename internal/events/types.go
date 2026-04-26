@@ -100,6 +100,9 @@ func (e Event) ContextMap(currentState string) map[string]any {
 	if parentEventID := strings.TrimSpace(e.ParentEventID); parentEventID != "" {
 		out["source_event_id"] = parentEventID
 	}
+	if runID := strings.TrimSpace(e.RunID); runID != "" {
+		out["run_id"] = runID
+	}
 	if !e.CreatedAt.IsZero() {
 		out["emitted_at"] = e.CreatedAt.UTC().Format(time.RFC3339Nano)
 	}

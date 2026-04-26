@@ -14,6 +14,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/eventidentity"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	llm "swarm/internal/runtime/llm"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
@@ -22,6 +23,8 @@ import (
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/testutil"
 )
+
+const specEntityStateRunID = "33333333-3333-3333-3333-333333333333"
 
 func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *PostgresStore) {
 	t.Helper()
@@ -1033,6 +1036,13 @@ func TestPostgresStore_AgentSessionSuccessorInvariantsRejectCrossScopeAndLegacyW
 
 func seedSpecEntityState(t *testing.T, ctx context.Context, db execer, entityID, flowInstance, slug, name, state string) {
 	t.Helper()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, specEntityStateRunID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	if strings.TrimSpace(flowInstance) == "" {
 		flowInstance = strings.TrimSpace(slug)
 	}
@@ -1051,14 +1061,14 @@ func seedSpecEntityState(t *testing.T, ctx context.Context, db execer, entityID,
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, slug, name, current_state,
+			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2, 'default', NULLIF($3,''), NULLIF($4,''), $5,
+			$1::uuid, $2::uuid, $3, 'default', NULLIF($4,''), NULLIF($5,''), $6,
 			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 		)
-		ON CONFLICT (entity_id) DO NOTHING
-	`, entityID, flowInstance, slug, name, state); err != nil {
+		ON CONFLICT (run_id, entity_id) DO NOTHING
+	`, specEntityStateRunID, entityID, flowInstance, slug, name, state); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
 }
@@ -3227,7 +3237,7 @@ func TestManagerStore_MarkEventDeliveryInProgress_RequiresIDs(t *testing.T) {
 func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimecorrelation.WithRunID(context.Background(), specEntityStateRunID)
 
 	entityID := uuid.NewString()
 	seedSpecEntityState(t, ctx, db, entityID, "v-flow", "v", "V", "operating")
@@ -3276,7 +3286,7 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 func TestManagerStore_EnsureEntitySchema(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimecorrelation.WithRunID(context.Background(), specEntityStateRunID)
 
 	entityID := uuid.NewString()
 	seedSpecEntityState(t, ctx, db, entityID, "entity-schema-flow", "vslug", "TestCo", "operating")
@@ -3289,7 +3299,7 @@ func TestManagerStore_EnsureEntitySchema(t *testing.T) {
 func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimecorrelation.WithRunID(context.Background(), specEntityStateRunID)
 
 	entityID := uuid.NewString()
 	seedSpecEntityState(t, ctx, db, entityID, "vslug-flow", "vslug", "V", "operating")
@@ -5253,7 +5263,7 @@ func TestManagerStore_LoadAgents_FailsClosedWithoutHotPathSchemaRepair(t *testin
 func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	ctx := runtimecorrelation.WithRunID(context.Background(), specEntityStateRunID)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
 	entityID := uuid.NewString()

@@ -14,6 +14,7 @@ import (
 
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -288,12 +289,17 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 	}
 
 	if m.db != nil {
+		runID, err := runtimecurrentstate.RequireRunID(ctx)
+		if err != nil {
+			return nil, err
+		}
 		rows, err := m.db.QueryContext(ctx, `
 			SELECT DISTINCT COALESCE(NULLIF(es.slug, ''), '')
 			FROM entity_state es
 			JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-			WHERE COALESCE(fi.config->>'instance_kind', '') = 'entity'
-		`)
+			WHERE es.run_id = $1::uuid
+			  AND COALESCE(fi.config->>'instance_kind', '') = 'entity'
+		`, runID)
 		if err != nil {
 			return nil, fmt.Errorf("list instance slugs: %w", err)
 		}
@@ -759,12 +765,17 @@ func (m *DockerManager) LookupEntitySlug(ctx context.Context, entityID string) (
 	if m.db == nil {
 		return SanitizeSlug(trimmedID), nil
 	}
+	identity, err := runtimecurrentstate.RequireIdentity(ctx, trimmedID)
+	if err != nil {
+		return "", err
+	}
 	var slug string
 	if err := m.db.QueryRowContext(ctx, `
 		SELECT COALESCE(NULLIF(slug, ''), '')
 		FROM entity_state
-		WHERE entity_id = $1::uuid
-	`, trimmedID).Scan(&slug); err != nil {
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+	`, identity.RunID, identity.EntityID).Scan(&slug); err != nil {
 		return "", fmt.Errorf("lookup instance slug: %w", err)
 	}
 	slug = SanitizeSlug(slug)

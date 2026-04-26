@@ -18,7 +18,7 @@ func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T
 	entityID := uuid.NewString()
 	seedWorkflowInstanceForMutationTest(t, store, entityID)
 
-	ctx := context.Background()
+	ctx := testWorkflowStoreRunContext(t, store)
 	firstEntered := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	secondEntered := make(chan struct{})
@@ -90,7 +90,7 @@ func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *tes
 		entityLocks:   map[string]*sync.Mutex{},
 	}
 
-	ctx := context.Background()
+	ctx := testWorkflowStoreRunContext(t, store)
 	firstEntered := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	errCh := make(chan error, 2)
@@ -143,7 +143,7 @@ func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
 	entityID := uuid.NewString()
 	seedWorkflowInstanceForMutationTest(t, store, entityID)
 
-	if err := store.Mutate(context.Background(), entityID, func(instance *WorkflowInstance) {
+	if err := store.Mutate(testWorkflowStoreRunContext(t, store), entityID, func(instance *WorkflowInstance) {
 		setWorkflowGate(instance, "g_single")
 		appendWorkflowEvidence(instance, "audit", map[string]any{"writer": "single"})
 		instance.CurrentState = "processing"
@@ -151,7 +151,7 @@ func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
 		t.Fatalf("mutate: %v", err)
 	}
 
-	instance, ok, err := store.Load(context.Background(), entityID)
+	instance, ok, err := store.Load(testWorkflowStoreRunContext(t, store), entityID)
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 	entityID := uuid.NewString()
 	storageRef := entityID
 	now := time.Now().UTC().Round(time.Microsecond)
-	if err := store.Upsert(context.Background(), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      storageRef,
 		WorkflowName:    "mutation-flow",
@@ -212,13 +212,13 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		t.Fatalf("insert scheduler-owned timer row: %v", err)
 	}
 
-	if err := store.Mutate(context.Background(), entityID, func(instance *WorkflowInstance) {
+	if err := store.Mutate(testWorkflowStoreRunContext(t, store), entityID, func(instance *WorkflowInstance) {
 		instance.CurrentState = "active"
 	}); err != nil {
 		t.Fatalf("mutate with scheduler-owned timer row present: %v", err)
 	}
 
-	instance, ok, err := store.Load(context.Background(), entityID)
+	instance, ok, err := store.Load(testWorkflowStoreRunContext(t, store), entityID)
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 
 func seedWorkflowInstanceForMutationTest(t *testing.T, store *WorkflowInstanceStore, entityID string) {
 	t.Helper()
-	if err := store.Upsert(context.Background(), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",

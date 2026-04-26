@@ -2,9 +2,13 @@ package store
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	stdruntime "runtime"
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
@@ -128,6 +132,48 @@ func TestGeneratePlatformTableDDLs_ExtractsInlineUniquePartialIndex(t *testing.T
 	}
 	if got := plans[0].Statements[1]; !strings.Contains(got, `CREATE UNIQUE INDEX IF NOT EXISTS "agent_sessions_nonterminated_unique" ON "agent_sessions"(agent_id, scope_key) WHERE status <> 'terminated'`) {
 		t.Fatalf("unexpected unique partial index statement: %q", got)
+	}
+}
+
+func TestPlatformSpecEntityStateUsesRunScopedIdentity(t *testing.T) {
+	_, file, _, _ := stdruntime.Caller(0)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("unmarshal platform spec: %v", err)
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	var entityState SchemaTableDDL
+	for _, plan := range plans {
+		if plan.TableName == "entity_state" {
+			entityState = plan
+			break
+		}
+	}
+	if entityState.TableName == "" {
+		t.Fatal("entity_state ddl plan missing")
+	}
+	joined := strings.Join(entityState.Statements, "\n")
+	for _, want := range []string{
+		"run_id            UUID NOT NULL REFERENCES runs(run_id)",
+		"entity_id         UUID NOT NULL",
+		"PRIMARY KEY (run_id, entity_id)",
+		`CREATE INDEX IF NOT EXISTS "idx_entity_flow" ON "entity_state"(run_id, flow_instance, current_state)`,
+		`CREATE INDEX IF NOT EXISTS "idx_entity_cross_run" ON "entity_state"(entity_id)`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("entity_state ddl missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "entity_id         UUID PRIMARY KEY") {
+		t.Fatalf("entity_state ddl kept global entity_id primary key:\n%s", joined)
 	}
 }
 

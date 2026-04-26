@@ -12,6 +12,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	models "swarm/internal/runtime/core/actors"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	"swarm/internal/runtime/entityruntime"
 	"swarm/internal/runtime/semanticview"
 )
@@ -25,7 +26,10 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_search_entities.schema", false, err, "resolve entity contract")
 	}
-	filterSQL, args := entityStateBaseQueryForContract(source, schema.Contract, payload, true)
+	filterSQL, args, err := entityStateBaseQueryForContractRun(ctx, source, schema.Contract, payload, true)
+	if err != nil {
+		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.run_context", true, err, "resolve entity_state run context")
+	}
 	currentStateFilter := strings.TrimSpace(asString(payload["current_state"]))
 	if currentStateFilter != "" {
 		args = append(args, currentStateFilter)
@@ -95,7 +99,10 @@ func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConf
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.schema", false, err, "resolve entity contract")
 	}
-	filterSQL, args := entityStateBaseQueryForContract(source, schema.Contract, payload, true)
+	filterSQL, args, err := entityStateBaseQueryForContractRun(ctx, source, schema.Contract, payload, true)
+	if err != nil {
+		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_entities.run_context", true, err, "resolve entity_state run context")
+	}
 	whereClause := joinEntityStateWhere(filterSQL)
 	rows, err := queryEntityStateRows(ctx, db, whereClause+" ORDER BY created_at DESC", args...)
 	if err != nil {
@@ -158,7 +165,10 @@ func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfi
 			return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_metrics.group_by", false, err, "validate group_by")
 		}
 	}
-	filterSQL, args := entityStateBaseQueryForContract(source, schema.Contract, payload, true)
+	filterSQL, args, err := entityStateBaseQueryForContractRun(ctx, source, schema.Contract, payload, true)
+	if err != nil {
+		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_query_metrics.run_context", true, err, "resolve entity_state run context")
+	}
 	whereClause := joinEntityStateWhere(filterSQL)
 	rows, err := queryEntityStateRows(ctx, db, whereClause+" ORDER BY created_at DESC", args...)
 	if err != nil {
@@ -204,6 +214,24 @@ func entityStateBaseQueryForContract(source semanticview.Source, contract entity
 		clauses, args = appendEntityToolExistingFlowInstanceFilter(source, clauses, args, asString(payload["flow_instance"]))
 	}
 	return clauses, args
+}
+
+func entityStateBaseQueryForContractRun(ctx context.Context, source semanticview.Source, contract entityruntime.Contract, payload map[string]any, includeFlowInstance bool) ([]string, []any, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	clauses := []string{"run_id = $1::uuid"}
+	args := []any{runID}
+	flowRoot := entityReadFlowScopeRoot(source, contract)
+	if flowRoot != "" {
+		args = append(args, flowRoot, flowRoot+"/%")
+		clauses = append(clauses, fmt.Sprintf("(flow_instance = $%d OR flow_instance LIKE $%d)", len(args)-1, len(args)))
+	}
+	if includeFlowInstance {
+		clauses, args = appendEntityToolExistingFlowInstanceFilter(source, clauses, args, asString(payload["flow_instance"]))
+	}
+	return clauses, args, nil
 }
 
 func entityReadFlowScopeRoot(source semanticview.Source, contract entityruntime.Contract) string {

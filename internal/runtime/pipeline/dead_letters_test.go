@@ -28,7 +28,7 @@ func (s eventReceiptsCapabilityStub) resolve(context.Context) (bool, error) {
 
 func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := context.Background()
+	ctx := testPipelineRunContext(t, db)
 	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
 		return errors.New("boom")
 	})
@@ -75,6 +75,7 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 		ID:          uuid.NewString(),
 		Type:        "chain.start",
 		SourceAgent: "src",
+		RunID:       testPipelineRunID,
 		Payload:     []byte(`{}`),
 		CreatedAt:   time.Now().UTC(),
 		ChainDepth:  5,
@@ -100,7 +101,7 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      entityID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),

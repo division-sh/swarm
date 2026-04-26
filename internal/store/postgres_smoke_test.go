@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/testutil"
@@ -17,10 +18,18 @@ import (
 func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
+	const runID = "66666666-6666-6666-6666-666666666666"
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 
 	// Seed entity.
 	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES ('testco', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
@@ -29,13 +38,13 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, slug, name, current_state,
+			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, 'testco', 'default', 'testco', 'TestCo', 'operating',
+			$1::uuid, $2::uuid, 'testco', 'default', 'testco', 'TestCo', 'operating',
 			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 		)
-	`, entityID); err != nil {
+	`, runID, entityID); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
 

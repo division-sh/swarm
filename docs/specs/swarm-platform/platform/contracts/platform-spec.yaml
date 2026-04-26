@@ -2731,19 +2731,20 @@ platform_tables:
         \ entity_id IS NOT NULL,\n    INDEX idx_receipts_subscriber (subscriber_id, processed_at),\n    INDEX idx_receipts_idempotency\
         \ (idempotency_key) WHERE idempotency_key IS NOT NULL\n);"
     entity_state:
-      description: Current state of every entity. This IS the entity registry — no separate registry table. slug and name
-        are top-level columns for fast lookup/display without JSONB queries. entity_type records the inferred flow-scoped
-        entity contract for the row; callers do not author or choose multiple entity kinds inside one flow in Wave 1.
-        fields JSONB holds all contract-driven entity fields. Generic store reads use entity_state for listing, filtering,
-        and lookup.
-      ddl: "CREATE TABLE entity_state (\n    entity_id         UUID PRIMARY KEY,\n    flow_instance     TEXT NOT NULL,\n    entity_type       TEXT NOT NULL DEFAULT 'default',\n    slug              TEXT,\n\
+      description: Current run-scoped state of every entity. This IS the run-scoped entity registry — no separate registry
+        table. Current-state identity is (run_id, entity_id), allowing source and fork runs to preserve the same entity_id
+        while diverging independently. slug and name are top-level columns for fast lookup/display without JSONB queries.
+        entity_type records the inferred flow-scoped entity contract for the row; callers do not author or choose multiple
+        entity kinds inside one flow in Wave 1. fields JSONB holds all contract-driven entity fields. Generic store reads
+        use entity_state for run-scoped listing, filtering, and lookup.
+      ddl: "CREATE TABLE entity_state (\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    entity_id         UUID NOT NULL,\n    flow_instance     TEXT NOT NULL,\n    entity_type       TEXT NOT NULL DEFAULT 'default',\n    slug              TEXT,\n\
         \    name              TEXT,\n    current_state     TEXT NOT NULL,\n    gates             JSONB NOT NULL DEFAULT '{}',\n\
         \    fields            JSONB NOT NULL DEFAULT '{}',\n    accumulator       JSONB NOT NULL DEFAULT '{}',\n    revision\
         \          INTEGER NOT NULL DEFAULT 0,\n    entered_state_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    created_at\
-        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX\
-        \ idx_entity_flow (flow_instance, current_state),\n\
-        \    INDEX idx_entity_state (current_state),\n    INDEX idx_entity_type (entity_type),\n    INDEX idx_entity_slug\
-        \ (slug) WHERE slug IS NOT NULL\n);"
+        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    PRIMARY\
+        \ KEY (run_id, entity_id),\n    INDEX idx_entity_flow (run_id, flow_instance, current_state),\n\
+        \    INDEX idx_entity_state (run_id, current_state),\n    INDEX idx_entity_type (run_id, entity_type),\n    INDEX\
+        \ idx_entity_slug (run_id, slug) WHERE slug IS NOT NULL,\n    INDEX idx_entity_cross_run (entity_id)\n);"
     agents:
       description: 'Runtime agent registry. One row per agent instance. Carries the full persisted runtime descriptor:
         role/model_tier/llm_backend/conversation_mode/parent_agent_id as typed columns, subscriptions/emit_events/tools/permissions
@@ -3035,22 +3036,23 @@ platform_tables:
         duration: event_receipts.duration_ms
       note: Every handler execution already produces an event_receipt. The receipt captures state_before, state_after, outcome,
         duration, and side_effects. This IS the pipeline transition record. No separate table needed.
-  entity_registry_policy: There is no separate entity registry table. entity_state IS the registry. Generic reads (list entities,
-    find by slug, count by state) query entity_state directly. Contract-driven entity tables are optional optimizations —
-    they materialize fields JSONB into typed columns for query performance. Not required for correctness.
+  entity_registry_policy: There is no separate entity registry table. entity_state IS the run-scoped current registry.
+    Generic reads (list entities, find by slug, count by state) query entity_state through an explicit run context.
+    Contract-driven entity tables are optional optimizations — they materialize fields JSONB into typed columns for
+    query performance. Not required for correctness.
   entity_lifecycle_scoping:
-    description: Entities are global and persistent. Entity queries (search_entities, query_entities, get_entity) return
-      entities from ALL runs, not scoped to the current run. This is intentional — a vertical discovered in one run
-      and killed in another is still visible to future queries. Products use this for dedup, historical analysis, and
-      trend detection.
-    rationale: In a continuous system where discovery runs periodically, entities accumulate over time. A killed vertical
-      should remain visible so the system does not rediscover the same opportunity. An operating vertical should be visible
-      so new discoveries can be checked against active investments. Global visibility enables agents to make informed decisions
-      about duplicate detection, market evolution, and portfolio context.
-    dedup_responsibility: Duplicate detection across runs is a product concern, not a platform concern. The platform
-      provides global entity queries. Products implement dedup logic in their agents and guards — checking entity names,
-      geographies, opportunity patterns, and current states to decide whether a newly discovered entity is genuinely new
-      or a rediscovery of an existing one.
+    description: Entity identity can be compared across runs, but current entity state is run-scoped. Entity queries
+      (search_entities, query_entities, get_entity) return entity_state rows from the current run context only. Cross-run
+      duplicate detection or historical analysis must use an explicit cross-run read model rather than the live current-state
+      registry.
+    rationale: Mutating timestamp forks require source and fork runs to preserve entity_id while diverging safely. Global
+      live current state would let forked execution overwrite or read source-run state by accident. Products that need
+      historical or portfolio-wide duplicate detection must consume explicit cross-run history/read surfaces.
+    dedup_responsibility: Duplicate detection across runs is a product concern, not a live current-state registry concern.
+      Products that need cross-run dedup consume explicit cross-run history/read surfaces, not unscoped entity_state
+      queries. Products implement dedup logic in their agents and guards — checking entity names, geographies, opportunity
+      patterns, and scoped current states to decide whether a newly discovered entity is genuinely new or a rediscovery
+      of an existing one.
     entity_state_for_dedup: 'When an agent checks for duplicates, the entity''s current_state provides context for the
       decision: active or in-pipeline entities are strong duplicates (skip). Recently killed entities are likely duplicates
       (skip unless evidence changed). Entities killed long ago may warrant re-evaluation if market conditions shifted.
@@ -3100,8 +3102,8 @@ platform_tables:
       as opaque JSONB. Products own their secrets.
 run_model:
   description: 'A run is the top-level execution context for the platform. Every event, delivery, session, turn,
-    and entity mutation belongs to exactly one run. Runs provide isolation for observability, debugging, and
-    fork/replay. The run_id is the primary correlation key across all platform tables.'
+    entity mutation, and current entity-state row belongs to exactly one run. Runs provide isolation for observability,
+    debugging, and fork/replay. The run_id is the primary correlation key across all platform tables.'
   lineage:
     description: 'Event lineage is tracked via two fields: run_id (which run this event belongs to) and
       source_event_id (which event caused this event to be emitted). Together they replace the former trace_id
@@ -3118,6 +3120,7 @@ run_model:
       - agent_conversation_audits.run_id
       - agent_turns.run_id
       - entity_mutations.run_id
+      - entity_state.run_id
       propagation_rule: 'Child event run_id = parent event run_id. The bus publish path reads run_id from
         the inbound event context and stamps it on every outbound event. No handler or agent code touches
         run_id directly.'
@@ -3202,19 +3205,20 @@ run_model:
       composite ordering. The fork point is inclusive: mutations from the target moment are included in
       reconstructed state. Only mutations strictly after T are undone.'
     isolation: 'Forked runs are fully isolated. They get their own event stream, their own entity state copies,
-      and their own agent sessions. Results can be compared side-by-side with the original run.'
+      and their own agent sessions. Fork state materialization writes entity_state rows under the fork run_id while
+      preserving entity_id from the source run. Results can be compared side-by-side with the original run.'
     original_run: 'The source run transitions to status=forked. It is frozen — no new events are processed.
       Its data is preserved for comparison and audit.'
   mutation_log:
     description: 'The entity_mutations table is the audit trail for all entity state changes. It serves three
       purposes: (1) flight recorder — step-by-step view of what happened, (2) fork — state reconstruction at
       any point in time, (3) drift detection — verify entity_state matches the mutation history.'
-    write_contract: 'Every write to entity_state MUST produce a corresponding entity_mutations row in the same
-      transaction. This includes system node handler writes (data_accumulation, compute, sets_gate, advances_to,
-      clear) and agent tool writes (save_entity_field). The runtime enforces this — there is no code path that
-      mutates entity_state without logging the mutation.'
+    write_contract: 'Every write to entity_state MUST carry an explicit run_id and produce a corresponding
+      entity_mutations row with the same run_id in the same transaction. This includes system node handler writes
+      (data_accumulation, compute, sets_gate, advances_to, clear) and agent tool writes (save_entity_field).
+      The runtime enforces this — there is no code path that mutates entity_state without logging the mutation.'
     drift_detection: 'swarm verify --run <run_id> reconstructs entity state from the mutation log and compares
-      it to current entity_state. Any mismatch indicates a write that bypassed the mutation log. This is a
+      it to current entity_state rows for that same run_id. Any mismatch indicates a write that bypassed the mutation log. This is a
       correctness check, not a normal operation — run it when debugging unexpected state.'
     retention: 'Mutation rows are never auto-deleted. Retention policy is an operational concern. The platform
       may provide a future archive/purge API for mutations older than N days on terminated entities.'

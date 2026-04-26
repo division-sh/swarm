@@ -17,6 +17,8 @@ import (
 	"swarm/internal/testutil"
 )
 
+const retryPolicyEntityStateRunID = "22222222-2222-2222-2222-222222222222"
+
 func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
@@ -929,6 +931,13 @@ func seedEntityAndAgent(t *testing.T, ctx context.Context, pg *store.PostgresSto
 
 	entityID = uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, retryPolicyEntityStateRunID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES ('retry-policy-entity', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
 	`); err != nil {
@@ -936,12 +945,12 @@ func seedEntityAndAgent(t *testing.T, ctx context.Context, pg *store.PostgresSto
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, slug, name, current_state,
+			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		)
-		VALUES ($1::uuid, 'retry-policy-entity', 'default', 'retry-policy', 'Store Retry Policy Test', 'approved',
+		VALUES ($1::uuid, $2::uuid, 'retry-policy-entity', 'default', 'retry-policy', 'Store Retry Policy Test', 'approved',
 			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
-	`, entityID); err != nil {
+	`, retryPolicyEntityStateRunID, entityID); err != nil {
 		t.Fatalf("seed entity: %v", err)
 	}
 

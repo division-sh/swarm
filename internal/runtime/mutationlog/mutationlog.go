@@ -10,10 +10,9 @@ import (
 
 	"github.com/google/uuid"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimecurrentstate "swarm/internal/runtime/currentstate"
 	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
-
-var syntheticRunNamespace = uuid.MustParse("7e7e89e6-0d4f-4eeb-a8a0-99a3e8ec2ef1")
 
 func ErrInvalidMutationLogWriter(message string) error {
 	return fmt.Errorf("mutation log completeness violation: %s", strings.TrimSpace(message))
@@ -64,7 +63,10 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 		return ErrInvalidMutationLogWriter("entity_id, field, writer_type, and writer_id are required")
 	}
 
-	runID := normalizeRunID(runtimecorrelation.RunIDFromContext(ctx))
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return ErrInvalidMutationLogWriter(err.Error())
+	}
 	if err := storerunlifecycle.EnsureActive(ctx, db, runID, "", "", storerunlifecycle.EnsureActiveOptions{}); err != nil {
 		return err
 	}
@@ -344,17 +346,6 @@ func deleteProjectionMapValue(target map[string]any, path []string) bool {
 		delete(target, segment)
 	}
 	return len(target) == 0
-}
-
-func normalizeRunID(runID string) string {
-	if parsed := validUUIDString(runID); parsed != "" {
-		return parsed
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return uuid.NewString()
-	}
-	return uuid.NewSHA1(syntheticRunNamespace, []byte(runID)).String()
 }
 
 func validUUIDString(raw string) string {

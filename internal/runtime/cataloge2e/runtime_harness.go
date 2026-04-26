@@ -16,12 +16,15 @@ import (
 	"swarm/internal/events"
 	runtime "swarm/internal/runtime"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
 )
+
+const catalogRuntimeRunID = "88888888-8888-8888-8888-888888888888"
 
 type catalogTriggerStep struct {
 	Event                         string         `yaml:"event"`
@@ -164,8 +167,15 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	loadAgentFixtures(t, fixtureRoot, llmRuntime)
 	pg := &store.PostgresStore{DB: db}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(context.Background(), catalogRuntimeRunID))
 	t.Cleanup(cancel)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, catalogRuntimeRunID); err != nil {
+		t.Fatalf("seed catalog runtime run: %v", err)
+	}
 
 	rt, err := runtime.NewRuntime(ctx, cfg, runtime.Stores{
 		SQLDB:             db,
@@ -291,6 +301,7 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 			ID:          uuid.NewString(),
 			Type:        events.EventType(strings.TrimSpace(step.Event)),
 			SourceAgent: "cataloge2e",
+			RunID:       catalogRuntimeRunID,
 			Payload:     raw,
 			CreatedAt:   time.Now().UTC(),
 		}
@@ -352,6 +363,7 @@ func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string
 		ID:          uuid.NewString(),
 		Type:        events.EventType(strings.TrimSpace(eventType)),
 		SourceAgent: strings.TrimSpace(sourceAgent),
+		RunID:       catalogRuntimeRunID,
 		Payload:     raw,
 		CreatedAt:   time.Now().UTC(),
 	}

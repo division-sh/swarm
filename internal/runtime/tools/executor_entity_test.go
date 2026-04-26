@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
@@ -1918,11 +1919,26 @@ accounts:
 func newEntityToolTestHarnessWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
+	ensureEntityToolTestRun(t, db)
+	ctx := runtimecorrelation.WithRunID(context.Background(), entityToolTestRunID)
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
 		SQLDB:          db,
 		WorkflowSource: semanticview.Wrap(bundle),
 	})
-	return runtimetools.WithActor(context.Background(), actor), exec, db
+	return runtimetools.WithActor(ctx, actor), exec, db
+}
+
+const entityToolTestRunID = "11111111-1111-1111-1111-111111111111"
+
+func ensureEntityToolTestRun(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, entityToolTestRunID); err != nil {
+		t.Fatalf("seed entity tool test run: %v", err)
+	}
 }
 
 func asString(v any) string {
@@ -2106,16 +2122,16 @@ func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, _ string, flowInstan
 	}
 	if _, err := db.Exec(`
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, name,
+			run_id, entity_id, flow_instance, entity_type, name,
 			current_state, gates, fields, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2, $3, '',
-			$4, '{}'::jsonb, $5::jsonb, '{}'::jsonb, 1,
-			$6, $6, $6
+			$1::uuid, $2::uuid, $3, $4, '',
+			$5, '{}'::jsonb, $6::jsonb, '{}'::jsonb, 1,
+			$7, $7, $7
 		)
-	`, entityID, flowInstance, entityType, currentState, string(fieldsJSON), enteredAt); err != nil {
+	`, entityToolTestRunID, entityID, flowInstance, entityType, currentState, string(fieldsJSON), enteredAt); err != nil {
 		t.Fatalf("seed entity_state(%s): %v", entityID, err)
 	}
 }

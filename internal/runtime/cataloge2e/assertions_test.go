@@ -20,6 +20,14 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	childID := "22222222-2222-2222-2222-222222222222"
 	grandchildID := "33333333-3333-3333-3333-333333333333"
 	pg := &store.PostgresStore{DB: db}
+	ctx := catalogRuntimeContext()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, catalogRuntimeRunID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	startedAt := time.Now().UTC().Add(-time.Second)
 
 	for _, stmt := range []struct {
@@ -31,15 +39,15 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 		{entityID: childID, flow: "child", state: "completed"},
 		{entityID: grandchildID, flow: "grandchild", state: "finished"},
 	} {
-		if _, err := db.ExecContext(context.Background(), `
+		if _, err := db.ExecContext(ctx, `
 			INSERT INTO entity_state (
-				entity_id, flow_instance, entity_type, current_state,
+				run_id, entity_id, flow_instance, entity_type, current_state,
 				gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 			)
 			VALUES (
-				$1::uuid, $2, 'default', $3, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+				$1::uuid, $2::uuid, $3, 'default', $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 			)
-		`, stmt.entityID, stmt.flow, stmt.state); err != nil {
+		`, catalogRuntimeRunID, stmt.entityID, stmt.flow, stmt.state); err != nil {
 			t.Fatalf("insert entity_state %s: %v", stmt.entityID, err)
 		}
 	}
@@ -50,6 +58,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	if err := pg.AppendEvent(context.Background(), (events.Event{
 		ID:        rootEventID,
 		Type:      "root.started",
+		RunID:     catalogRuntimeRunID,
 		Payload:   []byte(`{"entity_id":"` + rootID + `"}`),
 		CreatedAt: time.Now().UTC(),
 	}).WithEntityID(rootID)); err != nil {
@@ -58,6 +67,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	if err := pg.AppendEvent(context.Background(), (events.Event{
 		ID:            childEventID,
 		Type:          "child.started",
+		RunID:         catalogRuntimeRunID,
 		Payload:       []byte(`{"entity_id":"` + childID + `"}`),
 		ParentEventID: rootEventID,
 		CreatedAt:     time.Now().UTC(),
@@ -67,6 +77,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	if err := pg.AppendEvent(context.Background(), (events.Event{
 		ID:            grandchildEventID,
 		Type:          "grandchild.done",
+		RunID:         catalogRuntimeRunID,
 		Payload:       []byte(`{"entity_id":"` + grandchildID + `"}`),
 		ParentEventID: childEventID,
 		CreatedAt:     time.Now().UTC(),
@@ -192,6 +203,7 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 		ID:          uuid.NewString(),
 		Type:        "score.requested",
 		SourceAgent: "runtime",
+		RunID:       catalogRuntimeRunID,
 		Payload:     []byte(`{"entity_id":"` + entityID + `"}`),
 		CreatedAt:   time.Now().UTC(),
 	}).WithEntityID(entityID)); err != nil {
@@ -205,9 +217,17 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	t.Helper()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
+	ctx := catalogRuntimeContext()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+		ON CONFLICT (run_id) DO NOTHING
+	`, catalogRuntimeRunID); err != nil {
+		t.Fatalf("seed catalog assertion run: %v", err)
+	}
 	return &runtimeHarness{
 		t:              t,
-		ctx:            context.Background(),
+		ctx:            ctx,
 		db:             db,
 		pg:             &store.PostgresStore{DB: db},
 		workflow:       runtimepipeline.NewWorkflowInstanceStore(db),
@@ -221,16 +241,16 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 
 func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID, state string) {
 	t.Helper()
-	if _, err := h.db.ExecContext(context.Background(), `
+	if _, err := h.db.ExecContext(h.ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, current_state,
+			run_id, entity_id, flow_instance, entity_type, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, 'root', 'default', $2,
+			$1::uuid, $2::uuid, 'root', 'default', $3,
 			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 		)
-	`, entityID, state); err != nil {
+	`, catalogRuntimeRunID, entityID, state); err != nil {
 		t.Fatalf("insert entity_state %s: %v", entityID, err)
 	}
 }
@@ -241,6 +261,7 @@ func insertCatalogAssertionDeadLetterEvent(t *testing.T, h *runtimeHarness, enti
 		ID:          uuid.NewString(),
 		Type:        "platform.dead_letter",
 		SourceAgent: "runtime",
+		RunID:       catalogRuntimeRunID,
 		Payload:     []byte(`{"entity_id":"` + entityID + `"}`),
 		CreatedAt:   time.Now().UTC(),
 	}).WithEntityID(entityID)); err != nil {

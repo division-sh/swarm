@@ -153,7 +153,7 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 	})
 
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "root",
@@ -164,7 +164,7 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := pc.maybeDeactivateTerminalFlowInstance(context.Background(), entityID, "done"); err != nil {
+	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), entityID, "done"); err != nil {
 		t.Fatalf("maybeDeactivateTerminalFlowInstance: %v", err)
 	}
 	if deactivated {
@@ -208,7 +208,7 @@ func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeacti
 	const flowPath = "review/inst-1"
 	entityID := FlowInstanceEntityID(flowPath)
 	const parentEntityID = "22222222-2222-2222-2222-222222222222"
-	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      flowPath,
 		WorkflowName:    "review",
@@ -224,7 +224,7 @@ func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeacti
 		t.Fatalf("seed template instance: %v", err)
 	}
 
-	if err := pc.maybeDeactivateTerminalFlowInstance(context.Background(), entityID, "completed"); err != nil {
+	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), entityID, "completed"); err != nil {
 		t.Fatalf("maybeDeactivateTerminalFlowInstance: %v", err)
 	}
 	if !called {
@@ -348,7 +348,7 @@ func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
 		},
 	}
 
-	err := pc.updateEntityState(context.Background(), "11111111-1111-1111-1111-111111111111", "marginal_review", "scoring/vertical.marginal")
+	err := pc.updateEntityState(testPipelineRunContextNoSeed(), "11111111-1111-1111-1111-111111111111", "marginal_review", "scoring/vertical.marginal")
 	if err == nil {
 		t.Fatal("expected updateEntityState to fail when workflow store mutate fails")
 	}
@@ -358,7 +358,7 @@ func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := NewWorkflowInstanceStore(db)
 	entityID := "11111111-1111-1111-1111-111111111111"
-	if err := store.Upsert(context.Background(), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "flow-a",
@@ -384,7 +384,7 @@ func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
 			},
 		},
 	}
-	ctx := withPipelineFlowScope(context.Background(), "flow-b")
+	ctx := withPipelineFlowScope(testWorkflowStoreRunContext(t, store), "flow-b")
 	err := repo.SaveState(ctx, identity.NormalizeEntityID(entityID), testEngineStateMutation(map[string]any{"note": "bad write"}, nil, nil))
 	if err == nil || !strings.Contains(err.Error(), "cross_flow_write_forbidden") {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
@@ -429,7 +429,7 @@ review_entity:
 		},
 	}
 
-	loaded, ok, err := repo.LoadState(withPipelineFlowScope(context.Background(), "review"), identity.NormalizeEntityID(FlowInstanceEntityID("review/inst-missing")))
+	loaded, ok, err := repo.LoadState(withPipelineFlowScope(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), "review"), identity.NormalizeEntityID(FlowInstanceEntityID("review/inst-missing")))
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
 		},
 	}
 	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
-	if err := store.Upsert(context.Background(), WorkflowInstance{
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
 		InstanceID:      entityID.String(),
 		StorageRef:      entityID.String(),
 		WorkflowName:    "root",
@@ -466,10 +466,10 @@ func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
 		map[string]map[string]any{"evidence": {"count": 2}},
 	)
 
-	if err := repo.SaveState(context.Background(), entityID, mutation); err != nil {
+	if err := repo.SaveState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), entityID, mutation); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	loaded, ok, err := repo.LoadState(context.Background(), entityID)
+	loaded, ok, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), entityID)
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
@@ -493,7 +493,7 @@ func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *tes
 
 	t.Run("state_buckets", func(t *testing.T) {
 		store := NewWorkflowInstanceStore(db)
-		if err := store.Upsert(context.Background(), WorkflowInstance{
+		if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
 			InstanceID:      "22222222-2222-2222-2222-222222222222",
 			StorageRef:      "22222222-2222-2222-2222-222222222222",
 			WorkflowName:    "root",
@@ -506,7 +506,7 @@ func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *tes
 			t.Fatalf("upsert malformed state bucket instance: %v", err)
 		}
 		repo := pipelineEngineStateRepo{coordinator: &PipelineCoordinator{workflowStore: store}}
-		_, _, err := repo.LoadState(context.Background(), identity.NormalizeEntityID("22222222-2222-2222-2222-222222222222"))
+		_, _, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), identity.NormalizeEntityID("22222222-2222-2222-2222-222222222222"))
 		if err == nil || !strings.Contains(err.Error(), "invalid workflow state bucket") {
 			t.Fatalf("LoadState error = %v, want invalid workflow state bucket", err)
 		}
@@ -522,7 +522,7 @@ func TestRecordWorkflowEvidence_ReturnsWorkflowStoreMutationError(t *testing.T) 
 		workflowStore: NewWorkflowInstanceStore(db),
 	}
 
-	err := pc.recordWorkflowEvidence(context.Background(), "11111111-1111-1111-1111-111111111111", "research", map[string]any{"summary": "done"})
+	err := pc.recordWorkflowEvidence(testPipelineRunContextNoSeed(), "11111111-1111-1111-1111-111111111111", "research", map[string]any{"summary": "done"})
 	if err == nil {
 		t.Fatal("expected recordWorkflowEvidence to fail when workflow store mutate fails")
 	}

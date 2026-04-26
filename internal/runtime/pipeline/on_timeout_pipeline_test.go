@@ -67,7 +67,7 @@ func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) 
 			},
 		},
 	}
-	if err := pc.workflowStore.Upsert(context.Background(), instance); err != nil {
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), instance); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
@@ -85,9 +85,9 @@ func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) 
 		}),
 		CreatedAt: time.Now().UTC(),
 	}.WithEntityID("ent-001")
-	result, err := pc.executeAuthoritativeNodeHandler(context.Background(), timeoutEvt, workflowTriggerContext{
+	result, err := pc.executeAuthoritativeNodeHandler(testPipelineCoordinatorRunContext(t, pc), timeoutEvt, workflowTriggerContext{
 		Event: timeoutEvt,
-		State: pc.currentWorkflowState(context.Background(), "ent-001"),
+		State: pc.currentWorkflowState(testPipelineCoordinatorRunContext(t, pc), "ent-001"),
 	})
 	if err != nil {
 		t.Fatalf("executeAuthoritativeNodeHandler: %v", err)
