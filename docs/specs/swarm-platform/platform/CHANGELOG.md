@@ -8,6 +8,9 @@ The platform spec now makes the shipped CLI rule explicit: `bash`, `web_search`,
 ### Removed: subject-link runtime cleanup surfaces
 The runtime no longer exposes subject-link schema/tool/operator cleanup surfaces. Business correlation moves through explicit authored payload/config fields, and causal debugging uses `source_event_id`. Final canonical platform-spec adoption remains tracked separately.
 
+### Removed: cross-flow runtime entity reads
+Agent-facing entity tools no longer expose cross-flow entity state through read-only `get_entity` or explicit foreign `entity_type` query/search/metrics targets. Cross-flow handoff data must move through declared event payload fields or `create_flow_instance` `config_from` bindings; causal debugging uses `source_event_id`.
+
 ## v1.6.0 (2026-04-02)
 
 ### Breaking: Flow-Scoped Entity State (`flow_model.state_composition`)
@@ -16,7 +19,7 @@ Core principle: **state is flow-local, lineage is cross-flow.**
 
 One entity belongs to exactly one flow. No shared mutable state across flow boundaries. `flow_states` map removed. `current_state` is singular and unambiguous within the owning flow.
 
-**Cross-flow handoff**: when a business object moves between flows, the receiving flow creates its own entity via `create_entity: true`. Data crosses via event payloads or read-only `get_entity` on the source entity. Cross-flow writes are prohibited by the platform (save_entity_field rejects flow_instance mismatch).
+**Cross-flow handoff**: when a business object moves between flows, the receiving flow creates its own entity via `create_entity: true`. Data crosses via event payloads or `create_flow_instance` `config_from` bindings. Cross-flow reads and writes are prohibited by the platform for agent-facing entity tools.
 
 **Boot validation**: input pin handlers in stateful flows MUST declare `create_entity: true`. Boot error otherwise.
 
