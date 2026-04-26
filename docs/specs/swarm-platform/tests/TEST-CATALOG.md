@@ -193,7 +193,7 @@ These tests use actual Empire contracts (not minimal test flows) and trace real 
 - test-empire-validation-full-pipeline — vertical.shortlisted → research → spec → CTO → brand → ready_for_review (all 4 gates)
 - test-empire-validation-spec-revision — spec.validation_failed → revision_count < 3 → spec.revision_requested loop
 - test-empire-validation-revision-limit — spec.validation_failed → revision_count = 3 → escalate:validation.revision_limit_reached
-- test-empire-validation-kill-backprop — cto.spec_vetoed → killed + vertical.killed_backprop to scoring
+- test-empire-validation-terminal-outcome — cto.spec_vetoed → flow-local terminal outcome with any cross-flow reaction carried by declared events
 
 ### Operating Flow (4)
 - test-empire-operating-spinup — opco.spinup_requested → create_flow_instance → auto_emit opco.ceo_ready

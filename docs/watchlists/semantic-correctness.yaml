@@ -266,24 +266,24 @@ nodes:
     title: Primitive-Only Cross-Flow Runtime Migration
     parent_class: staged migration from coupled cross-flow runtime semantics to primitive-only event/config handoff semantics
     canonical_owners:
-      - emitted-event identity shaping and parent-retarget ownership in internal/runtime/pipeline
+      - emitted-event identity shaping in internal/runtime/pipeline without parent-retarget ownership
       - cross-flow entity access enforcement in internal/runtime/tools and pipeline state mutation
       - create_flow_instance boot/runtime sibling-field enforcement in internal/runtime/bootverify and internal/runtime/pipeline
       - runtime subject-link deprecation ownership across internal/runtime/pipeline, internal/runtime/manager, internal/runtime/tools, and supported proof surfaces
       - run/event causal lineage via events.source_event_id for debugging proof after deprecated subject-link removal
-    why_this_node_exists: the runtime is migrating away from the older coupled cross-flow model through staged owner removal and cleanup; subject-link writer/proof ownership moved in #534/#535, and #417 owns the remaining schema/tool/operator aftermath.
+      - canonical platform contract truth in docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
+    why_this_node_exists: the runtime is migrating away from the older coupled cross-flow model through staged owner removal and cleanup; subject-link writer/proof ownership moved in #534/#535, #417 closed the schema/tool/operator aftermath, and #414 owns canonical spec adoption for implementation-true behavior.
     known_manifestations:
-      - child-flow output events still retarget to parent/root entity context at the emitted-event owner seam
       - cross-flow get_entity reads remain runtime-authorized
       - cross-flow writes are already fail-closed and must stay so during migration
-      - back-propagation events remain boot/runtime-recognized compatibility semantics
-      - subject-link writer/proof propagation was removed by #534/#535; remaining #417 coverage removes the schema/tool/operator/read aftermath instead of refining local inheritance rules
+      - parent-retarget and back-propagation coupling are no longer canonical platform semantics and stale spec/docs references must not reintroduce them as current behavior
+      - subject-link writer/proof propagation was removed by #534/#535; #417 removed schema/tool/operator/read aftermath instead of refining local inheritance rules
+      - canonical platform specs must describe explicit authored payload/config business correlation plus source_event_id causal proof, not a replacement platform lineage primitive
       - first child-flow subject-lineage ambiguity from #446 is superseded by removing subject-link as a runtime lineage primitive rather than repairing local inheritance
       - subject-based lifecycle proof surfaces must migrate either to explicit authored business correlation fields carried through event payload/config or to source_event_id causal-chain proof
-      - create_flow_instance is still admitted without required sibling enforcement for both instance_id_from and config_from
-      - runtime create_flow_instance still falls back to payload.instance_id and then uuid generation when instance_id_from is absent
     representative_issues:
       - 413
+      - 414
       - 415
       - 426
       - 416
