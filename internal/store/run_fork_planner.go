@@ -53,11 +53,12 @@ type RunForkPoint struct {
 }
 
 type RunForkEntityState struct {
-	EntityID     string         `json:"entity_id"`
-	CurrentState string         `json:"current_state,omitempty"`
-	Fields       map[string]any `json:"fields,omitempty"`
-	Gates        map[string]any `json:"gates,omitempty"`
-	Accumulator  map[string]any `json:"accumulator,omitempty"`
+	EntityID       string         `json:"entity_id"`
+	CurrentState   string         `json:"current_state,omitempty"`
+	EnteredStateAt *time.Time     `json:"entered_state_at,omitempty"`
+	Fields         map[string]any `json:"fields,omitempty"`
+	Gates          map[string]any `json:"gates,omitempty"`
+	Accumulator    map[string]any `json:"accumulator,omitempty"`
 }
 
 type RunForkPendingWork struct {
@@ -278,7 +279,8 @@ func (s *PostgresStore) loadRunForkEntityStates(ctx context.Context, runID strin
 		SELECT
 			m.entity_id::text,
 			m.field,
-			COALESCE(m.new_value, 'null'::jsonb)
+			COALESCE(m.new_value, 'null'::jsonb),
+			m.created_at
 		FROM entity_mutations m
 		LEFT JOIN events e
 			ON e.event_id = m.caused_by_event
@@ -296,13 +298,18 @@ func (s *PostgresStore) loadRunForkEntityStates(ctx context.Context, runID strin
 	}
 	defer rows.Close()
 
-	grouped := map[string][]mutationlog.ProjectionMutation{}
+	type timedProjectionMutation struct {
+		mutationlog.ProjectionMutation
+		CreatedAt time.Time
+	}
+	grouped := map[string][]timedProjectionMutation{}
 	entityOrder := []string{}
 	seen := map[string]struct{}{}
 	for rows.Next() {
 		var entityID, field string
 		var raw []byte
-		if err := rows.Scan(&entityID, &field, &raw); err != nil {
+		var createdAt time.Time
+		if err := rows.Scan(&entityID, &field, &raw, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan fork entity mutation: %w", err)
 		}
 		var value any
@@ -314,9 +321,12 @@ func (s *PostgresStore) loadRunForkEntityStates(ctx context.Context, runID strin
 			seen[entityID] = struct{}{}
 			entityOrder = append(entityOrder, entityID)
 		}
-		grouped[entityID] = append(grouped[entityID], mutationlog.ProjectionMutation{
-			Field:    field,
-			NewValue: value,
+		grouped[entityID] = append(grouped[entityID], timedProjectionMutation{
+			ProjectionMutation: mutationlog.ProjectionMutation{
+				Field:    field,
+				NewValue: value,
+			},
+			CreatedAt: createdAt,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -325,16 +335,27 @@ func (s *PostgresStore) loadRunForkEntityStates(ctx context.Context, runID strin
 
 	out := make([]RunForkEntityState, 0, len(entityOrder))
 	for _, entityID := range entityOrder {
-		projection, err := mutationlog.ReconstructEntityStateProjection(grouped[entityID])
+		mutations := grouped[entityID]
+		projectionMutations := make([]mutationlog.ProjectionMutation, 0, len(mutations))
+		var enteredStateAt *time.Time
+		for _, mutation := range mutations {
+			projectionMutations = append(projectionMutations, mutation.ProjectionMutation)
+			if strings.TrimSpace(mutation.Field) == "current_state" {
+				tm := mutation.CreatedAt
+				enteredStateAt = &tm
+			}
+		}
+		projection, err := mutationlog.ReconstructEntityStateProjection(projectionMutations)
 		if err != nil {
 			return nil, fmt.Errorf("reconstruct entity %s at fork point: %w", entityID, err)
 		}
 		out = append(out, RunForkEntityState{
-			EntityID:     entityID,
-			CurrentState: projection.CurrentState,
-			Fields:       projection.Fields,
-			Gates:        projection.Gates,
-			Accumulator:  projection.Accumulator,
+			EntityID:       entityID,
+			CurrentState:   projection.CurrentState,
+			EnteredStateAt: enteredStateAt,
+			Fields:         projection.Fields,
+			Gates:          projection.Gates,
+			Accumulator:    projection.Accumulator,
 		})
 	}
 	return out, nil

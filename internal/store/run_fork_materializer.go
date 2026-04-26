@@ -275,6 +275,9 @@ func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, forkRunID st
 	if currentState == "" {
 		return fmt.Errorf("reconstructed current_state is required for entity %s", entityID)
 	}
+	if entity.EnteredStateAt == nil || entity.EnteredStateAt.IsZero() {
+		return fmt.Errorf("reconstructed entered_state_at is required for entity %s", entityID)
+	}
 	fieldsJSON, err := jsonMapArg(entity.Fields)
 	if err != nil {
 		return fmt.Errorf("encode fork fields for entity %s: %w", entityID, err)
@@ -299,7 +302,7 @@ func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, forkRunID st
 			$11, $12, $12
 		)
 	`, forkRunID, entityID, meta.FlowInstance, meta.EntityType, meta.Slug, meta.Name,
-		currentState, gatesJSON, fieldsJSON, accJSON, plan.ForkPoint.Timestamp, now); err != nil {
+		currentState, gatesJSON, fieldsJSON, accJSON, entity.EnteredStateAt, now); err != nil {
 		return fmt.Errorf("insert fork entity_state %s: %w", entityID, err)
 	}
 	return mutationlog.InsertEntityStateDiff(ctx, tx, entityID, mutationlog.EntityStateProjection{}, mutationlog.EntityStateProjection{

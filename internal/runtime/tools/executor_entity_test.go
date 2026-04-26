@@ -767,8 +767,10 @@ accounts:
 	pg := &store.PostgresStore{DB: db}
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
-	eventID := uuid.NewString()
+	stateEventID := uuid.NewString()
+	forkEventID := uuid.NewString()
 	at := time.Unix(1700000710, 0).UTC()
+	forkAt := at.Add(30 * time.Second)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
@@ -780,8 +782,10 @@ accounts:
 		INSERT INTO events (
 			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.revision', $3::uuid, 'review/inst-1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
-	`, sourceRunID, eventID, entityID, at); err != nil {
+		VALUES
+			($1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, 'review/inst-1', 'entity', '{}'::jsonb, 'test', 'platform', $5),
+			($1::uuid, $3::uuid, 'fork.field_only', $4::uuid, 'review/inst-1', 'entity', '{}'::jsonb, 'test', 'platform', $6)
+	`, sourceRunID, stateEventID, forkEventID, entityID, at, forkAt); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -789,9 +793,9 @@ accounts:
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $4),
-			($1::uuid, $2::uuid, 'status', 'null'::jsonb, '"open"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $4)
-	`, sourceRunID, entityID, eventID, at); err != nil {
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $5),
+			($1::uuid, $2::uuid, 'status', 'null'::jsonb, '"open"'::jsonb, $4::uuid, 'platform', 'revision-test', 'field-only', $6)
+	`, sourceRunID, entityID, stateEventID, forkEventID, at, forkAt); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -806,7 +810,7 @@ accounts:
 	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
-	result, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	result, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -832,6 +836,13 @@ accounts:
 	}
 	if got := strings.TrimSpace(asString(entity["current_state"])); got != "queued" {
 		t.Fatalf("fork get_entity current_state = %q, want queued", got)
+	}
+	enteredStateAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(asString(entity["entered_state_at"])))
+	if err != nil {
+		t.Fatalf("parse fork get_entity entered_state_at %q: %v", entity["entered_state_at"], err)
+	}
+	if !enteredStateAt.Equal(at) {
+		t.Fatalf("fork get_entity entered_state_at = %s, want state-entry timestamp %s", enteredStateAt, at)
 	}
 }
 

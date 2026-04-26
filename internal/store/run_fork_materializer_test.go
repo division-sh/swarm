@@ -19,7 +19,10 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	entityID := uuid.NewString()
 	firstEventID := uuid.NewString()
 	secondEventID := uuid.NewString()
+	thirdEventID := uuid.NewString()
 	at := time.Unix(1700000500, 0).UTC()
+	fieldOnlyAt := at.Add(30 * time.Second)
+	afterAt := at.Add(time.Minute)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, started_at)
 		VALUES ($1::uuid, 'running', $2)
@@ -32,8 +35,9 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		)
 		VALUES
 			($1::uuid, $2::uuid, 'fork.before', $4::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $5),
-			($1::uuid, $3::uuid, 'fork.after', $4::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $6)
-	`, sourceRunID, firstEventID, secondEventID, entityID, at, at.Add(time.Minute)); err != nil {
+			($1::uuid, $3::uuid, 'fork.field_only', $4::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $6),
+			($1::uuid, $7::uuid, 'fork.after', $4::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $8)
+	`, sourceRunID, firstEventID, secondEventID, entityID, at, fieldOnlyAt, thirdEventID, afterAt); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -47,11 +51,12 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"Before Name"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $5),
 			($1::uuid, $2::uuid, 'gates.ready', 'null'::jsonb, 'true'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $5),
 			($1::uuid, $2::uuid, 'accumulator.score', 'null'::jsonb, '7'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $5),
-			($1::uuid, $2::uuid, 'current_state', '"queued"'::jsonb, '"done"'::jsonb, $4::uuid, 'platform', 'materializer-test', 'after', $6),
-			($1::uuid, $2::uuid, 'title', '"before-title"'::jsonb, '"after-title"'::jsonb, $4::uuid, 'platform', 'materializer-test', 'after', $6),
-			($1::uuid, $2::uuid, 'slug', '"before-slug"'::jsonb, '"after-slug"'::jsonb, $4::uuid, 'platform', 'materializer-test', 'after', $6),
-			($1::uuid, $2::uuid, 'name', '"Before Name"'::jsonb, '"After Name"'::jsonb, $4::uuid, 'platform', 'materializer-test', 'after', $6)
-	`, sourceRunID, entityID, firstEventID, secondEventID, at, at.Add(time.Minute)); err != nil {
+			($1::uuid, $2::uuid, 'title', '"before-title"'::jsonb, '"fork-title"'::jsonb, $4::uuid, 'platform', 'materializer-test', 'field-only', $6),
+			($1::uuid, $2::uuid, 'current_state', '"queued"'::jsonb, '"done"'::jsonb, $7::uuid, 'platform', 'materializer-test', 'after', $8),
+			($1::uuid, $2::uuid, 'title', '"fork-title"'::jsonb, '"after-title"'::jsonb, $7::uuid, 'platform', 'materializer-test', 'after', $8),
+			($1::uuid, $2::uuid, 'slug', '"before-slug"'::jsonb, '"after-slug"'::jsonb, $7::uuid, 'platform', 'materializer-test', 'after', $8),
+			($1::uuid, $2::uuid, 'name', '"Before Name"'::jsonb, '"After Name"'::jsonb, $7::uuid, 'platform', 'materializer-test', 'after', $8)
+	`, sourceRunID, entityID, firstEventID, secondEventID, at, fieldOnlyAt, thirdEventID, afterAt); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -65,11 +70,11 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 			'done', '{"ready": true}'::jsonb, '{"title": "after-title", "slug": "after-slug", "name": "After Name"}'::jsonb, '{"score": 9}'::jsonb, 4,
 			$3, $3, $3
 		)
-	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
+	`, sourceRunID, entityID, afterAt); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
 
-	result, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: firstEventID})
+	result, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: secondEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -91,7 +96,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	`, result.ForkRunID).Scan(&forkStatus, &forkedFromRun, &forkedFromEvent); err != nil {
 		t.Fatalf("load fork run: %v", err)
 	}
-	if forkStatus != "paused" || forkedFromRun != sourceRunID || forkedFromEvent != firstEventID {
+	if forkStatus != "paused" || forkedFromRun != sourceRunID || forkedFromEvent != secondEventID {
 		t.Fatalf("fork run = status:%s from:%s event:%s", forkStatus, forkedFromRun, forkedFromEvent)
 	}
 	var sourceStatus string
@@ -104,6 +109,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 
 	var sourceState, forkState, sourceTitle, forkTitle string
 	var sourceRevision, forkRevision int
+	var forkEnteredStateAt time.Time
 	if err := db.QueryRowContext(ctx, `
 		SELECT current_state, fields->>'title', revision
 		FROM entity_state
@@ -112,10 +118,10 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		t.Fatalf("load source entity_state: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
-		SELECT current_state, fields->>'title', revision
+		SELECT current_state, fields->>'title', revision, entered_state_at
 		FROM entity_state
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, result.ForkRunID, entityID).Scan(&forkState, &forkTitle, &forkRevision); err != nil {
+	`, result.ForkRunID, entityID).Scan(&forkState, &forkTitle, &forkRevision, &forkEnteredStateAt); err != nil {
 		t.Fatalf("load fork entity_state: %v", err)
 	}
 	if sourceState != "done" || sourceTitle != "after-title" {
@@ -124,11 +130,14 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	if sourceRevision != 4 {
 		t.Fatalf("source revision = %d, want 4", sourceRevision)
 	}
-	if forkState != "queued" || forkTitle != "before-title" {
-		t.Fatalf("fork state/title = %s/%s, want queued/before-title", forkState, forkTitle)
+	if forkState != "queued" || forkTitle != "fork-title" {
+		t.Fatalf("fork state/title = %s/%s, want queued/fork-title", forkState, forkTitle)
 	}
 	if forkRevision != 1 {
 		t.Fatalf("fork revision = %d, want fork-local revision 1", forkRevision)
+	}
+	if !forkEnteredStateAt.Equal(at) {
+		t.Fatalf("fork entered_state_at = %s, want state-entry timestamp %s", forkEnteredStateAt, at)
 	}
 	var forkSlug, forkName string
 	if err := db.QueryRowContext(ctx, `
@@ -143,7 +152,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
-		SET fields = jsonb_set(fields, '{title}', '"fork-title"'::jsonb, true)
+		SET fields = jsonb_set(fields, '{title}', '"fork-local-title"'::jsonb, true)
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
 	`, result.ForkRunID, entityID); err != nil {
 		t.Fatalf("diverge fork entity_state: %v", err)
