@@ -415,6 +415,70 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	}
 }
 
+func TestRunForkPlanner_AccountsForReceiptOnlyPlatformAndNodeProcessing(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000280, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
+		)
+		VALUES
+			($1::uuid, 'platform', 'pipeline', 'success', 'pipeline_processed', '{}'::jsonb, $2),
+			($1::uuid, 'node', 'node-a', 'no_op', 'idempotent_no_op', '{}'::jsonb, $2)
+	`, eventID, at); err != nil {
+		t.Fatalf("seed receipt-only processing facts: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if plan.PendingWorkCount != 2 || len(plan.PendingWork) != 2 {
+		t.Fatalf("pending work count = %d/%d, want 2 receipt-only processing facts; items=%#v", plan.PendingWorkCount, len(plan.PendingWork), plan.PendingWork)
+	}
+	got := map[string]RunForkPendingWork{}
+	for _, item := range plan.PendingWork {
+		got[item.SubscriberType+"/"+item.SubscriberID] = item
+	}
+	for key, wantOutcome := range map[string]string{
+		"platform/pipeline": "success",
+		"node/node-a":       "no_op",
+	} {
+		item, ok := got[key]
+		if !ok {
+			t.Fatalf("missing receipt-only processing fact %s; all=%#v", key, got)
+		}
+		if item.DeliveryID != "" {
+			t.Fatalf("%s delivery_id = %q, want empty for receipt-only row", key, item.DeliveryID)
+		}
+		if item.Classification != RunForkPendingClassificationDeliveredCompleted {
+			t.Fatalf("%s classification = %q, want %q; item=%#v", key, item.Classification, RunForkPendingClassificationDeliveredCompleted, item)
+		}
+		if item.ReceiptOutcome != wantOutcome || item.ReceiptAt == nil {
+			t.Fatalf("%s receipt = outcome %q at %v, want outcome %q with timestamp", key, item.ReceiptOutcome, item.ReceiptAt, wantOutcome)
+		}
+	}
+}
+
 func TestRunForkPlanner_FailsClosedWhenMutationLogUnavailable(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

@@ -322,57 +322,112 @@ func (s *PostgresStore) loadRunForkEntityStates(ctx context.Context, runID strin
 
 func (s *PostgresStore) loadRunForkPendingWork(ctx context.Context, runID string, cursor runForkEventCursor) ([]RunForkPendingWork, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			e.event_id::text,
-			e.event_name,
-			d.delivery_id::text,
-			COALESCE(d.subscriber_type, ''),
-			COALESCE(d.subscriber_id, ''),
-			CASE
-				WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.status, '')
-				WHEN d.started_at IS NOT NULL AND d.started_at <= $2::timestamptz THEN 'in_progress'
-				ELSE 'pending'
-			END,
-			CASE
-				WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.retry_count, 0)
-				ELSE 0
-			END,
-			CASE
-				WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.reason_code, '')
-				ELSE ''
-			END,
-			CASE
-				WHEN d.started_at IS NOT NULL
-				 AND d.started_at <= $2::timestamptz
-				 AND (d.delivered_at IS NULL OR d.delivered_at > $2::timestamptz)
-				THEN COALESCE(d.active_session_id::text, '')
-				ELSE ''
-			END,
-			d.created_at,
-			CASE WHEN d.started_at <= $2::timestamptz THEN d.started_at ELSE NULL END,
-			CASE WHEN d.delivered_at <= $2::timestamptz THEN d.delivered_at ELSE NULL END,
-			COALESCE(r.outcome, ''),
-			r.processed_at,
-			EXISTS (
+		WITH delivery_rows AS (
+			SELECT
+				e.event_id::text AS event_id,
+				e.event_name AS event_name,
+				d.delivery_id::text AS delivery_id,
+				COALESCE(d.subscriber_type, '') AS subscriber_type,
+				COALESCE(d.subscriber_id, '') AS subscriber_id,
+				CASE
+					WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.status, '')
+					WHEN d.started_at IS NOT NULL AND d.started_at <= $2::timestamptz THEN 'in_progress'
+					ELSE 'pending'
+				END AS status,
+				CASE
+					WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.retry_count, 0)
+					ELSE 0
+				END AS retry_count,
+				CASE
+					WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.reason_code, '')
+					ELSE ''
+				END AS reason_code,
+				CASE
+					WHEN d.started_at IS NOT NULL
+					 AND d.started_at <= $2::timestamptz
+					 AND (d.delivered_at IS NULL OR d.delivered_at > $2::timestamptz)
+					THEN COALESCE(d.active_session_id::text, '')
+					ELSE ''
+				END AS active_session_id,
+				d.created_at AS created_at,
+				CASE WHEN d.started_at <= $2::timestamptz THEN d.started_at ELSE NULL END AS started_at,
+				CASE WHEN d.delivered_at <= $2::timestamptz THEN d.delivered_at ELSE NULL END AS delivered_at,
+				COALESCE(r.outcome, '') AS receipt_outcome,
+				r.processed_at AS receipt_at,
+				EXISTS (
+					SELECT 1
+					FROM dead_letters dl
+					WHERE dl.original_event_id = e.event_id
+					  AND dl.created_at <= $2::timestamptz
+					  AND COALESCE(dl.handler_node, '') <> ''
+					  AND COALESCE(d.subscriber_type, '') = 'node'
+					  AND dl.handler_node = d.subscriber_id
+				) AS dead_letter
+			FROM events e
+			INNER JOIN event_deliveries d ON d.event_id = e.event_id
+			LEFT JOIN event_receipts r
+				ON r.event_id = d.event_id
+			   AND r.subscriber_type = d.subscriber_type
+			   AND r.subscriber_id = d.subscriber_id
+			   AND r.processed_at <= $2::timestamptz
+			WHERE e.run_id = $1::uuid
+			  AND (e.created_at, e.event_id) <= ($2::timestamptz, $3::uuid)
+			  AND d.created_at <= $2::timestamptz
+		),
+		receipt_only_rows AS (
+			SELECT
+				e.event_id::text AS event_id,
+				e.event_name AS event_name,
+				''::text AS delivery_id,
+				COALESCE(r.subscriber_type, '') AS subscriber_type,
+				COALESCE(r.subscriber_id, '') AS subscriber_id,
+				''::text AS status,
+				0 AS retry_count,
+				COALESCE(r.reason_code, '') AS reason_code,
+				''::text AS active_session_id,
+				r.processed_at AS created_at,
+				NULL::timestamptz AS started_at,
+				r.processed_at AS delivered_at,
+				COALESCE(r.outcome, '') AS receipt_outcome,
+				r.processed_at AS receipt_at,
+				FALSE AS dead_letter
+			FROM events e
+			INNER JOIN event_receipts r ON r.event_id = e.event_id
+			WHERE e.run_id = $1::uuid
+			  AND (e.created_at, e.event_id) <= ($2::timestamptz, $3::uuid)
+			  AND r.processed_at <= $2::timestamptz
+			  AND r.subscriber_type IN ('platform', 'node')
+			  AND NOT EXISTS (
 				SELECT 1
-				FROM dead_letters dl
-				WHERE dl.original_event_id = e.event_id
-				  AND dl.created_at <= $2::timestamptz
-				  AND COALESCE(dl.handler_node, '') <> ''
-				  AND COALESCE(d.subscriber_type, '') = 'node'
-				  AND dl.handler_node = d.subscriber_id
-			)
-		FROM events e
-		INNER JOIN event_deliveries d ON d.event_id = e.event_id
-		LEFT JOIN event_receipts r
-			ON r.event_id = d.event_id
-		   AND r.subscriber_type = d.subscriber_type
-		   AND r.subscriber_id = d.subscriber_id
-		   AND r.processed_at <= $2::timestamptz
-		WHERE e.run_id = $1::uuid
-		  AND (e.created_at, e.event_id) <= ($2::timestamptz, $3::uuid)
-		  AND d.created_at <= $2::timestamptz
-		ORDER BY e.created_at ASC, e.event_id ASC, d.created_at ASC, d.delivery_id ASC
+				FROM event_deliveries d
+				WHERE d.event_id = r.event_id
+				  AND d.subscriber_type = r.subscriber_type
+				  AND d.subscriber_id = r.subscriber_id
+				  AND d.created_at <= $2::timestamptz
+			  )
+		)
+		SELECT
+			event_id,
+			event_name,
+			delivery_id,
+			subscriber_type,
+			subscriber_id,
+			status,
+			retry_count,
+			reason_code,
+			active_session_id,
+			created_at,
+			started_at,
+			delivered_at,
+			receipt_outcome,
+			receipt_at,
+			dead_letter
+		FROM (
+			SELECT * FROM delivery_rows
+			UNION ALL
+			SELECT * FROM receipt_only_rows
+		) work
+		ORDER BY created_at ASC, event_id ASC, delivery_id ASC, subscriber_type ASC, subscriber_id ASC
 	`, runID, cursor.CreatedAt, cursor.EventID)
 	if err != nil {
 		return nil, fmt.Errorf("load fork pending work: %w", err)
