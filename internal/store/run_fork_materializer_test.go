@@ -103,25 +103,32 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 
 	var sourceState, forkState, sourceTitle, forkTitle string
+	var sourceRevision, forkRevision int
 	if err := db.QueryRowContext(ctx, `
-		SELECT current_state, fields->>'title'
+		SELECT current_state, fields->>'title', revision
 		FROM entity_state
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, sourceRunID, entityID).Scan(&sourceState, &sourceTitle); err != nil {
+	`, sourceRunID, entityID).Scan(&sourceState, &sourceTitle, &sourceRevision); err != nil {
 		t.Fatalf("load source entity_state: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
-		SELECT current_state, fields->>'title'
+		SELECT current_state, fields->>'title', revision
 		FROM entity_state
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, result.ForkRunID, entityID).Scan(&forkState, &forkTitle); err != nil {
+	`, result.ForkRunID, entityID).Scan(&forkState, &forkTitle, &forkRevision); err != nil {
 		t.Fatalf("load fork entity_state: %v", err)
 	}
 	if sourceState != "done" || sourceTitle != "after-title" {
 		t.Fatalf("source state/title = %s/%s, want done/after-title", sourceState, sourceTitle)
 	}
+	if sourceRevision != 4 {
+		t.Fatalf("source revision = %d, want 4", sourceRevision)
+	}
 	if forkState != "queued" || forkTitle != "before-title" {
 		t.Fatalf("fork state/title = %s/%s, want queued/before-title", forkState, forkTitle)
+	}
+	if forkRevision != 1 {
+		t.Fatalf("fork revision = %d, want fork-local revision 1", forkRevision)
 	}
 	var forkSlug, forkName string
 	if err := db.QueryRowContext(ctx, `

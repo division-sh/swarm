@@ -3177,8 +3177,10 @@ run_model:
       consumes the canonical read-only planner, requires execution_ready=true, creates a fork run with
       status=paused and fork lineage, and writes reconstructed entity_state rows under the fork run_id.
       It does not mark the source run forked, freeze the source run, redeliver pending work, resume event
-      processing, change contracts, or mutate delivery/session/timer/route state. Full fork execution remains
-      a separately gated operation.'
+      processing, change contracts, or mutate delivery/session/timer/route state. Materialized fork current-state
+      rows start a new fork-local revision sequence at revision=1; source-at-T entity_state.revision is not
+      copied because revision is a current-row commit counter, not append-only historical state in entity_mutations.
+      Full fork execution remains a separately gated operation.'
     planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
       Builder, dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
       fork planning with direct SQL joins.'
@@ -3199,8 +3201,8 @@ run_model:
         (if event ID was provided). Copy reconstructed entity states into the fork context.'
       3a_materialize_only_run: 'For a materialize-only fork, insert the fork run row with status=paused,
         forked_from_run_id = source run, forked_from_event_id = target event, and event_count = 0.
-        Source run status is unchanged. Copy reconstructed entity states into the fork context and stop;
-        do not boot, resume, redeliver, or mutate runtime delivery/session/timer/route state.'
+        Source run status is unchanged. Copy reconstructed entity states into the fork context with fork-local
+        revision=1 and stop; do not boot, resume, redeliver, or mutate runtime delivery/session/timer/route state.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.
