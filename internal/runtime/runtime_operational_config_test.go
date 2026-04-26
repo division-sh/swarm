@@ -9,6 +9,8 @@ import (
 	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -41,6 +43,7 @@ func (*recoveryGuardManagerStore) ListPendingSubscribedEvents(context.Context, s
 
 type recoveryGuardEventStore struct {
 	missing []events.PersistedReplayEvent
+	routes  []runtimeflowidentity.Route
 }
 
 func (*recoveryGuardEventStore) AppendEvent(context.Context, events.Event) error { return nil }
@@ -53,12 +56,22 @@ func (*recoveryGuardEventStore) UpsertCommittedReplayScope(context.Context, stri
 func (*recoveryGuardEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
 }
+func (*recoveryGuardEventStore) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
+	return nil
+}
+func (*recoveryGuardEventStore) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+	return nil
+}
+func (s *recoveryGuardEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+	return append([]runtimeflowidentity.Route(nil), s.routes...), nil
+}
 func (s *recoveryGuardEventStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
 	return append([]events.PersistedReplayEvent(nil), s.missing...), nil
 }
 func (*recoveryGuardEventStore) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
 	return nil, true, nil
 }
+func (*recoveryGuardEventStore) SupportsPersistedReplay() bool { return false }
 
 type minimalRuntimeEventStore struct{}
 
@@ -106,7 +119,7 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testin
 	}
 }
 
-func TestRuntimeStart_FailsWhenRecoveryDisabledAndPipelineRecoverableWorkExists(t *testing.T) {
+func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	eventStore := &recoveryGuardEventStore{
 		missing: []events.PersistedReplayEvent{{
@@ -115,10 +128,18 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndPipelineRecoverableWorkExists(
 				Type: "support.item_created",
 			},
 		}},
+		routes: []runtimeflowidentity.Route{
+			runtimeflowidentity.DeriveRoute("child", "inst-1"),
+		},
+	}
+	managerStore := &recoveryGuardManagerStore{
+		agents: []runtimemanager.PersistedAgent{{
+			Config: runtimeactors.AgentConfig{ID: "persisted-agent"},
+		}},
 	}
 	rt, err := NewRuntime(context.Background(), testOperationalRuntimeConfig(), Stores{
 		EventStore:   eventStore,
-		ManagerStore: &recoveryGuardManagerStore{},
+		ManagerStore: managerStore,
 	}, RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
@@ -127,9 +148,11 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndPipelineRecoverableWorkExists(
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	err = rt.Start(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "runtime.recovery_on_startup=false") || !strings.Contains(err.Error(), "events missing pipeline receipts") {
-		t.Fatalf("Start error = %v, want explicit pipeline recovery denial", err)
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := rt.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
 	}
 }
 
