@@ -271,23 +271,25 @@ func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, 
 	return nil
 }
 
-func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, errText string) {
+func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
 	if eb == nil || eb.store == nil {
-		return
+		return nil
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
-		return
+		return nil
 	}
 	recorder, ok := eb.store.(PipelineReceiptPersistence)
 	if !ok {
-		return
+		return errors.New("event bus store does not support pipeline receipt persistence")
 	}
 	if err := recorder.UpsertPipelineReceipt(ctx, eventID, status, errText); err != nil {
 		eb.logRuntime(ctx, "error", "Persisting the pipeline receipt failed", "eventbus", "pipeline_receipt_persist_failed", eventID, "", "", "", "", nil, map[string]any{
 			"status": status,
 		}, err.Error(), 0)
+		return err
 	}
+	return nil
 }
 
 func (eb *EventBus) logAuthoritativeDeliveryIncomplete(ctx context.Context, evt events.Event, expected, delivered, missing, timedOut []string, cause error) error {
