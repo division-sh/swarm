@@ -89,6 +89,15 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	if !result.DeliveryResumeBlocked || !result.SourceRunStatusUnchanged {
 		t.Fatalf("boundary flags = resume_blocked:%v source_unchanged:%v", result.DeliveryResumeBlocked, result.SourceRunStatusUnchanged)
 	}
+	if result.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner {
+		t.Fatalf("taxonomy owner = %q, want %q", result.ReplayResumeAdmission.Owner, RunForkReplayResumeAdmissionOwner)
+	}
+	if !result.ReplayResumeAdmission.StateOnlyExecutionReady || result.ReplayResumeAdmission.HistoricalReplaySupported {
+		t.Fatalf("taxonomy flags = state_only:%v historical_supported:%v, want true/false",
+			result.ReplayResumeAdmission.StateOnlyExecutionReady,
+			result.ReplayResumeAdmission.HistoricalReplaySupported,
+		)
+	}
 
 	var forkStatus, forkedFromRun, forkedFromEvent string
 	if err := db.QueryRowContext(ctx, `
@@ -261,9 +270,15 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 		t.Fatalf("seed pending delivery: %v", err)
 	}
 
-	_, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	blocked, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err == nil || !strings.Contains(err.Error(), "delivery_history_unproven") {
 		t.Fatalf("MaterializeRunFork error = %v, want delivery blocker", err)
+	}
+	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.HistoricalReplayRequired {
+		t.Fatalf("blocked taxonomy = %#v, want owner and historical replay required", blocked.ReplayResumeAdmission)
+	}
+	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactDeliveryPendingHistory) {
+		t.Fatalf("blocked taxonomy missing pending delivery disposition: %#v", blocked.ReplayResumeAdmission)
 	}
 	var forkCount int
 	if err := db.QueryRowContext(ctx, `
@@ -325,6 +340,12 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	}
 	if !activated.Activated || !activated.SourceFrozen {
 		t.Fatalf("activation flags = activated:%v frozen:%v", activated.Activated, activated.SourceFrozen)
+	}
+	if !activated.HistoricalReplayBlocked {
+		t.Fatal("HistoricalReplayBlocked = false, want true for activation-only boundary")
+	}
+	if activated.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !activated.ReplayResumeAdmission.StateOnlyExecutionReady {
+		t.Fatalf("activation taxonomy = %#v, want owner and state-only ready", activated.ReplayResumeAdmission)
 	}
 	if activated.SourceRunID != sourceRunID || activated.ForkRunID != materialized.ForkRunID {
 		t.Fatalf("activation lineage = %#v", activated)
@@ -391,9 +412,15 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
 		t.Fatalf("seed post-fork event: %v", err)
 	}
-	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "source_events_advanced_after_fork_point") {
 		t.Fatalf("ActivateRunFork advanced source error = %v, want source advanced blocker", err)
+	}
+	if !blocked.SourceAdvancedAfterFork || !runForkTestHasActivationBlocker(blocked, "source_events_advanced_after_fork_point") {
+		t.Fatalf("advanced-source activation result = %#v, want taxonomy-backed source advanced blocker", blocked)
+	}
+	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced) {
+		t.Fatalf("advanced-source taxonomy missing source-advanced disposition: %#v", blocked.ReplayResumeAdmission)
 	}
 	var forkStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
@@ -442,9 +469,12 @@ func TestRunForkActivation_FailsClosedForPendingDeliveryAndMissingLineage(t *tes
 	`, sourceRunID, eventID, at); err != nil {
 		t.Fatalf("seed pending delivery: %v", err)
 	}
-	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "delivery_history_unproven") {
 		t.Fatalf("ActivateRunFork pending delivery error = %v, want delivery blocker", err)
+	}
+	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.HistoricalReplayRequired {
+		t.Fatalf("blocked activation taxonomy = %#v, want owner and historical replay required", blocked.ReplayResumeAdmission)
 	}
 
 	orphanRunID := uuid.NewString()
@@ -454,6 +484,42 @@ func TestRunForkActivation_FailsClosedForPendingDeliveryAndMissingLineage(t *tes
 	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: orphanRunID})
 	if err == nil || !strings.Contains(err.Error(), "requires fork lineage") {
 		t.Fatalf("ActivateRunFork orphan error = %v, want lineage failure", err)
+	}
+}
+
+func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	forkEventID := uuid.NewString()
+	at := time.Unix(1700001050, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.replay_state', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, materialized.ForkRunID, forkEventID, at.Add(time.Second)); err != nil {
+		t.Fatalf("seed fork event: %v", err)
+	}
+
+	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err == nil || !strings.Contains(err.Error(), "fork_events_already_exist") {
+		t.Fatalf("ActivateRunFork fork replay state error = %v, want fork event blocker", err)
+	}
+	if !runForkTestHasActivationBlocker(blocked, "fork_events_already_exist") {
+		t.Fatalf("activation blockers = %#v, want fork_events_already_exist", blocked.UnsupportedBlockers)
+	}
+	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactForkReplayState) {
+		t.Fatalf("fork replay-state taxonomy missing disposition: %#v", blocked.ReplayResumeAdmission)
 	}
 }
 
@@ -567,4 +633,13 @@ func seedActivationReadySourceRun(t *testing.T, db execContextDB, sourceRunID, e
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
+}
+
+func runForkTestHasActivationBlocker(result RunForkActivation, code string) bool {
+	for _, blocker := range result.UnsupportedBlockers {
+		if blocker.Code == code {
+			return true
+		}
+	}
+	return false
 }

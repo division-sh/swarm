@@ -30,19 +30,20 @@ type RunForkPlanRequest struct {
 }
 
 type RunForkPlan struct {
-	SourceRunID              string                      `json:"source_run_id"`
-	SourceRunStatus          string                      `json:"source_run_status,omitempty"`
-	SourceRunStartedAt       *time.Time                  `json:"source_run_started_at,omitempty"`
-	SourceRunEndedAt         *time.Time                  `json:"source_run_ended_at,omitempty"`
-	ForkPoint                RunForkPoint                `json:"fork_point"`
-	EventCountAtFork         int                         `json:"event_count_at_fork"`
-	ReconstructedEntityCount int                         `json:"reconstructed_entity_count"`
-	PendingWorkCount         int                         `json:"pending_work_count"`
-	UnsupportedBlockerCount  int                         `json:"unsupported_blocker_count"`
-	ExecutionReady           bool                        `json:"execution_ready"`
-	Entities                 []RunForkEntityState        `json:"entities,omitempty"`
-	PendingWork              []RunForkPendingWork        `json:"pending_work,omitempty"`
-	UnsupportedBlockers      []RunForkUnsupportedBlocker `json:"unsupported_blockers,omitempty"`
+	SourceRunID              string                       `json:"source_run_id"`
+	SourceRunStatus          string                       `json:"source_run_status,omitempty"`
+	SourceRunStartedAt       *time.Time                   `json:"source_run_started_at,omitempty"`
+	SourceRunEndedAt         *time.Time                   `json:"source_run_ended_at,omitempty"`
+	ForkPoint                RunForkPoint                 `json:"fork_point"`
+	EventCountAtFork         int                          `json:"event_count_at_fork"`
+	ReconstructedEntityCount int                          `json:"reconstructed_entity_count"`
+	PendingWorkCount         int                          `json:"pending_work_count"`
+	UnsupportedBlockerCount  int                          `json:"unsupported_blocker_count"`
+	ExecutionReady           bool                         `json:"execution_ready"`
+	ReplayResumeAdmission    RunForkReplayResumeAdmission `json:"replay_resume_admission"`
+	Entities                 []RunForkEntityState         `json:"entities,omitempty"`
+	PendingWork              []RunForkPendingWork         `json:"pending_work,omitempty"`
+	UnsupportedBlockers      []RunForkUnsupportedBlocker  `json:"unsupported_blockers,omitempty"`
 }
 
 type RunForkPoint struct {
@@ -208,9 +209,10 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 	if err != nil {
 		return RunForkPlan{}, err
 	}
-	plan.UnsupportedBlockers = runForkUnsupportedBlockers(evidence)
+	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(evidence)
+	plan.UnsupportedBlockers = plan.ReplayResumeAdmission.UnsupportedBlockers
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
-	plan.ExecutionReady = plan.UnsupportedBlockerCount == 0
+	plan.ExecutionReady = plan.ReplayResumeAdmission.StateOnlyExecutionReady
 	return plan, nil
 }
 
@@ -718,43 +720,6 @@ func (s *PostgresStore) hasRunForkActiveTurn(ctx context.Context, catalog schema
 		return false, fmt.Errorf("check fork active turn blockers: %w", err)
 	}
 	return exists, nil
-}
-
-func runForkUnsupportedBlockers(evidence runForkAdmissionEvidence) []RunForkUnsupportedBlocker {
-	blockers := []RunForkUnsupportedBlocker{}
-	add := func(code, message string) {
-		for _, existing := range blockers {
-			if existing.Code == code {
-				return
-			}
-		}
-		blockers = append(blockers, RunForkUnsupportedBlocker{Code: code, Message: message})
-	}
-	if runForkHasUnsupportedPendingWork(evidence.Pending) {
-		add("delivery_history_unproven", "event_deliveries stores current delivery state; arbitrary historical delivery transitions at the fork point are not append-only proven")
-	}
-	if evidence.RelevantTimer {
-		add("timer_history_unproven", "timers are current-state rows and timer creation/cancellation is not represented in the mutation log")
-	}
-	if evidence.RelevantRoute {
-		add("flow_route_history_unproven", "routing_rules are current-state rows and cannot prove historical flow-route membership at the fork point")
-	}
-	if evidence.ActiveSession {
-		add("session_history_unproven", "source-run session facts reference current session rows without append-only session-state proof at the fork point")
-	}
-	if evidence.ActiveTurn {
-		add("active_turn_history_unproven", "active turn ownership at the fork point cannot be proven from current session/turn rows alone")
-	}
-	return blockers
-}
-
-func runForkHasUnsupportedPendingWork(pending []RunForkPendingWork) bool {
-	for _, item := range pending {
-		if item.Classification != RunForkPendingClassificationDeliveredCompleted {
-			return true
-		}
-	}
-	return false
 }
 
 func runForkPendingReferencesActiveSession(pending []RunForkPendingWork) bool {

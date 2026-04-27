@@ -3196,6 +3196,12 @@ run_model:
     planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
       Builder, dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
       fork planning with direct SQL joins.'
+    replay_resume_admission_taxonomy: 'Fork planning, materialization, and activation surfaces expose the
+      canonical store-backed replay_resume_admission taxonomy. This taxonomy is non-mutating: it classifies
+      historical source-run facts as reconstruct, lineage-only, fail-closed blockers, split siblings, or
+      no-historical-action. It does not authorize event copying, delivery redelivery, session/turn/timer/route
+      reconstruction, contract swap execution, or any runtime replay mutation. Full historical resume remains
+      separately gated even when state-only activation is ready.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'

@@ -23,15 +23,16 @@ type RunForkMaterializeRequest struct {
 }
 
 type RunForkMaterialization struct {
-	SourceRunID              string                      `json:"source_run_id"`
-	ForkRunID                string                      `json:"fork_run_id"`
-	ForkRunStatus            string                      `json:"fork_run_status"`
-	ForkPoint                RunForkPoint                `json:"fork_point"`
-	MaterializedEntityCount  int                         `json:"materialized_entity_count"`
-	ExecutionReady           bool                        `json:"execution_ready"`
-	UnsupportedBlockers      []RunForkUnsupportedBlocker `json:"unsupported_blockers,omitempty"`
-	DeliveryResumeBlocked    bool                        `json:"delivery_resume_blocked"`
-	SourceRunStatusUnchanged bool                        `json:"source_run_status_unchanged"`
+	SourceRunID              string                       `json:"source_run_id"`
+	ForkRunID                string                       `json:"fork_run_id"`
+	ForkRunStatus            string                       `json:"fork_run_status"`
+	ForkPoint                RunForkPoint                 `json:"fork_point"`
+	MaterializedEntityCount  int                          `json:"materialized_entity_count"`
+	ExecutionReady           bool                         `json:"execution_ready"`
+	ReplayResumeAdmission    RunForkReplayResumeAdmission `json:"replay_resume_admission"`
+	UnsupportedBlockers      []RunForkUnsupportedBlocker  `json:"unsupported_blockers,omitempty"`
+	DeliveryResumeBlocked    bool                         `json:"delivery_resume_blocked"`
+	SourceRunStatusUnchanged bool                         `json:"source_run_status_unchanged"`
 }
 
 type runForkEntityMetadata struct {
@@ -89,6 +90,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 			SourceRunID:           plan.SourceRunID,
 			ForkPoint:             plan.ForkPoint,
 			ExecutionReady:        false,
+			ReplayResumeAdmission: plan.ReplayResumeAdmission,
 			UnsupportedBlockers:   plan.UnsupportedBlockers,
 			DeliveryResumeBlocked: true,
 		}, fmt.Errorf("fork materialization requires execution-ready plan; blockers: %s", runForkBlockerCodes(plan.UnsupportedBlockers))
@@ -144,6 +146,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 		ForkPoint:                plan.ForkPoint,
 		MaterializedEntityCount:  len(plan.Entities),
 		ExecutionReady:           true,
+		ReplayResumeAdmission:    plan.ReplayResumeAdmission,
 		DeliveryResumeBlocked:    true,
 		SourceRunStatusUnchanged: true,
 	}, nil

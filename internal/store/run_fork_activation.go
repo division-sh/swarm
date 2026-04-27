@@ -22,18 +22,19 @@ type RunForkActivateRequest struct {
 }
 
 type RunForkActivation struct {
-	SourceRunID              string                      `json:"source_run_id"`
-	ForkRunID                string                      `json:"fork_run_id"`
-	ForkRunStatus            string                      `json:"fork_run_status"`
-	SourceRunStatus          string                      `json:"source_run_status"`
-	ForkPoint                RunForkPoint                `json:"fork_point"`
-	Activated                bool                        `json:"activated"`
-	SourceFrozen             bool                        `json:"source_frozen"`
-	HistoricalReplayBlocked  bool                        `json:"historical_replay_blocked"`
-	UnsupportedBlockers      []RunForkUnsupportedBlocker `json:"unsupported_blockers,omitempty"`
-	MaterializedEntityCount  int                         `json:"materialized_entity_count"`
-	SourceAdvancedAfterFork  bool                        `json:"source_advanced_after_fork_point,omitempty"`
-	RepeatedActivationFailed bool                        `json:"repeated_activation_failed,omitempty"`
+	SourceRunID              string                       `json:"source_run_id"`
+	ForkRunID                string                       `json:"fork_run_id"`
+	ForkRunStatus            string                       `json:"fork_run_status"`
+	SourceRunStatus          string                       `json:"source_run_status"`
+	ForkPoint                RunForkPoint                 `json:"fork_point"`
+	Activated                bool                         `json:"activated"`
+	SourceFrozen             bool                         `json:"source_frozen"`
+	HistoricalReplayBlocked  bool                         `json:"historical_replay_blocked"`
+	ReplayResumeAdmission    RunForkReplayResumeAdmission `json:"replay_resume_admission"`
+	UnsupportedBlockers      []RunForkUnsupportedBlocker  `json:"unsupported_blockers,omitempty"`
+	MaterializedEntityCount  int                          `json:"materialized_entity_count"`
+	SourceAdvancedAfterFork  bool                         `json:"source_advanced_after_fork_point,omitempty"`
+	RepeatedActivationFailed bool                         `json:"repeated_activation_failed,omitempty"`
 }
 
 type runForkActivationLineage struct {
@@ -133,15 +134,24 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	if err != nil {
 		return result, err
 	}
+	result.ReplayResumeAdmission = plan.ReplayResumeAdmission
 	if !plan.ExecutionReady {
 		result.UnsupportedBlockers = plan.UnsupportedBlockers
 		return result, fmt.Errorf("fork activation requires execution-ready materialized fork; blockers: %s", runForkBlockerCodes(plan.UnsupportedBlockers))
 	}
 	if err := ensureRunForkSourceNotAdvanced(ctx, tx, catalog, lineage); err != nil {
 		result.SourceAdvancedAfterFork = true
+		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
+			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
+		}
 		return result, err
 	}
 	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, catalog, lineage.ForkRunID); err != nil {
+		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
+			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
+		}
 		return result, err
 	}
 
@@ -325,7 +335,7 @@ func ensureRunForkSourceNotAdvanced(ctx context.Context, tx *sql.Tx, catalog sch
 			return fmt.Errorf("check %s: %w", check.code, err)
 		}
 		if exists {
-			return fmt.Errorf("fork activation blocked: %s", check.code)
+			return runForkReplayResumeError(check.code, RunForkReplayResumeFactSourceAdvanced, fmt.Sprintf("fork activation blocked: %s", check.code))
 		}
 	}
 	if err := ensureRunForkNoRelevantPostForkTimers(ctx, tx, catalog, lineage); err != nil {
@@ -360,7 +370,7 @@ func ensureRunForkNoRelevantPostForkTimers(ctx context.Context, tx *sql.Tx, cata
 		return fmt.Errorf("check source timer advancement: %w", err)
 	}
 	if exists {
-		return fmt.Errorf("fork activation blocked: source_timers_advanced_after_fork_point")
+		return runForkReplayResumeError("source_timers_advanced_after_fork_point", RunForkReplayResumeFactSourceAdvanced, "fork activation blocked: source_timers_advanced_after_fork_point")
 	}
 	return nil
 }
@@ -388,7 +398,7 @@ func ensureRunForkNoRelevantPostForkRoutes(ctx context.Context, tx *sql.Tx, cata
 		return fmt.Errorf("check source route advancement: %w", err)
 	}
 	if exists {
-		return fmt.Errorf("fork activation blocked: source_routes_advanced_after_fork_point")
+		return runForkReplayResumeError("source_routes_advanced_after_fork_point", RunForkReplayResumeFactSourceAdvanced, "fork activation blocked: source_routes_advanced_after_fork_point")
 	}
 	return nil
 }
@@ -419,7 +429,7 @@ func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, c
 			return fmt.Errorf("check %s: %w", check.code, err)
 		}
 		if exists {
-			return fmt.Errorf("fork activation blocked: %s", check.code)
+			return runForkReplayResumeError(check.code, RunForkReplayResumeFactForkReplayState, fmt.Sprintf("fork activation blocked: %s", check.code))
 		}
 	}
 	return nil

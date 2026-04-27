@@ -197,6 +197,15 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	if plan.ExecutionReady {
 		t.Fatal("ExecutionReady = true, want false while recorder blockers remain")
 	}
+	if plan.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner {
+		t.Fatalf("taxonomy owner = %q, want %q", plan.ReplayResumeAdmission.Owner, RunForkReplayResumeAdmissionOwner)
+	}
+	if plan.ReplayResumeAdmission.StateOnlyExecutionReady {
+		t.Fatal("taxonomy StateOnlyExecutionReady = true, want false")
+	}
+	if !plan.ReplayResumeAdmission.HistoricalReplayRequired || plan.ReplayResumeAdmission.HistoricalReplaySupported {
+		t.Fatalf("taxonomy replay flags = required:%v supported:%v, want required true/supported false", plan.ReplayResumeAdmission.HistoricalReplayRequired, plan.ReplayResumeAdmission.HistoricalReplaySupported)
+	}
 	blockers := map[string]bool{}
 	for _, blocker := range plan.UnsupportedBlockers {
 		blockers[blocker.Code] = true
@@ -213,6 +222,18 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	for _, code := range []string{"timer_history_unproven", "flow_route_history_unproven"} {
 		if blockers[code] {
 			t.Fatalf("unexpected unrelated blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
+		}
+	}
+	for _, fact := range []string{
+		RunForkReplayResumeFactDeliveryCompletedHistory,
+		RunForkReplayResumeFactDeliveryPendingHistory,
+		RunForkReplayResumeFactDeliveryInProgressHistory,
+		RunForkReplayResumeFactDeliveryFailedHistory,
+		RunForkReplayResumeFactDeliveryDeadLetterHistory,
+		RunForkReplayResumeFactCommittedReplayScope,
+	} {
+		if !runForkTestHasDisposition(plan.ReplayResumeAdmission, fact) {
+			t.Fatalf("missing taxonomy disposition for %s; admission=%#v", fact, plan.ReplayResumeAdmission)
 		}
 	}
 }
@@ -274,6 +295,22 @@ func TestRunForkPlanner_StateOnlyPlanExecutionReadyWithEmptyAndUnrelatedTimerRou
 	}
 	if plan.UnsupportedBlockerCount != 0 {
 		t.Fatalf("UnsupportedBlockerCount = %d, want 0; blockers=%#v", plan.UnsupportedBlockerCount, plan.UnsupportedBlockers)
+	}
+	if plan.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner {
+		t.Fatalf("taxonomy owner = %q, want %q", plan.ReplayResumeAdmission.Owner, RunForkReplayResumeAdmissionOwner)
+	}
+	if !plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.HistoricalReplayRequired || plan.ReplayResumeAdmission.HistoricalReplaySupported {
+		t.Fatalf("taxonomy flags = state_only:%v historical_required:%v historical_supported:%v, want true/false/false",
+			plan.ReplayResumeAdmission.StateOnlyExecutionReady,
+			plan.ReplayResumeAdmission.HistoricalReplayRequired,
+			plan.ReplayResumeAdmission.HistoricalReplaySupported,
+		)
+	}
+	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, RunForkReplayResumeFactEntityStateSnapshot) {
+		t.Fatalf("missing entity-state taxonomy disposition; admission=%#v", plan.ReplayResumeAdmission)
+	}
+	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, RunForkReplayResumeFactHistoricalReplayExecution) {
+		t.Fatalf("missing split historical replay taxonomy disposition; admission=%#v", plan.ReplayResumeAdmission)
 	}
 	if plan.ReconstructedEntityCount != 1 {
 		t.Fatalf("ReconstructedEntityCount = %d, want 1", plan.ReconstructedEntityCount)
@@ -338,6 +375,11 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	for _, code := range []string{"timer_history_unproven", "flow_route_history_unproven"} {
 		if !runForkTestHasBlocker(plan, code) {
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
+		}
+	}
+	for _, fact := range []string{RunForkReplayResumeFactTimerHistory, RunForkReplayResumeFactRouteHistory} {
+		if !runForkTestHasDisposition(plan.ReplayResumeAdmission, fact) {
+			t.Fatalf("missing taxonomy disposition for %s; admission=%#v", fact, plan.ReplayResumeAdmission)
 		}
 	}
 }
@@ -734,6 +776,15 @@ func TestRunForkPlanner_FailsClosedWhenDeadLettersUnavailable(t *testing.T) {
 func runForkTestHasBlocker(plan RunForkPlan, code string) bool {
 	for _, blocker := range plan.UnsupportedBlockers {
 		if blocker.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func runForkTestHasDisposition(admission RunForkReplayResumeAdmission, fact string) bool {
+	for _, disposition := range admission.Dispositions {
+		if disposition.Fact == fact {
 			return true
 		}
 	}
