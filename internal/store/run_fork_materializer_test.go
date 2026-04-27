@@ -457,6 +457,52 @@ func TestRunForkActivation_FailsClosedForPendingDeliveryAndMissingLineage(t *tes
 	}
 }
 
+func TestRunForkActivation_ToleratesOptionalLegacyReplaySchemas(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700001100, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS timers CASCADE`); err != nil {
+		t.Fatalf("drop timers: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS routing_rules CASCADE`); err != nil {
+		t.Fatalf("drop routing_rules: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_turns CASCADE`); err != nil {
+		t.Fatalf("drop agent_turns: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE`); err != nil {
+		t.Fatalf("drop agent_sessions: %v", err)
+	}
+	for name, ddl := range map[string]string{
+		"timers":         `CREATE TABLE timers (timer_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), entity_id UUID, flow_instance TEXT)`,
+		"routing_rules":  `CREATE TABLE routing_rules (rule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), flow_instance TEXT)`,
+		"agent_sessions": `CREATE TABLE agent_sessions (session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), status TEXT NOT NULL DEFAULT 'active', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+		"agent_turns":    `CREATE TABLE agent_turns (turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), session_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+	} {
+		if _, err := db.ExecContext(ctx, ddl); err != nil {
+			t.Fatalf("create legacy %s: %v", name, err)
+		}
+	}
+
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork with optional legacy schemas: %v", err)
+	}
+	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err != nil {
+		t.Fatalf("ActivateRunFork with optional legacy schemas: %v", err)
+	}
+	if !activated.Activated || activated.ForkRunStatus != RunForkActivatedStatus || activated.SourceRunStatus != RunForkSourceFrozenStatus {
+		t.Fatalf("activation result = %#v", activated)
+	}
+}
+
 type sqlNullTime struct {
 	Time  time.Time
 	Valid bool
