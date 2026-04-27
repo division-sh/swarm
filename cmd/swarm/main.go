@@ -335,6 +335,7 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 	at := fs.String("at", "", "Fork point event UUID or RFC3339 timestamp")
 	dryRun := fs.Bool("dry-run", false, "Plan the fork without mutating runtime state")
 	materializeOnly := fs.Bool("materialize-only", false, "Create fork run and materialize state snapshot without resuming execution")
+	activate := fs.Bool("activate", false, "Activate an already materialized state-only fork")
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	if err := fs.Parse(args); err != nil {
 		if out != nil {
@@ -342,15 +343,27 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 		}
 		return 2
 	}
-	if *dryRun && *materializeOnly {
+	modeCount := 0
+	for _, enabled := range []bool{*dryRun, *materializeOnly, *activate} {
+		if enabled {
+			modeCount++
+		}
+	}
+	if modeCount > 1 {
 		if out != nil {
-			fmt.Fprintln(out, "fork failed: --dry-run and --materialize-only are mutually exclusive")
+			fmt.Fprintln(out, "fork failed: --dry-run, --materialize-only, and --activate are mutually exclusive")
 		}
 		return 2
 	}
-	if !*dryRun && !*materializeOnly {
+	if modeCount == 0 {
 		if out != nil {
-			fmt.Fprintln(out, "fork failed: mutating fork execution is not implemented; use --dry-run")
+			fmt.Fprintln(out, "fork failed: mutating fork execution is not implemented; use --dry-run, --materialize-only, or --activate")
+		}
+		return 2
+	}
+	if *activate && strings.TrimSpace(*at) != "" {
+		if out != nil {
+			fmt.Fprintln(out, "fork failed: --activate targets --run <fork_run_id> and does not accept --at")
 		}
 		return 2
 	}
@@ -380,6 +393,28 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 			fmt.Fprintln(out, "fork failed: postgres store required")
 		}
 		return 1
+	}
+	if *activate {
+		result, err := stores.Postgres.ActivateRunFork(ctx, store.RunForkActivateRequest{
+			ForkRunID: strings.TrimSpace(*runID),
+		})
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: %v\n", err)
+			}
+			return 1
+		}
+		if *asJSON {
+			enc := json.NewEncoder(out)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(result); err != nil {
+				fmt.Fprintf(out, "fork failed: encode json: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+		printRunForkActivation(out, result)
+		return 0
 	}
 	if *materializeOnly {
 		result, err := stores.Postgres.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{
@@ -425,6 +460,22 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 	}
 	printRunForkPlan(out, plan)
 	return 0
+}
+
+func printRunForkActivation(w io.Writer, result store.RunForkActivation) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, "Fork activated for source run %s\n", result.SourceRunID)
+	fmt.Fprintf(w, "Fork Run: %s status=%s\n", result.ForkRunID, result.ForkRunStatus)
+	fmt.Fprintf(w, "Source Run: %s status=%s\n", result.SourceRunID, result.SourceRunStatus)
+	fmt.Fprintf(w, "Fork Point: %s (%s) at %s\n", result.ForkPoint.EventName, result.ForkPoint.EventID, result.ForkPoint.Timestamp.Format(time.RFC3339Nano))
+	fmt.Fprintf(w, "Summary: activated=%t source_frozen=%t historical_replay_blocked=%t materialized_entities=%d\n",
+		result.Activated,
+		result.SourceFrozen,
+		result.HistoricalReplayBlocked,
+		result.MaterializedEntityCount,
+	)
 }
 
 func printRunForkMaterialization(w io.Writer, result store.RunForkMaterialization) {

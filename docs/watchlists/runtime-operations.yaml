@@ -121,6 +121,10 @@ active_issues:
     title: Materialize run-isolated timestamp-fork state snapshots without resuming execution
     maps_to:
       - run_isolated_current_state_ownership
+  - id: 562
+    title: Activate materialized state-only timestamp forks without delivery replay
+    maps_to:
+      - run_isolated_current_state_ownership
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -204,12 +208,14 @@ nodes:
       - entity_state previously had no run_id and used entity_id as a global primary key
       - state-only fork dry-run can be execution-ready, but mutating execution cannot materialize isolated current-state rows until live current state is run-scoped
       - execution-ready timestamp-fork plans need a store-owned materialization operation that creates fork run lineage plus fork-scoped entity_state and entity_mutations rows without resuming delivery
+      - materialized state-only forks need store-owned activation that freezes the source run and starts future fork-local execution without historical delivery replay
       - runtime entity tools and workflow projection read and write entity_state by entity_id without run context
       - inbound routing, route ownership, workspace, digest, budget, and tests consume global current-state semantics
     representative_issues:
       - 549
       - 550
       - 558
+      - 562
     common_framing_mistakes:
       too_broad:
         - implement all mutating fork execution in one PR

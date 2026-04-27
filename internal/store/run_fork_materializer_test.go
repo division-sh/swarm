@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -299,5 +301,224 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 	}
 	if first.ForkRunID == "" {
 		t.Fatal("first ForkRunID is empty")
+	}
+}
+
+func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000800, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err != nil {
+		t.Fatalf("ActivateRunFork: %v", err)
+	}
+	if !activated.Activated || !activated.SourceFrozen {
+		t.Fatalf("activation flags = activated:%v frozen:%v", activated.Activated, activated.SourceFrozen)
+	}
+	if activated.SourceRunID != sourceRunID || activated.ForkRunID != materialized.ForkRunID {
+		t.Fatalf("activation lineage = %#v", activated)
+	}
+	if activated.ForkRunStatus != RunForkActivatedStatus || activated.SourceRunStatus != RunForkSourceFrozenStatus {
+		t.Fatalf("activation statuses = fork:%s source:%s", activated.ForkRunStatus, activated.SourceRunStatus)
+	}
+
+	var sourceStatus, forkStatus string
+	var sourceEndedAt sqlNullTime
+	if err := db.QueryRowContext(ctx, `
+		SELECT status, ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, sourceRunID).Scan(&sourceStatus, &sourceEndedAt); err != nil {
+		t.Fatalf("load source status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
+		t.Fatalf("load fork status: %v", err)
+	}
+	if sourceStatus != RunForkSourceFrozenStatus || !sourceEndedAt.Valid {
+		t.Fatalf("source status/ended_at = %s/%v, want forked/valid", sourceStatus, sourceEndedAt.Valid)
+	}
+	if forkStatus != RunForkActivatedStatus {
+		t.Fatalf("fork status = %q, want running", forkStatus)
+	}
+
+	var sourceState, forkState string
+	if err := db.QueryRowContext(ctx, `
+		SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, sourceRunID, entityID).Scan(&sourceState); err != nil {
+		t.Fatalf("load source state: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, materialized.ForkRunID, entityID).Scan(&forkState); err != nil {
+		t.Fatalf("load fork state: %v", err)
+	}
+	if sourceState != "ready" || forkState != "ready" {
+		t.Fatalf("source/fork state = %s/%s, want ready/ready", sourceState, forkState)
+	}
+}
+
+func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	afterEventID := uuid.NewString()
+	at := time.Unix(1700000900, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
+		t.Fatalf("seed post-fork event: %v", err)
+	}
+	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err == nil || !strings.Contains(err.Error(), "source_events_advanced_after_fork_point") {
+		t.Fatalf("ActivateRunFork advanced source error = %v, want source advanced blocker", err)
+	}
+	var forkStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
+		t.Fatalf("load fork status after blocked activation: %v", err)
+	}
+	if forkStatus != RunForkMaterializedStatus {
+		t.Fatalf("fork status after blocked activation = %q, want paused", forkStatus)
+	}
+
+	cleanSourceRunID := uuid.NewString()
+	cleanEntityID := uuid.NewString()
+	cleanEventID := uuid.NewString()
+	seedActivationReadySourceRun(t, db, cleanSourceRunID, cleanEntityID, cleanEventID, at.Add(time.Minute))
+	cleanMaterialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: cleanSourceRunID, At: cleanEventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork clean: %v", err)
+	}
+	if _, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID}); err != nil {
+		t.Fatalf("ActivateRunFork clean: %v", err)
+	}
+	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID})
+	if err == nil || !strings.Contains(err.Error(), "requires materialized fork status") {
+		t.Fatalf("ActivateRunFork repeat error = %v, want materialized-status failure", err)
+	}
+}
+
+func TestRunForkActivation_FailsClosedForPendingDeliveryAndMissingLineage(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700001000, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'node', 'blocked-node', 'pending', $3)
+	`, sourceRunID, eventID, at); err != nil {
+		t.Fatalf("seed pending delivery: %v", err)
+	}
+	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err == nil || !strings.Contains(err.Error(), "delivery_history_unproven") {
+		t.Fatalf("ActivateRunFork pending delivery error = %v, want delivery blocker", err)
+	}
+
+	orphanRunID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'paused', $2)`, orphanRunID, at); err != nil {
+		t.Fatalf("seed orphan paused run: %v", err)
+	}
+	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: orphanRunID})
+	if err == nil || !strings.Contains(err.Error(), "requires fork lineage") {
+		t.Fatalf("ActivateRunFork orphan error = %v, want lineage failure", err)
+	}
+}
+
+type sqlNullTime struct {
+	Time  time.Time
+	Valid bool
+}
+
+type execContextDB interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func (n *sqlNullTime) Scan(value any) error {
+	if value == nil {
+		n.Valid = false
+		return nil
+	}
+	tm, ok := value.(time.Time)
+	if !ok {
+		return fmt.Errorf("sqlNullTime expected time.Time, got %T", value)
+	}
+	n.Time = tm
+	n.Valid = true
+	return nil
+}
+
+func seedActivationReadySourceRun(t *testing.T, db execContextDB, sourceRunID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed source run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.ready', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, sourceRunID, eventID, entityID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'activation-test', 'seed', $4),
+			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"Activation Entity"'::jsonb, $3::uuid, 'platform', 'activation-test', 'seed', $4)
+	`, sourceRunID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed mutations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, name,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'Activation Entity',
+			'ready', '{}'::jsonb, '{"name":"Activation Entity"}'::jsonb, '{}'::jsonb, 1,
+			$3, $3, $3
+		)
+	`, sourceRunID, entityID, at); err != nil {
+		t.Fatalf("seed source entity_state: %v", err)
 	}
 }

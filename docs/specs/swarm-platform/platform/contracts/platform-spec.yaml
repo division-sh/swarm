@@ -3168,6 +3168,7 @@ run_model:
     command: 'swarm fork --run <run_id> --at <event_id|timestamp> [--contracts <path>]'
     dry_run_command: 'swarm fork --run <run_id> --at <event_id|timestamp> --dry-run [--json]'
     materialize_only_command: 'swarm fork --run <run_id> --at <event_id|timestamp> --materialize-only [--json]'
+    activation_command: 'swarm fork --run <fork_run_id> --activate [--json]'
     planning_admission: 'The dry-run form is a read-only planning/admission surface. It resolves the fork
       point, reconstructs provable state, classifies replay candidates, and returns execution_ready=false
       with named unsupported blockers whenever persisted recorder facts cannot prove safe execution. Dry-run
@@ -3183,6 +3184,15 @@ run_model:
       Materialized fork rows preserve entered_state_at from the source-at-T current_state mutation evidence; they
       MUST NOT stamp entered_state_at with the fork point unless that is when the current_state was entered.
       Full fork execution remains a separately gated operation.'
+    activation_admission: 'The activate form consumes an already materialized state-only fork and is the
+      supported activation slice for forks whose state was produced by materialize-only admission. Activation
+      requires a fork run with status=paused, fork lineage, fork-local entity_state rows, and a revalidated
+      execution_ready=true planner result at the original fork point. Activation atomically transitions the
+      fork run to status=running and the source run to status=forked. It fails closed with no partial mutation
+      if the source run advanced after the fork point, if the fork already has events, deliveries, sessions, or
+      turns, or if pending delivery, timer, route, session, active-turn, replay, or contract-swap facts would
+      require historical replay. Activation does not copy, redeliver, replay, reconstruct, or mutate historical
+      event, delivery, timer, route, session, turn, or contract rows.'
     planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
       Builder, dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
       fork planning with direct SQL joins.'
@@ -3206,6 +3216,11 @@ run_model:
         Source run status is unchanged. Copy reconstructed entity states into the fork context with fork-local
         revision=1 and source-at-T entered_state_at for the reconstructed current_state, then stop; do not boot,
         resume, redeliver, or mutate runtime delivery/session/timer/route state.'
+      3b_activate_materialized_fork: 'For an activation-only fork, consume a previously materialized fork run.
+        Revalidate the original fork point against current source-run facts, require no source advancement and
+        no unsupported replay/timer/route/session/turn/contract-swap facts, then atomically mark the source run
+        forked and the fork run running. Future runtime work uses the fork run_id and fork-local entity_state
+        rows; historical delivery replay remains unsupported in this slice.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.
