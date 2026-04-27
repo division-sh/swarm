@@ -846,6 +846,132 @@ accounts:
 	}
 }
 
+func TestEntityTools_SaveEntityFieldAfterForkActivationUsesForkRunID(t *testing.T) {
+	actor := models.AgentConfig{
+		ID:    "tester",
+		Role:  "operator",
+		Tools: []string{"get_entity", "save_entity_field"},
+	}
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
+types: {}
+`, `
+accounts:
+  status: text
+`)
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	stateEventID := uuid.NewString()
+	forkEventID := uuid.NewString()
+	at := time.Unix(1700000720, 0).UTC()
+	forkAt := at.Add(30 * time.Second)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed source run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'fork.state_entry', $4::uuid, 'review/inst-1', 'entity', '{}'::jsonb, 'test', 'platform', $5),
+			($1::uuid, $3::uuid, 'fork.field_only', $4::uuid, 'review/inst-1', 'entity', '{}'::jsonb, 'test', 'platform', $6)
+	`, sourceRunID, stateEventID, forkEventID, entityID, at, forkAt); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'activation-tool-test', 'seed', $5),
+			($1::uuid, $2::uuid, 'status', 'null'::jsonb, '"open"'::jsonb, $4::uuid, 'platform', 'activation-tool-test', 'field-only', $6)
+	`, sourceRunID, entityID, stateEventID, forkEventID, at, forkAt); err != nil {
+		t.Fatalf("seed mutations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'review/inst-1', 'default', 'queued',
+			'{}'::jsonb, '{"status":"open"}'::jsonb, '{}'::jsonb, 1, $3, $4, $4
+		)
+	`, sourceRunID, entityID, at, forkAt); err != nil {
+		t.Fatalf("seed source entity_state: %v", err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	activated, err := pg.ActivateRunFork(ctx, store.RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err != nil {
+		t.Fatalf("ActivateRunFork: %v", err)
+	}
+	if !activated.Activated || !activated.SourceFrozen {
+		t.Fatalf("activation result = %#v", activated)
+	}
+
+	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+		SQLDB:          db,
+		WorkflowSource: semanticview.Wrap(bundle),
+	})
+	forkCtx := runtimetools.WithActor(runtimecorrelation.WithRunID(context.Background(), materialized.ForkRunID), actor)
+	if _, err := exec.Execute(forkCtx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "status",
+		"value":     "fork-active",
+	}); err != nil {
+		t.Fatalf("save_entity_field on activated fork: %v", err)
+	}
+
+	var sourceStatus, forkStatus string
+	var forkRevision int
+	if err := db.QueryRowContext(ctx, `
+		SELECT fields->>'status'
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, sourceRunID, entityID).Scan(&sourceStatus); err != nil {
+		t.Fatalf("load source entity_state: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT fields->>'status', revision
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, materialized.ForkRunID, entityID).Scan(&forkStatus, &forkRevision); err != nil {
+		t.Fatalf("load fork entity_state: %v", err)
+	}
+	if sourceStatus != "open" || forkStatus != "fork-active" {
+		t.Fatalf("source/fork status = %s/%s, want open/fork-active", sourceStatus, forkStatus)
+	}
+	if forkRevision != 2 {
+		t.Fatalf("fork revision = %d, want 2 after fork-local write", forkRevision)
+	}
+	var forkMutationCount, sourceMutationCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM entity_mutations
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND field = 'status' AND writer_type = 'agent' AND handler_step = 'save_entity_field'
+	`, materialized.ForkRunID, entityID).Scan(&forkMutationCount); err != nil {
+		t.Fatalf("count fork status mutation: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM entity_mutations
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND field = 'status' AND writer_type = 'agent' AND handler_step = 'save_entity_field'
+	`, sourceRunID, entityID).Scan(&sourceMutationCount); err != nil {
+		t.Fatalf("count source status mutation: %v", err)
+	}
+	if forkMutationCount != 1 || sourceMutationCount != 0 {
+		t.Fatalf("fork/source save_entity_field mutation count = %d/%d, want 1/0", forkMutationCount, sourceMutationCount)
+	}
+}
+
 func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarness(t)
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{

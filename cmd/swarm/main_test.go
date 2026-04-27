@@ -477,6 +477,52 @@ func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T)
 	}
 }
 
+func TestRunForkCommand_ActivateUsesCanonicalStoreOwnerJSON(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	pg := &store.PostgresStore{DB: db}
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000320, 0).UTC()
+	ctx := context.Background()
+	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
+	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+
+	var buf bytes.Buffer
+	code := runForkCommand(ctx, t.TempDir(), []string{
+		"--activate",
+		"--run", materialized.ForkRunID,
+		"--json",
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+	}
+	var result store.RunForkActivation
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("decode fork activation json: %v\n%s", err, buf.String())
+	}
+	if !result.Activated || !result.SourceFrozen || !result.HistoricalReplayBlocked {
+		t.Fatalf("activation result = %#v", result)
+	}
+	if result.SourceRunID != runID || result.ForkRunID != materialized.ForkRunID {
+		t.Fatalf("activation lineage = %#v", result)
+	}
+	var sourceStatus, forkStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, runID).Scan(&sourceStatus); err != nil {
+		t.Fatalf("load source status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
+		t.Fatalf("load fork status: %v", err)
+	}
+	if sourceStatus != store.RunForkSourceFrozenStatus || forkStatus != store.RunForkActivatedStatus {
+		t.Fatalf("source/fork status = %s/%s, want forked/running", sourceStatus, forkStatus)
+	}
+}
+
 func TestRunForkCommand_NonDryRunWithoutMaterializeOnlyStaysFailClosed(t *testing.T) {
 	var buf bytes.Buffer
 	code := runForkCommand(context.Background(), t.TempDir(), []string{
@@ -486,8 +532,53 @@ func TestRunForkCommand_NonDryRunWithoutMaterializeOnlyStaysFailClosed(t *testin
 	if code != 2 {
 		t.Fatalf("runForkCommand code=%d, want 2; output=%s", code, buf.String())
 	}
-	if !strings.Contains(buf.String(), "mutating fork execution is not implemented; use --dry-run") {
+	if !strings.Contains(buf.String(), "mutating fork execution is not implemented; use --dry-run, --materialize-only, or --activate") {
 		t.Fatalf("output = %q, want fail-closed fork execution message", buf.String())
+	}
+}
+
+func seedRunForkCLIActivationSource(t *testing.T, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, runID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.cli.activate', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, runID, eventID, entityID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'cli-test', 'seed', $4),
+			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"CLI Entity"'::jsonb, $3::uuid, 'platform', 'cli-test', 'seed', $4)
+	`, runID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed mutations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, name,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'CLI Entity',
+			'ready', '{}'::jsonb, '{"name":"CLI Entity"}'::jsonb, '{}'::jsonb, 1,
+			$3, $3, $3
+		)
+	`, runID, entityID, at); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
 	}
 }
 
