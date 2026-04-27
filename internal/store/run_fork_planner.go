@@ -92,11 +92,12 @@ type runForkEventCursor struct {
 }
 
 type runForkAdmissionEvidence struct {
-	Pending       []RunForkPendingWork
-	RelevantTimer bool
-	RelevantRoute bool
-	ActiveSession bool
-	ActiveTurn    bool
+	Pending                 []RunForkPendingWork
+	RelevantTimer           bool
+	RelevantRoute           bool
+	ActiveSession           bool
+	ActiveConversationAudit bool
+	ActiveTurn              bool
 }
 
 type runForkSourceFacts struct {
@@ -566,6 +567,10 @@ func (s *PostgresStore) loadRunForkAdmissionEvidence(ctx context.Context, catalo
 			return runForkAdmissionEvidence{}, err
 		}
 	}
+	activeConversationAudit, err := s.hasRunForkActiveConversationAudit(ctx, catalog, runID, cursor)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
 	activeTurn := runForkPendingReferencesActiveSession(pending)
 	if !activeTurn {
 		activeTurn, err = s.hasRunForkActiveTurn(ctx, catalog, runID, cursor)
@@ -574,11 +579,12 @@ func (s *PostgresStore) loadRunForkAdmissionEvidence(ctx context.Context, catalo
 		}
 	}
 	return runForkAdmissionEvidence{
-		Pending:       pending,
-		RelevantTimer: relevantTimer,
-		RelevantRoute: relevantRoute,
-		ActiveSession: activeSession,
-		ActiveTurn:    activeTurn,
+		Pending:                 pending,
+		RelevantTimer:           relevantTimer,
+		RelevantRoute:           relevantRoute,
+		ActiveSession:           activeSession,
+		ActiveConversationAudit: activeConversationAudit,
+		ActiveTurn:              activeTurn,
 	}, nil
 }
 
@@ -695,6 +701,25 @@ func (s *PostgresStore) hasRunForkActiveSession(ctx context.Context, catalog sch
 		)
 	`, activePredicate), runID, cursor.CreatedAt).Scan(&exists); err != nil {
 		return false, fmt.Errorf("check fork session blockers: %w", err)
+	}
+	return exists, nil
+}
+
+func (s *PostgresStore) hasRunForkActiveConversationAudit(ctx context.Context, catalog schemaColumnCatalog, runID string, cursor runForkEventCursor) (bool, error) {
+	if !catalog.hasColumns("agent_conversation_audits", "run_id", "status", "created_at") {
+		return false, nil
+	}
+	var exists bool
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM agent_conversation_audits
+			WHERE run_id = $1::uuid
+			  AND created_at <= $2::timestamptz
+			  AND COALESCE(status, '') IN ('active', 'suspended')
+		)
+	`, runID, cursor.CreatedAt).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check fork conversation audit blockers: %w", err)
 	}
 	return exists, nil
 }

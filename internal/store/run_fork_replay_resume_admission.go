@@ -28,6 +28,7 @@ const (
 	RunForkReplayResumeFactTimerHistory              = "timer_history"
 	RunForkReplayResumeFactRouteHistory              = "flow_route_history"
 	RunForkReplayResumeFactSessionHistory            = "session_history"
+	RunForkReplayResumeFactConversationAuditHistory  = "conversation_audit_history"
 	RunForkReplayResumeFactActiveTurnHistory         = "active_turn_history"
 	RunForkReplayResumeFactSourceAdvanced            = "source_advanced_after_fork_point"
 	RunForkReplayResumeFactForkReplayState           = "fork_replay_state"
@@ -40,6 +41,7 @@ const (
 	RunForkBlockerTimerHistoryUnproven      = "timer_history_unproven"
 	RunForkBlockerFlowRouteHistoryUnproven  = "flow_route_history_unproven"
 	RunForkBlockerSessionHistoryUnproven    = "session_history_unproven"
+	RunForkBlockerConversationAuditUnproven = "conversation_audit_history_unproven"
 	RunForkBlockerActiveTurnHistoryUnproven = "active_turn_history_unproven"
 )
 
@@ -130,6 +132,17 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) RunForkRepl
 		blockers = appendRunForkBlocker(blockers, blocker)
 		dispositions = append(dispositions, RunForkReplayResumeDisposition{
 			Fact:        RunForkReplayResumeFactSessionHistory,
+			Disposition: RunForkReplayResumeDispositionFailClosedBlocker,
+			BlockerCode: blocker.Code,
+			Message:     blocker.Message,
+		})
+		hasHistoricalReplayRequirement = true
+	}
+	if evidence.ActiveConversationAudit {
+		blocker := runForkReplayResumeBlocker(RunForkBlockerConversationAuditUnproven)
+		blockers = appendRunForkBlocker(blockers, blocker)
+		dispositions = append(dispositions, RunForkReplayResumeDisposition{
+			Fact:        RunForkReplayResumeFactConversationAuditHistory,
 			Disposition: RunForkReplayResumeDispositionFailClosedBlocker,
 			BlockerCode: blocker.Code,
 			Message:     blocker.Message,
@@ -291,6 +304,11 @@ func runForkReplayResumeBlocker(code string) RunForkUnsupportedBlocker {
 		return RunForkUnsupportedBlocker{
 			Code:    RunForkBlockerSessionHistoryUnproven,
 			Message: "source-run session facts reference current session rows without append-only session-state proof at the fork point",
+		}
+	case RunForkBlockerConversationAuditUnproven:
+		return RunForkUnsupportedBlocker{
+			Code:    RunForkBlockerConversationAuditUnproven,
+			Message: "source-run task conversation audit facts are audit/debug lineage and are not a fork-local session reconstruction source",
 		}
 	case RunForkBlockerActiveTurnHistoryUnproven:
 		return RunForkUnsupportedBlocker{
