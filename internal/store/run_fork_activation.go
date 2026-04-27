@@ -66,16 +66,16 @@ func RequireRunForkActivationCapabilities(caps StoreSchemaCapabilities, catalog 
 	return nil
 }
 
-func (s *PostgresStore) requireRunForkActivationCapabilities(ctx context.Context) error {
+func (s *PostgresStore) requireRunForkActivationCapabilities(ctx context.Context) (schemaColumnCatalog, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
-		return err
+		return schemaColumnCatalog{}, err
 	}
 	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
 	if err != nil {
-		return err
+		return schemaColumnCatalog{}, err
 	}
-	return RequireRunForkActivationCapabilities(caps, catalog)
+	return catalog, RequireRunForkActivationCapabilities(caps, catalog)
 }
 
 func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivateRequest) (RunForkActivation, error) {
@@ -89,7 +89,8 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	if _, err := uuid.Parse(forkRunID); err != nil {
 		return RunForkActivation{}, fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
-	if err := s.requireRunForkActivationCapabilities(ctx); err != nil {
+	catalog, err := s.requireRunForkActivationCapabilities(ctx)
+	if err != nil {
 		return RunForkActivation{}, err
 	}
 
@@ -136,11 +137,11 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 		result.UnsupportedBlockers = plan.UnsupportedBlockers
 		return result, fmt.Errorf("fork activation requires execution-ready materialized fork; blockers: %s", runForkBlockerCodes(plan.UnsupportedBlockers))
 	}
-	if err := ensureRunForkSourceNotAdvanced(ctx, tx, lineage); err != nil {
+	if err := ensureRunForkSourceNotAdvanced(ctx, tx, catalog, lineage); err != nil {
 		result.SourceAdvancedAfterFork = true
 		return result, err
 	}
-	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, lineage.ForkRunID); err != nil {
+	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, catalog, lineage.ForkRunID); err != nil {
 		return result, err
 	}
 
@@ -263,7 +264,7 @@ func loadRunForkActivationLineage(ctx context.Context, tx *sql.Tx, forkRunID str
 	return lineage, nil
 }
 
-func ensureRunForkSourceNotAdvanced(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage) error {
+func ensureRunForkSourceNotAdvanced(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage) error {
 	checks := []struct {
 		code  string
 		query string
@@ -327,16 +328,19 @@ func ensureRunForkSourceNotAdvanced(ctx context.Context, tx *sql.Tx, lineage run
 			return fmt.Errorf("fork activation blocked: %s", check.code)
 		}
 	}
-	if err := ensureRunForkNoRelevantPostForkTimers(ctx, tx, lineage); err != nil {
+	if err := ensureRunForkNoRelevantPostForkTimers(ctx, tx, catalog, lineage); err != nil {
 		return err
 	}
-	if err := ensureRunForkNoRelevantPostForkRoutes(ctx, tx, lineage); err != nil {
+	if err := ensureRunForkNoRelevantPostForkRoutes(ctx, tx, catalog, lineage); err != nil {
 		return err
 	}
 	return nil
 }
 
-func ensureRunForkNoRelevantPostForkTimers(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage) error {
+func ensureRunForkNoRelevantPostForkTimers(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage) error {
+	if !catalog.hasColumns("timers", "entity_id", "flow_instance", "created_at") {
+		return nil
+	}
 	if len(lineage.EntityIDs) == 0 && len(lineage.FlowInstances) == 0 {
 		return nil
 	}
@@ -361,7 +365,10 @@ func ensureRunForkNoRelevantPostForkTimers(ctx context.Context, tx *sql.Tx, line
 	return nil
 }
 
-func ensureRunForkNoRelevantPostForkRoutes(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage) error {
+func ensureRunForkNoRelevantPostForkRoutes(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage) error {
+	if !catalog.hasColumns("routing_rules", "flow_instance", "source_flow", "created_at") {
+		return nil
+	}
 	if len(lineage.FlowInstances) == 0 && len(lineage.SourceFlows) == 0 {
 		return nil
 	}
@@ -386,15 +393,25 @@ func ensureRunForkNoRelevantPostForkRoutes(ctx context.Context, tx *sql.Tx, line
 	return nil
 }
 
-func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, forkRunID string) error {
+func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID string) error {
 	checks := []struct {
 		code  string
 		query string
 	}{
 		{"fork_events_already_exist", `SELECT EXISTS (SELECT 1 FROM events WHERE run_id = $1::uuid)`},
 		{"fork_deliveries_already_exist", `SELECT EXISTS (SELECT 1 FROM event_deliveries WHERE run_id = $1::uuid)`},
-		{"fork_sessions_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid)`},
-		{"fork_turns_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_turns WHERE run_id = $1::uuid)`},
+	}
+	if catalog.hasColumns("agent_sessions", "run_id") {
+		checks = append(checks, struct {
+			code  string
+			query string
+		}{"fork_sessions_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid)`})
+	}
+	if catalog.hasColumns("agent_turns", "run_id") {
+		checks = append(checks, struct {
+			code  string
+			query string
+		}{"fork_turns_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_turns WHERE run_id = $1::uuid)`})
 	}
 	for _, check := range checks {
 		var exists bool
