@@ -720,6 +720,20 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			wantError: "fork_sessions_already_exist",
 		},
 		{
+			name: "fork conversation audit",
+			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
+				_, err := db.ExecContext(ctx, `
+					INSERT INTO agent_conversation_audits (
+						session_id, run_id, agent_id, scope_key, scope, runtime_mode, runtime_state, status, created_at, updated_at
+					)
+					VALUES ($1::uuid, $2::uuid, 'agent-task', 'global', 'global', 'task', '{}'::jsonb, 'active', $3, $3)
+				`, uuid.NewString(), forkRunID, at)
+				return err
+			},
+			wantCode:  "fork_conversation_audits_already_exist",
+			wantError: "fork_conversation_audits_already_exist",
+		},
+		{
 			name: "fork turn",
 			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
 				_, err := db.ExecContext(ctx, `

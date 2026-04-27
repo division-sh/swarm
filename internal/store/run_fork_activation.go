@@ -426,6 +426,12 @@ func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, c
 			query string
 		}{"fork_sessions_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid)`})
 	}
+	if catalog.hasColumns("agent_conversation_audits", "run_id") {
+		checks = append(checks, struct {
+			code  string
+			query string
+		}{"fork_conversation_audits_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_conversation_audits WHERE run_id = $1::uuid)`})
+	}
 	if catalog.hasColumns("agent_turns", "run_id") {
 		checks = append(checks, struct {
 			code  string
