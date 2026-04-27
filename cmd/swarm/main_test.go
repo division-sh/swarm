@@ -399,6 +399,9 @@ func TestRunForkCommand_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
 	if plan.UnsupportedBlockerCount != 0 {
 		t.Fatalf("UnsupportedBlockerCount = %d, want 0; blockers=%#v", plan.UnsupportedBlockerCount, plan.UnsupportedBlockers)
 	}
+	if plan.ReplayResumeAdmission.Owner != store.RunForkReplayResumeAdmissionOwner || !plan.ReplayResumeAdmission.StateOnlyExecutionReady {
+		t.Fatalf("taxonomy = %#v, want canonical owner and state-only ready", plan.ReplayResumeAdmission)
+	}
 }
 
 func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T) {
@@ -464,6 +467,9 @@ func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T)
 	if result.SourceRunID != runID || result.ForkRunID == "" || result.ForkRunStatus != store.RunForkMaterializedStatus {
 		t.Fatalf("materialization result = %#v", result)
 	}
+	if result.ReplayResumeAdmission.Owner != store.RunForkReplayResumeAdmissionOwner || !result.ReplayResumeAdmission.StateOnlyExecutionReady {
+		t.Fatalf("materialization taxonomy = %#v, want canonical owner and state-only ready", result.ReplayResumeAdmission)
+	}
 	var forkState string
 	if err := db.QueryRowContext(ctx, `
 		SELECT current_state
@@ -507,6 +513,9 @@ func TestRunForkCommand_ActivateUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	}
 	if !result.Activated || !result.SourceFrozen || !result.HistoricalReplayBlocked {
 		t.Fatalf("activation result = %#v", result)
+	}
+	if result.ReplayResumeAdmission.Owner != store.RunForkReplayResumeAdmissionOwner || !result.ReplayResumeAdmission.StateOnlyExecutionReady {
+		t.Fatalf("activation taxonomy = %#v, want canonical owner and state-only ready", result.ReplayResumeAdmission)
 	}
 	if result.SourceRunID != runID || result.ForkRunID != materialized.ForkRunID {
 		t.Fatalf("activation lineage = %#v", result)
