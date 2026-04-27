@@ -125,6 +125,16 @@ active_issues:
     title: Activate materialized state-only timestamp forks without delivery replay
     maps_to:
       - run_isolated_current_state_ownership
+  - id: 564
+    title: Gate historical replay/resume semantics for timestamp forks after activation
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+      - run_isolated_current_state_ownership
+      - delivery_and_replay_ownership
+  - id: 565
+    title: Define canonical timestamp-fork replay/resume ownership before historical execution
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -173,11 +183,38 @@ nodes:
       - 144
       - 145
       - 547
+      - 564
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
       too_narrow:
         - one dispatcher or retry function is wrong
+    current_action_pressure: active
+  - id: timestamp_fork_replay_resume_ownership
+    title: Timestamp Fork Replay Resume Ownership
+    parent_class: full mutating timestamp-fork execution after run-scoped current-state materialization and activation
+    canonical_owners:
+      - canonical timestamp-fork replay/resume owner must define which historical source-run facts are replayed, copied, reconstructed, lineage-only, or permanently blocked before execution starts
+      - existing fork planner/materializer/activation owners are prerequisites and consumers, not the historical replay/resume owner
+      - delivery, session/turn, timer, route, replay-scope, current-state, and mutation-log owners must either consume that owner or remain explicit blockers
+    why_this_node_exists: activation-only forks can start a state-only fork context, but historical replay/resume is split across delivery rows, committed replay scope, sessions, turns, timers, routes, source-advanced checks, and planner blockers; local delivery redelivery or event-copy helpers would preserve semantic drift
+    known_manifestations:
+      - activation-only timestamp forks deliberately block historical replay and set historical replay as unsupported
+      - pending or in-progress deliveries at the fork point are not safe to redeliver without event, recipient, receipt, idempotency, session/turn, timer/route, and side-effect policy
+      - same-run committed replay scope fixes do not define timestamp-fork redelivery under a new run_id
+      - source advancement after the fork point remains fail-closed because no branch/replay policy proves safe divergence
+      - timers and routing_rules are current rows without an append-only timestamp-fork reconstruction owner
+      - agent_sessions and agent_turns are run-scoped facts without an at-T fork reconstruction/reuse policy
+    representative_issues:
+      - 564
+      - 565
+    common_framing_mistakes:
+      too_broad:
+        - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
+      too_narrow:
+        - redeliver pending event_deliveries directly from CLI or a local helper
+        - copy event rows to a fork run without a delivery/session/timer/route/source-advanced model
+        - treat committed same-run outbox replay as timestamp-fork replay ownership
     current_action_pressure: active
   - id: atomic_runtime_state_mutation
     title: Atomic Runtime State Mutation
@@ -209,6 +246,7 @@ nodes:
       - state-only fork dry-run can be execution-ready, but mutating execution cannot materialize isolated current-state rows until live current state is run-scoped
       - execution-ready timestamp-fork plans need a store-owned materialization operation that creates fork run lineage plus fork-scoped entity_state and entity_mutations rows without resuming delivery
       - materialized state-only forks need store-owned activation that freezes the source run and starts future fork-local execution without historical delivery replay
+      - historical replay/resume after activation requires a separate timestamp-fork replay/resume owner before any pending delivery redelivery or event-copy execution can be honest
       - runtime entity tools and workflow projection read and write entity_state by entity_id without run context
       - inbound routing, route ownership, workspace, digest, budget, and tests consume global current-state semantics
     representative_issues:
@@ -216,6 +254,7 @@ nodes:
       - 550
       - 558
       - 562
+      - 564
     common_framing_mistakes:
       too_broad:
         - implement all mutating fork execution in one PR
