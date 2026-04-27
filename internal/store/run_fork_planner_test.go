@@ -238,6 +238,58 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	}
 }
 
+func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000250, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.safe_pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'safe-agent', 'pending', 0, 'matched_agent_subscription', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed safe pending delivery: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if !plan.ExecutionReady {
+		t.Fatalf("ExecutionReady = false, want true for safe pending delivery; blockers=%#v", plan.UnsupportedBlockers)
+	}
+	if plan.ReplayResumeAdmission.StateOnlyExecutionReady {
+		t.Fatal("StateOnlyExecutionReady = true, want false because delivery/event replay is required")
+	}
+	if !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.HistoricalReplayRequired || !plan.ReplayResumeAdmission.HistoricalReplaySupported {
+		t.Fatalf("replay flags = %#v, want delivery-event replay ready and supported", plan.ReplayResumeAdmission)
+	}
+	for _, disposition := range plan.ReplayResumeAdmission.Dispositions {
+		if disposition.Fact == RunForkReplayResumeFactDeliveryPendingHistory && disposition.Disposition == RunForkReplayResumeDispositionForkReplay {
+			return
+		}
+	}
+	t.Fatalf("missing fork_replay disposition for pending delivery; admission=%#v", plan.ReplayResumeAdmission)
+}
+
 func TestRunForkPlanner_StateOnlyPlanExecutionReadyWithEmptyAndUnrelatedTimerRouteTables(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

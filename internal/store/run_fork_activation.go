@@ -22,19 +22,20 @@ type RunForkActivateRequest struct {
 }
 
 type RunForkActivation struct {
-	SourceRunID              string                       `json:"source_run_id"`
-	ForkRunID                string                       `json:"fork_run_id"`
-	ForkRunStatus            string                       `json:"fork_run_status"`
-	SourceRunStatus          string                       `json:"source_run_status"`
-	ForkPoint                RunForkPoint                 `json:"fork_point"`
-	Activated                bool                         `json:"activated"`
-	SourceFrozen             bool                         `json:"source_frozen"`
-	HistoricalReplayBlocked  bool                         `json:"historical_replay_blocked"`
-	ReplayResumeAdmission    RunForkReplayResumeAdmission `json:"replay_resume_admission"`
-	UnsupportedBlockers      []RunForkUnsupportedBlocker  `json:"unsupported_blockers,omitempty"`
-	MaterializedEntityCount  int                          `json:"materialized_entity_count"`
-	SourceAdvancedAfterFork  bool                         `json:"source_advanced_after_fork_point,omitempty"`
-	RepeatedActivationFailed bool                         `json:"repeated_activation_failed,omitempty"`
+	SourceRunID              string                            `json:"source_run_id"`
+	ForkRunID                string                            `json:"fork_run_id"`
+	ForkRunStatus            string                            `json:"fork_run_status"`
+	SourceRunStatus          string                            `json:"source_run_status"`
+	ForkPoint                RunForkPoint                      `json:"fork_point"`
+	Activated                bool                              `json:"activated"`
+	SourceFrozen             bool                              `json:"source_frozen"`
+	HistoricalReplayBlocked  bool                              `json:"historical_replay_blocked"`
+	ReplayResumeAdmission    RunForkReplayResumeAdmission      `json:"replay_resume_admission"`
+	UnsupportedBlockers      []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
+	MaterializedEntityCount  int                               `json:"materialized_entity_count"`
+	DeliveryEventReplay      *RunForkDeliveryEventReplayResult `json:"delivery_event_replay,omitempty"`
+	SourceAdvancedAfterFork  bool                              `json:"source_advanced_after_fork_point,omitempty"`
+	RepeatedActivationFailed bool                              `json:"repeated_activation_failed,omitempty"`
 }
 
 type runForkActivationLineage struct {
@@ -55,8 +56,9 @@ func RequireRunForkActivationCapabilities(caps StoreSchemaCapabilities, catalog 
 		return err
 	}
 	required := map[string][]string{
-		"runs":         {"run_id", "status", "forked_from_run_id", "forked_from_event_id", "ended_at"},
-		"entity_state": {"run_id", "entity_id", "flow_instance", "updated_at"},
+		"runs":                          {"run_id", "status", "forked_from_run_id", "forked_from_event_id", "ended_at"},
+		"entity_state":                  {"run_id", "entity_id", "flow_instance", "updated_at"},
+		runForkDeliveryEventReplayTable: {"fork_run_id", "source_run_id", "source_event_id", "source_delivery_id", "fork_event_id", "fork_delivery_id", "subscriber_type", "subscriber_id"},
 	}
 	for tableName, columns := range required {
 		if catalog.hasColumns(tableName, columns...) {
@@ -170,6 +172,10 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	} else if affected != 1 {
 		return result, fmt.Errorf("fork activation blocked: source_run_freeze_not_applied")
 	}
+	replayResult, err := applyRunForkDeliveryEventReplay(ctx, tx, lineage, plan, now)
+	if err != nil {
+		return result, err
+	}
 	forkResult, err := tx.ExecContext(ctx, `
 		UPDATE runs
 		SET status = $2, ended_at = NULL
@@ -192,6 +198,9 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	result.SourceRunStatus = RunForkSourceFrozenStatus
 	result.Activated = true
 	result.SourceFrozen = true
+	if replayResult.ReplayedEventCount > 0 || replayResult.ReplayedDeliveryCount > 0 {
+		result.DeliveryEventReplay = &replayResult
+	}
 	return result, nil
 }
 

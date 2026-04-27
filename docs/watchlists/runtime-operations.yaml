@@ -135,6 +135,11 @@ active_issues:
     title: Define canonical timestamp-fork replay/resume ownership before historical execution
     maps_to:
       - timestamp_fork_replay_resume_ownership
+  - id: 569
+    title: Gate timestamp-fork delivery/event replay primitive under fork run_id
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+      - delivery_and_replay_ownership
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -178,12 +183,14 @@ nodes:
       - retry counters and delivery-state updates not atomic
       - replayed deliveries and restored timers without explicit shared-store ownership
       - markerless replay-eligible events can repeatedly fail committed replay-scope lookup on the supported outbox sweeper path
+      - timestamp forks need fork-local delivery/event replay lineage rather than direct source delivery redelivery or same-run outbox replay proof
     representative_issues:
       - 112
       - 144
       - 145
       - 547
       - 564
+      - 569
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
@@ -205,9 +212,11 @@ nodes:
       - source advancement after the fork point remains fail-closed because no branch/replay policy proves safe divergence
       - timers and routing_rules are current rows without an append-only timestamp-fork reconstruction owner
       - agent_sessions and agent_turns are run-scoped facts without an at-T fork reconstruction/reuse policy
+      - the first supported timestamp-fork delivery/event replay primitive must create fresh fork event/delivery IDs with source lineage and keep unsafe delivery/session/timer/route cases fail-closed
     representative_issues:
       - 564
       - 565
+      - 569
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR

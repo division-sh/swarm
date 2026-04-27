@@ -212,7 +212,7 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(evidence)
 	plan.UnsupportedBlockers = plan.ReplayResumeAdmission.UnsupportedBlockers
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
-	plan.ExecutionReady = plan.ReplayResumeAdmission.StateOnlyExecutionReady
+	plan.ExecutionReady = plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady
 	return plan, nil
 }
 
@@ -383,6 +383,10 @@ func (s *PostgresStore) loadRunForkPendingWork(ctx context.Context, runID string
 				END AS retry_count,
 				CASE
 					WHEN d.delivered_at IS NOT NULL AND d.delivered_at <= $2::timestamptz THEN COALESCE(d.reason_code, '')
+					WHEN COALESCE(d.status, '') = 'pending'
+					 AND d.started_at IS NULL
+					 AND d.delivered_at IS NULL
+					THEN COALESCE(d.reason_code, '')
 					ELSE ''
 				END AS reason_code,
 				CASE

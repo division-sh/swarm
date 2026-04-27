@@ -331,6 +331,8 @@ func platformTableOrder(name string) int {
 		return 70
 	case "event_deliveries":
 		return 80
+	case "run_fork_delivery_event_replays":
+		return 85
 	case "event_receipts":
 		return 90
 	case "entity_mutations":
