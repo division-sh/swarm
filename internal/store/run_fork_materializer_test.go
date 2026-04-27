@@ -477,6 +477,16 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if reasonCode != "fork_replay:matched_agent_subscription" || !activeSessionNull || !startedNull || !deliveredNull {
 		t.Fatalf("fork delivery replay fields = reason:%q activeNull:%v startedNull:%v deliveredNull:%v", reasonCode, activeSessionNull, startedNull, deliveredNull)
 	}
+	var forkSessionCount, forkTurnCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkSessionCount); err != nil {
+		t.Fatalf("count fork sessions: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_turns WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkTurnCount); err != nil {
+		t.Fatalf("count fork turns: %v", err)
+	}
+	if forkSessionCount != 0 || forkTurnCount != 0 {
+		t.Fatalf("fork replay created session/turn rows = %d/%d, want 0/0", forkSessionCount, forkTurnCount)
+	}
 
 	var lineageCount int
 	if err := db.QueryRowContext(ctx, `
@@ -685,6 +695,82 @@ func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.
 	}
 	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactForkReplayState) {
 		t.Fatalf("fork replay-state taxonomy missing disposition: %#v", blocked.ReplayResumeAdmission)
+	}
+}
+
+func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		seed      func(context.Context, *sql.DB, string, time.Time) error
+		wantCode  string
+		wantError string
+	}{
+		{
+			name: "fork session",
+			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
+				_, err := db.ExecContext(ctx, `
+					INSERT INTO agent_sessions (
+						session_id, run_id, agent_id, scope_key, scope, runtime_mode, status, created_at, updated_at
+					)
+					VALUES ($1::uuid, $2::uuid, 'agent-a', 'global', 'global', 'session', 'active', $3, $3)
+				`, uuid.NewString(), forkRunID, at)
+				return err
+			},
+			wantCode:  "fork_sessions_already_exist",
+			wantError: "fork_sessions_already_exist",
+		},
+		{
+			name: "fork turn",
+			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
+				_, err := db.ExecContext(ctx, `
+					INSERT INTO agent_turns (
+						turn_id, run_id, agent_id, session_id, runtime_mode, created_at
+					)
+					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'session', $4)
+				`, uuid.NewString(), forkRunID, uuid.NewString(), at)
+				return err
+			},
+			wantCode:  "fork_turns_already_exist",
+			wantError: "fork_turns_already_exist",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			pg := &PostgresStore{DB: db}
+			ctx := context.Background()
+
+			sourceRunID := uuid.NewString()
+			entityID := uuid.NewString()
+			eventID := uuid.NewString()
+			at := time.Unix(1700001060, 0).UTC()
+			seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+			materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+			if err != nil {
+				t.Fatalf("MaterializeRunFork: %v", err)
+			}
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO agents (
+					agent_id, role, model_tier, llm_backend, conversation_mode, created_at
+				)
+				VALUES ('agent-a', 'worker', 'standard', 'mock', 'session', $1)
+			`, at); err != nil {
+				t.Fatalf("seed agent: %v", err)
+			}
+			if err := tc.seed(ctx, db, materialized.ForkRunID, at.Add(time.Second)); err != nil {
+				t.Fatalf("seed %s: %v", tc.name, err)
+			}
+
+			blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("ActivateRunFork error = %v, want %s", err, tc.wantError)
+			}
+			if !runForkTestHasActivationBlocker(blocked, tc.wantCode) {
+				t.Fatalf("activation blockers = %#v, want %s", blocked.UnsupportedBlockers, tc.wantCode)
+			}
+			if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactForkReplayState) {
+				t.Fatalf("fork replay-state taxonomy missing disposition: %#v", blocked.ReplayResumeAdmission)
+			}
+		})
 	}
 }
 

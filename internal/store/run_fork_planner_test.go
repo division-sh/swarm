@@ -828,6 +828,121 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
 		}
 	}
+	for _, fact := range []string{RunForkReplayResumeFactSessionHistory, RunForkReplayResumeFactActiveTurnHistory} {
+		if !runForkTestHasDisposition(plan.ReplayResumeAdmission, fact) {
+			t.Fatalf("missing disposition %q; admission=%#v", fact, plan.ReplayResumeAdmission)
+		}
+	}
+}
+
+func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	auditSessionID := uuid.NewString()
+	at := time.Unix(1700000295, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.task_audit', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_conversation_audits (
+			session_id, run_id, agent_id, scope_key, scope, runtime_mode, runtime_state, status, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-task', 'global', 'global', 'task', '{}'::jsonb, 'active', $3, $3)
+	`, auditSessionID, runID, at.Add(-time.Second)); err != nil {
+		t.Fatalf("seed active task audit: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if plan.ExecutionReady {
+		t.Fatal("ExecutionReady = true, want false for active task conversation audit facts")
+	}
+	if !runForkTestHasBlocker(plan, RunForkBlockerConversationAuditUnproven) {
+		t.Fatalf("missing conversation audit blocker; blockers=%#v", plan.UnsupportedBlockers)
+	}
+	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, RunForkReplayResumeFactConversationAuditHistory) {
+		t.Fatalf("missing conversation audit disposition; admission=%#v", plan.ReplayResumeAdmission)
+	}
+}
+
+func TestRunForkPlanner_TerminatedSessionAndAuditBeforeForkAreLineageOnly(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	sessionID := uuid.NewString()
+	auditSessionID := uuid.NewString()
+	at := time.Unix(1700000297, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.completed_session', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (
+			agent_id, role, model_tier, llm_backend, conversation_mode, created_at
+		)
+		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session', $1)
+	`, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, scope_key, scope, runtime_mode, status, termination_reason, terminated_at, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', 'global', 'global', 'session', 'terminated', 'normal', $3, $4, $3)
+	`, sessionID, runID, at.Add(-time.Second), at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed terminated session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_conversation_audits (
+			session_id, run_id, agent_id, scope_key, scope, runtime_mode, runtime_state, status, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-task', 'global', 'global', 'task', '{}'::jsonb, 'terminated', $3, $3)
+	`, auditSessionID, runID, at.Add(-time.Second)); err != nil {
+		t.Fatalf("seed terminated audit: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	for _, code := range []string{RunForkBlockerSessionHistoryUnproven, RunForkBlockerConversationAuditUnproven, RunForkBlockerActiveTurnHistoryUnproven} {
+		if runForkTestHasBlocker(plan, code) {
+			t.Fatalf("completed lineage emitted blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
+		}
+	}
+	if !plan.ExecutionReady {
+		t.Fatalf("ExecutionReady = false, want completed session/audit lineage-only plan ready; blockers=%#v", plan.UnsupportedBlockers)
+	}
 }
 
 func TestRunForkPlanner_FailsClosedWhenMutationLogUnavailable(t *testing.T) {

@@ -213,10 +213,12 @@ nodes:
       - timers and routing_rules are current rows without an append-only timestamp-fork reconstruction owner
       - agent_sessions and agent_turns are run-scoped facts without an at-T fork reconstruction/reuse policy
       - the first supported timestamp-fork delivery/event replay primitive must create fresh fork event/delivery IDs with source lineage and direct committed replay-scope proof for the runtime recovery consumer, while keeping unsafe delivery/session/timer/route cases fail-closed
+      - session/turn replay remains an admission-policy first slice; source active sessions, active turns, active task conversation audits, and fork-local pre-existing session/turn rows are permanent fail-closed blockers until a run-scoped reconstruction owner is approved
     representative_issues:
       - 564
       - 565
       - 569
+      - 572
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
