@@ -3195,13 +3195,14 @@ run_model:
       requires a fork run with status=paused, fork lineage, fork-local entity_state rows, and a revalidated
       execution_ready=true planner result at the original fork point. Activation atomically transitions the
       fork run to status=running and the source run to status=forked. It may create fork-local event and delivery
-      rows only for source pending deliveries that the canonical replay_resume_admission taxonomy marks
-      delivery_event_replay_ready, using fresh fork event IDs and run_fork_delivery_event_replays lineage rows. It
-      fails closed with no partial mutation if the source run advanced after the fork point, if the fork already has
-      events, deliveries, sessions, or turns, or if in-progress, failed, dead-letter, committed replay-scope, timer,
-      route, session, active-turn, replay, or contract-swap facts would require unsupported historical replay.
-      Activation does not copy source event IDs, replay delivered/completed or receipt-only facts, reconstruct timer,
-      route, session, turn, or contract rows, or recompute recipients from current subscriptions.'
+      rows only for source pending unstarted agent deliveries that the canonical replay_resume_admission taxonomy marks
+      delivery_event_replay_ready, using fresh fork event IDs, a direct committed replay-scope marker, and
+      run_fork_delivery_event_replays lineage rows. It fails closed with no partial mutation if the source run advanced
+      after the fork point, if the fork already has events, deliveries, sessions, or turns, or if node, in-progress,
+      failed, dead-letter, committed replay-scope, timer, route, session, active-turn, replay, or contract-swap facts
+      would require unsupported historical replay. Activation does not copy source event IDs, replay delivered/completed
+      or receipt-only facts, reconstruct timer, route, session, turn, or contract rows, or recompute recipients from
+      current subscriptions.'
     planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
       Builder, dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
       fork planning with direct SQL joins.'
@@ -3209,11 +3210,12 @@ run_model:
       canonical store-backed replay_resume_admission taxonomy. This taxonomy classifies
       historical source-run facts as reconstruct, lineage-only, fail-closed blockers, split siblings, or
       no-historical-action. It also identifies the first supported delivery_event_replay_ready subset: pending
-      unstarted source deliveries whose fork-local event/delivery rows can be created under the fork run_id with
-      explicit source lineage. It does not authorize source event_id copying, delivered/completed redelivery,
-      receipt-only redelivery, session/turn/timer/route reconstruction, contract swap execution, or full runtime
-      replay mutation. Full historical resume remains separately gated even when state-only activation or delivery/event
-      replay is ready.'
+      unstarted source agent deliveries whose fork-local event/delivery rows can be created under the fork run_id with
+      explicit source lineage and a direct committed replay-scope marker for the existing persisted delivery/recovery
+      consumer. It does not authorize source event_id copying, node delivery replay, delivered/completed redelivery,
+      receipt-only redelivery, session/turn/timer/route reconstruction, contract swap execution, or full runtime replay
+      mutation. Full historical resume remains separately gated even when state-only activation or delivery/event replay
+      is ready.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -3237,10 +3239,10 @@ run_model:
       3b_activate_materialized_fork: 'For an activation fork, consume a previously materialized fork run.
         Revalidate the original fork point against current source-run facts, require no source advancement and
         no unsupported replay/timer/route/session/turn/contract-swap facts, optionally create fork-local event/delivery
-        rows for the delivery_event_replay_ready subset with explicit source lineage, then atomically mark the source run
-        forked and the fork run running. Future runtime work uses the fork run_id, fork-local entity_state rows, and
-        fork-local pending delivery rows; full historical replay remains unsupported outside the gated delivery/event
-        primitive.'
+        rows and direct committed replay-scope markers for the delivery_event_replay_ready subset with explicit source
+        lineage, then atomically mark the source run forked and the fork run running. Future runtime work uses the fork
+        run_id, fork-local entity_state rows, and fork-local pending delivery rows; full historical replay remains
+        unsupported outside the gated delivery/event primitive.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.

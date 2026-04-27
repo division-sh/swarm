@@ -183,7 +183,7 @@ nodes:
       - retry counters and delivery-state updates not atomic
       - replayed deliveries and restored timers without explicit shared-store ownership
       - markerless replay-eligible events can repeatedly fail committed replay-scope lookup on the supported outbox sweeper path
-      - timestamp forks need fork-local delivery/event replay lineage rather than direct source delivery redelivery or same-run outbox replay proof
+      - timestamp forks need fork-local delivery/event replay lineage and committed replay-scope proof rather than direct source delivery redelivery or markerless same-run outbox replay
     representative_issues:
       - 112
       - 144
@@ -212,7 +212,7 @@ nodes:
       - source advancement after the fork point remains fail-closed because no branch/replay policy proves safe divergence
       - timers and routing_rules are current rows without an append-only timestamp-fork reconstruction owner
       - agent_sessions and agent_turns are run-scoped facts without an at-T fork reconstruction/reuse policy
-      - the first supported timestamp-fork delivery/event replay primitive must create fresh fork event/delivery IDs with source lineage and keep unsafe delivery/session/timer/route cases fail-closed
+      - the first supported timestamp-fork delivery/event replay primitive must create fresh fork event/delivery IDs with source lineage and direct committed replay-scope proof for the runtime recovery consumer, while keeping unsafe delivery/session/timer/route cases fail-closed
     representative_issues:
       - 564
       - 565

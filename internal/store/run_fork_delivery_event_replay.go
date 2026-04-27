@@ -68,6 +68,9 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, lineage ru
 			if err != nil {
 				return result, err
 			}
+			if err := insertRunForkReplayScopeMarker(ctx, tx, lineage.ForkRunID, forkEventID, now); err != nil {
+				return result, err
+			}
 			if inserted {
 				result.ReplayedEventCount++
 			}
@@ -155,6 +158,26 @@ func insertRunForkReplayEvent(ctx context.Context, tx *sql.Tx, forkRunID, forkEv
 	return rowsAffected(res)
 }
 
+func insertRunForkReplayScopeMarker(ctx context.Context, tx *sql.Tx, forkRunID, forkEventID string, now time.Time) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id,
+			status, retry_count, reason_code, last_error, active_session_id,
+			started_at, delivered_at, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, $3::uuid, $4, $5,
+			'delivered', 0, $6, NULL, NULL,
+			NULL, $7, $7
+		)
+		ON CONFLICT (delivery_id) DO NOTHING
+	`, deterministicRunForkReplayScopeMarkerDeliveryID(forkRunID, forkEventID), forkRunID, forkEventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, replayScopeReasonDirect, now)
+	if err != nil {
+		return fmt.Errorf("insert fork replay committed scope marker for fork event %s: %w", forkEventID, err)
+	}
+	return nil
+}
+
 func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, item RunForkPendingWork, sourceEventID, forkEventID, forkDeliveryID string, now time.Time) (bool, error) {
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
@@ -220,6 +243,10 @@ func deterministicRunForkReplayEventID(forkRunID, sourceEventID string) string {
 
 func deterministicRunForkReplayDeliveryID(forkRunID, sourceDeliveryID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm/run-fork/delivery-event-replay/delivery/"+strings.TrimSpace(forkRunID)+"/"+strings.TrimSpace(sourceDeliveryID))).String()
+}
+
+func deterministicRunForkReplayScopeMarkerDeliveryID(forkRunID, forkEventID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm/run-fork/delivery-event-replay/scope/"+strings.TrimSpace(forkRunID)+"/"+strings.TrimSpace(forkEventID))).String()
 }
 
 func nullStringText(value sql.NullString) string {

@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	"swarm/internal/testutil"
 )
 
@@ -463,6 +466,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		       COALESCE(reason_code, ''), active_session_id IS NULL, started_at IS NULL, delivered_at IS NULL
 		FROM event_deliveries
 		WHERE run_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'safe-agent'
 	`, materialized.ForkRunID).Scan(&forkDeliveryID, &deliveryRunID, &deliveryEventID, &subscriberType, &subscriberID, &status, &retryCount, &reasonCode, &activeSessionNull, &startedNull, &deliveredNull); err != nil {
 		t.Fatalf("load fork replay delivery: %v", err)
 	}
@@ -502,6 +507,50 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 	if sourceDeliveryRun != sourceRunID || sourceDeliveryStatus != "pending" {
 		t.Fatalf("source delivery mutated = run:%s status:%s", sourceDeliveryRun, sourceDeliveryStatus)
+	}
+
+	scope, err := pg.LoadCommittedReplayScope(ctx, forkEventID)
+	if err != nil {
+		t.Fatalf("LoadCommittedReplayScope(fork event): %v", err)
+	}
+	if scope != runtimereplayclaim.CommittedReplayScopeDirect {
+		t.Fatalf("fork replay scope = %q, want direct", scope)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", ""); err != nil {
+		t.Fatalf("mark source event pipeline receipt: %v", err)
+	}
+	eb, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := eb.Subscribe("safe-agent", events.EventType("fork.ready"))
+	replayed, err := eb.SweepUndispatched(ctx, time.Hour, 10)
+	if err != nil {
+		t.Fatalf("SweepUndispatched: %v", err)
+	}
+	if replayed != 1 {
+		t.Fatalf("SweepUndispatched replayed = %d, want 1", replayed)
+	}
+	select {
+	case evt := <-ch:
+		if evt.ID != forkEventID || evt.RunID != materialized.ForkRunID {
+			t.Fatalf("delivered fork replay event = id:%s run:%s", evt.ID, evt.RunID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for fork replay event delivery")
+	}
+	var pipelineOutcome, pipelineReason string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, forkEventID).Scan(&pipelineOutcome, &pipelineReason); err != nil {
+		t.Fatalf("load fork replay pipeline receipt: %v", err)
+	}
+	if pipelineOutcome != "success" || pipelineReason != "pipeline_persisted" {
+		t.Fatalf("fork replay pipeline receipt = outcome:%s reason:%s", pipelineOutcome, pipelineReason)
 	}
 }
 

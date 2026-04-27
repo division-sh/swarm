@@ -290,6 +290,49 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	t.Fatalf("missing fork_replay disposition for pending delivery; admission=%#v", plan.ReplayResumeAdmission)
 }
 
+func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000260, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.node_pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'node', 'node-handler', 'pending', 0, 'matched_node_subscription', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed node pending delivery: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if plan.ExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady {
+		t.Fatalf("node pending plan became replay-ready: %#v", plan.ReplayResumeAdmission)
+	}
+	if !runForkTestHasBlocker(plan, RunForkBlockerDeliveryHistoryUnproven) {
+		t.Fatalf("node pending blockers = %#v, want delivery_history_unproven", plan.UnsupportedBlockers)
+	}
+}
+
 func TestRunForkPlanner_StateOnlyPlanExecutionReadyWithEmptyAndUnrelatedTimerRouteTables(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
