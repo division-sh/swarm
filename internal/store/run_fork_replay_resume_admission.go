@@ -200,9 +200,7 @@ func runForkPendingWorkReplayable(item RunForkPendingWork) bool {
 	if strings.TrimSpace(item.DeliveryID) == "" || strings.TrimSpace(item.SubscriberID) == "" {
 		return false
 	}
-	switch strings.TrimSpace(item.SubscriberType) {
-	case "node", "agent":
-	default:
+	if strings.TrimSpace(item.SubscriberType) != "agent" {
 		return false
 	}
 	if strings.TrimSpace(item.Status) != "pending" || item.RetryCount != 0 {
