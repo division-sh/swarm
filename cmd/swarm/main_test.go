@@ -404,6 +404,58 @@ func TestRunForkCommand_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
 	}
 }
 
+func TestRunForkCommand_DryRunJSONReportsDeliveryEventReplayReady(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000305, 0).UTC()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.cli.pending', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'cli-agent', 'pending', 0, 'matched_agent_subscription', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed pending delivery: %v", err)
+	}
+
+	var buf bytes.Buffer
+	code := runForkCommand(ctx, t.TempDir(), []string{
+		"--dry-run",
+		"--run", runID,
+		"--at", eventID,
+		"--json",
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+	}
+	var plan store.RunForkPlan
+	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
+		t.Fatalf("decode fork plan json: %v\n%s", err, buf.String())
+	}
+	if !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.HistoricalReplaySupported {
+		t.Fatalf("dry-run replay admission = execution:%v admission:%#v", plan.ExecutionReady, plan.ReplayResumeAdmission)
+	}
+	if plan.ReplayResumeAdmission.StateOnlyExecutionReady {
+		t.Fatalf("StateOnlyExecutionReady = true, want false for delivery/event replay dry-run")
+	}
+}
+
 func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)

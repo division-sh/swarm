@@ -263,11 +263,11 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, created_at
+			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, started_at, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'node', 'pending-node', 'pending', $3)
-	`, sourceRunID, eventID, at); err != nil {
-		t.Fatalf("seed pending delivery: %v", err)
+		VALUES ($1::uuid, $2::uuid, 'node', 'in-progress-node', 'in_progress', $4::uuid, $3, $3)
+	`, sourceRunID, eventID, at, uuid.NewString()); err != nil {
+		t.Fatalf("seed in-progress delivery: %v", err)
 	}
 
 	blocked, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
@@ -277,8 +277,8 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.HistoricalReplayRequired {
 		t.Fatalf("blocked taxonomy = %#v, want owner and historical replay required", blocked.ReplayResumeAdmission)
 	}
-	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactDeliveryPendingHistory) {
-		t.Fatalf("blocked taxonomy missing pending delivery disposition: %#v", blocked.ReplayResumeAdmission)
+	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactDeliveryInProgressHistory) {
+		t.Fatalf("blocked taxonomy missing in-progress delivery disposition: %#v", blocked.ReplayResumeAdmission)
 	}
 	var forkCount int
 	if err := db.QueryRowContext(ctx, `
@@ -389,6 +389,122 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	}
 }
 
+func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000850, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+
+	var sourceDeliveryID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'safe-agent', 'pending', 0, 'matched_agent_subscription', $3)
+		RETURNING delivery_id::text
+	`, sourceRunID, eventID, at).Scan(&sourceDeliveryID); err != nil {
+		t.Fatalf("seed safe pending delivery: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady {
+		t.Fatalf("plan replay readiness = execution:%v admission:%#v", plan.ExecutionReady, plan.ReplayResumeAdmission)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err != nil {
+		t.Fatalf("ActivateRunFork: %v", err)
+	}
+	if activated.DeliveryEventReplay == nil {
+		t.Fatalf("DeliveryEventReplay = nil, want fork-local replay result: %#v", activated)
+	}
+	if activated.DeliveryEventReplay.Owner != RunForkDeliveryEventReplayOwner ||
+		activated.DeliveryEventReplay.ReplayedEventCount != 1 ||
+		activated.DeliveryEventReplay.ReplayedDeliveryCount != 1 {
+		t.Fatalf("DeliveryEventReplay = %#v", activated.DeliveryEventReplay)
+	}
+
+	var forkEventID, forkRunID, eventName, forkEntityID, flowInstance, payload string
+	var sourceEventNull bool
+	var chainDepth int
+	if err := db.QueryRowContext(ctx, `
+		SELECT event_id::text, run_id::text, event_name, entity_id::text, COALESCE(flow_instance, ''), payload::text, source_event_id IS NULL, chain_depth
+		FROM events
+		WHERE run_id = $1::uuid
+	`, materialized.ForkRunID).Scan(&forkEventID, &forkRunID, &eventName, &forkEntityID, &flowInstance, &payload, &sourceEventNull, &chainDepth); err != nil {
+		t.Fatalf("load fork replay event: %v", err)
+	}
+	if forkEventID == eventID || forkRunID != materialized.ForkRunID || eventName != "fork.ready" || forkEntityID != entityID || flowInstance != "flow-a/1" {
+		t.Fatalf("fork event = id:%s run:%s name:%s entity:%s flow:%s", forkEventID, forkRunID, eventName, forkEntityID, flowInstance)
+	}
+	if !sourceEventNull || chainDepth != 0 {
+		t.Fatalf("fork event source/chain = null:%v depth:%d, want fresh fork-local event tree", sourceEventNull, chainDepth)
+	}
+	if payload != "{}" {
+		t.Fatalf("fork event payload = %s, want {}", payload)
+	}
+
+	var forkDeliveryID, deliveryRunID, deliveryEventID, subscriberType, subscriberID, status, reasonCode string
+	var retryCount int
+	var activeSessionNull, startedNull, deliveredNull bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT delivery_id::text, run_id::text, event_id::text, subscriber_type, subscriber_id, status, retry_count,
+		       COALESCE(reason_code, ''), active_session_id IS NULL, started_at IS NULL, delivered_at IS NULL
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+	`, materialized.ForkRunID).Scan(&forkDeliveryID, &deliveryRunID, &deliveryEventID, &subscriberType, &subscriberID, &status, &retryCount, &reasonCode, &activeSessionNull, &startedNull, &deliveredNull); err != nil {
+		t.Fatalf("load fork replay delivery: %v", err)
+	}
+	if deliveryRunID != materialized.ForkRunID || deliveryEventID != forkEventID || subscriberType != "agent" || subscriberID != "safe-agent" || status != "pending" || retryCount != 0 {
+		t.Fatalf("fork delivery = run:%s event:%s subscriber:%s/%s status:%s retry:%d", deliveryRunID, deliveryEventID, subscriberType, subscriberID, status, retryCount)
+	}
+	if reasonCode != "fork_replay:matched_agent_subscription" || !activeSessionNull || !startedNull || !deliveredNull {
+		t.Fatalf("fork delivery replay fields = reason:%q activeNull:%v startedNull:%v deliveredNull:%v", reasonCode, activeSessionNull, startedNull, deliveredNull)
+	}
+
+	var lineageCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM run_fork_delivery_event_replays
+		WHERE fork_run_id = $1::uuid
+		  AND source_run_id = $2::uuid
+		  AND source_event_id = $3::uuid
+		  AND source_delivery_id = $4::uuid
+		  AND fork_event_id = $5::uuid
+		  AND fork_delivery_id = $6::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'safe-agent'
+	`, materialized.ForkRunID, sourceRunID, eventID, sourceDeliveryID, forkEventID, forkDeliveryID).Scan(&lineageCount); err != nil {
+		t.Fatalf("count fork replay lineage: %v", err)
+	}
+	if lineageCount != 1 {
+		t.Fatalf("lineage rows = %d, want 1", lineageCount)
+	}
+
+	var sourceDeliveryRun, sourceDeliveryStatus string
+	if err := db.QueryRowContext(ctx, `
+		SELECT run_id::text, status
+		FROM event_deliveries
+		WHERE delivery_id = $1::uuid
+	`, sourceDeliveryID).Scan(&sourceDeliveryRun, &sourceDeliveryStatus); err != nil {
+		t.Fatalf("load source delivery after activation: %v", err)
+	}
+	if sourceDeliveryRun != sourceRunID || sourceDeliveryStatus != "pending" {
+		t.Fatalf("source delivery mutated = run:%s status:%s", sourceDeliveryRun, sourceDeliveryStatus)
+	}
+}
+
 func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -447,7 +563,7 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	}
 }
 
-func TestRunForkActivation_FailsClosedForPendingDeliveryAndMissingLineage(t *testing.T) {
+func TestRunForkActivation_FailsClosedForInProgressDeliveryAndMissingLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -463,15 +579,15 @@ func TestRunForkActivation_FailsClosedForPendingDeliveryAndMissingLineage(t *tes
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, created_at
+			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, started_at, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'node', 'blocked-node', 'pending', $3)
-	`, sourceRunID, eventID, at); err != nil {
-		t.Fatalf("seed pending delivery: %v", err)
+		VALUES ($1::uuid, $2::uuid, 'node', 'blocked-node', 'in_progress', $4::uuid, $3, $3)
+	`, sourceRunID, eventID, at, uuid.NewString()); err != nil {
+		t.Fatalf("seed in-progress delivery: %v", err)
 	}
 	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "delivery_history_unproven") {
-		t.Fatalf("ActivateRunFork pending delivery error = %v, want delivery blocker", err)
+		t.Fatalf("ActivateRunFork in-progress delivery error = %v, want delivery blocker", err)
 	}
 	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.HistoricalReplayRequired {
 		t.Fatalf("blocked activation taxonomy = %#v, want owner and historical replay required", blocked.ReplayResumeAdmission)

@@ -10,6 +10,7 @@ const (
 	RunForkReplayResumeAdmissionOwner = "store.run_fork.replay_resume_admission"
 
 	RunForkReplayResumeDispositionReconstruct        = "reconstruct"
+	RunForkReplayResumeDispositionForkReplay         = "fork_replay"
 	RunForkReplayResumeDispositionLineageOnly        = "lineage_only"
 	RunForkReplayResumeDispositionFailClosedBlocker  = "fail_closed_blocker"
 	RunForkReplayResumeDispositionSplitSibling       = "split_sibling"
@@ -45,6 +46,7 @@ const (
 type RunForkReplayResumeAdmission struct {
 	Owner                     string                           `json:"owner"`
 	StateOnlyExecutionReady   bool                             `json:"state_only_execution_ready"`
+	DeliveryEventReplayReady  bool                             `json:"delivery_event_replay_ready"`
 	HistoricalReplaySupported bool                             `json:"historical_replay_supported"`
 	HistoricalReplayRequired  bool                             `json:"historical_replay_required"`
 	Dispositions              []RunForkReplayResumeDisposition `json:"dispositions,omitempty"`
@@ -79,13 +81,19 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) RunForkRepl
 	}
 	blockers := []RunForkUnsupportedBlocker{}
 	hasHistoricalReplayRequirement := false
+	hasReplayableDeliveryEvent := false
 
 	for _, item := range evidence.Pending {
 		disposition := runForkReplayResumeDispositionForPendingWork(item)
 		dispositions = append(dispositions, disposition)
+		if item.Classification != RunForkPendingClassificationDeliveredCompleted {
+			hasHistoricalReplayRequirement = true
+		}
+		if disposition.Disposition == RunForkReplayResumeDispositionForkReplay {
+			hasReplayableDeliveryEvent = true
+		}
 		if strings.TrimSpace(disposition.BlockerCode) != "" {
 			blockers = appendRunForkBlocker(blockers, runForkReplayResumeBlocker(disposition.BlockerCode))
-			hasHistoricalReplayRequirement = true
 		}
 	}
 	if len(evidence.Pending) == 0 {
@@ -140,10 +148,13 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) RunForkRepl
 		hasHistoricalReplayRequirement = true
 	}
 
+	deliveryEventReplayReady := hasReplayableDeliveryEvent && len(blockers) == 0
+	stateOnlyExecutionReady := len(blockers) == 0 && !hasHistoricalReplayRequirement
 	return RunForkReplayResumeAdmission{
 		Owner:                     RunForkReplayResumeAdmissionOwner,
-		StateOnlyExecutionReady:   len(blockers) == 0,
-		HistoricalReplaySupported: false,
+		StateOnlyExecutionReady:   stateOnlyExecutionReady,
+		DeliveryEventReplayReady:  deliveryEventReplayReady,
+		HistoricalReplaySupported: deliveryEventReplayReady,
 		HistoricalReplayRequired:  hasHistoricalReplayRequirement,
 		Dispositions:              dispositions,
 		UnsupportedBlockers:       blockers,
@@ -160,6 +171,14 @@ func runForkReplayResumeDispositionForPendingWork(item RunForkPendingWork) RunFo
 			Message:        "completed delivery and receipt facts are preserved as source-run lineage/proof only; they are not redelivered into the fork",
 		}
 	case RunForkPendingClassificationPending:
+		if runForkPendingWorkReplayable(item) {
+			return RunForkReplayResumeDisposition{
+				Fact:           RunForkReplayResumeFactDeliveryPendingHistory,
+				Disposition:    RunForkReplayResumeDispositionForkReplay,
+				Classification: item.Classification,
+				Message:        "pending unstarted source delivery can be replayed by creating fork-local event and delivery rows with explicit source lineage",
+			}
+		}
 		return runForkReplayResumePendingBlocker(item, RunForkReplayResumeFactDeliveryPendingHistory)
 	case RunForkPendingClassificationInProgress:
 		return runForkReplayResumePendingBlocker(item, RunForkReplayResumeFactDeliveryInProgressHistory)
@@ -172,6 +191,27 @@ func runForkReplayResumeDispositionForPendingWork(item RunForkPendingWork) RunFo
 	default:
 		return runForkReplayResumePendingBlocker(item, RunForkReplayResumeFactDeliveryPendingHistory)
 	}
+}
+
+func runForkPendingWorkReplayable(item RunForkPendingWork) bool {
+	if item.Classification != RunForkPendingClassificationPending {
+		return false
+	}
+	if strings.TrimSpace(item.DeliveryID) == "" || strings.TrimSpace(item.SubscriberID) == "" {
+		return false
+	}
+	switch strings.TrimSpace(item.SubscriberType) {
+	case "node", "agent":
+	default:
+		return false
+	}
+	if strings.TrimSpace(item.Status) != "pending" || item.RetryCount != 0 {
+		return false
+	}
+	return strings.TrimSpace(item.ActiveSessionID) == "" &&
+		item.StartedAt == nil &&
+		item.DeliveredAt == nil &&
+		item.ReceiptAt == nil
 }
 
 func runForkReplayResumePendingBlocker(item RunForkPendingWork, fact string) RunForkReplayResumeDisposition {
@@ -190,6 +230,7 @@ func runForkReplayResumeAdmissionWithBlocker(admission RunForkReplayResumeAdmiss
 		admission.Owner = RunForkReplayResumeAdmissionOwner
 	}
 	admission.StateOnlyExecutionReady = false
+	admission.DeliveryEventReplayReady = false
 	admission.HistoricalReplaySupported = false
 	admission.HistoricalReplayRequired = true
 	admission.UnsupportedBlockers = appendRunForkBlocker(admission.UnsupportedBlockers, blocker)

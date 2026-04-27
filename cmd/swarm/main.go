@@ -476,6 +476,13 @@ func printRunForkActivation(w io.Writer, result store.RunForkActivation) {
 		result.HistoricalReplayBlocked,
 		result.MaterializedEntityCount,
 	)
+	if result.DeliveryEventReplay != nil {
+		fmt.Fprintf(w, "Delivery/Event Replay: events=%d deliveries=%d owner=%s\n",
+			result.DeliveryEventReplay.ReplayedEventCount,
+			result.DeliveryEventReplay.ReplayedDeliveryCount,
+			result.DeliveryEventReplay.Owner,
+		)
+	}
 }
 
 func printRunForkMaterialization(w io.Writer, result store.RunForkMaterialization) {
