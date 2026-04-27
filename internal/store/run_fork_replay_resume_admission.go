@@ -308,7 +308,7 @@ func runForkReplayResumeBlocker(code string) RunForkUnsupportedBlocker {
 	case RunForkBlockerConversationAuditUnproven:
 		return RunForkUnsupportedBlocker{
 			Code:    RunForkBlockerConversationAuditUnproven,
-			Message: "source-run task conversation audit facts are audit/debug lineage and are not a fork-local session reconstruction source",
+			Message: "source-run task conversation audit facts do not carry append-only termination proof at the fork point and are not a fork-local session reconstruction source",
 		}
 	case RunForkBlockerActiveTurnHistoryUnproven:
 		return RunForkUnsupportedBlocker{

@@ -567,7 +567,7 @@ func (s *PostgresStore) loadRunForkAdmissionEvidence(ctx context.Context, catalo
 			return runForkAdmissionEvidence{}, err
 		}
 	}
-	activeConversationAudit, err := s.hasRunForkActiveConversationAudit(ctx, catalog, runID, cursor)
+	activeConversationAudit, err := s.hasRunForkConversationAuditHistory(ctx, catalog, runID, cursor)
 	if err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
@@ -705,8 +705,8 @@ func (s *PostgresStore) hasRunForkActiveSession(ctx context.Context, catalog sch
 	return exists, nil
 }
 
-func (s *PostgresStore) hasRunForkActiveConversationAudit(ctx context.Context, catalog schemaColumnCatalog, runID string, cursor runForkEventCursor) (bool, error) {
-	if !catalog.hasColumns("agent_conversation_audits", "run_id", "status", "created_at") {
+func (s *PostgresStore) hasRunForkConversationAuditHistory(ctx context.Context, catalog schemaColumnCatalog, runID string, cursor runForkEventCursor) (bool, error) {
+	if !catalog.hasColumns("agent_conversation_audits", "run_id", "created_at") {
 		return false, nil
 	}
 	var exists bool
@@ -716,7 +716,6 @@ func (s *PostgresStore) hasRunForkActiveConversationAudit(ctx context.Context, c
 			FROM agent_conversation_audits
 			WHERE run_id = $1::uuid
 			  AND created_at <= $2::timestamptz
-			  AND COALESCE(status, '') IN ('active', 'suspended')
 		)
 	`, runID, cursor.CreatedAt).Scan(&exists); err != nil {
 		return false, fmt.Errorf("check fork conversation audit blockers: %w", err)
