@@ -37,12 +37,14 @@ const (
 )
 
 const (
-	RunForkBlockerDeliveryHistoryUnproven   = "delivery_history_unproven"
-	RunForkBlockerTimerHistoryUnproven      = "timer_history_unproven"
-	RunForkBlockerFlowRouteHistoryUnproven  = "flow_route_history_unproven"
-	RunForkBlockerSessionHistoryUnproven    = "session_history_unproven"
-	RunForkBlockerConversationAuditUnproven = "conversation_audit_history_unproven"
-	RunForkBlockerActiveTurnHistoryUnproven = "active_turn_history_unproven"
+	RunForkBlockerDeliveryHistoryUnproven               = "delivery_history_unproven"
+	RunForkBlockerNonAgentDeliveryReplayUnsupported     = "non_agent_delivery_replay_unsupported"
+	RunForkBlockerCommittedReplayScopeReplayUnsupported = "committed_replay_scope_replay_unsupported"
+	RunForkBlockerTimerHistoryUnproven                  = "timer_history_unproven"
+	RunForkBlockerFlowRouteHistoryUnproven              = "flow_route_history_unproven"
+	RunForkBlockerSessionHistoryUnproven                = "session_history_unproven"
+	RunForkBlockerConversationAuditUnproven             = "conversation_audit_history_unproven"
+	RunForkBlockerActiveTurnHistoryUnproven             = "active_turn_history_unproven"
 )
 
 type RunForkReplayResumeAdmission struct {
@@ -192,16 +194,31 @@ func runForkReplayResumeDispositionForPendingWork(item RunForkPendingWork) RunFo
 				Message:        "pending unstarted source delivery can be replayed by creating fork-local event and delivery rows with explicit source lineage",
 			}
 		}
+		if runForkPendingWorkIsNonAgent(item) {
+			return runForkReplayResumeNonAgentBlocker(item, RunForkReplayResumeFactDeliveryPendingHistory)
+		}
 		return runForkReplayResumePendingBlocker(item, RunForkReplayResumeFactDeliveryPendingHistory)
 	case RunForkPendingClassificationInProgress:
+		if runForkPendingWorkIsNonAgent(item) {
+			return runForkReplayResumeNonAgentBlocker(item, RunForkReplayResumeFactDeliveryInProgressHistory)
+		}
 		return runForkReplayResumePendingBlocker(item, RunForkReplayResumeFactDeliveryInProgressHistory)
 	case RunForkPendingClassificationFailedRetryable, RunForkPendingClassificationFailedTerminal:
+		if runForkPendingWorkIsNonAgent(item) {
+			return runForkReplayResumeNonAgentBlocker(item, RunForkReplayResumeFactDeliveryFailedHistory)
+		}
 		return runForkReplayResumePendingBlocker(item, RunForkReplayResumeFactDeliveryFailedHistory)
 	case RunForkPendingClassificationDeadLetter:
+		if runForkPendingWorkIsNonAgent(item) {
+			return runForkReplayResumeNonAgentBlocker(item, RunForkReplayResumeFactDeliveryDeadLetterHistory)
+		}
 		return runForkReplayResumePendingBlocker(item, RunForkReplayResumeFactDeliveryDeadLetterHistory)
 	case RunForkPendingClassificationCommittedReplay:
-		return runForkReplayResumePendingBlocker(item, RunForkReplayResumeFactCommittedReplayScope)
+		return runForkReplayResumeCommittedReplayScopeBlocker(item)
 	default:
+		if runForkPendingWorkIsNonAgent(item) {
+			return runForkReplayResumeNonAgentBlocker(item, RunForkReplayResumeFactDeliveryPendingHistory)
+		}
 		return runForkReplayResumePendingBlocker(item, RunForkReplayResumeFactDeliveryPendingHistory)
 	}
 }
@@ -225,10 +242,36 @@ func runForkPendingWorkReplayable(item RunForkPendingWork) bool {
 		item.ReceiptAt == nil
 }
 
+func runForkPendingWorkIsNonAgent(item RunForkPendingWork) bool {
+	return strings.TrimSpace(item.SubscriberType) != "agent"
+}
+
 func runForkReplayResumePendingBlocker(item RunForkPendingWork, fact string) RunForkReplayResumeDisposition {
 	blocker := runForkReplayResumeBlocker(RunForkBlockerDeliveryHistoryUnproven)
 	return RunForkReplayResumeDisposition{
 		Fact:           fact,
+		Disposition:    RunForkReplayResumeDispositionFailClosedBlocker,
+		BlockerCode:    blocker.Code,
+		Classification: item.Classification,
+		Message:        blocker.Message,
+	}
+}
+
+func runForkReplayResumeNonAgentBlocker(item RunForkPendingWork, fact string) RunForkReplayResumeDisposition {
+	blocker := runForkReplayResumeBlocker(RunForkBlockerNonAgentDeliveryReplayUnsupported)
+	return RunForkReplayResumeDisposition{
+		Fact:           fact,
+		Disposition:    RunForkReplayResumeDispositionFailClosedBlocker,
+		BlockerCode:    blocker.Code,
+		Classification: item.Classification,
+		Message:        blocker.Message,
+	}
+}
+
+func runForkReplayResumeCommittedReplayScopeBlocker(item RunForkPendingWork) RunForkReplayResumeDisposition {
+	blocker := runForkReplayResumeBlocker(RunForkBlockerCommittedReplayScopeReplayUnsupported)
+	return RunForkReplayResumeDisposition{
+		Fact:           RunForkReplayResumeFactCommittedReplayScope,
 		Disposition:    RunForkReplayResumeDispositionFailClosedBlocker,
 		BlockerCode:    blocker.Code,
 		Classification: item.Classification,
@@ -289,6 +332,16 @@ func runForkReplayResumeBlocker(code string) RunForkUnsupportedBlocker {
 		return RunForkUnsupportedBlocker{
 			Code:    RunForkBlockerDeliveryHistoryUnproven,
 			Message: "event_deliveries stores current delivery state; arbitrary historical delivery transitions at the fork point are not append-only proven",
+		}
+	case RunForkBlockerNonAgentDeliveryReplayUnsupported:
+		return RunForkUnsupportedBlocker{
+			Code:    RunForkBlockerNonAgentDeliveryReplayUnsupported,
+			Message: "non-agent delivery replay requires runtime handler, idempotency, receipt, route, and side-effect semantics and is not supported by the timestamp-fork delivery/event replay primitive",
+		}
+	case RunForkBlockerCommittedReplayScopeReplayUnsupported:
+		return RunForkUnsupportedBlocker{
+			Code:    RunForkBlockerCommittedReplayScopeReplayUnsupported,
+			Message: "committed replay-scope marker rows are same-run replay proof and are not node work to replay into a timestamp fork",
 		}
 	case RunForkBlockerTimerHistoryUnproven:
 		return RunForkUnsupportedBlocker{

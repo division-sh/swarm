@@ -274,8 +274,8 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 	}
 
 	blocked, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
-	if err == nil || !strings.Contains(err.Error(), "delivery_history_unproven") {
-		t.Fatalf("MaterializeRunFork error = %v, want delivery blocker", err)
+	if err == nil || !strings.Contains(err.Error(), RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+		t.Fatalf("MaterializeRunFork error = %v, want non-agent delivery blocker", err)
 	}
 	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.HistoricalReplayRequired {
 		t.Fatalf("blocked taxonomy = %#v, want owner and historical replay required", blocked.ReplayResumeAdmission)
@@ -645,8 +645,8 @@ func TestRunForkActivation_FailsClosedForInProgressDeliveryAndMissingLineage(t *
 		t.Fatalf("seed in-progress delivery: %v", err)
 	}
 	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
-	if err == nil || !strings.Contains(err.Error(), "delivery_history_unproven") {
-		t.Fatalf("ActivateRunFork in-progress delivery error = %v, want delivery blocker", err)
+	if err == nil || !strings.Contains(err.Error(), RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+		t.Fatalf("ActivateRunFork in-progress delivery error = %v, want non-agent delivery blocker", err)
 	}
 	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.HistoricalReplayRequired {
 		t.Fatalf("blocked activation taxonomy = %#v, want owner and historical replay required", blocked.ReplayResumeAdmission)

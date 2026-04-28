@@ -212,6 +212,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	}
 	for _, code := range []string{
 		"delivery_history_unproven",
+		RunForkBlockerCommittedReplayScopeReplayUnsupported,
 		"session_history_unproven",
 		"active_turn_history_unproven",
 	} {
@@ -328,8 +329,204 @@ func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 	if plan.ExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 		t.Fatalf("node pending plan became replay-ready: %#v", plan.ReplayResumeAdmission)
 	}
-	if !runForkTestHasBlocker(plan, RunForkBlockerDeliveryHistoryUnproven) {
-		t.Fatalf("node pending blockers = %#v, want delivery_history_unproven", plan.UnsupportedBlockers)
+	if !runForkTestHasBlocker(plan, RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+		t.Fatalf("node pending blockers = %#v, want non-agent delivery replay blocker", plan.UnsupportedBlockers)
+	}
+	if !runForkTestHasDispositionBlocker(plan.ReplayResumeAdmission, RunForkReplayResumeFactDeliveryPendingHistory, RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+		t.Fatalf("node pending admission = %#v, want non-agent delivery replay disposition", plan.ReplayResumeAdmission)
+	}
+}
+
+func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		status        string
+		retryCount    int
+		reasonCode    string
+		activeSession bool
+		delivered     bool
+		wantFact      string
+		wantClass     string
+	}{
+		{
+			name:       "pending node",
+			status:     "pending",
+			reasonCode: "matched_node_subscription",
+			wantFact:   RunForkReplayResumeFactDeliveryPendingHistory,
+			wantClass:  RunForkPendingClassificationPending,
+		},
+		{
+			name:          "in progress node",
+			status:        "in_progress",
+			reasonCode:    "node_processing",
+			activeSession: true,
+			wantFact:      RunForkReplayResumeFactDeliveryInProgressHistory,
+			wantClass:     RunForkPendingClassificationInProgress,
+		},
+		{
+			name:       "failed node",
+			status:     "failed",
+			retryCount: 1,
+			reasonCode: "retryable_node_error",
+			delivered:  true,
+			wantFact:   RunForkReplayResumeFactDeliveryFailedHistory,
+			wantClass:  RunForkPendingClassificationFailedRetryable,
+		},
+		{
+			name:       "dead letter node",
+			status:     "dead_letter",
+			retryCount: 3,
+			reasonCode: "dead_letter",
+			delivered:  true,
+			wantFact:   RunForkReplayResumeFactDeliveryDeadLetterHistory,
+			wantClass:  RunForkPendingClassificationDeadLetter,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			pg := &PostgresStore{DB: db}
+			ctx := context.Background()
+
+			runID := uuid.NewString()
+			eventID := uuid.NewString()
+			at := time.Unix(1700000265, 0).UTC()
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO runs (run_id, status, started_at)
+				VALUES ($1::uuid, 'running', $2)
+			`, runID, at.Add(-time.Minute)); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO events (
+					run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+				)
+				VALUES ($1::uuid, $2::uuid, 'fork.non_agent', 'global', '{}'::jsonb, 'test', 'platform', $3)
+			`, runID, eventID, at); err != nil {
+				t.Fatalf("seed event: %v", err)
+			}
+			var activeSessionID any
+			var startedAt any
+			var deliveredAt any
+			if tc.activeSession {
+				activeSessionID = uuid.NewString()
+				startedAt = at
+			}
+			if tc.delivered {
+				deliveredAt = at
+			}
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO event_deliveries (
+					run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, active_session_id, started_at, delivered_at, created_at
+				)
+				VALUES ($1::uuid, $2::uuid, 'node', 'node-handler', $3, $4, $5, $6::uuid, $7, $8, $9)
+			`, runID, eventID, tc.status, tc.retryCount, tc.reasonCode, activeSessionID, startedAt, deliveredAt, at); err != nil {
+				t.Fatalf("seed node delivery: %v", err)
+			}
+
+			plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+			if err != nil {
+				t.Fatalf("PlanRunFork: %v", err)
+			}
+			if plan.ExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady {
+				t.Fatalf("non-agent delivery became replay-ready: %#v", plan.ReplayResumeAdmission)
+			}
+			if !runForkTestHasBlocker(plan, RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+				t.Fatalf("blockers = %#v, want non-agent delivery replay blocker", plan.UnsupportedBlockers)
+			}
+			if !runForkTestHasDispositionBlocker(plan.ReplayResumeAdmission, tc.wantFact, RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+				t.Fatalf("admission = %#v, want %s/%s disposition", plan.ReplayResumeAdmission, tc.wantFact, RunForkBlockerNonAgentDeliveryReplayUnsupported)
+			}
+			if len(plan.PendingWork) != 1 {
+				t.Fatalf("pending work = %#v, want one non-agent item", plan.PendingWork)
+			}
+			if plan.PendingWork[0].Classification != tc.wantClass {
+				t.Fatalf("classification = %q, want %q; item=%#v", plan.PendingWork[0].Classification, tc.wantClass, plan.PendingWork[0])
+			}
+		})
+	}
+}
+
+func TestRunForkPlanner_ReplayScopeMarkerRemainsCommittedReplayBlocker(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000266, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.replay_scope', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, delivered_at, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, $3, $4, 'delivered', 0, $5, $6, $6)
+	`, runID, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, replayScopeReasonDirect, at); err != nil {
+		t.Fatalf("seed replay-scope marker: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if plan.ExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady {
+		t.Fatalf("replay-scope marker became replay-ready: %#v", plan.ReplayResumeAdmission)
+	}
+	if !runForkTestHasBlocker(plan, RunForkBlockerCommittedReplayScopeReplayUnsupported) {
+		t.Fatalf("blockers = %#v, want committed replay-scope blocker", plan.UnsupportedBlockers)
+	}
+	if !runForkTestHasDispositionBlocker(plan.ReplayResumeAdmission, RunForkReplayResumeFactCommittedReplayScope, RunForkBlockerCommittedReplayScopeReplayUnsupported) {
+		t.Fatalf("admission = %#v, want committed replay-scope blocker disposition", plan.ReplayResumeAdmission)
+	}
+	if len(plan.PendingWork) != 1 || plan.PendingWork[0].Classification != RunForkPendingClassificationCommittedReplay {
+		t.Fatalf("pending work = %#v, want committed replay-scope marker classification", plan.PendingWork)
+	}
+}
+
+func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000267, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.system_delivery', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'system', 'system-handler', 'pending', 0, 'matched_system_subscription', $3)
+	`, runID, eventID, at)
+	if err == nil {
+		t.Fatal("seed system delivery succeeded, want canonical event_deliveries subscriber_type check to reject system rows")
+	}
+	if !strings.Contains(err.Error(), "subscriber_type") {
+		t.Fatalf("system delivery error = %v, want subscriber_type constraint proof", err)
 	}
 }
 
@@ -1032,6 +1229,15 @@ func runForkTestHasBlocker(plan RunForkPlan, code string) bool {
 func runForkTestHasDisposition(admission RunForkReplayResumeAdmission, fact string) bool {
 	for _, disposition := range admission.Dispositions {
 		if disposition.Fact == fact {
+			return true
+		}
+	}
+	return false
+}
+
+func runForkTestHasDispositionBlocker(admission RunForkReplayResumeAdmission, fact, blockerCode string) bool {
+	for _, disposition := range admission.Dispositions {
+		if disposition.Fact == fact && disposition.BlockerCode == blockerCode {
 			return true
 		}
 	}
