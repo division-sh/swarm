@@ -44,11 +44,12 @@ func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.
 		},
 	})
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
-
-	tools := registry.GenerateEmitToolsForActor(models.AgentConfig{
+	actor := models.AgentConfig{
 		ID:   "campaign-coordinator",
 		Role: "campaign_coordinator",
-	}, nil)
+	}
+
+	tools := registry.GenerateEmitToolsForActor(actor, nil)
 	for _, def := range tools {
 		if def.Name == "emit_scan_requested" {
 			if strings.TrimSpace(def.Usage) == "" {
@@ -56,6 +57,23 @@ func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.
 			}
 			if strings.Contains(strings.ToLower(def.Usage), "cel") {
 				t.Fatalf("emit usage should not mention CEL: %q", def.Usage)
+			}
+			schema := def.Schema.(map[string]any)
+			if err := ValidatePayloadAgainstSchema(schema, map[string]any{
+				"entity_id": "scan-1",
+				"extra":     "must fail provider-visible schema",
+			}); err == nil {
+				t.Fatal("role-fallback delivered emit schema accepted undeclared field")
+			}
+			_, runtimeSchema, ok := registry.EventSchemaForActorTool(actor, "emit_scan_requested")
+			if !ok {
+				t.Fatal("role-fallback runtime schema not found")
+			}
+			if err := ValidatePayloadAgainstSchema(runtimeSchema.Schema, map[string]any{
+				"entity_id": "scan-1",
+				"extra":     "must fail runtime schema",
+			}); err == nil {
+				t.Fatal("role-fallback runtime emit schema accepted undeclared field")
 			}
 			return
 		}
