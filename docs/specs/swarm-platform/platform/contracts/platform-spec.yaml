@@ -3235,6 +3235,16 @@ run_model:
       timers, routes, sessions, turns, source advancement, and contract-swap boot/resume. The model MUST NOT create
       fork-local executable work, run handlers, accept source outcomes as fork suppressors, or treat same-run outbox
       replay as timestamp-fork selected-contract execution.'
+    selected_contract_execution_admission: 'Selected-contract fork execution admission is a non-mutating runtime-side
+      prerequisite for future selected-contract execution. The canonical owner consumes the durable
+      store.run_fork.selected_contract_binding by fork run_id, loads and validates the selected semantic source from that
+      binding identity, combines it with contract_frontier_admission and selected_contract_execution_model evidence, and
+      returns fail-closed execution admission/context for the future runtime.run_fork.selected_contract_execution owner.
+      It MUST NOT run handlers, create fork-local events or event_deliveries, copy source events or source
+      event_deliveries, use same-run outbox replay, write receipts, dead letters, idempotency state, emitted follow-up
+      events, timers, routes, sessions, turns, source-advanced policy, contract-swap state, or UI/API execution state.
+      Missing, ambiguous, stale, incompatible, or unavailable binding/source/admission evidence is a hard admission
+      failure before any selected-contract execution mutation.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
