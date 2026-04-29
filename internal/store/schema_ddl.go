@@ -317,6 +317,8 @@ func platformTableOrder(name string) int {
 		return 10
 	case "run_fork_selected_contract_bindings":
 		return 15
+	case "run_fork_selected_contract_executions":
+		return 18
 	case "dead_letters":
 		return 20
 	case "agents":
