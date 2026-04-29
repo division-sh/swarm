@@ -712,6 +712,138 @@ func TestRunForkCommand_ActivateUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	}
 }
 
+func TestRunForkCommand_ActivateSelectedBindingConsumesRuntimeAdmission(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000330, 0).UTC()
+	ctx := context.Background()
+	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
+	repo := repoRoot()
+	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
+
+	var materializeOut bytes.Buffer
+	materializeCode := runForkCommand(ctx, repo, []string{
+		"--materialize-only",
+		"--run", runID,
+		"--at", eventID,
+		"--contracts", contractsRoot,
+		"--json",
+	}, &materializeOut)
+	if materializeCode != 0 {
+		t.Fatalf("materialize code=%d output=%s", materializeCode, materializeOut.String())
+	}
+	var materialized store.RunForkMaterialization
+	if err := json.Unmarshal(materializeOut.Bytes(), &materialized); err != nil {
+		t.Fatalf("decode materialization: %v\n%s", err, materializeOut.String())
+	}
+
+	var activateOut bytes.Buffer
+	activateCode := runForkCommand(ctx, repo, []string{
+		"--activate",
+		"--run", materialized.ForkRunID,
+		"--json",
+	}, &activateOut)
+	if activateCode != 0 {
+		t.Fatalf("activate code=%d output=%s", activateCode, activateOut.String())
+	}
+	var result struct {
+		store.RunForkActivation
+		Owner     string                                           `json:"selected_contract_activation_gate_owner"`
+		Admission *store.RunForkSelectedContractExecutionAdmission `json:"selected_contract_execution_admission"`
+	}
+	if err := json.Unmarshal(activateOut.Bytes(), &result); err != nil {
+		t.Fatalf("decode activation: %v\n%s", err, activateOut.String())
+	}
+	if !result.Activated || !result.SourceFrozen || result.ForkRunID != materialized.ForkRunID {
+		t.Fatalf("activation = %#v", result.RunForkActivation)
+	}
+	if result.Owner != store.RunForkSelectedContractExecutionActivationGateOwner {
+		t.Fatalf("selected activation owner = %q, want %q", result.Owner, store.RunForkSelectedContractExecutionActivationGateOwner)
+	}
+	if result.Admission == nil ||
+		result.Admission.Owner != store.RunForkSelectedContractExecutionAdmissionOwner ||
+		result.Admission.FrontierEventCount != 0 ||
+		result.Admission.ContractBindingOwner != store.RunForkSelectedContractBindingOwner {
+		t.Fatalf("selected admission = %#v", result.Admission)
+	}
+}
+
+func TestRunForkCommand_ActivateSelectedBindingBlocksSourceReplayBeforeMutation(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000340, 0).UTC()
+	ctx := context.Background()
+	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'safe-agent', 'pending', 0, 'matched_agent_subscription', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed safe pending delivery: %v", err)
+	}
+	repo := repoRoot()
+	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
+
+	var materializeOut bytes.Buffer
+	materializeCode := runForkCommand(ctx, repo, []string{
+		"--materialize-only",
+		"--run", runID,
+		"--at", eventID,
+		"--contracts", contractsRoot,
+		"--json",
+	}, &materializeOut)
+	if materializeCode != 0 {
+		t.Fatalf("materialize code=%d output=%s", materializeCode, materializeOut.String())
+	}
+	var materialized store.RunForkMaterialization
+	if err := json.Unmarshal(materializeOut.Bytes(), &materialized); err != nil {
+		t.Fatalf("decode materialization: %v\n%s", err, materializeOut.String())
+	}
+
+	var activateOut bytes.Buffer
+	activateCode := runForkCommand(ctx, repo, []string{
+		"--activate",
+		"--run", materialized.ForkRunID,
+		"--json",
+	}, &activateOut)
+	if activateCode != 1 {
+		t.Fatalf("activate code=%d, want 1; output=%s", activateCode, activateOut.String())
+	}
+	if !strings.Contains(activateOut.String(), store.RunForkBlockerSelectedContractSourceReplayUnsupported) {
+		t.Fatalf("activate output = %q, want selected source replay blocker", activateOut.String())
+	}
+	var sourceStatus, forkStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, runID).Scan(&sourceStatus); err != nil {
+		t.Fatalf("load source status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
+		t.Fatalf("load fork status: %v", err)
+	}
+	if sourceStatus != "running" || forkStatus != store.RunForkMaterializedStatus {
+		t.Fatalf("source/fork status = %s/%s, want running/paused", sourceStatus, forkStatus)
+	}
+	var replayRows, forkEvents, forkDeliveries int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, materialized.ForkRunID).Scan(&replayRows); err != nil {
+		t.Fatalf("count replay rows: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkEvents); err != nil {
+		t.Fatalf("count fork events: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkDeliveries); err != nil {
+		t.Fatalf("count fork deliveries: %v", err)
+	}
+	if replayRows != 0 || forkEvents != 0 || forkDeliveries != 0 {
+		t.Fatalf("selected-bound replay mutation counts = replay:%d events:%d deliveries:%d, want 0/0/0", replayRows, forkEvents, forkDeliveries)
+	}
+}
+
 func TestRunForkCommand_NonDryRunWithoutMaterializeOnlyStaysFailClosed(t *testing.T) {
 	var buf bytes.Buffer
 	code := runForkCommand(context.Background(), t.TempDir(), []string{

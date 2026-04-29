@@ -405,8 +405,13 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 		return 1
 	}
 	if *activate {
-		result, err := stores.Postgres.ActivateRunFork(ctx, store.RunForkActivateRequest{
+		result, err := runtimerunforkexecution.ActivateSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractActivationGateRequest{
 			ForkRunID: strings.TrimSpace(*runID),
+			Store:     stores.Postgres,
+			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
+				RepoRoot:         repo,
+				PlatformSpecPath: resolvePath(repo, *platformSpecPath),
+			},
 		})
 		if err != nil {
 			if out != nil {
@@ -423,7 +428,7 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 			}
 			return 0
 		}
-		printRunForkActivation(out, result)
+		printRunForkActivation(out, result.RunForkActivation)
 		return 0
 	}
 	if *materializeOnly {
