@@ -620,6 +620,15 @@ func printSelectedContractExecution(w io.Writer, result runtimerunforkexecution.
 		result.Materialization.MaterializedEntityCount,
 		result.Activation.SourceFrozen,
 	)
+	if result.Activation.BranchDivergence != nil {
+		fmt.Fprintf(w, "Selected Contract Branch: owner=%s policy=%s source_frozen=%t source_status=%s facts=%s\n",
+			result.Activation.BranchDivergence.Owner,
+			result.Activation.BranchDivergence.Policy,
+			result.Activation.BranchDivergence.SourceFrozen,
+			result.Activation.BranchDivergence.SourceRunStatusAfterActivation,
+			strings.Join(result.Activation.BranchDivergence.SourceAdvancedFacts, ","),
+		)
+	}
 	if len(result.ForkEvents) > 0 {
 		fmt.Fprintln(w, "Fork Events:")
 		for _, event := range result.ForkEvents {

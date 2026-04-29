@@ -497,6 +497,8 @@ func bootstrapPlatformTableOrder(name string) int {
 		return 15
 	case "run_fork_selected_contract_executions":
 		return 18
+	case "run_fork_selected_contract_branch_divergences":
+		return 19
 	case "dead_letters":
 		return 20
 	case "agents":

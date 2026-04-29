@@ -2715,6 +2715,12 @@ platform_tables:
         frontier event each fork event executed from. Source events, deliveries, receipts, dead letters, retry state, and
         post-fork outcomes are lineage evidence only and must not be copied or used as fork suppressors.
       ddl: "CREATE TABLE run_fork_selected_contract_executions (\n    execution_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id     UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id   UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id UUID NOT NULL REFERENCES events(event_id),\n    fork_event_id   UUID NOT NULL REFERENCES events(event_id),\n    event_name      TEXT NOT NULL,\n    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (fork_run_id, source_event_id),\n    UNIQUE (fork_event_id),\n    INDEX idx_run_fork_selected_contract_executions_fork (fork_run_id, fork_event_id),\n    INDEX idx_run_fork_selected_contract_executions_source (source_run_id, source_event_id)\n);"
+    run_fork_selected_contract_branch_divergences:
+      description: Durable source/fork branch divergence evidence for selected-contract timestamp-fork execution. This
+        table is written only by the selected-contract execution owner when the source has advanced after the fork point
+        and selected execution proceeds as a branch rather than freezing or rewinding the source. Source post-fork facts
+        remain source-run evidence only; fork-local work is regenerated under the fork run_id.
+      ddl: "CREATE TABLE run_fork_selected_contract_branch_divergences (\n    divergence_id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id                     UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id                   UUID NOT NULL REFERENCES runs(run_id),\n    fork_event_id                   UUID NOT NULL REFERENCES events(event_id),\n    owner                           TEXT NOT NULL,\n    policy                          TEXT NOT NULL CHECK (policy IN ('selected_contract_source_advanced_branch')),\n    source_run_status_at_activation TEXT NOT NULL,\n    source_run_status_after_activation TEXT NOT NULL,\n    source_frozen                   BOOLEAN NOT NULL DEFAULT FALSE,\n    source_advanced_facts           TEXT[] NOT NULL DEFAULT '{}',\n    created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (fork_run_id),\n    INDEX idx_run_fork_selected_contract_branch_divergences_source (source_run_id, fork_event_id)\n);"
     event_deliveries:
       description: Tracks delivery of events to subscribers (nodes and agents). One row per event × subscriber. run_id
         inherited from the parent event for run-scoped queries.
@@ -3260,6 +3266,14 @@ run_model:
       creation, or fork delivery row creation. This gate does not run handlers, create selected fork-local executable
       event/delivery rows, write receipts, dead letters, idempotency state, emitted follow-up events, timers, routes,
       sessions, turns, source-advanced policy, contract-swap state, or UI/API execution state.'
+    selected_contract_source_advanced_branch: 'Mutating selected-contract timestamp-fork execution treats a source run
+      that advanced after the fork point as branch divergence evidence, not as executable fork work and not as a fork
+      suppressor. This policy is owned by runtime.run_fork.selected_contract_execution and its store-owned durable branch
+      divergence evidence. It is selected-contract execution only: generic/state-only activation still requires no source
+      advancement and may freeze the source run. A selected-contract branch must not freeze or rewind an already-advanced
+        source run, must record terminal source status at activation as divergence evidence, must not copy post-fork source
+        events or event_deliveries, and must continue to regenerate fork-local events, deliveries, receipts, dead letters,
+        idempotency effects, and emitted follow-ups under the fork run_id.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -3287,6 +3301,12 @@ run_model:
         lineage, then atomically mark the source run forked and the fork run running. Future runtime work uses the fork
         run_id, fork-local entity_state rows, and fork-local pending delivery rows; full historical replay remains
         unsupported outside the gated delivery/event primitive.'
+      3c_selected_contract_source_advanced_branch: 'For selected-contract mutating fork execution, source advancement
+        after the fork point is explicit branch divergence evidence when the selected execution owner can regenerate
+        fork-local work under the fork run_id. The source run remains in its current status and is not frozen or rewound.
+        Post-fork source events, deliveries, receipts, dead letters, retry state, outcomes, current state, and mutations
+        remain source-run evidence only; they are not copied into the fork and do not suppress fork-local selected
+        execution. Generic/state-only activation continues to use 3b no-source-advancement/freeze semantics.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.
