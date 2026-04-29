@@ -202,9 +202,13 @@ type actorScopedToolExecutorStub struct {
 	defs       []llm.ToolDefinition
 	actorDefs  []llm.ToolDefinition
 	roleScoped bool
+	callCount  *int
 }
 
 func (s actorScopedToolExecutorStub) Execute(context.Context, string, any) (any, error) {
+	if s.callCount != nil {
+		*s.callCount++
+	}
 	return map[string]any{"ok": true}, nil
 }
 
@@ -642,6 +646,7 @@ func TestGatewayMCPToolsForRequest_DoesNotFallbackToRuntimeWideToolsForRoleScope
 
 func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing.T) {
 	registry := newTestTurnContextRegistry()
+	executeCount := 0
 	legacyDefs := []llm.ToolDefinition{
 		{Name: "create_entity", Description: "legacy create"},
 		{Name: "get_entity", Description: "legacy get"},
@@ -659,6 +664,7 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 		defs:       legacyDefs,
 		actorDefs:  generatedDefs,
 		roleScoped: true,
+		callCount:  &executeCount,
 	}, testGatewayToken, GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
 			return models.AgentConfig{ID: agentID, Role: "validation_orchestrator"}, true
@@ -729,6 +735,29 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 		if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
 			t.Fatalf("%s response = %s, want tool-not-allowed", def.Name, rec.Body.String())
 		}
+	}
+	if executeCount != 0 {
+		t.Fatalf("MCP denied legacy tool calls reached executor %d times, want 0", executeCount)
+	}
+
+	for _, def := range legacyDefs {
+		body, err := json.Marshal(ToolGatewayRequest{Input: map[string]any{}})
+		if err != nil {
+			t.Fatalf("marshal direct tool request for %s: %v", def.Name, err)
+		}
+		toolReq := withContextToken(httptest.NewRequest(http.MethodPost, "/tools/"+def.Name, strings.NewReader(string(body))), "ctx-role-scoped-generated")
+		authorizeGatewayRequest(toolReq)
+		rec := httptest.NewRecorder()
+		g.Handler().ServeHTTP(rec, toolReq)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("direct %s status = %d, want 400", def.Name, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+			t.Fatalf("direct %s response = %s, want tool-not-allowed", def.Name, rec.Body.String())
+		}
+	}
+	if executeCount != 0 {
+		t.Fatalf("direct denied legacy tool calls reached executor %d times, want 0", executeCount)
 	}
 }
 
