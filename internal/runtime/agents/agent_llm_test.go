@@ -135,7 +135,7 @@ func TestFilterTools_RetainsUniversalEntityToolsWhenConstrained(t *testing.T) {
 		{Name: "agent_message"},
 		{Name: "non_universal"},
 	}
-	filtered := filterTools(tools, allowed, constrained)
+	filtered := filterTools(tools, allowed, constrained, nil)
 	names := make([]string, 0, len(filtered))
 	for _, tool := range filtered {
 		names = append(names, tool.Name)
@@ -161,7 +161,7 @@ func TestFilterTools_DefaultDeniesNonUniversalToolsWhenNoToolList(t *testing.T) 
 		{Name: "agent_message"},
 		{Name: "schedule"},
 	}
-	filtered := filterTools(tools, allowed, constrained)
+	filtered := filterTools(tools, allowed, constrained, nil)
 	names := make([]string, 0, len(filtered))
 	for _, tool := range filtered {
 		names = append(names, tool.Name)
@@ -183,9 +183,14 @@ func TestFilterTools_RetainsRoleScopedEntityToolsOnNonPrecomposedPath(t *testing
 		{Name: "read_validation_case"},
 		{Name: "save_validation_case_business_brief"},
 		{Name: "update_validation_case_business_brief_summary"},
+		{Name: "read_unrelated_prefix_tool"},
 		{Name: "schedule"},
 	}
-	filtered := filterTools(tools, allowed, constrained)
+	filtered := filterTools(tools, allowed, constrained, map[string]struct{}{
+		"read_validation_case":                          {},
+		"save_validation_case_business_brief":           {},
+		"update_validation_case_business_brief_summary": {},
+	})
 	names := make([]string, 0, len(filtered))
 	for _, tool := range filtered {
 		names = append(names, tool.Name)
@@ -198,8 +203,8 @@ func TestFilterTools_RetainsRoleScopedEntityToolsOnNonPrecomposedPath(t *testing
 	if containsString(names, "schedule") {
 		t.Fatalf("expected unrelated non-universal tool filtered out, got %v", names)
 	}
-	if runtimetools.IsRoleScopedEntityTool("read_file") {
-		t.Fatal("read_file must not be classified as a role-scoped entity tool")
+	if containsString(names, "read_unrelated_prefix_tool") {
+		t.Fatalf("expected unproven read_* tool filtered out, got %v", names)
 	}
 }
 

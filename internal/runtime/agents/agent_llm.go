@@ -44,6 +44,10 @@ type actorScopedToolExecutor interface {
 	ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition
 }
 
+type roleScopedEntityToolCatalog interface {
+	RoleScopedEntityToolNamesForActor(models.AgentConfig) map[string]struct{}
+}
+
 func NewLLMAgentWithOptions(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, opts LLMAgentOptions) (*LLMAgent, error) {
 	return newLLMAgent(cfg, modelRuntime, toolExecutor, tools, false, opts)
 }
@@ -68,7 +72,7 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	if emitRegistry == nil {
 		emitRegistry = runtimetools.NewEmitRegistry(nil, authority)
 	}
-	tools = composeConversationTools(cfg, modelRuntime, tools, precomposed, authority, emitRegistry)
+	tools = composeConversationTools(cfg, modelRuntime, toolExecutor, tools, precomposed, authority, emitRegistry)
 
 	maxTurns := 100
 	mode := llm.TaskScoped
@@ -116,12 +120,16 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	}, nil
 }
 
-func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, tools []llm.ToolDefinition, precomposed bool, authority runtimeauthority.Provider, emitRegistry *runtimetools.EmitRegistry) []llm.ToolDefinition {
+func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, precomposed bool, authority runtimeauthority.Provider, emitRegistry *runtimetools.EmitRegistry) []llm.ToolDefinition {
 	if precomposed {
 		return tools
 	}
 	allowedToolSet, constrained := extractAllowedToolSet(cfg)
-	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), emitToolDefinitions(cfg, authority, emitRegistry))
+	roleScopedToolSet := map[string]struct{}{}
+	if catalog, ok := toolExecutor.(roleScopedEntityToolCatalog); ok {
+		roleScopedToolSet = catalog.RoleScopedEntityToolNamesForActor(cfg)
+	}
+	tools = mergeTools(filterTools(tools, allowedToolSet, constrained, roleScopedToolSet), emitToolDefinitions(cfg, authority, emitRegistry))
 	tools = mergeTools(tools, nativeFallbackToolDefinitions(cfg, modelRuntime))
 	return tools
 }
@@ -669,10 +677,14 @@ func emitToolDefinitions(cfg models.AgentConfig, authority runtimeauthority.Prov
 	return emitRegistry.GenerateEmitToolsForRole(cfg.Role, processWarnOnce)
 }
 
-func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrained bool) []llm.ToolDefinition {
+func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrained bool, roleScoped map[string]struct{}) []llm.ToolDefinition {
 	out := make([]llm.ToolDefinition, 0, len(in))
 	for _, t := range in {
-		if runtimetools.IsUniversal(t.Name) || runtimetools.IsRoleScopedEntityTool(t.Name) {
+		if runtimetools.IsUniversal(t.Name) {
+			out = append(out, t)
+			continue
+		}
+		if _, ok := roleScoped[strings.TrimSpace(t.Name)]; ok {
 			out = append(out, t)
 			continue
 		}
