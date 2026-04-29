@@ -477,6 +477,29 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFailsClosedWhenTooLarg
 	}
 }
 
+func TestConversation_ExecuteToolCalls_RoleScopedTypedReadNearCapFitsEnvelope(t *testing.T) {
+	overhead := len(`{"blob":""}`)
+	payload := map[string]any{"blob": strings.Repeat("x", toolresultpolicy.MaxCompleteTypedReadResultBytes-overhead)}
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, SessionScoped, 4, &fakeRuntime{})
+	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
+
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
+	if strings.Contains(raw, "__runtime_guardrail__") {
+		t.Fatalf("near-cap typed read tripped batch guardrail: %s", raw)
+	}
+	if len(raw) > maxToolMessageBytes {
+		t.Fatalf("tool message size = %d, want <= %d", len(raw), maxToolMessageBytes)
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	if len(arr) != 1 || arr[0]["ok"] != true {
+		t.Fatalf("expected successful near-cap typed read payload, got %#v", arr)
+	}
+}
+
 func TestConversation_ExecuteToolCalls_ReadPrefixedNonRoleScopedToolKeepsLegacyProjection(t *testing.T) {
 	huge := strings.Repeat("x", maxToolResultBytes+1024)
 	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_custom_report"}}, SessionScoped, 4, &fakeRuntime{})
