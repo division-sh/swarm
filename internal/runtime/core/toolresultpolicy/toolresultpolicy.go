@@ -11,8 +11,8 @@ import (
 
 const (
 	// Keep this above the #571 40KB proof target while still bounding a single
-	// inline typed read result before the LLM turn envelope becomes unsafe.
-	MaxCompleteTypedReadResultBytes = 64 * 1024
+	// inline typed read result with enough room for the LLM tool-call envelope.
+	MaxCompleteTypedReadResultBytes = 56 * 1024
 
 	RoleScopedEntityToolAuthorizationClass = "role_scoped_entity_tool"
 
