@@ -1,9 +1,10 @@
 package store
 
 const (
-	RunForkSelectedContractExecutionModelOwner     = "runtime.run_fork.selected_contract_execution_model"
-	RunForkSelectedContractExecutionAdmissionOwner = "runtime.run_fork.selected_contract_execution_admission"
-	RunForkSelectedContractExecutionOwner          = "runtime.run_fork.selected_contract_execution"
+	RunForkSelectedContractExecutionModelOwner          = "runtime.run_fork.selected_contract_execution_model"
+	RunForkSelectedContractExecutionAdmissionOwner      = "runtime.run_fork.selected_contract_execution_admission"
+	RunForkSelectedContractExecutionActivationGateOwner = "runtime.run_fork.selected_contract_execution.activation_gate"
+	RunForkSelectedContractExecutionOwner               = "runtime.run_fork.selected_contract_execution"
 
 	RunForkSelectedContractExecutionAdmissionUseEvidenceOnly   = "prerequisite_evidence_only"
 	RunForkSelectedContractExecutionAdmissionUseDurableBinding = "durable_binding_and_frontier_evidence"
@@ -16,6 +17,7 @@ const (
 
 	RunForkBlockerSelectedContractExecutionModelNonMutating     = "selected_contract_execution_model_non_mutating"
 	RunForkBlockerSelectedContractExecutionAdmissionNonMutating = "selected_contract_execution_admission_non_mutating"
+	RunForkBlockerSelectedContractSourceReplayUnsupported       = "selected_contract_source_replay_unsupported"
 )
 
 type RunForkSelectedContractExecution struct {

@@ -3245,6 +3245,15 @@ run_model:
       events, timers, routes, sessions, turns, source-advanced policy, contract-swap state, or UI/API execution state.
       Missing, ambiguous, stale, incompatible, or unavailable binding/source/admission evidence is a hard admission
       failure before any selected-contract execution mutation.'
+    selected_contract_activation_gate: 'Selected-bound fork activation is owned by the runtime-side
+      runtime.run_fork.selected_contract_execution.activation_gate before store activation mutates lifecycle state.
+      The gate loads durable selected-contract binding, consumes selected_contract_execution_admission, and permits
+      activation to proceed only when the selected-bound fork has no selected executable frontier and no replayable source
+      delivery/event work. If selected-contract frontier evidence or source delivery/event replay would be required, the
+      gate fails closed before source freeze, fork activation, run_fork_delivery_event_replays insertion, fork event row
+      creation, or fork delivery row creation. This gate does not run handlers, create selected fork-local executable
+      event/delivery rows, write receipts, dead letters, idempotency state, emitted follow-up events, timers, routes,
+      sessions, turns, source-advanced policy, contract-swap state, or UI/API execution state.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'

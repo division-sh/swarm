@@ -254,6 +254,7 @@ nodes:
       - selected-contract fork execution needs a non-mutating owner model before mutation; the model must consume frontier admission as evidence only and classify contract binding, fork run_id context, handler execution, receipts, dead letters, idempotency, emitted follow-ups, timers, routes, sessions, source-advanced policy, and contract-swap boot/resume
       - selected-contract fork execution needs a durable fork-run selected-source binding owner; CLI/API arguments, dry-run JSON, and local model output are not authoritative for future execution
       - selected-contract fork execution needs a runtime-side non-mutating admission/context owner that consumes the durable selected-source binding before any handler execution or fork-local delivery/outcome mutation
+      - selected-bound fork activation needs a runtime-side selected-contract activation gate that consumes selected-contract execution admission before store activation mutation and blocks source delivery/event replay from becoming selected-contract executable work by fall-through
     representative_issues:
       - 564
       - 565
@@ -265,6 +266,7 @@ nodes:
       - 585
       - 590
       - 594
+      - 596
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
