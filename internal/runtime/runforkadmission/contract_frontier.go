@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
@@ -47,6 +49,9 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 	routeTable, err := runtimebus.DeriveRouteTable(req.Source)
 	if err != nil {
 		return store.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract fork routes: %w", err)
+	}
+	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan.PendingWork); err != nil {
+		return store.RunForkContractFrontierAdmission{}, err
 	}
 	workflowNodes, err := runtimepipeline.LoadWorkflowNodes(req.Source)
 	if err != nil {
@@ -99,12 +104,14 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) []store.RunForkCo
 	type aggregate struct {
 		event           store.RunForkContractFrontierEvent
 		classifications map[string]struct{}
+		flowInstances   map[string]struct{}
 		subscriberTypes map[string]struct{}
 		subscriberIDs   map[string]struct{}
 	}
 	byEvent := map[string]*aggregate{}
 	for _, item := range pending {
-		if strings.TrimSpace(item.Classification) == store.RunForkPendingClassificationDeliveredCompleted {
+		switch strings.TrimSpace(item.Classification) {
+		case store.RunForkPendingClassificationDeliveredCompleted, store.RunForkPendingClassificationCommittedReplay:
 			continue
 		}
 		eventID := strings.TrimSpace(item.EventID)
@@ -119,23 +126,145 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) []store.RunForkCo
 					EventName:     strings.TrimSpace(item.EventName),
 				},
 				classifications: map[string]struct{}{},
+				flowInstances:   map[string]struct{}{},
 				subscriberTypes: map[string]struct{}{},
 				subscriberIDs:   map[string]struct{}{},
 			}
 			byEvent[eventID] = agg
 		}
 		addString(agg.classifications, item.Classification)
+		addString(agg.flowInstances, item.FlowInstance)
 		addString(agg.subscriberTypes, item.SubscriberType)
 		addString(agg.subscriberIDs, item.SubscriberID)
 	}
 	out := make([]store.RunForkContractFrontierEvent, 0, len(byEvent))
 	for _, agg := range byEvent {
 		agg.event.SourceClassifications = sortedSet(agg.classifications)
+		agg.event.SourceFlowInstances = sortedSet(agg.flowInstances)
 		agg.event.SourceSubscriberTypes = sortedSet(agg.subscriberTypes)
 		agg.event.SourceSubscriberIDs = sortedSet(agg.subscriberIDs)
 		out = append(out, agg.event)
 	}
 	return out
+}
+
+func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable, source semanticview.Source, pending []store.RunForkPendingWork) error {
+	for _, route := range contractFrontierFlowInstanceRoutes(source, pending) {
+		if err := routeTable.AddFlowInstanceRoute(runtimecontracts.SystemNodeContract{}, route); err != nil {
+			return fmt.Errorf("derive selected-contract flow-instance route %s: %w", route.InstancePath, err)
+		}
+	}
+	return nil
+}
+
+func contractFrontierFlowInstanceRoutes(source semanticview.Source, pending []store.RunForkPendingWork) []runtimeflowidentity.Route {
+	seen := map[string]struct{}{}
+	out := make([]runtimeflowidentity.Route, 0)
+	for _, item := range pending {
+		for _, instancePath := range contractFrontierFlowInstances(source, item) {
+			route := runtimeflowidentity.StoredRoute("", "", instancePath)
+			if !route.Valid() {
+				continue
+			}
+			key := strings.Join([]string{route.ScopeKey, route.InstanceID, route.InstancePath}, "\x00")
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, route)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.Join([]string{out[i].ScopeKey, out[i].InstanceID, out[i].InstancePath}, "\x00") <
+			strings.Join([]string{out[j].ScopeKey, out[j].InstanceID, out[j].InstancePath}, "\x00")
+	})
+	return out
+}
+
+func contractFrontierFlowInstances(source semanticview.Source, item store.RunForkPendingWork) []string {
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		value = strings.Trim(strings.TrimSpace(value), "/")
+		if value != "" && isContractFrontierTemplateInstancePath(source, value) {
+			seen[value] = struct{}{}
+		}
+	}
+	add(item.FlowInstance)
+	add(inferContractFrontierFlowInstanceFromEvent(source, item.EventName))
+	return sortedSet(seen)
+}
+
+func isContractFrontierTemplateInstancePath(source semanticview.Source, instancePath string) bool {
+	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
+	if source == nil || instancePath == "" {
+		return false
+	}
+	for _, scope := range source.FlowScopes() {
+		if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+			continue
+		}
+		scopePath := strings.Trim(strings.TrimSpace(scope.Path), "/")
+		if scopePath == "" || instancePath == scopePath {
+			continue
+		}
+		if strings.HasPrefix(instancePath, scopePath+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func inferContractFrontierFlowInstanceFromEvent(source semanticview.Source, eventName string) string {
+	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
+	if source == nil || eventName == "" {
+		return ""
+	}
+	type templateScope struct {
+		path        string
+		localEvents []string
+	}
+	templates := make([]templateScope, 0)
+	for _, scope := range source.FlowScopes() {
+		if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+			continue
+		}
+		path := strings.Trim(strings.TrimSpace(scope.Path), "/")
+		if path == "" {
+			continue
+		}
+		localEvents := map[string]struct{}{}
+		for eventType := range scope.Events {
+			addString(localEvents, eventType)
+		}
+		for _, eventType := range scope.InputEvents {
+			addString(localEvents, eventType)
+		}
+		for _, eventType := range scope.OutputEvents {
+			addString(localEvents, eventType)
+		}
+		addString(localEvents, scope.AutoEmitEvent)
+		templates = append(templates, templateScope{path: path, localEvents: sortedSet(localEvents)})
+	}
+	sort.Slice(templates, func(i, j int) bool {
+		return len(templates[i].path) > len(templates[j].path)
+	})
+	for _, template := range templates {
+		if !strings.HasPrefix(eventName, template.path+"/") {
+			continue
+		}
+		for _, localEvent := range template.localEvents {
+			suffix := "/" + strings.Trim(strings.TrimSpace(localEvent), "/")
+			if suffix == "/" || !strings.HasSuffix(eventName, suffix) {
+				continue
+			}
+			instancePath := strings.Trim(strings.TrimSuffix(eventName, suffix), "/")
+			if instancePath == template.path || !strings.HasPrefix(instancePath, template.path+"/") {
+				continue
+			}
+			return instancePath
+		}
+	}
+	return ""
 }
 
 func workflowNodeSubscribers(nodes []runtimepipeline.WorkflowNode, eventName string) []string {
