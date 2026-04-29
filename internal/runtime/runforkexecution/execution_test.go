@@ -198,6 +198,71 @@ func TestExecuteSelectedContractRunForkPreservesSessionBlocker(t *testing.T) {
 	}
 }
 
+func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002350, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "invalid event name", at)
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid event type") {
+		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want publish event type validation failure", err)
+	}
+	if result.Activation.SourceFrozen || result.Activation.ForkRunStatus == store.RunForkActivatedStatus {
+		t.Fatalf("activation mutated before publish failure cleanup: %#v", result.Activation)
+	}
+	var sourceStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
+		t.Fatalf("load source status: %v", err)
+	}
+	if sourceStatus != "running" {
+		t.Fatalf("source status = %q, want running", sourceStatus)
+	}
+	var forkRows, forkEvents, forkState, lineageRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, sourceRunID).Scan(&forkRows); err != nil {
+		t.Fatalf("count fork rows: %v", err)
+	}
+	if result.Materialization.ForkRunID != "" {
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkEvents); err != nil {
+			t.Fatalf("count fork events: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkState); err != nil {
+			t.Fatalf("count fork state: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&lineageRows); err != nil {
+			t.Fatalf("count fork lineage: %v", err)
+		}
+	}
+	if forkRows != 0 || forkEvents != 0 || forkState != 0 || lineageRows != 0 {
+		t.Fatalf("cleanup left fork rows runs:%d events:%d state:%d lineage:%d", forkRows, forkEvents, forkState, lineageRows)
+	}
+}
+
 func runForkExecutionRepoRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("../../..")

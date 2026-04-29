@@ -81,6 +81,9 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	if s == nil || s.DB == nil {
 		return RunForkMaterialization{}, fmt.Errorf("postgres store is required")
 	}
+	if _, err := s.requireRunForkSelectedContractExecutionCapabilities(ctx); err != nil {
+		return RunForkMaterialization{}, err
+	}
 	if err := s.requireRunForkMaterializerCapabilities(ctx); err != nil {
 		return RunForkMaterialization{}, err
 	}
@@ -252,7 +255,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		}
 		return result, err
 	}
-	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, catalog, lineage.ForkRunID); err != nil {
+	if err := ensureRunForkSelectedContractExecutionForkState(ctx, tx, catalog, lineage.ForkRunID, req.AllowedSourceEventIDs); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
 			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
@@ -298,6 +301,110 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 	result.Activated = true
 	result.SourceFrozen = true
 	return result, nil
+}
+
+func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx context.Context, forkRunID string) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("postgres store is required")
+	}
+	forkRunID = strings.TrimSpace(forkRunID)
+	if forkRunID == "" {
+		return fmt.Errorf("fork run_id is required")
+	}
+	if _, err := uuid.Parse(forkRunID); err != nil {
+		return fmt.Errorf("fork run_id must be a UUID: %w", err)
+	}
+	catalog, err := s.requireRunForkSelectedContractExecutionCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return fmt.Errorf("begin selected-contract fork discard: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, forkRunID).Scan(&status); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("load fork run for discard: %w", err)
+	}
+	if status != RunForkMaterializedStatus {
+		return fmt.Errorf("selected-contract fork discard requires materialized fork status %q; got %q", RunForkMaterializedStatus, status)
+	}
+
+	if catalog.hasColumns("agent_turns", "run_id") {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_turns WHERE run_id = $1::uuid`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract fork turns: %w", err)
+		}
+	}
+	if catalog.hasColumns("agent_conversation_audits", "run_id") {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_conversation_audits WHERE run_id = $1::uuid`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract fork conversation audits: %w", err)
+		}
+	}
+	if catalog.hasColumns("agent_sessions", "run_id") {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_sessions WHERE run_id = $1::uuid`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract fork sessions: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM run_fork_selected_contract_executions
+		WHERE fork_run_id = $1::uuid
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract execution lineage: %w", err)
+	}
+	if catalog.hasColumns(runForkDeliveryEventReplayTable, "fork_run_id") {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract fork replay lineage: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM event_receipts
+		WHERE event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork receipts: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM dead_letters
+		WHERE original_event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork dead letters: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM event_deliveries
+		WHERE run_id = $1::uuid
+		   OR event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork deliveries: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_mutations WHERE run_id = $1::uuid`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork mutations: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE run_id = $1::uuid`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork events: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_state WHERE run_id = $1::uuid`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork entity state: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_selected_contract_bindings WHERE fork_run_id = $1::uuid`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork binding: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE run_id = $1::uuid AND status = $2`, forkRunID, RunForkMaterializedStatus); err != nil {
+		return fmt.Errorf("delete selected-contract fork run: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit selected-contract fork discard: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, sourceEventIDs []string) ([]RunForkSelectedContractSourceEvent, error) {
@@ -409,6 +516,95 @@ func runForkSelectedContractExecutionPlanBlockers(plan RunForkPlan, allowedSourc
 		}
 	}
 	return blockers
+}
+
+func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID string, allowedSourceEventIDs []string) error {
+	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
+	if len(allowedEvents) == 0 {
+		return ensureRunForkActivationNoForkReplayState(ctx, tx, catalog, forkRunID)
+	}
+	for _, check := range []struct {
+		code  string
+		table string
+		query string
+	}{
+		{"fork_sessions_already_exist", "agent_sessions", `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid)`},
+		{"fork_conversation_audits_already_exist", "agent_conversation_audits", `SELECT EXISTS (SELECT 1 FROM agent_conversation_audits WHERE run_id = $1::uuid)`},
+		{"fork_turns_already_exist", "agent_turns", `SELECT EXISTS (SELECT 1 FROM agent_turns WHERE run_id = $1::uuid)`},
+	} {
+		if !catalog.hasColumns(check.table, "run_id") {
+			continue
+		}
+		var exists bool
+		if err := tx.QueryRowContext(ctx, check.query, forkRunID).Scan(&exists); err != nil {
+			return fmt.Errorf("check %s: %w", check.code, err)
+		}
+		if exists {
+			return runForkReplayResumeError(check.code, RunForkReplayResumeFactForkReplayState, fmt.Sprintf("fork activation blocked: %s", check.code))
+		}
+	}
+
+	var missingLineage int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM unnest($2::uuid[]) AS allowed(source_event_id)
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM run_fork_selected_contract_executions x
+			WHERE x.fork_run_id = $1::uuid
+			  AND x.source_event_id = allowed.source_event_id
+		)
+	`, forkRunID, pq.Array(allowedEvents)).Scan(&missingLineage); err != nil {
+		return fmt.Errorf("check selected-contract execution lineage completeness: %w", err)
+	}
+	if missingLineage > 0 {
+		return runForkReplayResumeError("fork_selected_contract_execution_lineage_missing", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_selected_contract_execution_lineage_missing")
+	}
+
+	var strayEvents int
+	if err := tx.QueryRowContext(ctx, `
+		WITH RECURSIVE selected_tree AS (
+			SELECT e.event_id
+			FROM events e
+			INNER JOIN run_fork_selected_contract_executions x
+				ON x.fork_event_id = e.event_id
+			   AND x.fork_run_id = $1::uuid
+			   AND x.source_event_id = ANY($2::uuid[])
+			WHERE e.run_id = $1::uuid
+			UNION
+			SELECT child.event_id
+			FROM events child
+			INNER JOIN selected_tree parent ON child.source_event_id = parent.event_id
+			WHERE child.run_id = $1::uuid
+		)
+		SELECT COUNT(*)
+		FROM events e
+		WHERE e.run_id = $1::uuid
+		  AND NOT EXISTS (
+			SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id
+		  )
+	`, forkRunID, pq.Array(allowedEvents)).Scan(&strayEvents); err != nil {
+		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
+	}
+	if strayEvents > 0 {
+		return runForkReplayResumeError("fork_events_not_selected_contract_lineage", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_events_not_selected_contract_lineage")
+	}
+
+	var strayDeliveries int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries d
+		WHERE d.run_id = $1::uuid
+		  AND NOT EXISTS (
+			SELECT 1 FROM events e WHERE e.run_id = $1::uuid AND e.event_id = d.event_id
+		  )
+	`, forkRunID).Scan(&strayDeliveries); err != nil {
+		return fmt.Errorf("check selected-contract fork deliveries: %w", err)
+	}
+	if strayDeliveries > 0 {
+		return runForkReplayResumeError("fork_deliveries_not_selected_contract_lineage", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_deliveries_not_selected_contract_lineage")
+	}
+	return nil
 }
 
 func uniqueNonEmptyStrings(in []string) []string {

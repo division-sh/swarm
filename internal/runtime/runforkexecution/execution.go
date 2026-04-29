@@ -100,6 +100,22 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
+	published, err := publishSelectedContractForkEvents(ctx, publishSelectedContractForkEventsRequest{
+		Store:        req.Store,
+		LoadedSource: loadedSource,
+		SourceRunID:  plan.SourceRunID,
+		ForkRunID:    materialization.ForkRunID,
+		SourceEvents: sourceEventIDs,
+	})
+	if err != nil {
+		return SelectedContractExecutionResult{
+			Owner:                              store.RunForkSelectedContractExecutionOwner,
+			Materialization:                    materialization,
+			SelectedContractExecutionAdmission: &admission,
+			ExecutedEventCount:                 len(published),
+			ForkEvents:                         published,
+		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+	}
 	activation, err := req.Store.ActivateRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialization.ForkRunID,
 		AllowedSourceEventIDs: sourceEventIDs,
@@ -110,15 +126,10 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			Materialization:                    materialization,
 			Activation:                         activation,
 			SelectedContractExecutionAdmission: &admission,
-		}, err
+			ExecutedEventCount:                 len(published),
+			ForkEvents:                         published,
+		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
 	}
-	published, err := publishSelectedContractForkEvents(ctx, publishSelectedContractForkEventsRequest{
-		Store:        req.Store,
-		LoadedSource: loadedSource,
-		SourceRunID:  plan.SourceRunID,
-		ForkRunID:    materialization.ForkRunID,
-		SourceEvents: sourceEventIDs,
-	})
 	result := SelectedContractExecutionResult{
 		Owner:                              store.RunForkSelectedContractExecutionOwner,
 		Materialization:                    materialization,
@@ -128,6 +139,19 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		ForkEvents:                         published,
 	}
 	return result, err
+}
+
+func cleanupSelectedContractExecutionFailure(ctx context.Context, store *store.PostgresStore, forkRunID string, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	if store == nil || strings.TrimSpace(forkRunID) == "" {
+		return cause
+	}
+	if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, forkRunID); err != nil {
+		return fmt.Errorf("%w; cleanup selected-contract fork %s: %v", cause, forkRunID, err)
+	}
+	return cause
 }
 
 type publishSelectedContractForkEventsRequest struct {
