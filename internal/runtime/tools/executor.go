@@ -341,23 +341,6 @@ func runtimeToolSchemaForName(defs []llm.ToolDefinition, name string) (map[strin
 	return nil, false
 }
 
-func pruneSchemaUnknownKeys(payload map[string]any, schema map[string]any) map[string]any {
-	if payload == nil {
-		return map[string]any{}
-	}
-	props := schemaProperties(schema["properties"])
-	if len(props) == 0 {
-		return payload
-	}
-	out := make(map[string]any, len(payload))
-	for key, value := range payload {
-		if _, ok := props[key]; ok {
-			out[key] = value
-		}
-	}
-	return out
-}
-
 func payloadTouchesSchemaProps(payload map[string]any, schema map[string]any) bool {
 	if len(payload) == 0 || schema == nil {
 		return false

@@ -29,6 +29,7 @@ type RegisteredTool struct {
 	HandlerType        implementationClass
 	InputSchema        map[string]any
 	OutputSchema       map[string]any
+	GeneratedSchema    bool
 	HTTP               *runtimecontracts.HTTPToolSpec
 	ResponseMapping    map[string]any
 	Credentials        []string
@@ -53,10 +54,11 @@ func toolDefinitionsForRuntime(source semanticview.Source, discovered map[string
 	for _, name := range names {
 		entry := entries[name]
 		defs = append(defs, llm.ToolDefinition{
-			Name:        name,
-			Description: strings.TrimSpace(entry.Description),
-			Usage:       strings.TrimSpace(entry.Usage),
-			Schema:      deepCloneJSONValue(entry.InputSchema),
+			Name:            name,
+			Description:     strings.TrimSpace(entry.Description),
+			Usage:           strings.TrimSpace(entry.Usage),
+			Schema:          deepCloneJSONValue(entry.InputSchema),
+			GeneratedSchema: entry.GeneratedSchema,
 		})
 	}
 	return defs, nil
@@ -79,10 +81,11 @@ func toolDefinitionsForActor(source semanticview.Source, actor models.AgentConfi
 	for _, name := range names {
 		entry := entries[name]
 		defs = append(defs, llm.ToolDefinition{
-			Name:        name,
-			Description: strings.TrimSpace(entry.Description),
-			Usage:       strings.TrimSpace(entry.Usage),
-			Schema:      deepCloneJSONValue(entry.InputSchema),
+			Name:            name,
+			Description:     strings.TrimSpace(entry.Description),
+			Usage:           strings.TrimSpace(entry.Usage),
+			Schema:          deepCloneJSONValue(entry.InputSchema),
+			GeneratedSchema: entry.GeneratedSchema,
 		})
 	}
 	return defs, nil

@@ -441,7 +441,11 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 	}
 	if namedName, ok := eventNamedTypeName(types, typeRef); ok {
 		if _, ok := seen[namedName]; ok {
-			return map[string]any{"type": "object"}
+			return map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{},
+				"additionalProperties": false,
+			}
 		}
 		seen[namedName] = struct{}{}
 		defer delete(seen, namedName)

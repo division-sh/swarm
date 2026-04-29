@@ -46,23 +46,26 @@ func (v *ToolInputValidator) Validate(actor *models.AgentConfig, name string, in
 		return defsErr
 	}
 
-	contractSchema, foundContract := validatorToolSchemaForName(defs, name)
+	contractSchema, generatedSchema, foundContract := validatorToolSchemaForName(defs, name)
 	if foundContract && contractSchema != nil {
-		return ValidatePayloadAgainstSchema(contractSchema, validatorPruneSchemaUnknownKeys(payload, contractSchema))
+		if !generatedSchema {
+			payload = validatorPruneSchemaUnknownKeys(payload, contractSchema)
+		}
+		return ValidatePayloadAgainstSchema(contractSchema, payload)
 	}
 	return nil
 }
 
-func validatorToolSchemaForName(defs []llm.ToolDefinition, name string) (map[string]any, bool) {
+func validatorToolSchemaForName(defs []llm.ToolDefinition, name string) (map[string]any, bool, bool) {
 	name = normalizeNativeToolName(name)
 	for _, def := range defs {
 		if strings.TrimSpace(def.Name) != name {
 			continue
 		}
 		schema, ok := def.Schema.(map[string]any)
-		return schema, ok
+		return schema, def.GeneratedSchema, ok
 	}
-	return nil, false
+	return nil, false, false
 }
 
 func validatorPruneSchemaUnknownKeys(payload map[string]any, schema map[string]any) map[string]any {

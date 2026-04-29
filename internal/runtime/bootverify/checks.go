@@ -57,6 +57,9 @@ type checkerContext struct {
 	toolUsageLoaded   bool
 	toolUsageFindings []Finding
 
+	generatedToolSchemaClosureLoaded   bool
+	generatedToolSchemaClosureFindings []Finding
+
 	runtimeToolNamesLoaded bool
 	runtimeToolNames       map[string]struct{}
 
@@ -201,6 +204,7 @@ var bootCheckRegistry = []Check{
 	{ID: "handler_field_compliance", Severity: "error", Run: checkHandlerFieldCompliance},
 	{ID: "tool_resolution", Severity: "warning", Run: checkToolResolution},
 	{ID: "platform_tool_usage_hints", Severity: SeverityHardInvalidity, Run: checkPlatformToolUsageHints},
+	{ID: "generated_tool_schema_closure", Severity: SeverityHardInvalidity, Run: checkGeneratedToolSchemaClosure},
 	{ID: "prompt_exists", Severity: "warning", Run: checkPromptExists},
 	{ID: "produces_drift", Severity: "warning", Run: checkProducesDrift},
 	{ID: "invalid_field_detection", Severity: "error", Run: checkInvalidFieldDetection},
@@ -252,10 +256,13 @@ func checkStateMachineCoherence(c *checkerContext) []Finding { return c.stateMac
 func checkNodeStateSchemaTypedCounterpart(c *checkerContext) []Finding {
 	return c.nodeStateSchemaTypedCounterpart()
 }
-func checkRequiredAgentsMatch(c *checkerContext) []Finding        { return c.requiredAgentsMatch() }
-func checkHandlerFieldCompliance(c *checkerContext) []Finding     { return c.handlerFieldCompliance() }
-func checkToolResolution(c *checkerContext) []Finding             { return c.toolResolution() }
-func checkPlatformToolUsageHints(c *checkerContext) []Finding     { return c.platformToolUsageHints() }
+func checkRequiredAgentsMatch(c *checkerContext) []Finding    { return c.requiredAgentsMatch() }
+func checkHandlerFieldCompliance(c *checkerContext) []Finding { return c.handlerFieldCompliance() }
+func checkToolResolution(c *checkerContext) []Finding         { return c.toolResolution() }
+func checkPlatformToolUsageHints(c *checkerContext) []Finding { return c.platformToolUsageHints() }
+func checkGeneratedToolSchemaClosure(c *checkerContext) []Finding {
+	return c.generatedToolSchemaClosure()
+}
 func checkPromptExists(c *checkerContext) []Finding               { return c.promptExists() }
 func checkInvalidFieldDetection(c *checkerContext) []Finding      { return c.invalidFieldDetection() }
 func checkPolicyConflictDetection(c *checkerContext) []Finding    { return c.policyConflicts() }
@@ -531,6 +538,22 @@ func (c *checkerContext) platformToolUsageHints() []Finding {
 		})
 	}
 	return c.toolUsageFindings
+}
+
+func (c *checkerContext) generatedToolSchemaClosure() []Finding {
+	if c.generatedToolSchemaClosureLoaded {
+		return c.generatedToolSchemaClosureFindings
+	}
+	c.generatedToolSchemaClosureLoaded = true
+	for _, err := range runtimetools.ValidateGeneratedToolSchemaClosureForSource(c.source) {
+		c.generatedToolSchemaClosureFindings = append(c.generatedToolSchemaClosureFindings, Finding{
+			CheckID:  "generated_tool_schema_closure",
+			Severity: SeverityHardInvalidity,
+			Message:  err.Error(),
+			Location: "generated-tools",
+		})
+	}
+	return c.generatedToolSchemaClosureFindings
 }
 
 func (c *checkerContext) runtimeAvailableToolNames() map[string]struct{} {

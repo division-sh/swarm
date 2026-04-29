@@ -82,11 +82,19 @@ func roleScopedEntityToolSchemaEntriesForActor(source semanticview.Source, actor
 
 func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleScopedEntityToolSpec) ContractSchemaEntry {
 	entry := ContractSchemaEntry{
-		Category:    "entity_persistence",
-		Description: roleScopedEntityToolDescription(spec),
-		InputSchema: ObjectSchema(map[string]any{}),
+		Category:        "entity_persistence",
+		Description:     roleScopedEntityToolDescription(spec),
+		InputSchema:     ObjectSchema(map[string]any{}),
+		GeneratedSchema: true,
 	}
-	if spec.Kind == roleScopedEntityToolSaveField || spec.Kind == roleScopedEntityToolUpdatePath {
+	switch spec.Kind {
+	case roleScopedEntityToolReadWhole:
+		entry.OutputSchema = roleScopedEntityWholeReadOutputSchema(contract)
+	case roleScopedEntityToolReadField:
+		if decl, err := entityruntime.FieldDecl(contract, spec.Field); err == nil {
+			entry.OutputSchema = entityContractJSONSchema(contract, decl.Type, map[string]struct{}{})
+		}
+	case roleScopedEntityToolSaveField, roleScopedEntityToolUpdatePath:
 		typeRef := ""
 		if spec.Subpath == "" {
 			if decl, err := entityruntime.FieldDecl(contract, spec.Field); err == nil {
@@ -98,8 +106,33 @@ func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleS
 		entry.InputSchema = ObjectSchema(map[string]any{
 			"value": entityContractJSONSchema(contract, typeRef, map[string]struct{}{}),
 		}, "value")
+		entry.OutputSchema = ObjectSchema(map[string]any{
+			"entity_id": map[string]any{"type": "string"},
+			"field":     map[string]any{"type": "string"},
+			"revision":  map[string]any{"type": "integer"},
+		}, "entity_id", "field", "revision")
 	}
 	return entry
+}
+
+func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[string]any {
+	fieldProps := make(map[string]any, len(contract.Entity.Fields))
+	requiredFields := make([]string, 0, len(contract.Entity.Fields))
+	for _, field := range entityruntime.FieldNames(contract) {
+		decl, err := entityruntime.FieldDecl(contract, field)
+		if err != nil {
+			continue
+		}
+		fieldProps[field] = entityContractJSONSchema(contract, decl.Type, map[string]struct{}{})
+		requiredFields = append(requiredFields, field)
+	}
+	return ObjectSchema(map[string]any{
+		"entity_id":     map[string]any{"type": "string"},
+		"flow_instance": map[string]any{"type": "string"},
+		"entity_type":   map[string]any{"type": "string"},
+		"current_state": map[string]any{"type": "string"},
+		"fields":        ObjectSchema(fieldProps, requiredFields...),
+	}, "entity_id", "flow_instance", "entity_type", "current_state", "fields")
 }
 
 func roleScopedEntityToolDescription(spec roleScopedEntityToolSpec) string {

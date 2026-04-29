@@ -136,11 +136,13 @@ func (r *EmitRegistry) GenerateEmitToolsForEvents(eventTypes []string, warn func
 			}
 			continue
 		}
+		schema = closeGeneratedEmitSchema(schema)
 		tools = append(tools, llm.ToolDefinition{
-			Name:        toolName,
-			Description: schema.Description,
-			Usage:       EmitToolUsage(),
-			Schema:      schema.Schema,
+			Name:            toolName,
+			Description:     schema.Description,
+			Usage:           EmitToolUsage(),
+			Schema:          schema.Schema,
+			GeneratedSchema: true,
 		})
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
@@ -184,11 +186,13 @@ func (r *EmitRegistry) GenerateEmitToolsForActor(actor models.AgentConfig, warn 
 				}
 				continue
 			}
+			schema = closeGeneratedEmitSchema(schema)
 			tools = append(tools, llm.ToolDefinition{
-				Name:        toolName,
-				Description: schema.Description,
-				Usage:       EmitToolUsage(),
-				Schema:      schema.Schema,
+				Name:            toolName,
+				Description:     schema.Description,
+				Usage:           EmitToolUsage(),
+				Schema:          schema.Schema,
+				GeneratedSchema: true,
 			})
 		}
 		sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
@@ -218,13 +222,13 @@ func (r *EmitRegistry) schemaForActorEvent(actor models.AgentConfig, eventType s
 	}
 	if bundle, ok := semanticview.Bundle(r.source); ok && bundle != nil {
 		if schema, _, ok := runtimecontracts.EventSchemaForFlowEvent(bundle, flowID, eventType); ok {
-			return schema, true
+			return closeGeneratedEmitSchema(schema), true
 		}
 	}
 	registry := runtimecontracts.EventSchemaRegistryFromCatalog(map[string]runtimecontracts.EventCatalogEntry{
 		proof.CatalogKey: proof.Entry,
 	})
-	schema, ok := registry[proof.CatalogKey]
+	schema, ok := closeGeneratedEmitSchemaRegistry(registry)[proof.CatalogKey]
 	return schema, ok
 }
 
@@ -242,6 +246,22 @@ func (r *EmitRegistry) GeneratedEmitSchemasForAgentRoles() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func closeGeneratedEmitSchemaRegistry(in map[string]EmitSchema) map[string]EmitSchema {
+	if len(in) == 0 {
+		return map[string]EmitSchema{}
+	}
+	out := make(map[string]EmitSchema, len(in))
+	for eventType, schema := range in {
+		out[eventType] = closeGeneratedEmitSchema(schema)
+	}
+	return out
+}
+
+func closeGeneratedEmitSchema(schema EmitSchema) EmitSchema {
+	schema.Schema = closeGeneratedJSONSchema(schema.Schema)
+	return schema
 }
 
 func ValidateGeneratedEmitToolSchemasForSource(source semanticview.Source) []error {

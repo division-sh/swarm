@@ -309,6 +309,50 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 	}
 }
 
+func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(t *testing.T) {
+	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
+	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	source := semanticview.Wrap(bundle)
+	if errs := runtimetools.ValidateGeneratedToolSchemaClosureForSource(source); len(errs) > 0 {
+		t.Fatalf("ValidateGeneratedToolSchemaClosureForSource errors = %#v", errs)
+	}
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
+	saveSchema := names["save_validation_case_business_brief"].Schema.(map[string]any)
+	if err := runtimetools.ValidatePayloadAgainstSchema(saveSchema, map[string]any{
+		"value": map[string]any{
+			"summary":    "provider-side",
+			"confidence": 7,
+			"notes":      "undeclared",
+		},
+	}); err == nil {
+		t.Fatal("provider-visible generated save schema accepted undeclared nested key")
+	}
+
+	entityID := uuid.NewString()
+	seedEntityStateRow(t, db, entityID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+		"status":         "open",
+		"business_brief": map[string]any{"summary": "before", "confidence": 1},
+	}, time.Now().UTC())
+	currentCtx := runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:    "evt-current",
+		Type:  events.EventType("validation.started"),
+		RunID: entityToolTestRunID,
+	}.WithEntityID(entityID).WithFlowInstance("validation/inst-1"))
+	if _, err := exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
+		"value": map[string]any{
+			"summary":    "after",
+			"confidence": 9,
+			"notes":      "runtime bypass must reject",
+		},
+	}); err == nil {
+		t.Fatal("runtime execution accepted undeclared nested key")
+	}
+	if got := persistedEntityField(t, db, entityID, "business_brief"); strings.Contains(got, "after") || strings.Contains(got, "runtime bypass") {
+		t.Fatalf("runtime validation failure still mutated entity: %s", got)
+	}
+}
+
 func TestRoleScopedEntityTools_NonOptedActorKeepsLegacySurface(t *testing.T) {
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"get_entity", "query_entities"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, false)

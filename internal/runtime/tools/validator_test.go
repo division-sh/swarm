@@ -86,3 +86,39 @@ func TestToolInputValidator_UsesActorScopedDefinitionsWhenAvailable(t *testing.T
 		t.Fatal("Validate(nil actor) succeeded, want schema rejection for child_only")
 	}
 }
+
+func TestToolInputValidator_RejectsUnknownKeysAgainstClosedSchema(t *testing.T) {
+	validator := NewToolInputValidator(func(*models.AgentConfig) ([]llm.ToolDefinition, error) {
+		return []llm.ToolDefinition{{
+			Name:            "save_validation_case_business_brief",
+			GeneratedSchema: true,
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"value": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"summary":    map[string]any{"type": "string"},
+							"confidence": map[string]any{"type": "integer"},
+						},
+						"required":             []any{"summary", "confidence"},
+						"additionalProperties": false,
+					},
+				},
+				"required":             []any{"value"},
+				"additionalProperties": false,
+			},
+		}}, nil
+	})
+
+	err := validator.Validate(nil, "save_validation_case_business_brief", map[string]any{
+		"value": map[string]any{
+			"summary":    "ok",
+			"confidence": 8,
+			"notes":      "must not be silently pruned",
+		},
+	})
+	if err == nil {
+		t.Fatal("Validate() succeeded, want undeclared nested key rejection")
+	}
+}

@@ -59,11 +59,13 @@ func GenerateEmitTools(
 			}
 			continue
 		}
+		schema = closeGeneratedEmitSchema(schema)
 		tools = append(tools, llm.ToolDefinition{
-			Name:        EmitToolName(eventType),
-			Description: schema.Description,
-			Usage:       EmitToolUsage(),
-			Schema:      schema.Schema,
+			Name:            EmitToolName(eventType),
+			Description:     schema.Description,
+			Usage:           EmitToolUsage(),
+			Schema:          schema.Schema,
+			GeneratedSchema: true,
 		})
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })

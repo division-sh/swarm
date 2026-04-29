@@ -14,12 +14,14 @@ func builtinRegisteredTools(source semanticview.Source, actor *models.AgentConfi
 	out := make(map[string]RegisteredTool, len(entries))
 	for name, entry := range entries {
 		out[name] = RegisteredTool{
-			Name:        strings.TrimSpace(name),
-			Category:    strings.TrimSpace(entry.Category),
-			Description: strings.TrimSpace(entry.Description),
-			Usage:       runtimeOwnedToolUsage(name),
-			HandlerType: implementationPlatformBuiltin,
-			InputSchema: deepCloneMap(entry.InputSchema),
+			Name:            strings.TrimSpace(name),
+			Category:        strings.TrimSpace(entry.Category),
+			Description:     strings.TrimSpace(entry.Description),
+			Usage:           runtimeOwnedToolUsage(name),
+			HandlerType:     implementationPlatformBuiltin,
+			InputSchema:     deepCloneMap(entry.InputSchema),
+			OutputSchema:    deepCloneMap(entry.OutputSchema),
+			GeneratedSchema: entry.GeneratedSchema,
 		}
 	}
 	return out
@@ -482,7 +484,7 @@ func entityContractJSONSchema(contract entityruntime.Contract, typeRef string, s
 	case deliveryNamedType(contract, typeRef):
 		typeName := deliveryTypeName(contract, typeRef)
 		if _, ok := seen[typeName]; ok {
-			return map[string]any{"type": "object"}
+			return ObjectSchema(map[string]any{})
 		}
 		seen[typeName] = struct{}{}
 		named := contract.Types.Types[typeName]
