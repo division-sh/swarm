@@ -17,6 +17,7 @@ import (
 const (
 	RunForkSelectedContractExecutionLineageOwner = "store.run_fork.selected_contract_execution_lineage"
 	runForkSelectedContractExecutionLineageTable = "run_fork_selected_contract_executions"
+	runForkSelectedContractBranchDivergenceTable = "run_fork_selected_contract_branch_divergences"
 )
 
 type RunForkSelectedContractExecutionMaterializeRequest struct {
@@ -49,18 +50,35 @@ type RunForkSelectedContractExecutionLineage struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+type RunForkSelectedContractBranchDivergence struct {
+	Owner                          string    `json:"owner"`
+	ForkRunID                      string    `json:"fork_run_id"`
+	SourceRunID                    string    `json:"source_run_id"`
+	ForkEventID                    string    `json:"fork_event_id"`
+	Policy                         string    `json:"policy"`
+	SourceRunStatusAtActivation    string    `json:"source_run_status_at_activation"`
+	SourceRunStatusAfterActivation string    `json:"source_run_status_after_activation"`
+	SourceFrozen                   bool      `json:"source_frozen"`
+	SourceAdvancedFacts            []string  `json:"source_advanced_facts,omitempty"`
+	CreatedAt                      time.Time `json:"created_at"`
+}
+
 func RequireRunForkSelectedContractExecutionCapabilities(caps StoreSchemaCapabilities, catalog schemaColumnCatalog) error {
 	if err := RequireRunForkActivationCapabilities(caps, catalog); err != nil {
 		return err
 	}
-	required := map[string][]string{
-		runForkSelectedContractExecutionLineageTable: {"fork_run_id", "source_run_id", "source_event_id", "fork_event_id", "event_name", "created_at"},
+	required := []struct {
+		table   string
+		columns []string
+	}{
+		{runForkSelectedContractExecutionLineageTable, []string{"fork_run_id", "source_run_id", "source_event_id", "fork_event_id", "event_name", "created_at"}},
+		{runForkSelectedContractBranchDivergenceTable, []string{"fork_run_id", "source_run_id", "fork_event_id", "policy", "source_run_status_at_activation", "source_run_status_after_activation", "source_frozen", "source_advanced_facts", "created_at"}},
 	}
-	for tableName, columns := range required {
-		if catalog.hasColumns(tableName, columns...) {
+	for _, requirement := range required {
+		if catalog.hasColumns(requirement.table, requirement.columns...) {
 			continue
 		}
-		return fmt.Errorf("selected-contract fork execution requires %s columns %v", tableName, columns)
+		return fmt.Errorf("selected-contract fork execution requires %s columns %v", requirement.table, requirement.columns)
 	}
 	return nil
 }
@@ -223,8 +241,8 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		result.RepeatedActivationFailed = lineage.ForkStatus == RunForkActivatedStatus
 		return result, fmt.Errorf("selected-contract fork activation requires materialized fork status %q; got %q", RunForkMaterializedStatus, lineage.ForkStatus)
 	}
-	if lineage.SourceRunStatus != "running" && lineage.SourceRunStatus != "paused" {
-		return result, fmt.Errorf("selected-contract fork activation requires source run status running or paused before freeze; got %q", lineage.SourceRunStatus)
+	if !runForkSelectedContractBranchSourceStatusSupported(lineage.SourceRunStatus) {
+		return result, fmt.Errorf("selected-contract fork activation requires source run status running, paused, completed, failed, or cancelled for branch lineage; got %q", lineage.SourceRunStatus)
 	}
 	if len(lineage.EntityIDs) == 0 {
 		return result, fmt.Errorf("selected-contract fork activation requires materialized fork entity_state rows")
@@ -247,8 +265,21 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		result.UnsupportedBlockers = blockers
 		return result, fmt.Errorf("selected-contract fork activation blocked: %s", runForkBlockerCodes(blockers))
 	}
-	if err := ensureRunForkSourceNotAdvanced(ctx, tx, catalog, lineage); err != nil {
+	sourceAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedFacts(ctx, tx, catalog, lineage)
+	if err != nil {
+		return result, err
+	}
+	if len(sourceAdvancedFacts) > 0 {
 		result.SourceAdvancedAfterFork = true
+	}
+	if err := ensureRunForkNoRelevantPostForkTimers(ctx, tx, catalog, lineage); err != nil {
+		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
+			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
+		}
+		return result, err
+	}
+	if err := ensureRunForkNoRelevantPostForkRoutes(ctx, tx, catalog, lineage); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
 			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
@@ -264,6 +295,48 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 	}
 
 	now := time.Now().UTC()
+	if len(sourceAdvancedFacts) > 0 {
+		forkResult, err := tx.ExecContext(ctx, `
+			UPDATE runs
+			SET status = $2, ended_at = NULL
+			WHERE run_id = $1::uuid
+			  AND status = $3
+		`, lineage.ForkRunID, RunForkActivatedStatus, RunForkMaterializedStatus)
+		if err != nil {
+			return result, fmt.Errorf("activate selected-contract branch fork run: %w", err)
+		}
+		if affected, err := forkResult.RowsAffected(); err != nil {
+			return result, fmt.Errorf("confirm selected-contract branch fork activation: %w", err)
+		} else if affected != 1 {
+			return result, fmt.Errorf("selected-contract branch activation blocked: fork_run_activation_not_applied")
+		}
+		divergence := RunForkSelectedContractBranchDivergence{
+			Owner:                          RunForkSelectedContractBranchDivergenceOwner,
+			ForkRunID:                      lineage.ForkRunID,
+			SourceRunID:                    lineage.SourceRunID,
+			ForkEventID:                    lineage.ForkEventID,
+			Policy:                         RunForkSelectedContractSourceAdvancedBranchPolicy,
+			SourceRunStatusAtActivation:    lineage.SourceRunStatus,
+			SourceRunStatusAfterActivation: lineage.SourceRunStatus,
+			SourceFrozen:                   false,
+			SourceAdvancedFacts:            sourceAdvancedFacts,
+			CreatedAt:                      now,
+		}
+		if err := insertRunForkSelectedContractBranchDivergence(ctx, tx, divergence); err != nil {
+			return result, err
+		}
+		if err := tx.Commit(); err != nil {
+			return result, fmt.Errorf("commit selected-contract branch activation: %w", err)
+		}
+		committed = true
+		result.ForkRunStatus = RunForkActivatedStatus
+		result.SourceRunStatus = lineage.SourceRunStatus
+		result.Activated = true
+		result.SourceFrozen = false
+		result.BranchDivergence = &divergence
+		return result, nil
+	}
+
 	sourceResult, err := tx.ExecContext(ctx, `
 		UPDATE runs
 		SET status = $2, ended_at = COALESCE(ended_at, $3)
@@ -354,6 +427,12 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_sessions WHERE run_id = $1::uuid`, forkRunID); err != nil {
 			return fmt.Errorf("delete selected-contract fork sessions: %w", err)
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM run_fork_selected_contract_branch_divergences
+		WHERE fork_run_id = $1::uuid
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract branch divergence: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM run_fork_selected_contract_executions
@@ -476,6 +555,171 @@ func (s *PostgresStore) RecordRunForkSelectedContractExecutionLineage(ctx contex
 	`, lineage.ForkRunID, lineage.SourceRunID, lineage.SourceEventID, lineage.ForkEventID, lineage.EventName, createdAt)
 	if err != nil {
 		return fmt.Errorf("record selected-contract execution lineage: %w", err)
+	}
+	return nil
+}
+
+func runForkSelectedContractBranchSourceStatusSupported(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "running", "paused", "completed", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+func collectRunForkSelectedContractSourceAdvancedFacts(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage) ([]string, error) {
+	checks := []struct {
+		code    string
+		enabled bool
+		query   string
+		args    []any
+	}{
+		{
+			code:    "source_events_advanced_after_fork_point",
+			enabled: true,
+			query: `
+				SELECT EXISTS (
+					SELECT 1 FROM events
+					WHERE run_id = $1::uuid
+					  AND (created_at, event_id) > ($2::timestamptz, $3::uuid)
+				)
+			`,
+			args: []any{lineage.SourceRunID, lineage.ForkEventTime, lineage.ForkEventID},
+		},
+		{
+			code:    "source_mutations_advanced_after_fork_point",
+			enabled: true,
+			query: `
+				SELECT EXISTS (
+					SELECT 1 FROM entity_mutations
+					WHERE run_id = $1::uuid
+					  AND created_at > $2::timestamptz
+				)
+			`,
+			args: []any{lineage.SourceRunID, lineage.ForkEventTime},
+		},
+		{
+			code:    "source_current_state_advanced_after_fork_point",
+			enabled: true,
+			query: `
+				SELECT EXISTS (
+					SELECT 1 FROM entity_state
+					WHERE run_id = $1::uuid
+					  AND updated_at > $2::timestamptz
+				)
+			`,
+			args: []any{lineage.SourceRunID, lineage.ForkEventTime},
+		},
+		{
+			code:    "source_deliveries_advanced_after_fork_point",
+			enabled: true,
+			query: `
+				SELECT EXISTS (
+					SELECT 1 FROM event_deliveries d
+					WHERE d.run_id = $1::uuid
+					  AND (
+							d.created_at > $2::timestamptz
+							OR d.started_at > $2::timestamptz
+							OR d.delivered_at > $2::timestamptz
+					  )
+				)
+			`,
+			args: []any{lineage.SourceRunID, lineage.ForkEventTime},
+		},
+		{
+			code:    "source_receipts_advanced_after_fork_point",
+			enabled: catalog.hasColumns("event_receipts", "event_id", "processed_at") && catalog.hasColumns("events", "event_id", "run_id", "created_at"),
+			query: `
+				SELECT EXISTS (
+					SELECT 1
+					FROM event_receipts r
+					INNER JOIN events e ON e.event_id = r.event_id
+					WHERE e.run_id = $1::uuid
+					  AND (
+							r.processed_at > $2::timestamptz
+							OR (e.created_at, e.event_id) > ($2::timestamptz, $3::uuid)
+					  )
+				)
+			`,
+			args: []any{lineage.SourceRunID, lineage.ForkEventTime, lineage.ForkEventID},
+		},
+		{
+			code:    "source_dead_letters_advanced_after_fork_point",
+			enabled: catalog.hasColumns("dead_letters", "original_event_id", "created_at") && catalog.hasColumns("events", "event_id", "run_id", "created_at"),
+			query: `
+				SELECT EXISTS (
+					SELECT 1
+					FROM dead_letters dl
+					INNER JOIN events e ON e.event_id = dl.original_event_id
+					WHERE e.run_id = $1::uuid
+					  AND (
+							dl.created_at > $2::timestamptz
+							OR (e.created_at, e.event_id) > ($2::timestamptz, $3::uuid)
+					  )
+				)
+			`,
+			args: []any{lineage.SourceRunID, lineage.ForkEventTime, lineage.ForkEventID},
+		},
+	}
+	facts := []string{}
+	switch strings.TrimSpace(lineage.SourceRunStatus) {
+	case "completed", "failed", "cancelled":
+		facts = append(facts, "source_run_terminal_at_activation")
+	}
+	for _, check := range checks {
+		if !check.enabled {
+			continue
+		}
+		var exists bool
+		if err := tx.QueryRowContext(ctx, check.query, check.args...).Scan(&exists); err != nil {
+			return nil, fmt.Errorf("check selected-contract branch %s: %w", check.code, err)
+		}
+		if exists {
+			facts = append(facts, check.code)
+		}
+	}
+	return uniqueNonEmptyStrings(facts), nil
+}
+
+func insertRunForkSelectedContractBranchDivergence(ctx context.Context, tx *sql.Tx, divergence RunForkSelectedContractBranchDivergence) error {
+	if divergence.CreatedAt.IsZero() {
+		divergence.CreatedAt = time.Now().UTC()
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO run_fork_selected_contract_branch_divergences (
+			fork_run_id,
+			source_run_id,
+			fork_event_id,
+			owner,
+			policy,
+			source_run_status_at_activation,
+			source_run_status_after_activation,
+			source_frozen,
+			source_advanced_facts,
+			created_at
+		)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9::text[], $10)
+		ON CONFLICT (fork_run_id) DO UPDATE
+		SET owner = EXCLUDED.owner,
+		    policy = EXCLUDED.policy,
+		    source_run_status_at_activation = EXCLUDED.source_run_status_at_activation,
+		    source_run_status_after_activation = EXCLUDED.source_run_status_after_activation,
+		    source_frozen = EXCLUDED.source_frozen,
+		    source_advanced_facts = EXCLUDED.source_advanced_facts,
+		    created_at = EXCLUDED.created_at
+	`, divergence.ForkRunID,
+		divergence.SourceRunID,
+		divergence.ForkEventID,
+		divergence.Owner,
+		divergence.Policy,
+		divergence.SourceRunStatusAtActivation,
+		divergence.SourceRunStatusAfterActivation,
+		divergence.SourceFrozen,
+		pq.Array(divergence.SourceAdvancedFacts),
+		divergence.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("record selected-contract branch divergence: %w", err)
 	}
 	return nil
 }

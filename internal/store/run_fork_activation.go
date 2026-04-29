@@ -22,21 +22,22 @@ type RunForkActivateRequest struct {
 }
 
 type RunForkActivation struct {
-	SourceRunID              string                            `json:"source_run_id"`
-	ForkRunID                string                            `json:"fork_run_id"`
-	ForkRunStatus            string                            `json:"fork_run_status"`
-	SourceRunStatus          string                            `json:"source_run_status"`
-	ForkPoint                RunForkPoint                      `json:"fork_point"`
-	Activated                bool                              `json:"activated"`
-	SourceFrozen             bool                              `json:"source_frozen"`
-	HistoricalReplayBlocked  bool                              `json:"historical_replay_blocked"`
-	ReplayResumeAdmission    RunForkReplayResumeAdmission      `json:"replay_resume_admission"`
-	UnsupportedBlockers      []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
-	MaterializedEntityCount  int                               `json:"materialized_entity_count"`
-	DeliveryEventReplay      *RunForkDeliveryEventReplayResult `json:"delivery_event_replay,omitempty"`
-	SelectedContractBinding  *RunForkSelectedContractBinding   `json:"selected_contract_binding,omitempty"`
-	SourceAdvancedAfterFork  bool                              `json:"source_advanced_after_fork_point,omitempty"`
-	RepeatedActivationFailed bool                              `json:"repeated_activation_failed,omitempty"`
+	SourceRunID              string                                   `json:"source_run_id"`
+	ForkRunID                string                                   `json:"fork_run_id"`
+	ForkRunStatus            string                                   `json:"fork_run_status"`
+	SourceRunStatus          string                                   `json:"source_run_status"`
+	ForkPoint                RunForkPoint                             `json:"fork_point"`
+	Activated                bool                                     `json:"activated"`
+	SourceFrozen             bool                                     `json:"source_frozen"`
+	HistoricalReplayBlocked  bool                                     `json:"historical_replay_blocked"`
+	ReplayResumeAdmission    RunForkReplayResumeAdmission             `json:"replay_resume_admission"`
+	UnsupportedBlockers      []RunForkUnsupportedBlocker              `json:"unsupported_blockers,omitempty"`
+	MaterializedEntityCount  int                                      `json:"materialized_entity_count"`
+	DeliveryEventReplay      *RunForkDeliveryEventReplayResult        `json:"delivery_event_replay,omitempty"`
+	SelectedContractBinding  *RunForkSelectedContractBinding          `json:"selected_contract_binding,omitempty"`
+	BranchDivergence         *RunForkSelectedContractBranchDivergence `json:"selected_contract_branch_divergence,omitempty"`
+	SourceAdvancedAfterFork  bool                                     `json:"source_advanced_after_fork_point,omitempty"`
+	RepeatedActivationFailed bool                                     `json:"repeated_activation_failed,omitempty"`
 }
 
 type runForkActivationLineage struct {

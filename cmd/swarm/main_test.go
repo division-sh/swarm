@@ -603,6 +603,56 @@ func TestRunForkCommand_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *tes
 	}
 }
 
+func TestRunForkCommand_SelectedContractsExecuteReportsSourceAdvancedBranchJSON(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	repo := repoRoot()
+	contractsRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	afterEventID := uuid.NewString()
+	at := time.Unix(1700000313, 0).UTC()
+	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, at)
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
+		t.Fatalf("seed post-fork source event: %v", err)
+	}
+
+	var buf bytes.Buffer
+	code := runForkCommand(context.Background(), repo, []string{
+		"--contracts", contractsRoot,
+		"--run", sourceRunID,
+		"--at", sourceEventID,
+		"--json",
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+	}
+	var result runtimerunforkexecution.SelectedContractExecutionResult
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("decode selected branch execution json: %v\n%s", err, buf.String())
+	}
+	if result.Activation.BranchDivergence == nil || result.Activation.SourceFrozen {
+		t.Fatalf("branch activation = %#v", result.Activation)
+	}
+	if result.Activation.BranchDivergence.Owner != store.RunForkSelectedContractBranchDivergenceOwner ||
+		result.Activation.BranchDivergence.Policy != store.RunForkSelectedContractSourceAdvancedBranchPolicy {
+		t.Fatalf("branch divergence = %#v", result.Activation.BranchDivergence)
+	}
+	var sourceStatus string
+	if err := db.QueryRowContext(context.Background(), `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
+		t.Fatalf("load source status: %v", err)
+	}
+	if sourceStatus != "running" {
+		t.Fatalf("source status = %q, want unchanged running", sourceStatus)
+	}
+}
+
 func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)

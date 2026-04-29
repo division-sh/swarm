@@ -306,7 +306,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
 }
 
-func TestExecuteSelectedContractRunForkCleansUpBeforeActivationFailure(t *testing.T) {
+func TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
@@ -326,6 +326,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationFailure(t *testin
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	afterEventID := uuid.NewString()
+	afterDeliveryID := uuid.NewString()
 	at := time.Unix(1700002350, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	if _, err := db.ExecContext(ctx, `
@@ -335,6 +336,22 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationFailure(t *testin
 		VALUES ($1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4)
 	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
 		t.Fatalf("seed post-fork source event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'node', 'source-post-t-node', 'delivered', 'source_post_t_delivery', $4)
+	`, afterDeliveryID, sourceRunID, afterEventID, at.Add(1500*time.Millisecond)); err != nil {
+		t.Fatalf("seed post-fork source delivery: %v", err)
+	}
+	seedSourceOutcomeThatMustNotSuppressFork(t, db, afterEventID, entityID, at.Add(2*time.Second))
+	if _, err := db.ExecContext(ctx, `
+		UPDATE runs
+		SET status = 'completed', ended_at = $2
+		WHERE run_id = $1::uuid
+	`, sourceRunID, at.Add(3*time.Second)); err != nil {
+		t.Fatalf("mark source complete after fork point: %v", err)
 	}
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -347,13 +364,97 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationFailure(t *testin
 			contractsRoot,
 		),
 	})
-	if err == nil || !strings.Contains(err.Error(), "source_events_advanced_after_fork_point") {
-		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want source-advanced activation failure", err)
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
-	if result.Activation.SourceFrozen || result.Activation.ForkRunStatus == store.RunForkActivatedStatus {
-		t.Fatalf("activation mutated before publish failure cleanup: %#v", result.Activation)
+	if !result.Activation.Activated || result.Activation.ForkRunStatus != store.RunForkActivatedStatus {
+		t.Fatalf("activation = %#v, want activated fork", result.Activation)
 	}
-	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
+	if result.Activation.SourceFrozen || !result.Activation.SourceAdvancedAfterFork {
+		t.Fatalf("branch activation flags = frozen:%v advanced:%v", result.Activation.SourceFrozen, result.Activation.SourceAdvancedAfterFork)
+	}
+	if result.Activation.BranchDivergence == nil {
+		t.Fatalf("branch divergence missing from result: %#v", result.Activation)
+	}
+	if result.Activation.BranchDivergence.Owner != store.RunForkSelectedContractBranchDivergenceOwner ||
+		result.Activation.BranchDivergence.Policy != store.RunForkSelectedContractSourceAdvancedBranchPolicy ||
+		result.Activation.BranchDivergence.SourceFrozen {
+		t.Fatalf("branch divergence = %#v", result.Activation.BranchDivergence)
+	}
+	for _, fact := range []string{
+		"source_events_advanced_after_fork_point",
+		"source_run_terminal_at_activation",
+		"source_deliveries_advanced_after_fork_point",
+		"source_receipts_advanced_after_fork_point",
+		"source_dead_letters_advanced_after_fork_point",
+	} {
+		if !containsString(result.Activation.BranchDivergence.SourceAdvancedFacts, fact) {
+			t.Fatalf("branch facts = %#v, want %s", result.Activation.BranchDivergence.SourceAdvancedFacts, fact)
+		}
+	}
+
+	var sourceStatus, forkStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
+		t.Fatalf("load source status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkStatus); err != nil {
+		t.Fatalf("load fork status: %v", err)
+	}
+	if sourceStatus != "completed" || forkStatus != store.RunForkActivatedStatus {
+		t.Fatalf("branch statuses source/fork = %s/%s, want completed/running", sourceStatus, forkStatus)
+	}
+
+	var branchRows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM run_fork_selected_contract_branch_divergences
+		WHERE fork_run_id = $1::uuid
+		  AND source_run_id = $2::uuid
+		  AND fork_event_id = $3::uuid
+		  AND policy = $4
+		  AND source_frozen = false
+		  AND source_run_status_at_activation = 'completed'
+		  AND source_run_status_after_activation = 'completed'
+		  AND source_advanced_facts @> ARRAY[
+				'source_events_advanced_after_fork_point',
+				'source_run_terminal_at_activation',
+				'source_deliveries_advanced_after_fork_point',
+				'source_receipts_advanced_after_fork_point',
+				'source_dead_letters_advanced_after_fork_point'
+		  ]::text[]
+	`, result.Materialization.ForkRunID, sourceRunID, sourceEventID, store.RunForkSelectedContractSourceAdvancedBranchPolicy).Scan(&branchRows); err != nil {
+		t.Fatalf("count branch divergence rows: %v", err)
+	}
+	if branchRows != 1 {
+		t.Fatalf("branch divergence rows = %d, want 1", branchRows)
+	}
+
+	forkEventID := result.ForkEvents[0].ForkEventID
+	var copiedPostTEvents, copiedPostTDeliveries, forkReceipts, emittedFollowUps int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_id = $2::uuid`, result.Materialization.ForkRunID, afterEventID).Scan(&copiedPostTEvents); err != nil {
+		t.Fatalf("count copied post-T source event: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND event_id = $2::uuid`, result.Materialization.ForkRunID, afterEventID).Scan(&copiedPostTDeliveries); err != nil {
+		t.Fatalf("count copied post-T source delivery: %v", err)
+	}
+	if copiedPostTEvents != 0 || copiedPostTDeliveries != 0 {
+		t.Fatalf("copied post-T source rows into fork events=%d deliveries=%d", copiedPostTEvents, copiedPostTDeliveries)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, forkEventID).Scan(&forkReceipts); err != nil {
+		t.Fatalf("count fork receipts: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name = 'item.processed'
+		  AND source_event_id = $2::uuid
+	`, result.Materialization.ForkRunID, forkEventID).Scan(&emittedFollowUps); err != nil {
+		t.Fatalf("count branch follow-ups: %v", err)
+	}
+	if forkReceipts == 0 || emittedFollowUps != 1 {
+		t.Fatalf("branch fork-local outcomes receipts=%d followUps=%d, want receipts and one follow-up", forkReceipts, emittedFollowUps)
+	}
 }
 
 func assertSelectedContractExecutionCleanup(t *testing.T, db *sql.DB, sourceRunID, forkRunID string) {
@@ -479,4 +580,13 @@ func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEv
 	`, sourceEventID, entityID, at); err != nil {
 		t.Fatalf("seed source dead letter: %v", err)
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
