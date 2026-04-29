@@ -223,6 +223,54 @@ func TestCLIExecutionToolSurface_CanonicalizesProviderBuiltins(t *testing.T) {
 	}
 }
 
+func TestCLIExecutionToolSurface_DoesNotInjectRetiredLegacyEntityTools(t *testing.T) {
+	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
+	tools := []ToolDefinition{
+		{Name: "read_validation_case"},
+		{Name: "read_validation_case_business_brief"},
+		{Name: "save_validation_case_business_brief"},
+		{Name: "update_validation_case_business_brief_summary"},
+		{Name: "emit_validation_package_ready"},
+	}
+
+	surface := cliExecutionToolSurfaceForActor(actor, tools)
+	allowed := strings.Split(claudeAllowedToolsArgForActor(actor, tools), ",")
+	summary := AgentVisibleToolSummaryLinesForActor(actor, tools)
+	legacyNames := []string{
+		"create_entity",
+		"get_entity",
+		"get_subject_status",
+		"query_entities",
+		"query_metrics",
+		"save_entity_field",
+		"search_entities",
+	}
+	for _, name := range legacyNames {
+		if slices.Contains(surface.RuntimeToolNames, name) || slices.Contains(surface.CanonicalVisibleTools, name) {
+			t.Fatalf("legacy entity tool %q appeared in CLI runtime surface: %#v", name, surface)
+		}
+		if slices.Contains(allowed, "mcp__runtime-tools__"+name) || slices.Contains(allowed, name) {
+			t.Fatalf("legacy entity tool %q appeared in Claude allowed tools: %#v", name, allowed)
+		}
+		for _, line := range summary {
+			if strings.Contains(line, name) {
+				t.Fatalf("legacy entity tool %q appeared in prompt tool summary line %q", name, line)
+			}
+		}
+	}
+	for _, name := range []string{"read_validation_case", "save_validation_case_business_brief", "emit_validation_package_ready"} {
+		if !slices.Contains(surface.RuntimeToolNames, name) {
+			t.Fatalf("generated/runtime tool %q missing from CLI runtime surface: %#v", name, surface.RuntimeToolNames)
+		}
+		if !slices.Contains(allowed, "mcp__runtime-tools__"+name) {
+			t.Fatalf("generated/runtime tool %q missing from Claude allowed tools: %#v", name, allowed)
+		}
+	}
+	if len(AgentVisibleToolSurfaceForActor(actor, tools).WritableEntityPaths) != 0 {
+		t.Fatalf("save_entity_field writable paths should not be advertised for generated save tools")
+	}
+}
+
 func TestCLIExecutionToolSurface_FileIONativeSurfaceRemovesFallbackRuntimeTools(t *testing.T) {
 	surface := cliExecutionToolSurfaceForActor(models.AgentConfig{
 		NativeTools: models.NativeToolConfig{

@@ -253,13 +253,17 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
 		"create_entity",
 		"get_entity",
+		"get_subject_status",
 		"save_entity_field",
 		"query_entities",
+		"query_metrics",
+		"search_entities",
 	}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
-	_, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 
-	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
+	defs := exec.ToolDefinitionsForActor(actor)
+	names := roleScopedToolDefinitionMap(defs)
 	for _, name := range []string{
 		"read_validation_case",
 		"read_validation_case_status",
@@ -277,7 +281,7 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 			t.Fatalf("create-only field produced mutation tool %q in %#v", name, sortedRoleScopedToolNames(names))
 		}
 	}
-	for _, name := range []string{
+	legacyNames := []string{
 		"create_entity",
 		"get_entity",
 		"get_subject_status",
@@ -285,7 +289,8 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		"query_metrics",
 		"save_entity_field",
 		"search_entities",
-	} {
+	}
+	for _, name := range legacyNames {
 		if _, ok := names[name]; ok {
 			t.Fatalf("legacy entity tool %q remained visible in %#v", name, sortedRoleScopedToolNames(names))
 		}
@@ -300,12 +305,28 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		t.Fatalf("generated save schema missing value: %#v", saveSchema)
 	}
 
-	caps := exec.ToolCapabilitiesForActor(actor, []string{"read_validation_case", "get_entity"}, nil)
+	surface := llm.AgentVisibleToolSurfaceForActor(actor, defs)
+	for _, name := range legacyNames {
+		if containsString(surface.RuntimeToolNames, name) || containsString(surface.NonEmitToolNames, name) {
+			t.Fatalf("legacy entity tool %q remained in agent-visible surface: %#v", name, surface)
+		}
+	}
+	if len(surface.WritableEntityPaths) != 0 {
+		t.Fatalf("save_entity_field writable path summary remained visible for role-scoped actor: %#v", surface.WritableEntityPaths)
+	}
+
+	capabilityNames := append([]string{"read_validation_case"}, legacyNames...)
+	caps := exec.ToolCapabilitiesForActor(actor, capabilityNames, nil)
 	if cap, ok := caps.Capability("read_validation_case"); !ok || !cap.Visible || !cap.Callable {
 		t.Fatalf("read_validation_case capability = %#v, ok=%v; want visible/callable", cap, ok)
 	}
-	if cap, ok := caps.Capability("get_entity"); !ok || cap.Visible || cap.Callable {
-		t.Fatalf("get_entity capability = %#v, ok=%v; want denied for opted-in actor", cap, ok)
+	for _, name := range legacyNames {
+		if cap, ok := caps.Capability(name); !ok || cap.Visible || cap.Callable || cap.DenialReason != "tool_not_allowed" {
+			t.Fatalf("%s capability = %#v, ok=%v; want denied for opted-in actor", name, cap, ok)
+		}
+		if _, err := exec.Execute(ctx, name, map[string]any{}); err == nil || !strings.Contains(err.Error(), "not allowed") {
+			t.Fatalf("direct %s execution error = %v, want tool-not-allowed", name, err)
+		}
 	}
 }
 
