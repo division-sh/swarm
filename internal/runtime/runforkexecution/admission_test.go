@@ -19,13 +19,14 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	forkRunID := uuid.NewString()
 	binding := testSelectedContractBinding(forkRunID)
 	reader := &fakeSelectedContractBindingReader{binding: binding}
+	sourceLoader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 	frontier := testContractFrontierAdmission(binding.ContractSelection)
 	model := testSelectedContractExecutionModel(t, frontier)
 
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     reader,
-		SelectedSource:    testSelectedSource(binding.ContractSelection),
+		SourceLoader:      sourceLoader,
 		FrontierAdmission: frontier,
 		ExecutionModel:    model,
 	})
@@ -34,6 +35,9 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	}
 	if reader.requestedForkRunID != forkRunID {
 		t.Fatalf("binding reader fork_run_id = %q, want %q", reader.requestedForkRunID, forkRunID)
+	}
+	if sourceLoader.requestedSelection != binding.ContractSelection {
+		t.Fatalf("source loader selection = %#v, want binding selection %#v", sourceLoader.requestedSelection, binding.ContractSelection)
 	}
 	if admission.Owner != store.RunForkSelectedContractExecutionAdmissionOwner ||
 		admission.FutureExecutionOwner != store.RunForkSelectedContractExecutionOwner ||
@@ -83,7 +87,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnMissingBinding(t *t
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{err: errors.New("selected contract binding not found")},
-		SelectedSource:    testSelectedSource(selection),
+		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(selection)},
 		FrontierAdmission: frontier,
 		ExecutionModel:    model,
 	})
@@ -102,7 +106,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnUnavailableSelected
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SelectedSource:    nil,
+		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{Selection: binding.ContractSelection}},
 		FrontierAdmission: frontier,
 		ExecutionModel:    model,
 	})
@@ -123,12 +127,33 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnSourceMismatch(t *t
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SelectedSource:    testSelectedSource(mismatched),
+		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{Selection: binding.ContractSelection, Source: testSelectedSource(mismatched)}},
 		FrontierAdmission: frontier,
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "workflow version mismatch") {
 		t.Fatalf("error = %v, want selected source mismatch", err)
+	}
+}
+
+func TestBuildSelectedContractExecutionAdmissionFailsClosedOnWrongContractsRoot(t *testing.T) {
+	ctx := context.Background()
+	forkRunID := uuid.NewString()
+	binding := testSelectedContractBinding(forkRunID)
+	frontier := testContractFrontierAdmission(binding.ContractSelection)
+	model := testSelectedContractExecutionModel(t, frontier)
+	wrongRoot := binding.ContractSelection
+	wrongRoot.ContractsRoot = "/tmp/other-selected-contracts"
+
+	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
+		ForkRunID:         forkRunID,
+		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
+		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(wrongRoot)},
+		FrontierAdmission: frontier,
+		ExecutionModel:    model,
+	})
+	if err == nil || !strings.Contains(err.Error(), "selected source selection does not match durable binding") {
+		t.Fatalf("error = %v, want wrong contracts_root source failure", err)
 	}
 }
 
@@ -143,7 +168,7 @@ func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalEvidence(t *tes
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SelectedSource:    testSelectedSource(binding.ContractSelection),
+		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
 		FrontierAdmission: frontier,
 		ExecutionModel:    model,
 	})
@@ -163,7 +188,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleModelFrontier(
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SelectedSource:    testSelectedSource(binding.ContractSelection),
+		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
 		FrontierAdmission: frontier,
 		ExecutionModel:    model,
 	})
@@ -176,6 +201,20 @@ type fakeSelectedContractBindingReader struct {
 	binding            store.RunForkSelectedContractBinding
 	err                error
 	requestedForkRunID string
+}
+
+type fakeSelectedContractSourceLoader struct {
+	loaded             LoadedSelectedContractSource
+	err                error
+	requestedSelection store.RunForkContractSelection
+}
+
+func (l *fakeSelectedContractSourceLoader) LoadRunForkSelectedContractSource(_ context.Context, selection store.RunForkContractSelection) (LoadedSelectedContractSource, error) {
+	l.requestedSelection = selection
+	if l.err != nil {
+		return LoadedSelectedContractSource{}, l.err
+	}
+	return l.loaded, nil
 }
 
 func (r *fakeSelectedContractBindingReader) RequireRunForkSelectedContractBinding(_ context.Context, forkRunID string) (store.RunForkSelectedContractBinding, error) {
@@ -213,6 +252,13 @@ func testSelectedSource(selection store.RunForkContractSelection) semanticview.S
 			Version: selection.WorkflowVersion,
 		},
 	})
+}
+
+func testLoadedSelectedSource(selection store.RunForkContractSelection) LoadedSelectedContractSource {
+	return LoadedSelectedContractSource{
+		Selection: selection,
+		Source:    testSelectedSource(selection),
+	}
 }
 
 func testContractFrontierAdmission(selection store.RunForkContractSelection) store.RunForkContractFrontierAdmission {

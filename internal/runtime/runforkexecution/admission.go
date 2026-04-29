@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 )
@@ -16,10 +17,49 @@ type SelectedContractBindingReader interface {
 	RequireRunForkSelectedContractBinding(context.Context, string) (store.RunForkSelectedContractBinding, error)
 }
 
+type SelectedContractSourceLoader interface {
+	LoadRunForkSelectedContractSource(context.Context, store.RunForkContractSelection) (LoadedSelectedContractSource, error)
+}
+
+type LoadedSelectedContractSource struct {
+	Selection store.RunForkContractSelection
+	Source    semanticview.Source
+}
+
+type ContractBundleSourceLoader struct {
+	RepoRoot         string
+	PlatformSpecPath string
+}
+
+func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection store.RunForkContractSelection) (LoadedSelectedContractSource, error) {
+	if err := ctx.Err(); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	if err := validateSelectedContractSelection("selected source loader", selection); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	repoRoot := strings.TrimSpace(l.RepoRoot)
+	if repoRoot == "" {
+		return LoadedSelectedContractSource{}, fmt.Errorf("selected-contract execution admission source loader requires repo root")
+	}
+	platformSpecPath := strings.TrimSpace(l.PlatformSpecPath)
+	if platformSpecPath == "" {
+		platformSpecPath = runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, strings.TrimSpace(selection.ContractsRoot), platformSpecPath)
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	return LoadedSelectedContractSource{
+		Selection: selection,
+		Source:    semanticview.Wrap(bundle),
+	}, nil
+}
+
 type SelectedContractExecutionAdmissionRequest struct {
 	ForkRunID         string
 	BindingReader     SelectedContractBindingReader
-	SelectedSource    semanticview.Source
+	SourceLoader      SelectedContractSourceLoader
 	FrontierAdmission store.RunForkContractFrontierAdmission
 	ExecutionModel    store.RunForkSelectedContractExecution
 }
@@ -42,7 +82,14 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 	if err := validateSelectedContractExecutionBinding(forkRunID, binding); err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, err
 	}
-	if err := validateSelectedContractExecutionSource(binding, req.SelectedSource); err != nil {
+	if req.SourceLoader == nil {
+		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires selected source loader bound to %s", store.RunForkSelectedContractBindingOwner)
+	}
+	loadedSource, err := req.SourceLoader.LoadRunForkSelectedContractSource(ctx, binding.ContractSelection)
+	if err != nil {
+		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("load selected semantic source for execution admission: %w", err)
+	}
+	if err := validateSelectedContractExecutionSource(binding, loadedSource); err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, err
 	}
 	if err := validateSelectedContractExecutionFrontier(binding, req.FrontierAdmission); err != nil {
@@ -65,8 +112,8 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		AdmissionOwner:        req.FrontierAdmission.Owner,
 		AdmissionUse:          store.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 		ExecutionModelOwner:   req.ExecutionModel.Owner,
-		SourceWorkflowName:    strings.TrimSpace(req.SelectedSource.WorkflowName()),
-		SourceWorkflowVersion: strings.TrimSpace(req.SelectedSource.WorkflowVersion()),
+		SourceWorkflowName:    strings.TrimSpace(loadedSource.Source.WorkflowName()),
+		SourceWorkflowVersion: strings.TrimSpace(loadedSource.Source.WorkflowVersion()),
 		FrontierEventCount:    req.ExecutionModel.FrontierEventCount,
 		FrontierEvents:        append([]store.RunForkSelectedContractFrontierEvent(nil), req.ExecutionModel.FrontierEvents...),
 		ContractBinding: store.RunForkSelectedContractExecutionBoundary{
@@ -106,11 +153,15 @@ func validateSelectedContractExecutionBinding(forkRunID string, binding store.Ru
 	return validateSelectedContractSelection("binding", binding.ContractSelection)
 }
 
-func validateSelectedContractExecutionSource(binding store.RunForkSelectedContractBinding, source semanticview.Source) error {
+func validateSelectedContractExecutionSource(binding store.RunForkSelectedContractBinding, loaded LoadedSelectedContractSource) error {
+	if err := validateSelectionMatches("selected source", binding.ContractSelection, loaded.Selection); err != nil {
+		return err
+	}
+	source := loaded.Source
 	if source == nil {
 		return fmt.Errorf("selected-contract execution admission requires selected semantic source from durable binding")
 	}
-	selection := binding.ContractSelection
+	selection := loaded.Selection
 	sourceName := strings.TrimSpace(source.WorkflowName())
 	sourceVersion := strings.TrimSpace(source.WorkflowVersion())
 	if sourceName == "" || sourceVersion == "" {
