@@ -640,6 +640,98 @@ func TestGatewayMCPToolsForRequest_DoesNotFallbackToRuntimeWideToolsForRoleScope
 	}
 }
 
+func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	legacyDefs := []llm.ToolDefinition{
+		{Name: "create_entity", Description: "legacy create"},
+		{Name: "get_entity", Description: "legacy get"},
+		{Name: "get_subject_status", Description: "legacy subject"},
+		{Name: "query_entities", Description: "legacy query"},
+		{Name: "query_metrics", Description: "legacy metrics"},
+		{Name: "save_entity_field", Description: "legacy save"},
+		{Name: "search_entities", Description: "legacy search"},
+	}
+	generatedDefs := []llm.ToolDefinition{
+		{Name: "read_validation_case", Description: "role scoped read"},
+		{Name: "save_validation_case_business_brief", Description: "role scoped save"},
+	}
+	g := NewGateway(actorScopedToolExecutorStub{
+		defs:       legacyDefs,
+		actorDefs:  generatedDefs,
+		roleScoped: true,
+	}, testGatewayToken, GatewayHooks{
+		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+			return models.AgentConfig{ID: agentID, Role: "validation_orchestrator"}, true
+		},
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
+	putTestTurnContext(t, registry, "ctx-role-scoped-generated", TurnContext{
+		Actor:     actor,
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-role-scoped-generated")
+	tools := mustMCPToolsForRequest(t, g, req)
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"read_validation_case", "save_validation_case_business_brief"}) {
+		t.Fatalf("role-scoped tool catalog = %#v, want generated-only tools", names)
+	}
+
+	legacyAllowed := map[string]struct{}{}
+	for _, def := range legacyDefs {
+		legacyAllowed[def.Name] = struct{}{}
+	}
+	putTestTurnContext(t, registry, "ctx-role-scoped-legacy-allowed", TurnContext{
+		Actor:     actor,
+		Allowed:   legacyAllowed,
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	allowedReq := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-role-scoped-legacy-allowed")
+	if tools := mustMCPToolsForRequest(t, g, allowedReq); len(tools) != 0 {
+		t.Fatalf("legacy allowed_tools reintroduced role-scoped catalog entries: %#v", tools)
+	}
+
+	for _, def := range legacyDefs {
+		body, err := json.Marshal(map[string]any{
+			"id":     "req-" + def.Name,
+			"method": "tools/call",
+			"params": map[string]any{
+				"name":      def.Name,
+				"arguments": map[string]any{},
+			},
+		})
+		if err != nil {
+			t.Fatalf("marshal request for %s: %v", def.Name, err)
+		}
+		callReq := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-role-scoped-generated")
+		authorizeGatewayRequest(callReq)
+		rec := httptest.NewRecorder()
+		g.Handler().ServeHTTP(rec, callReq)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", def.Name, rec.Code)
+		}
+		resp := mustRPCResponse(t, rec)
+		result, ok := resp.Result.(map[string]any)
+		if !ok {
+			t.Fatalf("%s result type = %T, want map", def.Name, resp.Result)
+		}
+		if isError, _ := result["isError"].(bool); !isError {
+			t.Fatalf("%s isError = %#v, want true", def.Name, result["isError"])
+		}
+		if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+			t.Fatalf("%s response = %s, want tool-not-allowed", def.Name, rec.Body.String())
+		}
+	}
+}
+
 func TestGatewayMCPToolsForRequest_IgnoresCallerAllowlist(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	g := NewGateway(actorScopedToolExecutorStub{
