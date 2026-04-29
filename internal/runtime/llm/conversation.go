@@ -10,6 +10,7 @@ import (
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
 	"swarm/internal/runtime/core/toolidentity"
+	"swarm/internal/runtime/core/toolresultpolicy"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -256,6 +257,18 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 		return fmt.Sprintf(`[%q]`, err.Error()), executed
 	}
 	if len(b) > toolRelayMessageLimit(calls) {
+		if toolCallBatchHasRoleScopedTypedRead(ctx, calls) {
+			overflow := []map[string]any{{
+				"name":  "__runtime_guardrail__",
+				"ok":    false,
+				"error": fmt.Sprintf("%s: role-scoped typed read results exceeded the complete delivery limit of %d bytes", toolresultpolicy.TypedReadResultTooLargeCode, toolresultpolicy.MaxCompleteTypedReadResultBytes),
+			}}
+			guarded, gerr := json.Marshal(overflow)
+			if gerr != nil {
+				return fmt.Sprintf(`[{"name":"__runtime_guardrail__","ok":false,"error":%q}]`, toolresultpolicy.TypedReadResultTooLargeCode), executed
+			}
+			return strings.TrimSpace(string(guarded)), executed
+		}
 		overflow := []map[string]any{{
 			"name":  "__runtime_guardrail__",
 			"ok":    false,
@@ -276,10 +289,19 @@ func (c *Conversation) projectToolResult(ctx context.Context, name string, input
 	}
 	b, err := json.Marshal(result)
 	if err != nil {
+		if toolIsRoleScopedTypedReadInContext(ctx, name) {
+			return nil, toolresultpolicy.NewTypedReadResultMarshalError("llm-conversation", "tool_result.project", name, err)
+		}
 		return map[string]any{
 			"truncated": false,
 			"error":     "marshal tool result",
 		}, nil
+	}
+	if toolIsRoleScopedTypedReadInContext(ctx, name) {
+		if len(b) > toolresultpolicy.MaxCompleteTypedReadResultBytes {
+			return nil, toolresultpolicy.NewTypedReadResultTooLargeError("llm-conversation", "tool_result.project", name, len(b))
+		}
+		return result, nil
 	}
 	limit := toolRelayResultLimitForRuntime(ctx, c.runtime, c.turnToolDefinitions(), name, input)
 	if len(b) <= limit {
@@ -392,6 +414,23 @@ func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context
 		return ctx
 	}
 	return toolcapabilities.WithContext(ctx, c.toolExecutor.ToolCapabilitiesForActor(actor, names, nil))
+}
+
+func toolIsRoleScopedTypedReadInContext(ctx context.Context, name string) bool {
+	set, ok := toolcapabilities.FromContext(ctx)
+	if !ok {
+		return false
+	}
+	return toolresultpolicy.IsRoleScopedTypedReadInContext(set, name)
+}
+
+func toolCallBatchHasRoleScopedTypedRead(ctx context.Context, calls []ToolCall) bool {
+	for _, call := range calls {
+		if toolIsRoleScopedTypedReadInContext(ctx, call.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeReadFileFollowUpAllowedForTurn(ctx context.Context, tools []ToolDefinition) bool {

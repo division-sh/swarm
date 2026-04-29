@@ -9,6 +9,7 @@ import (
 
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
+	"swarm/internal/runtime/core/toolresultpolicy"
 )
 
 type fakeRuntime struct {
@@ -139,6 +140,57 @@ func (l largeToolExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []st
 		caps = append(caps, toolcapabilities.Capability{Name: name, Visible: true, Callable: true})
 	}
 	return toolcapabilities.NewSet(caps)
+}
+
+type roleScopedTypedReadExec struct {
+	payload any
+}
+
+func (r roleScopedTypedReadExec) Execute(context.Context, string, any) (any, error) {
+	return r.payload, nil
+}
+
+func (r roleScopedTypedReadExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		caps = append(caps, toolcapabilities.Capability{
+			Name:               name,
+			Visible:            true,
+			Callable:           true,
+			AuthorizationClass: toolresultpolicy.RoleScopedEntityToolAuthorizationClass,
+		})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
+func largeValidationCasePayloadForConversationTest() map[string]any {
+	problem := strings.Repeat("problem statement ", 350)
+	return map[string]any{
+		"entity_id":              "validation-case-1",
+		"entity_type":            "validation_case",
+		"flow_instance":          "validation/inst-1",
+		"mvp_problem_statement":  problem,
+		"current_state":          "mvp_speccing",
+		"revision":               float64(3),
+		"business_brief_padding": strings.Repeat("business brief ", 900),
+		"fields": map[string]any{
+			"business_brief": map[string]any{
+				"summary":    strings.Repeat("business brief ", 900),
+				"confidence": float64(10),
+			},
+			"mvp_spec": map[string]any{
+				"problem_statement":  problem,
+				"technical_approach": strings.Repeat("technical approach ", 350),
+			},
+		},
+	}
+}
+
+func asStringForConversationTest(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
 }
 
 type relayRuntime struct {
@@ -345,6 +397,100 @@ func TestConversation_ExecuteToolCalls_TruncatesLargeResult(t *testing.T) {
 	resultMap, _ := arr[0]["result"].(map[string]any)
 	if resultMap == nil || resultMap["truncated"] != true {
 		t.Fatalf("expected truncated result metadata, got %#v", arr[0]["result"])
+	}
+}
+
+func TestConversation_ExecuteToolCalls_RoleScopedTypedReadPreservesLargeValidationCase(t *testing.T) {
+	payload := largeValidationCasePayloadForConversationTest()
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if len(rawPayload) < 40*1024 || len(rawPayload) > toolresultpolicy.MaxCompleteTypedReadResultBytes {
+		t.Fatalf("payload size = %d, want >=40KB and <=%d", len(rawPayload), toolresultpolicy.MaxCompleteTypedReadResultBytes)
+	}
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, SessionScoped, 4, &fakeRuntime{})
+	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
+
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
+	if strings.Contains(raw, `"truncated"`) || strings.Contains(raw, `"preview"`) || strings.Contains(raw, `"follow_up"`) {
+		t.Fatalf("typed read projection used lossy metadata: %s", raw)
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	if len(arr) != 1 || arr[0]["ok"] != true {
+		t.Fatalf("expected successful typed read payload, got %#v", arr)
+	}
+	resultMap, _ := arr[0]["result"].(map[string]any)
+	fields, _ := resultMap["fields"].(map[string]any)
+	mvp, _ := fields["mvp_spec"].(map[string]any)
+	if got := asStringForConversationTest(mvp["problem_statement"]); got != asStringForConversationTest(payload["mvp_problem_statement"]) {
+		t.Fatalf("mvp_spec.problem_statement length = %d, want %d", len(got), len(asStringForConversationTest(payload["mvp_problem_statement"])))
+	}
+}
+
+func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFieldPreservesCompleteField(t *testing.T) {
+	field := map[string]any{
+		"problem_statement":  strings.Repeat("problem statement ", 900),
+		"technical_approach": strings.Repeat("technical approach ", 900),
+	}
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case_mvp_spec"}}, SessionScoped, 4, &fakeRuntime{})
+	c.SetToolExecutor(roleScopedTypedReadExec{payload: field})
+
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case_mvp_spec", Arguments: map[string]any{}}})
+	if strings.Contains(raw, `"truncated"`) || strings.Contains(raw, `"preview"`) || strings.Contains(raw, `"follow_up"`) {
+		t.Fatalf("typed field read projection used lossy metadata: %s", raw)
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	resultMap, _ := arr[0]["result"].(map[string]any)
+	if got := asStringForConversationTest(resultMap["technical_approach"]); got != field["technical_approach"].(string) {
+		t.Fatalf("technical_approach length = %d, want %d", len(got), len(field["technical_approach"].(string)))
+	}
+}
+
+func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFailsClosedWhenTooLarge(t *testing.T) {
+	payload := map[string]any{"blob": strings.Repeat("x", toolresultpolicy.MaxCompleteTypedReadResultBytes+1024)}
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_validation_case"}}, SessionScoped, 4, &fakeRuntime{})
+	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
+
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
+	if strings.Contains(raw, `"truncated"`) || strings.Contains(raw, `"preview"`) || strings.Contains(raw, `"follow_up"`) {
+		t.Fatalf("typed read oversize emitted lossy metadata: %s", raw)
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	if len(arr) != 1 || arr[0]["ok"] != false {
+		t.Fatalf("expected fail-closed typed read payload, got %#v", arr)
+	}
+	if !strings.Contains(asStringForConversationTest(arr[0]["error"]), toolresultpolicy.TypedReadResultTooLargeCode) {
+		t.Fatalf("error = %#v, want %s", arr[0]["error"], toolresultpolicy.TypedReadResultTooLargeCode)
+	}
+}
+
+func TestConversation_ExecuteToolCalls_ReadPrefixedNonRoleScopedToolKeepsLegacyProjection(t *testing.T) {
+	huge := strings.Repeat("x", maxToolResultBytes+1024)
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "read_custom_report"}}, SessionScoped, 4, &fakeRuntime{})
+	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
+
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
+	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_custom_report", Arguments: map[string]any{}}})
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		t.Fatalf("unmarshal tool payload: %v", err)
+	}
+	resultMap, _ := arr[0]["result"].(map[string]any)
+	if truncated, _ := resultMap["truncated"].(bool); !truncated {
+		t.Fatalf("truncated = %#v, want legacy projection for non-role-scoped read-prefixed tool", resultMap["truncated"])
 	}
 }
 

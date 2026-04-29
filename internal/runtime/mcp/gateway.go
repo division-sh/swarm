@@ -14,6 +14,7 @@ import (
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
 	"swarm/internal/runtime/core/toolidentity"
+	"swarm/internal/runtime/core/toolresultpolicy"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	llm "swarm/internal/runtime/llm"
 	runtimerterr "swarm/internal/runtime/rterrors"
@@ -358,6 +359,15 @@ func projectToolCallSuccessText(ctx context.Context, executor runtimeGatewayExec
 	}
 	raw, err := json.Marshal(out)
 	if err != nil {
+		if toolIsRoleScopedTypedReadInContext(ctx, toolName) {
+			return "", toolresultpolicy.NewTypedReadResultMarshalError("mcp-gateway", "mcp.tools.call.result_project", toolName, err)
+		}
+		return ToolResultText(out), nil
+	}
+	if toolIsRoleScopedTypedReadInContext(ctx, toolName) {
+		if len(raw) > toolresultpolicy.MaxCompleteTypedReadResultBytes {
+			return "", toolresultpolicy.NewTypedReadResultTooLargeError("mcp-gateway", "mcp.tools.call.result_project", toolName, len(raw))
+		}
 		return ToolResultText(out), nil
 	}
 	if len(raw) <= toolCallRelayResultLimit(toolName, input) {
@@ -398,6 +408,14 @@ func projectToolCallSuccessText(ctx context.Context, executor runtimeGatewayExec
 		"preview":   clampRunes(string(raw), maxToolResultPreviewRunes),
 		"follow_up": followUp,
 	}), nil
+}
+
+func toolIsRoleScopedTypedReadInContext(ctx context.Context, name string) bool {
+	set, ok := toolcapabilities.FromContext(ctx)
+	if !ok {
+		return false
+	}
+	return toolresultpolicy.IsRoleScopedTypedReadInContext(set, name)
 }
 
 func toolCallRelayResultLimit(toolName string, input any) int {

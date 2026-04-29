@@ -149,6 +149,14 @@ active_issues:
     title: Gate non-mutating fork contract/frontier/route admission
     maps_to:
       - timestamp_fork_replay_resume_ownership
+  - id: 571
+    title: get_entity truncates large current-entity reads and hides required fields
+    maps_to:
+      - transport_policy_and_surface_parity
+  - id: 580
+    title: Implement non-lossy typed read tools for current-entity access
+    maps_to:
+      - transport_policy_and_surface_parity
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -166,6 +174,7 @@ nodes:
       - oversized file-backed tool results on supported Claude helper turns can leak provider scratch paths back into later runtime read_file calls
       - CLI native tools can still use mixed provider-plus-platform fallback semantics, so visible turn surface does not equal callable provider-native truth for bash, web_search, and file_io
       - startup validation can compare provider-native init output against the full runtime MCP/local fallback surface and can select ordinary semantic tools as startup probes because their schemas accept empty objects
+      - generated role-scoped typed reads can be silently downgraded by generic transport projection into preview/truncated shapes instead of complete typed values or explicit typed-read errors
     representative_issues:
       - 111
       - 136
@@ -175,6 +184,8 @@ nodes:
       - 381
       - 444
       - 544
+      - 571
+      - 580
     common_framing_mistakes:
       too_broad:
         - tool transport is inconsistent

@@ -392,6 +392,68 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	}
 }
 
+func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T) {
+	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
+	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	entityID := uuid.NewString()
+	brief := strings.Repeat("business brief ", 1800)
+	specProblem := strings.Repeat("problem statement ", 900)
+	specApproach := strings.Repeat("technical approach ", 900)
+	seedEntityStateRow(t, db, entityID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+		"status": "open",
+		"business_brief": map[string]any{
+			"summary":    brief,
+			"confidence": 10,
+		},
+		"mvp_spec": map[string]any{
+			"problem_statement":  specProblem,
+			"technical_approach": specApproach,
+		},
+	}, time.Now().UTC())
+	currentCtx := runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:    "evt-current",
+		Type:  events.EventType("validation.started"),
+		RunID: entityToolTestRunID,
+	}.WithEntityID(entityID).WithFlowInstance("validation/inst-1"))
+
+	whole, err := exec.Execute(currentCtx, "read_validation_case", map[string]any{})
+	if err != nil {
+		t.Fatalf("read_validation_case: %v", err)
+	}
+	rawWhole, err := json.Marshal(whole)
+	if err != nil {
+		t.Fatalf("marshal whole read: %v", err)
+	}
+	if len(rawWhole) < 40*1024 {
+		t.Fatalf("whole read fixture size = %d, want >= 40KB", len(rawWhole))
+	}
+	if strings.Contains(string(rawWhole), `"truncated"`) || strings.Contains(string(rawWhole), `"preview"`) || strings.Contains(string(rawWhole), `"follow_up"`) {
+		t.Fatalf("whole typed read contains lossy projection markers")
+	}
+	wholeMap, ok := whole.(map[string]any)
+	if !ok {
+		t.Fatalf("whole read = %T, want map", whole)
+	}
+	fields, _ := wholeMap["fields"].(map[string]any)
+	mvp, _ := fields["mvp_spec"].(map[string]any)
+	if asString(mvp["problem_statement"]) != specProblem {
+		t.Fatalf("whole read mvp_spec.problem_statement length = %d, want %d", len(asString(mvp["problem_statement"])), len(specProblem))
+	}
+
+	field, err := exec.Execute(currentCtx, "read_validation_case_mvp_spec", map[string]any{})
+	if err != nil {
+		t.Fatalf("read_validation_case_mvp_spec: %v", err)
+	}
+	fieldMap, ok := field.(map[string]any)
+	if !ok {
+		t.Fatalf("field read = %T, want map", field)
+	}
+	if asString(fieldMap["technical_approach"]) != specApproach {
+		t.Fatalf("field read technical_approach length = %d, want %d", len(asString(fieldMap["technical_approach"])), len(specApproach))
+	}
+}
+
 func TestEntityTools_SaveEntityFieldAcceptsAnnotatedJSONBFields(t *testing.T) {
 	ctx, exec := newAnnotatedEntityToolExecutor(t)
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{"flow_instance": "validation/inst-1"})
@@ -2435,11 +2497,15 @@ types:
   business_brief:
     summary: text
     confidence: integer
+  mvp_spec:
+    problem_statement: text
+    technical_approach: text
 `,
 			EntitiesYAML: `
 validation_case:
   status: text
   business_brief: business_brief
+  mvp_spec: mvp_spec
 `,
 			AgentsYAML: roleScopedEntityToolAgentYAML(actor),
 		},
