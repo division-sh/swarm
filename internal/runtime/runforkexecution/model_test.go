@@ -75,6 +75,43 @@ func TestBuildSelectedContractExecutionModelConsumesAdmissionAsEvidenceOnly(t *t
 	}
 }
 
+func TestBuildSelectedContractExecutionModelCarriesFrontierBlockers(t *testing.T) {
+	admission := store.RunForkContractFrontierAdmission{
+		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+		NonMutating:                  true,
+		HistoricalExecutionSupported: false,
+		ContractSelection: store.RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/contracts",
+			WorkflowName:    "workflow",
+			WorkflowVersion: "v1",
+		},
+		FrontierEventCount: 1,
+		FrontierEvents: []store.RunForkContractFrontierEvent{{
+			SourceEventID: "source-event",
+			EventName:     "ghost.event",
+		}},
+		UnsupportedBlockers: []store.RunForkUnsupportedBlocker{
+			{Code: store.RunForkBlockerContractFrontierExecutionUnsupported},
+			{Code: store.RunForkBlockerContractFrontierRouteUnresolved},
+		},
+	}
+
+	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{Admission: admission})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
+	}
+	for _, code := range []string{
+		store.RunForkBlockerContractFrontierExecutionUnsupported,
+		store.RunForkBlockerContractFrontierRouteUnresolved,
+		store.RunForkBlockerSelectedContractExecutionModelNonMutating,
+	} {
+		if !unsupportedBlockerHas(model.UnsupportedBlockers, code) {
+			t.Fatalf("unsupported blockers = %#v, want %s", model.UnsupportedBlockers, code)
+		}
+	}
+}
+
 func TestBuildSelectedContractExecutionModelFailsClosedOnExecutableAdmission(t *testing.T) {
 	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
 		Admission: store.RunForkContractFrontierAdmission{

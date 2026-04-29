@@ -154,6 +154,12 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		return store.RunForkSelectedContractExecutionAdmission{}, err
 	}
 
+	unsupportedBlockers := append([]store.RunForkUnsupportedBlocker(nil), req.ExecutionModel.UnsupportedBlockers...)
+	unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, store.RunForkUnsupportedBlocker{
+		Code:    store.RunForkBlockerSelectedContractExecutionAdmissionNonMutating,
+		Message: "selected-contract execution admission is non-mutating; handler execution and fork-local writes remain separately gated",
+	})
+
 	return store.RunForkSelectedContractExecutionAdmission{
 		Owner:                 store.RunForkSelectedContractExecutionAdmissionOwner,
 		FutureExecutionOwner:  store.RunForkSelectedContractExecutionOwner,
@@ -177,13 +183,10 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 			Owner:       store.RunForkSelectedContractBindingOwner,
 			Reason:      "execution admission consumes the durable selected contract source bound to the fork run before any mutation",
 		},
-		RequiredConsumers: append([]store.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.RequiredConsumers...),
-		BlockedSiblings:   append([]store.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.BlockedSiblings...),
-		InvalidPaths:      append([]store.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.InvalidPaths...),
-		UnsupportedBlockers: []store.RunForkUnsupportedBlocker{{
-			Code:    store.RunForkBlockerSelectedContractExecutionAdmissionNonMutating,
-			Message: "selected-contract execution admission is non-mutating; handler execution and fork-local writes remain separately gated",
-		}},
+		RequiredConsumers:   append([]store.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.RequiredConsumers...),
+		BlockedSiblings:     append([]store.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.BlockedSiblings...),
+		InvalidPaths:        append([]store.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.InvalidPaths...),
+		UnsupportedBlockers: unsupportedBlockers,
 	}, nil
 }
 

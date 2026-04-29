@@ -23,6 +23,12 @@ func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelReque
 		return store.RunForkSelectedContractExecution{}, fmt.Errorf("selected-contract frontier admission unexpectedly supports historical execution")
 	}
 
+	unsupportedBlockers := append([]store.RunForkUnsupportedBlocker(nil), admission.UnsupportedBlockers...)
+	unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, store.RunForkUnsupportedBlocker{
+		Code:    store.RunForkBlockerSelectedContractExecutionModelNonMutating,
+		Message: "selected-contract fork execution is model-only; executable fork work remains separately gated",
+	})
+
 	return store.RunForkSelectedContractExecution{
 		Owner:                store.RunForkSelectedContractExecutionModelOwner,
 		FutureExecutionOwner: store.RunForkSelectedContractExecutionOwner,
@@ -39,14 +45,25 @@ func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelReque
 			Owner:       store.RunForkSelectedContractBindingOwner,
 			Reason:      "future execution must consume the durable selected contract source bound to the fork run before handlers run",
 		},
-		RequiredConsumers: selectedContractExecutionRequiredConsumers(),
-		BlockedSiblings:   selectedContractExecutionBlockedSiblings(),
-		InvalidPaths:      selectedContractExecutionInvalidPaths(),
-		UnsupportedBlockers: []store.RunForkUnsupportedBlocker{{
-			Code:    store.RunForkBlockerSelectedContractExecutionModelNonMutating,
-			Message: "selected-contract fork execution is model-only; executable fork work remains separately gated",
-		}},
+		RequiredConsumers:   selectedContractExecutionRequiredConsumers(),
+		BlockedSiblings:     selectedContractExecutionBlockedSiblings(),
+		InvalidPaths:        selectedContractExecutionInvalidPaths(),
+		UnsupportedBlockers: unsupportedBlockers,
 	}, nil
+}
+
+func appendRunForkUnsupportedBlocker(blockers []store.RunForkUnsupportedBlocker, blocker store.RunForkUnsupportedBlocker) []store.RunForkUnsupportedBlocker {
+	code := strings.TrimSpace(blocker.Code)
+	if code == "" {
+		return blockers
+	}
+	for _, existing := range blockers {
+		if strings.TrimSpace(existing.Code) == code {
+			return blockers
+		}
+	}
+	blocker.Code = code
+	return append(blockers, blocker)
 }
 
 func selectedContractFrontierEvents(events []store.RunForkContractFrontierEvent) []store.RunForkSelectedContractFrontierEvent {

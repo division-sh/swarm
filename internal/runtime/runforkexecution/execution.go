@@ -77,6 +77,9 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if frontier.FrontierEventCount == 0 {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires selected frontier events")
 	}
+	if err := validateSelectedContractExecutionFrontierForMutation(frontier); err != nil {
+		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner}, err
+	}
 	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{Admission: frontier})
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
@@ -139,6 +142,22 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		ForkEvents:                         published,
 	}
 	return result, err
+}
+
+func validateSelectedContractExecutionFrontierForMutation(frontier store.RunForkContractFrontierAdmission) error {
+	for _, blocker := range frontier.UnsupportedBlockers {
+		code := strings.TrimSpace(blocker.Code)
+		switch code {
+		case "", store.RunForkBlockerContractFrontierExecutionUnsupported:
+			continue
+		default:
+			if msg := strings.TrimSpace(blocker.Message); msg != "" {
+				return fmt.Errorf("%s: %s", code, msg)
+			}
+			return fmt.Errorf("%s", code)
+		}
+	}
+	return nil
 }
 
 func cleanupSelectedContractExecutionFailure(ctx context.Context, store *store.PostgresStore, forkRunID string, cause error) error {

@@ -198,7 +198,7 @@ func TestExecuteSelectedContractRunForkPreservesSessionBlocker(t *testing.T) {
 	}
 }
 
-func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(t *testing.T) {
+func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterialization(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
@@ -217,8 +217,8 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
-	at := time.Unix(1700002350, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "invalid event name", at)
+	at := time.Unix(1700002325, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "ghost.event", at)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
@@ -230,8 +230,65 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 			contractsRoot,
 		),
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid event type") {
-		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want publish event type validation failure", err)
+	if err == nil || !strings.Contains(err.Error(), store.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want unresolved frontier blocker", err)
+	}
+	if result.Materialization.ForkRunID != "" || result.ExecutedEventCount != 0 {
+		t.Fatalf("result mutated before unresolved frontier rejection: %#v", result)
+	}
+
+	var forkRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, sourceRunID).Scan(&forkRows); err != nil {
+		t.Fatalf("count fork rows: %v", err)
+	}
+	if forkRows != 0 {
+		t.Fatalf("fork rows after unresolved frontier rejection = %d, want 0", forkRows)
+	}
+}
+
+func TestExecuteSelectedContractRunForkCleansUpBeforeActivationFailure(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	afterEventID := uuid.NewString()
+	at := time.Unix(1700002350, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4)
+	`, sourceRunID, afterEventID, entityID, at.Add(time.Second)); err != nil {
+		t.Fatalf("seed post-fork source event: %v", err)
+	}
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+	})
+	if err == nil || !strings.Contains(err.Error(), "source_events_advanced_after_fork_point") {
+		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want source-advanced activation failure", err)
 	}
 	if result.Activation.SourceFrozen || result.Activation.ForkRunStatus == store.RunForkActivatedStatus {
 		t.Fatalf("activation mutated before publish failure cleanup: %#v", result.Activation)
