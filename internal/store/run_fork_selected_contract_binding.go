@@ -79,8 +79,22 @@ func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, 
 	if _, err := uuid.Parse(forkRunID); err != nil {
 		return RunForkSelectedContractBinding{}, false, fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
-	if err := s.requireRunForkSelectedContractBindingCapabilities(ctx); err != nil {
+	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
 		return RunForkSelectedContractBinding{}, false, err
+	}
+	if !catalog.hasColumns(
+		runForkSelectedContractBindingTable,
+		"fork_run_id",
+		"source_run_id",
+		"fork_event_id",
+		"mode",
+		"contracts_root",
+		"workflow_name",
+		"workflow_version",
+		"created_at",
+	) {
+		return RunForkSelectedContractBinding{}, false, nil
 	}
 	binding, err := loadRunForkSelectedContractBinding(ctx, s.DB, forkRunID)
 	if err == sql.ErrNoRows {
@@ -93,6 +107,9 @@ func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, 
 }
 
 func (s *PostgresStore) RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (RunForkSelectedContractBinding, error) {
+	if err := s.requireRunForkSelectedContractBindingCapabilities(ctx); err != nil {
+		return RunForkSelectedContractBinding{}, err
+	}
 	binding, ok, err := s.LoadRunForkSelectedContractBinding(ctx, forkRunID)
 	if err != nil {
 		return RunForkSelectedContractBinding{}, err

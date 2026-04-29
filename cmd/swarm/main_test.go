@@ -712,6 +712,42 @@ func TestRunForkCommand_ActivateUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	}
 }
 
+func TestRunForkCommand_ActivateNonSelectedDoesNotRequireSelectedBindingSchema(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	pg := &store.PostgresStore{DB: db}
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000325, 0).UTC()
+	ctx := context.Background()
+	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
+	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE run_fork_selected_contract_bindings`); err != nil {
+		t.Fatalf("drop selected binding table: %v", err)
+	}
+
+	var buf bytes.Buffer
+	code := runForkCommand(ctx, t.TempDir(), []string{
+		"--activate",
+		"--run", materialized.ForkRunID,
+		"--json",
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+	}
+	var result store.RunForkActivation
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("decode fork activation json: %v\n%s", err, buf.String())
+	}
+	if !result.Activated || !result.SourceFrozen || result.ForkRunID != materialized.ForkRunID {
+		t.Fatalf("activation result = %#v", result)
+	}
+}
+
 func TestRunForkCommand_ActivateSelectedBindingConsumesRuntimeAdmission(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
