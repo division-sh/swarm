@@ -246,6 +246,66 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	}
 }
 
+func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE OR REPLACE FUNCTION fail_selected_contract_execution_lineage_insert()
+		RETURNS trigger AS $$
+		BEGIN
+			RAISE EXCEPTION 'forced selected execution lineage failure';
+		END;
+		$$ LANGUAGE plpgsql;
+
+		CREATE TRIGGER fail_selected_contract_execution_lineage_insert
+		BEFORE INSERT ON run_fork_selected_contract_executions
+		FOR EACH ROW EXECUTE FUNCTION fail_selected_contract_execution_lineage_insert();
+	`); err != nil {
+		t.Fatalf("install lineage failure trigger: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002335, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+	})
+	if err == nil || !strings.Contains(err.Error(), "forced selected execution lineage failure") {
+		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want forced lineage publish failure", err)
+	}
+	if result.Materialization.ForkRunID == "" {
+		t.Fatalf("expected materialization before publish failure, got %#v", result.Materialization)
+	}
+	if result.Activation.SourceFrozen || result.Activation.ForkRunStatus == store.RunForkActivatedStatus {
+		t.Fatalf("activation mutated before publish failure cleanup: %#v", result.Activation)
+	}
+
+	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
+}
+
 func TestExecuteSelectedContractRunForkCleansUpBeforeActivationFailure(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -293,6 +353,12 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationFailure(t *testin
 	if result.Activation.SourceFrozen || result.Activation.ForkRunStatus == store.RunForkActivatedStatus {
 		t.Fatalf("activation mutated before publish failure cleanup: %#v", result.Activation)
 	}
+	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
+}
+
+func assertSelectedContractExecutionCleanup(t *testing.T, db *sql.DB, sourceRunID, forkRunID string) {
+	t.Helper()
+	ctx := context.Background()
 	var sourceStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
 		t.Fatalf("load source status: %v", err)
@@ -300,23 +366,36 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationFailure(t *testin
 	if sourceStatus != "running" {
 		t.Fatalf("source status = %q, want running", sourceStatus)
 	}
-	var forkRows, forkEvents, forkState, lineageRows int
+	var forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, sourceRunID).Scan(&forkRows); err != nil {
 		t.Fatalf("count fork rows: %v", err)
 	}
-	if result.Materialization.ForkRunID != "" {
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkEvents); err != nil {
+	if forkRunID != "" {
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`, forkRunID).Scan(&forkEvents); err != nil {
 			t.Fatalf("count fork events: %v", err)
 		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkState); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`, forkRunID).Scan(&forkDeliveries); err != nil {
+			t.Fatalf("count fork deliveries: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts`).Scan(&forkReceipts); err != nil {
+			t.Fatalf("count event receipts after cleanup: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid`, forkRunID).Scan(&forkState); err != nil {
 			t.Fatalf("count fork state: %v", err)
 		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&lineageRows); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, forkRunID).Scan(&forkMutations); err != nil {
+			t.Fatalf("count fork mutations: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_bindings WHERE fork_run_id = $1::uuid`, forkRunID).Scan(&bindingRows); err != nil {
+			t.Fatalf("count fork binding: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`, forkRunID).Scan(&lineageRows); err != nil {
 			t.Fatalf("count fork lineage: %v", err)
 		}
 	}
-	if forkRows != 0 || forkEvents != 0 || forkState != 0 || lineageRows != 0 {
-		t.Fatalf("cleanup left fork rows runs:%d events:%d state:%d lineage:%d", forkRows, forkEvents, forkState, lineageRows)
+	if forkRows != 0 || forkEvents != 0 || forkDeliveries != 0 || forkReceipts != 0 || forkState != 0 || forkMutations != 0 || bindingRows != 0 || lineageRows != 0 {
+		t.Fatalf("cleanup left fork rows runs:%d events:%d deliveries:%d receipts:%d state:%d mutations:%d bindings:%d lineage:%d",
+			forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows)
 	}
 }
 
