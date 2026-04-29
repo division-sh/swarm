@@ -428,7 +428,7 @@ func (r *EmitRegistry) EventSchemaForActorTool(actor models.AgentConfig, toolNam
 	if !ok {
 		return "", EmitSchema{}, false
 	}
-	return eventType, schema, true
+	return eventType, closeGeneratedEmitSchema(schema), true
 }
 
 func (r *EmitRegistry) IsEmitToolAllowedForRole(role, toolName string) bool {
