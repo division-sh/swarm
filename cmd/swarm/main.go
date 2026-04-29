@@ -34,6 +34,7 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimerunforkadmission "swarm/internal/runtime/runforkadmission"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
@@ -330,6 +331,8 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", "", "Optional path to Swarm runtime config")
+	contractsPath := fs.String("contracts", "", "Path to selected Swarm contract bundle root for non-mutating dry-run admission")
+	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	storeMode := fs.String("store", "postgres", "Store mode: postgres")
 	runID := fs.String("run", "", "Source run ID to plan from")
 	at := fs.String("at", "", "Fork point event UUID or RFC3339 timestamp")
@@ -358,6 +361,12 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 	if modeCount == 0 {
 		if out != nil {
 			fmt.Fprintln(out, "fork failed: mutating fork execution is not implemented; use --dry-run, --materialize-only, or --activate")
+		}
+		return 2
+	}
+	if strings.TrimSpace(*contractsPath) != "" && !*dryRun {
+		if out != nil {
+			fmt.Fprintln(out, "fork failed: --contracts is only supported for non-mutating --dry-run admission")
 		}
 		return 2
 	}
@@ -449,6 +458,35 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 		}
 		return 1
 	}
+	if contracts := strings.TrimSpace(*contractsPath); contracts != "" {
+		contractsRoot, err := normalizeContractsRoot(resolveContractsPath(repo, contracts))
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: resolve contracts: %v\n", err)
+			}
+			return 1
+		}
+		_, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvePath(repo, *platformSpecPath))
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: load selected contracts: %v\n", err)
+			}
+			return 1
+		}
+		source := semanticview.Wrap(bundle)
+		admission, err := runtimerunforkadmission.AdmitContractFrontier(runtimerunforkadmission.ContractFrontierRequest{
+			Plan:              plan,
+			Source:            source,
+			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
+		})
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: admit selected contract frontier: %v\n", err)
+			}
+			return 1
+		}
+		plan.ContractFrontierAdmission = &admission
+	}
 	if *asJSON {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
@@ -533,6 +571,15 @@ func printRunForkPlan(w io.Writer, plan store.RunForkPlan) {
 				item.Classification,
 			)
 		}
+	}
+	if plan.ContractFrontierAdmission != nil {
+		admission := plan.ContractFrontierAdmission
+		fmt.Fprintf(w, "Contract Frontier Admission: owner=%s non_mutating=%t frontier_events=%d historical_execution_supported=%t\n",
+			admission.Owner,
+			admission.NonMutating,
+			admission.FrontierEventCount,
+			admission.HistoricalExecutionSupported,
+		)
 	}
 }
 
