@@ -672,7 +672,7 @@ func emitToolDefinitions(cfg models.AgentConfig, authority runtimeauthority.Prov
 func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrained bool) []llm.ToolDefinition {
 	out := make([]llm.ToolDefinition, 0, len(in))
 	for _, t := range in {
-		if runtimetools.IsUniversal(t.Name) {
+		if runtimetools.IsUniversal(t.Name) || runtimetools.IsRoleScopedEntityTool(t.Name) {
 			out = append(out, t)
 			continue
 		}

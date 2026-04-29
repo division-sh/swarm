@@ -95,9 +95,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 			processWarn("tool-executor", "mcp discovery warning: %v", err)
 		}
 	}
-	exec.authorizer = NewToolAuthorizer(bus, func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
-		return classifyToolAuthorization(actor, toolName, exec.authority, exec.emitRegistry)
-	})
+	exec.authorizer = NewToolAuthorizer(bus, exec.toolAuthorizationDecision)
 	exec.validator = NewToolInputValidator(exec.contractDefinitionsForActor)
 	exec.dispatcher = NewToolDispatcher(
 		func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
@@ -112,6 +110,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
 			return exec.execMCPTool(ctx, actor, tool, input)
 		},
+		exec.execRoleScopedEntityTool,
 		exec.buildToolHandlers(),
 	)
 	return exec
@@ -188,7 +187,7 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 	filtered := make([]llm.ToolDefinition, 0, len(names))
 	for _, name := range names {
 		entry := entries[name]
-		if !classifyToolAuthorization(actor, name, e.authority, e.emitRegistry).allowed {
+		if !e.toolAuthorizationDecision(actor, name).allowed {
 			continue
 		}
 		filtered = append(filtered, llm.ToolDefinition{
@@ -207,7 +206,86 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 }
 
 func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
-	return capabilitySetForActorWithDeps(actor, names, requestAllowed, e.authority, e.emitRegistry)
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	seen := map[string]struct{}{}
+	for _, raw := range names {
+		name := normalizeNativeToolName(strings.TrimSpace(raw))
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		decision := e.toolAuthorizationDecision(actor, name)
+		cap := toolcapabilities.Capability{
+			Name:               name,
+			Kind:               toolKindPolicy(name),
+			Visible:            decision.allowed,
+			Callable:           decision.allowed,
+			ContextRequirement: toolContextRequirementPolicy(name),
+			AuthorizationClass: string(decision.class),
+		}
+		if len(requestAllowed) > 0 {
+			if _, ok := requestAllowed[name]; !ok {
+				cap.Visible = false
+				cap.Callable = false
+				cap.DenialReason = "request_not_allowed"
+				caps = append(caps, cap)
+				continue
+			}
+		}
+		if !decision.allowed {
+			cap.DenialReason = "tool_not_allowed"
+		}
+		caps = append(caps, cap)
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
+func (e *Executor) toolAuthorizationDecision(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
+	toolName = normalizeNativeToolName(toolName)
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
+	if roleScopedEntityToolsEnabledForActor(source, actor) {
+		if _, legacy := legacyEntityToolSurfaceNames[toolName]; legacy {
+			return toolAuthorizationDecision{
+				ownership: toolOwnershipPlatformBuiltin,
+				class:     toolAuthorizationDenied,
+				allowed:   false,
+			}
+		}
+		if _, _, ok := roleScopedEntityToolSpecForActor(source, actor, toolName); ok {
+			return toolAuthorizationDecision{
+				ownership: toolOwnershipPlatformBuiltin,
+				class:     toolAuthorizationRoleScoped,
+				allowed:   true,
+			}
+		}
+	}
+	decision := classifyToolAuthorization(actor, toolName, e.authority, e.emitRegistry)
+	if decision.allowed {
+		return decision
+	}
+	if _, _, ok := roleScopedEntityToolSpecForActor(source, actor, toolName); ok {
+		return toolAuthorizationDecision{
+			ownership: toolOwnershipPlatformBuiltin,
+			class:     toolAuthorizationRoleScoped,
+			allowed:   true,
+		}
+	}
+	return decision
+}
+
+func (e *Executor) RoleScopedEntityToolsEnabledForActor(actor models.AgentConfig) bool {
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
+	return roleScopedEntityToolsEnabledForActor(source, actor)
 }
 
 func (e *Executor) Execute(ctx context.Context, name string, input any) (any, error) {

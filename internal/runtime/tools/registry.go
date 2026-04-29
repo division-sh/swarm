@@ -137,6 +137,10 @@ func registeredToolsForActor(source semanticview.Source, actor models.AgentConfi
 	if err != nil {
 		return nil, err
 	}
+	roleScopedEntitySurface := roleScopedEntityToolsEnabledForActor(source, actor)
+	if roleScopedEntitySurface {
+		removeLegacyEntityToolSurface(entries)
+	}
 	for name, entry := range builtinRegisteredTools(source, &actor) {
 		entries[name] = entry
 	}
@@ -178,6 +182,9 @@ func registeredToolsForActor(source semanticview.Source, actor models.AgentConfi
 			continue
 		}
 		entries[name] = tool
+	}
+	if roleScopedEntitySurface {
+		removeLegacyEntityToolSurface(entries)
 	}
 	removeUnavailableEntityScopedUniversalTools(entries, source, actor)
 	return entries, nil

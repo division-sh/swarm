@@ -159,8 +159,9 @@ func (s *relayAwareToolExecutorStub) PersistOversizedToolResultRelay(_ context.C
 }
 
 type actorScopedToolExecutorStub struct {
-	defs      []llm.ToolDefinition
-	actorDefs []llm.ToolDefinition
+	defs       []llm.ToolDefinition
+	actorDefs  []llm.ToolDefinition
+	roleScoped bool
 }
 
 func (s actorScopedToolExecutorStub) Execute(context.Context, string, any) (any, error) {
@@ -173,6 +174,10 @@ func (s actorScopedToolExecutorStub) ToolDefinitions() []llm.ToolDefinition {
 
 func (s actorScopedToolExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
 	return append([]llm.ToolDefinition(nil), s.actorDefs...)
+}
+
+func (s actorScopedToolExecutorStub) RoleScopedEntityToolsEnabledForActor(models.AgentConfig) bool {
+	return s.roleScoped
 }
 
 func (s actorScopedToolExecutorStub) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
@@ -564,6 +569,34 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 	}
 	if !strings.Contains(tools[0].Description, "actor scoped\n\nUsage:\nUse CEL equality with ==.") {
 		t.Fatalf("tool description = %q, want usage appended", tools[0].Description)
+	}
+}
+
+func TestGatewayMCPToolsForRequest_DoesNotFallbackToRuntimeWideToolsForRoleScopedActor(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	g := NewGateway(actorScopedToolExecutorStub{
+		defs: []llm.ToolDefinition{
+			{Name: "get_entity", Description: "runtime-wide legacy entity tool"},
+		},
+		actorDefs:  nil,
+		roleScoped: true,
+	}, "", GatewayHooks{
+		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+			return models.AgentConfig{ID: agentID, Role: "validation_orchestrator"}, true
+		},
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	putTestTurnContext(t, registry, "ctx-role-scoped-empty", TurnContext{
+		Actor:     models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+
+	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-role-scoped-empty")
+	tools := mustMCPToolsForRequest(t, g, req)
+	if len(tools) != 0 {
+		t.Fatalf("role-scoped empty actor catalog fell back to runtime-wide tools: %#v", tools)
 	}
 }
 

@@ -587,9 +587,13 @@ type FlowSchemaDocument struct {
 	TerminalStates    []string                 `yaml:"terminal_states"`
 	States            []string                 `yaml:"states"`
 	Pins              FlowPins                 `yaml:"pins"`
+	ToolSurface       FlowToolSurfaceContract  `yaml:"tool_surface"`
 	RequiredAgents    []FlowRequiredAgent      `yaml:"required_agents"`
 	InstanceVariables FlowInstanceVariables    `yaml:"instance_variables"`
 	AutoEmitOnCreate  AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
+}
+type FlowToolSurfaceContract struct {
+	RoleScopedEntityTools bool `yaml:"role_scoped_entity_tools"`
 }
 type FlowInstanceVariables struct {
 	Description string                  `yaml:"description"`

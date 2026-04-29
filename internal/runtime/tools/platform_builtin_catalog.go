@@ -26,6 +26,13 @@ func builtinRegisteredTools(source semanticview.Source, actor *models.AgentConfi
 }
 
 func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.AgentConfig) map[string]ContractSchemaEntry {
+	if actor != nil && roleScopedEntityToolsEnabledForActor(source, *actor) {
+		contract, ok := resolveEntityToolContract(source, actor)
+		if !ok {
+			return map[string]ContractSchemaEntry{}
+		}
+		return roleScopedEntityToolSchemaEntriesForActor(source, *actor, contract)
+	}
 	readContracts := actorOwnedReadTargetContracts(source, actor)
 	readTargetSchema := entityReadTargetInputSchemaForContracts(readContracts)
 	out := genericEntityRuntimeContractSchemas(readTargetSchema)

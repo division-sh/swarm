@@ -174,6 +174,35 @@ func TestFilterTools_DefaultDeniesNonUniversalToolsWhenNoToolList(t *testing.T) 
 	}
 }
 
+func TestFilterTools_RetainsRoleScopedEntityToolsOnNonPrecomposedPath(t *testing.T) {
+	allowed, constrained := extractAllowedToolSet(models.AgentConfig{})
+	if constrained {
+		t.Fatal("expected unconstrained tool set when no tools are configured")
+	}
+	tools := []llm.ToolDefinition{
+		{Name: "read_validation_case"},
+		{Name: "save_validation_case_business_brief"},
+		{Name: "update_validation_case_business_brief_summary"},
+		{Name: "schedule"},
+	}
+	filtered := filterTools(tools, allowed, constrained)
+	names := make([]string, 0, len(filtered))
+	for _, tool := range filtered {
+		names = append(names, tool.Name)
+	}
+	for _, want := range []string{"read_validation_case", "save_validation_case_business_brief", "update_validation_case_business_brief_summary"} {
+		if !containsString(names, want) {
+			t.Fatalf("expected role-scoped entity tool %s preserved, got %v", want, names)
+		}
+	}
+	if containsString(names, "schedule") {
+		t.Fatalf("expected unrelated non-universal tool filtered out, got %v", names)
+	}
+	if runtimetools.IsRoleScopedEntityTool("read_file") {
+		t.Fatal("read_file must not be classified as a role-scoped entity tool")
+	}
+}
+
 func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundleRoot := writeAgentPromptTestBundle(t, repoRoot)
