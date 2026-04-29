@@ -149,6 +149,10 @@ active_issues:
     title: Gate non-mutating fork contract/frontier/route admission
     maps_to:
       - timestamp_fork_replay_resume_ownership
+  - id: 594
+    title: Define selected-contract fork execution admission from durable binding
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
     maps_to:
@@ -249,6 +253,7 @@ nodes:
       - selected-contract timestamp-fork re-admission needs a non-mutating contract/frontier/route admission owner before node/system delivery facts can become executable fork work
       - selected-contract fork execution needs a non-mutating owner model before mutation; the model must consume frontier admission as evidence only and classify contract binding, fork run_id context, handler execution, receipts, dead letters, idempotency, emitted follow-ups, timers, routes, sessions, source-advanced policy, and contract-swap boot/resume
       - selected-contract fork execution needs a durable fork-run selected-source binding owner; CLI/API arguments, dry-run JSON, and local model output are not authoritative for future execution
+      - selected-contract fork execution needs a runtime-side non-mutating admission/context owner that consumes the durable selected-source binding before any handler execution or fork-local delivery/outcome mutation
     representative_issues:
       - 564
       - 565
@@ -259,6 +264,7 @@ nodes:
       - 583
       - 585
       - 590
+      - 594
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
