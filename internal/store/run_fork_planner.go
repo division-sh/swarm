@@ -42,6 +42,7 @@ type RunForkPlan struct {
 	ExecutionReady            bool                              `json:"execution_ready"`
 	ReplayResumeAdmission     RunForkReplayResumeAdmission      `json:"replay_resume_admission"`
 	ContractFrontierAdmission *RunForkContractFrontierAdmission `json:"contract_frontier_admission,omitempty"`
+	SelectedContractExecution *RunForkSelectedContractExecution `json:"selected_contract_execution,omitempty"`
 	Entities                  []RunForkEntityState              `json:"entities,omitempty"`
 	PendingWork               []RunForkPendingWork              `json:"pending_work,omitempty"`
 	UnsupportedBlockers       []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`

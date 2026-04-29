@@ -518,6 +518,29 @@ func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *test
 	if !runForkPlanHasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierExecutionUnsupported) {
 		t.Fatalf("contract frontier blockers = %#v, want execution unsupported", admission.UnsupportedBlockers)
 	}
+	model := plan.SelectedContractExecution
+	if model == nil {
+		t.Fatalf("SelectedContractExecution = nil; output=%s", buf.String())
+	}
+	if model.Owner != store.RunForkSelectedContractExecutionModelOwner ||
+		model.FutureExecutionOwner != store.RunForkSelectedContractExecutionOwner ||
+		!model.NonMutating ||
+		model.ExecutionSupported {
+		t.Fatalf("selected-contract execution model = %#v", model)
+	}
+	if model.AdmissionOwner != store.RunForkContractFrontierAdmissionOwner ||
+		model.AdmissionUse != store.RunForkSelectedContractExecutionAdmissionUseEvidenceOnly {
+		t.Fatalf("selected-contract execution admission use = %#v", model)
+	}
+	if !runForkPlanHasBoundary(model.InvalidPaths, "copy_source_event_deliveries", store.RunForkSelectedContractDispositionInvalid) {
+		t.Fatalf("selected-contract execution invalid paths = %#v", model.InvalidPaths)
+	}
+	if !runForkPlanHasBoundary(model.RequiredConsumers, "handler_execution", store.RunForkSelectedContractDispositionFutureOwnerRequired) {
+		t.Fatalf("selected-contract execution consumers = %#v", model.RequiredConsumers)
+	}
+	if !runForkPlanHasBlocker(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractExecutionModelNonMutating) {
+		t.Fatalf("selected-contract execution blockers = %#v", model.UnsupportedBlockers)
+	}
 }
 
 func TestRunForkCommand_ContractsRemainDryRunOnly(t *testing.T) {
@@ -735,6 +758,15 @@ func runForkPlanHasBlocker(blockers []store.RunForkUnsupportedBlocker, code stri
 func runForkPlanHasString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func runForkPlanHasBoundary(values []store.RunForkSelectedContractExecutionBoundary, concept, disposition string) bool {
+	for _, value := range values {
+		if value.Concept == concept && value.Disposition == disposition {
 			return true
 		}
 	}

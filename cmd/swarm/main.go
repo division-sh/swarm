@@ -35,6 +35,7 @@ import (
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimerunforkadmission "swarm/internal/runtime/runforkadmission"
+	runtimerunforkexecution "swarm/internal/runtime/runforkexecution"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
@@ -485,7 +486,17 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 			}
 			return 1
 		}
+		executionModel, err := runtimerunforkexecution.BuildSelectedContractExecutionModel(runtimerunforkexecution.SelectedContractExecutionModelRequest{
+			Admission: admission,
+		})
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: model selected contract execution: %v\n", err)
+			}
+			return 1
+		}
 		plan.ContractFrontierAdmission = &admission
+		plan.SelectedContractExecution = &executionModel
 	}
 	if *asJSON {
 		enc := json.NewEncoder(out)
@@ -579,6 +590,15 @@ func printRunForkPlan(w io.Writer, plan store.RunForkPlan) {
 			admission.NonMutating,
 			admission.FrontierEventCount,
 			admission.HistoricalExecutionSupported,
+		)
+	}
+	if plan.SelectedContractExecution != nil {
+		model := plan.SelectedContractExecution
+		fmt.Fprintf(w, "Selected Contract Execution Model: owner=%s non_mutating=%t execution_supported=%t future_owner=%s\n",
+			model.Owner,
+			model.NonMutating,
+			model.ExecutionSupported,
+			model.FutureExecutionOwner,
 		)
 	}
 }
