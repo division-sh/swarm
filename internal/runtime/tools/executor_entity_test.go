@@ -13,9 +13,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	llm "swarm/internal/runtime/llm"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
@@ -243,6 +246,144 @@ func TestEntityTools_CreateEntityAcceptsAnnotatedJSONBFields(t *testing.T) {
 	checklist, ok := kit["checklist"].([]any)
 	if !ok || len(checklist) != 2 {
 		t.Fatalf("validation_kit.checklist = %#v, want persisted array", kit["checklist"])
+	}
+}
+
+func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testing.T) {
+	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
+		"create_entity",
+		"get_entity",
+		"save_entity_field",
+		"query_entities",
+	}}
+	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	_, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+
+	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
+	for _, name := range []string{
+		"read_validation_case",
+		"read_validation_case_status",
+		"read_validation_case_business_brief",
+		"save_validation_case_business_brief",
+		"update_validation_case_business_brief_summary",
+		"update_validation_case_business_brief_confidence",
+	} {
+		if _, ok := names[name]; !ok {
+			t.Fatalf("expected generated role-scoped tool %q in %#v", name, sortedRoleScopedToolNames(names))
+		}
+	}
+	for _, name := range []string{
+		"create_entity",
+		"get_entity",
+		"get_subject_status",
+		"query_entities",
+		"query_metrics",
+		"save_entity_field",
+		"search_entities",
+	} {
+		if _, ok := names[name]; ok {
+			t.Fatalf("legacy entity tool %q remained visible in %#v", name, sortedRoleScopedToolNames(names))
+		}
+	}
+
+	saveSchema := names["save_validation_case_business_brief"].Schema.(map[string]any)
+	props, _ := saveSchema["properties"].(map[string]any)
+	if _, ok := props["entity_id"]; ok {
+		t.Fatalf("generated save schema exposes entity_id: %#v", saveSchema)
+	}
+	if _, ok := props["value"]; !ok {
+		t.Fatalf("generated save schema missing value: %#v", saveSchema)
+	}
+
+	caps := exec.ToolCapabilitiesForActor(actor, []string{"read_validation_case", "get_entity"}, nil)
+	if cap, ok := caps.Capability("read_validation_case"); !ok || !cap.Visible || !cap.Callable {
+		t.Fatalf("read_validation_case capability = %#v, ok=%v; want visible/callable", cap, ok)
+	}
+	if cap, ok := caps.Capability("get_entity"); !ok || cap.Visible || cap.Callable {
+		t.Fatalf("get_entity capability = %#v, ok=%v; want denied for opted-in actor", cap, ok)
+	}
+}
+
+func TestRoleScopedEntityTools_NonOptedActorKeepsLegacySurface(t *testing.T) {
+	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"get_entity", "query_entities"}}
+	bundle := loadRoleScopedEntityToolBundle(t, actor, false)
+	_, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+
+	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
+	for _, name := range []string{"get_entity", "query_entities"} {
+		if _, ok := names[name]; !ok {
+			t.Fatalf("expected legacy entity tool %q without opt-in in %#v", name, sortedRoleScopedToolNames(names))
+		}
+	}
+	if _, ok := names["read_validation_case"]; ok {
+		t.Fatalf("generated role-scoped tool was visible without opt-in in %#v", sortedRoleScopedToolNames(names))
+	}
+}
+
+func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing.T) {
+	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
+		"create_entity",
+		"get_entity",
+		"save_entity_field",
+		"query_entities",
+	}}
+	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	currentID := uuid.NewString()
+	siblingID := uuid.NewString()
+	foreignID := uuid.NewString()
+	seedEntityStateRow(t, db, currentID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+		"status":         "open",
+		"business_brief": map[string]any{"summary": "before", "confidence": 1},
+	}, time.Now().UTC())
+	seedEntityStateRow(t, db, siblingID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+		"status":         "open",
+		"business_brief": map[string]any{"summary": "sibling", "confidence": 2},
+	}, time.Now().UTC())
+	seedEntityStateRow(t, db, foreignID, "", "other/inst-1", "other_case", "queued", map[string]any{
+		"status": "foreign",
+	}, time.Now().UTC())
+	currentCtx := runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:    "evt-current",
+		Type:  events.EventType("validation.started"),
+		RunID: entityToolTestRunID,
+	}.WithEntityID(currentID).WithFlowInstance("validation/inst-1"))
+
+	if _, err := exec.Execute(currentCtx, "save_validation_case_business_brief", map[string]any{
+		"value": map[string]any{"summary": "after", "confidence": 9},
+	}); err != nil {
+		t.Fatalf("save_validation_case_business_brief: %v", err)
+	}
+	got, err := exec.Execute(currentCtx, "read_validation_case_business_brief", map[string]any{})
+	if err != nil {
+		t.Fatalf("read_validation_case_business_brief: %v", err)
+	}
+	brief, ok := got.(map[string]any)
+	if !ok || strings.TrimSpace(asString(brief["summary"])) != "after" {
+		t.Fatalf("read current business_brief = %#v, want updated current entity", got)
+	}
+	if got := persistedEntityField(t, db, siblingID, "business_brief"); strings.Contains(got, "after") {
+		t.Fatalf("generated save touched sibling entity: %s", got)
+	}
+
+	if _, err := exec.Execute(currentCtx, "read_validation_case", map[string]any{"entity_id": siblingID}); err == nil {
+		t.Fatalf("read_validation_case accepted caller-supplied entity_id")
+	}
+	if _, err := exec.Execute(ctx, "read_validation_case", map[string]any{}); err == nil {
+		t.Fatalf("read_validation_case succeeded without current inbound entity")
+	}
+	foreignCtx := runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:    "evt-foreign",
+		Type:  events.EventType("other.started"),
+		RunID: entityToolTestRunID,
+	}.WithEntityID(foreignID).WithFlowInstance("other/inst-1"))
+	if _, err := exec.Execute(foreignCtx, "read_validation_case", map[string]any{}); err == nil {
+		t.Fatalf("read_validation_case accepted foreign current entity")
+	}
+	for _, legacy := range []string{"get_entity", "create_entity"} {
+		if _, err := exec.Execute(currentCtx, legacy, map[string]any{"entity_id": currentID}); err == nil {
+			t.Fatalf("legacy tool %s remained callable for opted-in actor", legacy)
+		}
 	}
 }
 
@@ -2266,6 +2407,96 @@ terminal_states: [closed]
 	return bundle
 }
 
+func loadRoleScopedEntityToolBundle(t *testing.T, actor models.AgentConfig, optIn bool) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	toolSurface := ""
+	if optIn {
+		toolSurface = `
+tool_surface:
+  role_scoped_entity_tools: true
+`
+	}
+	return loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
+		"validation": {
+			SchemaYAML: fmt.Sprintf(`
+name: validation
+mode: static
+initial_state: queued
+states: [queued, ready, closed]
+terminal_states: [closed]
+%s`, toolSurface),
+			TypesYAML: `
+types:
+  business_brief:
+    summary: text
+    confidence: integer
+`,
+			EntitiesYAML: `
+validation_case:
+  status: text
+  business_brief: business_brief
+`,
+			AgentsYAML: roleScopedEntityToolAgentYAML(actor),
+		},
+		"other": {
+			EntitiesYAML: `
+other_case:
+  status: text
+`,
+		},
+	})
+}
+
+func roleScopedEntityToolAgentYAML(actor models.AgentConfig) string {
+	var builder strings.Builder
+	builder.WriteString(strings.TrimSpace(actor.ID))
+	builder.WriteString(":\n")
+	builder.WriteString("  id: ")
+	builder.WriteString(strings.TrimSpace(actor.ID))
+	builder.WriteString("\n")
+	if role := strings.TrimSpace(actor.Role); role != "" {
+		builder.WriteString("  role: ")
+		builder.WriteString(role)
+		builder.WriteString("\n")
+	}
+	if len(actor.Tools) > 0 {
+		builder.WriteString("  tools:\n")
+		for _, tool := range actor.Tools {
+			tool = strings.TrimSpace(tool)
+			if tool == "" {
+				continue
+			}
+			builder.WriteString("    - ")
+			builder.WriteString(tool)
+			builder.WriteString("\n")
+		}
+	}
+	builder.WriteString("  entity_writes:\n")
+	builder.WriteString("    validation_case:\n")
+	builder.WriteString("      save:\n")
+	builder.WriteString("        - business_brief\n")
+	return builder.String()
+}
+
+func roleScopedToolDefinitionMap(defs []llm.ToolDefinition) map[string]llm.ToolDefinition {
+	out := make(map[string]llm.ToolDefinition, len(defs))
+	for _, def := range defs {
+		if name := strings.TrimSpace(def.Name); name != "" {
+			out[name] = def
+		}
+	}
+	return out
+}
+
+func sortedRoleScopedToolNames(defs map[string]llm.ToolDefinition) []string {
+	names := make([]string, 0, len(defs))
+	for name := range defs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 type entityToolFlowFixture struct {
 	SchemaYAML   string
 	TypesYAML    string
@@ -2360,6 +2591,19 @@ func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, _ string, flowInstan
 	`, entityToolTestRunID, entityID, flowInstance, entityType, currentState, string(fieldsJSON), enteredAt); err != nil {
 		t.Fatalf("seed entity_state(%s): %v", entityID, err)
 	}
+}
+
+func persistedEntityField(t *testing.T, db *sql.DB, entityID, field string) string {
+	t.Helper()
+	var raw []byte
+	if err := db.QueryRow(`
+		SELECT COALESCE(fields -> $2, 'null'::jsonb)
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $3::uuid
+	`, entityToolTestRunID, field, entityID).Scan(&raw); err != nil {
+		t.Fatalf("read persisted entity field %s.%s: %v", entityID, field, err)
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 func entityToolAgentYAML(actor models.AgentConfig) string {

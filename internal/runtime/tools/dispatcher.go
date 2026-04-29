@@ -13,17 +13,19 @@ type ToolHandler func(ctx context.Context, actor models.AgentConfig, input any) 
 type EmitToolHandler func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error)
 type HTTPToolHandler func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error)
 type MCPToolHandler func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error)
+type RoleScopedEntityToolHandler func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error)
 type ToolResolver func(actor models.AgentConfig, name string) (RegisteredTool, bool, error)
 
 type ToolDispatcher struct {
-	emitHandler EmitToolHandler
-	resolver    ToolResolver
-	httpHandler HTTPToolHandler
-	mcpHandler  MCPToolHandler
-	handlers    map[string]ToolHandler
+	emitHandler             EmitToolHandler
+	resolver                ToolResolver
+	httpHandler             HTTPToolHandler
+	mcpHandler              MCPToolHandler
+	roleScopedEntityHandler RoleScopedEntityToolHandler
+	handlers                map[string]ToolHandler
 }
 
-func NewToolDispatcher(emitHandler EmitToolHandler, resolver ToolResolver, httpHandler HTTPToolHandler, mcpHandler MCPToolHandler, handlers map[string]ToolHandler) *ToolDispatcher {
+func NewToolDispatcher(emitHandler EmitToolHandler, resolver ToolResolver, httpHandler HTTPToolHandler, mcpHandler MCPToolHandler, roleScopedEntityHandler RoleScopedEntityToolHandler, handlers map[string]ToolHandler) *ToolDispatcher {
 	copied := make(map[string]ToolHandler, len(handlers))
 	for name, handler := range handlers {
 		if strings.TrimSpace(name) == "" || handler == nil {
@@ -32,11 +34,12 @@ func NewToolDispatcher(emitHandler EmitToolHandler, resolver ToolResolver, httpH
 		copied[strings.TrimSpace(name)] = handler
 	}
 	return &ToolDispatcher{
-		emitHandler: emitHandler,
-		resolver:    resolver,
-		httpHandler: httpHandler,
-		mcpHandler:  mcpHandler,
-		handlers:    copied,
+		emitHandler:             emitHandler,
+		resolver:                resolver,
+		httpHandler:             httpHandler,
+		mcpHandler:              mcpHandler,
+		roleScopedEntityHandler: roleScopedEntityHandler,
+		handlers:                copied,
 	}
 }
 
@@ -65,6 +68,9 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 	case implementationPlatformBuiltin:
 		handler, ok := d.handlers[name]
 		if !ok || handler == nil {
+			if IsRoleScopedEntityTool(name) && d.roleScopedEntityHandler != nil {
+				return d.roleScopedEntityHandler(ctx, actor, name, input)
+			}
 			return nil, fmt.Errorf("missing platform builtin handler: %s", name)
 		}
 		return handler(ctx, actor, input)

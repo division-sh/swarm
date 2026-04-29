@@ -29,6 +29,7 @@ const (
 	toolAuthorizationPermission  toolAuthorizationClass = "permission"
 	toolAuthorizationEmitAllowed toolAuthorizationClass = "emit_allowed"
 	toolAuthorizationNativeTool  toolAuthorizationClass = "native_tool"
+	toolAuthorizationRoleScoped  toolAuthorizationClass = "role_scoped_entity_tool"
 	toolAuthorizationActorConfig toolAuthorizationClass = "actor_config"
 	toolAuthorizationDenied      toolAuthorizationClass = "denied"
 )
