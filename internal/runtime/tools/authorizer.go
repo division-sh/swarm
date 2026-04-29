@@ -8,6 +8,7 @@ import (
 
 	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolresultpolicy"
 )
 
 type ToolAuthorizer struct {
@@ -29,7 +30,7 @@ const (
 	toolAuthorizationPermission  toolAuthorizationClass = "permission"
 	toolAuthorizationEmitAllowed toolAuthorizationClass = "emit_allowed"
 	toolAuthorizationNativeTool  toolAuthorizationClass = "native_tool"
-	toolAuthorizationRoleScoped  toolAuthorizationClass = "role_scoped_entity_tool"
+	toolAuthorizationRoleScoped  toolAuthorizationClass = toolresultpolicy.RoleScopedEntityToolAuthorizationClass
 	toolAuthorizationActorConfig toolAuthorizationClass = "actor_config"
 	toolAuthorizationDenied      toolAuthorizationClass = "denied"
 )

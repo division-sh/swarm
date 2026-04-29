@@ -15,6 +15,7 @@ import (
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
 	"swarm/internal/runtime/core/toolidentity"
+	"swarm/internal/runtime/core/toolresultpolicy"
 	llm "swarm/internal/runtime/llm"
 	runtimerterr "swarm/internal/runtime/rterrors"
 )
@@ -50,6 +51,45 @@ func mustMCPToolsForRequest(t *testing.T, g *Gateway, req *http.Request) []ToolD
 		t.Fatalf("mcpToolsForRequest: %v", err)
 	}
 	return tools
+}
+
+func roleScopedTypedReadContext(name string) context.Context {
+	return toolcapabilities.WithContext(context.Background(), toolcapabilities.NewSet([]toolcapabilities.Capability{{
+		Name:               name,
+		Visible:            true,
+		Callable:           true,
+		AuthorizationClass: toolresultpolicy.RoleScopedEntityToolAuthorizationClass,
+	}}))
+}
+
+func largeValidationCasePayloadForTypedReadTest() map[string]any {
+	problem := strings.Repeat("problem statement ", 350)
+	return map[string]any{
+		"entity_id":              "validation-case-1",
+		"entity_type":            "validation_case",
+		"flow_instance":          "validation/inst-1",
+		"mvp_problem_statement":  problem,
+		"current_state":          "mvp_speccing",
+		"revision":               float64(3),
+		"business_brief_padding": strings.Repeat("business brief ", 900),
+		"fields": map[string]any{
+			"business_brief": map[string]any{
+				"summary":    strings.Repeat("business brief ", 900),
+				"confidence": float64(10),
+			},
+			"mvp_spec": map[string]any{
+				"problem_statement":  problem,
+				"technical_approach": strings.Repeat("technical approach ", 350),
+			},
+		},
+	}
+}
+
+func asStringForGatewayTest(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
 }
 
 type testToolExecutor func(context.Context, string, any) (any, error)
@@ -1154,6 +1194,96 @@ func TestGatewayHandleMCP_ToolsCallSuppressesRuntimeReadFileFollowUpWithoutReadF
 	}
 	if len(exec.relayRaw) != 0 {
 		t.Fatalf("relay raw = %q, want no relay payload write", string(exec.relayRaw))
+	}
+}
+
+func TestProjectToolCallSuccessText_RoleScopedTypedReadPreservesLargeValidationCase(t *testing.T) {
+	payload := largeValidationCasePayloadForTypedReadTest()
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if len(rawPayload) < 40*1024 || len(rawPayload) > toolresultpolicy.MaxCompleteTypedReadResultBytes {
+		t.Fatalf("payload size = %d, want >=40KB and <=%d", len(rawPayload), toolresultpolicy.MaxCompleteTypedReadResultBytes)
+	}
+	ctx := roleScopedTypedReadContext("read_validation_case")
+
+	text, err := projectToolCallSuccessText(ctx, testToolExecutor(func(context.Context, string, any) (any, error) {
+		return payload, nil
+	}), "read_validation_case", map[string]any{}, payload)
+	if err != nil {
+		t.Fatalf("projectToolCallSuccessText: %v", err)
+	}
+	if strings.Contains(text, `"truncated"`) || strings.Contains(text, `"preview"`) || strings.Contains(text, `"follow_up"`) {
+		t.Fatalf("typed read projection used lossy metadata: %s", text)
+	}
+	var projected map[string]any
+	if err := json.Unmarshal([]byte(text), &projected); err != nil {
+		t.Fatalf("unmarshal projected text: %v", err)
+	}
+	fields, _ := projected["fields"].(map[string]any)
+	mvp, _ := fields["mvp_spec"].(map[string]any)
+	if got := asStringForGatewayTest(mvp["problem_statement"]); got != asStringForGatewayTest(payload["mvp_problem_statement"]) {
+		t.Fatalf("mvp_spec.problem_statement length = %d, want %d", len(got), len(asStringForGatewayTest(payload["mvp_problem_statement"])))
+	}
+}
+
+func TestProjectToolCallSuccessText_RoleScopedTypedReadFieldPreservesCompleteField(t *testing.T) {
+	field := map[string]any{
+		"problem_statement":  strings.Repeat("problem statement ", 900),
+		"technical_approach": strings.Repeat("technical approach ", 900),
+	}
+	ctx := roleScopedTypedReadContext("read_validation_case_mvp_spec")
+
+	text, err := projectToolCallSuccessText(ctx, testToolExecutor(func(context.Context, string, any) (any, error) {
+		return field, nil
+	}), "read_validation_case_mvp_spec", map[string]any{}, field)
+	if err != nil {
+		t.Fatalf("projectToolCallSuccessText: %v", err)
+	}
+	if strings.Contains(text, `"truncated"`) || strings.Contains(text, `"preview"`) || strings.Contains(text, `"follow_up"`) {
+		t.Fatalf("typed field read projection used lossy metadata: %s", text)
+	}
+	var projected map[string]any
+	if err := json.Unmarshal([]byte(text), &projected); err != nil {
+		t.Fatalf("unmarshal projected text: %v", err)
+	}
+	if got := asStringForGatewayTest(projected["technical_approach"]); got != field["technical_approach"].(string) {
+		t.Fatalf("technical_approach length = %d, want %d", len(got), len(field["technical_approach"].(string)))
+	}
+}
+
+func TestProjectToolCallSuccessText_RoleScopedTypedReadFailsClosedWhenTooLarge(t *testing.T) {
+	payload := map[string]any{"blob": strings.Repeat("x", toolresultpolicy.MaxCompleteTypedReadResultBytes+1024)}
+	ctx := roleScopedTypedReadContext("read_validation_case")
+
+	text, err := projectToolCallSuccessText(ctx, testToolExecutor(func(context.Context, string, any) (any, error) {
+		return payload, nil
+	}), "read_validation_case", map[string]any{}, payload)
+	if err == nil {
+		t.Fatalf("projectToolCallSuccessText returned nil error and text %s", text)
+	}
+	runtimeErr, ok := runtimerterr.AsRuntimeError(err)
+	if !ok || runtimeErr.Code != toolresultpolicy.TypedReadResultTooLargeCode {
+		t.Fatalf("error = %#v, want runtime code %s", err, toolresultpolicy.TypedReadResultTooLargeCode)
+	}
+}
+
+func TestProjectToolCallSuccessText_ReadPrefixedNonRoleScopedToolKeepsLegacyProjection(t *testing.T) {
+	payload := map[string]any{"blob": strings.Repeat("x", maxToolResultBytes+1024)}
+
+	text, err := projectToolCallSuccessText(context.Background(), testToolExecutor(func(context.Context, string, any) (any, error) {
+		return payload, nil
+	}), "read_custom_report", map[string]any{}, payload)
+	if err != nil {
+		t.Fatalf("projectToolCallSuccessText: %v", err)
+	}
+	var projected map[string]any
+	if err := json.Unmarshal([]byte(text), &projected); err != nil {
+		t.Fatalf("unmarshal projected text: %v", err)
+	}
+	if truncated, _ := projected["truncated"].(bool); !truncated {
+		t.Fatalf("truncated = %#v, want legacy projection for non-role-scoped read-prefixed tool", projected["truncated"])
 	}
 }
 
