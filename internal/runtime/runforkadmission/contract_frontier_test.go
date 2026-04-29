@@ -101,12 +101,81 @@ func TestAdmitContractFrontier_DeliveredCompletedHistoryIsNotFrontierWork(t *tes
 	}
 }
 
+func TestAdmitContractFrontier_CommittedReplayScopeMarkersAreNotFrontierWork(t *testing.T) {
+	plan := testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationCommittedReplay, "platform", "replay-scope")
+	source := testContractFrontierSource("consumer-node")
+
+	admission, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	if admission.FrontierEventCount != 0 || len(admission.FrontierEvents) != 0 {
+		t.Fatalf("frontier events = %#v, want none for replay-scope marker", admission.FrontierEvents)
+	}
+	if len(admission.UnsupportedBlockers) != 0 {
+		t.Fatalf("blockers = %#v, want none without executable frontier work", admission.UnsupportedBlockers)
+	}
+}
+
+func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T) {
+	plan := testRunForkPlan("review/inst-1/task.started", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan.PendingWork[0].FlowInstance = "review/inst-1"
+	source := testContractFrontierTemplateSource()
+
+	admission, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
+		t.Fatalf("frontier events = %#v, want one instantiated frontier event", admission.FrontierEvents)
+	}
+	event := admission.FrontierEvents[0]
+	if !hasString(event.SourceFlowInstances, "review/inst-1") {
+		t.Fatalf("source flow instances = %v, want review/inst-1", event.SourceFlowInstances)
+	}
+	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "reviewer-inst-1" {
+		t.Fatalf("derived recipients = %#v, want materialized reviewer-inst-1", event.DerivedRecipients)
+	}
+	if event.DerivedRecipients[0].Path != "review/inst-1" {
+		t.Fatalf("recipient path = %q, want review/inst-1", event.DerivedRecipients[0].Path)
+	}
+	if hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("blockers = %#v, want no unresolved-route blocker for materialized instance route", admission.UnsupportedBlockers)
+	}
+}
+
 func TestAdmitContractFrontier_FailsClosedWithoutSelectedSource(t *testing.T) {
 	_, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan: testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node"),
 	})
 	if err == nil {
 		t.Fatal("AdmitContractFrontier error = nil, want selected source failure")
+	}
+}
+
+func TestAdmitContractFrontier_InfersFlowInstanceRouteFromEventName(t *testing.T) {
+	plan := testRunForkPlan("review/inst-1/task.started", store.RunForkPendingClassificationPending, "node", "source-node")
+	source := testContractFrontierTemplateSource()
+
+	admission, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	event := admission.FrontierEvents[0]
+	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "reviewer-inst-1" {
+		t.Fatalf("derived recipients = %#v, want inferred materialized reviewer-inst-1", event.DerivedRecipients)
 	}
 }
 
@@ -171,6 +240,39 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"producer": &root.Children[0],
 				"consumer": &root.Children[1],
+			},
+		},
+	})
+}
+
+func testContractFrontierTemplateSource() semanticview.Source {
+	review := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+		},
+		Path: "review",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"reviewer": {
+				ID:           "reviewer-{instance_id}",
+				SubscribesTo: []string{"task.started"},
+				Produces:     []string{"task.started"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.started": {},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{review}}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "test-workflow",
+			Version: "v-test",
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"review": &root.Children[0],
 			},
 		},
 	})

@@ -28,6 +28,7 @@ type RunForkContractFrontierEvent struct {
 	SourceEventID           string                             `json:"source_event_id"`
 	EventName               string                             `json:"event_name"`
 	SourceClassifications   []string                           `json:"source_classifications,omitempty"`
+	SourceFlowInstances     []string                           `json:"source_flow_instances,omitempty"`
 	SourceSubscriberTypes   []string                           `json:"source_subscriber_types,omitempty"`
 	SourceSubscriberIDs     []string                           `json:"source_subscriber_ids,omitempty"`
 	RuntimeEventOwners      []string                           `json:"runtime_event_owners,omitempty"`

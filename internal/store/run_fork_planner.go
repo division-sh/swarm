@@ -66,6 +66,7 @@ type RunForkEntityState struct {
 type RunForkPendingWork struct {
 	EventID         string     `json:"event_id"`
 	EventName       string     `json:"event_name"`
+	FlowInstance    string     `json:"flow_instance,omitempty"`
 	DeliveryID      string     `json:"delivery_id,omitempty"`
 	SubscriberType  string     `json:"subscriber_type,omitempty"`
 	SubscriberID    string     `json:"subscriber_id,omitempty"`
@@ -371,6 +372,7 @@ func (s *PostgresStore) loadRunForkPendingWork(ctx context.Context, runID string
 			SELECT
 				e.event_id::text AS event_id,
 				e.event_name AS event_name,
+				COALESCE(e.flow_instance, '') AS flow_instance,
 				d.delivery_id::text AS delivery_id,
 				COALESCE(d.subscriber_type, '') AS subscriber_type,
 				COALESCE(d.subscriber_id, '') AS subscriber_id,
@@ -427,6 +429,7 @@ func (s *PostgresStore) loadRunForkPendingWork(ctx context.Context, runID string
 			SELECT
 				e.event_id::text AS event_id,
 				e.event_name AS event_name,
+				COALESCE(e.flow_instance, '') AS flow_instance,
 				''::text AS delivery_id,
 				COALESCE(r.subscriber_type, '') AS subscriber_type,
 				COALESCE(r.subscriber_id, '') AS subscriber_id,
@@ -458,6 +461,7 @@ func (s *PostgresStore) loadRunForkPendingWork(ctx context.Context, runID string
 		SELECT
 			event_id,
 			event_name,
+			flow_instance,
 			delivery_id,
 			subscriber_type,
 			subscriber_id,
@@ -491,6 +495,7 @@ func (s *PostgresStore) loadRunForkPendingWork(ctx context.Context, runID string
 		if err := rows.Scan(
 			&item.EventID,
 			&item.EventName,
+			&item.FlowInstance,
 			&item.DeliveryID,
 			&item.SubscriberType,
 			&item.SubscriberID,

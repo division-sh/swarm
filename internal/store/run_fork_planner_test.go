@@ -142,9 +142,9 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
-			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+			run_id, event_id, event_name, flow_instance, scope, payload, produced_by, produced_by_type, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'fork.work', 'global', '{}'::jsonb, 'test', 'platform', $3)
+		VALUES ($1::uuid, $2::uuid, 'fork.work', 'review/inst-1', 'global', '{}'::jsonb, 'test', 'platform', $3)
 	`, runID, eventID, at); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -179,6 +179,9 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	got := map[string]string{}
 	for _, item := range plan.PendingWork {
 		got[item.SubscriberID] = item.Classification
+		if item.FlowInstance != "review/inst-1" {
+			t.Fatalf("pending item flow_instance = %q, want review/inst-1; item=%#v", item.FlowInstance, item)
+		}
 	}
 	want := map[string]string{
 		"done-agent":               RunForkPendingClassificationDeliveredCompleted,
