@@ -153,6 +153,11 @@ active_issues:
     title: Define selected-contract fork execution admission from durable binding
     maps_to:
       - timestamp_fork_replay_resume_ownership
+  - id: 598
+    title: Gate selected-contract fork handler execution and fork-local write ownership
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+      - delivery_and_replay_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
     maps_to:
@@ -216,6 +221,7 @@ nodes:
       - timestamp forks need fork-local delivery/event replay lineage and committed replay-scope proof rather than direct source delivery redelivery or markerless same-run outbox replay
       - timestamp-fork non-agent delivery facts are not safe to replay through the agent delivery primitive; node/system delivery execution requires a separate handler/idempotency/receipt owner
       - selected-contract fork execution must classify delivery-write boundaries before future mutation; source deliveries remain lineage/blocker evidence, not executable fork work
+      - selected-contract fork execution must write fresh fork-local event/delivery/outcome rows through the runtime selected-contract execution owner, with source rows used only as lineage evidence
     representative_issues:
       - 112
       - 144
@@ -226,6 +232,7 @@ nodes:
       - 574
       - 583
       - 585
+      - 598
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
@@ -255,6 +262,7 @@ nodes:
       - selected-contract fork execution needs a durable fork-run selected-source binding owner; CLI/API arguments, dry-run JSON, and local model output are not authoritative for future execution
       - selected-contract fork execution needs a runtime-side non-mutating admission/context owner that consumes the durable selected-source binding before any handler execution or fork-local delivery/outcome mutation
       - selected-bound fork activation needs a runtime-side selected-contract activation gate that consumes selected-contract execution admission before store activation mutation and blocks source delivery/event replay from becoming selected-contract executable work by fall-through
+      - mutating selected-contract fork execution must consume durable selected-source binding/admission, execute handlers under the fork run_id, write fresh fork-local event/delivery/outcome rows with lineage, regenerate follow-ups, and not use source outcomes as suppressors
     representative_issues:
       - 564
       - 565
@@ -267,6 +275,7 @@ nodes:
       - 590
       - 594
       - 596
+      - 598
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR

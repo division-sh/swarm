@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 )
@@ -24,6 +25,35 @@ type SelectedContractSourceLoader interface {
 type LoadedSelectedContractSource struct {
 	Selection store.RunForkContractSelection
 	Source    semanticview.Source
+	Module    runtimepipeline.WorkflowModule
+}
+
+type selectedContractWorkflowModule struct {
+	source         semanticview.Source
+	workflow       *runtimepipeline.WorkflowDefinition
+	nodes          []runtimepipeline.WorkflowNode
+	guardRegistry  runtimepipeline.GuardRegistry
+	actionRegistry runtimepipeline.ActionRegistry
+}
+
+func (m selectedContractWorkflowModule) SemanticSource() semanticview.Source {
+	return m.source
+}
+
+func (m selectedContractWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
+	return m.workflow
+}
+
+func (m selectedContractWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
+	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
+}
+
+func (m selectedContractWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
+	return m.guardRegistry
+}
+
+func (m selectedContractWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
+	return m.actionRegistry
 }
 
 type ContractBundleSourceLoader struct {
@@ -35,7 +65,7 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if err := ctx.Err(); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	if err := validateSelectedContractSelection("selected source loader", selection); err != nil {
+	if err := validateSelectedSourceLoaderSelection(selection); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
 	repoRoot := strings.TrimSpace(l.RepoRoot)
@@ -50,9 +80,34 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
+	source := semanticview.Wrap(bundle)
+	if strings.TrimSpace(selection.WorkflowName) == "" {
+		selection.WorkflowName = strings.TrimSpace(source.WorkflowName())
+	}
+	if strings.TrimSpace(selection.WorkflowVersion) == "" {
+		selection.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
+	}
+	if err := validateSelectedContractSelection("selected source loader", selection); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
 	return LoadedSelectedContractSource{
 		Selection: selection,
-		Source:    semanticview.Wrap(bundle),
+		Source:    source,
+		Module: selectedContractWorkflowModule{
+			source:         source,
+			workflow:       workflow,
+			nodes:          nodes,
+			guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
+			actionRegistry: runtimepipeline.NewContractActionRegistry(source),
+		},
 	}, nil
 }
 
@@ -243,6 +298,16 @@ func validateSelectedContractSelection(label string, selection store.RunForkCont
 	}
 	if strings.TrimSpace(selection.WorkflowVersion) == "" {
 		return fmt.Errorf("selected-contract execution admission %s requires workflow_version", label)
+	}
+	return nil
+}
+
+func validateSelectedSourceLoaderSelection(selection store.RunForkContractSelection) error {
+	if strings.TrimSpace(selection.Mode) != "selected_contracts" {
+		return fmt.Errorf("selected-contract execution admission selected source loader requires mode selected_contracts; got %q", selection.Mode)
+	}
+	if strings.TrimSpace(selection.ContractsRoot) == "" {
+		return fmt.Errorf("selected-contract execution admission selected source loader requires contracts_root")
 	}
 	return nil
 }

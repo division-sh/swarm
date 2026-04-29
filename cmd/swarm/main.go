@@ -332,7 +332,7 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", "", "Optional path to Swarm runtime config")
-	contractsPath := fs.String("contracts", "", "Path to selected Swarm contract bundle root for non-mutating dry-run admission")
+	contractsPath := fs.String("contracts", "", "Path to selected Swarm contract bundle root for fork planning or selected-contract execution")
 	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	storeMode := fs.String("store", "postgres", "Store mode: postgres")
 	runID := fs.String("run", "", "Source run ID to plan from")
@@ -359,15 +359,10 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 		}
 		return 2
 	}
-	if modeCount == 0 {
+	selectedContractsRequested := strings.TrimSpace(*contractsPath) != ""
+	if modeCount == 0 && !selectedContractsRequested {
 		if out != nil {
-			fmt.Fprintln(out, "fork failed: mutating fork execution is not implemented; use --dry-run, --materialize-only, or --activate")
-		}
-		return 2
-	}
-	if strings.TrimSpace(*contractsPath) != "" && !*dryRun && !*materializeOnly {
-		if out != nil {
-			fmt.Fprintln(out, "fork failed: --contracts is only supported for non-mutating --dry-run admission or --materialize-only binding")
+			fmt.Fprintln(out, "fork failed: mutating fork execution without --contracts is not implemented; use --dry-run, --materialize-only, --activate, or --contracts")
 		}
 		return 2
 	}
@@ -475,6 +470,50 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 		printRunForkMaterialization(out, result)
 		return 0
 	}
+	if modeCount == 0 && selectedContractsRequested {
+		contractsRoot, err := normalizeContractsRoot(resolveContractsPath(repo, *contractsPath))
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: resolve contracts: %v\n", err)
+			}
+			return 1
+		}
+		_, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvePath(repo, *platformSpecPath))
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: load selected contracts: %v\n", err)
+			}
+			return 1
+		}
+		source := semanticview.Wrap(bundle)
+		result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
+			SourceRunID: strings.TrimSpace(*runID),
+			At:          strings.TrimSpace(*at),
+			Store:       stores.Postgres,
+			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
+				RepoRoot:         repo,
+				PlatformSpecPath: resolvePath(repo, *platformSpecPath),
+			},
+			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
+		})
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: %v\n", err)
+			}
+			return 1
+		}
+		if *asJSON {
+			enc := json.NewEncoder(out)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(result); err != nil {
+				fmt.Fprintf(out, "fork failed: encode json: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+		printSelectedContractExecution(out, result)
+		return 0
+	}
 	plan, err := stores.Postgres.PlanRunFork(ctx, store.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(*runID),
 		At:          strings.TrimSpace(*at),
@@ -565,6 +604,27 @@ func printRunForkActivation(w io.Writer, result store.RunForkActivation) {
 			result.SelectedContractBinding.ContractSelection.WorkflowName,
 			result.SelectedContractBinding.ContractSelection.WorkflowVersion,
 		)
+	}
+}
+
+func printSelectedContractExecution(w io.Writer, result runtimerunforkexecution.SelectedContractExecutionResult) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, "Selected-contract fork executed for source run %s\n", result.Materialization.SourceRunID)
+	fmt.Fprintf(w, "Fork Run: %s status=%s\n", result.Materialization.ForkRunID, result.Activation.ForkRunStatus)
+	fmt.Fprintf(w, "Source Run: %s status=%s\n", result.Activation.SourceRunID, result.Activation.SourceRunStatus)
+	fmt.Fprintf(w, "Owner: %s\n", result.Owner)
+	fmt.Fprintf(w, "Summary: executed_events=%d materialized_entities=%d source_frozen=%t\n",
+		result.ExecutedEventCount,
+		result.Materialization.MaterializedEntityCount,
+		result.Activation.SourceFrozen,
+	)
+	if len(result.ForkEvents) > 0 {
+		fmt.Fprintln(w, "Fork Events:")
+		for _, event := range result.ForkEvents {
+			fmt.Fprintf(w, "  %s -> %s %s\n", event.SourceEventID, event.ForkEventID, event.EventName)
+		}
 	}
 }
 

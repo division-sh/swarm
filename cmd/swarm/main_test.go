@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ import (
 	runtimedeadletters "swarm/internal/runtime/deadletters"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimerunforkexecution "swarm/internal/runtime/runforkexecution"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
@@ -543,18 +545,61 @@ func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *test
 	}
 }
 
-func TestRunForkCommand_ContractsRemainNonExecuting(t *testing.T) {
+func TestRunForkCommand_ActivateWithContractsReachesSelectedActivationGate(t *testing.T) {
 	var buf bytes.Buffer
 	code := runForkCommand(context.Background(), t.TempDir(), []string{
 		"--activate",
 		"--contracts", t.TempDir(),
 		"--run", uuid.NewString(),
 	}, &buf)
-	if code != 2 {
-		t.Fatalf("runForkCommand code=%d, want 2; output=%s", code, buf.String())
+	if code != 1 {
+		t.Fatalf("runForkCommand code=%d, want runtime failure after parsing; output=%s", code, buf.String())
 	}
-	if !strings.Contains(buf.String(), "--contracts is only supported for non-mutating --dry-run admission or --materialize-only binding") {
-		t.Fatalf("output = %q, want non-executing contracts failure", buf.String())
+	if strings.Contains(buf.String(), "--contracts is only supported") {
+		t.Fatalf("output = %q, want --activate to consume canonical selected activation gate rather than parse-level contract rejection", buf.String())
+	}
+}
+
+func TestRunForkCommand_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	repo := repoRoot()
+	contractsRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700000312, 0).UTC()
+	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, at)
+
+	var buf bytes.Buffer
+	code := runForkCommand(context.Background(), repo, []string{
+		"--contracts", contractsRoot,
+		"--run", sourceRunID,
+		"--at", sourceEventID,
+		"--json",
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+	}
+	var result runtimerunforkexecution.SelectedContractExecutionResult
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("decode selected execution json: %v\n%s", err, buf.String())
+	}
+	if result.Owner != store.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+		t.Fatalf("selected execution result = %#v", result)
+	}
+	var lineageRows int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM run_fork_selected_contract_executions
+		WHERE fork_run_id = $1::uuid
+		  AND source_event_id = $2::uuid
+		  AND fork_event_id = $3::uuid
+	`, result.Materialization.ForkRunID, sourceEventID, result.ForkEvents[0].ForkEventID).Scan(&lineageRows); err != nil {
+		t.Fatalf("count selected execution lineage: %v", err)
+	}
+	if lineageRows != 1 {
+		t.Fatalf("selected execution lineage rows = %d, want 1", lineageRows)
 	}
 }
 
@@ -889,7 +934,7 @@ func TestRunForkCommand_NonDryRunWithoutMaterializeOnlyStaysFailClosed(t *testin
 	if code != 2 {
 		t.Fatalf("runForkCommand code=%d, want 2; output=%s", code, buf.String())
 	}
-	if !strings.Contains(buf.String(), "mutating fork execution is not implemented; use --dry-run, --materialize-only, or --activate") {
+	if !strings.Contains(buf.String(), "mutating fork execution without --contracts is not implemented") {
 		t.Fatalf("output = %q, want fail-closed fork execution message", buf.String())
 	}
 }
@@ -932,6 +977,59 @@ func seedRunForkCLIActivationSource(t *testing.T, db interface {
 		VALUES (
 			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'CLI Entity',
 			'ready', '{}'::jsonb, '{"name":"CLI Entity"}'::jsonb, '{}'::jsonb, 1,
+			$3, $3, $3
+		)
+	`, runID, entityID, at); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
+	}
+}
+
+func seedRunForkCLISelectedExecutionSource(t *testing.T, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, runID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'item.received', $3::uuid, 'flow-a/1', 'entity', $4::jsonb, 'test', 'platform', $5)
+	`, runID, eventID, entityID, fmt.Sprintf(`{"entity_id":%q}`, entityID), at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'node', 'test-node', 'pending', 'source_pending_node_delivery', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'cli-selected-execution-test', 'seed', $4),
+			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"CLI Selected Execution Entity"'::jsonb, $3::uuid, 'platform', 'cli-selected-execution-test', 'seed', $4)
+	`, runID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed mutations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, name,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'CLI Selected Execution Entity',
+			'pending', '{}'::jsonb, '{"name":"CLI Selected Execution Entity"}'::jsonb, '{}'::jsonb, 1,
 			$3, $3, $3
 		)
 	`, runID, entityID, at); err != nil {
