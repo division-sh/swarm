@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
@@ -149,6 +150,12 @@ func validateSelectedContractExecutionModel(binding store.RunForkSelectedContrac
 	}
 	if strings.TrimSpace(model.AdmissionOwner) != frontier.Owner {
 		return fmt.Errorf("selected-contract execution admission model admission owner mismatch: got %q want %q", model.AdmissionOwner, frontier.Owner)
+	}
+	if model.FrontierEventCount != frontier.FrontierEventCount {
+		return fmt.Errorf("selected-contract execution admission model frontier count mismatch: got %d want %d", model.FrontierEventCount, frontier.FrontierEventCount)
+	}
+	if !reflect.DeepEqual(model.FrontierEvents, selectedContractFrontierEvents(frontier.FrontierEvents)) {
+		return fmt.Errorf("selected-contract execution admission model frontier events do not match durable frontier evidence")
 	}
 	if model.ContractBinding.Owner != store.RunForkSelectedContractBindingOwner ||
 		model.ContractBinding.Disposition != store.RunForkSelectedContractDispositionPrerequisite {
