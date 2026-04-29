@@ -152,6 +152,26 @@ func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalEvidence(t *tes
 	}
 }
 
+func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleModelFrontier(t *testing.T) {
+	ctx := context.Background()
+	forkRunID := uuid.NewString()
+	binding := testSelectedContractBinding(forkRunID)
+	frontier := testContractFrontierAdmission(binding.ContractSelection)
+	model := testSelectedContractExecutionModel(t, frontier)
+	frontier.FrontierEvents[0].EventName = "work.changed"
+
+	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
+		ForkRunID:         forkRunID,
+		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
+		SelectedSource:    testSelectedSource(binding.ContractSelection),
+		FrontierAdmission: frontier,
+		ExecutionModel:    model,
+	})
+	if err == nil || !strings.Contains(err.Error(), "frontier events do not match") {
+		t.Fatalf("error = %v, want stale frontier model failure", err)
+	}
+}
+
 type fakeSelectedContractBindingReader struct {
 	binding            store.RunForkSelectedContractBinding
 	err                error
