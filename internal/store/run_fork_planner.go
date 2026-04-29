@@ -30,20 +30,21 @@ type RunForkPlanRequest struct {
 }
 
 type RunForkPlan struct {
-	SourceRunID              string                       `json:"source_run_id"`
-	SourceRunStatus          string                       `json:"source_run_status,omitempty"`
-	SourceRunStartedAt       *time.Time                   `json:"source_run_started_at,omitempty"`
-	SourceRunEndedAt         *time.Time                   `json:"source_run_ended_at,omitempty"`
-	ForkPoint                RunForkPoint                 `json:"fork_point"`
-	EventCountAtFork         int                          `json:"event_count_at_fork"`
-	ReconstructedEntityCount int                          `json:"reconstructed_entity_count"`
-	PendingWorkCount         int                          `json:"pending_work_count"`
-	UnsupportedBlockerCount  int                          `json:"unsupported_blocker_count"`
-	ExecutionReady           bool                         `json:"execution_ready"`
-	ReplayResumeAdmission    RunForkReplayResumeAdmission `json:"replay_resume_admission"`
-	Entities                 []RunForkEntityState         `json:"entities,omitempty"`
-	PendingWork              []RunForkPendingWork         `json:"pending_work,omitempty"`
-	UnsupportedBlockers      []RunForkUnsupportedBlocker  `json:"unsupported_blockers,omitempty"`
+	SourceRunID               string                            `json:"source_run_id"`
+	SourceRunStatus           string                            `json:"source_run_status,omitempty"`
+	SourceRunStartedAt        *time.Time                        `json:"source_run_started_at,omitempty"`
+	SourceRunEndedAt          *time.Time                        `json:"source_run_ended_at,omitempty"`
+	ForkPoint                 RunForkPoint                      `json:"fork_point"`
+	EventCountAtFork          int                               `json:"event_count_at_fork"`
+	ReconstructedEntityCount  int                               `json:"reconstructed_entity_count"`
+	PendingWorkCount          int                               `json:"pending_work_count"`
+	UnsupportedBlockerCount   int                               `json:"unsupported_blocker_count"`
+	ExecutionReady            bool                              `json:"execution_ready"`
+	ReplayResumeAdmission     RunForkReplayResumeAdmission      `json:"replay_resume_admission"`
+	ContractFrontierAdmission *RunForkContractFrontierAdmission `json:"contract_frontier_admission,omitempty"`
+	Entities                  []RunForkEntityState              `json:"entities,omitempty"`
+	PendingWork               []RunForkPendingWork              `json:"pending_work,omitempty"`
+	UnsupportedBlockers       []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
 }
 
 type RunForkPoint struct {

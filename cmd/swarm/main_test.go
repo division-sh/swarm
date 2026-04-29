@@ -456,6 +456,86 @@ func TestRunForkCommand_DryRunJSONReportsDeliveryEventReplayReady(t *testing.T) 
 	}
 }
 
+func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000307, 0).UTC()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'flow-a/work.begin', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'node', 'source-node', 'pending', 0, 'matched_node_subscription', $3)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed pending node delivery: %v", err)
+	}
+
+	repo := repoRoot()
+	var buf bytes.Buffer
+	code := runForkCommand(ctx, repo, []string{
+		"--dry-run",
+		"--run", runID,
+		"--at", eventID,
+		"--contracts", filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated"),
+		"--json",
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+	}
+	var plan store.RunForkPlan
+	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
+		t.Fatalf("decode fork plan json: %v\n%s", err, buf.String())
+	}
+	if plan.ContractFrontierAdmission == nil {
+		t.Fatalf("ContractFrontierAdmission = nil; output=%s", buf.String())
+	}
+	admission := plan.ContractFrontierAdmission
+	if admission.Owner != store.RunForkContractFrontierAdmissionOwner || !admission.NonMutating || admission.HistoricalExecutionSupported {
+		t.Fatalf("contract frontier admission = %#v", admission)
+	}
+	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
+		t.Fatalf("frontier events = %#v", admission.FrontierEvents)
+	}
+	if !runForkPlanHasString(admission.FrontierEvents[0].RuntimeEventOwners, "alpha-intake") {
+		t.Fatalf("runtime event owners = %#v, want alpha-intake from selected contract", admission.FrontierEvents[0].RuntimeEventOwners)
+	}
+	if !runForkPlanHasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierExecutionUnsupported) {
+		t.Fatalf("contract frontier blockers = %#v, want execution unsupported", admission.UnsupportedBlockers)
+	}
+}
+
+func TestRunForkCommand_ContractsRemainDryRunOnly(t *testing.T) {
+	var buf bytes.Buffer
+	code := runForkCommand(context.Background(), t.TempDir(), []string{
+		"--materialize-only",
+		"--contracts", t.TempDir(),
+		"--run", uuid.NewString(),
+		"--at", uuid.NewString(),
+	}, &buf)
+	if code != 2 {
+		t.Fatalf("runForkCommand code=%d, want 2; output=%s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "--contracts is only supported for non-mutating --dry-run admission") {
+		t.Fatalf("output = %q, want dry-run-only contracts failure", buf.String())
+	}
+}
+
 func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
@@ -641,6 +721,24 @@ func seedRunForkCLIActivationSource(t *testing.T, db interface {
 	`, runID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
+}
+
+func runForkPlanHasBlocker(blockers []store.RunForkUnsupportedBlocker, code string) bool {
+	for _, blocker := range blockers {
+		if blocker.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func runForkPlanHasString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func setPostgresEnvFromDSN(t *testing.T, dsn string) {

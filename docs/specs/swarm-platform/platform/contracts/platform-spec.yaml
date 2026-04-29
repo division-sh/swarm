@@ -3172,14 +3172,15 @@ run_model:
       loading new contracts, and resuming execution. The system automatically determines which events need
       to be re-delivered. The original run is frozen. The forked run gets independent execution.'
     command: 'swarm fork --run <run_id> --at <event_id|timestamp> [--contracts <path>]'
-    dry_run_command: 'swarm fork --run <run_id> --at <event_id|timestamp> --dry-run [--json]'
+    dry_run_command: 'swarm fork --run <run_id> --at <event_id|timestamp> --dry-run [--contracts <path>] [--json]'
     materialize_only_command: 'swarm fork --run <run_id> --at <event_id|timestamp> --materialize-only [--json]'
     activation_command: 'swarm fork --run <fork_run_id> --activate [--json]'
     planning_admission: 'The dry-run form is a read-only planning/admission surface. It resolves the fork
-      point, reconstructs provable state, classifies replay candidates, and returns execution_ready=false
+      point, reconstructs provable state, classifies replay candidates, optionally loads selected contracts
+      for non-mutating contract/frontier/route admission, and returns execution_ready=false
       with named unsupported blockers whenever persisted recorder facts cannot prove safe execution. Dry-run
       MUST NOT create a forked run, mark the source run forked, copy entity state, redeliver events, or change
-      runtime delivery/session/timer state.'
+      runtime delivery/session/timer/route state.'
     materialize_only_admission: 'The materialize-only form is the first supported mutating fork slice. It
       consumes the canonical read-only planner, requires execution_ready=true, creates a fork run with
       status=paused and fork lineage, and writes reconstructed entity_state rows under the fork run_id.

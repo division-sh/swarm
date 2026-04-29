@@ -145,6 +145,10 @@ active_issues:
     maps_to:
       - timestamp_fork_replay_resume_ownership
       - delivery_and_replay_ownership
+  - id: 577
+    title: Gate non-mutating fork contract/frontier/route admission
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -222,12 +226,14 @@ nodes:
       - the first supported timestamp-fork delivery/event replay primitive must create fresh fork event/delivery IDs with source lineage and direct committed replay-scope proof for the runtime recovery consumer, while keeping unsafe delivery/session/timer/route cases fail-closed
       - session/turn replay remains an admission-policy first slice; source active sessions, active turns, active task conversation audits, and fork-local pre-existing session/turn rows are permanent fail-closed blockers until a run-scoped reconstruction owner is approved
       - non-agent delivery replay remains admission-policy only; source node/system/platform/internal delivery facts and committed replay-scope markers are lineage-only or named fail-closed blockers until runtime handler replay ownership is approved
+      - selected-contract timestamp-fork re-admission needs a non-mutating contract/frontier/route admission owner before node/system delivery facts can become executable fork work
     representative_issues:
       - 564
       - 565
       - 569
       - 572
       - 574
+      - 577
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
