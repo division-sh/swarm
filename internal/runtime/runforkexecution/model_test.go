@@ -47,6 +47,11 @@ func TestBuildSelectedContractExecutionModelConsumesAdmissionAsEvidenceOnly(t *t
 		model.AdmissionUse != store.RunForkSelectedContractExecutionAdmissionUseEvidenceOnly {
 		t.Fatalf("admission use = owner:%q use:%q", model.AdmissionOwner, model.AdmissionUse)
 	}
+	if model.ContractBinding.Concept != "selected_contract_binding" ||
+		model.ContractBinding.Disposition != store.RunForkSelectedContractDispositionPrerequisite ||
+		model.ContractBinding.Owner != store.RunForkSelectedContractBindingOwner {
+		t.Fatalf("contract binding boundary = %#v, want canonical selected-contract binding owner", model.ContractBinding)
+	}
 	if model.FrontierEventCount != 1 || len(model.FrontierEvents) != 1 {
 		t.Fatalf("frontier events = %#v", model.FrontierEvents)
 	}

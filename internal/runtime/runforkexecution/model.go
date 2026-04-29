@@ -35,9 +35,9 @@ func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelReque
 		FrontierEvents:       selectedContractFrontierEvents(admission.FrontierEvents),
 		ContractBinding: store.RunForkSelectedContractExecutionBoundary{
 			Concept:     "selected_contract_binding",
-			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
-			Owner:       store.RunForkSelectedContractExecutionOwner,
-			Reason:      "future execution must bind the selected contract source to the fork before handlers run",
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       store.RunForkSelectedContractBindingOwner,
+			Reason:      "future execution must consume the durable selected contract source bound to the fork run before handlers run",
 		},
 		RequiredConsumers: selectedContractExecutionRequiredConsumers(),
 		BlockedSiblings:   selectedContractExecutionBlockedSiblings(),

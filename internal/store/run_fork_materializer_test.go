@@ -221,6 +221,130 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 }
 
+func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000510, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+
+	selection := RunForkContractSelection{
+		Mode:            "selected_contracts",
+		ContractsRoot:   "/tmp/selected-contracts",
+		WorkflowName:    "selected-workflow",
+		WorkflowVersion: "v2",
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+		SourceRunID:       sourceRunID,
+		At:                eventID,
+		ContractSelection: &selection,
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	if materialized.SelectedContractBinding == nil {
+		t.Fatalf("SelectedContractBinding = nil")
+	}
+	if materialized.SelectedContractBinding.Owner != RunForkSelectedContractBindingOwner ||
+		materialized.SelectedContractBinding.ForkRunID != materialized.ForkRunID ||
+		materialized.SelectedContractBinding.SourceRunID != sourceRunID ||
+		materialized.SelectedContractBinding.ForkEventID != eventID {
+		t.Fatalf("materialized selected binding = %#v", materialized.SelectedContractBinding)
+	}
+
+	loaded, err := pg.RequireRunForkSelectedContractBinding(ctx, materialized.ForkRunID)
+	if err != nil {
+		t.Fatalf("RequireRunForkSelectedContractBinding: %v", err)
+	}
+	if loaded.Owner != RunForkSelectedContractBindingOwner ||
+		loaded.ContractSelection.ContractsRoot != selection.ContractsRoot ||
+		loaded.ContractSelection.WorkflowName != selection.WorkflowName ||
+		loaded.ContractSelection.WorkflowVersion != selection.WorkflowVersion {
+		t.Fatalf("loaded selected binding = %#v", loaded)
+	}
+
+	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err != nil {
+		t.Fatalf("ActivateRunFork: %v", err)
+	}
+	if activated.SelectedContractBinding == nil ||
+		activated.SelectedContractBinding.Owner != RunForkSelectedContractBindingOwner ||
+		activated.SelectedContractBinding.ForkRunID != materialized.ForkRunID {
+		t.Fatalf("activated selected binding = %#v", activated.SelectedContractBinding)
+	}
+
+	var forkEventCount, forkDeliveryCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkEventCount); err != nil {
+		t.Fatalf("count fork events: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkDeliveryCount); err != nil {
+		t.Fatalf("count fork deliveries: %v", err)
+	}
+	if forkEventCount != 0 || forkDeliveryCount != 0 {
+		t.Fatalf("fork executable work = events:%d deliveries:%d, want 0/0", forkEventCount, forkDeliveryCount)
+	}
+}
+
+func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidSelection(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := pg.RequireRunForkSelectedContractBinding(ctx, uuid.NewString()); err == nil || !strings.Contains(err.Error(), "selected contract binding") {
+		t.Fatalf("RequireRunForkSelectedContractBinding error = %v, want missing binding failure", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000520, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	invalidSelection := RunForkContractSelection{
+		Mode:            "selected_contracts",
+		WorkflowName:    "selected-workflow",
+		WorkflowVersion: "v2",
+	}
+	if _, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+		SourceRunID:       sourceRunID,
+		At:                eventID,
+		ContractSelection: &invalidSelection,
+	}); err == nil || !strings.Contains(err.Error(), "contracts_root") {
+		t.Fatalf("MaterializeRunFork invalid selection error = %v, want contracts_root failure", err)
+	}
+
+	validSelection := RunForkContractSelection{
+		Mode:            "selected_contracts",
+		ContractsRoot:   "/tmp/selected-contracts",
+		WorkflowName:    "selected-workflow",
+		WorkflowVersion: "v2",
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+		SourceRunID:       sourceRunID,
+		At:                eventID,
+		ContractSelection: &validSelection,
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO run_fork_selected_contract_bindings (
+			fork_run_id, source_run_id, fork_event_id,
+			mode, contracts_root, workflow_name, workflow_version
+		)
+		VALUES (
+			$1::uuid, $2::uuid, $3::uuid,
+			'selected_contracts', '/tmp/duplicate', 'workflow', 'v1'
+		)
+	`, materialized.ForkRunID, sourceRunID, eventID)
+	if err == nil {
+		t.Fatalf("duplicate selected contract binding insert succeeded, want unique failure")
+	}
+}
+
 func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

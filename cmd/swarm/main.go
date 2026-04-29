@@ -365,9 +365,9 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 		}
 		return 2
 	}
-	if strings.TrimSpace(*contractsPath) != "" && !*dryRun {
+	if strings.TrimSpace(*contractsPath) != "" && !*dryRun && !*materializeOnly {
 		if out != nil {
-			fmt.Fprintln(out, "fork failed: --contracts is only supported for non-mutating --dry-run admission")
+			fmt.Fprintln(out, "fork failed: --contracts is only supported for non-mutating --dry-run admission or --materialize-only binding")
 		}
 		return 2
 	}
@@ -427,9 +427,30 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 		return 0
 	}
 	if *materializeOnly {
+		var contractSelection *store.RunForkContractSelection
+		if contracts := strings.TrimSpace(*contractsPath); contracts != "" {
+			contractsRoot, err := normalizeContractsRoot(resolveContractsPath(repo, contracts))
+			if err != nil {
+				if out != nil {
+					fmt.Fprintf(out, "fork failed: resolve contracts: %v\n", err)
+				}
+				return 1
+			}
+			_, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvePath(repo, *platformSpecPath))
+			if err != nil {
+				if out != nil {
+					fmt.Fprintf(out, "fork failed: load selected contracts: %v\n", err)
+				}
+				return 1
+			}
+			source := semanticview.Wrap(bundle)
+			selection := runtimerunforkadmission.SelectedContractSelection(source, contractsRoot)
+			contractSelection = &selection
+		}
 		result, err := stores.Postgres.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{
-			SourceRunID: strings.TrimSpace(*runID),
-			At:          strings.TrimSpace(*at),
+			SourceRunID:       strings.TrimSpace(*runID),
+			At:                strings.TrimSpace(*at),
+			ContractSelection: contractSelection,
 		})
 		if err != nil {
 			if out != nil {
@@ -532,6 +553,14 @@ func printRunForkActivation(w io.Writer, result store.RunForkActivation) {
 			result.DeliveryEventReplay.Owner,
 		)
 	}
+	if result.SelectedContractBinding != nil {
+		fmt.Fprintf(w, "Selected Contract Binding: owner=%s contracts=%s workflow=%s@%s\n",
+			result.SelectedContractBinding.Owner,
+			result.SelectedContractBinding.ContractSelection.ContractsRoot,
+			result.SelectedContractBinding.ContractSelection.WorkflowName,
+			result.SelectedContractBinding.ContractSelection.WorkflowVersion,
+		)
+	}
 }
 
 func printRunForkMaterialization(w io.Writer, result store.RunForkMaterialization) {
@@ -546,6 +575,14 @@ func printRunForkMaterialization(w io.Writer, result store.RunForkMaterializatio
 		result.DeliveryResumeBlocked,
 		result.SourceRunStatusUnchanged,
 	)
+	if result.SelectedContractBinding != nil {
+		fmt.Fprintf(w, "Selected Contract Binding: owner=%s contracts=%s workflow=%s@%s\n",
+			result.SelectedContractBinding.Owner,
+			result.SelectedContractBinding.ContractSelection.ContractsRoot,
+			result.SelectedContractBinding.ContractSelection.WorkflowName,
+			result.SelectedContractBinding.ContractSelection.WorkflowVersion,
+		)
+	}
 }
 
 func printRunForkPlan(w io.Writer, plan store.RunForkPlan) {
