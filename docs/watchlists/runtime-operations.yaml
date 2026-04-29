@@ -248,6 +248,7 @@ nodes:
       - non-agent delivery replay remains admission-policy only; source node/system/platform/internal delivery facts and committed replay-scope markers are lineage-only or named fail-closed blockers until runtime handler replay ownership is approved
       - selected-contract timestamp-fork re-admission needs a non-mutating contract/frontier/route admission owner before node/system delivery facts can become executable fork work
       - selected-contract fork execution needs a non-mutating owner model before mutation; the model must consume frontier admission as evidence only and classify contract binding, fork run_id context, handler execution, receipts, dead letters, idempotency, emitted follow-ups, timers, routes, sessions, source-advanced policy, and contract-swap boot/resume
+      - selected-contract fork execution needs a durable fork-run selected-source binding owner; CLI/API arguments, dry-run JSON, and local model output are not authoritative for future execution
     representative_issues:
       - 564
       - 565
@@ -257,6 +258,7 @@ nodes:
       - 577
       - 583
       - 585
+      - 590
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR

@@ -34,6 +34,7 @@ type RunForkActivation struct {
 	UnsupportedBlockers      []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
 	MaterializedEntityCount  int                               `json:"materialized_entity_count"`
 	DeliveryEventReplay      *RunForkDeliveryEventReplayResult `json:"delivery_event_replay,omitempty"`
+	SelectedContractBinding  *RunForkSelectedContractBinding   `json:"selected_contract_binding,omitempty"`
 	SourceAdvancedAfterFork  bool                              `json:"source_advanced_after_fork_point,omitempty"`
 	RepeatedActivationFailed bool                              `json:"repeated_activation_failed,omitempty"`
 }
@@ -130,6 +131,14 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	}
 	if len(lineage.EntityIDs) == 0 {
 		return result, fmt.Errorf("fork activation requires materialized fork entity_state rows")
+	}
+	if catalog.hasColumns(runForkSelectedContractBindingTable, "fork_run_id", "source_run_id", "fork_event_id", "mode", "contracts_root", "workflow_name", "workflow_version", "created_at") {
+		binding, err := loadRunForkSelectedContractBinding(ctx, tx, lineage.ForkRunID)
+		if err == nil {
+			result.SelectedContractBinding = &binding
+		} else if err != sql.ErrNoRows {
+			return result, fmt.Errorf("load selected contract binding: %w", err)
+		}
 	}
 
 	plan, err := s.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: lineage.SourceRunID, At: lineage.ForkEventID})

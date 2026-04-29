@@ -2702,6 +2702,13 @@ platform_tables:
         \ idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,\n    INDEX idx_events_global (event_name,\
         \ created_at) WHERE scope = 'global',\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key\
         \ IS NOT NULL,\n    INDEX idx_events_source (source_event_id) WHERE source_event_id IS NOT NULL\n);"
+    run_fork_selected_contract_bindings:
+      description: Durable selected-contract source binding for timestamp forks. One row binds a fork run to the selected
+        contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
+        selected-contract execution; CLI/API arguments, dry-run JSON, and local model output are not semantic owners. It
+        does not authorize handler execution, event/delivery replay, timer, route, session, turn, source-advanced, or
+        contract-swap mutation.
+      ddl: "CREATE TABLE run_fork_selected_contract_bindings (\n    binding_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    fork_run_id      UUID NOT NULL REFERENCES runs(run_id),\n    source_run_id    UUID NOT NULL REFERENCES runs(run_id),\n    fork_event_id    UUID NOT NULL REFERENCES events(event_id),\n    mode             TEXT NOT NULL CHECK (mode IN ('selected_contracts')),\n    contracts_root   TEXT NOT NULL,\n    workflow_name    TEXT NOT NULL,\n    workflow_version TEXT NOT NULL,\n    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (fork_run_id),\n    INDEX idx_run_fork_selected_contract_bindings_source (source_run_id, fork_event_id)\n);"
     event_deliveries:
       description: Tracks delivery of events to subscribers (nodes and agents). One row per event × subscriber. run_id
         inherited from the parent event for run-scoped queries.
@@ -3184,6 +3191,8 @@ run_model:
     materialize_only_admission: 'The materialize-only form is the first supported mutating fork slice. It
       consumes the canonical read-only planner, requires execution_ready=true, creates a fork run with
       status=paused and fork lineage, and writes reconstructed entity_state rows under the fork run_id.
+      When selected contracts are provided, it may also persist a durable selected-contract source binding under the
+      fork run_id after loading and validating that selected source, but that binding is prerequisite metadata only.
       It does not mark the source run forked, freeze the source run, redeliver pending work, resume event
       processing, change contracts, or mutate delivery/session/timer/route state. Materialized fork current-state
       rows start a new fork-local revision sequence at revision=1; source-at-T entity_state.revision is not
@@ -3219,7 +3228,8 @@ run_model:
       is ready.'
     selected_contract_execution_model: 'Selected-contract fork execution ownership is a non-mutating model until
       separately approved for runtime mutation. The canonical owner consumes contract_frontier_admission output only as
-      prerequisite evidence, names the future selected-contract execution owner, classifies invalid paths such as copying
+      prerequisite evidence, names the durable selected-contract binding owner that future execution must consume,
+      names the future selected-contract execution owner, classifies invalid paths such as copying
       source event_deliveries or source events, and records the required future consumers for fork-local run_id context,
       handler execution, fork-local event/delivery writes, receipts, dead letters, idempotency, emitted follow-up events,
       timers, routes, sessions, turns, source advancement, and contract-swap boot/resume. The model MUST NOT create

@@ -18,21 +18,23 @@ const (
 )
 
 type RunForkMaterializeRequest struct {
-	SourceRunID string
-	At          string
+	SourceRunID       string
+	At                string
+	ContractSelection *RunForkContractSelection
 }
 
 type RunForkMaterialization struct {
-	SourceRunID              string                       `json:"source_run_id"`
-	ForkRunID                string                       `json:"fork_run_id"`
-	ForkRunStatus            string                       `json:"fork_run_status"`
-	ForkPoint                RunForkPoint                 `json:"fork_point"`
-	MaterializedEntityCount  int                          `json:"materialized_entity_count"`
-	ExecutionReady           bool                         `json:"execution_ready"`
-	ReplayResumeAdmission    RunForkReplayResumeAdmission `json:"replay_resume_admission"`
-	UnsupportedBlockers      []RunForkUnsupportedBlocker  `json:"unsupported_blockers,omitempty"`
-	DeliveryResumeBlocked    bool                         `json:"delivery_resume_blocked"`
-	SourceRunStatusUnchanged bool                         `json:"source_run_status_unchanged"`
+	SourceRunID              string                          `json:"source_run_id"`
+	ForkRunID                string                          `json:"fork_run_id"`
+	ForkRunStatus            string                          `json:"fork_run_status"`
+	ForkPoint                RunForkPoint                    `json:"fork_point"`
+	MaterializedEntityCount  int                             `json:"materialized_entity_count"`
+	ExecutionReady           bool                            `json:"execution_ready"`
+	ReplayResumeAdmission    RunForkReplayResumeAdmission    `json:"replay_resume_admission"`
+	SelectedContractBinding  *RunForkSelectedContractBinding `json:"selected_contract_binding,omitempty"`
+	UnsupportedBlockers      []RunForkUnsupportedBlocker     `json:"unsupported_blockers,omitempty"`
+	DeliveryResumeBlocked    bool                            `json:"delivery_resume_blocked"`
+	SourceRunStatusUnchanged bool                            `json:"source_run_status_unchanged"`
 }
 
 type runForkEntityMetadata struct {
@@ -77,6 +79,17 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 	}
 	if err := s.requireRunForkMaterializerCapabilities(ctx); err != nil {
 		return RunForkMaterialization{}, err
+	}
+	var selection *RunForkContractSelection
+	if req.ContractSelection != nil {
+		normalized, err := normalizeRunForkSelectedContractSelection(*req.ContractSelection)
+		if err != nil {
+			return RunForkMaterialization{}, err
+		}
+		selection = &normalized
+		if err := s.requireRunForkSelectedContractBindingCapabilities(ctx); err != nil {
+			return RunForkMaterialization{}, err
+		}
 	}
 	plan, err := s.PlanRunFork(ctx, RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(req.SourceRunID),
@@ -135,6 +148,19 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 			return RunForkMaterialization{}, err
 		}
 	}
+	var selectedContractBinding *RunForkSelectedContractBinding
+	if selection != nil {
+		binding, err := insertRunForkSelectedContractBinding(ctx, tx, RunForkSelectedContractBindingRequest{
+			ForkRunID:         forkRunID,
+			SourceRunID:       plan.SourceRunID,
+			ForkEventID:       plan.ForkPoint.EventID,
+			ContractSelection: *selection,
+		}, now)
+		if err != nil {
+			return RunForkMaterialization{}, err
+		}
+		selectedContractBinding = &binding
+	}
 	if err := tx.Commit(); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("commit fork materialization: %w", err)
 	}
@@ -147,6 +173,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 		MaterializedEntityCount:  len(plan.Entities),
 		ExecutionReady:           true,
 		ReplayResumeAdmission:    plan.ReplayResumeAdmission,
+		SelectedContractBinding:  selectedContractBinding,
 		DeliveryResumeBlocked:    true,
 		SourceRunStatusUnchanged: true,
 	}, nil

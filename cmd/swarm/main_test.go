@@ -543,19 +543,18 @@ func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *test
 	}
 }
 
-func TestRunForkCommand_ContractsRemainDryRunOnly(t *testing.T) {
+func TestRunForkCommand_ContractsRemainNonExecuting(t *testing.T) {
 	var buf bytes.Buffer
 	code := runForkCommand(context.Background(), t.TempDir(), []string{
-		"--materialize-only",
+		"--activate",
 		"--contracts", t.TempDir(),
 		"--run", uuid.NewString(),
-		"--at", uuid.NewString(),
 	}, &buf)
 	if code != 2 {
 		t.Fatalf("runForkCommand code=%d, want 2; output=%s", code, buf.String())
 	}
-	if !strings.Contains(buf.String(), "--contracts is only supported for non-mutating --dry-run admission") {
-		t.Fatalf("output = %q, want dry-run-only contracts failure", buf.String())
+	if !strings.Contains(buf.String(), "--contracts is only supported for non-mutating --dry-run admission or --materialize-only binding") {
+		t.Fatalf("output = %q, want non-executing contracts failure", buf.String())
 	}
 }
 
@@ -605,11 +604,14 @@ func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T)
 	`, runID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
+	repo := repoRoot()
+	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 	var buf bytes.Buffer
-	code := runForkCommand(ctx, t.TempDir(), []string{
+	code := runForkCommand(ctx, repo, []string{
 		"--materialize-only",
 		"--run", runID,
 		"--at", eventID,
+		"--contracts", contractsRoot,
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -625,6 +627,16 @@ func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T)
 	if result.ReplayResumeAdmission.Owner != store.RunForkReplayResumeAdmissionOwner || !result.ReplayResumeAdmission.StateOnlyExecutionReady {
 		t.Fatalf("materialization taxonomy = %#v, want canonical owner and state-only ready", result.ReplayResumeAdmission)
 	}
+	if result.SelectedContractBinding == nil {
+		t.Fatalf("SelectedContractBinding = nil; output=%s", buf.String())
+	}
+	if result.SelectedContractBinding.Owner != store.RunForkSelectedContractBindingOwner ||
+		result.SelectedContractBinding.ForkRunID != result.ForkRunID ||
+		result.SelectedContractBinding.SourceRunID != runID ||
+		result.SelectedContractBinding.ForkEventID != eventID ||
+		result.SelectedContractBinding.ContractSelection.ContractsRoot != contractsRoot {
+		t.Fatalf("selected contract binding = %#v", result.SelectedContractBinding)
+	}
 	var forkState string
 	if err := db.QueryRowContext(ctx, `
 		SELECT current_state
@@ -635,6 +647,19 @@ func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T)
 	}
 	if forkState != "ready" {
 		t.Fatalf("fork state = %q, want ready", forkState)
+	}
+	var persistedBindingMode string
+	if err := db.QueryRowContext(ctx, `
+		SELECT mode
+		FROM run_fork_selected_contract_bindings
+		WHERE fork_run_id = $1::uuid
+		  AND source_run_id = $2::uuid
+		  AND fork_event_id = $3::uuid
+	`, result.ForkRunID, runID, eventID).Scan(&persistedBindingMode); err != nil {
+		t.Fatalf("load selected contract binding row: %v", err)
+	}
+	if persistedBindingMode != "selected_contracts" {
+		t.Fatalf("binding mode = %q, want selected_contracts", persistedBindingMode)
 	}
 }
 
