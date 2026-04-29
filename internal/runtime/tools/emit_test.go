@@ -306,6 +306,120 @@ func TestGenerateEmitToolsForActor_ProviderSchemaNormalizesPrecisionRefs(t *test
 	}
 }
 
+func TestGenerateEmitToolsForActor_GeneratedSchemaIsClosedRequiredAndRejectsUndeclaredPayload(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{
+			Enums: map[string]runtimecontracts.EnumTypeDecl{
+				"SignalStrength": {Values: []string{"weak", "strong"}},
+			},
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"DiscoveryContext": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"source": {Type: "text"},
+						"score":  {Type: "numeric(5,2)"},
+					},
+				},
+			},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"analysis-agent": {
+				ID:         "analysis-agent",
+				Role:       "analysis",
+				EmitEvents: []string{"vertical.derived"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"vertical.derived": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"opportunity_name":     {Type: "text"},
+						"signal_strength":      {Type: "SignalStrength"},
+						"discovery_context":    {Type: "DiscoveryContext"},
+						"derivation_rationale": {Type: "text"},
+					},
+				},
+			},
+		},
+	})
+	if errs := ValidateGeneratedToolSchemaClosureForSource(source); len(errs) > 0 {
+		t.Fatalf("ValidateGeneratedToolSchemaClosureForSource errors = %#v", errs)
+	}
+	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
+	defs := registry.GenerateEmitToolsForActor(models.AgentConfig{
+		ID:         "analysis-agent",
+		Role:       "analysis",
+		EmitEvents: []string{"vertical.derived"},
+	}, nil)
+	if len(defs) != 1 {
+		t.Fatalf("tool count = %d, want 1 (%#v)", len(defs), defs)
+	}
+	schema := defs[0].Schema.(map[string]any)
+	required := requiredSchemaSet(schema["required"])
+	for _, field := range []string{"opportunity_name", "signal_strength", "discovery_context", "derivation_rationale"} {
+		if _, ok := required[field]; !ok {
+			t.Fatalf("generated emit schema missing required field %s in %#v", field, schema["required"])
+		}
+	}
+	props := schema["properties"].(map[string]any)
+	if got := props["signal_strength"].(map[string]any)["enum"]; len(schemaEnumValues(got)) != 2 {
+		t.Fatalf("signal_strength enum = %#v, want two values", got)
+	}
+	contextSchema := props["discovery_context"].(map[string]any)
+	if got := contextSchema["additionalProperties"]; got != false {
+		t.Fatalf("discovery_context additionalProperties = %#v, want false", got)
+	}
+	if err := ValidatePayloadAgainstSchema(schema, map[string]any{
+		"opportunity_name":     "AP automation",
+		"signal_strength":      "strong",
+		"discovery_context":    map[string]any{"source": "call", "score": 98.5},
+		"derivation_rationale": "evidence",
+		"vertical_id":          "parent-vertical",
+	}); err == nil {
+		t.Fatal("generated emit schema accepted undeclared vertical_id")
+	}
+	if err := ValidatePayloadAgainstSchema(schema, map[string]any{
+		"opportunity_name":     "AP automation",
+		"discovery_context":    map[string]any{"source": "call", "score": 98.5},
+		"derivation_rationale": "evidence",
+	}); err == nil {
+		t.Fatal("generated emit schema accepted missing declared signal_strength")
+	}
+}
+
+func TestGeneratedToolSchemaClosureRejectsOpenOrPartialObjectSchemas(t *testing.T) {
+	errs := validateGeneratedJSONSchema("tool.input", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"value": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"mode": map[string]any{"type": "string", "enum": []any{}},
+				},
+				"additionalProperties": false,
+			},
+		},
+		"additionalProperties": false,
+	})
+	got := strings.Join(generatedSchemaClosureErrorStrings(errs), "\n")
+	for _, want := range []string{
+		"tool.input object schema must require declared property value",
+		"tool.input.properties.value object schema must require declared property mode",
+		"tool.input.properties.value.properties.mode enum schema must declare at least one allowed value",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("errors = %q, want %q", got, want)
+		}
+	}
+}
+
+func generatedSchemaClosureErrorStrings(errs []error) []string {
+	out := make([]string, 0, len(errs))
+	for _, err := range errs {
+		out = append(out, err.Error())
+	}
+	return out
+}
+
 func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{

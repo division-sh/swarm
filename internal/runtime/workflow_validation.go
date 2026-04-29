@@ -22,10 +22,11 @@ type WorkflowContractValidationOptions struct {
 }
 
 type WorkflowContractValidationResult struct {
-	BootReport                  runtimebootverify.Report
-	ToolImplementationWarnings  []error
-	MissingEmitSchemaEventTypes []string
-	GeneratedEmitSchemaErrors   []error
+	BootReport                       runtimebootverify.Report
+	ToolImplementationWarnings       []error
+	MissingEmitSchemaEventTypes      []string
+	GeneratedEmitSchemaErrors        []error
+	GeneratedToolSchemaClosureErrors []error
 }
 
 func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store) WorkflowContractValidationOptions {
@@ -82,6 +83,10 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	result.GeneratedEmitSchemaErrors = runtimetools.ValidateGeneratedEmitToolSchemasForSource(source)
 	if len(result.GeneratedEmitSchemaErrors) > 0 {
 		return result, fmt.Errorf("generated emit tool schema validation failed:\n%s", formatValidationErrors(result.GeneratedEmitSchemaErrors))
+	}
+	result.GeneratedToolSchemaClosureErrors = runtimetools.ValidateGeneratedToolSchemaClosureForSource(source)
+	if len(result.GeneratedToolSchemaClosureErrors) > 0 {
+		return result, fmt.Errorf("generated tool schema closure validation failed:\n%s", formatValidationErrors(result.GeneratedToolSchemaClosureErrors))
 	}
 
 	return result, nil

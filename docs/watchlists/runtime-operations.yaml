@@ -157,6 +157,10 @@ active_issues:
     title: Implement non-lossy typed read tools for current-entity access
     maps_to:
       - transport_policy_and_surface_parity
+  - id: 582
+    title: Enforce closed generated schemas for typed tools and emits
+    maps_to:
+      - transport_policy_and_surface_parity
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -175,6 +179,7 @@ nodes:
       - CLI native tools can still use mixed provider-plus-platform fallback semantics, so visible turn surface does not equal callable provider-native truth for bash, web_search, and file_io
       - startup validation can compare provider-native init output against the full runtime MCP/local fallback surface and can select ordinary semantic tools as startup probes because their schemas accept empty objects
       - generated role-scoped typed reads can be silently downgraded by generic transport projection into preview/truncated shapes instead of complete typed values or explicit typed-read errors
+      - generated typed tool and emit schemas can drift between provider-visible delivery, runtime validation, and bootverify, allowing undeclared payload keys or missing required/enum constraints to survive one surface
     representative_issues:
       - 111
       - 136
@@ -186,6 +191,7 @@ nodes:
       - 544
       - 571
       - 580
+      - 582
     common_framing_mistakes:
       too_broad:
         - tool transport is inconsistent

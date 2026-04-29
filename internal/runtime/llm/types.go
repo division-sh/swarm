@@ -8,10 +8,11 @@ import (
 )
 
 type ToolDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Schema      any    `json:"schema,omitempty"`
-	Usage       string `json:"-"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	Schema          any    `json:"schema,omitempty"`
+	Usage           string `json:"-"`
+	GeneratedSchema bool   `json:"-"`
 }
 
 func DeliveredToolDescription(def ToolDefinition) string {

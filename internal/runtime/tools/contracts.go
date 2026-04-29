@@ -10,9 +10,11 @@ import (
 )
 
 type ContractSchemaEntry struct {
-	Category    string         `yaml:"category"`
-	Description string         `yaml:"description"`
-	InputSchema map[string]any `yaml:"input_schema"`
+	Category        string         `yaml:"category"`
+	Description     string         `yaml:"description"`
+	InputSchema     map[string]any `yaml:"input_schema"`
+	OutputSchema    map[string]any `yaml:"output_schema,omitempty"`
+	GeneratedSchema bool           `yaml:"-"`
 }
 
 var supportedRuntimeToolNames = map[string]struct{}{

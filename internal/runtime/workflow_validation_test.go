@@ -133,14 +133,14 @@ func TestValidateWorkflowContractSurfaceRejectsInvalidGeneratedEmitToolSchema(t 
 	source := semanticview.Wrap(bundle)
 
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, DefaultWorkflowContractValidationOptions(nil))
-	if err == nil || !strings.Contains(err.Error(), "generated emit tool schema validation failed") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want generated schema failure", err)
+	if err == nil || !strings.Contains(err.Error(), "generated_tool_schema_closure") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want boot generated schema closure failure", err)
 	}
-	if len(result.GeneratedEmitSchemaErrors) != 1 {
-		t.Fatalf("GeneratedEmitSchemaErrors = %#v, want one error", result.GeneratedEmitSchemaErrors)
+	if len(result.BootReport.Errors()) != 1 {
+		t.Fatalf("BootReport errors = %#v, want one error", result.BootReport.Errors())
 	}
-	if got := result.GeneratedEmitSchemaErrors[0].Error(); !strings.Contains(got, "unsupported JSON Schema type \"NotDeclared\"") {
-		t.Fatalf("GeneratedEmitSchemaErrors[0] = %q, want unsupported type", got)
+	if got := result.BootReport.Errors()[0].Message; !strings.Contains(got, "unsupported JSON Schema type \"NotDeclared\"") {
+		t.Fatalf("BootReport error = %q, want unsupported type", got)
 	}
 }
 
