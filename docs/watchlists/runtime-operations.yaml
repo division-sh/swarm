@@ -194,6 +194,7 @@ nodes:
       - markerless replay-eligible events can repeatedly fail committed replay-scope lookup on the supported outbox sweeper path
       - timestamp forks need fork-local delivery/event replay lineage and committed replay-scope proof rather than direct source delivery redelivery or markerless same-run outbox replay
       - timestamp-fork non-agent delivery facts are not safe to replay through the agent delivery primitive; node/system delivery execution requires a separate handler/idempotency/receipt owner
+      - selected-contract fork execution must classify delivery-write boundaries before future mutation; source deliveries remain lineage/blocker evidence, not executable fork work
     representative_issues:
       - 112
       - 144
@@ -202,6 +203,8 @@ nodes:
       - 564
       - 569
       - 574
+      - 583
+      - 585
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
@@ -227,6 +230,7 @@ nodes:
       - session/turn replay remains an admission-policy first slice; source active sessions, active turns, active task conversation audits, and fork-local pre-existing session/turn rows are permanent fail-closed blockers until a run-scoped reconstruction owner is approved
       - non-agent delivery replay remains admission-policy only; source node/system/platform/internal delivery facts and committed replay-scope markers are lineage-only or named fail-closed blockers until runtime handler replay ownership is approved
       - selected-contract timestamp-fork re-admission needs a non-mutating contract/frontier/route admission owner before node/system delivery facts can become executable fork work
+      - selected-contract fork execution needs a non-mutating owner model before mutation; the model must consume frontier admission as evidence only and classify contract binding, fork run_id context, handler execution, receipts, dead letters, idempotency, emitted follow-ups, timers, routes, sessions, source-advanced policy, and contract-swap boot/resume
     representative_issues:
       - 564
       - 565
@@ -234,6 +238,8 @@ nodes:
       - 572
       - 574
       - 577
+      - 583
+      - 585
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
