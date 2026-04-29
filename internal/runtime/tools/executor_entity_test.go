@@ -272,6 +272,11 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 			t.Fatalf("expected generated role-scoped tool %q in %#v", name, sortedRoleScopedToolNames(names))
 		}
 	}
+	for _, name := range []string{"save_validation_case_status", "update_validation_case_status_value"} {
+		if _, ok := names[name]; ok {
+			t.Fatalf("create-only field produced mutation tool %q in %#v", name, sortedRoleScopedToolNames(names))
+		}
+	}
 	for _, name := range []string{
 		"create_entity",
 		"get_entity",
@@ -2473,6 +2478,8 @@ func roleScopedEntityToolAgentYAML(actor models.AgentConfig) string {
 	}
 	builder.WriteString("  entity_writes:\n")
 	builder.WriteString("    validation_case:\n")
+	builder.WriteString("      create:\n")
+	builder.WriteString("        - status\n")
 	builder.WriteString("      save:\n")
 	builder.WriteString("        - business_brief\n")
 	return builder.String()

@@ -13,7 +13,7 @@ type ToolHandler func(ctx context.Context, actor models.AgentConfig, input any) 
 type EmitToolHandler func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error)
 type HTTPToolHandler func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error)
 type MCPToolHandler func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error)
-type RoleScopedEntityToolHandler func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error)
+type RoleScopedEntityToolHandler func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, bool, error)
 type ToolResolver func(actor models.AgentConfig, name string) (RegisteredTool, bool, error)
 
 type ToolDispatcher struct {
@@ -68,8 +68,11 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 	case implementationPlatformBuiltin:
 		handler, ok := d.handlers[name]
 		if !ok || handler == nil {
-			if IsRoleScopedEntityTool(name) && d.roleScopedEntityHandler != nil {
-				return d.roleScopedEntityHandler(ctx, actor, name, input)
+			if d.roleScopedEntityHandler != nil {
+				out, handled, err := d.roleScopedEntityHandler(ctx, actor, name, input)
+				if handled {
+					return out, err
+				}
 			}
 			return nil, fmt.Errorf("missing platform builtin handler: %s", name)
 		}

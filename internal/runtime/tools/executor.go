@@ -110,7 +110,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
 			return exec.execMCPTool(ctx, actor, tool, input)
 		},
-		exec.execRoleScopedEntityTool,
+		exec.dispatchRoleScopedEntityTool,
 		exec.buildToolHandlers(),
 	)
 	return exec

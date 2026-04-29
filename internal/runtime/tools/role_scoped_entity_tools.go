@@ -65,27 +65,6 @@ func roleScopedEntityToolsEnabledForActor(source semanticview.Source, actor mode
 	return schema.ToolSurface.RoleScopedEntityTools
 }
 
-func IsRoleScopedEntityTool(toolName string) bool {
-	return roleScopedEntityToolNameKind(toolName) != ""
-}
-
-func roleScopedEntityToolNameKind(toolName string) roleScopedEntityToolKind {
-	toolName = strings.TrimSpace(toolName)
-	if toolName == "read_file" {
-		return ""
-	}
-	switch {
-	case strings.HasPrefix(toolName, "read_"):
-		return roleScopedEntityToolReadWhole
-	case strings.HasPrefix(toolName, "save_"):
-		return roleScopedEntityToolSaveField
-	case strings.HasPrefix(toolName, "update_"):
-		return roleScopedEntityToolUpdatePath
-	default:
-		return ""
-	}
-}
-
 func roleScopedEntityToolSchemaEntriesForActor(source semanticview.Source, actor models.AgentConfig, contract entityruntime.Contract) map[string]ContractSchemaEntry {
 	specs := roleScopedEntityToolSpecsForActor(source, actor, contract)
 	out := make(map[string]ContractSchemaEntry, len(specs))
@@ -216,7 +195,6 @@ func roleScopedWritableFields(source semanticview.Source, actor models.AgentConf
 			}
 		}
 	}
-	add(decl.Create)
 	add(decl.Save)
 	out := make([]string, 0, len(seen))
 	for field := range seen {
@@ -304,6 +282,44 @@ func roleScopedEntityToolSpecForActor(source semanticview.Source, actor models.A
 	specs := roleScopedEntityToolSpecsForActor(source, actor, contract)
 	spec, ok := specs[strings.TrimSpace(toolName)]
 	return spec, contract, ok
+}
+
+func (e *Executor) RoleScopedEntityToolNamesForActor(actor models.AgentConfig) map[string]struct{} {
+	if e == nil {
+		return nil
+	}
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
+	if !roleScopedEntityToolsEnabledForActor(source, actor) {
+		return nil
+	}
+	contract, ok := entityruntime.ResolveForActor(source, actor.ID)
+	if !ok {
+		return nil
+	}
+	specs := roleScopedEntityToolSpecsForActor(source, actor, contract)
+	out := make(map[string]struct{}, len(specs))
+	for name := range specs {
+		if name = strings.TrimSpace(name); name != "" {
+			out[name] = struct{}{}
+		}
+	}
+	return out
+}
+
+func (e *Executor) dispatchRoleScopedEntityTool(ctx context.Context, actor models.AgentConfig, name string, input any) (any, bool, error) {
+	if e == nil {
+		return nil, false, nil
+	}
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
+	if _, _, ok := roleScopedEntityToolSpecForActor(source, actor, name); !ok {
+		return nil, false, nil
+	}
+	out, err := e.execRoleScopedEntityTool(ctx, actor, name, input)
+	return out, true, err
 }
 
 func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
