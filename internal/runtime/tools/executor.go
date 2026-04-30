@@ -26,27 +26,28 @@ import (
 )
 
 type Executor struct {
-	mu              sync.RWMutex
-	manager         Manager
-	managerProvider ManagerProvider
-	sqlDB           *sql.DB
-	bus             EventPublisher
-	scheduler       Scheduler
-	scheduleStore   SchedulePersistence
-	mailboxStore    MailboxPersistence
-	cfg             *config.Config
-	credentials     runtimecredentials.Store
-	httpClient      *http.Client
-	mcpClient       *runtimemcp.Client
-	workflowSource  semanticview.Source
-	workspaces      workspace.Resolver
-	authority       runtimeauthority.Provider
-	emitRegistry    *EmitRegistry
-	authorizer      *ToolAuthorizer
-	validator       *ToolInputValidator
-	dispatcher      *ToolDispatcher
-	oneShotMu       sync.Mutex
-	oneShotEmits    map[string]struct{}
+	mu                             sync.RWMutex
+	manager                        Manager
+	managerProvider                ManagerProvider
+	sqlDB                          *sql.DB
+	bus                            EventPublisher
+	scheduler                      Scheduler
+	scheduleStore                  SchedulePersistence
+	mailboxStore                   MailboxPersistence
+	cfg                            *config.Config
+	credentials                    runtimecredentials.Store
+	httpClient                     *http.Client
+	mcpClient                      *runtimemcp.Client
+	workflowSource                 semanticview.Source
+	workspaces                     workspace.Resolver
+	authority                      runtimeauthority.Provider
+	emitRegistry                   *EmitRegistry
+	authorizer                     *ToolAuthorizer
+	validator                      *ToolInputValidator
+	dispatcher                     *ToolDispatcher
+	allowInternalLegacyEntityTools bool
+	oneShotMu                      sync.Mutex
+	oneShotEmits                   map[string]struct{}
 }
 
 type runtimeToolLogSink interface {
@@ -63,21 +64,22 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		scheduleStore = stores[0]
 	}
 	exec := &Executor{
-		manager:         opts.Manager,
-		managerProvider: opts.ManagerProvider,
-		bus:             bus,
-		scheduler:       scheduler,
-		scheduleStore:   scheduleStore,
-		mailboxStore:    opts.MailboxStore,
-		sqlDB:           opts.SQLDB,
-		cfg:             opts.Config,
-		credentials:     opts.Credentials,
-		httpClient:      &http.Client{Timeout: 30 * time.Second},
-		mcpClient:       opts.MCPClient,
-		workflowSource:  opts.WorkflowSource,
-		workspaces:      opts.WorkspaceResolver,
-		authority:       runtimeauthority.ProviderOrNoop(opts.AuthorityProvider),
-		oneShotEmits:    make(map[string]struct{}),
+		manager:                        opts.Manager,
+		managerProvider:                opts.ManagerProvider,
+		bus:                            bus,
+		scheduler:                      scheduler,
+		scheduleStore:                  scheduleStore,
+		mailboxStore:                   opts.MailboxStore,
+		sqlDB:                          opts.SQLDB,
+		cfg:                            opts.Config,
+		credentials:                    opts.Credentials,
+		httpClient:                     &http.Client{Timeout: 30 * time.Second},
+		mcpClient:                      opts.MCPClient,
+		workflowSource:                 opts.WorkflowSource,
+		workspaces:                     opts.WorkspaceResolver,
+		authority:                      runtimeauthority.ProviderOrNoop(opts.AuthorityProvider),
+		allowInternalLegacyEntityTools: opts.AllowInternalLegacyEntityTools,
+		oneShotEmits:                   make(map[string]struct{}),
 	}
 	if opts.EmitRegistry != nil {
 		exec.emitRegistry = opts.EmitRegistry
@@ -148,10 +150,19 @@ func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) 
 	e.mu.RLock()
 	source := e.workflowSource
 	client := e.mcpClient
+	allowInternalLegacy := e.allowInternalLegacyEntityTools
 	e.mu.RUnlock()
 	var discovered map[string]runtimemcp.DiscoveredTool
 	if client != nil {
 		discovered = client.DiscoveredTools()
+	}
+	if allowInternalLegacy && IsLegacyEntityToolSurfaceName(name) {
+		entries, err := registeredToolsForRuntime(source, discovered)
+		if err != nil {
+			return RegisteredTool{}, false, err
+		}
+		tool, ok := entries[name]
+		return tool, ok, nil
 	}
 	return resolveRegisteredToolForActor(source, actor, name, discovered)
 }
@@ -247,8 +258,9 @@ func (e *Executor) toolAuthorizationDecision(actor models.AgentConfig, toolName 
 	toolName = normalizeNativeToolName(toolName)
 	e.mu.RLock()
 	source := e.workflowSource
+	allowInternalLegacy := e.allowInternalLegacyEntityTools
 	e.mu.RUnlock()
-	if _, legacy := legacyEntityToolSurfaceNames[toolName]; legacy && !actorAllowsInternalLegacyEntityTools(actor) {
+	if _, legacy := legacyEntityToolSurfaceNames[toolName]; legacy && !allowInternalLegacy {
 		return toolAuthorizationDecision{
 			ownership: toolOwnershipPlatformBuiltin,
 			class:     toolAuthorizationDenied,

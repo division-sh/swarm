@@ -63,17 +63,6 @@ func actorHasEntityContract(source semanticview.Source, actor models.AgentConfig
 	return ok
 }
 
-func actorAllowsInternalLegacyEntityTools(actor models.AgentConfig) bool {
-	// Legacy entity handlers remain available only to non-agent internal/operator
-	// paths. Normal agent configs do not set these execution types.
-	switch strings.ToLower(strings.TrimSpace(actor.Type)) {
-	case "internal", "operator", "system", "system_node":
-		return true
-	default:
-		return false
-	}
-}
-
 func roleScopedEntityToolSchemaEntriesForActor(source semanticview.Source, actor models.AgentConfig, contract entityruntime.Contract) map[string]ContractSchemaEntry {
 	specs := roleScopedEntityToolSpecsForActor(source, actor, contract)
 	out := make(map[string]ContractSchemaEntry, len(specs))

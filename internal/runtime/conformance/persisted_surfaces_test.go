@@ -2319,7 +2319,8 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 		t.Fatalf("seed run: %v", err)
 	}
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
-		SQLDB: db,
+		SQLDB:                          db,
+		AllowInternalLegacyEntityTools: true,
 		WorkflowSource: runtimesemanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 			RootEntities: runtimecontracts.EntityContractsDocument{
 				"accounts": {

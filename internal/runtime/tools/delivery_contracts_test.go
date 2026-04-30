@@ -13,7 +13,9 @@ import (
 
 func TestToolDefinitionsForActor_DeriveRoleScopedEntitySchemasFromActorContract(t *testing.T) {
 	actor := models.AgentConfig{
-		ID:    "analyzer",
+		ID: "analyzer",
+		// Type is config-authored; it must not be trusted to restore legacy tools.
+		Type:  "internal",
 		Role:  "analyzer",
 		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	}

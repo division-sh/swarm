@@ -261,8 +261,9 @@ contract_formats:
         get_entity, get_subject_status, query_entities, search_entities, query_metrics, and save_entity_field. allowed_tools,
         runtime-wide fallback, MCP tools/list, provider summaries, and executor authorization MUST NOT reintroduce these
         names for ordinary agents.'
-      compatibility_boundary: 'Retained legacy platform entity handlers are non-agent internal/operator compatibility only.
-        They are not a valid normal-agent provider-visible or callable surface.'
+      compatibility_boundary: 'Retained legacy platform entity handlers are trusted runtime-internal compatibility only.
+        A normal agent MUST NOT regain them by setting agent-authored type/role/config fields; they are not a valid normal-agent
+        provider-visible or callable surface.'
     schema_source: entities.yaml + types.yaml
   required_agents:
     description: required_agents in schema.yaml declares agents the flow needs.
@@ -1371,7 +1372,7 @@ engine:
       - Agent sessions are terminated
       - All persisted state remains in the database
       - Entity remains queryable through explicit read/query surfaces; for normal agents this means generated current-entity
-        reads, while legacy query_entities remains a non-agent internal/operator/system compatibility surface.
+        reads, while legacy query_entities remains a trusted runtime-internal compatibility surface.
       archival: Future concern — retention policy and cold storage are not specified in v1.1.0.
       event_rejection: 'When an event arrives targeting an entity in a terminal state, the platform rejects it before handler
         execution. No guard runs, no handler runs, no state changes. The event is marked as rejected with reason: terminal_entity.
@@ -2224,21 +2225,21 @@ tool_model:
       agent_fire: Terminate an agent session. Requires agent_fire permission.
       agent_hire: Spawn a new agent session. Requires agent_hire permission.
       agent_reconfigure: Modify an agent's prompt, tools, or subscriptions. Requires agent_reconfigure permission.
-      create_entity: Create a new entity row in entity_state. Legacy internal/operator/system compatibility surface; not
+      create_entity: Create a new entity row in entity_state. Legacy trusted runtime-internal compatibility surface; not
         provider-visible or callable for normal agents.
-      get_entity: Read an entity by ID. Legacy internal/operator/system compatibility surface; not provider-visible or
+      get_entity: Read an entity by ID. Legacy trusted runtime-internal compatibility surface; not provider-visible or
         callable for normal agents in favor of generated read_{entity_type} tools.
       human_task_decide: Record a human decision on a pending task. Requires human_task_decide permission.
       human_task_request: Create a task for human execution. Requires human_task_request permission.
       mailbox_send: Send an item to the human mailbox for decision. Auto-granted to all agents (universal tool).
-      query_entities: Query entities by state, fields, or aggregation. Legacy internal/operator/system compatibility surface;
+      query_entities: Query entities by state, fields, or aggregation. Legacy trusted runtime-internal compatibility surface;
         not provider-visible or callable for normal agents.
-      query_metrics: Read aggregated metrics (counts, sums, averages) across entities. Legacy internal/operator/system
+      query_metrics: Read aggregated metrics (counts, sums, averages) across entities. Legacy trusted runtime-internal
         compatibility surface; not provider-visible or callable for normal agents.
-      save_entity_field: Write a specific field on an entity. Legacy internal/operator/system compatibility surface; not
+      save_entity_field: Write a specific field on an entity. Legacy trusted runtime-internal compatibility surface; not
         provider-visible or callable for normal agents in favor of generated save/update tools.
       schedule: Schedule a future action or timer. Requires schedule permission.
-      search_entities: Query entities by stage, field values, or metadata. Legacy internal/operator/system compatibility
+      search_entities: Query entities by stage, field values, or metadata. Legacy trusted runtime-internal compatibility
         surface; not provider-visible or callable for normal agents.
     handler_actions:
       description: These are handler ACTION field values, not agent-callable tools. They are invoked via the action field in
@@ -2258,7 +2259,7 @@ tool_model:
       description: All entity tools operate on the generic entity_state table. They read/write entity_state.fields (JSONB),
         entity_state.current_state, entity_state.gates, and entity_state.accumulator. They do NOT operate on product-specific
         typed tables. Product-specific tables are optional query-performance optimizations — the entity tools always use the
-        generic entity_state interface. For normal agents, these legacy schemas are non-provider-visible internal/operator
+        generic entity_state interface. For normal agents, these legacy schemas are non-provider-visible runtime-internal
         compatibility surfaces; the valid provider-visible surface is the generated role-scoped tool set from
         contract_formats.persistence_model.role_scoped_entity_tools.
       create_entity:

@@ -50,4 +50,7 @@ type ExecutorOptions struct {
 	WorkspaceResolver workspace.Resolver
 	AuthorityProvider runtimeauthority.Provider
 	EmitRegistry      *EmitRegistry
+	// Trusted runtime/test escape hatch for exercising retained legacy handlers.
+	// Actor-authored config must never enable legacy entity tools for normal agents.
+	AllowInternalLegacyEntityTools bool
 }
