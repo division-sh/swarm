@@ -199,10 +199,9 @@ func (s *relayAwareToolExecutorStub) PersistOversizedToolResultRelay(_ context.C
 }
 
 type actorScopedToolExecutorStub struct {
-	defs       []llm.ToolDefinition
-	actorDefs  []llm.ToolDefinition
-	roleScoped bool
-	callCount  *int
+	defs      []llm.ToolDefinition
+	actorDefs []llm.ToolDefinition
+	callCount *int
 }
 
 func (s actorScopedToolExecutorStub) Execute(context.Context, string, any) (any, error) {
@@ -218,10 +217,6 @@ func (s actorScopedToolExecutorStub) ToolDefinitions() []llm.ToolDefinition {
 
 func (s actorScopedToolExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
 	return append([]llm.ToolDefinition(nil), s.actorDefs...)
-}
-
-func (s actorScopedToolExecutorStub) RoleScopedEntityToolsEnabledForActor(models.AgentConfig) bool {
-	return s.roleScoped
 }
 
 func (s actorScopedToolExecutorStub) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
@@ -616,14 +611,13 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 	}
 }
 
-func TestGatewayMCPToolsForRequest_DoesNotFallbackToRuntimeWideToolsForRoleScopedActor(t *testing.T) {
+func TestGatewayMCPToolsForRequest_DoesNotFallbackToRuntimeWideToolsForEmptyActorCatalog(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	g := NewGateway(actorScopedToolExecutorStub{
 		defs: []llm.ToolDefinition{
 			{Name: "get_entity", Description: "runtime-wide legacy entity tool"},
 		},
-		actorDefs:  nil,
-		roleScoped: true,
+		actorDefs: nil,
 	}, "", GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
 			return models.AgentConfig{ID: agentID, Role: "validation_orchestrator"}, true
@@ -640,7 +634,7 @@ func TestGatewayMCPToolsForRequest_DoesNotFallbackToRuntimeWideToolsForRoleScope
 	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-role-scoped-empty")
 	tools := mustMCPToolsForRequest(t, g, req)
 	if len(tools) != 0 {
-		t.Fatalf("role-scoped empty actor catalog fell back to runtime-wide tools: %#v", tools)
+		t.Fatalf("empty actor catalog fell back to runtime-wide tools: %#v", tools)
 	}
 }
 
@@ -661,10 +655,9 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 		{Name: "save_validation_case_business_brief", Description: "role scoped save"},
 	}
 	g := NewGateway(actorScopedToolExecutorStub{
-		defs:       legacyDefs,
-		actorDefs:  generatedDefs,
-		roleScoped: true,
-		callCount:  &executeCount,
+		defs:      legacyDefs,
+		actorDefs: generatedDefs,
+		callCount: &executeCount,
 	}, testGatewayToken, GatewayHooks{
 		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
 			return models.AgentConfig{ID: agentID, Role: "validation_orchestrator"}, true

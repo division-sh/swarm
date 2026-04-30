@@ -2338,6 +2338,7 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	ctx = runtimetools.WithActor(ctx, runtimeactors.AgentConfig{
 		ID:    "tester",
+		Type:  "internal",
 		Role:  "operator",
 		Tools: []string{"create_entity", "save_entity_field"},
 	})

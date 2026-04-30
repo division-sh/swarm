@@ -53,10 +53,6 @@ type runtimeGatewayExecutor interface {
 	ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition
 }
 
-type roleScopedEntityToolSurfaceReporter interface {
-	RoleScopedEntityToolsEnabledForActor(models.AgentConfig) bool
-}
-
 func NewGateway(executor runtimeGatewayExecutor, authToken string, hooks GatewayHooks) *Gateway {
 	return &Gateway{
 		executor:  executor,
@@ -643,15 +639,6 @@ func (g *Gateway) toolCatalog(actor models.AgentConfig, actorOK bool) map[string
 			}
 		}
 	}
-	if g.executor != nil && len(catalog) == 0 && !g.roleScopedEntityToolsEnabledForActor(actor) {
-		for _, def := range g.executor.ToolDefinitions() {
-			name := normalizeGatewayToolName(def.Name)
-			if name != "" {
-				def.Name = name
-				catalog[name] = def
-			}
-		}
-	}
 	if g.hooks.EmitToolsForActor != nil {
 		for _, def := range g.hooks.EmitToolsForActor(actor) {
 			name := normalizeGatewayToolName(def.Name)
@@ -674,14 +661,6 @@ func (g *Gateway) toolCatalog(actor models.AgentConfig, actorOK bool) map[string
 		}
 	}
 	return catalog
-}
-
-func (g *Gateway) roleScopedEntityToolsEnabledForActor(actor models.AgentConfig) bool {
-	if g == nil || g.executor == nil {
-		return false
-	}
-	reporter, ok := g.executor.(roleScopedEntityToolSurfaceReporter)
-	return ok && reporter.RoleScopedEntityToolsEnabledForActor(actor)
 }
 
 func (g *Gateway) requestToolCapabilities(actor models.AgentConfig, actorOK bool, catalog map[string]llm.ToolDefinition, requestAllowed map[string]struct{}) (toolcapabilities.Set, bool) {

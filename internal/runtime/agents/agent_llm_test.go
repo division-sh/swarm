@@ -122,9 +122,9 @@ func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
 	}
 }
 
-func TestFilterTools_RetainsUniversalEntityToolsWhenConstrained(t *testing.T) {
+func TestFilterTools_RemovesLegacyEntityToolsWhenConstrained(t *testing.T) {
 	allowed, constrained := extractAllowedToolSet(models.AgentConfig{
-		Tools: []string{"emit_example"},
+		Tools: []string{"emit_example", "get_entity"},
 	})
 	if !constrained {
 		t.Fatal("expected constrained tool set")
@@ -140,18 +140,21 @@ func TestFilterTools_RetainsUniversalEntityToolsWhenConstrained(t *testing.T) {
 	for _, tool := range filtered {
 		names = append(names, tool.Name)
 	}
-	if !containsString(names, "get_entity") || !containsString(names, "search_entities") || !containsString(names, "agent_message") {
-		t.Fatalf("expected universal tools preserved, got %v", names)
+	if containsString(names, "get_entity") || containsString(names, "search_entities") {
+		t.Fatalf("legacy entity tools should not be preserved by constrained filtering, got %v", names)
+	}
+	if !containsString(names, "agent_message") {
+		t.Fatalf("expected non-entity universal tool preserved, got %v", names)
 	}
 	if containsString(names, "non_universal") {
 		t.Fatalf("expected non-universal tool filtered out, got %v", names)
 	}
-	if !runtimetools.IsUniversal("get_entity") {
-		t.Fatal("expected get_entity to be universal")
+	if runtimetools.IsUniversal("get_entity") {
+		t.Fatal("get_entity must not remain universal")
 	}
 }
 
-func TestFilterTools_DefaultDeniesNonUniversalToolsWhenNoToolList(t *testing.T) {
+func TestFilterTools_DefaultDeniesLegacyEntityToolsWhenNoToolList(t *testing.T) {
 	allowed, constrained := extractAllowedToolSet(models.AgentConfig{})
 	if constrained {
 		t.Fatal("expected unconstrained tool set when no tools are configured")
@@ -166,8 +169,11 @@ func TestFilterTools_DefaultDeniesNonUniversalToolsWhenNoToolList(t *testing.T) 
 	for _, tool := range filtered {
 		names = append(names, tool.Name)
 	}
-	if !containsString(names, "get_entity") || !containsString(names, "agent_message") {
-		t.Fatalf("expected universal tools preserved, got %v", names)
+	if containsString(names, "get_entity") {
+		t.Fatalf("legacy entity tool should not be preserved by default filtering, got %v", names)
+	}
+	if !containsString(names, "agent_message") {
+		t.Fatalf("expected non-entity universal tool preserved, got %v", names)
 	}
 	if containsString(names, "schedule") {
 		t.Fatalf("expected non-universal tool filtered out, got %v", names)

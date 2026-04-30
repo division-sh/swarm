@@ -28,7 +28,7 @@ func builtinRegisteredTools(source semanticview.Source, actor *models.AgentConfi
 }
 
 func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.AgentConfig) map[string]ContractSchemaEntry {
-	if actor != nil && roleScopedEntityToolsEnabledForActor(source, *actor) {
+	if actor != nil {
 		contract, ok := resolveEntityToolContract(source, actor)
 		if !ok {
 			return map[string]ContractSchemaEntry{}

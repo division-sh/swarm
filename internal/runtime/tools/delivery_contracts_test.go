@@ -1,6 +1,7 @@
 package tools_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 	runtimetools "swarm/internal/runtime/tools"
 )
 
-func TestToolDefinitionsForActor_DeriveWave1EntitySchemasFromActorContract(t *testing.T) {
+func TestToolDefinitionsForActor_DeriveRoleScopedEntitySchemasFromActorContract(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:    "analyzer",
 		Role:  "analyzer",
@@ -41,104 +42,42 @@ review_subject:
 		defByName[def.Name] = schema
 	}
 
-	createSchema := defByName["create_entity"]
-	if createSchema == nil {
-		t.Fatal("expected create_entity definition")
+	for _, legacy := range []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"} {
+		if _, ok := defByName[legacy]; ok {
+			t.Fatalf("legacy entity tool %q remained visible in %#v", legacy, toolDefinitionNames(defs))
+		}
 	}
-	props, _ := createSchema["properties"].(map[string]any)
-	if _, ok := props["entity_id"]; ok {
-		t.Fatalf("create_entity schema should not expose entity_id: %#v", props)
-	}
-	if _, ok := props["entity_type"]; ok {
-		t.Fatalf("create_entity schema should not expose entity_type: %#v", props)
-	}
-	if _, ok := props["subject_id"]; ok {
-		t.Fatalf("create_entity schema should not expose subject_id: %#v", props)
-	}
-	fields, _ := props["fields"].(map[string]any)
-	fieldProps, _ := fields["properties"].(map[string]any)
-	if _, ok := fieldProps["status"]; !ok {
-		t.Fatalf("create_entity fields schema missing status: %#v", fieldProps)
-	}
-	if _, ok := fieldProps["metadata"]; !ok {
-		t.Fatalf("create_entity fields schema missing metadata: %#v", fieldProps)
-	}
-	if additional, ok := fields["additionalProperties"].(bool); !ok || additional {
-		t.Fatalf("create_entity fields additionalProperties = %#v, want false", fields["additionalProperties"])
+	caps := exec.ToolCapabilitiesForActor(actor, []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"}, nil)
+	for _, legacy := range []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"} {
+		cap, ok := caps.Capability(legacy)
+		if !ok || cap.Visible || cap.Callable {
+			t.Fatalf("legacy entity tool %q capability = %#v ok=%v, want denied", legacy, cap, ok)
+		}
+		if _, err := exec.Execute(runtimetools.WithActor(context.Background(), actor), legacy, map[string]any{}); err == nil || !strings.Contains(err.Error(), "not allowed") {
+			t.Fatalf("direct legacy %s execution error = %v, want not allowed", legacy, err)
+		}
 	}
 
-	saveSchema := defByName["save_entity_field"]
-	saveProps, _ := saveSchema["properties"].(map[string]any)
-	fieldEnum, _ := saveProps["field"].(map[string]any)
-	values, _ := fieldEnum["enum"].([]any)
-	if !containsAnyString(values, "status") {
-		t.Fatalf("save_entity_field field enum = %#v, want status", values)
+	readSchema := defByName["read_review_subject"]
+	if readSchema == nil {
+		t.Fatalf("expected read_review_subject definition, got %v", toolDefinitionNames(defs))
 	}
-	if !containsAnyString(values, "metadata") {
-		t.Fatalf("save_entity_field field enum = %#v, want metadata", values)
+	props, _ := readSchema["properties"].(map[string]any)
+	if len(props) != 0 {
+		t.Fatalf("read_review_subject should not accept selector/entity_id input, got schema %#v", readSchema)
 	}
-	if !containsAnyString(values, "metadata.region") {
-		t.Fatalf("save_entity_field field enum = %#v, want metadata.region", values)
+
+	metadataSchema := defByName["read_review_subject_metadata"]
+	if metadataSchema == nil {
+		t.Fatalf("expected read_review_subject_metadata definition, got %v", toolDefinitionNames(defs))
 	}
-	if containsAnyString(values, "entity_id") {
-		t.Fatalf("save_entity_field field enum = %#v, should not include envelope field entity_id", values)
+	metadataProps, _ := metadataSchema["properties"].(map[string]any)
+	if len(metadataProps) != 0 {
+		t.Fatalf("read_review_subject_metadata should not accept selector/entity_id input, got schema %#v", metadataSchema)
 	}
 	summaryLines := llm.AgentVisibleToolSummaryLinesForActor(actor, defs)
-	wantWritablePathLine := "Writable entity paths for save_entity_field in this turn: " + strings.Join(anyStrings(values), ", ")
-	if !containsString(summaryLines, wantWritablePathLine) {
-		t.Fatalf("agent-visible writable path summary = %#v, want %q", summaryLines, wantWritablePathLine)
-	}
-
-	searchSchema := defByName["search_entities"]
-	searchProps, _ := searchSchema["properties"].(map[string]any)
-	searchTarget, _ := searchProps["entity_type"].(map[string]any)
-	searchTargets, _ := searchTarget["enum"].([]any)
-	if !containsAnyString(searchTargets, "review.review_subject") {
-		t.Fatalf("search_entities entity_type enum = %#v, want review.review_subject", searchTargets)
-	}
-	filterSchema, _ := searchProps["filter"].(map[string]any)
-	filterProps, _ := filterSchema["properties"].(map[string]any)
-	if _, ok := filterProps["metadata.region"]; !ok {
-		t.Fatalf("search_entities filter schema missing metadata.region: %#v", filterProps)
-	}
-	if _, ok := filterProps["status"]; !ok {
-		t.Fatalf("search_entities filter schema missing status: %#v", filterProps)
-	}
-	if additional, ok := filterSchema["additionalProperties"].(bool); !ok || additional {
-		t.Fatalf("search_entities filter additionalProperties = %#v, want false", filterSchema["additionalProperties"])
-	}
-
-	querySchema := defByName["query_entities"]
-	queryProps, _ := querySchema["properties"].(map[string]any)
-	queryTarget, _ := queryProps["entity_type"].(map[string]any)
-	queryTargets, _ := queryTarget["enum"].([]any)
-	if !containsAnyString(queryTargets, "review.review_subject") {
-		t.Fatalf("query_entities entity_type enum = %#v, want review.review_subject", queryTargets)
-	}
-	selectSchema, _ := queryProps["select"].(map[string]any)
-	selectItems, _ := selectSchema["items"].(map[string]any)
-	selectEnum, _ := selectItems["enum"].([]any)
-	if !containsAnyString(selectEnum, "metadata.region") {
-		t.Fatalf("query_entities select enum = %#v, want metadata.region", selectEnum)
-	}
-	if !containsAnyString(selectEnum, "entity_id") {
-		t.Fatalf("query_entities select enum = %#v, want entity_id", selectEnum)
-	}
-
-	metricSchema := defByName["query_metrics"]
-	metricProps, _ := metricSchema["properties"].(map[string]any)
-	metricTarget, _ := metricProps["entity_type"].(map[string]any)
-	metricTargets, _ := metricTarget["enum"].([]any)
-	if !containsAnyString(metricTargets, "review.review_subject") {
-		t.Fatalf("query_metrics entity_type enum = %#v, want review.review_subject", metricTargets)
-	}
-	metricField, _ := metricProps["field"].(map[string]any)
-	metricFieldEnum, _ := metricField["enum"].([]any)
-	if !containsAnyString(metricFieldEnum, "status") {
-		t.Fatalf("query_metrics field enum = %#v, want status", metricFieldEnum)
-	}
-	if containsAnyString(metricFieldEnum, "metadata") {
-		t.Fatalf("query_metrics field enum = %#v, should not include composite metadata", metricFieldEnum)
+	if containsString(summaryLines, "Writable entity paths for save_entity_field") {
+		t.Fatalf("legacy save_entity_field writable path summary remained visible: %#v", summaryLines)
 	}
 }
 
@@ -175,29 +114,21 @@ signal:
 		defByName[def.Name] = schema
 	}
 
-	for _, toolName := range []string{"search_entities", "query_entities", "query_metrics"} {
-		schema := defByName[toolName]
-		if schema == nil {
-			t.Fatalf("expected %s definition", toolName)
+	for _, legacy := range []string{"search_entities", "query_entities", "query_metrics"} {
+		if _, ok := defByName[legacy]; ok {
+			t.Fatalf("legacy query tool %q remained visible in %#v", legacy, toolDefinitionNames(defs))
 		}
-		props, _ := schema["properties"].(map[string]any)
-		target, _ := props["entity_type"].(map[string]any)
-		targets, _ := target["enum"].([]any)
-		if !containsAnyString(targets, "discovery.campaign") {
-			t.Fatalf("%s entity_type enum = %#v, want discovery.campaign", toolName, targets)
-		}
-		if containsAnyString(targets, "signal-search.signal") {
-			t.Fatalf("%s entity_type enum = %#v, should not expose foreign read target", toolName, targets)
-		}
+	}
+	if _, ok := defByName["read_campaign"]; !ok {
+		t.Fatalf("expected read_campaign role-scoped definition, got %#v", toolDefinitionNames(defs))
 	}
 }
 
 func TestToolDefinitionsForActor_HideEntityScopedUniversalToolsWithoutActorContract(t *testing.T) {
 	lifecycle := models.AgentConfig{
-		ID:           "lifecycle-coordinator",
-		Role:         "lifecycle-coordinator",
-		SessionScope: "global",
-		Tools:        []string{"schedule"},
+		ID:    "lifecycle-coordinator",
+		Role:  "lifecycle-coordinator",
+		Tools: []string{"schedule"},
 	}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
@@ -221,14 +152,14 @@ vertical:
 	})
 	defs := exec.ToolDefinitionsForActor(lifecycle)
 	names := toolDefinitionNames(defs)
-	for _, toolName := range []string{"get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"} {
+	for _, toolName := range []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"} {
 		if containsString(names, toolName) {
 			t.Fatalf("expected %s to be hidden for actor with no entity contract/read scope, got %v", toolName, names)
 		}
 	}
 }
 
-func TestToolDefinitionsForActor_PreserveNonPlatformEntityToolNameOverrideWithoutActorContract(t *testing.T) {
+func TestToolDefinitionsForActor_RetireSameNameEntityToolOverrideWithoutActorContract(t *testing.T) {
 	lifecycle := models.AgentConfig{
 		ID:           "lifecycle-coordinator",
 		Role:         "lifecycle-coordinator",
@@ -270,40 +201,9 @@ validation_case:
 	for _, def := range defs {
 		defByName[def.Name] = def
 	}
-	def, ok := defByName["get_entity"]
-	if !ok {
-		t.Fatalf("expected non-platform get_entity override to remain visible, got %v", toolDefinitionNames(defs))
+	if _, ok := defByName["get_entity"]; ok {
+		t.Fatalf("same-name get_entity override remained visible, got %v", toolDefinitionNames(defs))
 	}
-	if got := strings.TrimSpace(def.Description); got != "Lifecycle-owned external lookup override." {
-		t.Fatalf("get_entity description = %q, want scoped override", got)
-	}
-	schema, _ := def.Schema.(map[string]any)
-	props, _ := schema["properties"].(map[string]any)
-	if _, ok := props["query"]; !ok {
-		t.Fatalf("get_entity override schema = %#v, want query property", schema)
-	}
-	if _, ok := props["entity_id"]; ok {
-		t.Fatalf("get_entity override schema = %#v, should not be platform entity schema", schema)
-	}
-}
-
-func containsAnyString(values []any, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
-func anyStrings(values []any) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if got, ok := value.(string); ok {
-			out = append(out, got)
-		}
-	}
-	return out
 }
 
 func toolDefinitionNames(defs []llm.ToolDefinition) []string {

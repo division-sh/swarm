@@ -6,7 +6,6 @@ import (
 
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
-	"swarm/internal/runtime/entityruntime"
 	llm "swarm/internal/runtime/llm"
 	runtimemcp "swarm/internal/runtime/mcp"
 	"swarm/internal/runtime/semanticview"
@@ -140,8 +139,7 @@ func registeredToolsForActor(source semanticview.Source, actor models.AgentConfi
 	if err != nil {
 		return nil, err
 	}
-	roleScopedEntitySurface := roleScopedEntityToolsEnabledForActor(source, actor)
-	if roleScopedEntitySurface {
+	if !actorAllowsInternalLegacyEntityTools(actor) {
 		removeLegacyEntityToolSurface(entries)
 	}
 	for name, entry := range builtinRegisteredTools(source, &actor) {
@@ -186,33 +184,10 @@ func registeredToolsForActor(source semanticview.Source, actor models.AgentConfi
 		}
 		entries[name] = tool
 	}
-	if roleScopedEntitySurface {
+	if !actorAllowsInternalLegacyEntityTools(actor) {
 		removeLegacyEntityToolSurface(entries)
 	}
-	removeUnavailableEntityScopedUniversalTools(entries, source, actor)
 	return entries, nil
-}
-
-func removeUnavailableEntityScopedUniversalTools(entries map[string]RegisteredTool, source semanticview.Source, actor models.AgentConfig) {
-	if len(entries) == 0 || source == nil {
-		return
-	}
-	if !strings.EqualFold(strings.TrimSpace(actor.SessionScope), "global") {
-		return
-	}
-	actorID := strings.TrimSpace(actor.ID)
-	if actorID == "" {
-		return
-	}
-	if _, ok := entityruntime.ResolveForActor(source, actorID); ok {
-		return
-	}
-	for name := range entries {
-		tool := entries[name]
-		if tool.HandlerType == implementationPlatformBuiltin && isEntityScopedUniversalRuntimeTool(name) {
-			delete(entries, name)
-		}
-	}
 }
 
 func resolveRegisteredToolForActor(source semanticview.Source, actor models.AgentConfig, toolName string, discovered map[string]runtimemcp.DiscoveredTool) (RegisteredTool, bool, error) {

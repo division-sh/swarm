@@ -233,8 +233,10 @@ contract_formats:
       authoritative flow-owned entity contracts in entities.yaml, agents.yaml entity_writes declarations, and the shared
       type system. This ensures all data access is permissioned, auditable, and storage-backend agnostic.
     role_scoped_entity_tools:
-      opt_in: 'A flow opts into the Path alpha entity-tool model with tool_surface.role_scoped_entity_tools: true in
-        schema.yaml. The opt-in applies to agents authored in that flow.'
+      default_surface: 'For normal agents, the Path alpha entity-tool model is mandatory. If an actor resolves to a
+        flow-owned entity contract, the platform generates role-scoped current-entity tools for that actor by default;
+        no schema.yaml opt-in flag is required or honored as a compatibility boundary.'
+      no_contract_surface: Normal agents that do not resolve to a flow-owned entity contract receive no entity tools.
       current_entity_binding: 'Generated role-scoped entity tools operate on the current entity resolved from the triggering
         event/session context. Agent-supplied entity_id, entity_type, or flow_instance arguments are not accepted.'
       generated_reads:
@@ -249,17 +251,18 @@ contract_formats:
         update_path: 'update_{entity_type}_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
           named-object field. The value schema is the exact declared subpath type.'
         create_rule: 'create authorization in entity_writes is author evidence for prompt/boot coverage. Path alpha does not
-          expose a generic agent-facing create_entity replacement for opted-in current-entity tools.'
+          expose a generic agent-facing create_entity replacement for current-entity tools.'
       generated_schema_closure: 'Generated entity-tool input and output schemas are closed recursively: additionalProperties
         is false for object schemas, required fields are explicit, and enum values come from the shared type system. Provider-visible
         schemas, runtime validation, and bootverify schema-closure checks must agree. Provider schema enforcement is a first
         validation layer when honored; runtime validation remains mandatory defense-in-depth.'
-      legacy_surface_retirement: 'For fully opted-in role-scoped actors, the legacy universal entity surface is removed from
-        the provider-visible/callable agent surface, not merely denied after selection. Retired names are create_entity,
-        get_entity, get_subject_status, query_entities, search_entities, query_metrics, and save_entity_field.'
-      compatibility_boundary: 'Non-opted flows, operator/system surfaces, and explicitly tracked rollout compatibility may
-        continue to expose legacy platform entity tools until their parent rollout issues close. That compatibility is not
-        the valid surface for fully opted-in role-scoped agents.'
+      legacy_surface_retirement: 'For normal agents, the legacy universal entity surface is removed from the
+        provider-visible/callable agent surface, not merely denied after selection. Retired names are create_entity,
+        get_entity, get_subject_status, query_entities, search_entities, query_metrics, and save_entity_field. allowed_tools,
+        runtime-wide fallback, MCP tools/list, provider summaries, and executor authorization MUST NOT reintroduce these
+        names for ordinary agents.'
+      compatibility_boundary: 'Retained legacy platform entity handlers are non-agent internal/operator compatibility only.
+        They are not a valid normal-agent provider-visible or callable surface.'
     schema_source: entities.yaml + types.yaml
   required_agents:
     description: required_agents in schema.yaml declares agents the flow needs.
@@ -1367,8 +1370,8 @@ engine:
       - Timers are cancelled
       - Agent sessions are terminated
       - All persisted state remains in the database
-      - Entity remains queryable through explicit read/query surfaces; for fully opted-in role-scoped agents this means generated
-        current-entity reads, while legacy query_entities remains a non-opted/operator/system compatibility surface.
+      - Entity remains queryable through explicit read/query surfaces; for normal agents this means generated current-entity
+        reads, while legacy query_entities remains a non-agent internal/operator/system compatibility surface.
       archival: Future concern — retention policy and cold storage are not specified in v1.1.0.
       event_rejection: 'When an event arrives targeting an entity in a terminal state, the platform rejects it before handler
         execution. No guard runs, no handler runs, no state changes. The event is marked as rejected with reason: terminal_entity.
@@ -2221,22 +2224,22 @@ tool_model:
       agent_fire: Terminate an agent session. Requires agent_fire permission.
       agent_hire: Spawn a new agent session. Requires agent_hire permission.
       agent_reconfigure: Modify an agent's prompt, tools, or subscriptions. Requires agent_reconfigure permission.
-      create_entity: Create a new entity row in entity_state. Legacy/operator/system compatibility surface; removed from
-        fully opted-in role-scoped agent surfaces.
-      get_entity: Read an entity by ID. Legacy/operator/system compatibility surface; removed from fully opted-in role-scoped
-        agent surfaces in favor of generated read_{entity_type} tools.
+      create_entity: Create a new entity row in entity_state. Legacy internal/operator/system compatibility surface; not
+        provider-visible or callable for normal agents.
+      get_entity: Read an entity by ID. Legacy internal/operator/system compatibility surface; not provider-visible or
+        callable for normal agents in favor of generated read_{entity_type} tools.
       human_task_decide: Record a human decision on a pending task. Requires human_task_decide permission.
       human_task_request: Create a task for human execution. Requires human_task_request permission.
       mailbox_send: Send an item to the human mailbox for decision. Auto-granted to all agents (universal tool).
-      query_entities: Query entities by state, fields, or aggregation. Legacy/operator/system compatibility surface; removed
-        from fully opted-in role-scoped agent surfaces.
-      query_metrics: Read aggregated metrics (counts, sums, averages) across entities. Legacy/operator/system compatibility
-        surface; removed from fully opted-in role-scoped agent surfaces.
-      save_entity_field: Write a specific field on an entity. Legacy/operator/system compatibility surface; removed from
-        fully opted-in role-scoped agent surfaces in favor of generated save/update tools.
+      query_entities: Query entities by state, fields, or aggregation. Legacy internal/operator/system compatibility surface;
+        not provider-visible or callable for normal agents.
+      query_metrics: Read aggregated metrics (counts, sums, averages) across entities. Legacy internal/operator/system
+        compatibility surface; not provider-visible or callable for normal agents.
+      save_entity_field: Write a specific field on an entity. Legacy internal/operator/system compatibility surface; not
+        provider-visible or callable for normal agents in favor of generated save/update tools.
       schedule: Schedule a future action or timer. Requires schedule permission.
-      search_entities: Query entities by stage, field values, or metadata. Legacy/operator/system compatibility surface;
-        removed from fully opted-in role-scoped agent surfaces.
+      search_entities: Query entities by stage, field values, or metadata. Legacy internal/operator/system compatibility
+        surface; not provider-visible or callable for normal agents.
     handler_actions:
       description: These are handler ACTION field values, not agent-callable tools. They are invoked via the action field in
         node handlers. The platform ships the handler code. They are listed separately from the tool catalog because agents
@@ -2255,8 +2258,8 @@ tool_model:
       description: All entity tools operate on the generic entity_state table. They read/write entity_state.fields (JSONB),
         entity_state.current_state, entity_state.gates, and entity_state.accumulator. They do NOT operate on product-specific
         typed tables. Product-specific tables are optional query-performance optimizations — the entity tools always use the
-        generic entity_state interface. For fully opted-in role-scoped agents, these legacy schemas are compatibility surfaces;
-        the valid provider-visible surface is the generated role-scoped tool set from
+        generic entity_state interface. For normal agents, these legacy schemas are non-provider-visible internal/operator
+        compatibility surfaces; the valid provider-visible surface is the generated role-scoped tool set from
         contract_formats.persistence_model.role_scoped_entity_tools.
       create_entity:
         description: Create a new entity row in entity_state.
@@ -2345,16 +2348,16 @@ tool_model:
     universal_tools: 'The following tools are included in every agent session without listing in tools: agent_message
       and mailbox_send. Emit tools (emit_{event_name}) are auto-generated from emit_events. Neither universal communication
       tools nor emit tools require explicit tools entry.'
-    role_scoped_entity_tools: 'When the actor''s owning flow declares tool_surface.role_scoped_entity_tools: true, the platform
-      generates current-entity read/save/update tools from the actor''s flow-owned entity contract and entity_writes declaration.
-      The generated tools are included in the agent-visible/provider-visible surface without explicit tools entries. In the
-      same opted-in surface, the legacy entity names create_entity, get_entity, get_subject_status, query_entities,
-      search_entities, query_metrics, and save_entity_field are removed before provider delivery and remain denied by runtime
-      authorization as defense-in-depth.'
+    role_scoped_entity_tools: 'When a normal actor resolves to a flow-owned entity contract, the platform generates
+      current-entity read/save/update tools from that contract and the actor''s entity_writes declaration. The generated
+      tools are included in the agent-visible/provider-visible surface without explicit tools entries. The legacy entity
+      names create_entity, get_entity, get_subject_status, query_entities, search_entities, query_metrics, and
+      save_entity_field are removed before provider delivery and remain denied by runtime authorization as defense-in-depth.
+      Normal actors without an entity contract receive no entity tools.'
     context_cost: An agent with 4 tools in tools pays for 4 tool schemas in LLM context, regardless of how many tools
       exist in the registry or how many tools an MCP server exposes. The filter is the contract, not the source.
     default_deny: If an agent calls a tool that is not in its tools list, not a universal communication tool, not an emit
-      tool, not a generated role-scoped entity tool for an opted-in actor, and not a native_tools capability — the call is
+      tool, not a generated role-scoped entity tool for an actor with an entity contract, and not a native_tools capability — the call is
       rejected. There is no default-allow policy for unrecognized tools.
   mcp_client:
     description: The platform acts as an MCP client, connecting to external MCP servers to discover and invoke tools. MCP
