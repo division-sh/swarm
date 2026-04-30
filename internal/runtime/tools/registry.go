@@ -139,9 +139,7 @@ func registeredToolsForActor(source semanticview.Source, actor models.AgentConfi
 	if err != nil {
 		return nil, err
 	}
-	if !actorAllowsInternalLegacyEntityTools(actor) {
-		removeLegacyEntityToolSurface(entries)
-	}
+	removeLegacyEntityToolSurface(entries)
 	for name, entry := range builtinRegisteredTools(source, &actor) {
 		entries[name] = entry
 	}
@@ -184,9 +182,7 @@ func registeredToolsForActor(source semanticview.Source, actor models.AgentConfi
 		}
 		entries[name] = tool
 	}
-	if !actorAllowsInternalLegacyEntityTools(actor) {
-		removeLegacyEntityToolSurface(entries)
-	}
+	removeLegacyEntityToolSurface(entries)
 	return entries, nil
 }
 

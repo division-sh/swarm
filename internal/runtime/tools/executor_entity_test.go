@@ -260,7 +260,7 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		"search_entities",
 	}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
-	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 
 	defs := exec.ToolDefinitionsForActor(actor)
 	names := roleScopedToolDefinitionMap(defs)
@@ -337,7 +337,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	if errs := runtimetools.ValidateGeneratedToolSchemaClosureForSource(source); len(errs) > 0 {
 		t.Fatalf("ValidateGeneratedToolSchemaClosureForSource errors = %#v", errs)
 	}
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
 	saveSchema := names["save_validation_case_business_brief"].Schema.(map[string]any)
 	if err := runtimetools.ValidatePayloadAgainstSchema(saveSchema, map[string]any{
@@ -377,7 +377,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 func TestRoleScopedEntityTools_NonOptedActorReceivesGeneratedSurfaceByDefault(t *testing.T) {
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"get_entity", "query_entities"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, false)
-	_, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	_, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
 	for _, name := range []string{"get_entity", "query_entities"} {
@@ -398,7 +398,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"query_entities",
 	}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	currentID := uuid.NewString()
 	siblingID := uuid.NewString()
 	foreignID := uuid.NewString()
@@ -460,7 +460,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T) {
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	entityID := uuid.NewString()
 	brief := strings.Repeat("business brief ", 1800)
 	specProblem := strings.Repeat("problem statement ", 900)
@@ -1089,8 +1089,9 @@ accounts:
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
-		SQLDB:          db,
-		WorkflowSource: semanticview.Wrap(bundle),
+		SQLDB:                          db,
+		WorkflowSource:                 semanticview.Wrap(bundle),
+		AllowInternalLegacyEntityTools: true,
 	})
 	forkCtx := runtimetools.WithActor(runtimecorrelation.WithRunID(context.Background(), result.ForkRunID), actor)
 	out, err := exec.Execute(forkCtx, "get_entity", map[string]any{"entity_id": entityID})
@@ -1193,8 +1194,9 @@ accounts:
 	}
 
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
-		SQLDB:          db,
-		WorkflowSource: semanticview.Wrap(bundle),
+		SQLDB:                          db,
+		WorkflowSource:                 semanticview.Wrap(bundle),
+		AllowInternalLegacyEntityTools: true,
 	})
 	forkCtx := runtimetools.WithActor(runtimecorrelation.WithRunID(context.Background(), materialized.ForkRunID), actor)
 	if _, err := exec.Execute(forkCtx, "save_entity_field", map[string]any{
@@ -2419,17 +2421,18 @@ accounts:
 
 func newEntityToolTestHarnessWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
-	if strings.TrimSpace(actor.Type) == "" && strings.TrimSpace(actor.ID) != "validation-orchestrator" {
-		// These legacy handler tests exercise retained internal/operator paths,
-		// not normal agent provider-visible tool delivery.
-		actor.Type = "internal"
-	}
+	return newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, true)
+}
+
+func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle, allowInternalLegacy bool) (context.Context, *runtimetools.Executor, *sql.DB) {
+	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
 	ensureEntityToolTestRun(t, db)
 	ctx := runtimecorrelation.WithRunID(context.Background(), entityToolTestRunID)
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
-		SQLDB:          db,
-		WorkflowSource: semanticview.Wrap(bundle),
+		SQLDB:                          db,
+		WorkflowSource:                 semanticview.Wrap(bundle),
+		AllowInternalLegacyEntityTools: allowInternalLegacy,
 	})
 	return runtimetools.WithActor(ctx, actor), exec, db
 }
