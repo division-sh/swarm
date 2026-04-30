@@ -102,11 +102,11 @@ events_defined = set(k for k, v in all_events.items() if isinstance(v, dict))
 # ============================================================
 # Helpers
 # ============================================================
-def flatten_payload(payload, prefix=''):
+def flatten_payload(payload, prefix='', skip_root_swarm=False):
     fields = set()
     if not isinstance(payload, dict): return fields
     for k, v in payload.items():
-        if k.startswith('_') or k == 'swarm': continue
+        if k.startswith('_') or (skip_root_swarm and not prefix and k == 'swarm'): continue
         full = (prefix + '.' + k) if prefix else k
         fields.add(full)
         if isinstance(v, dict) and not any(t in str(v) for t in ['string','integer','number','boolean','array','object','text','timestamp','uuid','numeric']):
