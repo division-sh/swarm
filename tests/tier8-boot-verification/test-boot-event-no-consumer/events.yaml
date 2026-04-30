@@ -1,5 +1,6 @@
 task.requested:
-  _source: external
+  swarm:
+    source: external
   entity_id: string
 orphan.unconsumed:
   entity_id: string

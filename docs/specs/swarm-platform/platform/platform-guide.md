@@ -202,7 +202,7 @@ The spec also allows "empty" required agent declarations. A role may exist with 
 
 The contracts use two categories of `_`-prefixed fields:
 
-**Semantic fields** that the platform and verifier understand: `_source`, `_consumer`, `_status`, `_producer`. These suppress verifier warnings (like NO-PRODUCER or NO-CONSUMER) and carry meaning.
+**Semantic event metadata** that the platform and verifier understand lives under the reserved `swarm:` namespace: `swarm.source`, `swarm.consumer`, `swarm.status`, and exceptional `swarm.producer` for non-derivable producer proof. Legacy `_source`, `_consumer`, `_status`, and `_producer` are migration inputs only.
 
 **Documentation-only fields** that the platform ignores: anything else starting with `_` (like `_note`, `_routing_note`, `_internal_events_note`). These are human comments. The verifier skips them. They are not part of the contract.
 

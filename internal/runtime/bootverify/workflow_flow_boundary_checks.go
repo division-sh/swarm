@@ -114,7 +114,7 @@ func (p inputPinProducerPaths) message(flowID, eventType string) string {
 	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
 	return fmt.Sprintf(
-		"Flow %s declares input pin event %s but no producer path was found in the authored bundle.\n\nChecked producer paths:\n- Sibling flow output pin: %s\n- Root agent emit_events: %s\n- Root node handler emits: %s\n- Platform event catalog: %s\n- External source annotation (_source): %s\n- Same-flow timer declaration: %s\n\nFix one of:\n- Add %s to a producing flow's pins.outputs.events\n- Add %s to a root agent's emit_events\n- Add _source: external (...) to %s's events.yaml entry if produced externally",
+		"Flow %s declares input pin event %s but no producer path was found in the authored bundle.\n\nChecked producer paths:\n- Sibling flow output pin: %s\n- Root agent emit_events: %s\n- Root node handler emits: %s\n- Platform event catalog: %s\n- External source metadata (swarm.source): %s\n- Same-flow timer declaration: %s\n\nFix one of:\n- Add %s to a producing flow's pins.outputs.events\n- Add %s to a root agent's emit_events\n- Add swarm.source: external to %s's events.yaml entry if produced externally",
 		flowID,
 		eventType,
 		p.siblingFlowOutputPin,
@@ -259,10 +259,10 @@ func (c *checkerContext) inputPinExternalSourcePath(flowID, eventType string) st
 	if !ok || bundle == nil {
 		return "not found"
 	}
-	if entry, ok := inputPinRootEventEntry(bundle, flowID, eventType); ok && inputPinExternalSourceMatch(entry.Source) {
+	if entry, ok := inputPinRootEventEntry(bundle, flowID, eventType); ok && inputPinExternalSourceMatch(entry.SwarmSource()) {
 		return "found"
 	}
-	if entry, ok := inputPinFlowEventEntry(bundle, flowID, eventType); ok && inputPinExternalSourceMatch(entry.Source) {
+	if entry, ok := inputPinFlowEventEntry(bundle, flowID, eventType); ok && inputPinExternalSourceMatch(entry.SwarmSource()) {
 		return "found"
 	}
 	return "not found"

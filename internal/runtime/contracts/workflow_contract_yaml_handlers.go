@@ -301,25 +301,26 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	var aux struct {
-		Note               string    `yaml:"_note"`
-		Emitter            yaml.Node `yaml:"emitter"`
-		EmitterType        string    `yaml:"emitter_type"`
-		Producer           yaml.Node `yaml:"producer"`
-		ProducerLegacy     yaml.Node `yaml:"_producer"`
-		AlternateEmitters  []string  `yaml:"alternate_emitters"`
-		Consumer           yaml.Node `yaml:"consumer"`
-		ConsumerLegacy     yaml.Node `yaml:"_consumer"`
-		ConsumerType       yaml.Node `yaml:"consumer_type"`
-		ConsumerTypeLegacy yaml.Node `yaml:"_consumer_type"`
-		Source             string    `yaml:"_source"`
-		Status             string    `yaml:"_status"`
-		Intercepted        yaml.Node `yaml:"intercepted"`
-		Passthrough        yaml.Node `yaml:"passthrough"`
-		RuntimeHandling    string    `yaml:"runtime_handling"`
-		OwningNode         string    `yaml:"owning_node"`
-		DeliveryChannel    yaml.Node `yaml:"delivery_channel"`
-		Payload            yaml.Node `yaml:"payload"`
-		Required           []string  `yaml:"required"`
+		Swarm              eventSwarmMetadataYAML `yaml:"swarm"`
+		Note               string                 `yaml:"_note"`
+		Emitter            yaml.Node              `yaml:"emitter"`
+		EmitterType        string                 `yaml:"emitter_type"`
+		Producer           yaml.Node              `yaml:"producer"`
+		ProducerLegacy     yaml.Node              `yaml:"_producer"`
+		AlternateEmitters  []string               `yaml:"alternate_emitters"`
+		Consumer           yaml.Node              `yaml:"consumer"`
+		ConsumerLegacy     yaml.Node              `yaml:"_consumer"`
+		ConsumerType       yaml.Node              `yaml:"consumer_type"`
+		ConsumerTypeLegacy yaml.Node              `yaml:"_consumer_type"`
+		Source             string                 `yaml:"_source"`
+		Status             string                 `yaml:"_status"`
+		Intercepted        yaml.Node              `yaml:"intercepted"`
+		Passthrough        yaml.Node              `yaml:"passthrough"`
+		RuntimeHandling    string                 `yaml:"runtime_handling"`
+		OwningNode         string                 `yaml:"owning_node"`
+		DeliveryChannel    yaml.Node              `yaml:"delivery_channel"`
+		Payload            yaml.Node              `yaml:"payload"`
+		Required           []string               `yaml:"required"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -336,11 +337,19 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	if err != nil {
 		return err
 	}
+	swarmProducer, err := decodeStringListNode(&aux.Swarm.Producer)
+	if err != nil {
+		return err
+	}
 	consumer, err := decodeStringListNode(&aux.Consumer)
 	if err != nil {
 		return err
 	}
 	legacyConsumer, err := decodeStringListNode(&aux.ConsumerLegacy)
+	if err != nil {
+		return err
+	}
+	swarmConsumer, err := decodeStringListNode(&aux.Swarm.Consumer)
 	if err != nil {
 		return err
 	}
@@ -368,15 +377,43 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	if len(payload.Required) == 0 {
 		payload.Required = normalizeStrings(aux.Required)
 	}
-	e.Note = strings.TrimSpace(aux.Note)
+	note, err := mergeCanonicalLegacyString(aux.Swarm.Note, aux.Note, "swarm.note", "_note")
+	if err != nil {
+		return err
+	}
+	source, err := mergeCanonicalLegacyString(aux.Swarm.Source, aux.Source, "swarm.source", "_source")
+	if err != nil {
+		return err
+	}
+	status, err := mergeCanonicalLegacyString(aux.Swarm.Status, aux.Status, "swarm.status", "_status")
+	if err != nil {
+		return err
+	}
+	producer, err = mergeCanonicalLegacyStringLists(swarmProducer, mergeStringLists(producer, legacyProducer), "swarm.producer", "producer/_producer")
+	if err != nil {
+		return err
+	}
+	consumer, err = mergeCanonicalLegacyStringLists(swarmConsumer, mergeStringLists(consumer, legacyConsumer), "swarm.consumer", "consumer/_consumer")
+	if err != nil {
+		return err
+	}
+	consumerType = mergeStringLists(consumerType, legacyConsumerType)
+	e.Swarm = EventSwarmMetadata{
+		Note:     note,
+		Source:   source,
+		Producer: producer,
+		Consumer: consumer,
+		Status:   status,
+	}
+	e.Note = e.SwarmNote()
 	e.Emitter = emitter
 	e.EmitterType = strings.TrimSpace(aux.EmitterType)
-	e.Producer = mergeStringLists(producer, legacyProducer)
+	e.Producer = e.SwarmProducer()
 	e.AlternateEmitters = mergeStringLists(aux.AlternateEmitters, alternates)
-	e.Consumer = mergeStringLists(consumer, legacyConsumer)
-	e.ConsumerType = mergeStringLists(consumerType, legacyConsumerType)
-	e.Source = strings.TrimSpace(aux.Source)
-	e.Status = strings.TrimSpace(aux.Status)
+	e.Consumer = e.SwarmConsumer()
+	e.ConsumerType = consumerType
+	e.Source = e.SwarmSource()
+	e.Status = e.SwarmStatus()
 	e.Intercepted = intercepted
 	e.Passthrough = passthrough
 	e.RuntimeHandling = strings.TrimSpace(aux.RuntimeHandling)
@@ -385,6 +422,63 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	e.Payload = payload
 	e.Required = normalizeStrings(aux.Required)
 	return nil
+}
+
+type eventSwarmMetadataYAML struct {
+	Note     string    `yaml:"note"`
+	Source   string    `yaml:"source"`
+	Producer yaml.Node `yaml:"producer"`
+	Consumer yaml.Node `yaml:"consumer"`
+	Status   string    `yaml:"status"`
+}
+
+func mergeCanonicalLegacyString(canonical, legacy, canonicalKey, legacyKey string) (string, error) {
+	canonical = strings.TrimSpace(canonical)
+	legacy = strings.TrimSpace(legacy)
+	switch {
+	case canonical == "":
+		return legacy, nil
+	case legacy == "":
+		return canonical, nil
+	case canonical == legacy:
+		return canonical, nil
+	default:
+		return "", fmt.Errorf("event metadata fields %s and %s conflict: %q != %q", canonicalKey, legacyKey, canonical, legacy)
+	}
+}
+
+func mergeCanonicalLegacyStringLists(canonical, legacy []string, canonicalKey, legacyKey string) ([]string, error) {
+	canonical = normalizeStrings(canonical)
+	legacy = normalizeStrings(legacy)
+	switch {
+	case len(canonical) == 0:
+		return legacy, nil
+	case len(legacy) == 0:
+		return canonical, nil
+	case sameStringSet(canonical, legacy):
+		return canonical, nil
+	default:
+		return nil, fmt.Errorf("event metadata fields %s and %s conflict: %v != %v", canonicalKey, legacyKey, canonical, legacy)
+	}
+}
+
+func sameStringSet(a, b []string) bool {
+	a = normalizeStrings(a)
+	b = normalizeStrings(b)
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, value := range a {
+		seen[value]++
+	}
+	for _, value := range b {
+		if seen[value] == 0 {
+			return false
+		}
+		seen[value]--
+	}
+	return true
 }
 
 func decodeGuardSpecNode(node *yaml.Node) (*GuardSpec, error) {

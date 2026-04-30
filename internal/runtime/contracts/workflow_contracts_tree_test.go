@@ -442,28 +442,89 @@ gate_state:
 	}
 }
 
-func TestEventCatalogEntry_ConsumerAliasesAndSourceAnnotations(t *testing.T) {
+func TestEventCatalogEntry_SwarmMetadataOwnsTopologyAndLifecycle(t *testing.T) {
+	var entry EventCatalogEntry
+	if err := loadYAMLBytes([]byte(`
+swarm:
+  source: external (human board interface)
+  producer: mailbox_human
+  consumer: mailbox_system (external UI, not agent-subscribed)
+  status: planned
+  note: Human board handoff
+consumer_type: external_ui
+entity_id: string
+`), &entry); err != nil {
+		t.Fatalf("load event catalog entry: %v", err)
+	}
+	if got := entry.SwarmSource(); got != "external (human board interface)" {
+		t.Fatalf("expected source annotation preserved, got %q", got)
+	}
+	if got := entry.SwarmConsumer(); len(got) != 1 || strings.TrimSpace(got[0]) == "" {
+		t.Fatalf("expected swarm.consumer to populate canonical consumer, got %#v", got)
+	}
+	if got := entry.ConsumerType; len(got) != 1 || strings.TrimSpace(got[0]) != "external_ui" {
+		t.Fatalf("expected sibling consumer_type to remain runtime delivery metadata, got %#v", got)
+	}
+	if got := entry.SwarmProducer(); len(got) != 1 || strings.TrimSpace(got[0]) != "mailbox_human" {
+		t.Fatalf("expected swarm.producer to populate canonical producer, got %#v", got)
+	}
+	if got := entry.SwarmStatus(); got != "planned" {
+		t.Fatalf("expected swarm.status preserved, got %q", got)
+	}
+	if got := entry.SwarmNote(); got != "Human board handoff" {
+		t.Fatalf("expected swarm.note preserved, got %q", got)
+	}
+	if _, ok := entry.Payload.Properties["source"]; ok {
+		t.Fatalf("did not expect metadata source to become a payload field")
+	}
+}
+
+func TestEventCatalogEntry_LegacyMetadataNormalizesIntoSwarmOwner(t *testing.T) {
 	var entry EventCatalogEntry
 	if err := loadYAMLBytes([]byte(`
 _source: external (human board interface)
 _producer: mailbox_human
 _consumer: mailbox_system (external UI, not agent-subscribed)
 _consumer_type: external_ui
-entity_id: string
+_status: planned
+_note: Human board handoff
+source: text
 `), &entry); err != nil {
 		t.Fatalf("load event catalog entry: %v", err)
 	}
-	if got := strings.TrimSpace(entry.Source); got != "external (human board interface)" {
-		t.Fatalf("expected source annotation preserved, got %q", got)
+	if got := entry.SwarmSource(); got != "external (human board interface)" {
+		t.Fatalf("expected legacy _source to normalize into swarm.source, got %q", got)
 	}
-	if got := len(entry.Consumer); got != 1 || strings.TrimSpace(entry.Consumer[0]) == "" {
-		t.Fatalf("expected _consumer alias to populate consumer, got %#v", entry.Consumer)
+	if got := entry.SwarmProducer(); len(got) != 1 || got[0] != "mailbox_human" {
+		t.Fatalf("expected legacy _producer to normalize into swarm.producer, got %#v", got)
 	}
-	if got := len(entry.ConsumerType); got != 1 || strings.TrimSpace(entry.ConsumerType[0]) != "external_ui" {
-		t.Fatalf("expected _consumer_type alias to populate consumer_type, got %#v", entry.ConsumerType)
+	if got := entry.SwarmConsumer(); len(got) != 1 || got[0] == "" {
+		t.Fatalf("expected legacy _consumer to normalize into swarm.consumer, got %#v", got)
 	}
-	if got := len(entry.Producer); got != 1 || strings.TrimSpace(entry.Producer[0]) != "mailbox_human" {
-		t.Fatalf("expected _producer alias to populate producer, got %#v", entry.Producer)
+	if got := entry.ConsumerType; len(got) != 1 || got[0] != "external_ui" {
+		t.Fatalf("expected legacy _consumer_type to normalize into sibling consumer_type, got %#v", got)
+	}
+	if got := entry.SwarmStatus(); got != "planned" {
+		t.Fatalf("expected legacy _status to normalize into swarm.status, got %q", got)
+	}
+	if got := entry.SwarmNote(); got != "Human board handoff" {
+		t.Fatalf("expected legacy _note to normalize into swarm.note, got %q", got)
+	}
+	if _, ok := entry.Payload.Properties["source"]; !ok {
+		t.Fatalf("expected bare source to remain payload field, not metadata")
+	}
+}
+
+func TestEventCatalogEntry_ConflictingSwarmAndLegacyMetadataFailsClosed(t *testing.T) {
+	var entry EventCatalogEntry
+	err := loadYAMLBytes([]byte(`
+swarm:
+  source: external (operator)
+_source: platform (timer)
+entity_id: string
+`), &entry)
+	if err == nil || !strings.Contains(err.Error(), "swarm.source") || !strings.Contains(err.Error(), "_source") {
+		t.Fatalf("load event catalog entry error = %v, want swarm/_source conflict", err)
 	}
 }
 

@@ -177,15 +177,20 @@ contract_formats:
   event_schema:
     description: |
       Events in `events.yaml` use the Wave 1 flat payload form.
-      Event-level metadata is underscore-prefixed. Non-underscored keys
-      are producer-owned payload fields. The platform validates emit
-      calls against the declared payload contract and populates envelope
-      fields separately.
+      Event-level Swarm metadata lives under the reserved `swarm:`
+      namespace. Aside from reserved platform metadata fields such as
+      `emitter`, `runtime_handling`, `owning_node`, and
+      `delivery_channel`, other non-underscored top-level keys are
+      producer-owned payload fields.
+      The platform validates emit calls against the declared payload
+      contract and populates envelope fields separately.
     format:
       event_name: |
-        _note: Human-readable metadata (optional)
-        _source: Producer annotation (optional)
-        _consumer: Consumer annotation (optional)
+        swarm:
+          source: external (optional; non-derivable external/platform producer proof)
+          consumer: external_ui (optional; non-derivable external sink proof)
+          status: planned (optional; lifecycle suppression)
+          note: Human-readable metadata (optional)
         field_name: type
         nested_field:
           type: NamedType
@@ -264,10 +269,10 @@ contract_formats:
   underscore_prefix_convention:
     description: Fields starting with _ in contract YAML files.
     semantic_fields:
-      _source: 'Event producer type. Suppresses NO-PRODUCER verifier warnings. Values: external (...)'
-      _consumer: 'Event consumer type. Suppresses NO-CONSUMER warnings. Values: mailbox_system (...)'
-      _status: 'Event lifecycle. Values: planned (future feature).'
-      _producer: Event producer agent. Suppresses NO-PRODUCER warnings for agent-emitted events.
+      _source: 'Legacy migration input for event swarm.source. Do not author in new contracts.'
+      _consumer: 'Legacy migration input for event swarm.consumer. Do not author in new contracts.'
+      _status: 'Legacy migration input for event swarm.status. Do not author in new contracts.'
+      _producer: 'Legacy migration input for event swarm.producer for non-derivable producer proof only. Do not author for ordinary internal topology.'
     documentation_fields: Any other _-prefixed field (_note, _routing_note, _internal_events_note, etc.) is a human comment.
       The platform ignores them. The verifier ignores them. They are not part of the contract.
 rule:
@@ -1808,13 +1813,13 @@ engine:
       severity: warning
       scope: per-flow
       trigger: An event is emitted (by a node handler or agent emit_events) but no node or agent subscribes to it. Suppressed
-        if the event has _consumer or _status annotations.
+        if the event has swarm.consumer or swarm.status metadata.
       when: boot-only
     - id: event_producer_exists
       severity: warning
       scope: per-flow
-      trigger: An agent subscribes to an event that no node handler emits and no agent lists in emit_events. Suppressed if
-        the event has _source or _status annotations.
+      trigger: An agent subscribes to an event that no node handler emits and no agent lists in emit_events. Suppressed if the
+        event has swarm.source or swarm.status metadata.
       when: boot-only
     - id: payload_field_coverage
       severity: error
@@ -1990,15 +1995,15 @@ engine:
       scope: per-flow
       trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs.events) has no satisfiable authored producer
         path on the static verify surface. The warning checks only sibling flow output pins, root agent emit_events, root
-        node handler emit sites, exact platform_events catalog matches, _source values starting with external, and same-flow
-        timer declarations. It does not use produces or _status: planned as proof.'
+        node handler emit sites, exact platform_events catalog matches, swarm.source values starting with external, and same-flow
+        timer declarations. It does not use produces or swarm.status: planned as input-pin proof.'
       when: boot-only
     - id: semantic_drift_dead_event_schema
       severity: warning
       scope: per-event
       trigger: A product-declared event schema entry in `events.yaml` has no active authored role on the static verify surface.
         Active roles are limited to intra-flow local usage, explicit cross-flow qualified usage, root-local usage for root-declared
-        events only, external `_source` / `_consumer` annotations, same-flow timer fire/start/cancel references, same-flow
+        events only, external `swarm.source` / `swarm.consumer` metadata, same-flow timer fire/start/cancel references, same-flow
         `fan_out.emit`, and same-flow `auto_emit_on_create`. It does not treat platform catalog membership, root-local
         references into child-flow declarations, or coincidental same local names in other flows as proof.
       when: boot-only
@@ -3463,7 +3468,8 @@ platform_events:
         source: string — who initiated the reset (admin_cli, builder_api, etc.)
         timestamp: string (ISO 8601)
       produced_by_type: platform
-      _source: external (platform admin CLI or builder API)
+      swarm:
+        source: external (platform admin CLI or builder API)
     platform.auth_required:
       description: Agent or tool call blocked pending authorization.
       scope: flow
@@ -3853,7 +3859,7 @@ static_analyzer:
       - payload compatibility
       - multi-hop reachability or liveness
       - produces-based proof
-      - _status-based lifecycle suppression
+      - swarm.status-based lifecycle suppression
     accepted_producer_paths:
       sibling_flow_output_pin:
         rule: Another flow declares the same local event name in schema.yaml pins.outputs.events.
@@ -3865,7 +3871,7 @@ static_analyzer:
       platform_event_catalog:
         rule: The input pin event exactly matches a platform_events.catalog key.
       external_source_annotation:
-        rule: The consuming flow or root event entry for the event has _source beginning with external.
+        rule: The consuming flow or root event entry for the event has swarm.source beginning with external.
       same_flow_timer_declaration:
         rule: A timer declared within the consuming flow fires the same event.
     rule: Emit warning when none of the accepted producer-path forms are found. The finding message must say no producer path
@@ -3943,7 +3949,7 @@ static_analyzer:
         rule: Another flow or root participant references the declaration via an explicitly qualified event name that resolves
           to the declaring flow.
       external_annotations:
-        rule: "`_source` beginning with external or `_consumer` metadata on the declared event entry counts as an active external role."
+        rule: "`swarm.source` beginning with external or `swarm.consumer` metadata on the declared event entry counts as an active external role."
       same_flow_timer_references:
         rule: "Timers in the same scope keep the declaration alive through `event`, `start_on: event:...`, or `cancel_on: event:...`."
       same_flow_fan_out_emit:

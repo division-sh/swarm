@@ -79,7 +79,8 @@ item:
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
-  _source: external (bootstrap fixture)
+  swarm:
+    source: external (bootstrap fixture)
   entity_id: string
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
@@ -148,7 +149,8 @@ item:
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
-  _source: external (bootstrap fixture)
+  swarm:
+    source: external (bootstrap fixture)
   entity_id: string
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `

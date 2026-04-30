@@ -175,7 +175,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 		if eventRefProducedLocal(c.source, ref, emittedRefs) {
 			continue
 		}
-		if eventProducedExternallyLocal(ref.Entry) || strings.EqualFold(strings.TrimSpace(ref.Entry.Status), "planned") {
+		if eventProducedExternallyLocal(ref.Entry) || strings.EqualFold(strings.TrimSpace(ref.Entry.SwarmStatus()), "planned") {
 			continue
 		}
 		c.eventWarningFindings = append(c.eventWarningFindings, Finding{
@@ -236,14 +236,14 @@ func eventRefProducedLocal(source semanticview.Source, ref semanticview.FlowEven
 }
 
 func eventHasExternalConsumerLocal(entry runtimecontracts.EventCatalogEntry) bool {
-	return len(entry.Consumer) > 0 || len(entry.ConsumerType) > 0
+	return len(entry.SwarmConsumer()) > 0
 }
 
 func eventProducedExternallyLocal(entry runtimecontracts.EventCatalogEntry) bool {
-	if len(entry.Producer) > 0 {
+	if len(entry.SwarmProducer()) > 0 {
 		return true
 	}
-	source := strings.ToLower(strings.TrimSpace(entry.Source))
+	source := strings.ToLower(strings.TrimSpace(entry.SwarmSource()))
 	return strings.HasPrefix(source, "external") || strings.HasPrefix(source, "platform")
 }
 

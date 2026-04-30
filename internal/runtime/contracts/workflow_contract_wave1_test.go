@@ -325,8 +325,9 @@ flows: []
 func TestEventCatalogEntryDecode_AcceptsFlatWave1PayloadGrammar(t *testing.T) {
 	var entry EventCatalogEntry
 	if err := yaml.Unmarshal([]byte(`
-_note: root handoff
-_source: scoring
+swarm:
+  note: root handoff
+  source: scoring
 vertical_name: text
 composite_score:
   type: numeric

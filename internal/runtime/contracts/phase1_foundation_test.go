@@ -46,6 +46,7 @@ func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
 	expectFieldType(t, reflect.TypeOf(ToolSchemaEntry{}), "InputSchema", reflect.TypeOf(ToolInputSchema{}))
 	expectFieldType(t, reflect.TypeOf(SystemNodeContract{}), "StateSchema", reflect.TypeOf(NodeStateSchema{}))
 	expectFieldType(t, reflect.TypeOf(SystemNodeContract{}), "GateState", reflect.TypeOf(NodeGateStateSchema{}))
+	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "Swarm", reflect.TypeOf(EventSwarmMetadata{}))
 	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "Emitter", reflect.TypeOf(EventEmitterRef{}))
 	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "Producer", reflect.TypeOf([]string{}))
 	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "Consumer", reflect.TypeOf([]string{}))

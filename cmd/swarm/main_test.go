@@ -1752,7 +1752,8 @@ pins:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
 task.assigned:
-  _source: external (verify lint evidence test)
+  swarm:
+    source: external (verify lint evidence test)
   entity_id: string
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
@@ -1913,7 +1914,8 @@ states: [idle, done]
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
 task.assigned:
-  _source: external (state schema float verify test)
+  swarm:
+    source: external (state schema float verify test)
   entity_id: string
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
@@ -2266,7 +2268,7 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"scan.corpus_dispatch": {
-				Source: "external",
+				Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"},
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"scan_id":   {Type: "string"},
@@ -2317,7 +2319,7 @@ func TestVerifyBundle_InputPinProducerPathReturnsWarningSurface(t *testing.T) {
 		"Root agent emit_events: not found",
 		"Root node handler emits: not found",
 		"Platform event catalog: not matched",
-		"External source annotation (_source): not found",
+		"External source metadata (swarm.source): not found",
 		"Same-flow timer declaration: not found",
 	} {
 		if !strings.Contains(err.Error(), want) {
