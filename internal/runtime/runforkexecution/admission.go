@@ -116,6 +116,7 @@ type SelectedContractExecutionAdmissionRequest struct {
 	BindingReader     SelectedContractBindingReader
 	SourceLoader      SelectedContractSourceLoader
 	FrontierAdmission store.RunForkContractFrontierAdmission
+	RouteAdmission    store.RunForkSelectedContractRouteAdmission
 	RouteTopology     store.RunForkSelectedContractRouteTopology
 	ExecutionModel    store.RunForkSelectedContractExecution
 }
@@ -151,10 +152,10 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 	if err := validateSelectedContractExecutionFrontier(binding, req.FrontierAdmission); err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, err
 	}
-	if err := validateSelectedContractExecutionRouteTopology(binding, req.FrontierAdmission, req.RouteTopology); err != nil {
+	if err := validateSelectedContractExecutionRouteTopology(binding, req.FrontierAdmission, req.RouteAdmission, req.RouteTopology); err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, err
 	}
-	if err := validateSelectedContractExecutionModel(binding, req.FrontierAdmission, req.RouteTopology, req.ExecutionModel); err != nil {
+	if err := validateSelectedContractExecutionModel(binding, req.FrontierAdmission, req.RouteAdmission, req.RouteTopology, req.ExecutionModel); err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, err
 	}
 
@@ -252,14 +253,17 @@ func validateSelectedContractExecutionFrontier(binding store.RunForkSelectedCont
 	return validateSelectionMatches("frontier admission", binding.ContractSelection, admission.ContractSelection)
 }
 
-func validateSelectedContractExecutionRouteTopology(binding store.RunForkSelectedContractBinding, frontier store.RunForkContractFrontierAdmission, routeTopology store.RunForkSelectedContractRouteTopology) error {
-	if err := validateSelectedContractRouteTopology(frontier, routeTopology); err != nil {
+func validateSelectedContractExecutionRouteTopology(binding store.RunForkSelectedContractBinding, frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission, routeTopology store.RunForkSelectedContractRouteTopology) error {
+	if err := validateSelectedContractRouteAdmission(frontier, routeAdmission); err != nil {
+		return err
+	}
+	if err := validateSelectedContractRouteTopology(frontier, routeAdmission, routeTopology); err != nil {
 		return err
 	}
 	return validateSelectionMatches("route topology", binding.ContractSelection, routeTopology.ContractSelection)
 }
 
-func validateSelectedContractExecutionModel(binding store.RunForkSelectedContractBinding, frontier store.RunForkContractFrontierAdmission, routeTopology store.RunForkSelectedContractRouteTopology, model store.RunForkSelectedContractExecution) error {
+func validateSelectedContractExecutionModel(binding store.RunForkSelectedContractBinding, frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission, routeTopology store.RunForkSelectedContractRouteTopology, model store.RunForkSelectedContractExecution) error {
 	if strings.TrimSpace(model.Owner) != store.RunForkSelectedContractExecutionModelOwner {
 		return fmt.Errorf("selected-contract execution admission requires %s model; got %q", store.RunForkSelectedContractExecutionModelOwner, model.Owner)
 	}
@@ -280,6 +284,9 @@ func validateSelectedContractExecutionModel(binding store.RunForkSelectedContrac
 	}
 	if model.RouteTopology == nil {
 		return fmt.Errorf("selected-contract execution admission model must carry %s", store.RunForkSelectedContractRouteTopologyOwner)
+	}
+	if err := validateSelectedContractRouteTopology(frontier, routeAdmission, *model.RouteTopology); err != nil {
+		return err
 	}
 	if !reflect.DeepEqual(*model.RouteTopology, routeTopology) {
 		return fmt.Errorf("selected-contract execution admission model route topology does not match canonical route topology truth")

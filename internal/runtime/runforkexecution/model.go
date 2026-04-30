@@ -2,14 +2,16 @@ package runforkexecution
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"swarm/internal/store"
 )
 
 type SelectedContractExecutionModelRequest struct {
-	Admission     store.RunForkContractFrontierAdmission
-	RouteTopology store.RunForkSelectedContractRouteTopology
+	Admission      store.RunForkContractFrontierAdmission
+	RouteAdmission store.RunForkSelectedContractRouteAdmission
+	RouteTopology  store.RunForkSelectedContractRouteTopology
 }
 
 type SelectedContractRouteTopologyRequest struct {
@@ -32,7 +34,10 @@ func BuildSelectedContractRouteTopology(req SelectedContractRouteTopologyRequest
 	if err := validateSelectedContractRouteAdmission(admission, routeAdmission); err != nil {
 		return store.RunForkSelectedContractRouteTopology{}, err
 	}
+	return canonicalSelectedContractRouteTopology(routeAdmission), nil
+}
 
+func canonicalSelectedContractRouteTopology(routeAdmission store.RunForkSelectedContractRouteAdmission) store.RunForkSelectedContractRouteTopology {
 	blockers := []store.RunForkUnsupportedBlocker{{
 		Code:    store.RunForkBlockerSelectedContractRouteTopologyNonMutating,
 		Message: "selected-contract route topology is non-mutating; route persistence, recipient delivery writes, and handler execution remain separately gated",
@@ -73,7 +78,7 @@ func BuildSelectedContractRouteTopology(req SelectedContractRouteTopologyRequest
 		BlockedSiblings:                selectedContractRouteTopologyBlockedSiblings(),
 		InvalidPaths:                   selectedContractRouteTopologyInvalidPaths(),
 		UnsupportedBlockers:            blockers,
-	}, nil
+	}
 }
 
 func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelRequest) (store.RunForkSelectedContractExecution, error) {
@@ -88,7 +93,11 @@ func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelReque
 		return store.RunForkSelectedContractExecution{}, fmt.Errorf("selected-contract frontier admission unexpectedly supports historical execution")
 	}
 	routeTopology := req.RouteTopology
-	if err := validateSelectedContractRouteTopology(admission, routeTopology); err != nil {
+	routeAdmission := req.RouteAdmission
+	if err := validateSelectedContractRouteAdmission(admission, routeAdmission); err != nil {
+		return store.RunForkSelectedContractExecution{}, err
+	}
+	if err := validateSelectedContractRouteTopology(admission, routeAdmission, routeTopology); err != nil {
 		return store.RunForkSelectedContractExecution{}, err
 	}
 
@@ -125,7 +134,7 @@ func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelReque
 	}, nil
 }
 
-func validateSelectedContractRouteTopology(frontier store.RunForkContractFrontierAdmission, topology store.RunForkSelectedContractRouteTopology) error {
+func validateSelectedContractRouteTopology(frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission, topology store.RunForkSelectedContractRouteTopology) error {
 	if strings.TrimSpace(topology.Owner) != store.RunForkSelectedContractRouteTopologyOwner {
 		return fmt.Errorf("selected-contract execution model requires %s route topology; got %q", store.RunForkSelectedContractRouteTopologyOwner, topology.Owner)
 	}
@@ -156,6 +165,10 @@ func validateSelectedContractRouteTopology(frontier store.RunForkContractFrontie
 	}
 	if err := validateSelectionMatches("route topology", frontier.ContractSelection, topology.ContractSelection); err != nil {
 		return err
+	}
+	canonical := canonicalSelectedContractRouteTopology(routeAdmission)
+	if !reflect.DeepEqual(topology, canonical) {
+		return fmt.Errorf("selected-contract route topology does not match canonical route-admission evidence")
 	}
 	return nil
 }

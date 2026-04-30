@@ -144,8 +144,9 @@ func TestBuildSelectedContractExecutionModelConsumesRouteTopologyAsTruth(t *test
 		t.Fatalf("BuildSelectedContractRouteTopology: %v", err)
 	}
 	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
-		Admission:     admission,
-		RouteTopology: routeTopology,
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
 	})
 	if err != nil {
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
@@ -216,9 +217,11 @@ func TestBuildSelectedContractExecutionModelCarriesFrontierBlockers(t *testing.T
 		},
 	}
 
+	routeAdmission := testSelectedContractRouteAdmission(admission)
 	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
-		Admission:     admission,
-		RouteTopology: testSelectedContractRouteTopology(t, admission),
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  testSelectedContractRouteTopologyFromAdmission(t, admission, routeAdmission),
 	})
 	if err != nil {
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
@@ -248,15 +251,82 @@ func TestBuildSelectedContractExecutionModelRequiresCanonicalRouteTopology(t *te
 			WorkflowVersion: "v1",
 		},
 	}
-	routeTopology := testSelectedContractRouteTopology(t, admission)
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, admission, routeAdmission)
 	routeTopology.Owner = "cmd.swarm.local_route_topology"
 
 	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
-		Admission:     admission,
-		RouteTopology: routeTopology,
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
 	})
 	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractRouteTopologyOwner) {
 		t.Fatalf("error = %v, want canonical route topology failure", err)
+	}
+}
+
+func TestBuildSelectedContractExecutionModelRejectsForgedDynamicRouteTopology(t *testing.T) {
+	admission := store.RunForkContractFrontierAdmission{
+		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+		NonMutating:                  true,
+		HistoricalExecutionSupported: false,
+		ContractSelection: store.RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/contracts",
+			WorkflowName:    "workflow",
+			WorkflowVersion: "v1",
+		},
+		FrontierEventCount: 1,
+		FrontierEvents: []store.RunForkContractFrontierEvent{{
+			SourceEventID:         "source-event",
+			EventName:             "review/inst-1/task.started",
+			SourceClassifications: []string{store.RunForkPendingClassificationPending},
+			SourceFlowInstances:   []string{"review/inst-1"},
+			SourceSubscriberTypes: []string{"node"},
+			SourceSubscriberIDs:   []string{"source-node"},
+		}},
+	}
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	routeAdmission.DynamicFlowInstances = []string{"review/inst-1"}
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, admission, routeAdmission)
+	routeTopology.DynamicFlowInstances = nil
+	routeTopology.DynamicTopologySupported = true
+	routeTopology.DynamicTopologyDisposition = store.RunForkSelectedContractDispositionForkLocalTruth
+	routeTopology.UnsupportedBlockers = removeUnsupportedBlocker(routeTopology.UnsupportedBlockers, store.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven)
+
+	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
+	})
+	if err == nil || !strings.Contains(err.Error(), "canonical route-admission evidence") {
+		t.Fatalf("error = %v, want forged dynamic route topology failure", err)
+	}
+}
+
+func TestBuildSelectedContractExecutionModelRejectsForgedRouteAdmissionBlockerTopology(t *testing.T) {
+	admission := store.RunForkContractFrontierAdmission{
+		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+		NonMutating:                  true,
+		HistoricalExecutionSupported: false,
+		ContractSelection: store.RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/contracts",
+			WorkflowName:    "workflow",
+			WorkflowVersion: "v1",
+		},
+	}
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, admission, routeAdmission)
+	routeTopology.UnsupportedBlockers = removeUnsupportedBlocker(routeTopology.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteAdmissionNonMutating)
+
+	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
+	})
+	if err == nil || !strings.Contains(err.Error(), "canonical route-admission evidence") {
+		t.Fatalf("error = %v, want forged route-admission blocker topology failure", err)
 	}
 }
 
@@ -277,12 +347,14 @@ func TestBuildSelectedContractExecutionModelFailsClosedOnStaleRouteAdmissionFron
 			EventName:     "work.begin",
 		}},
 	}
-	routeTopology := testSelectedContractRouteTopology(t, admission)
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, admission, routeAdmission)
 	admission.FrontierEvents[0].EventName = "work.changed"
 
 	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
-		Admission:     admission,
-		RouteTopology: routeTopology,
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
 	})
 	if err == nil || !strings.Contains(err.Error(), "frontier fingerprint mismatch") {
 		t.Fatalf("error = %v, want stale route topology frontier failure", err)
@@ -310,12 +382,14 @@ func TestBuildSelectedContractExecutionModelFailsClosedOnStaleRouteAdmissionFlow
 			SourceSubscriberIDs:   []string{"source-node"},
 		}},
 	}
-	routeTopology := testSelectedContractRouteTopology(t, admission)
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, admission, routeAdmission)
 	admission.FrontierEvents[0].SourceFlowInstances = []string{"review/inst-2"}
 
 	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
-		Admission:     admission,
-		RouteTopology: routeTopology,
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
 	})
 	if err == nil || !strings.Contains(err.Error(), "frontier fingerprint mismatch") {
 		t.Fatalf("error = %v, want stale route topology flow-instance failure", err)
@@ -363,4 +437,14 @@ func unsupportedBlockerHas(items []store.RunForkUnsupportedBlocker, code string)
 		}
 	}
 	return false
+}
+
+func removeUnsupportedBlocker(items []store.RunForkUnsupportedBlocker, code string) []store.RunForkUnsupportedBlocker {
+	out := make([]store.RunForkUnsupportedBlocker, 0, len(items))
+	for _, item := range items {
+		if item.Code != code {
+			out = append(out, item)
+		}
+	}
+	return out
 }
