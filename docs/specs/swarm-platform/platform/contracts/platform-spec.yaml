@@ -188,6 +188,7 @@ contract_formats:
       event_name: |
         swarm:
           source: external (optional; non-derivable external/platform producer proof)
+          producer: mailbox_human (optional; exceptional non-derivable producer proof)
           consumer: external_ui (optional; non-derivable external sink proof)
           status: planned (optional; lifecycle suppression)
           note: Human-readable metadata (optional)
@@ -1819,7 +1820,7 @@ engine:
       severity: warning
       scope: per-flow
       trigger: An agent subscribes to an event that no node handler emits and no agent lists in emit_events. Suppressed if the
-        event has swarm.source or swarm.status metadata.
+        event has swarm.source, swarm.producer, or swarm.status metadata.
       when: boot-only
     - id: payload_field_coverage
       severity: error

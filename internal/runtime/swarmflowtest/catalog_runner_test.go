@@ -1840,19 +1840,34 @@ func catalogIsSuppressedEvent(events map[string]any, ev string) bool {
 	if catalogMetadataHasPrefix(swarm["source"], "external", "platform") {
 		return true
 	}
-	if catalogMetadataHasPrefix(swarm["consumer"], "external", "mailbox") {
+	if catalogMetadataPresent(swarm["consumer"]) {
+		return true
+	}
+	if catalogMetadataPresent(swarm["producer"]) {
 		return true
 	}
 	if strings.EqualFold(strings.TrimSpace(asStringForCatalog(swarm["status"])), "planned") {
 		return true
 	}
-	if source := strings.TrimSpace(asStringForCatalog(eventDef["_source"])); strings.HasPrefix(source, "external") {
+	if source := strings.TrimSpace(asStringForCatalog(eventDef["_source"])); strings.HasPrefix(source, "external") || strings.HasPrefix(source, "platform") {
 		return true
 	}
-	if consumer := strings.TrimSpace(asStringForCatalog(eventDef["_consumer"])); strings.HasPrefix(consumer, "mailbox") {
+	if catalogMetadataPresent(eventDef["consumer"]) || catalogMetadataPresent(eventDef["_consumer"]) {
+		return true
+	}
+	if catalogMetadataPresent(eventDef["producer"]) || catalogMetadataPresent(eventDef["_producer"]) {
 		return true
 	}
 	return strings.EqualFold(strings.TrimSpace(asStringForCatalog(eventDef["_status"])), "planned")
+}
+
+func catalogMetadataPresent(value any) bool {
+	for _, item := range catalogAnySlice(value) {
+		if catalogMetadataPresent(item) {
+			return true
+		}
+	}
+	return strings.TrimSpace(asStringForCatalog(value)) != ""
 }
 
 func catalogMetadataHasPrefix(value any, prefixes ...string) bool {

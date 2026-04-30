@@ -122,21 +122,40 @@ def extract_policy_refs(s):
 def metadata_value_startswith(value, prefixes):
     if isinstance(value, list):
         return any(metadata_value_startswith(item, prefixes) for item in value)
-    return str(value).startswith(prefixes)
+    return str(value).strip().startswith(prefixes)
 
-def is_suppressed(ev_name):
+def metadata_value_present(value):
+    if isinstance(value, list):
+        return any(metadata_value_present(item) for item in value)
+    return str(value or '').strip() != ''
+
+def event_swarm_metadata(ev):
+    swarm = ev.get('swarm', {}) if isinstance(ev, dict) else {}
+    return swarm if isinstance(swarm, dict) else {}
+
+def event_planned(ev, swarm):
+    return swarm.get('status') == 'planned' or ev.get('_status') == 'planned'
+
+def suppresses_event_consumer_warning(ev_name):
     ev = all_events.get(ev_name, {})
     if isinstance(ev, dict):
-        swarm = ev.get('swarm', {})
-        if isinstance(swarm, dict):
-            if metadata_value_startswith(swarm.get('source', ''), ('external', 'platform')): return True
-            if metadata_value_startswith(swarm.get('consumer', ''), ('external', 'mailbox')): return True
-            if swarm.get('status') == 'planned': return True
-            if metadata_value_startswith(swarm.get('producer', ''), ('agent',)): return True
-        if ev.get('_source', '').startswith('external'): return True
-        if ev.get('_consumer', '').startswith('mailbox'): return True
-        if ev.get('_status') == 'planned': return True
-        if ev.get('_producer', '').startswith('agent'): return True
+        swarm = event_swarm_metadata(ev)
+        if metadata_value_present(swarm.get('consumer', '')): return True
+        if metadata_value_present(ev.get('consumer', '')): return True
+        if metadata_value_present(ev.get('_consumer', '')): return True
+        if event_planned(ev, swarm): return True
+    return False
+
+def suppresses_event_producer_warning(ev_name):
+    ev = all_events.get(ev_name, {})
+    if isinstance(ev, dict):
+        swarm = event_swarm_metadata(ev)
+        if metadata_value_startswith(swarm.get('source', ''), ('external', 'platform')): return True
+        if metadata_value_startswith(ev.get('_source', ''), ('external', 'platform')): return True
+        if metadata_value_present(swarm.get('producer', '')): return True
+        if metadata_value_present(ev.get('producer', '')): return True
+        if metadata_value_present(ev.get('_producer', '')): return True
+        if event_planned(ev, swarm): return True
     return False
 
 def emit_event_name(spec):
@@ -323,7 +342,7 @@ for ev in events_emitted:
 # ============================================================
 for ev in events_emitted:
     if ev and ev in events_defined and ev not in events_subscribed and not ev.startswith('platform.'):
-        if not is_suppressed(ev):
+        if not suppresses_event_consumer_warning(ev):
             warn("event_consumer_exists", "'%s' emitted but nobody subscribes" % ev)
 
 # ============================================================
@@ -331,7 +350,7 @@ for ev in events_emitted:
 # ============================================================
 for ev in events_subscribed:
     if ev and ev in events_defined and ev not in events_emitted:
-        if not is_suppressed(ev) and ev not in fan_out_events and not ev.startswith('timer.') and not ev.startswith('platform.'):
+        if not suppresses_event_producer_warning(ev) and ev not in fan_out_events and not ev.startswith('timer.') and not ev.startswith('platform.'):
             warn("event_producer_exists", "'%s' subscribed but nobody emits" % ev)
 
 # ============================================================
