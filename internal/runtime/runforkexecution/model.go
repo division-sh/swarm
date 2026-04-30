@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"swarm/internal/store"
@@ -73,6 +74,16 @@ func validateSelectedContractRouteAdmission(frontier store.RunForkContractFronti
 	}
 	if strings.TrimSpace(routeAdmission.FrontierAdmissionOwner) != store.RunForkContractFrontierAdmissionOwner {
 		return fmt.Errorf("selected-contract route admission must consume %s; got %q", store.RunForkContractFrontierAdmissionOwner, routeAdmission.FrontierAdmissionOwner)
+	}
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := store.RunForkContractFrontierEvidenceBinding(frontier)
+	if routeAdmission.FrontierEventCount != frontierEventCount {
+		return fmt.Errorf("selected-contract route admission frontier count mismatch: got %d want %d", routeAdmission.FrontierEventCount, frontierEventCount)
+	}
+	if !reflect.DeepEqual(routeAdmission.FrontierSourceEventIDs, frontierSourceEventIDs) {
+		return fmt.Errorf("selected-contract route admission frontier source event IDs do not match current frontier evidence")
+	}
+	if strings.TrimSpace(routeAdmission.FrontierEvidenceFingerprint) != frontierFingerprint {
+		return fmt.Errorf("selected-contract route admission frontier fingerprint mismatch")
 	}
 	if err := validateSelectionMatches("route admission", frontier.ContractSelection, routeAdmission.ContractSelection); err != nil {
 		return err

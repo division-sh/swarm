@@ -56,6 +56,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 			Message: "source route rows are current operational state and remain evidence-only until selected route reconstruction is separately approved",
 		})
 	}
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := store.RunForkContractFrontierEvidenceBinding(req.FrontierAdmission)
 
 	return store.RunForkSelectedContractRouteAdmission{
 		Owner:                          store.RunForkSelectedContractRouteAdmissionOwner,
@@ -67,6 +68,9 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		SelectedRouteEvents:            routeEvents,
 		DynamicFlowInstances:           dynamicFlowInstances,
 		FrontierAdmissionOwner:         req.FrontierAdmission.Owner,
+		FrontierEventCount:             frontierEventCount,
+		FrontierSourceEventIDs:         frontierSourceEventIDs,
+		FrontierEvidenceFingerprint:    frontierFingerprint,
 		RequiredConsumers:              selectedRouteHistoryRequiredConsumers(),
 		BlockedSiblings:                selectedRouteHistoryBlockedSiblings(),
 		InvalidPaths:                   selectedRouteHistoryInvalidPaths(),
