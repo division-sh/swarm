@@ -179,6 +179,39 @@ func TestBuildSelectedContractExecutionModelFailsClosedOnStaleRouteAdmissionFron
 	}
 }
 
+func TestBuildSelectedContractExecutionModelFailsClosedOnStaleRouteAdmissionFlowInstances(t *testing.T) {
+	admission := store.RunForkContractFrontierAdmission{
+		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+		NonMutating:                  true,
+		HistoricalExecutionSupported: false,
+		ContractSelection: store.RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/contracts",
+			WorkflowName:    "workflow",
+			WorkflowVersion: "v1",
+		},
+		FrontierEventCount: 1,
+		FrontierEvents: []store.RunForkContractFrontierEvent{{
+			SourceEventID:         "source-event",
+			EventName:             "review/inst-1/task.started",
+			SourceClassifications: []string{store.RunForkPendingClassificationPending},
+			SourceFlowInstances:   []string{"review/inst-1"},
+			SourceSubscriberTypes: []string{"node"},
+			SourceSubscriberIDs:   []string{"source-node"},
+		}},
+	}
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	admission.FrontierEvents[0].SourceFlowInstances = []string{"review/inst-2"}
+
+	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+	})
+	if err == nil || !strings.Contains(err.Error(), "frontier fingerprint mismatch") {
+		t.Fatalf("error = %v, want stale route admission flow-instance failure", err)
+	}
+}
+
 func TestBuildSelectedContractExecutionModelFailsClosedOnExecutableAdmission(t *testing.T) {
 	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
 		Admission: store.RunForkContractFrontierAdmission{

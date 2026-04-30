@@ -128,6 +128,10 @@ func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmi
 	type frontierEvent struct {
 		SourceEventID           string           `json:"source_event_id,omitempty"`
 		EventName               string           `json:"event_name,omitempty"`
+		SourceClassifications   []string         `json:"source_classifications,omitempty"`
+		SourceFlowInstances     []string         `json:"source_flow_instances,omitempty"`
+		SourceSubscriberTypes   []string         `json:"source_subscriber_types,omitempty"`
+		SourceSubscriberIDs     []string         `json:"source_subscriber_ids,omitempty"`
 		RuntimeEventOwners      []string         `json:"runtime_event_owners,omitempty"`
 		WorkflowNodeSubscribers []string         `json:"workflow_node_subscribers,omitempty"`
 		DerivedRecipients       []routeRecipient `json:"derived_recipients,omitempty"`
@@ -158,6 +162,10 @@ func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmi
 		events = append(events, frontierEvent{
 			SourceEventID:           sourceEventID,
 			EventName:               eventName,
+			SourceClassifications:   sortedTrimmedStrings(event.SourceClassifications),
+			SourceFlowInstances:     sortedTrimmedStrings(event.SourceFlowInstances),
+			SourceSubscriberTypes:   sortedTrimmedStrings(event.SourceSubscriberTypes),
+			SourceSubscriberIDs:     sortedTrimmedStrings(event.SourceSubscriberIDs),
 			RuntimeEventOwners:      sortedTrimmedStrings(event.RuntimeEventOwners),
 			WorkflowNodeSubscribers: sortedTrimmedStrings(event.WorkflowNodeSubscribers),
 			DerivedRecipients:       recipients,
