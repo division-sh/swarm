@@ -398,6 +398,7 @@ Every event has a typed payload schema in `events.yaml`. The platform validates 
 
 Events can be marked with reserved `swarm:` metadata:
 - `swarm.source: external` — produced by human/API, not by any agent or node
+- `swarm.producer: mailbox_human` — exceptional non-derivable producer proof
 - `swarm.consumer: external_ui` — consumed by UI/mailbox/operator, not by any agent
 - `swarm.status: planned` — future feature, not yet implemented
 

@@ -606,6 +606,10 @@ func TestRun_DoesNotWarnForEventProducerExistsWhenCatalogDeclaresExternalOrPlann
 			name:  "planned status",
 			entry: runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Status: "planned"}},
 		},
+		{
+			name:  "exceptional non-agent producer metadata",
+			entry: runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Producer: []string{"mailbox_human"}}},
+		},
 	}
 
 	for _, tc := range cases {
