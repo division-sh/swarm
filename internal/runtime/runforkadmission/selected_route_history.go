@@ -41,6 +41,9 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err != nil {
 		return store.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission routes: %w", err)
 	}
+	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan.PendingWork); err != nil {
+		return store.RunForkSelectedContractRouteAdmission{}, err
+	}
 	routeEvents := selectedRouteHistoryEvents(routeTable, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
 	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Plan, req.FrontierAdmission)
 	blockers := []store.RunForkUnsupportedBlocker{{
