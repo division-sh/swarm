@@ -551,8 +551,21 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 			}
 			return 1
 		}
+		routeAdmission, err := runtimerunforkadmission.AdmitSelectedContractRouteHistory(runtimerunforkadmission.SelectedContractRouteHistoryRequest{
+			Plan:              plan,
+			Source:            source,
+			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
+			FrontierAdmission: admission,
+		})
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: admit selected contract routes: %v\n", err)
+			}
+			return 1
+		}
 		executionModel, err := runtimerunforkexecution.BuildSelectedContractExecutionModel(runtimerunforkexecution.SelectedContractExecutionModelRequest{
-			Admission: admission,
+			Admission:      admission,
+			RouteAdmission: routeAdmission,
 		})
 		if err != nil {
 			if out != nil {

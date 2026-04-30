@@ -8,7 +8,8 @@ import (
 )
 
 type SelectedContractExecutionModelRequest struct {
-	Admission store.RunForkContractFrontierAdmission
+	Admission      store.RunForkContractFrontierAdmission
+	RouteAdmission store.RunForkSelectedContractRouteAdmission
 }
 
 func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelRequest) (store.RunForkSelectedContractExecution, error) {
@@ -22,8 +23,15 @@ func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelReque
 	if admission.HistoricalExecutionSupported {
 		return store.RunForkSelectedContractExecution{}, fmt.Errorf("selected-contract frontier admission unexpectedly supports historical execution")
 	}
+	routeAdmission := req.RouteAdmission
+	if err := validateSelectedContractRouteAdmission(admission, routeAdmission); err != nil {
+		return store.RunForkSelectedContractExecution{}, err
+	}
 
 	unsupportedBlockers := append([]store.RunForkUnsupportedBlocker(nil), admission.UnsupportedBlockers...)
+	for _, blocker := range routeAdmission.UnsupportedBlockers {
+		unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, blocker)
+	}
 	unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, store.RunForkUnsupportedBlocker{
 		Code:    store.RunForkBlockerSelectedContractExecutionModelNonMutating,
 		Message: "selected-contract fork execution is model-only; executable fork work remains separately gated",
@@ -39,6 +47,7 @@ func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelReque
 		AdmissionUse:         store.RunForkSelectedContractExecutionAdmissionUseEvidenceOnly,
 		FrontierEventCount:   admission.FrontierEventCount,
 		FrontierEvents:       selectedContractFrontierEvents(admission.FrontierEvents),
+		RouteAdmission:       &routeAdmission,
 		ContractBinding: store.RunForkSelectedContractExecutionBoundary{
 			Concept:     "selected_contract_binding",
 			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
@@ -50,6 +59,25 @@ func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelReque
 		InvalidPaths:        selectedContractExecutionInvalidPaths(),
 		UnsupportedBlockers: unsupportedBlockers,
 	}, nil
+}
+
+func validateSelectedContractRouteAdmission(frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission) error {
+	if strings.TrimSpace(routeAdmission.Owner) != store.RunForkSelectedContractRouteAdmissionOwner {
+		return fmt.Errorf("selected-contract execution model requires %s route admission; got %q", store.RunForkSelectedContractRouteAdmissionOwner, routeAdmission.Owner)
+	}
+	if !routeAdmission.NonMutating {
+		return fmt.Errorf("selected-contract route admission must be non-mutating")
+	}
+	if routeAdmission.RouteReconstructionSupported {
+		return fmt.Errorf("selected-contract route admission unexpectedly supports route reconstruction")
+	}
+	if strings.TrimSpace(routeAdmission.FrontierAdmissionOwner) != store.RunForkContractFrontierAdmissionOwner {
+		return fmt.Errorf("selected-contract route admission must consume %s; got %q", store.RunForkContractFrontierAdmissionOwner, routeAdmission.FrontierAdmissionOwner)
+	}
+	if err := validateSelectionMatches("route admission", frontier.ContractSelection, routeAdmission.ContractSelection); err != nil {
+		return err
+	}
+	return nil
 }
 
 func appendRunForkUnsupportedBlocker(blockers []store.RunForkUnsupportedBlocker, blocker store.RunForkUnsupportedBlocker) []store.RunForkUnsupportedBlocker {
@@ -134,9 +162,15 @@ func selectedContractExecutionBlockedSiblings() []store.RunForkSelectedContractE
 			Reason:      "node/system execution requires a later mutating owner and remains blocked here",
 		},
 		{
-			Concept:     "timers_routes",
+			Concept:     "timer_reconstruction",
 			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Reason:      "timer and route reconstruction remain separate fork replay/resume blockers",
+			Reason:      "timer reconstruction remains a separate fork replay/resume blocker",
+		},
+		{
+			Concept:     "mutating_route_reconstruction",
+			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+			Owner:       store.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
+			Reason:      "route-history admission is non-mutating and must not persist routes or create executable recipients in this slice",
 		},
 		{
 			Concept:     "sessions_turns_audits",

@@ -534,6 +534,18 @@ func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *test
 		model.AdmissionUse != store.RunForkSelectedContractExecutionAdmissionUseEvidenceOnly {
 		t.Fatalf("selected-contract execution admission use = %#v", model)
 	}
+	if model.RouteAdmission == nil ||
+		model.RouteAdmission.Owner != store.RunForkSelectedContractRouteAdmissionOwner ||
+		!model.RouteAdmission.NonMutating ||
+		model.RouteAdmission.RouteReconstructionSupported {
+		t.Fatalf("selected-contract route admission = %#v", model.RouteAdmission)
+	}
+	if !runForkPlanHasBoundary(model.RouteAdmission.InvalidPaths, "copy_source_routing_rules", store.RunForkSelectedContractDispositionInvalid) {
+		t.Fatalf("selected-contract route invalid paths = %#v", model.RouteAdmission.InvalidPaths)
+	}
+	if !runForkPlanHasBlocker(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
+		t.Fatalf("selected-contract execution blockers = %#v, want route admission non-mutating blocker", model.UnsupportedBlockers)
+	}
 	if !runForkPlanHasBoundary(model.InvalidPaths, "copy_source_event_deliveries", store.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("selected-contract execution invalid paths = %#v", model.InvalidPaths)
 	}

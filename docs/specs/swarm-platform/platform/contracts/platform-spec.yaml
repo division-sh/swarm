@@ -3281,6 +3281,14 @@ run_model:
       materialization or activation can create fork-local executable work. It MUST NOT copy source timers or
       routing_rules, fire or replay source timers, persist fork-local timer/route rows, derive selected-source recipients
       for execution, or use source timer/route outcomes as selected-fork suppressors in this policy slice.'
+    selected_contract_route_admission: 'Selected-contract route/subscription reconstruction admission is a
+      non-mutating prerequisite owned by runtime.run_fork.selected_contract_route_admission. It consumes
+      runtime.run_fork.contract_frontier_admission for selected frontier work, consumes selected-source static route
+      derivation through internal/runtime/bus.DeriveRouteTable for historical route evidence, and treats source
+      routing_rules and flow_instance_routes as evidence-only fail-closed facts. It MUST NOT copy source route rows,
+      persist fork-local route rows, derive executable recipients, create event_deliveries, run handlers, or absorb
+      timer reconstruction, session/turn reconstruction, source-advanced policy, contract-swap ownership, or UI/API
+      route ownership.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -3320,6 +3328,11 @@ run_model:
         activating, firing timers, copying routing rules, deriving selected-source recipients, or creating fork-local
         executable work. Timer reconstruction and route reconstruction are separately gated fork replay/resume
         children.'
+      3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
+        admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical
+        route reconstruction, uses the selected contract route table only as route evidence, and fails closed before
+        route persistence, executable recipient derivation, delivery writes, or handler execution. Source routing rows,
+        source flow-instance routes, and source recipients are never copied into the fork.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.

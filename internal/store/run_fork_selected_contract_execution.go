@@ -5,6 +5,7 @@ const (
 	RunForkSelectedContractExecutionAdmissionOwner      = "runtime.run_fork.selected_contract_execution_admission"
 	RunForkSelectedContractExecutionActivationGateOwner = "runtime.run_fork.selected_contract_execution.activation_gate"
 	RunForkSelectedContractExecutionOwner               = "runtime.run_fork.selected_contract_execution"
+	RunForkSelectedContractRouteAdmissionOwner          = "runtime.run_fork.selected_contract_route_admission"
 	RunForkSelectedContractBranchDivergenceOwner        = "store.run_fork.selected_contract_branch_divergence"
 
 	RunForkSelectedContractExecutionAdmissionUseEvidenceOnly   = "prerequisite_evidence_only"
@@ -19,6 +20,7 @@ const (
 	RunForkBlockerSelectedContractExecutionModelNonMutating     = "selected_contract_execution_model_non_mutating"
 	RunForkBlockerSelectedContractExecutionAdmissionNonMutating = "selected_contract_execution_admission_non_mutating"
 	RunForkBlockerSelectedContractSourceReplayUnsupported       = "selected_contract_source_replay_unsupported"
+	RunForkBlockerSelectedContractRouteAdmissionNonMutating     = "selected_contract_route_admission_non_mutating"
 
 	RunForkSelectedContractSourceAdvancedBranchPolicy = "selected_contract_source_advanced_branch"
 )
@@ -33,6 +35,7 @@ type RunForkSelectedContractExecution struct {
 	AdmissionUse         string                                     `json:"admission_use"`
 	FrontierEventCount   int                                        `json:"frontier_event_count"`
 	FrontierEvents       []RunForkSelectedContractFrontierEvent     `json:"frontier_events,omitempty"`
+	RouteAdmission       *RunForkSelectedContractRouteAdmission     `json:"route_admission,omitempty"`
 	ContractBinding      RunForkSelectedContractExecutionBoundary   `json:"contract_binding"`
 	RequiredConsumers    []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
 	BlockedSiblings      []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
@@ -57,6 +60,7 @@ type RunForkSelectedContractExecutionAdmission struct {
 	SourceWorkflowVersion string                                     `json:"source_workflow_version"`
 	FrontierEventCount    int                                        `json:"frontier_event_count"`
 	FrontierEvents        []RunForkSelectedContractFrontierEvent     `json:"frontier_events,omitempty"`
+	RouteAdmission        *RunForkSelectedContractRouteAdmission     `json:"route_admission,omitempty"`
 	ContractBinding       RunForkSelectedContractExecutionBoundary   `json:"contract_binding"`
 	RequiredConsumers     []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
 	BlockedSiblings       []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
@@ -71,6 +75,29 @@ type RunForkSelectedContractFrontierEvent struct {
 	WorkflowNodeSubscribers []string                           `json:"workflow_node_subscribers,omitempty"`
 	DerivedRecipients       []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
 	Disposition             string                             `json:"disposition"`
+}
+
+type RunForkSelectedContractRouteAdmission struct {
+	Owner                          string                                     `json:"owner"`
+	FutureRouteReconstructionOwner string                                     `json:"future_route_reconstruction_owner"`
+	NonMutating                    bool                                       `json:"non_mutating"`
+	RouteReconstructionSupported   bool                                       `json:"route_reconstruction_supported"`
+	ContractSelection              RunForkContractSelection                   `json:"contract_selection"`
+	SourceRouteFactsPresent        bool                                       `json:"source_route_facts_present"`
+	SelectedRouteEvents            []RunForkSelectedContractRouteEvent        `json:"selected_route_events,omitempty"`
+	DynamicFlowInstances           []string                                   `json:"dynamic_flow_instances,omitempty"`
+	FrontierAdmissionOwner         string                                     `json:"frontier_admission_owner,omitempty"`
+	RequiredConsumers              []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
+	BlockedSiblings                []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
+	InvalidPaths                   []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
+	UnsupportedBlockers            []RunForkUnsupportedBlocker                `json:"unsupported_blockers,omitempty"`
+}
+
+type RunForkSelectedContractRouteEvent struct {
+	SourceEventID     string                             `json:"source_event_id,omitempty"`
+	EventName         string                             `json:"event_name"`
+	DerivedRecipients []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
+	Disposition       string                             `json:"disposition"`
 }
 
 type RunForkSelectedContractExecutionBoundary struct {
