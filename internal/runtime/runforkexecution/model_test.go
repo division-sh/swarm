@@ -109,6 +109,78 @@ func TestBuildSelectedContractRouteTopologyFailsClosedOnDynamicFlowInstances(t *
 	}
 }
 
+func TestBuildSelectedContractRouteTopologyProvesDynamicFlowInstancesFromForkLocalEvidence(t *testing.T) {
+	admission := store.RunForkContractFrontierAdmission{
+		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+		NonMutating:                  true,
+		HistoricalExecutionSupported: false,
+		ContractSelection: store.RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/contracts",
+			WorkflowName:    "workflow",
+			WorkflowVersion: "v1",
+		},
+		FrontierEventCount: 1,
+		FrontierEvents: []store.RunForkContractFrontierEvent{{
+			SourceEventID:       "source-event",
+			EventName:           "review/inst-1/task.started",
+			SourceFlowInstances: []string{"review/inst-1"},
+			DerivedRecipients: []store.RunForkContractFrontierRecipient{{
+				SubscriberType: "node",
+				SubscriberID:   "reviewer-inst-1",
+				Path:           "review/inst-1",
+				RouteSource:    "selected_contracts",
+			}},
+		}},
+	}
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	routeAdmission.DynamicFlowInstances = []string{"review/inst-1"}
+	routeAdmission.SelectedRouteEvents = []store.RunForkSelectedContractRouteEvent{{
+		SourceEventID: "source-event",
+		EventName:     "review/inst-1/task.started",
+		DerivedRecipients: []store.RunForkContractFrontierRecipient{{
+			SubscriberType: "node",
+			SubscriberID:   "reviewer-inst-1",
+			Path:           "review/inst-1",
+			RouteSource:    "selected_contracts",
+		}},
+		Disposition: store.RunForkSelectedContractDispositionEvidenceOnly,
+	}}
+
+	topology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractRouteTopology: %v", err)
+	}
+	if !topology.DynamicTopologySupported {
+		t.Fatalf("DynamicTopologySupported = false, want fork-local dynamic topology proof")
+	}
+	if topology.DynamicTopologyOwner != store.RunForkSelectedContractDynamicRouteTopologyOwner {
+		t.Fatalf("dynamic topology owner = %q", topology.DynamicTopologyOwner)
+	}
+	if topology.DynamicTopologyDisposition != store.RunForkSelectedContractDispositionForkLocalTruth {
+		t.Fatalf("dynamic disposition = %q", topology.DynamicTopologyDisposition)
+	}
+	if len(topology.DynamicTopologyProofs) != 1 {
+		t.Fatalf("dynamic proofs = %#v, want one proof", topology.DynamicTopologyProofs)
+	}
+	proof := topology.DynamicTopologyProofs[0]
+	if proof.FlowInstance != "review/inst-1" ||
+		proof.Disposition != store.RunForkSelectedContractDispositionForkLocalTruth ||
+		len(proof.DerivedRecipients) != 1 ||
+		proof.DerivedRecipients[0].SubscriberID != "reviewer-inst-1" {
+		t.Fatalf("dynamic proof = %#v", proof)
+	}
+	if !executionBoundaryHas(topology.RequiredEvidence, "selected_contract_dynamic_route_topology", store.RunForkSelectedContractDispositionPrerequisite) {
+		t.Fatalf("required evidence = %#v, want dynamic topology prerequisite", topology.RequiredEvidence)
+	}
+	if unsupportedBlockerHas(topology.UnsupportedBlockers, store.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven) {
+		t.Fatalf("unsupported blockers = %#v, want dynamic topology proof to clear blocker", topology.UnsupportedBlockers)
+	}
+}
+
 func TestBuildSelectedContractRecipientPlanningConsumesRouteTopology(t *testing.T) {
 	admission := store.RunForkContractFrontierAdmission{
 		Owner:                        store.RunForkContractFrontierAdmissionOwner,
@@ -170,6 +242,64 @@ func TestBuildSelectedContractRecipientPlanningConsumesRouteTopology(t *testing.
 	}
 	if !unsupportedBlockerHas(planning.UnsupportedBlockers, store.RunForkBlockerSelectedContractRecipientPlanningNonMutating) {
 		t.Fatalf("unsupported blockers = %#v, want recipient-planning non-mutating blocker", planning.UnsupportedBlockers)
+	}
+}
+
+func TestBuildSelectedContractRecipientPlanningConsumesProvenDynamicTopology(t *testing.T) {
+	admission := store.RunForkContractFrontierAdmission{
+		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+		NonMutating:                  true,
+		HistoricalExecutionSupported: false,
+		ContractSelection: store.RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/contracts",
+			WorkflowName:    "workflow",
+			WorkflowVersion: "v1",
+		},
+		FrontierEventCount: 1,
+		FrontierEvents: []store.RunForkContractFrontierEvent{{
+			SourceEventID:       "source-event",
+			EventName:           "review/inst-1/task.started",
+			SourceFlowInstances: []string{"review/inst-1"},
+			DerivedRecipients: []store.RunForkContractFrontierRecipient{{
+				SubscriberType: "node",
+				SubscriberID:   "reviewer-inst-1",
+				Path:           "review/inst-1",
+				RouteSource:    "selected_contracts",
+			}},
+		}},
+	}
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	routeAdmission.DynamicFlowInstances = []string{"review/inst-1"}
+	routeAdmission.SelectedRouteEvents = []store.RunForkSelectedContractRouteEvent{{
+		SourceEventID: "source-event",
+		EventName:     "review/inst-1/task.started",
+		DerivedRecipients: []store.RunForkContractFrontierRecipient{{
+			SubscriberType: "node",
+			SubscriberID:   "reviewer-inst-1",
+			Path:           "review/inst-1",
+			RouteSource:    "selected_contracts",
+		}},
+		Disposition: store.RunForkSelectedContractDispositionEvidenceOnly,
+	}}
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, admission, routeAdmission)
+
+	planning, err := BuildSelectedContractRecipientPlanning(SelectedContractRecipientPlanningRequest{
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
+	}
+	if !planning.RecipientPlanningSupported {
+		t.Fatalf("RecipientPlanningSupported = false, want proven dynamic topology to allow planning; blockers=%#v", planning.UnsupportedBlockers)
+	}
+	if unsupportedBlockerHas(planning.UnsupportedBlockers, store.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven) {
+		t.Fatalf("unsupported blockers = %#v, want dynamic blocker cleared", planning.UnsupportedBlockers)
+	}
+	if !executionBoundaryHas(planning.RequiredEvidence, "selected_contract_dynamic_route_topology", store.RunForkSelectedContractDispositionPrerequisite) {
+		t.Fatalf("required evidence = %#v, want dynamic topology evidence consumed", planning.RequiredEvidence)
 	}
 }
 

@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"swarm/internal/store"
@@ -34,16 +35,19 @@ func BuildSelectedContractRouteTopology(req SelectedContractRouteTopologyRequest
 	if err := validateSelectedContractRouteAdmission(admission, routeAdmission); err != nil {
 		return store.RunForkSelectedContractRouteTopology{}, err
 	}
-	return canonicalSelectedContractRouteTopology(routeAdmission), nil
+	return canonicalSelectedContractRouteTopology(admission, routeAdmission), nil
 }
 
-func canonicalSelectedContractRouteTopology(routeAdmission store.RunForkSelectedContractRouteAdmission) store.RunForkSelectedContractRouteTopology {
+func canonicalSelectedContractRouteTopology(frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission) store.RunForkSelectedContractRouteTopology {
 	blockers := []store.RunForkUnsupportedBlocker{{
 		Code:    store.RunForkBlockerSelectedContractRouteTopologyNonMutating,
 		Message: "selected-contract route topology is non-mutating; route persistence, recipient delivery writes, and handler execution remain separately gated",
 	}}
 	dynamicDisposition := store.RunForkSelectedContractDispositionForkLocalTruth
-	if len(routeAdmission.DynamicFlowInstances) > 0 {
+	dynamicFlowInstances := sortedTrimmedStrings(routeAdmission.DynamicFlowInstances)
+	dynamicProofs := selectedContractDynamicRouteTopologyProofs(frontier, routeAdmission, dynamicFlowInstances)
+	dynamicSupported := len(dynamicFlowInstances) == 0 || len(dynamicProofs) == len(dynamicFlowInstances)
+	if len(dynamicFlowInstances) > 0 && !dynamicSupported {
 		dynamicDisposition = store.RunForkSelectedContractDispositionFailClosed
 		blockers = appendRunForkUnsupportedBlocker(blockers, store.RunForkUnsupportedBlocker{
 			Code:    store.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven,
@@ -64,10 +68,12 @@ func canonicalSelectedContractRouteTopology(routeAdmission store.RunForkSelected
 		ExecutableRecipientsSupported:  false,
 		ContractSelection:              routeAdmission.ContractSelection,
 		StaticTopologySupported:        true,
-		DynamicTopologySupported:       len(routeAdmission.DynamicFlowInstances) == 0,
+		DynamicTopologySupported:       dynamicSupported,
+		DynamicTopologyOwner:           selectedContractDynamicRouteTopologyOwner(dynamicFlowInstances),
 		SourceRouteFactsPresent:        routeAdmission.SourceRouteFactsPresent,
 		StaticRouteEvents:              staticEvents,
-		DynamicFlowInstances:           append([]string(nil), routeAdmission.DynamicFlowInstances...),
+		DynamicFlowInstances:           dynamicFlowInstances,
+		DynamicTopologyProofs:          dynamicProofs,
 		DynamicTopologyDisposition:     dynamicDisposition,
 		FrontierAdmissionOwner:         routeAdmission.FrontierAdmissionOwner,
 		FrontierEventCount:             routeAdmission.FrontierEventCount,
@@ -178,7 +184,7 @@ func validateSelectedContractRouteTopology(frontier store.RunForkContractFrontie
 	if err := validateSelectionMatches("route topology", frontier.ContractSelection, topology.ContractSelection); err != nil {
 		return err
 	}
-	canonical := canonicalSelectedContractRouteTopology(routeAdmission)
+	canonical := canonicalSelectedContractRouteTopology(frontier, routeAdmission)
 	if !reflect.DeepEqual(topology, canonical) {
 		return fmt.Errorf("selected-contract route topology does not match canonical route-admission evidence")
 	}
@@ -242,6 +248,120 @@ func selectedContractRouteTopologyEvents(events []store.RunForkSelectedContractR
 	return out
 }
 
+func selectedContractDynamicRouteTopologyOwner(instances []string) string {
+	if len(instances) == 0 {
+		return ""
+	}
+	return store.RunForkSelectedContractDynamicRouteTopologyOwner
+}
+
+func selectedContractDynamicRouteTopologyProofs(frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission, instances []string) []store.RunForkSelectedContractDynamicTopologyProof {
+	if len(instances) == 0 {
+		return nil
+	}
+	evidence := selectedContractDynamicTopologyEvidence(frontier, routeAdmission)
+	proofs := make([]store.RunForkSelectedContractDynamicTopologyProof, 0, len(instances))
+	for _, instance := range instances {
+		item, ok := evidence[instance]
+		if !ok || len(item.recipients) == 0 || len(item.eventNames) == 0 {
+			continue
+		}
+		recipients := sortedFrontierRecipients(item.recipients)
+		if len(recipients) == 0 {
+			continue
+		}
+		proofs = append(proofs, store.RunForkSelectedContractDynamicTopologyProof{
+			FlowInstance:      instance,
+			SourceEventIDs:    sortedStringSet(item.sourceEventIDs),
+			EventNames:        sortedStringSet(item.eventNames),
+			DerivedRecipients: recipients,
+			Disposition:       store.RunForkSelectedContractDispositionForkLocalTruth,
+		})
+	}
+	return proofs
+}
+
+type selectedContractDynamicTopologyEvidenceItem struct {
+	sourceEventIDs map[string]struct{}
+	eventNames     map[string]struct{}
+	recipients     []store.RunForkContractFrontierRecipient
+}
+
+func selectedContractDynamicTopologyEvidence(frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission) map[string]*selectedContractDynamicTopologyEvidenceItem {
+	out := map[string]*selectedContractDynamicTopologyEvidenceItem{}
+	add := func(instance, sourceEventID, eventName string, recipients []store.RunForkContractFrontierRecipient) {
+		instance = normalizeRouteInstance(instance)
+		eventName = strings.TrimSpace(eventName)
+		if instance == "" || eventName == "" {
+			return
+		}
+		item := out[instance]
+		if item == nil {
+			item = &selectedContractDynamicTopologyEvidenceItem{
+				sourceEventIDs: map[string]struct{}{},
+				eventNames:     map[string]struct{}{},
+			}
+			out[instance] = item
+		}
+		if sourceEventID = strings.TrimSpace(sourceEventID); sourceEventID != "" {
+			item.sourceEventIDs[sourceEventID] = struct{}{}
+		}
+		item.eventNames[eventName] = struct{}{}
+		for _, recipient := range recipients {
+			if normalizeRouteInstance(recipient.Path) != instance {
+				continue
+			}
+			item.recipients = append(item.recipients, store.RunForkContractFrontierRecipient{
+				SubscriberType: strings.TrimSpace(recipient.SubscriberType),
+				SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
+				Path:           strings.TrimSpace(recipient.Path),
+				RouteSource:    strings.TrimSpace(recipient.RouteSource),
+			})
+		}
+	}
+	for _, event := range frontier.FrontierEvents {
+		for _, instance := range event.SourceFlowInstances {
+			add(instance, event.SourceEventID, event.EventName, event.DerivedRecipients)
+		}
+	}
+	for _, event := range routeAdmission.SelectedRouteEvents {
+		for _, recipient := range event.DerivedRecipients {
+			add(recipient.Path, event.SourceEventID, event.EventName, event.DerivedRecipients)
+		}
+	}
+	return out
+}
+
+func normalizeRouteInstance(value string) string {
+	return strings.Trim(strings.TrimSpace(value), "/")
+}
+
+func sortedStringSet(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedTrimmedStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = normalizeRouteInstance(value)
+		if value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	return sortedStringSet(seen)
+}
+
 func selectedContractRouteTopologyRequiredEvidence(routeAdmission store.RunForkSelectedContractRouteAdmission) []store.RunForkSelectedContractExecutionBoundary {
 	evidence := []store.RunForkSelectedContractExecutionBoundary{
 		{
@@ -255,6 +375,14 @@ func selectedContractRouteTopologyRequiredEvidence(routeAdmission store.RunForkS
 		if strings.TrimSpace(item.Disposition) == store.RunForkSelectedContractDispositionPrerequisite {
 			evidence = append(evidence, item)
 		}
+	}
+	if len(routeAdmission.DynamicFlowInstances) > 0 {
+		evidence = append(evidence, store.RunForkSelectedContractExecutionBoundary{
+			Concept:     "selected_contract_dynamic_route_topology",
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       store.RunForkSelectedContractDynamicRouteTopologyOwner,
+			Reason:      "dynamic flow-instance topology must be proven from fork-local selected-contract route evidence or remain fail-closed",
+		})
 	}
 	return evidence
 }

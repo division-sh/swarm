@@ -3339,6 +3339,15 @@ run_model:
       a named blocker. It MUST NOT copy source routing_rules or materialized flow-instance route rows, persist
       fork-local route rows, derive executable recipients, invoke the delivery planner for fork work, create
       event_deliveries, run handlers, or absorb timer/session/turn/source-advanced/contract-swap/UI ownership.'
+    selected_contract_dynamic_route_topology: 'Selected-contract dynamic route topology proof is a non-mutating
+      child owned by runtime.run_fork.selected_contract_dynamic_route_topology under
+      runtime.run_fork.selected_contract_route_topology. It may clear selected_contract_dynamic_route_topology_unproven
+      only when each dynamic flow-instance topology item is proven from fork-local selected-contract evidence:
+      selected-source route derivation, contract frontier evidence, route-admission evidence, and fork-local
+      flow-instance identity/topology evidence. If proof is incomplete, dynamic topology remains fail-closed. This
+      owner MUST NOT copy source routing_rules or materialized flow-instance route rows, persist fork-local route rows,
+      derive executable recipients outside runtime.run_fork.selected_contract_recipient_planning, invoke delivery
+      writes, run handlers, or absorb timer/session/turn/source-advanced/contract-swap/UI ownership.'
     selected_contract_recipient_planning: 'Selected-contract recipient planning for mutating fork execution is owned by
       runtime.run_fork.selected_contract_recipient_planning after selected route topology. It consumes the durable
       selected-contract binding, runtime.run_fork.contract_frontier_admission, runtime.run_fork.selected_contract_route_admission,
@@ -3403,6 +3412,14 @@ run_model:
         evidence only. Dynamic flow-instance topology requires explicit fork-local topology proof and otherwise
         remains fail-closed. This owner is still non-mutating: it does not persist route rows, derive executable
         recipients, write deliveries, or run handlers.'
+      3f1_selected_contract_dynamic_route_topology: 'For selected-contract mutating fork execution, dynamic
+        flow-instance route topology is proven by runtime.run_fork.selected_contract_dynamic_route_topology as a
+        non-mutating extension of runtime.run_fork.selected_contract_route_topology. Dynamic proof is valid only when
+        selected-source route derivation and frontier/route-admission evidence identify fork-local flow-instance
+        topology and derived recipients for every dynamic instance. Missing, stale, source-row-only, or partial proof
+        keeps selected_contract_dynamic_route_topology_unproven fail-closed. This owner does not persist routes,
+        copy source routing rows, create deliveries, run handlers, reconstruct timers/sessions/turns, change
+        source-advanced policy, own contract-swap behavior, or own UI/API execution state.'
       3g_selected_contract_recipient_planning: 'For selected-contract mutating fork execution, fork-local recipient
         planning is a separate owner beyond route topology. The selected execution model, admission, publish path, and
         EventBus.Publish recipient guard consume runtime.run_fork.selected_contract_recipient_planning before selected
