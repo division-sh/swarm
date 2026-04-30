@@ -1293,6 +1293,7 @@ The platform owns ALL tool schema serving. It reads tool definition YAML, genera
 
 - `note`: create_flow_instance is a handler ACTION field value, not a tool agents can call. It is listed here for completeness but invoked via action: create_flow_instance in node handlers.
 - `handler_registration`: At bootstrap, the workflow module registers handlers for its tools. The platform provides the MCP gateway and schema validation. One tools file per workflow contains all tool schemas for the actor's visible surface: universal communication tools, generated emit tools, generated role-scoped entity tools for opted-in actors, and explicitly configured workflow-specific tools.
+- `default_deny`: If an agent calls a tool that is not in its `tools` list, not a universal communication tool, not an emit tool, not a generated role-scoped entity tool for an opted-in actor, and not an authorized `native_tools` capability, the call is rejected.
 ## custom_tool_schema
 
 - `description`: Accepted fields for tool definitions in tools.yaml.

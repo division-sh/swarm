@@ -710,6 +710,8 @@ The platform-builtin tools are:
 - `agent_message` — send a message to another agent (auto-granted)
 - `mailbox_send` — send an item to the human mailbox (auto-granted)
 
+Default-deny still applies. A call is valid only when the tool is explicitly listed in `tools`, is a universal communication tool, is a generated emit tool, is a generated role-scoped entity tool for an opted-in actor, or is an authorized `native_tools` capability.
+
 Custom tool definitions in `tools.yaml` require a `description` field and optionally include `handler_type`, `input_schema`, `output_schema`, `parameters`, and `returns`. The fields `endpoint` and `type` are explicitly not accepted.
 
 ### Prompt Templating

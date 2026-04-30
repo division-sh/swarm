@@ -2353,8 +2353,9 @@ tool_model:
       authorization as defense-in-depth.'
     context_cost: An agent with 4 tools in tools pays for 4 tool schemas in LLM context, regardless of how many tools
       exist in the registry or how many tools an MCP server exposes. The filter is the contract, not the source.
-    default_deny: If an agent calls a tool that is not in its tools list, not a universal tool, not an emit tool, and not
-      a native_tools capability — the call is rejected. There is no default-allow policy for unrecognized tools.
+    default_deny: If an agent calls a tool that is not in its tools list, not a universal communication tool, not an emit
+      tool, not a generated role-scoped entity tool for an opted-in actor, and not a native_tools capability — the call is
+      rejected. There is no default-allow policy for unrecognized tools.
   mcp_client:
     description: The platform acts as an MCP client, connecting to external MCP servers to discover and invoke tools. MCP
       servers are registered in the product's policy.yaml under mcp_servers.
