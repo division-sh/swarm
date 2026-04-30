@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"swarm/internal/events"
+	"swarm/internal/runtime/bus"
 	"swarm/internal/runtime/runforkadmission"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
@@ -54,6 +56,12 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 	if result.Owner != store.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
 		t.Fatalf("result = %#v", result)
+	}
+	if result.SelectedContractExecutionAdmission.RecipientPlanning == nil ||
+		result.SelectedContractExecutionAdmission.RecipientPlanning.Owner != store.RunForkSelectedContractRecipientPlanningOwner ||
+		!result.SelectedContractExecutionAdmission.RecipientPlanning.RecipientPlanningSupported ||
+		len(result.SelectedContractExecutionAdmission.RecipientPlanning.RecipientPlanEvents) != 1 {
+		t.Fatalf("recipient planning admission = %#v", result.SelectedContractExecutionAdmission.RecipientPlanning)
 	}
 	forkEventID := result.ForkEvents[0].ForkEventID
 	if forkEventID == "" || forkEventID == sourceEventID {
@@ -454,6 +462,121 @@ func TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint(
 	}
 	if forkReceipts == 0 || emittedFollowUps != 1 {
 		t.Fatalf("branch fork-local outcomes receipts=%d followUps=%d, want receipts and one follow-up", forkReceipts, emittedFollowUps)
+	}
+}
+
+func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *testing.T) {
+	frontier := testContractFrontierAdmission(testContractSelection())
+	sourceEventID := frontier.FrontierEvents[0].SourceEventID
+	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission)
+	planning, err := BuildSelectedContractRecipientPlanning(SelectedContractRecipientPlanningRequest{
+		Admission:      frontier,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
+	}
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning)
+	if err != nil {
+		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
+	}
+	guard.ExpectForkEvent("fork-event", sourceEventID)
+
+	err = guard.AuthorizeEvent(context.Background(), events.Event{
+		ID:          "fork-event",
+		Type:        "work.begin",
+		SourceAgent: store.RunForkSelectedContractExecutionOwner,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizeEvent canonical recipient plan: %v", err)
+	}
+
+	err = guard.Authorize(context.Background(), events.Event{
+		ID:          "fork-event",
+		Type:        "work.begin",
+		SourceAgent: store.RunForkSelectedContractExecutionOwner,
+	}, bus.PublishRecipientPlan{
+		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+			Type:        "node",
+			ID:          "alpha-intake",
+			Path:        "flow-a/alpha-intake",
+			RouteSource: "selected_contracts",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Authorize canonical recipient plan: %v", err)
+	}
+}
+
+func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(t *testing.T) {
+	frontier := testContractFrontierAdmission(testContractSelection())
+	sourceEventID := frontier.FrontierEvents[0].SourceEventID
+	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission)
+	planning, err := BuildSelectedContractRecipientPlanning(SelectedContractRecipientPlanningRequest{
+		Admission:      frontier,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
+	}
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning)
+	if err != nil {
+		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
+	}
+
+	err = guard.Authorize(context.Background(), events.Event{
+		ID:          "fork-event",
+		Type:        "work.begin",
+		SourceAgent: store.RunForkSelectedContractExecutionOwner,
+	}, bus.PublishRecipientPlan{
+		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+			Type:        "node",
+			ID:          "alpha-intake",
+			Path:        "flow-a/alpha-intake",
+			RouteSource: "selected_contracts",
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractRecipientPlanningOwner) {
+		t.Fatalf("Authorize without expectation error = %v, want recipient-planning evidence failure", err)
+	}
+
+	guard.ExpectForkEvent("fork-event-subscription", sourceEventID)
+	err = guard.Authorize(context.Background(), events.Event{
+		ID:          "fork-event-subscription",
+		Type:        "work.begin",
+		SourceAgent: store.RunForkSelectedContractExecutionOwner,
+	}, bus.PublishRecipientPlan{
+		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+			Type:        "node",
+			ID:          "alpha-intake",
+			Path:        "flow-a/alpha-intake",
+			RouteSource: "selected_contracts",
+		}},
+		SubscriptionRecipients: []string{"legacy-subscription"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "live subscription") {
+		t.Fatalf("Authorize subscription recipient error = %v, want live subscription rejection", err)
+	}
+
+	guard.ExpectForkEvent("fork-event-wrong-recipient", sourceEventID)
+	err = guard.Authorize(context.Background(), events.Event{
+		ID:          "fork-event-wrong-recipient",
+		Type:        "work.begin",
+		SourceAgent: store.RunForkSelectedContractExecutionOwner,
+	}, bus.PublishRecipientPlan{
+		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+			Type:        "node",
+			ID:          "other-node",
+			Path:        "flow-a/other-node",
+			RouteSource: "selected_contracts",
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "routed recipients do not match") {
+		t.Fatalf("Authorize wrong recipient error = %v, want recipient-plan mismatch", err)
 	}
 }
 

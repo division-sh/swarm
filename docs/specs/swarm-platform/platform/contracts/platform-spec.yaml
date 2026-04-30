@@ -3303,6 +3303,19 @@ run_model:
       a named blocker. It MUST NOT copy source routing_rules or materialized flow-instance route rows, persist
       fork-local route rows, derive executable recipients, invoke the delivery planner for fork work, create
       event_deliveries, run handlers, or absorb timer/session/turn/source-advanced/contract-swap/UI ownership.'
+    selected_contract_recipient_planning: 'Selected-contract recipient planning for mutating fork execution is owned by
+      runtime.run_fork.selected_contract_recipient_planning after selected route topology. It consumes the durable
+      selected-contract binding, runtime.run_fork.contract_frontier_admission, runtime.run_fork.selected_contract_route_admission,
+      and runtime.run_fork.selected_contract_route_topology, then produces deterministic fork-local recipient-plan
+      evidence for selected frontier events before selected execution publishes fork-local events. The selected execution
+      publish path and EventBus.Publish MUST consume/gate on this owner before deriving recipients for selected-fork work.
+      internal/runtime/bus.deliveryPlanner.Plan MAY be a downstream helper or isolated pure primitive, but it is not the
+      canonical owner and MUST NOT bypass this owner. Dynamic flow-instance topology remains fail-closed unless explicit
+      fork-local topology proof exists. Source route rows, source flow-instance route rows, source event_deliveries,
+      source recipients, source receipts, source dead letters, and post-fork source outcomes are invalid as executable
+      fork truth or fork suppressors. This owner MUST NOT persist fork-local route rows, write event_deliveries, run
+      handlers, write receipts, dead letters, idempotency state, emitted follow-ups, timers, sessions, turns,
+      source-advanced policy, contract-swap state, or UI/API execution state.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -3354,6 +3367,15 @@ run_model:
         evidence only. Dynamic flow-instance topology requires explicit fork-local topology proof and otherwise
         remains fail-closed. This owner is still non-mutating: it does not persist route rows, derive executable
         recipients, write deliveries, or run handlers.'
+      3g_selected_contract_recipient_planning: 'For selected-contract mutating fork execution, fork-local recipient
+        planning is a separate owner beyond route topology. The selected execution model, admission, publish path, and
+        EventBus.Publish recipient guard consume runtime.run_fork.selected_contract_recipient_planning before selected
+        fork recipient derivation. The owner plans recipients from selected binding, frontier evidence, route admission,
+        and route topology evidence only; source deliveries, source route rows, source recipients, source receipts,
+        source dead letters, and post-fork source outcomes are not executable fork truth or suppressors. This owner is
+        still non-mutating: it does not persist route rows, write deliveries, run handlers, or own receipts, dead
+        letters, idempotency, emitted follow-ups, timers, sessions, turns, source-advanced policy, contract swap, or
+        UI/API execution state.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.

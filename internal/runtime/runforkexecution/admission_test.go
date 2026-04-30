@@ -70,6 +70,9 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	if admission.RouteTopology == nil || admission.RouteTopology.Owner != store.RunForkSelectedContractRouteTopologyOwner {
 		t.Fatalf("route topology = %#v, want canonical selected-contract route topology", admission.RouteTopology)
 	}
+	if admission.RecipientPlanning == nil || admission.RecipientPlanning.Owner != store.RunForkSelectedContractRecipientPlanningOwner {
+		t.Fatalf("recipient planning = %#v, want canonical selected-contract recipient planning", admission.RecipientPlanning)
+	}
 	if !executionBoundaryHas(admission.InvalidPaths, "copy_source_event_deliveries", store.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("invalid paths = %#v, want source delivery copy invalid", admission.InvalidPaths)
 	}
@@ -341,6 +344,30 @@ func TestBuildSelectedContractExecutionAdmissionRejectsForgedRouteTopology(t *te
 	})
 	if err == nil || !strings.Contains(err.Error(), "canonical route-admission evidence") {
 		t.Fatalf("error = %v, want forged route topology admission failure", err)
+	}
+}
+
+func TestBuildSelectedContractExecutionAdmissionRejectsForgedRecipientPlanning(t *testing.T) {
+	ctx := context.Background()
+	forkRunID := uuid.NewString()
+	binding := testSelectedContractBinding(forkRunID)
+	frontier := testContractFrontierAdmission(binding.ContractSelection)
+	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission)
+	model := testSelectedContractExecutionModel(t, frontier)
+	model.RecipientPlanning.Owner = "cmd.swarm.local_recipient_plan"
+
+	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
+		ForkRunID:         forkRunID,
+		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
+		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		FrontierAdmission: frontier,
+		RouteAdmission:    routeAdmission,
+		RouteTopology:     routeTopology,
+		ExecutionModel:    model,
+	})
+	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractRecipientPlanningOwner) {
+		t.Fatalf("error = %v, want canonical recipient planning failure", err)
 	}
 }
 

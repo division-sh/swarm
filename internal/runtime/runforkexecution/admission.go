@@ -158,6 +158,13 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 	if err := validateSelectedContractExecutionModel(binding, req.FrontierAdmission, req.RouteAdmission, req.RouteTopology, req.ExecutionModel); err != nil {
 		return store.RunForkSelectedContractExecutionAdmission{}, err
 	}
+	recipientPlanning := req.ExecutionModel.RecipientPlanning
+	if recipientPlanning == nil {
+		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission model must carry %s", store.RunForkSelectedContractRecipientPlanningOwner)
+	}
+	if err := validateSelectedContractRecipientPlanning(req.FrontierAdmission, req.RouteAdmission, req.RouteTopology, *recipientPlanning); err != nil {
+		return store.RunForkSelectedContractExecutionAdmission{}, err
+	}
 
 	unsupportedBlockers := append([]store.RunForkUnsupportedBlocker(nil), req.ExecutionModel.UnsupportedBlockers...)
 	unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, store.RunForkUnsupportedBlocker{
@@ -183,6 +190,7 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		FrontierEventCount:    req.ExecutionModel.FrontierEventCount,
 		FrontierEvents:        append([]store.RunForkSelectedContractFrontierEvent(nil), req.ExecutionModel.FrontierEvents...),
 		RouteTopology:         &req.RouteTopology,
+		RecipientPlanning:     recipientPlanning,
 		ContractBinding: store.RunForkSelectedContractExecutionBoundary{
 			Concept:     "selected_contract_binding",
 			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
@@ -290,6 +298,12 @@ func validateSelectedContractExecutionModel(binding store.RunForkSelectedContrac
 	}
 	if !reflect.DeepEqual(*model.RouteTopology, routeTopology) {
 		return fmt.Errorf("selected-contract execution admission model route topology does not match canonical route topology truth")
+	}
+	if model.RecipientPlanning == nil {
+		return fmt.Errorf("selected-contract execution admission model must carry %s", store.RunForkSelectedContractRecipientPlanningOwner)
+	}
+	if err := validateSelectedContractRecipientPlanning(frontier, routeAdmission, routeTopology, *model.RecipientPlanning); err != nil {
+		return err
 	}
 	if model.ContractBinding.Owner != store.RunForkSelectedContractBindingOwner ||
 		model.ContractBinding.Disposition != store.RunForkSelectedContractDispositionPrerequisite {

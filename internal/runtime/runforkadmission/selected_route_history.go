@@ -45,7 +45,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		return store.RunForkSelectedContractRouteAdmission{}, err
 	}
 	routeEvents := selectedRouteHistoryEvents(routeTable, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
-	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Plan, req.FrontierAdmission)
+	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
 	blockers := []store.RunForkUnsupportedBlocker{{
 		Code:    store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
 		Message: "selected-contract route admission is non-mutating; route persistence, recipient delivery writes, and handler execution remain separately gated",
@@ -155,11 +155,11 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, events []sele
 	return out
 }
 
-func selectedRouteHistoryDynamicFlowInstances(plan store.RunForkPlan, frontier store.RunForkContractFrontierAdmission) []string {
+func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan store.RunForkPlan, frontier store.RunForkContractFrontierAdmission) []string {
 	seen := map[string]struct{}{}
 	add := func(value string) {
 		value = strings.Trim(strings.TrimSpace(value), "/")
-		if value != "" {
+		if value != "" && isContractFrontierTemplateInstancePath(source, value) {
 			seen[value] = struct{}{}
 		}
 	}
@@ -185,8 +185,8 @@ func selectedRouteHistoryRequiredConsumers() []store.RunForkSelectedContractExec
 		{
 			Concept:     "fork_local_recipient_planning",
 			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
-			Owner:       "internal/runtime/bus.delivery_planner",
-			Reason:      "executable route reconstruction must feed an approved recipient planner before delivery rows can be created",
+			Owner:       store.RunForkSelectedContractRecipientPlanningOwner,
+			Reason:      "executable route reconstruction must feed the canonical recipient-planning owner before delivery rows can be created",
 		},
 	}
 }

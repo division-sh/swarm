@@ -100,9 +100,20 @@ func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelReque
 	if err := validateSelectedContractRouteTopology(admission, routeAdmission, routeTopology); err != nil {
 		return store.RunForkSelectedContractExecution{}, err
 	}
+	recipientPlanning, err := BuildSelectedContractRecipientPlanning(SelectedContractRecipientPlanningRequest{
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
+	})
+	if err != nil {
+		return store.RunForkSelectedContractExecution{}, err
+	}
 
 	unsupportedBlockers := append([]store.RunForkUnsupportedBlocker(nil), admission.UnsupportedBlockers...)
 	for _, blocker := range routeTopology.UnsupportedBlockers {
+		unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, blocker)
+	}
+	for _, blocker := range recipientPlanning.UnsupportedBlockers {
 		unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, blocker)
 	}
 	unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, store.RunForkUnsupportedBlocker{
@@ -121,6 +132,7 @@ func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelReque
 		FrontierEventCount:   admission.FrontierEventCount,
 		FrontierEvents:       selectedContractFrontierEvents(admission.FrontierEvents),
 		RouteTopology:        &routeTopology,
+		RecipientPlanning:    &recipientPlanning,
 		ContractBinding: store.RunForkSelectedContractExecutionBoundary{
 			Concept:     "selected_contract_binding",
 			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
@@ -258,8 +270,8 @@ func selectedContractRouteTopologyRequiredConsumers() []store.RunForkSelectedCon
 		{
 			Concept:     "fork_local_recipient_planning",
 			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
-			Owner:       "internal/runtime/bus.delivery_planner",
-			Reason:      "recipient planning is a future consumer and is not invoked by the route topology owner",
+			Owner:       store.RunForkSelectedContractRecipientPlanningOwner,
+			Reason:      "recipient planning is a future consumer and must own executable selected-fork recipient evidence before delivery planning",
 		},
 	}
 }
@@ -351,6 +363,12 @@ func selectedContractFrontierEvents(events []store.RunForkContractFrontierEvent)
 
 func selectedContractExecutionRequiredConsumers() []store.RunForkSelectedContractExecutionBoundary {
 	return []store.RunForkSelectedContractExecutionBoundary{
+		{
+			Concept:     "fork_local_recipient_planning",
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       store.RunForkSelectedContractRecipientPlanningOwner,
+			Reason:      "selected execution must consume canonical recipient-plan evidence before publish-path recipient derivation",
+		},
 		{
 			Concept:     "fork_run_id_runtime_context",
 			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,

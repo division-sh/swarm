@@ -166,6 +166,10 @@ active_issues:
     title: Gate selected-contract fork route reconstruction and recipient ownership
     maps_to:
       - timestamp_fork_replay_resume_ownership
+  - id: 611
+    title: Gate selected-contract recipient planning owner and publish-path consumer migration
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
     maps_to:
@@ -275,6 +279,7 @@ nodes:
       - selected-contract timestamp forks with source timer or route facts must keep those rows as evidence-only fail-closed blockers until separate timer and route reconstruction owners are approved; source timers, routing_rules, route recipients, and timer firings are not executable selected-fork work
       - selected-contract route/subscription reconstruction needs a non-mutating route-history admission owner that consumes selected-source route derivation, distinguishes frontier route/recipient admission from historical route evidence, and keeps route persistence, executable recipients, delivery writes, and handler execution split
       - selected-contract route/topology truth needs a canonical owner beyond route admission before recipient delivery; route admission is prerequisite evidence, static selected-source topology is fork-local truth only through the selected route derivation owner, and dynamic flow-instance topology must be fork-local-proven or fail-closed without copying source routing rows
+      - selected-contract recipient planning needs a canonical owner beyond route topology before selected execution publishes fork-local events; selected execution and EventBus.Publish must consume that owner before recipient derivation, while delivery writes, route persistence, handlers, timers, sessions, turns, source-advanced policy, contract swap, and UI/API remain separately gated siblings
     representative_issues:
       - 564
       - 565
@@ -292,6 +297,7 @@ nodes:
       - 602
       - 604
       - 609
+      - 611
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
