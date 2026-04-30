@@ -1,6 +1,8 @@
 task.requested:
-  _source: external
+  swarm:
+    source: external
   entity_id: string
 task.completed:
-  _source: external
+  swarm:
+    source: external
   entity_id: string

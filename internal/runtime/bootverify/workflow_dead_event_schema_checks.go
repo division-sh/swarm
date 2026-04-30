@@ -58,7 +58,7 @@ func (c *checkerContext) deadEventSchema() []Finding {
 			CheckID:  "semantic_drift_dead_event_schema",
 			Severity: "warning",
 			Message: fmt.Sprintf(
-				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- External source annotation (_source): %s\n- External consumer annotation (_consumer): %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n\nIf this event is no longer used, remove it from %s.\nIf it is used by an external system, add _source: external (...) or _consumer: ... to document the external role.",
+				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- External source metadata (swarm.source): %s\n- External consumer metadata (swarm.consumer): %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n\nIf this event is no longer used, remove it from %s.\nIf it is used by an external system, add swarm.source: external or swarm.consumer: ... to document the external role.",
 				decl.Canonical,
 				fileLabel,
 				usage.handlerEmits,
@@ -351,12 +351,12 @@ func deadEventSameScope(a, b string) bool {
 }
 
 func deadEventExternalSource(entry runtimecontracts.EventCatalogEntry) bool {
-	source := strings.ToLower(strings.TrimSpace(entry.Source))
+	source := strings.ToLower(strings.TrimSpace(entry.SwarmSource()))
 	return strings.HasPrefix(source, "external")
 }
 
 func deadEventExternalConsumer(entry runtimecontracts.EventCatalogEntry) bool {
-	return len(entry.Consumer) > 0 || len(entry.ConsumerType) > 0
+	return len(entry.SwarmConsumer()) > 0
 }
 
 func deadEventSchemaFileLabel(path, flowID string) string {

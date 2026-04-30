@@ -396,10 +396,10 @@ Agent emits event → platform persists → system node handles → new event em
 
 Every event has a typed payload schema in `events.yaml`. The platform validates payloads at entry.
 
-Events can be marked with metadata:
-- `_source: external` — produced by human/API, not by any agent or node
-- `_consumer: mailbox_system` — consumed by UI, not by any agent
-- `_status: planned` — future feature, not yet implemented
+Events can be marked with reserved `swarm:` metadata:
+- `swarm.source: external` — produced by human/API, not by any agent or node
+- `swarm.consumer: external_ui` — consumed by UI/mailbox/operator, not by any agent
+- `swarm.status: planned` — future feature, not yet implemented
 
 ### Expressions (CEL)
 

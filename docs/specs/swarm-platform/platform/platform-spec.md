@@ -269,10 +269,10 @@ hello.completed:
 
 - `description`: Fields starting with _ in contract YAML files.
 - `semantic_fields`:
-  - `_source`: Event producer type. Suppresses NO-PRODUCER verifier warnings. Values: external (...)
-  - `_consumer`: Event consumer type. Suppresses NO-CONSUMER warnings. Values: mailbox_system (...)
-  - `_status`: Event lifecycle. Values: planned (future feature).
-  - `_producer`: Event producer agent. Suppresses NO-PRODUCER warnings for agent-emitted events.
+  - `_source`: Legacy migration input for event swarm.source. Do not author in new contracts.
+  - `_consumer`: Legacy migration input for event swarm.consumer. Do not author in new contracts.
+  - `_status`: Legacy migration input for event swarm.status. Do not author in new contracts.
+  - `_producer`: Legacy migration input for event swarm.producer for non-derivable producer proof only. Do not author for ordinary internal topology.
 
 - `documentation_fields`: Any other _-prefixed field (_note, _routing_note, _internal_events_note, etc.) is a human comment. The platform ignores them. The verifier ignores them. They are not part of the contract.
 # handler_specification

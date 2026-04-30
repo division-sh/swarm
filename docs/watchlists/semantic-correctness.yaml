@@ -388,6 +388,8 @@ nodes:
         - supported proof-harness allowlists and active prose/reference surfaces that still described payload_transform, fan_out.emit_per_item, or implicit passthrough as current behavior
       - adjacent split retained after this node:
         - generic post-publish canonical-event validation cleanup remains outside this migration class unless later promoted
+      - adjacent supporting migration tracked by #605:
+        - canonical event-level swarm metadata now owns non-derivable external/lifecycle topology proof so flat event payload fields and verifier metadata no longer share ambiguous underscore ownership
     representative_issues:
       - 455
       - 457
@@ -397,6 +399,7 @@ nodes:
       - 466
       - 468
       - 470
+      - 605
     common_framing_mistakes:
       too_broad:
         - land the entire strict event-schema migration in one PR

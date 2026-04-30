@@ -233,7 +233,7 @@ func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
 	for _, want := range []string{
 		"has no active role in the authored bundle",
 		"Handler emits: 0",
-		"External source annotation (_source): no",
+		"External source metadata (swarm.source): no",
 	} {
 		if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", want) {
 			t.Fatalf("expected semantic_drift_dead_event_schema warning containing %q, got %#v", want, report.Warnings())
@@ -312,25 +312,25 @@ root-node:
 			},
 		},
 		{
-			name:   "external source annotation",
+			name:   "external source metadata",
 			target: "support/ticket.ready",
 			opts: deadEventSchemaFixtureOptions{
 				name: "dead-event-schema-external-source",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready:\n  _source: external (manual handoff)\n",
+						events: "ticket.ready:\n  swarm:\n    source: external (manual handoff)\n",
 					},
 				},
 			},
 		},
 		{
-			name:   "external consumer annotation",
+			name:   "external consumer metadata",
 			target: "support/ticket.ready",
 			opts: deadEventSchemaFixtureOptions{
 				name: "dead-event-schema-external-consumer",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready:\n  _consumer: mailbox_system\n",
+						events: "ticket.ready:\n  swarm:\n    consumer: mailbox_system\n",
 					},
 				},
 			},
@@ -576,8 +576,8 @@ func TestRun_DoesNotWarnForEventConsumerExistsWhenCatalogDeclaresConsumerMetadat
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.start": {Source: "external"},
-			"task.done":  {ConsumerType: []string{"dashboard"}},
+			"task.start": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"}},
+			"task.done":  {Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"dashboard"}}},
 		},
 	}
 	bundle.Platform.Platform.Name = "test"
@@ -600,11 +600,11 @@ func TestRun_DoesNotWarnForEventProducerExistsWhenCatalogDeclaresExternalOrPlann
 	}{
 		{
 			name:  "external source",
-			entry: runtimecontracts.EventCatalogEntry{Source: "external system"},
+			entry: runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Source: "external system"}},
 		},
 		{
 			name:  "planned status",
-			entry: runtimecontracts.EventCatalogEntry{Status: "planned"},
+			entry: runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Status: "planned"}},
 		},
 	}
 
@@ -660,7 +660,7 @@ func TestRun_MapsMissingPromptToPromptExistsWarning(t *testing.T) {
 func TestEventProducedExternallyLocal_AllowsAnnotatedSourceText(t *testing.T) {
 	t.Parallel()
 
-	entry := runtimecontracts.EventCatalogEntry{Source: "platform (timer system)"}
+	entry := runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Source: "platform (timer system)"}}
 	if !eventProducedExternallyLocal(entry) {
 		t.Fatal("expected platform source annotation to count as externally produced")
 	}
@@ -2163,7 +2163,7 @@ func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
 func TestRun_DoesNotWarnForExternalInputPinWithoutEmitter(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	entry := bundle.Events["task.feedback"]
-	entry.Source = "external"
+	entry.Swarm.Source = "external"
 	bundle.Events["task.feedback"] = entry
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -2305,7 +2305,7 @@ func TestRun_DoesNotUseProducesOrPlannedAsInputProducerPathProof(t *testing.T) {
 			name: "planned status",
 			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
 				entry := bundle.Events["task.feedback"]
-				entry.Status = "planned"
+				entry.Swarm.Status = "planned"
 				bundle.Events["task.feedback"] = entry
 			},
 		},
@@ -3703,7 +3703,7 @@ pins:
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
 		entry := "ticket.ready:\n  payload:\n    entity_id: string\n"
 		if flowID == "external_consumer" {
-			entry = "ticket.ready:\n  _source: external (manual handoff)\n  entity_id: string\n"
+			entry = "ticket.ready:\n  swarm:\n    source: external (manual handoff)\n  entity_id: string\n"
 		} else {
 			entry = "ticket.ready:\n  entity_id: string\n"
 		}
@@ -4164,8 +4164,8 @@ func bootverifyDeclarationDriftBundle() *runtimecontracts.WorkflowContractBundle
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.start": {Source: "external"},
-			"task.done":  {ConsumerType: []string{"dashboard"}},
+			"task.start": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"}},
+			"task.done":  {Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"dashboard"}}},
 		},
 	}
 	bundle.Platform.Platform.Name = "test"
@@ -4205,7 +4205,7 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"scan.corpus_dispatch": {
-				Source: "external",
+				Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"},
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"scan_id":   {Type: "string"},
@@ -4216,7 +4216,7 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 				Required: []string{"scan_id", "geography"},
 			},
 			"market_research.scan_assigned": {
-				ConsumerType: []string{"dashboard"},
+				Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"dashboard"}},
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"scan_id":   {Type: "string"},

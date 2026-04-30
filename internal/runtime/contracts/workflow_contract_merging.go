@@ -85,6 +85,14 @@ func mergeEventContracts(bundle *WorkflowContractBundle, entries map[string]Even
 func mergeEventCatalogEntry(existing EventCatalogEntry, incoming EventCatalogEntry) (EventCatalogEntry, bool) {
 	merged := existing
 	var ok bool
+	if merged.Swarm, ok = mergeEventSwarmMetadata(existing.Swarm, incoming.Swarm); !ok {
+		return EventCatalogEntry{}, false
+	}
+	merged.Note = strings.TrimSpace(merged.Swarm.Note)
+	merged.Producer = normalizeStrings(merged.Swarm.Producer)
+	merged.Consumer = normalizeStrings(merged.Swarm.Consumer)
+	merged.Source = strings.TrimSpace(merged.Swarm.Source)
+	merged.Status = strings.TrimSpace(merged.Swarm.Status)
 	if merged.Emitter, ok = mergeEventEmitterRef(existing.Emitter, incoming.Emitter); !ok {
 		return EventCatalogEntry{}, false
 	}
@@ -92,9 +100,6 @@ func mergeEventCatalogEntry(existing EventCatalogEntry, incoming EventCatalogEnt
 		return EventCatalogEntry{}, false
 	}
 	merged.AlternateEmitters = mergeStringLists(existing.AlternateEmitters, incoming.AlternateEmitters)
-	if merged.Consumer, ok = mergeStringSliceValue(existing.Consumer, incoming.Consumer); !ok {
-		return EventCatalogEntry{}, false
-	}
 	if merged.ConsumerType, ok = mergeStringSliceValue(existing.ConsumerType, incoming.ConsumerType); !ok {
 		return EventCatalogEntry{}, false
 	}
@@ -117,6 +122,27 @@ func mergeEventCatalogEntry(existing EventCatalogEntry, incoming EventCatalogEnt
 		return EventCatalogEntry{}, false
 	}
 	merged.Required = mergeStringLists(existing.Required, incoming.Required)
+	return merged, true
+}
+
+func mergeEventSwarmMetadata(existing, incoming EventSwarmMetadata) (EventSwarmMetadata, bool) {
+	merged := existing
+	var ok bool
+	if merged.Note, ok = mergeStringValue(existing.Note, incoming.Note); !ok {
+		return EventSwarmMetadata{}, false
+	}
+	if merged.Source, ok = mergeStringValue(existing.Source, incoming.Source); !ok {
+		return EventSwarmMetadata{}, false
+	}
+	if merged.Producer, ok = mergeStringSliceValue(existing.Producer, incoming.Producer); !ok {
+		return EventSwarmMetadata{}, false
+	}
+	if merged.Consumer, ok = mergeStringSliceValue(existing.Consumer, incoming.Consumer); !ok {
+		return EventSwarmMetadata{}, false
+	}
+	if merged.Status, ok = mergeStringValue(existing.Status, incoming.Status); !ok {
+		return EventSwarmMetadata{}, false
+	}
 	return merged, true
 }
 func mergeStringValue(existing, incoming string) (string, bool) {

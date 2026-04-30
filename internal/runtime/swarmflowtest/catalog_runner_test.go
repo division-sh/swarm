@@ -1836,6 +1836,16 @@ func TestCatalogDefinedHandlerField_RejectsRetiredEmitCarriers(t *testing.T) {
 
 func catalogIsSuppressedEvent(events map[string]any, ev string) bool {
 	eventDef := catalogMap(events[ev])
+	swarm := catalogMap(eventDef["swarm"])
+	if catalogMetadataHasPrefix(swarm["source"], "external", "platform") {
+		return true
+	}
+	if catalogMetadataHasPrefix(swarm["consumer"], "external", "mailbox") {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(asStringForCatalog(swarm["status"])), "planned") {
+		return true
+	}
 	if source := strings.TrimSpace(asStringForCatalog(eventDef["_source"])); strings.HasPrefix(source, "external") {
 		return true
 	}
@@ -1843,6 +1853,21 @@ func catalogIsSuppressedEvent(events map[string]any, ev string) bool {
 		return true
 	}
 	return strings.EqualFold(strings.TrimSpace(asStringForCatalog(eventDef["_status"])), "planned")
+}
+
+func catalogMetadataHasPrefix(value any, prefixes ...string) bool {
+	for _, item := range catalogAnySlice(value) {
+		if catalogMetadataHasPrefix(item, prefixes...) {
+			return true
+		}
+	}
+	text := strings.TrimSpace(asStringForCatalog(value))
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func catalogFindEventCycles(graph map[string]map[string]struct{}) [][]string {

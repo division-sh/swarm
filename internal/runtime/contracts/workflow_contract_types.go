@@ -840,23 +840,52 @@ type SystemNodeEventHandler struct {
 	Branch           []BranchSpec             `yaml:"branch"`
 }
 type EventCatalogEntry struct {
-	Note              string           `yaml:"_note"`
-	Emitter           EventEmitterRef  `yaml:"emitter"`
-	EmitterType       string           `yaml:"emitter_type"`
-	Producer          []string         `yaml:"producer"`
-	AlternateEmitters []string         `yaml:"alternate_emitters"`
-	Consumer          []string         `yaml:"consumer"`
-	ConsumerType      []string         `yaml:"consumer_type"`
-	Source            string           `yaml:"_source"`
-	Status            string           `yaml:"_status"`
-	Intercepted       bool             `yaml:"intercepted"`
-	Passthrough       bool             `yaml:"passthrough"`
-	RuntimeHandling   string           `yaml:"runtime_handling"`
-	OwningNode        string           `yaml:"owning_node"`
-	DeliveryChannel   string           `yaml:"delivery_channel"`
-	Payload           EventPayloadSpec `yaml:"payload"`
-	Required          []string         `yaml:"required"`
+	Swarm             EventSwarmMetadata `yaml:"swarm"`
+	Note              string             `yaml:"_note"`
+	Emitter           EventEmitterRef    `yaml:"emitter"`
+	EmitterType       string             `yaml:"emitter_type"`
+	Producer          []string           `yaml:"producer"`
+	AlternateEmitters []string           `yaml:"alternate_emitters"`
+	Consumer          []string           `yaml:"consumer"`
+	ConsumerType      []string           `yaml:"consumer_type"`
+	Source            string             `yaml:"_source"`
+	Status            string             `yaml:"_status"`
+	Intercepted       bool               `yaml:"intercepted"`
+	Passthrough       bool               `yaml:"passthrough"`
+	RuntimeHandling   string             `yaml:"runtime_handling"`
+	OwningNode        string             `yaml:"owning_node"`
+	DeliveryChannel   string             `yaml:"delivery_channel"`
+	Payload           EventPayloadSpec   `yaml:"payload"`
+	Required          []string           `yaml:"required"`
 }
+type EventSwarmMetadata struct {
+	Note     string   `yaml:"note,omitempty"`
+	Source   string   `yaml:"source,omitempty"`
+	Producer []string `yaml:"producer,omitempty"`
+	Consumer []string `yaml:"consumer,omitempty"`
+	Status   string   `yaml:"status,omitempty"`
+}
+
+func (e EventCatalogEntry) SwarmNote() string {
+	return strings.TrimSpace(e.Swarm.Note)
+}
+
+func (e EventCatalogEntry) SwarmSource() string {
+	return strings.TrimSpace(e.Swarm.Source)
+}
+
+func (e EventCatalogEntry) SwarmProducer() []string {
+	return normalizeStrings(e.Swarm.Producer)
+}
+
+func (e EventCatalogEntry) SwarmConsumer() []string {
+	return normalizeStrings(e.Swarm.Consumer)
+}
+
+func (e EventCatalogEntry) SwarmStatus() string {
+	return strings.TrimSpace(e.Swarm.Status)
+}
+
 type AgentRegistryEntry struct {
 	ID                     string                          `yaml:"id"`
 	Type                   string                          `yaml:"type"`

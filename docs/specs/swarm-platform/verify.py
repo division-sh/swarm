@@ -106,7 +106,7 @@ def flatten_payload(payload, prefix=''):
     fields = set()
     if not isinstance(payload, dict): return fields
     for k, v in payload.items():
-        if k.startswith('_'): continue
+        if k.startswith('_') or k == 'swarm': continue
         full = (prefix + '.' + k) if prefix else k
         fields.add(full)
         if isinstance(v, dict) and not any(t in str(v) for t in ['string','integer','number','boolean','array','object','text','timestamp','uuid','numeric']):
@@ -119,9 +119,20 @@ def extract_payload_refs(s):
 def extract_policy_refs(s):
     return re.findall(r'policy\.([a-zA-Z_][a-zA-Z0-9_.]*)', str(s))
 
+def metadata_value_startswith(value, prefixes):
+    if isinstance(value, list):
+        return any(metadata_value_startswith(item, prefixes) for item in value)
+    return str(value).startswith(prefixes)
+
 def is_suppressed(ev_name):
     ev = all_events.get(ev_name, {})
     if isinstance(ev, dict):
+        swarm = ev.get('swarm', {})
+        if isinstance(swarm, dict):
+            if metadata_value_startswith(swarm.get('source', ''), ('external', 'platform')): return True
+            if metadata_value_startswith(swarm.get('consumer', ''), ('external', 'mailbox')): return True
+            if swarm.get('status') == 'planned': return True
+            if metadata_value_startswith(swarm.get('producer', ''), ('agent',)): return True
         if ev.get('_source', '').startswith('external'): return True
         if ev.get('_consumer', '').startswith('mailbox'): return True
         if ev.get('_status') == 'planned': return True
