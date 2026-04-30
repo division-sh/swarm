@@ -97,8 +97,9 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{}, err
 	}
 	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
-		Admission:     frontier,
-		RouteTopology: routeTopology,
+		Admission:      frontier,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
@@ -117,6 +118,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		BindingReader:     req.Store,
 		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,
+		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})

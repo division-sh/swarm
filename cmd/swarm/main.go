@@ -574,8 +574,9 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 			return 1
 		}
 		executionModel, err := runtimerunforkexecution.BuildSelectedContractExecutionModel(runtimerunforkexecution.SelectedContractExecutionModelRequest{
-			Admission:     admission,
-			RouteTopology: routeTopology,
+			Admission:      admission,
+			RouteAdmission: routeAdmission,
+			RouteTopology:  routeTopology,
 		})
 		if err != nil {
 			if out != nil {
