@@ -263,7 +263,7 @@ func selectedContractDynamicRouteTopologyProofs(frontier store.RunForkContractFr
 	proofs := make([]store.RunForkSelectedContractDynamicTopologyProof, 0, len(instances))
 	for _, instance := range instances {
 		item, ok := evidence[instance]
-		if !ok || len(item.recipients) == 0 || len(item.eventNames) == 0 {
+		if !ok || !item.hasFrontierFlowInstance || len(item.recipients) == 0 || len(item.eventNames) == 0 {
 			continue
 		}
 		recipients := sortedFrontierRecipients(item.recipients)
@@ -282,14 +282,15 @@ func selectedContractDynamicRouteTopologyProofs(frontier store.RunForkContractFr
 }
 
 type selectedContractDynamicTopologyEvidenceItem struct {
-	sourceEventIDs map[string]struct{}
-	eventNames     map[string]struct{}
-	recipients     []store.RunForkContractFrontierRecipient
+	hasFrontierFlowInstance bool
+	sourceEventIDs          map[string]struct{}
+	eventNames              map[string]struct{}
+	recipients              []store.RunForkContractFrontierRecipient
 }
 
 func selectedContractDynamicTopologyEvidence(frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission) map[string]*selectedContractDynamicTopologyEvidenceItem {
 	out := map[string]*selectedContractDynamicTopologyEvidenceItem{}
-	add := func(instance, sourceEventID, eventName string, recipients []store.RunForkContractFrontierRecipient) {
+	add := func(instance, sourceEventID, eventName string, hasFrontierFlowInstance bool, recipients []store.RunForkContractFrontierRecipient) {
 		instance = normalizeRouteInstance(instance)
 		eventName = strings.TrimSpace(eventName)
 		if instance == "" || eventName == "" {
@@ -306,6 +307,9 @@ func selectedContractDynamicTopologyEvidence(frontier store.RunForkContractFront
 		if sourceEventID = strings.TrimSpace(sourceEventID); sourceEventID != "" {
 			item.sourceEventIDs[sourceEventID] = struct{}{}
 		}
+		if hasFrontierFlowInstance {
+			item.hasFrontierFlowInstance = true
+		}
 		item.eventNames[eventName] = struct{}{}
 		for _, recipient := range recipients {
 			if normalizeRouteInstance(recipient.Path) != instance {
@@ -321,12 +325,12 @@ func selectedContractDynamicTopologyEvidence(frontier store.RunForkContractFront
 	}
 	for _, event := range frontier.FrontierEvents {
 		for _, instance := range event.SourceFlowInstances {
-			add(instance, event.SourceEventID, event.EventName, event.DerivedRecipients)
+			add(instance, event.SourceEventID, event.EventName, true, event.DerivedRecipients)
 		}
 	}
 	for _, event := range routeAdmission.SelectedRouteEvents {
 		for _, recipient := range event.DerivedRecipients {
-			add(recipient.Path, event.SourceEventID, event.EventName, event.DerivedRecipients)
+			add(recipient.Path, event.SourceEventID, event.EventName, false, event.DerivedRecipients)
 		}
 	}
 	return out
