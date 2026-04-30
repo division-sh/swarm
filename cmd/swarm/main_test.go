@@ -534,14 +534,19 @@ func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *test
 		model.AdmissionUse != store.RunForkSelectedContractExecutionAdmissionUseEvidenceOnly {
 		t.Fatalf("selected-contract execution admission use = %#v", model)
 	}
-	if model.RouteAdmission == nil ||
-		model.RouteAdmission.Owner != store.RunForkSelectedContractRouteAdmissionOwner ||
-		!model.RouteAdmission.NonMutating ||
-		model.RouteAdmission.RouteReconstructionSupported {
-		t.Fatalf("selected-contract route admission = %#v", model.RouteAdmission)
+	if model.RouteTopology == nil ||
+		model.RouteTopology.Owner != store.RunForkSelectedContractRouteTopologyOwner ||
+		model.RouteTopology.RouteAdmissionOwner != store.RunForkSelectedContractRouteAdmissionOwner ||
+		!model.RouteTopology.NonMutating ||
+		model.RouteTopology.RoutePersistenceSupported ||
+		model.RouteTopology.ExecutableRecipientsSupported {
+		t.Fatalf("selected-contract route topology = %#v", model.RouteTopology)
 	}
-	if !runForkPlanHasBoundary(model.RouteAdmission.InvalidPaths, "copy_source_routing_rules", store.RunForkSelectedContractDispositionInvalid) {
-		t.Fatalf("selected-contract route invalid paths = %#v", model.RouteAdmission.InvalidPaths)
+	if !runForkPlanHasBoundary(model.RouteTopology.InvalidPaths, "copy_source_routing_rules", store.RunForkSelectedContractDispositionInvalid) {
+		t.Fatalf("selected-contract route invalid paths = %#v", model.RouteTopology.InvalidPaths)
+	}
+	if !runForkPlanHasBlocker(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteTopologyNonMutating) {
+		t.Fatalf("selected-contract execution blockers = %#v, want route topology non-mutating blocker", model.UnsupportedBlockers)
 	}
 	if !runForkPlanHasBlocker(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
 		t.Fatalf("selected-contract execution blockers = %#v, want route admission non-mutating blocker", model.UnsupportedBlockers)

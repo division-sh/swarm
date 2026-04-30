@@ -79,9 +79,16 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{}, err
 	}
-	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+	routeTopology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{
 		Admission:      frontier,
 		RouteAdmission: routeAdmission,
+	})
+	if err != nil {
+		return SelectedContractActivationGateResult{}, err
+	}
+	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:     frontier,
+		RouteTopology: routeTopology,
 	})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, err
@@ -91,7 +98,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		BindingReader:     req.Store,
 		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,
-		RouteAdmission:    routeAdmission,
+		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})
 	if err != nil {

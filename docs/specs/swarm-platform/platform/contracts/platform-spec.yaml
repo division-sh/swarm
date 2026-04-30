@@ -3295,6 +3295,14 @@ run_model:
       persist fork-local route rows, derive executable recipients, create event_deliveries, run handlers, or absorb
       timer reconstruction, session/turn reconstruction, source-advanced policy, contract-swap ownership, or UI/API
       route ownership.'
+    selected_contract_route_topology: 'Selected-contract route/topology truth is owned by
+      runtime.run_fork.selected_contract_route_topology after route admission. It consumes
+      runtime.run_fork.selected_contract_route_admission as prerequisite evidence, classifies selected-source static
+      route topology as fork-local truth only through internal/runtime/bus.DeriveRouteTable and the durable selected
+      contract/frontier binding, and classifies dynamic flow-instance topology as fork-local-proven or fail-closed with
+      a named blocker. It MUST NOT copy source routing_rules or materialized flow-instance route rows, persist
+      fork-local route rows, derive executable recipients, invoke the delivery planner for fork work, create
+      event_deliveries, run handlers, or absorb timer/session/turn/source-advanced/contract-swap/UI ownership.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -3339,6 +3347,13 @@ run_model:
         route reconstruction, uses the selected contract route table only as route evidence, and fails closed before
         route persistence, executable recipient derivation, delivery writes, or handler execution. Source routing rows,
         source flow-instance routes, and source recipients are never copied into the fork.'
+      3f_selected_contract_route_topology: 'For selected-contract mutating fork execution, fork-local route/topology
+        truth is a separate owner beyond route admission. The selected execution model and admission consume
+        runtime.run_fork.selected_contract_route_topology rather than treating route admission as final truth. Static
+        selected-source topology is classified from selected-source route derivation and selected binding/frontier
+        evidence only. Dynamic flow-instance topology requires explicit fork-local topology proof and otherwise
+        remains fail-closed. This owner is still non-mutating: it does not persist route rows, derive executable
+        recipients, write deliveries, or run handlers.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.

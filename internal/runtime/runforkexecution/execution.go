@@ -89,9 +89,16 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err := validateSelectedContractExecutionFrontierForMutation(frontier); err != nil {
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner}, err
 	}
-	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+	routeTopology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{
 		Admission:      frontier,
 		RouteAdmission: routeAdmission,
+	})
+	if err != nil {
+		return SelectedContractExecutionResult{}, err
+	}
+	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:     frontier,
+		RouteTopology: routeTopology,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
@@ -110,7 +117,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		BindingReader:     req.Store,
 		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,
-		RouteAdmission:    routeAdmission,
+		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})
 	if err != nil {

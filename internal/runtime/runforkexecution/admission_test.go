@@ -21,7 +21,7 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	reader := &fakeSelectedContractBindingReader{binding: binding}
 	sourceLoader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 	frontier := testContractFrontierAdmission(binding.ContractSelection)
-	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	routeTopology := testSelectedContractRouteTopology(t, frontier)
 	model := testSelectedContractExecutionModel(t, frontier)
 
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
@@ -29,7 +29,7 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 		BindingReader:     reader,
 		SourceLoader:      sourceLoader,
 		FrontierAdmission: frontier,
-		RouteAdmission:    routeAdmission,
+		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})
 	if err != nil {
@@ -65,8 +65,8 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
 		t.Fatalf("frontier events = %#v", admission.FrontierEvents)
 	}
-	if admission.RouteAdmission == nil || admission.RouteAdmission.Owner != store.RunForkSelectedContractRouteAdmissionOwner {
-		t.Fatalf("route admission = %#v, want canonical selected-contract route admission", admission.RouteAdmission)
+	if admission.RouteTopology == nil || admission.RouteTopology.Owner != store.RunForkSelectedContractRouteTopologyOwner {
+		t.Fatalf("route topology = %#v, want canonical selected-contract route topology", admission.RouteTopology)
 	}
 	if !executionBoundaryHas(admission.InvalidPaths, "copy_source_event_deliveries", store.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("invalid paths = %#v, want source delivery copy invalid", admission.InvalidPaths)
@@ -97,7 +97,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnMissingBinding(t *t
 		BindingReader:     &fakeSelectedContractBindingReader{err: errors.New("selected contract binding not found")},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(selection)},
 		FrontierAdmission: frontier,
-		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
+		RouteTopology:     testSelectedContractRouteTopology(t, frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "load selected-contract binding") {
@@ -117,7 +117,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnUnavailableSelected
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{Selection: binding.ContractSelection}},
 		FrontierAdmission: frontier,
-		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
+		RouteTopology:     testSelectedContractRouteTopology(t, frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "selected semantic source") {
@@ -139,7 +139,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnSourceMismatch(t *t
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{Selection: binding.ContractSelection, Source: testSelectedSource(mismatched)}},
 		FrontierAdmission: frontier,
-		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
+		RouteTopology:     testSelectedContractRouteTopology(t, frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "workflow version mismatch") {
@@ -161,7 +161,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnWrongContractsRoot(
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(wrongRoot)},
 		FrontierAdmission: frontier,
-		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
+		RouteTopology:     testSelectedContractRouteTopology(t, frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "selected source selection does not match durable binding") {
@@ -175,6 +175,7 @@ func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalEvidence(t *tes
 	binding := testSelectedContractBinding(forkRunID)
 	frontier := testContractFrontierAdmission(binding.ContractSelection)
 	model := testSelectedContractExecutionModel(t, frontier)
+	routeTopology := testSelectedContractRouteTopology(t, frontier)
 	frontier.Owner = "cmd.swarm.local_frontier"
 
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
@@ -182,7 +183,7 @@ func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalEvidence(t *tes
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
 		FrontierAdmission: frontier,
-		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
+		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), store.RunForkContractFrontierAdmissionOwner) {
@@ -203,7 +204,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleModelFrontier(
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
 		FrontierAdmission: frontier,
-		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
+		RouteTopology:     testSelectedContractRouteTopology(t, frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "frontier events do not match") {
@@ -211,34 +212,34 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleModelFrontier(
 	}
 }
 
-func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalRouteAdmission(t *testing.T) {
+func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalRouteTopology(t *testing.T) {
 	ctx := context.Background()
 	forkRunID := uuid.NewString()
 	binding := testSelectedContractBinding(forkRunID)
 	frontier := testContractFrontierAdmission(binding.ContractSelection)
 	model := testSelectedContractExecutionModel(t, frontier)
-	routeAdmission := testSelectedContractRouteAdmission(frontier)
-	routeAdmission.Owner = "cmd.swarm.route_helper"
+	routeTopology := testSelectedContractRouteTopology(t, frontier)
+	routeTopology.Owner = "cmd.swarm.route_helper"
 
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
 		FrontierAdmission: frontier,
-		RouteAdmission:    routeAdmission,
+		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractRouteAdmissionOwner) {
-		t.Fatalf("error = %v, want canonical route admission failure", err)
+	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractRouteTopologyOwner) {
+		t.Fatalf("error = %v, want canonical route topology failure", err)
 	}
 }
 
-func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteAdmissionFrontier(t *testing.T) {
+func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteTopologyFrontier(t *testing.T) {
 	ctx := context.Background()
 	forkRunID := uuid.NewString()
 	binding := testSelectedContractBinding(forkRunID)
 	frontier := testContractFrontierAdmission(binding.ContractSelection)
-	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	routeTopology := testSelectedContractRouteTopology(t, frontier)
 	model := testSelectedContractExecutionModel(t, frontier)
 	frontier.FrontierEvents[0].EventName = "work.changed"
 
@@ -247,15 +248,15 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteAdmission
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
 		FrontierAdmission: frontier,
-		RouteAdmission:    routeAdmission,
+		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "frontier fingerprint mismatch") {
-		t.Fatalf("error = %v, want stale route admission frontier failure", err)
+		t.Fatalf("error = %v, want stale route topology frontier failure", err)
 	}
 }
 
-func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteAdmissionFlowInstances(t *testing.T) {
+func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteTopologyFlowInstances(t *testing.T) {
 	ctx := context.Background()
 	forkRunID := uuid.NewString()
 	binding := testSelectedContractBinding(forkRunID)
@@ -265,7 +266,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteAdmission
 	frontier.FrontierEvents[0].SourceFlowInstances = []string{"review/inst-1"}
 	frontier.FrontierEvents[0].SourceSubscriberTypes = []string{"node"}
 	frontier.FrontierEvents[0].SourceSubscriberIDs = []string{"source-node"}
-	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	routeTopology := testSelectedContractRouteTopology(t, frontier)
 	model := testSelectedContractExecutionModel(t, frontier)
 	frontier.FrontierEvents[0].SourceFlowInstances = []string{"review/inst-2"}
 
@@ -274,11 +275,11 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteAdmission
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
 		FrontierAdmission: frontier,
-		RouteAdmission:    routeAdmission,
+		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "frontier fingerprint mismatch") {
-		t.Fatalf("error = %v, want stale route admission flow-instance failure", err)
+		t.Fatalf("error = %v, want stale route topology flow-instance failure", err)
 	}
 }
 
@@ -407,11 +408,23 @@ func testSelectedContractRouteAdmission(frontier store.RunForkContractFrontierAd
 func testSelectedContractExecutionModel(t *testing.T, frontier store.RunForkContractFrontierAdmission) store.RunForkSelectedContractExecution {
 	t.Helper()
 	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
-		Admission:      frontier,
-		RouteAdmission: testSelectedContractRouteAdmission(frontier),
+		Admission:     frontier,
+		RouteTopology: testSelectedContractRouteTopology(t, frontier),
 	})
 	if err != nil {
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
 	}
 	return model
+}
+
+func testSelectedContractRouteTopology(t *testing.T, frontier store.RunForkContractFrontierAdmission) store.RunForkSelectedContractRouteTopology {
+	t.Helper()
+	routeTopology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{
+		Admission:      frontier,
+		RouteAdmission: testSelectedContractRouteAdmission(frontier),
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractRouteTopology: %v", err)
+	}
+	return routeTopology
 }
