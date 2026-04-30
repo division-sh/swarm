@@ -545,6 +545,16 @@ func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *test
 	if !runForkPlanHasBoundary(model.RouteTopology.InvalidPaths, "copy_source_routing_rules", store.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("selected-contract route invalid paths = %#v", model.RouteTopology.InvalidPaths)
 	}
+	if model.RecipientPlanning == nil ||
+		model.RecipientPlanning.Owner != store.RunForkSelectedContractRecipientPlanningOwner ||
+		!model.RecipientPlanning.NonMutating ||
+		!model.RecipientPlanning.RecipientPlanningSupported ||
+		model.RecipientPlanning.DeliveryWritesSupported {
+		t.Fatalf("selected-contract recipient planning = %#v", model.RecipientPlanning)
+	}
+	if !runForkPlanHasBoundary(model.RecipientPlanning.RequiredConsumers, "eventbus_publish_recipient_guard", store.RunForkSelectedContractDispositionPrerequisite) {
+		t.Fatalf("selected-contract recipient planning consumers = %#v", model.RecipientPlanning.RequiredConsumers)
+	}
 	if !runForkPlanHasBlocker(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteTopologyNonMutating) {
 		t.Fatalf("selected-contract execution blockers = %#v, want route topology non-mutating blocker", model.UnsupportedBlockers)
 	}
@@ -604,6 +614,11 @@ func TestRunForkCommand_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *tes
 	}
 	if result.Owner != store.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
 		t.Fatalf("selected execution result = %#v", result)
+	}
+	if result.SelectedContractExecutionAdmission == nil ||
+		result.SelectedContractExecutionAdmission.RecipientPlanning == nil ||
+		result.SelectedContractExecutionAdmission.RecipientPlanning.Owner != store.RunForkSelectedContractRecipientPlanningOwner {
+		t.Fatalf("selected execution recipient planning admission = %#v", result.SelectedContractExecutionAdmission)
 	}
 	var lineageRows int
 	if err := db.QueryRowContext(context.Background(), `

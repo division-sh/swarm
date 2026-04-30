@@ -177,8 +177,14 @@ func (eb *EventBus) publishTransactional(
 		return fmt.Errorf("persist event: %w", err)
 	}
 
+	if err := eb.authorizePublishRecipientPlanning(txctx, evt); err != nil {
+		return err
+	}
 	inboundPlan, err := eb.deliveryPlanner.Plan(txctx, evt)
 	if err != nil {
+		return err
+	}
+	if err := eb.authorizePublishRecipientPlan(txctx, evt, inboundPlan); err != nil {
 		return err
 	}
 	eb.recordPublishDiagnostic(txctx, evt, inboundPlan)
@@ -367,12 +373,37 @@ func (eb *EventBus) publishSubscribedNonTransactional(ctx context.Context, evt e
 }
 
 func (eb *EventBus) planSubscribedPublish(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
+	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
+		return eventDeliveryPlan{}, err
+	}
 	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
 	if err != nil {
 		return eventDeliveryPlan{}, err
 	}
+	if err := eb.authorizePublishRecipientPlan(ctx, evt, plan); err != nil {
+		return eventDeliveryPlan{}, err
+	}
 	eb.recordPublishDiagnostic(ctx, evt, plan)
 	return plan, nil
+}
+
+func (eb *EventBus) authorizePublishRecipientPlanning(ctx context.Context, evt events.Event) error {
+	if eb == nil || eb.recipientPlanAdmissionGuard == nil {
+		return nil
+	}
+	return eb.recipientPlanAdmissionGuard(ctx, evt)
+}
+
+func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
+	if eb == nil || eb.recipientPlanGuard == nil {
+		return nil
+	}
+	return eb.recipientPlanGuard(ctx, evt, PublishRecipientPlan{
+		Recipients:             uniqueStrings(plan.Recipients),
+		PersistedRecipients:    uniqueStrings(plan.PersistedRecipients),
+		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type), plan.RoutedRecipients),
+		SubscriptionRecipients: uniqueStrings(plan.SubscribedRecipients),
+	})
 }
 
 func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {

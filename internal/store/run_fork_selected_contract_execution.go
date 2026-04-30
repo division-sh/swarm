@@ -15,6 +15,7 @@ const (
 	RunForkSelectedContractExecutionOwner               = "runtime.run_fork.selected_contract_execution"
 	RunForkSelectedContractRouteAdmissionOwner          = "runtime.run_fork.selected_contract_route_admission"
 	RunForkSelectedContractRouteTopologyOwner           = "runtime.run_fork.selected_contract_route_topology"
+	RunForkSelectedContractRecipientPlanningOwner       = "runtime.run_fork.selected_contract_recipient_planning"
 	RunForkSelectedContractBranchDivergenceOwner        = "store.run_fork.selected_contract_branch_divergence"
 
 	RunForkSelectedContractExecutionAdmissionUseEvidenceOnly   = "prerequisite_evidence_only"
@@ -34,6 +35,7 @@ const (
 	RunForkBlockerSelectedContractRouteAdmissionNonMutating     = "selected_contract_route_admission_non_mutating"
 	RunForkBlockerSelectedContractRouteTopologyNonMutating      = "selected_contract_route_topology_non_mutating"
 	RunForkBlockerSelectedContractDynamicRouteTopologyUnproven  = "selected_contract_dynamic_route_topology_unproven"
+	RunForkBlockerSelectedContractRecipientPlanningNonMutating  = "selected_contract_recipient_planning_non_mutating"
 
 	RunForkSelectedContractSourceAdvancedBranchPolicy = "selected_contract_source_advanced_branch"
 )
@@ -49,6 +51,7 @@ type RunForkSelectedContractExecution struct {
 	FrontierEventCount   int                                        `json:"frontier_event_count"`
 	FrontierEvents       []RunForkSelectedContractFrontierEvent     `json:"frontier_events,omitempty"`
 	RouteTopology        *RunForkSelectedContractRouteTopology      `json:"route_topology,omitempty"`
+	RecipientPlanning    *RunForkSelectedContractRecipientPlanning  `json:"recipient_planning,omitempty"`
 	ContractBinding      RunForkSelectedContractExecutionBoundary   `json:"contract_binding"`
 	RequiredConsumers    []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
 	BlockedSiblings      []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
@@ -74,6 +77,7 @@ type RunForkSelectedContractExecutionAdmission struct {
 	FrontierEventCount    int                                        `json:"frontier_event_count"`
 	FrontierEvents        []RunForkSelectedContractFrontierEvent     `json:"frontier_events,omitempty"`
 	RouteTopology         *RunForkSelectedContractRouteTopology      `json:"route_topology,omitempty"`
+	RecipientPlanning     *RunForkSelectedContractRecipientPlanning  `json:"recipient_planning,omitempty"`
 	ContractBinding       RunForkSelectedContractExecutionBoundary   `json:"contract_binding"`
 	RequiredConsumers     []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
 	BlockedSiblings       []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
@@ -139,6 +143,33 @@ type RunForkSelectedContractRouteEvent struct {
 	EventName         string                             `json:"event_name"`
 	DerivedRecipients []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
 	Disposition       string                             `json:"disposition"`
+}
+
+type RunForkSelectedContractRecipientPlanning struct {
+	Owner                       string                                      `json:"owner"`
+	RouteTopologyOwner          string                                      `json:"route_topology_owner"`
+	RouteAdmissionOwner         string                                      `json:"route_admission_owner"`
+	FutureExecutionOwner        string                                      `json:"future_execution_owner"`
+	NonMutating                 bool                                        `json:"non_mutating"`
+	RecipientPlanningSupported  bool                                        `json:"recipient_planning_supported"`
+	DeliveryWritesSupported     bool                                        `json:"delivery_writes_supported"`
+	ContractSelection           RunForkContractSelection                    `json:"contract_selection"`
+	FrontierEventCount          int                                         `json:"frontier_event_count"`
+	FrontierSourceEventIDs      []string                                    `json:"frontier_source_event_ids,omitempty"`
+	FrontierEvidenceFingerprint string                                      `json:"frontier_evidence_fingerprint"`
+	RecipientPlanEvents         []RunForkSelectedContractRecipientPlanEvent `json:"recipient_plan_events,omitempty"`
+	RequiredEvidence            []RunForkSelectedContractExecutionBoundary  `json:"required_evidence,omitempty"`
+	RequiredConsumers           []RunForkSelectedContractExecutionBoundary  `json:"required_consumers,omitempty"`
+	BlockedSiblings             []RunForkSelectedContractExecutionBoundary  `json:"blocked_siblings,omitempty"`
+	InvalidPaths                []RunForkSelectedContractExecutionBoundary  `json:"invalid_paths,omitempty"`
+	UnsupportedBlockers         []RunForkUnsupportedBlocker                 `json:"unsupported_blockers,omitempty"`
+}
+
+type RunForkSelectedContractRecipientPlanEvent struct {
+	SourceEventID string                             `json:"source_event_id,omitempty"`
+	EventName     string                             `json:"event_name"`
+	Recipients    []RunForkContractFrontierRecipient `json:"recipients,omitempty"`
+	Disposition   string                             `json:"disposition"`
 }
 
 type RunForkSelectedContractExecutionBoundary struct {

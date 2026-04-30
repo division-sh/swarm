@@ -126,11 +126,12 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
 	published, err := publishSelectedContractForkEvents(ctx, publishSelectedContractForkEventsRequest{
-		Store:        req.Store,
-		LoadedSource: loadedSource,
-		SourceRunID:  plan.SourceRunID,
-		ForkRunID:    materialization.ForkRunID,
-		SourceEvents: sourceEventIDs,
+		Store:             req.Store,
+		LoadedSource:      loadedSource,
+		RecipientPlanning: *model.RecipientPlanning,
+		SourceRunID:       plan.SourceRunID,
+		ForkRunID:         materialization.ForkRunID,
+		SourceEvents:      sourceEventIDs,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{
@@ -196,11 +197,12 @@ func cleanupSelectedContractExecutionFailure(ctx context.Context, store *store.P
 }
 
 type publishSelectedContractForkEventsRequest struct {
-	Store        *store.PostgresStore
-	LoadedSource LoadedSelectedContractSource
-	SourceRunID  string
-	ForkRunID    string
-	SourceEvents []string
+	Store             *store.PostgresStore
+	LoadedSource      LoadedSelectedContractSource
+	RecipientPlanning store.RunForkSelectedContractRecipientPlanning
+	SourceRunID       string
+	ForkRunID         string
+	SourceEvents      []string
 }
 
 func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedContractForkEventsRequest) ([]SelectedContractExecutionForkEvent, error) {
@@ -208,8 +210,14 @@ func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedC
 	if err != nil {
 		return nil, err
 	}
+	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning)
+	if err != nil {
+		return nil, err
+	}
 	bus, err := runtimebus.NewEventBusWithOptions(req.Store, runtimebus.EventBusOptions{
-		ContractBundle: req.LoadedSource.Source,
+		ContractBundle:              req.LoadedSource.Source,
+		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
+		RecipientPlanGuard:          guard.Authorize,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create selected-contract execution bus: %w", err)
@@ -222,6 +230,7 @@ func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedC
 	for _, sourceEvent := range sourceEvents {
 		forkEventID := uuid.NewString()
 		evt := selectedContractForkEvent(req.ForkRunID, forkEventID, sourceEvent)
+		guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
 		if err := bus.Publish(runCtx, evt); err != nil {
 			return out, fmt.Errorf("execute selected-contract fork event %s as %s: %w", sourceEvent.SourceEventID, forkEventID, err)
 		}

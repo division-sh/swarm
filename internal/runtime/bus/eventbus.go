@@ -24,31 +24,45 @@ type EventInterceptor interface {
 type PayloadValidator func(eventType string, payload []byte) error
 
 type EventBus struct {
-	mu                  sync.RWMutex
-	channels            map[events.EventType]map[string]chan events.Event
-	agentChans          map[string]chan events.Event
-	subscriptions       map[string][]events.EventType
-	subscriptionKinds   map[string]inMemorySubscriberKind
-	pendingInternalByID map[string][]string
-	routeTable          *RouteTable
-	deliveryPlanner     deliveryPlanner
-	interceptors        []EventInterceptor
-	interceptorProvider func() []EventInterceptor
-	store               EventStore
-	logger              LoggerHook
-	semanticSource      semanticview.Source
-	payloadValidator    PayloadValidator
-	outboxSweeperActive bool
-	inFlightPublishes   atomic.Int64
+	mu                          sync.RWMutex
+	channels                    map[events.EventType]map[string]chan events.Event
+	agentChans                  map[string]chan events.Event
+	subscriptions               map[string][]events.EventType
+	subscriptionKinds           map[string]inMemorySubscriberKind
+	pendingInternalByID         map[string][]string
+	routeTable                  *RouteTable
+	deliveryPlanner             deliveryPlanner
+	interceptors                []EventInterceptor
+	interceptorProvider         func() []EventInterceptor
+	store                       EventStore
+	logger                      LoggerHook
+	semanticSource              semanticview.Source
+	payloadValidator            PayloadValidator
+	recipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
+	recipientPlanGuard          PublishRecipientPlanGuard
+	outboxSweeperActive         bool
+	inFlightPublishes           atomic.Int64
 }
 
+type PublishRecipientPlan struct {
+	Recipients             []string
+	PersistedRecipients    []string
+	RoutedRecipients       []PublishDiagnosticRecipient
+	SubscriptionRecipients []string
+}
+
+type PublishRecipientPlanAdmissionGuard func(context.Context, events.Event) error
+type PublishRecipientPlanGuard func(context.Context, events.Event, PublishRecipientPlan) error
+
 type EventBusOptions struct {
-	Logger              LoggerHook
-	Interceptors        []EventInterceptor
-	InterceptorProvider func() []EventInterceptor
-	ContractBundle      semanticview.Source
-	RouteTable          *RouteTable
-	PayloadValidator    PayloadValidator
+	Logger                      LoggerHook
+	Interceptors                []EventInterceptor
+	InterceptorProvider         func() []EventInterceptor
+	ContractBundle              semanticview.Source
+	RouteTable                  *RouteTable
+	PayloadValidator            PayloadValidator
+	RecipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
+	RecipientPlanGuard          PublishRecipientPlanGuard
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -98,18 +112,20 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		routeTable = derived
 	}
 	eb := &EventBus{
-		channels:            make(map[events.EventType]map[string]chan events.Event),
-		agentChans:          make(map[string]chan events.Event),
-		subscriptions:       make(map[string][]events.EventType),
-		subscriptionKinds:   make(map[string]inMemorySubscriberKind),
-		pendingInternalByID: make(map[string][]string),
-		routeTable:          routeTable,
-		store:               store,
-		logger:              opts.Logger,
-		interceptors:        filtered,
-		interceptorProvider: opts.InterceptorProvider,
-		semanticSource:      semanticSource,
-		payloadValidator:    opts.PayloadValidator,
+		channels:                    make(map[events.EventType]map[string]chan events.Event),
+		agentChans:                  make(map[string]chan events.Event),
+		subscriptions:               make(map[string][]events.EventType),
+		subscriptionKinds:           make(map[string]inMemorySubscriberKind),
+		pendingInternalByID:         make(map[string][]string),
+		routeTable:                  routeTable,
+		store:                       store,
+		logger:                      opts.Logger,
+		interceptors:                filtered,
+		interceptorProvider:         opts.InterceptorProvider,
+		semanticSource:              semanticSource,
+		payloadValidator:            opts.PayloadValidator,
+		recipientPlanAdmissionGuard: opts.RecipientPlanAdmissionGuard,
+		recipientPlanGuard:          opts.RecipientPlanGuard,
 	}
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 	return eb, nil
