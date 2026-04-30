@@ -150,6 +150,35 @@ func TestBuildSelectedContractExecutionModelRequiresCanonicalRouteAdmission(t *t
 	}
 }
 
+func TestBuildSelectedContractExecutionModelFailsClosedOnStaleRouteAdmissionFrontier(t *testing.T) {
+	admission := store.RunForkContractFrontierAdmission{
+		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+		NonMutating:                  true,
+		HistoricalExecutionSupported: false,
+		ContractSelection: store.RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/contracts",
+			WorkflowName:    "workflow",
+			WorkflowVersion: "v1",
+		},
+		FrontierEventCount: 1,
+		FrontierEvents: []store.RunForkContractFrontierEvent{{
+			SourceEventID: "source-event",
+			EventName:     "work.begin",
+		}},
+	}
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	admission.FrontierEvents[0].EventName = "work.changed"
+
+	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+	})
+	if err == nil || !strings.Contains(err.Error(), "frontier fingerprint mismatch") {
+		t.Fatalf("error = %v, want stale route admission frontier failure", err)
+	}
+}
+
 func TestBuildSelectedContractExecutionModelFailsClosedOnExecutableAdmission(t *testing.T) {
 	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
 		Admission: store.RunForkContractFrontierAdmission{

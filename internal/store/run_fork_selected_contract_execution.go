@@ -1,5 +1,13 @@
 package store
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"sort"
+	"strings"
+)
+
 const (
 	RunForkSelectedContractExecutionModelOwner          = "runtime.run_fork.selected_contract_execution_model"
 	RunForkSelectedContractExecutionAdmissionOwner      = "runtime.run_fork.selected_contract_execution_admission"
@@ -87,6 +95,9 @@ type RunForkSelectedContractRouteAdmission struct {
 	SelectedRouteEvents            []RunForkSelectedContractRouteEvent        `json:"selected_route_events,omitempty"`
 	DynamicFlowInstances           []string                                   `json:"dynamic_flow_instances,omitempty"`
 	FrontierAdmissionOwner         string                                     `json:"frontier_admission_owner,omitempty"`
+	FrontierEventCount             int                                        `json:"frontier_event_count"`
+	FrontierSourceEventIDs         []string                                   `json:"frontier_source_event_ids,omitempty"`
+	FrontierEvidenceFingerprint    string                                     `json:"frontier_evidence_fingerprint"`
 	RequiredConsumers              []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
 	BlockedSiblings                []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
 	InvalidPaths                   []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
@@ -105,4 +116,85 @@ type RunForkSelectedContractExecutionBoundary struct {
 	Disposition string `json:"disposition"`
 	Owner       string `json:"owner,omitempty"`
 	Reason      string `json:"reason"`
+}
+
+func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmission) (int, []string, string) {
+	type routeRecipient struct {
+		SubscriberType string `json:"subscriber_type,omitempty"`
+		SubscriberID   string `json:"subscriber_id,omitempty"`
+		Path           string `json:"path,omitempty"`
+		RouteSource    string `json:"route_source,omitempty"`
+	}
+	type frontierEvent struct {
+		SourceEventID           string           `json:"source_event_id,omitempty"`
+		EventName               string           `json:"event_name,omitempty"`
+		RuntimeEventOwners      []string         `json:"runtime_event_owners,omitempty"`
+		WorkflowNodeSubscribers []string         `json:"workflow_node_subscribers,omitempty"`
+		DerivedRecipients       []routeRecipient `json:"derived_recipients,omitempty"`
+	}
+
+	events := make([]frontierEvent, 0, len(frontier.FrontierEvents))
+	ids := map[string]struct{}{}
+	for _, event := range frontier.FrontierEvents {
+		sourceEventID := strings.TrimSpace(event.SourceEventID)
+		eventName := strings.TrimSpace(event.EventName)
+		if sourceEventID != "" {
+			ids[sourceEventID] = struct{}{}
+		}
+		recipients := make([]routeRecipient, 0, len(event.DerivedRecipients))
+		for _, recipient := range event.DerivedRecipients {
+			recipients = append(recipients, routeRecipient{
+				SubscriberType: strings.TrimSpace(recipient.SubscriberType),
+				SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
+				Path:           strings.TrimSpace(recipient.Path),
+				RouteSource:    strings.TrimSpace(recipient.RouteSource),
+			})
+		}
+		sort.Slice(recipients, func(i, j int) bool {
+			left := strings.Join([]string{recipients[i].SubscriberType, recipients[i].SubscriberID, recipients[i].Path, recipients[i].RouteSource}, "\x00")
+			right := strings.Join([]string{recipients[j].SubscriberType, recipients[j].SubscriberID, recipients[j].Path, recipients[j].RouteSource}, "\x00")
+			return left < right
+		})
+		events = append(events, frontierEvent{
+			SourceEventID:           sourceEventID,
+			EventName:               eventName,
+			RuntimeEventOwners:      sortedTrimmedStrings(event.RuntimeEventOwners),
+			WorkflowNodeSubscribers: sortedTrimmedStrings(event.WorkflowNodeSubscribers),
+			DerivedRecipients:       recipients,
+		})
+	}
+	sort.Slice(events, func(i, j int) bool {
+		left := strings.Join([]string{events[i].SourceEventID, events[i].EventName}, "\x00")
+		right := strings.Join([]string{events[j].SourceEventID, events[j].EventName}, "\x00")
+		return left < right
+	})
+
+	sourceEventIDs := make([]string, 0, len(ids))
+	for id := range ids {
+		sourceEventIDs = append(sourceEventIDs, id)
+	}
+	sort.Strings(sourceEventIDs)
+
+	payload, _ := json.Marshal(events)
+	sum := sha256.Sum256(payload)
+	return len(frontier.FrontierEvents), sourceEventIDs, hex.EncodeToString(sum[:])
+}
+
+func sortedTrimmedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for value := range seen {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }

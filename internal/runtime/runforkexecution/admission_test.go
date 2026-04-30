@@ -233,6 +233,28 @@ func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalRouteAdmission(
 	}
 }
 
+func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteAdmissionFrontier(t *testing.T) {
+	ctx := context.Background()
+	forkRunID := uuid.NewString()
+	binding := testSelectedContractBinding(forkRunID)
+	frontier := testContractFrontierAdmission(binding.ContractSelection)
+	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	model := testSelectedContractExecutionModel(t, frontier)
+	frontier.FrontierEvents[0].EventName = "work.changed"
+
+	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
+		ForkRunID:         forkRunID,
+		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
+		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		FrontierAdmission: frontier,
+		RouteAdmission:    routeAdmission,
+		ExecutionModel:    model,
+	})
+	if err == nil || !strings.Contains(err.Error(), "frontier fingerprint mismatch") {
+		t.Fatalf("error = %v, want stale route admission frontier failure", err)
+	}
+}
+
 type fakeSelectedContractBindingReader struct {
 	binding            store.RunForkSelectedContractBinding
 	err                error
@@ -320,6 +342,7 @@ func testContractFrontierAdmission(selection store.RunForkContractSelection) sto
 }
 
 func testSelectedContractRouteAdmission(frontier store.RunForkContractFrontierAdmission) store.RunForkSelectedContractRouteAdmission {
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := store.RunForkContractFrontierEvidenceBinding(frontier)
 	return store.RunForkSelectedContractRouteAdmission{
 		Owner:                          store.RunForkSelectedContractRouteAdmissionOwner,
 		FutureRouteReconstructionOwner: store.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
@@ -327,6 +350,9 @@ func testSelectedContractRouteAdmission(frontier store.RunForkContractFrontierAd
 		RouteReconstructionSupported:   false,
 		ContractSelection:              frontier.ContractSelection,
 		FrontierAdmissionOwner:         frontier.Owner,
+		FrontierEventCount:             frontierEventCount,
+		FrontierSourceEventIDs:         frontierSourceEventIDs,
+		FrontierEvidenceFingerprint:    frontierFingerprint,
 		RequiredConsumers: []store.RunForkSelectedContractExecutionBoundary{{
 			Concept:     "selected_source_route_derivation",
 			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
