@@ -183,14 +183,18 @@ The routing consequences are:
 
 This separation means you can change who receives an event by editing subscriptions, without touching the event's payload schema.
 
-### Persistence Tools Derived From Entity Schema
+### Role-Scoped Persistence Tools Derived From Entity Contracts
 
-Agents do not get raw database access. Instead, the platform auto-generates typed persistence tools from `entity_schema`:
+Agents do not get raw database access. In Path alpha opted-in flows, the platform generates role-scoped current-entity tools from the flow-owned entity contract and the agent's `entity_writes` declaration.
 
-- `get_entity` — read an entity by ID
-- `save_entity_field` — write a specific field on an entity
-- `search_entities` — query entities by stage, field values, or metadata
-- `query_metrics` — read aggregated metrics across entities
+- `read_{entity_type}()` — read the complete current entity for this turn
+- `read_{entity_type}_{field}()` — read the complete typed value for one declared field
+- `save_{entity_type}_{field}({value})` — save one top-level field authorized by `entity_writes`
+- `update_{entity_type}_{field}_{subpath}({value})` — update one generated top-level subpath for a writable named-object field
+
+The generated tools do not accept `entity_id`, `entity_type`, or `flow_instance`. The runtime resolves the current entity from the event/session context. Generated typed reads are non-lossy: they return the complete typed value or fail closed with an explicit typed-read error.
+
+Legacy entity tools (`create_entity`, `get_entity`, `get_subject_status`, `query_entities`, `search_entities`, `query_metrics`, `save_entity_field`) are compatibility surfaces for non-opted flows and operator/system contexts. They are not the valid agent surface for fully opted-in role-scoped flows.
 
 ### Required Agents
 
@@ -582,7 +586,7 @@ When an event arrives in an agent's inbox, the platform creates or resumes an ag
 7. Session completes when the agent signals done or hits `max_turns_per_task`.
 8. Session state is persisted for audit and debugging.
 
-The platform auto-generates emit tools from each agent's `emit_events` list. Agents do not need to list emit tools in `tools`. Universal tools (`agent_message`, `mailbox_send`) are also auto-granted.
+The platform auto-generates emit tools from each agent's `emit_events` list. Agents do not need to list emit tools in `tools`. Universal communication tools (`agent_message`, `mailbox_send`) are also auto-granted. Entity tools are delivered from the role-scoped entity-tool contract when the owning flow opts in with `tool_surface.role_scoped_entity_tools: true`.
 
 #### Conversation Modes
 
@@ -697,8 +701,12 @@ The platform-builtin tools are:
 
 - `create_flow_instance` — create a new dynamic flow instance from a template (**handler action only**, not directly callable by agents)
 - `record_evidence` — append payload to entity accumulator (also handler action only)
-- `create_entity` — create a new entity row
-- `query_entities` — query entities by state, fields, or aggregation
+- `create_entity` — create a new entity row (legacy/operator/system compatibility, not exposed to fully opted-in role-scoped agents)
+- `get_entity` — read an entity by ID (legacy/operator/system compatibility, replaced by generated `read_*` tools for opted-in actors)
+- `query_entities` — query entities by state, fields, or aggregation (legacy/operator/system compatibility)
+- `query_metrics` — read aggregated metrics across entities (legacy/operator/system compatibility)
+- `save_entity_field` — write a specific entity field (legacy/operator/system compatibility, replaced by generated save/update tools for opted-in actors)
+- `search_entities` — query entities by stage, field values, or metadata (legacy/operator/system compatibility)
 - `agent_message` — send a message to another agent (auto-granted)
 - `mailbox_send` — send an item to the human mailbox (auto-granted)
 
