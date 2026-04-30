@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Clarified: Path alpha role-scoped entity-tool contracts are canonical
+Opted-in flows (`tool_surface.role_scoped_entity_tools: true`) now have a canonical platform-spec home for generated current-entity read/save/update tools, non-lossy typed reads, generated closed schemas, and legacy entity-tool retirement. Fully opted-in role-scoped actors do not receive the legacy entity surface names (`create_entity`, `get_entity`, `get_subject_status`, `query_entities`, `search_entities`, `query_metrics`, `save_entity_field`). Older changelog entries describing those tools as universally auto-granted are historical records for the pre-Path alpha model, not current opted-in actor-surface truth.
+
 ### Clarified: CLI native_tools are provider-native only
 The platform spec now makes the shipped CLI rule explicit: `bash`, `web_search`, and `file_io` are provider-native capabilities only. The platform does not inject fallback tools to satisfy `native_tools` on CLI, unsupported capabilities fail closed, and visible native-tool surface must equal callable truth for the same turn.
 
