@@ -680,6 +680,9 @@ func emitToolDefinitions(cfg models.AgentConfig, authority runtimeauthority.Prov
 func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrained bool, roleScoped map[string]struct{}) []llm.ToolDefinition {
 	out := make([]llm.ToolDefinition, 0, len(in))
 	for _, t := range in {
+		if runtimetools.IsLegacyEntityToolSurfaceName(t.Name) {
+			continue
+		}
 		if runtimetools.IsUniversal(t.Name) {
 			out = append(out, t)
 			continue

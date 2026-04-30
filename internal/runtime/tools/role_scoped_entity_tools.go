@@ -46,23 +46,32 @@ func removeLegacyEntityToolSurface(entries map[string]RegisteredTool) {
 	}
 }
 
+func IsLegacyEntityToolSurfaceName(name string) bool {
+	_, ok := legacyEntityToolSurfaceNames[strings.TrimSpace(name)]
+	return ok
+}
+
 func roleScopedEntityToolsEnabledForActor(source semanticview.Source, actor models.AgentConfig) bool {
-	if source == nil {
+	return actorHasEntityContract(source, actor)
+}
+
+func actorHasEntityContract(source semanticview.Source, actor models.AgentConfig) bool {
+	if source == nil || strings.TrimSpace(actor.ID) == "" {
 		return false
 	}
-	contractSource, ok := source.AgentContractSource(strings.TrimSpace(actor.ID))
-	if !ok {
+	_, ok := entityruntime.ResolveForActor(source, actor.ID)
+	return ok
+}
+
+func actorAllowsInternalLegacyEntityTools(actor models.AgentConfig) bool {
+	// Legacy entity handlers remain available only to non-agent internal/operator
+	// paths. Normal agent configs do not set these execution types.
+	switch strings.ToLower(strings.TrimSpace(actor.Type)) {
+	case "internal", "operator", "system", "system_node":
+		return true
+	default:
 		return false
 	}
-	flowID := strings.TrimSpace(contractSource.FlowID)
-	if flowID == "" {
-		return false
-	}
-	schema, ok := source.FlowSchemaByID(flowID)
-	if !ok {
-		return false
-	}
-	return schema.ToolSurface.RoleScopedEntityTools
 }
 
 func roleScopedEntityToolSchemaEntriesForActor(source semanticview.Source, actor models.AgentConfig, contract entityruntime.Contract) map[string]ContractSchemaEntry {
@@ -305,9 +314,6 @@ func roleScopedToolNamePart(raw string) string {
 }
 
 func roleScopedEntityToolSpecForActor(source semanticview.Source, actor models.AgentConfig, toolName string) (roleScopedEntityToolSpec, entityruntime.Contract, bool) {
-	if !roleScopedEntityToolsEnabledForActor(source, actor) {
-		return roleScopedEntityToolSpec{}, entityruntime.Contract{}, false
-	}
 	contract, ok := entityruntime.ResolveForActor(source, actor.ID)
 	if !ok {
 		return roleScopedEntityToolSpec{}, entityruntime.Contract{}, false
@@ -324,9 +330,6 @@ func (e *Executor) RoleScopedEntityToolNamesForActor(actor models.AgentConfig) m
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
-	if !roleScopedEntityToolsEnabledForActor(source, actor) {
-		return nil
-	}
 	contract, ok := entityruntime.ResolveForActor(source, actor.ID)
 	if !ok {
 		return nil

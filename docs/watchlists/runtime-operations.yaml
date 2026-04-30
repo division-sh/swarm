@@ -194,6 +194,10 @@ active_issues:
     title: Land Path alpha role-scoped tool-contract model in canonical platform spec
     maps_to:
       - transport_policy_and_surface_parity
+  - id: 617
+    title: Aggressively retire legacy universal entity tools from agent catalogs
+    maps_to:
+      - transport_policy_and_surface_parity
 nodes:
   - id: transport_policy_and_surface_parity
     title: Transport Policy And Surface Parity
@@ -208,12 +212,13 @@ nodes:
       - supported agent turns can persist a canonical visible tool surface that is broader than the provider-callable surface actually available on that turn
       - fallback relay on a supported turn can degrade file-backed work by clamping large relayed tool results to preview-only text
       - supported no-read_file turns can emit runtime_read_file follow-up artifacts for oversized tool results even though the same turn surface cannot call read_file
+      - legacy universal entity tools can remain normal-agent provider-visible/callable beside generated role-scoped typed tools
       - oversized file-backed tool results on supported Claude helper turns can leak provider scratch paths back into later runtime read_file calls
       - CLI native tools can still use mixed provider-plus-platform fallback semantics, so visible turn surface does not equal callable provider-native truth for bash, web_search, and file_io
       - startup validation can compare provider-native init output against the full runtime MCP/local fallback surface and can select ordinary semantic tools as startup probes because their schemas accept empty objects
       - generated role-scoped typed reads can be silently downgraded by generic transport projection into preview/truncated shapes instead of complete typed values or explicit typed-read errors
       - generated typed tool and emit schemas can drift between provider-visible delivery, runtime validation, and bootverify, allowing undeclared payload keys or missing required/enum constraints to survive one surface
-      - canonical platform specs and generated docs can lag runtime Path alpha tool delivery, re-authorizing legacy universal entity-tool semantics after opted-in actors have moved to generated role-scoped tools
+      - canonical platform specs and generated docs can lag runtime Path alpha tool delivery, re-authorizing legacy universal entity-tool semantics after normal agents have moved to generated role-scoped tools
     representative_issues:
       - 111
       - 136

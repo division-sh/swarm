@@ -248,14 +248,14 @@ func (e *Executor) toolAuthorizationDecision(actor models.AgentConfig, toolName 
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
-	if roleScopedEntityToolsEnabledForActor(source, actor) {
-		if _, legacy := legacyEntityToolSurfaceNames[toolName]; legacy {
-			return toolAuthorizationDecision{
-				ownership: toolOwnershipPlatformBuiltin,
-				class:     toolAuthorizationDenied,
-				allowed:   false,
-			}
+	if _, legacy := legacyEntityToolSurfaceNames[toolName]; legacy && !actorAllowsInternalLegacyEntityTools(actor) {
+		return toolAuthorizationDecision{
+			ownership: toolOwnershipPlatformBuiltin,
+			class:     toolAuthorizationDenied,
+			allowed:   false,
 		}
+	}
+	if roleScopedEntityToolsEnabledForActor(source, actor) {
 		if _, _, ok := roleScopedEntityToolSpecForActor(source, actor, toolName); ok {
 			return toolAuthorizationDecision{
 				ownership: toolOwnershipPlatformBuiltin,

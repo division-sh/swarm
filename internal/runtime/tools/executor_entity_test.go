@@ -374,19 +374,19 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	}
 }
 
-func TestRoleScopedEntityTools_NonOptedActorKeepsLegacySurface(t *testing.T) {
+func TestRoleScopedEntityTools_NonOptedActorReceivesGeneratedSurfaceByDefault(t *testing.T) {
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"get_entity", "query_entities"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, false)
 	_, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
 	for _, name := range []string{"get_entity", "query_entities"} {
-		if _, ok := names[name]; !ok {
-			t.Fatalf("expected legacy entity tool %q without opt-in in %#v", name, sortedRoleScopedToolNames(names))
+		if _, ok := names[name]; ok {
+			t.Fatalf("legacy entity tool %q remained visible without opt-in in %#v", name, sortedRoleScopedToolNames(names))
 		}
 	}
-	if _, ok := names["read_validation_case"]; ok {
-		t.Fatalf("generated role-scoped tool was visible without opt-in in %#v", sortedRoleScopedToolNames(names))
+	if _, ok := names["read_validation_case"]; !ok {
+		t.Fatalf("generated role-scoped tool was not visible by default in %#v", sortedRoleScopedToolNames(names))
 	}
 }
 
@@ -1027,6 +1027,7 @@ func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 func TestEntityTools_GetEntityReturnsForkLocalMaterializedRevision(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:    "tester",
+		Type:  "internal",
 		Role:  "operator",
 		Tools: []string{"get_entity"},
 	}
@@ -1122,6 +1123,7 @@ accounts:
 func TestEntityTools_SaveEntityFieldAfterForkActivationUsesForkRunID(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:    "tester",
+		Type:  "internal",
 		Role:  "operator",
 		Tools: []string{"get_entity", "save_entity_field"},
 	}
@@ -1807,7 +1809,7 @@ func TestEntityTools_InvalidField(t *testing.T) {
 		"field":     "unknown_field",
 		"value":     "x",
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid enum value unknown_field") {
+	if err == nil || !strings.Contains(err.Error(), "unknown entity field") {
 		t.Fatalf("expected delivery-boundary invalid field rejection, got %v", err)
 	}
 }
@@ -1867,7 +1869,7 @@ func TestEntityTools_CreateEntityRejectsCallerSuppliedSubjectID(t *testing.T) {
 	}
 }
 
-func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(t *testing.T) {
+func TestEntityTools_ConstrainedAllowedToolsDoNotPermitLegacyEntityTools(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutorWithActor(t, models.AgentConfig{
 		ID:    "tester",
 		Role:  "operator",
@@ -1885,8 +1887,8 @@ func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(
 	}); err == nil {
 		t.Fatalf("expected create_entity to be denied when not listed in tools")
 	}
-	if _, err := exec.Execute(ctx, "query_entities", map[string]any{}); err != nil {
-		t.Fatalf("query_entities with constrained tools: %v", err)
+	if _, err := exec.Execute(ctx, "query_entities", map[string]any{}); err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("query_entities with constrained tools error = %v, want not allowed", err)
 	}
 }
 
@@ -2349,6 +2351,7 @@ func newAnnotatedEntityToolExecutor(t *testing.T) (context.Context, *runtimetool
 	t.Helper()
 	return newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
 		ID:    "tester",
+		Type:  "internal",
 		Role:  "operator",
 		Tools: []string{"create_entity", "get_entity", "save_entity_field", "search_entities"},
 	}, loadWave1EntityToolBundle(t, models.AgentConfig{
@@ -2383,6 +2386,9 @@ func newEntityToolTestHarness(t *testing.T) (context.Context, *runtimetools.Exec
 
 func newEntityToolTestHarnessWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
+	if strings.TrimSpace(actor.Type) == "" {
+		actor.Type = "internal"
+	}
 	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
 types:
   Metadata:
@@ -2413,6 +2419,11 @@ accounts:
 
 func newEntityToolTestHarnessWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
+	if strings.TrimSpace(actor.Type) == "" && strings.TrimSpace(actor.ID) != "validation-orchestrator" {
+		// These legacy handler tests exercise retained internal/operator paths,
+		// not normal agent provider-visible tool delivery.
+		actor.Type = "internal"
+	}
 	_, db, _ := testutil.StartPostgres(t)
 	ensureEntityToolTestRun(t, db)
 	ctx := runtimecorrelation.WithRunID(context.Background(), entityToolTestRunID)
