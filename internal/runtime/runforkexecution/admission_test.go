@@ -255,6 +255,33 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteAdmission
 	}
 }
 
+func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteAdmissionFlowInstances(t *testing.T) {
+	ctx := context.Background()
+	forkRunID := uuid.NewString()
+	binding := testSelectedContractBinding(forkRunID)
+	frontier := testContractFrontierAdmission(binding.ContractSelection)
+	frontier.FrontierEvents[0].EventName = "review/inst-1/task.started"
+	frontier.FrontierEvents[0].SourceClassifications = []string{store.RunForkPendingClassificationPending}
+	frontier.FrontierEvents[0].SourceFlowInstances = []string{"review/inst-1"}
+	frontier.FrontierEvents[0].SourceSubscriberTypes = []string{"node"}
+	frontier.FrontierEvents[0].SourceSubscriberIDs = []string{"source-node"}
+	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	model := testSelectedContractExecutionModel(t, frontier)
+	frontier.FrontierEvents[0].SourceFlowInstances = []string{"review/inst-2"}
+
+	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
+		ForkRunID:         forkRunID,
+		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
+		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		FrontierAdmission: frontier,
+		RouteAdmission:    routeAdmission,
+		ExecutionModel:    model,
+	})
+	if err == nil || !strings.Contains(err.Error(), "frontier fingerprint mismatch") {
+		t.Fatalf("error = %v, want stale route admission flow-instance failure", err)
+	}
+}
+
 type fakeSelectedContractBindingReader struct {
 	binding            store.RunForkSelectedContractBinding
 	err                error
