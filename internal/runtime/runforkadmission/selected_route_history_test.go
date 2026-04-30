@@ -116,7 +116,7 @@ func TestAdmitSelectedContractRouteHistoryDoesNotDuplicateFrontierRecipients(t *
 }
 
 func TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances(t *testing.T) {
-	plan := testRunForkPlan("review/inst-1/task.started", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan := testRunForkPlan("review/inst-1/task.started", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 	plan.PendingWork[0].FlowInstance = "review/inst-1"
 	source := testContractFrontierTemplateSource()
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -139,6 +139,12 @@ func TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances(t *test
 	}
 	if !hasString(admission.DynamicFlowInstances, "review/inst-1") {
 		t.Fatalf("dynamic flow instances = %v, want review/inst-1", admission.DynamicFlowInstances)
+	}
+	if len(admission.SelectedRouteEvents) != 1 ||
+		len(admission.SelectedRouteEvents[0].DerivedRecipients) != 1 ||
+		admission.SelectedRouteEvents[0].DerivedRecipients[0].SubscriberID != "reviewer-inst-1" ||
+		admission.SelectedRouteEvents[0].DerivedRecipients[0].Path != "review/inst-1" {
+		t.Fatalf("selected route events = %#v, want materialized dynamic recipient reviewer-inst-1", admission.SelectedRouteEvents)
 	}
 	if !routeBoundaryHas(admission.BlockedSiblings, "dynamic_flow_instance_route_reconstruction", store.RunForkSelectedContractDispositionBlockedSibling) {
 		t.Fatalf("blocked siblings = %#v, want dynamic route reconstruction blocked", admission.BlockedSiblings)
