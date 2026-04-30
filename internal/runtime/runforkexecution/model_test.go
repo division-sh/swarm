@@ -33,7 +33,11 @@ func TestBuildSelectedContractExecutionModelConsumesAdmissionAsEvidenceOnly(t *t
 		}},
 	}
 
-	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{Admission: admission})
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+	})
 	if err != nil {
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
 	}
@@ -58,6 +62,9 @@ func TestBuildSelectedContractExecutionModelConsumesAdmissionAsEvidenceOnly(t *t
 	if model.FrontierEvents[0].Disposition != store.RunForkSelectedContractDispositionEvidenceOnly {
 		t.Fatalf("frontier disposition = %q", model.FrontierEvents[0].Disposition)
 	}
+	if model.RouteAdmission == nil || model.RouteAdmission.Owner != store.RunForkSelectedContractRouteAdmissionOwner {
+		t.Fatalf("route admission = %#v, want canonical selected-contract route admission", model.RouteAdmission)
+	}
 	if !executionBoundaryHas(model.InvalidPaths, "copy_source_event_deliveries", store.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("invalid paths = %#v, want source delivery copying invalid", model.InvalidPaths)
 	}
@@ -72,6 +79,9 @@ func TestBuildSelectedContractExecutionModelConsumesAdmissionAsEvidenceOnly(t *t
 	}
 	if !unsupportedBlockerHas(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractExecutionModelNonMutating) {
 		t.Fatalf("unsupported blockers = %#v, want non-mutating model blocker", model.UnsupportedBlockers)
+	}
+	if !unsupportedBlockerHas(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
+		t.Fatalf("unsupported blockers = %#v, want non-mutating route admission blocker", model.UnsupportedBlockers)
 	}
 }
 
@@ -97,18 +107,46 @@ func TestBuildSelectedContractExecutionModelCarriesFrontierBlockers(t *testing.T
 		},
 	}
 
-	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{Admission: admission})
+	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:      admission,
+		RouteAdmission: testSelectedContractRouteAdmission(admission),
+	})
 	if err != nil {
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
 	}
 	for _, code := range []string{
 		store.RunForkBlockerContractFrontierExecutionUnsupported,
 		store.RunForkBlockerContractFrontierRouteUnresolved,
+		store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
 		store.RunForkBlockerSelectedContractExecutionModelNonMutating,
 	} {
 		if !unsupportedBlockerHas(model.UnsupportedBlockers, code) {
 			t.Fatalf("unsupported blockers = %#v, want %s", model.UnsupportedBlockers, code)
 		}
+	}
+}
+
+func TestBuildSelectedContractExecutionModelRequiresCanonicalRouteAdmission(t *testing.T) {
+	admission := store.RunForkContractFrontierAdmission{
+		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+		NonMutating:                  true,
+		HistoricalExecutionSupported: false,
+		ContractSelection: store.RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/contracts",
+			WorkflowName:    "workflow",
+			WorkflowVersion: "v1",
+		},
+	}
+	routeAdmission := testSelectedContractRouteAdmission(admission)
+	routeAdmission.Owner = "cmd.swarm.local_route_admission"
+
+	_, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:      admission,
+		RouteAdmission: routeAdmission,
+	})
+	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractRouteAdmissionOwner) {
+		t.Fatalf("error = %v, want canonical route admission failure", err)
 	}
 }
 

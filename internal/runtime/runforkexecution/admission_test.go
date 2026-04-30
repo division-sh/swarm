@@ -21,6 +21,7 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	reader := &fakeSelectedContractBindingReader{binding: binding}
 	sourceLoader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 	frontier := testContractFrontierAdmission(binding.ContractSelection)
+	routeAdmission := testSelectedContractRouteAdmission(frontier)
 	model := testSelectedContractExecutionModel(t, frontier)
 
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
@@ -28,6 +29,7 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 		BindingReader:     reader,
 		SourceLoader:      sourceLoader,
 		FrontierAdmission: frontier,
+		RouteAdmission:    routeAdmission,
 		ExecutionModel:    model,
 	})
 	if err != nil {
@@ -63,6 +65,9 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
 		t.Fatalf("frontier events = %#v", admission.FrontierEvents)
 	}
+	if admission.RouteAdmission == nil || admission.RouteAdmission.Owner != store.RunForkSelectedContractRouteAdmissionOwner {
+		t.Fatalf("route admission = %#v, want canonical selected-contract route admission", admission.RouteAdmission)
+	}
 	if !executionBoundaryHas(admission.InvalidPaths, "copy_source_event_deliveries", store.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("invalid paths = %#v, want source delivery copy invalid", admission.InvalidPaths)
 	}
@@ -74,6 +79,9 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	}
 	if !unsupportedBlockerHas(admission.UnsupportedBlockers, store.RunForkBlockerSelectedContractExecutionAdmissionNonMutating) {
 		t.Fatalf("unsupported blockers = %#v, want non-mutating admission blocker", admission.UnsupportedBlockers)
+	}
+	if !unsupportedBlockerHas(admission.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
+		t.Fatalf("unsupported blockers = %#v, want non-mutating route admission blocker", admission.UnsupportedBlockers)
 	}
 }
 
@@ -89,6 +97,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnMissingBinding(t *t
 		BindingReader:     &fakeSelectedContractBindingReader{err: errors.New("selected contract binding not found")},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(selection)},
 		FrontierAdmission: frontier,
+		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "load selected-contract binding") {
@@ -108,6 +117,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnUnavailableSelected
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{Selection: binding.ContractSelection}},
 		FrontierAdmission: frontier,
+		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "selected semantic source") {
@@ -129,6 +139,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnSourceMismatch(t *t
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{Selection: binding.ContractSelection, Source: testSelectedSource(mismatched)}},
 		FrontierAdmission: frontier,
+		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "workflow version mismatch") {
@@ -150,6 +161,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnWrongContractsRoot(
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(wrongRoot)},
 		FrontierAdmission: frontier,
+		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "selected source selection does not match durable binding") {
@@ -170,6 +182,7 @@ func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalEvidence(t *tes
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
 		FrontierAdmission: frontier,
+		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), store.RunForkContractFrontierAdmissionOwner) {
@@ -190,10 +203,33 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleModelFrontier(
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
 		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
 		FrontierAdmission: frontier,
+		RouteAdmission:    testSelectedContractRouteAdmission(frontier),
 		ExecutionModel:    model,
 	})
 	if err == nil || !strings.Contains(err.Error(), "frontier events do not match") {
 		t.Fatalf("error = %v, want stale frontier model failure", err)
+	}
+}
+
+func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalRouteAdmission(t *testing.T) {
+	ctx := context.Background()
+	forkRunID := uuid.NewString()
+	binding := testSelectedContractBinding(forkRunID)
+	frontier := testContractFrontierAdmission(binding.ContractSelection)
+	model := testSelectedContractExecutionModel(t, frontier)
+	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	routeAdmission.Owner = "cmd.swarm.route_helper"
+
+	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
+		ForkRunID:         forkRunID,
+		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
+		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		FrontierAdmission: frontier,
+		RouteAdmission:    routeAdmission,
+		ExecutionModel:    model,
+	})
+	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractRouteAdmissionOwner) {
+		t.Fatalf("error = %v, want canonical route admission failure", err)
 	}
 }
 
@@ -283,9 +319,44 @@ func testContractFrontierAdmission(selection store.RunForkContractSelection) sto
 	}
 }
 
+func testSelectedContractRouteAdmission(frontier store.RunForkContractFrontierAdmission) store.RunForkSelectedContractRouteAdmission {
+	return store.RunForkSelectedContractRouteAdmission{
+		Owner:                          store.RunForkSelectedContractRouteAdmissionOwner,
+		FutureRouteReconstructionOwner: store.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
+		NonMutating:                    true,
+		RouteReconstructionSupported:   false,
+		ContractSelection:              frontier.ContractSelection,
+		FrontierAdmissionOwner:         frontier.Owner,
+		RequiredConsumers: []store.RunForkSelectedContractExecutionBoundary{{
+			Concept:     "selected_source_route_derivation",
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       "internal/runtime/bus.DeriveRouteTable",
+			Reason:      "test route admission consumes selected-source route derivation",
+		}},
+		BlockedSiblings: []store.RunForkSelectedContractExecutionBoundary{{
+			Concept:     "mutating_route_reconstruction",
+			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+			Owner:       store.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
+			Reason:      "test route admission remains non-mutating",
+		}},
+		InvalidPaths: []store.RunForkSelectedContractExecutionBoundary{{
+			Concept:     "copy_source_routing_rules",
+			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Reason:      "test route admission rejects source route row copy",
+		}},
+		UnsupportedBlockers: []store.RunForkUnsupportedBlocker{{
+			Code:    store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
+			Message: "selected-contract route admission is non-mutating",
+		}},
+	}
+}
+
 func testSelectedContractExecutionModel(t *testing.T, frontier store.RunForkContractFrontierAdmission) store.RunForkSelectedContractExecution {
 	t.Helper()
-	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{Admission: frontier})
+	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:      frontier,
+		RouteAdmission: testSelectedContractRouteAdmission(frontier),
+	})
 	if err != nil {
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
 	}

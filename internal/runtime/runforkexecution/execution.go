@@ -77,10 +77,22 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if frontier.FrontierEventCount == 0 {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires selected frontier events")
 	}
+	routeAdmission, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
+		Plan:              plan,
+		Source:            loadedSource.Source,
+		ContractSelection: selection,
+		FrontierAdmission: frontier,
+	})
+	if err != nil {
+		return SelectedContractExecutionResult{}, err
+	}
 	if err := validateSelectedContractExecutionFrontierForMutation(frontier); err != nil {
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner}, err
 	}
-	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{Admission: frontier})
+	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
+		Admission:      frontier,
+		RouteAdmission: routeAdmission,
+	})
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
@@ -98,6 +110,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		BindingReader:     req.Store,
 		SourceLoader:      req.SourceLoader,
 		FrontierAdmission: frontier,
+		RouteAdmission:    routeAdmission,
 		ExecutionModel:    model,
 	})
 	if err != nil {

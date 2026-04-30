@@ -162,6 +162,10 @@ active_issues:
     title: Gate source-advanced branch policy for selected-contract timestamp forks
     maps_to:
       - timestamp_fork_replay_resume_ownership
+  - id: 604
+    title: Gate selected-contract fork route reconstruction and recipient ownership
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
     maps_to:
@@ -269,6 +273,7 @@ nodes:
       - mutating selected-contract fork execution must consume durable selected-source binding/admission, execute handlers under the fork run_id, write fresh fork-local event/delivery/outcome rows with lineage, regenerate follow-ups, and not use source outcomes as suppressors
       - selected-contract timestamp forks from historical T need durable branch divergence evidence when the source advanced after T; post-T source rows remain source-run evidence only and must not freeze, rewind, execute, copy, or suppress fork-local selected work
       - selected-contract timestamp forks with source timer or route facts must keep those rows as evidence-only fail-closed blockers until separate timer and route reconstruction owners are approved; source timers, routing_rules, route recipients, and timer firings are not executable selected-fork work
+      - selected-contract route/subscription reconstruction needs a non-mutating route-history admission owner that consumes selected-source route derivation, distinguishes frontier route/recipient admission from historical route evidence, and keeps route persistence, executable recipients, delivery writes, and handler execution split
     representative_issues:
       - 564
       - 565
@@ -284,6 +289,7 @@ nodes:
       - 598
       - 600
       - 602
+      - 604
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
