@@ -3274,6 +3274,13 @@ run_model:
         source run, must record terminal source status at activation as divergence evidence, must not copy post-fork source
         events or event_deliveries, and must continue to regenerate fork-local events, deliveries, receipts, dead letters,
         idempotency effects, and emitted follow-ups under the fork run_id.'
+    selected_contract_timer_route_policy: 'Mutating selected-contract timestamp-fork execution treats source timer and
+      route facts as evidence-only fail-closed blockers until separately approved timer and route reconstruction owners
+      exist. The runtime.run_fork.selected_contract_execution owner consumes the canonical
+      store.run_fork.replay_resume_admission timer_history and flow_route_history blockers before selected-contract
+      materialization or activation can create fork-local executable work. It MUST NOT copy source timers or
+      routing_rules, fire or replay source timers, persist fork-local timer/route rows, derive selected-source recipients
+      for execution, or use source timer/route outcomes as selected-fork suppressors in this policy slice.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -3307,6 +3314,12 @@ run_model:
         Post-fork source events, deliveries, receipts, dead letters, retry state, outcomes, current state, and mutations
         remain source-run evidence only; they are not copied into the fork and do not suppress fork-local selected
         execution. Generic/state-only activation continues to use 3b no-source-advancement/freeze semantics.'
+      3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution, source timer and route
+        facts remain evidence-only blockers. The selected execution owner consumes timer_history_unproven and
+        flow_route_history_unproven from the canonical replay/resume taxonomy and fails before materializing,
+        activating, firing timers, copying routing rules, deriving selected-source recipients, or creating fork-local
+        executable work. Timer reconstruction and route reconstruction are separately gated fork replay/resume
+        children.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.

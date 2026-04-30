@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -159,6 +160,44 @@ func TestSelectedContractExecutionActivationPreservesTimerBlocker(t *testing.T) 
 	if materialized.ForkRunID != "" {
 		t.Fatalf("materialized fork despite timer blocker: %#v", materialized)
 	}
+	assertNoSelectedContractForkRows(t, db, sourceRunID)
+}
+
+func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700002525, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO routing_rules (
+			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow,
+			is_materialized, status, created_at
+		)
+		VALUES ('item.received', 'node', 'selected-route-node', 'flow-a/2', 'flow-a', true, 'active', $1)
+	`, at); err != nil {
+		t.Fatalf("seed routing rule: %v", err)
+	}
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), RunForkBlockerFlowRouteHistoryUnproven) {
+		t.Fatalf("materialization error = %v, want route blocker", err)
+	}
+	if materialized.ForkRunID != "" {
+		t.Fatalf("materialized fork despite route blocker: %#v", materialized)
+	}
+	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
 
 func seedSelectedContractExecutionStoreSource(t *testing.T, db execContextDB, sourceRunID, entityID, eventID string, at time.Time) {
@@ -209,5 +248,40 @@ func seedSelectedContractExecutionStoreSource(t *testing.T, db execContextDB, so
 		)
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
+	}
+}
+
+func assertNoSelectedContractForkRows(t *testing.T, db *sql.DB, sourceRunID string) {
+	t.Helper()
+	ctx := context.Background()
+	for name, query := range map[string]string{
+		"runs": `
+			SELECT COUNT(*)
+			FROM runs
+			WHERE forked_from_run_id = $1::uuid
+		`,
+		"selected_contract_bindings": `
+			SELECT COUNT(*)
+			FROM run_fork_selected_contract_bindings
+			WHERE source_run_id = $1::uuid
+		`,
+		"selected_contract_executions": `
+			SELECT COUNT(*)
+			FROM run_fork_selected_contract_executions
+			WHERE source_run_id = $1::uuid
+		`,
+		"selected_contract_branch_divergences": `
+			SELECT COUNT(*)
+			FROM run_fork_selected_contract_branch_divergences
+			WHERE source_run_id = $1::uuid
+		`,
+	} {
+		var count int
+		if err := db.QueryRowContext(ctx, query, sourceRunID).Scan(&count); err != nil {
+			t.Fatalf("count %s rows: %v", name, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows for blocked selected-contract fork = %d, want 0", name, count)
+		}
 	}
 }
