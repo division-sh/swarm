@@ -15,6 +15,7 @@ const (
 	RunForkSelectedContractExecutionOwner               = "runtime.run_fork.selected_contract_execution"
 	RunForkSelectedContractRouteAdmissionOwner          = "runtime.run_fork.selected_contract_route_admission"
 	RunForkSelectedContractRouteTopologyOwner           = "runtime.run_fork.selected_contract_route_topology"
+	RunForkSelectedContractDynamicRouteTopologyOwner    = "runtime.run_fork.selected_contract_dynamic_route_topology"
 	RunForkSelectedContractRecipientPlanningOwner       = "runtime.run_fork.selected_contract_recipient_planning"
 	RunForkSelectedContractBranchDivergenceOwner        = "store.run_fork.selected_contract_branch_divergence"
 
@@ -114,28 +115,38 @@ type RunForkSelectedContractRouteAdmission struct {
 }
 
 type RunForkSelectedContractRouteTopology struct {
-	Owner                          string                                     `json:"owner"`
-	RouteAdmissionOwner            string                                     `json:"route_admission_owner"`
-	FutureRouteReconstructionOwner string                                     `json:"future_route_reconstruction_owner"`
-	NonMutating                    bool                                       `json:"non_mutating"`
-	RoutePersistenceSupported      bool                                       `json:"route_persistence_supported"`
-	ExecutableRecipientsSupported  bool                                       `json:"executable_recipients_supported"`
-	ContractSelection              RunForkContractSelection                   `json:"contract_selection"`
-	StaticTopologySupported        bool                                       `json:"static_topology_supported"`
-	DynamicTopologySupported       bool                                       `json:"dynamic_topology_supported"`
-	SourceRouteFactsPresent        bool                                       `json:"source_route_facts_present"`
-	StaticRouteEvents              []RunForkSelectedContractRouteEvent        `json:"static_route_events,omitempty"`
-	DynamicFlowInstances           []string                                   `json:"dynamic_flow_instances,omitempty"`
-	DynamicTopologyDisposition     string                                     `json:"dynamic_topology_disposition,omitempty"`
-	FrontierAdmissionOwner         string                                     `json:"frontier_admission_owner,omitempty"`
-	FrontierEventCount             int                                        `json:"frontier_event_count"`
-	FrontierSourceEventIDs         []string                                   `json:"frontier_source_event_ids,omitempty"`
-	FrontierEvidenceFingerprint    string                                     `json:"frontier_evidence_fingerprint"`
-	RequiredEvidence               []RunForkSelectedContractExecutionBoundary `json:"required_evidence,omitempty"`
-	RequiredConsumers              []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
-	BlockedSiblings                []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
-	InvalidPaths                   []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
-	UnsupportedBlockers            []RunForkUnsupportedBlocker                `json:"unsupported_blockers,omitempty"`
+	Owner                          string                                        `json:"owner"`
+	RouteAdmissionOwner            string                                        `json:"route_admission_owner"`
+	FutureRouteReconstructionOwner string                                        `json:"future_route_reconstruction_owner"`
+	NonMutating                    bool                                          `json:"non_mutating"`
+	RoutePersistenceSupported      bool                                          `json:"route_persistence_supported"`
+	ExecutableRecipientsSupported  bool                                          `json:"executable_recipients_supported"`
+	ContractSelection              RunForkContractSelection                      `json:"contract_selection"`
+	StaticTopologySupported        bool                                          `json:"static_topology_supported"`
+	DynamicTopologySupported       bool                                          `json:"dynamic_topology_supported"`
+	DynamicTopologyOwner           string                                        `json:"dynamic_topology_owner,omitempty"`
+	SourceRouteFactsPresent        bool                                          `json:"source_route_facts_present"`
+	StaticRouteEvents              []RunForkSelectedContractRouteEvent           `json:"static_route_events,omitempty"`
+	DynamicFlowInstances           []string                                      `json:"dynamic_flow_instances,omitempty"`
+	DynamicTopologyProofs          []RunForkSelectedContractDynamicTopologyProof `json:"dynamic_topology_proofs,omitempty"`
+	DynamicTopologyDisposition     string                                        `json:"dynamic_topology_disposition,omitempty"`
+	FrontierAdmissionOwner         string                                        `json:"frontier_admission_owner,omitempty"`
+	FrontierEventCount             int                                           `json:"frontier_event_count"`
+	FrontierSourceEventIDs         []string                                      `json:"frontier_source_event_ids,omitempty"`
+	FrontierEvidenceFingerprint    string                                        `json:"frontier_evidence_fingerprint"`
+	RequiredEvidence               []RunForkSelectedContractExecutionBoundary    `json:"required_evidence,omitempty"`
+	RequiredConsumers              []RunForkSelectedContractExecutionBoundary    `json:"required_consumers,omitempty"`
+	BlockedSiblings                []RunForkSelectedContractExecutionBoundary    `json:"blocked_siblings,omitempty"`
+	InvalidPaths                   []RunForkSelectedContractExecutionBoundary    `json:"invalid_paths,omitempty"`
+	UnsupportedBlockers            []RunForkUnsupportedBlocker                   `json:"unsupported_blockers,omitempty"`
+}
+
+type RunForkSelectedContractDynamicTopologyProof struct {
+	FlowInstance      string                             `json:"flow_instance"`
+	SourceEventIDs    []string                           `json:"source_event_ids,omitempty"`
+	EventNames        []string                           `json:"event_names,omitempty"`
+	DerivedRecipients []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
+	Disposition       string                             `json:"disposition"`
 }
 
 type RunForkSelectedContractRouteEvent struct {
