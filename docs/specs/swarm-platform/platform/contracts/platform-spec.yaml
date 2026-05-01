@@ -3365,6 +3365,18 @@ run_model:
       fork truth or fork suppressors. This owner MUST NOT persist fork-local route rows, write event_deliveries, run
       handlers, write receipts, dead letters, idempotency state, emitted follow-ups, timers, sessions, turns,
       source-advanced policy, contract-swap state, or UI/API execution state.'
+    selected_contract_supported_execution: 'The supported selected-contract timestamp-fork execution surface is
+      swarm fork --contracts. It is owned by runtime.run_fork.selected_contract_execution, not by CLI, route helpers,
+      delivery-row helpers, or source-row replay. The owner consumes store.run_fork.selected_contract_binding,
+      selected_contract_execution_admission, selected_contract_route_topology, selected_contract_dynamic_route_topology,
+      and runtime.run_fork.selected_contract_recipient_planning before publishing selected frontier work. It creates fresh
+      fork-local events and event_deliveries under the fork run_id, records selected source-to-fork lineage in
+      run_fork_selected_contract_executions, runs selected handlers through the normal runtime pipeline, writes fork-local
+      outcomes, and regenerates emitted follow-ups under the fork run_id. Source events are payload/lineage inputs only;
+      source event_deliveries, recipients, receipts, dead letters, retry/idempotency state, and post-fork outcomes MUST
+      NOT become executable fork work or fork suppressors. Route persistence, timer reconstruction, session/turn/audit
+      reconstruction, non-agent delivery replay, runtime restart recovery, contract-swap boot/resume beyond selected
+      frontier execution, and UI/API ownership remain separately gated siblings.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -3433,6 +3445,15 @@ run_model:
         still non-mutating: it does not persist route rows, write deliveries, run handlers, or own receipts, dead
         letters, idempotency, emitted follow-ups, timers, sessions, turns, source-advanced policy, contract swap, or
         UI/API execution state.'
+      3h_selected_contract_supported_execution: 'For the supported swarm fork --contracts surface, selected-contract
+        execution is a runtime-owned mutating path after selected binding, execution admission, route topology, dynamic
+        topology proof or fail-closed classification, and recipient planning. It mints fresh fork-local event IDs, writes
+        fork event and delivery rows under the fork run_id, gates EventBus.Publish through recipient-planning evidence,
+        runs selected handlers through the normal runtime pipeline, records selected execution lineage, writes fork-local
+        outcomes, and regenerates follow-up events under the fork run_id. This is not full historical resume: route
+        persistence/recovery, timer reconstruction, session/turn/audit reconstruction, non-agent replay, contract-swap
+        boot/resume beyond selected frontier execution, runtime restart recovery, and UI/API ownership remain separate
+        parents or siblings.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.
