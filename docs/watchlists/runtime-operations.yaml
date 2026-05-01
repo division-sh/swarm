@@ -200,6 +200,10 @@ active_issues:
     title: Per-role entity tool contracts / provider-visible schemas
     maps_to:
       - transport_policy_and_surface_parity
+  - id: 556
+    title: Root/run current-entity context can make generated role-scoped tools impossible
+    maps_to:
+      - transport_policy_and_surface_parity
   - id: 579
     title: Retire universal agent-surface entity tools for fully opted-in role-scoped flows
     maps_to:
@@ -227,6 +231,7 @@ nodes:
       - fallback relay on a supported turn can degrade file-backed work by clamping large relayed tool results to preview-only text
       - supported no-read_file turns can emit runtime_read_file follow-up artifacts for oversized tool results even though the same turn surface cannot call read_file
       - legacy universal entity tools can remain normal-agent provider-visible/callable beside generated role-scoped typed tools
+      - generated role-scoped current-entity tools can remain provider-visible/callable on turns whose current entity cannot resolve to the actor's flow-owned entity contract
       - oversized file-backed tool results on supported Claude helper turns can leak provider scratch paths back into later runtime read_file calls
       - CLI native tools can still use mixed provider-plus-platform fallback semantics, so visible turn surface does not equal callable provider-native truth for bash, web_search, and file_io
       - startup validation can compare provider-native init output against the full runtime MCP/local fallback surface and can select ordinary semantic tools as startup probes because their schemas accept empty objects
@@ -242,6 +247,7 @@ nodes:
       - 381
       - 444
       - 544
+      - 556
       - 568
       - 571
       - 579

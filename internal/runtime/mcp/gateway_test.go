@@ -239,6 +239,71 @@ func (s actorScopedToolExecutorStub) ToolCapabilitiesForActor(_ models.AgentConf
 	return toolcapabilities.NewSet(caps)
 }
 
+type contextAwareRoleScopedExecutorStub struct {
+	callCount int
+}
+
+func (s *contextAwareRoleScopedExecutorStub) Execute(context.Context, string, any) (any, error) {
+	s.callCount++
+	return map[string]any{"ok": true}, nil
+}
+
+func (s *contextAwareRoleScopedExecutorStub) ToolDefinitions() []llm.ToolDefinition {
+	return []llm.ToolDefinition{{Name: "read_scan_campaign"}, {Name: "save_scan_campaign_mode"}, {Name: "emit_market_research_scan_complete"}}
+}
+
+func (s *contextAwareRoleScopedExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
+	return s.ToolDefinitions()
+}
+
+func (s *contextAwareRoleScopedExecutorStub) ToolDefinitionsForActorInContext(ctx context.Context, actor models.AgentConfig) []llm.ToolDefinition {
+	if roleScopedCurrentEntityEligibleInGatewayTest(ctx) {
+		return s.ToolDefinitionsForActor(actor)
+	}
+	return []llm.ToolDefinition{{Name: "emit_market_research_scan_complete"}}
+}
+
+func (s *contextAwareRoleScopedExecutorStub) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	return roleScopedGatewayCapabilities(names, requestAllowed, true)
+}
+
+func (s *contextAwareRoleScopedExecutorStub) ToolCapabilitiesForActorInContext(ctx context.Context, actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	return roleScopedGatewayCapabilities(names, requestAllowed, roleScopedCurrentEntityEligibleInGatewayTest(ctx))
+}
+
+func roleScopedCurrentEntityEligibleInGatewayTest(ctx context.Context) bool {
+	inbound, ok := runtimebus.InboundEventFromContext(ctx)
+	return ok && strings.HasPrefix(inbound.EntityID(), "valid-")
+}
+
+func roleScopedGatewayCapabilities(names []string, requestAllowed map[string]struct{}, currentEntityEligible bool) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, raw := range names {
+		name := toolidentity.CanonicalName(raw)
+		if name == "" {
+			continue
+		}
+		visible := true
+		callable := true
+		if len(requestAllowed) > 0 {
+			_, visible = requestAllowed[name]
+			callable = visible
+		}
+		if strings.HasPrefix(name, "read_scan_campaign") || strings.HasPrefix(name, "save_scan_campaign") {
+			if !currentEntityEligible {
+				visible = false
+				callable = false
+			}
+		}
+		caps = append(caps, toolcapabilities.Capability{
+			Name:     name,
+			Visible:  visible,
+			Callable: callable,
+		})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
 type capabilityAwareExecutorStub struct {
 	callCount int
 }
@@ -751,6 +816,85 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 	}
 	if executeCount != 0 {
 		t.Fatalf("direct denied legacy tool calls reached executor %d times, want 0", executeCount)
+	}
+}
+
+func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	exec := &contextAwareRoleScopedExecutorStub{}
+	g := NewGateway(exec, testGatewayToken, GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+		WithActor:          models.WithActor,
+		WithInboundEvent:   runtimebus.WithInboundEvent,
+	})
+	actor := models.AgentConfig{ID: "market-research-agent", Role: "market_research"}
+	putTestTurnContext(t, registry, "ctx-invalid-current-entity", TurnContext{
+		Actor: actor,
+		Inbound: events.Event{
+			ID:   "evt-root",
+			Type: events.EventType("discovery/market_research.corpus_file_assigned"),
+		}.WithEntityID("root-run-id"),
+		HasInbound: true,
+		CreatedAt:  time.Now().UTC(),
+		ExpiresAt:  time.Now().UTC().Add(time.Hour),
+	})
+	putTestTurnContext(t, registry, "ctx-valid-current-entity", TurnContext{
+		Actor: actor,
+		Inbound: events.Event{
+			ID:   "evt-scan",
+			Type: events.EventType("discovery/market_research.corpus_file_assigned"),
+		}.WithEntityID("valid-scan-campaign-id"),
+		HasInbound: true,
+		CreatedAt:  time.Now().UTC(),
+		ExpiresAt:  time.Now().UTC().Add(time.Hour),
+	})
+
+	invalidReq := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-invalid-current-entity")
+	invalidTools := mustMCPToolsForRequest(t, g, invalidReq)
+	invalidNames := make([]string, 0, len(invalidTools))
+	for _, tool := range invalidTools {
+		invalidNames = append(invalidNames, tool.Name)
+	}
+	if slices.Contains(invalidNames, "read_scan_campaign") || slices.Contains(invalidNames, "save_scan_campaign_mode") {
+		t.Fatalf("invalid current entity exposed role-scoped tools: %#v", invalidNames)
+	}
+	if !slices.Contains(invalidNames, "emit_market_research_scan_complete") {
+		t.Fatalf("invalid current entity filtered non-entity tool: %#v", invalidNames)
+	}
+
+	validReq := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-valid-current-entity")
+	validTools := mustMCPToolsForRequest(t, g, validReq)
+	validNames := make([]string, 0, len(validTools))
+	for _, tool := range validTools {
+		validNames = append(validNames, tool.Name)
+	}
+	if !slices.Contains(validNames, "read_scan_campaign") || !slices.Contains(validNames, "save_scan_campaign_mode") {
+		t.Fatalf("valid current entity did not expose role-scoped tools: %#v", validNames)
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-read",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "read_scan_campaign",
+			"arguments": map[string]any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	callReq := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(string(body))), "ctx-invalid-current-entity")
+	authorizeGatewayRequest(callReq)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, callReq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if exec.callCount != 0 {
+		t.Fatalf("ineligible role-scoped MCP call reached executor %d times", exec.callCount)
+	}
+	if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+		t.Fatalf("response = %s, want tool-not-allowed", rec.Body.String())
 	}
 }
 

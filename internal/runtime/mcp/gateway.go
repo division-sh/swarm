@@ -53,6 +53,11 @@ type runtimeGatewayExecutor interface {
 	ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition
 }
 
+type runtimeGatewayContextAwareExecutor interface {
+	ToolDefinitionsForActorInContext(context.Context, models.AgentConfig) []llm.ToolDefinition
+	ToolCapabilitiesForActorInContext(context.Context, models.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
+}
+
 func NewGateway(executor runtimeGatewayExecutor, authToken string, hooks GatewayHooks) *Gateway {
 	return &Gateway{
 		executor:  executor,
@@ -497,6 +502,9 @@ func (g *Gateway) withToolCapabilities(ctx context.Context, actor models.AgentCo
 	if g.executor == nil {
 		return ctx
 	}
+	if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
+		return toolcapabilities.WithContext(ctx, contextAware.ToolCapabilitiesForActorInContext(ctx, actor, names, requestAllowed))
+	}
 	set := g.executor.ToolCapabilitiesForActor(actor, names, requestAllowed)
 	return toolcapabilities.WithContext(ctx, set)
 }
@@ -555,7 +563,8 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) ([]ToolDef, error) {
 	if err != nil {
 		return nil, err
 	}
-	return g.mcpToolsForActor(turn.Actor, turn.Allowed, true), nil
+	ctx := g.baseContextForResolvedTurn(r.Context(), turn)
+	return g.mcpToolsForActorInContext(ctx, turn.Actor, turn.Allowed, true), nil
 }
 
 func (g *Gateway) MCPToolsForActor(actor models.AgentConfig) []ToolDef {
@@ -567,8 +576,12 @@ func (g *Gateway) MCPToolsForActor(actor models.AgentConfig) []ToolDef {
 }
 
 func (g *Gateway) mcpToolsForActor(actor models.AgentConfig, allowed map[string]struct{}, actorOK bool) []ToolDef {
-	catalog := g.toolCatalog(actor, actorOK)
-	set, hasSet := g.requestToolCapabilities(actor, actorOK, catalog, allowed)
+	return g.mcpToolsForActorInContext(context.Background(), actor, allowed, actorOK)
+}
+
+func (g *Gateway) mcpToolsForActorInContext(ctx context.Context, actor models.AgentConfig, allowed map[string]struct{}, actorOK bool) []ToolDef {
+	catalog := g.toolCatalogInContext(ctx, actor, actorOK)
+	set, hasSet := g.requestToolCapabilitiesInContext(ctx, actor, actorOK, catalog, allowed)
 
 	names := make([]string, 0, len(catalog))
 	if hasSet {
@@ -626,12 +639,20 @@ func (g *Gateway) mcpToolsForActor(actor models.AgentConfig, allowed map[string]
 }
 
 func (g *Gateway) toolCatalog(actor models.AgentConfig, actorOK bool) map[string]llm.ToolDefinition {
+	return g.toolCatalogInContext(context.Background(), actor, actorOK)
+}
+
+func (g *Gateway) toolCatalogInContext(ctx context.Context, actor models.AgentConfig, actorOK bool) map[string]llm.ToolDefinition {
 	catalog := map[string]llm.ToolDefinition{}
 	if !actorOK {
 		return catalog
 	}
 	if g.executor != nil {
-		for _, def := range g.executor.ToolDefinitionsForActor(actor) {
+		defs := g.executor.ToolDefinitionsForActor(actor)
+		if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
+			defs = contextAware.ToolDefinitionsForActorInContext(ctx, actor)
+		}
+		for _, def := range defs {
 			name := normalizeGatewayToolName(def.Name)
 			if name != "" {
 				def.Name = name
@@ -664,8 +685,15 @@ func (g *Gateway) toolCatalog(actor models.AgentConfig, actorOK bool) map[string
 }
 
 func (g *Gateway) requestToolCapabilities(actor models.AgentConfig, actorOK bool, catalog map[string]llm.ToolDefinition, requestAllowed map[string]struct{}) (toolcapabilities.Set, bool) {
+	return g.requestToolCapabilitiesInContext(context.Background(), actor, actorOK, catalog, requestAllowed)
+}
+
+func (g *Gateway) requestToolCapabilitiesInContext(ctx context.Context, actor models.AgentConfig, actorOK bool, catalog map[string]llm.ToolDefinition, requestAllowed map[string]struct{}) (toolcapabilities.Set, bool) {
 	if g.executor == nil || !actorOK {
 		return toolcapabilities.Set{}, false
+	}
+	if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
+		return contextAware.ToolCapabilitiesForActorInContext(ctx, actor, g.catalogNames(catalog), requestAllowed), true
 	}
 	return g.executor.ToolCapabilitiesForActor(actor, g.catalogNames(catalog), requestAllowed), true
 }
@@ -723,7 +751,7 @@ func (g *Gateway) runtimeTurnContextForRequest(r *http.Request, operation string
 	return turn, nil
 }
 
-func (g *Gateway) contextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
+func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
 	if g.hooks.WithActor != nil {
 		ctx = g.hooks.WithActor(ctx, turn.Actor)
 	}
@@ -737,7 +765,12 @@ func (g *Gateway) contextForResolvedTurn(ctx context.Context, turn TurnContext) 
 	if turn.Recorder != nil && g.hooks.WithEmittedEventsRecorder != nil {
 		ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
 	}
-	return g.withToolCapabilities(ctx, turn.Actor, g.catalogNames(g.toolCatalog(turn.Actor, true)), turn.Allowed)
+	return ctx
+}
+
+func (g *Gateway) contextForResolvedTurn(ctx context.Context, turn TurnContext) context.Context {
+	ctx = g.baseContextForResolvedTurn(ctx, turn)
+	return g.withToolCapabilities(ctx, turn.Actor, g.catalogNames(g.toolCatalogInContext(ctx, turn.Actor, true)), turn.Allowed)
 }
 
 func (g *Gateway) AuthorizeForTest(r *http.Request) error {
