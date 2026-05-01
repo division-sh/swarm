@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -331,6 +332,36 @@ func (e *Executor) RoleScopedEntityToolNamesForActor(actor models.AgentConfig) m
 		}
 	}
 	return out
+}
+
+func (e *Executor) roleScopedEntityToolsEligibleForCurrentTurn(ctx context.Context, actor models.AgentConfig) bool {
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	db := e.sqlDB
+	source := e.workflowSource
+	e.mu.RUnlock()
+	return roleScopedEntityToolsEligibleForCurrentTurn(ctx, db, source, actor)
+}
+
+func roleScopedEntityToolsEligibleForCurrentTurn(ctx context.Context, db *sql.DB, source semanticview.Source, actor models.AgentConfig) bool {
+	if db == nil || source == nil {
+		return false
+	}
+	contract, ok := entityruntime.ResolveForActor(source, actor.ID)
+	if !ok {
+		return false
+	}
+	entityID := roleScopedCurrentEntityID(ctx)
+	if entityID == "" {
+		return false
+	}
+	row, found, err := loadEntityState(ctx, db, entityID)
+	if err != nil || !found {
+		return false
+	}
+	return roleScopedEntityMatchesContract(source, row, contract) == nil
 }
 
 func (e *Executor) dispatchRoleScopedEntityTool(ctx context.Context, actor models.AgentConfig, name string, input any) (any, bool, error) {

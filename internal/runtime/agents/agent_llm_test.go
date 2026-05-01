@@ -399,12 +399,16 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 }
 
 type boardTestRuntime struct {
-	steps []*llm.Response
-	errs  []error
-	call  int
+	steps         []*llm.Response
+	errs          []error
+	call          int
+	startTools    []string
+	continueTools []string
+	inputs        []string
 }
 
 func (r *boardTestRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+	r.startTools = toolNamesForAgentTest(tools)
 	return &llm.Session{
 		ID:                "sess-1",
 		AgentID:           agentID,
@@ -419,6 +423,10 @@ func (r *boardTestRuntime) StartSession(_ context.Context, agentID, systemPrompt
 }
 
 func (r *boardTestRuntime) ContinueSession(_ context.Context, s *llm.Session, message llm.Message) (*llm.Response, error) {
+	if s != nil {
+		r.continueTools = toolNamesForAgentTest(s.Tools)
+	}
+	r.inputs = append(r.inputs, strings.TrimSpace(message.Content))
 	if r.call < len(r.errs) && r.errs[r.call] != nil {
 		err := r.errs[r.call]
 		r.call++
@@ -430,6 +438,14 @@ func (r *boardTestRuntime) ContinueSession(_ context.Context, s *llm.Session, me
 	resp := r.steps[r.call]
 	r.call++
 	return resp, nil
+}
+
+func toolNamesForAgentTest(tools []llm.ToolDefinition) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, strings.TrimSpace(tool.Name))
+	}
+	return names
 }
 
 func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
@@ -509,6 +525,53 @@ func (actorScopedFactoryToolExec) ToolDefinitionsForActor(cfg models.AgentConfig
 		{Name: "emit_scan_requested"},
 		{Name: "scoped_" + strings.TrimSpace(cfg.ID)},
 	}
+}
+
+type contextAwareFactoryToolExec struct{}
+
+func (contextAwareFactoryToolExec) Execute(context.Context, string, any) (any, error) {
+	return map[string]any{"ok": true}, nil
+}
+
+func (contextAwareFactoryToolExec) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
+	return []llm.ToolDefinition{
+		{Name: "read_scan_campaign"},
+		{Name: "save_scan_campaign_mode"},
+		{Name: "emit_market_research_scan_complete"},
+	}
+}
+
+func (contextAwareFactoryToolExec) ToolDefinitionsForActorInContext(ctx context.Context, cfg models.AgentConfig) []llm.ToolDefinition {
+	inbound, ok := runtimebus.InboundEventFromContext(ctx)
+	if ok && strings.HasPrefix(inbound.EntityID(), "valid-") {
+		return contextAwareFactoryToolExec{}.ToolDefinitionsForActor(cfg)
+	}
+	return []llm.ToolDefinition{{Name: "emit_market_research_scan_complete"}}
+}
+
+func (contextAwareFactoryToolExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	return roleScopedCapabilitiesForAgentTest(names, true)
+}
+
+func (contextAwareFactoryToolExec) ToolCapabilitiesForActorInContext(ctx context.Context, _ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	inbound, ok := runtimebus.InboundEventFromContext(ctx)
+	return roleScopedCapabilitiesForAgentTest(names, ok && strings.HasPrefix(inbound.EntityID(), "valid-"))
+}
+
+func roleScopedCapabilitiesForAgentTest(names []string, currentEntityEligible bool) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		visible := true
+		callable := true
+		if strings.HasPrefix(strings.TrimSpace(name), "read_scan_campaign") || strings.HasPrefix(strings.TrimSpace(name), "save_scan_campaign") {
+			if !currentEntityEligible {
+				visible = false
+				callable = false
+			}
+		}
+		caps = append(caps, toolcapabilities.Capability{Name: name, Visible: visible, Callable: callable})
+	}
+	return toolcapabilities.NewSet(caps)
 }
 
 func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
@@ -607,6 +670,45 @@ func TestNewLLMAgentFactory_PrefersActorScopedToolDefinitions(t *testing.T) {
 	}
 	if !containsString(names, "scoped_analysis-agent") {
 		t.Fatalf("expected precomposed actor-scoped tool to survive local filtering, got %v", names)
+	}
+}
+
+func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testing.T) {
+	rt := &boardTestRuntime{
+		steps: []*llm.Response{
+			{Message: llm.Message{Role: "assistant", Content: "handled"}},
+		},
+	}
+	factory := NewLLMAgentFactory(rt, contextAwareFactoryToolExec{}, nil, LLMAgentOptions{})
+	agent, err := factory(models.AgentConfig{
+		ID:               "market-research-agent",
+		Role:             "market_research",
+		ConversationMode: "task",
+		Config: mustAgentConfigJSON(t, map[string]any{
+			"system_prompt": "You are here.",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+	llmAgent := agent.(*LLMAgent)
+	evt := events.Event{
+		ID:      "evt-root",
+		Type:    events.EventType("discovery/market_research.corpus_file_assigned"),
+		RunID:   "run-1",
+		Payload: []byte(`{"assignment":{"scan_id":"root-run-id","geography":"US"}}`),
+	}.WithEntityID("root-run-id")
+	if _, err := llmAgent.OnEvent(context.Background(), evt); err != nil {
+		t.Fatalf("OnEvent: %v", err)
+	}
+	if containsString(rt.continueTools, "read_scan_campaign") || containsString(rt.continueTools, "save_scan_campaign_mode") {
+		t.Fatalf("invalid current entity left role-scoped tools in provider turn: %#v", rt.continueTools)
+	}
+	if !containsString(rt.continueTools, "emit_market_research_scan_complete") {
+		t.Fatalf("invalid current entity removed non-entity emit tool: %#v", rt.continueTools)
+	}
+	if len(rt.inputs) == 0 || strings.Contains(rt.inputs[0], "read_scan_campaign") || strings.Contains(rt.inputs[0], "save_scan_campaign_mode") {
+		t.Fatalf("event prompt advertised ineligible role-scoped tools: %#v", rt.inputs)
 	}
 }
 

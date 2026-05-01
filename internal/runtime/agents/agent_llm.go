@@ -28,6 +28,7 @@ type LLMAgent struct {
 	scopeKey       string
 	promptCache    map[string]string
 	promptResolver runtimecontracts.PromptResolver
+	toolExecutor   actorScopedToolExecutor
 	authority      runtimeauthority.Provider
 	emitRegistry   *runtimetools.EmitRegistry
 	mu             sync.Mutex
@@ -42,6 +43,10 @@ type LLMAgentOptions struct {
 type actorScopedToolExecutor interface {
 	llm.CapabilityAwareToolExecutor
 	ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition
+}
+
+type contextAwareActorScopedToolExecutor interface {
+	ToolDefinitionsForActorInContext(context.Context, models.AgentConfig) []llm.ToolDefinition
 }
 
 type roleScopedEntityToolCatalog interface {
@@ -115,6 +120,7 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		conversation:   c,
 		promptCache:    promptCache,
 		promptResolver: opts.PromptResolver,
+		toolExecutor:   toolExecutor,
 		authority:      authority,
 		emitRegistry:   emitRegistry,
 	}, nil
@@ -183,6 +189,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), a.cfg.SessionScope, conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
+	a.applyTurnToolDefinitions(ctx)
 
 	// Human task events must feed back into the requesting agent's reasoning context
 	// as an async tool-result style message correlated by task_id.
@@ -217,6 +224,21 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	}
 	_ = resp
 	return nil, nil
+}
+
+func (a *LLMAgent) applyTurnToolDefinitions(ctx context.Context) {
+	if a == nil || a.conversation == nil || a.toolExecutor == nil {
+		return
+	}
+	contextAware, ok := a.toolExecutor.(contextAwareActorScopedToolExecutor)
+	if !ok {
+		return
+	}
+	tools := contextAware.ToolDefinitionsForActorInContext(ctx, a.cfg)
+	a.conversation.Tools = tools
+	if a.conversation.Session != nil {
+		a.conversation.Session.Tools = tools
+	}
 }
 
 func (a *LLMAgent) applyPromptForEvent(evt events.Event) {

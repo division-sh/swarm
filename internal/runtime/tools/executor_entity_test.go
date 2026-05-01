@@ -17,6 +17,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	llm "swarm/internal/runtime/llm"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -327,6 +328,62 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		if _, err := exec.Execute(ctx, name, map[string]any{}); err == nil || !strings.Contains(err.Error(), "not allowed") {
 			t.Fatalf("direct %s execution error = %v, want tool-not-allowed", name, err)
 		}
+	}
+}
+
+func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *testing.T) {
+	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
+		"get_entity",
+		"save_entity_field",
+		"query_entities",
+	}}
+	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
+	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	currentID := uuid.NewString()
+	foreignID := uuid.NewString()
+	seedEntityStateRow(t, db, currentID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+		"status":         "open",
+		"business_brief": map[string]any{"summary": "valid", "confidence": 1},
+	}, time.Now().UTC())
+	seedEntityStateRow(t, db, foreignID, "", "run-root", "default", "queued", map[string]any{
+		"status": "root",
+	}, time.Now().UTC())
+
+	validCtx := runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:    "evt-current",
+		Type:  events.EventType("validation.started"),
+		RunID: entityToolTestRunID,
+	}.WithEntityID(currentID).WithFlowInstance("validation/inst-1"))
+	invalidCtx := runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:    "evt-root",
+		Type:  events.EventType("validation.started"),
+		RunID: entityToolTestRunID,
+	}.WithEntityID(foreignID).WithFlowInstance("run-root"))
+
+	validNames := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(validCtx, actor))
+	for _, name := range []string{"read_validation_case", "read_validation_case_status", "save_validation_case_business_brief", "update_validation_case_business_brief_summary"} {
+		if _, ok := validNames[name]; !ok {
+			t.Fatalf("valid current entity filtered %s from %#v", name, sortedRoleScopedToolNames(validNames))
+		}
+	}
+
+	invalidNames := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(invalidCtx, actor))
+	for _, name := range []string{"read_validation_case", "read_validation_case_status", "save_validation_case_business_brief", "update_validation_case_business_brief_summary"} {
+		if _, ok := invalidNames[name]; ok {
+			t.Fatalf("invalid current entity left %s visible in %#v", name, sortedRoleScopedToolNames(invalidNames))
+		}
+	}
+
+	caps := exec.ToolCapabilitiesForActorInContext(invalidCtx, actor, []string{"read_validation_case", "save_validation_case_business_brief"}, nil)
+	for _, name := range []string{"read_validation_case", "save_validation_case_business_brief"} {
+		cap, ok := caps.Capability(name)
+		if !ok || cap.Visible || cap.Callable || cap.DenialReason != "current_entity_contract_unavailable" {
+			t.Fatalf("%s invalid-current capability = %#v ok=%v", name, cap, ok)
+		}
+	}
+	deniedCtx := toolcapabilities.WithContext(invalidCtx, caps)
+	if _, err := exec.Execute(deniedCtx, "read_validation_case", map[string]any{}); err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("context-denied read_validation_case error = %v, want not allowed before execution", err)
 	}
 }
 

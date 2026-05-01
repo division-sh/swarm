@@ -216,6 +216,22 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 	return filtered
 }
 
+func (e *Executor) ToolDefinitionsForActorInContext(ctx context.Context, actor models.AgentConfig) []llm.ToolDefinition {
+	defs := e.ToolDefinitionsForActor(actor)
+	roleScopedNames := e.RoleScopedEntityToolNamesForActor(actor)
+	if len(roleScopedNames) == 0 || e.roleScopedEntityToolsEligibleForCurrentTurn(ctx, actor) {
+		return defs
+	}
+	filtered := make([]llm.ToolDefinition, 0, len(defs))
+	for _, def := range defs {
+		if _, ok := roleScopedNames[strings.TrimSpace(def.Name)]; ok {
+			continue
+		}
+		filtered = append(filtered, def)
+	}
+	return filtered
+}
+
 func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	seen := map[string]struct{}{}
@@ -248,6 +264,24 @@ func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []st
 		}
 		if !decision.allowed {
 			cap.DenialReason = "tool_not_allowed"
+		}
+		caps = append(caps, cap)
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
+func (e *Executor) ToolCapabilitiesForActorInContext(ctx context.Context, actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	set := e.ToolCapabilitiesForActor(actor, names, requestAllowed)
+	roleScopedNames := e.RoleScopedEntityToolNamesForActor(actor)
+	if len(roleScopedNames) == 0 || e.roleScopedEntityToolsEligibleForCurrentTurn(ctx, actor) {
+		return set
+	}
+	caps := make([]toolcapabilities.Capability, 0, len(set.ByName))
+	for name, cap := range set.ByName {
+		if _, ok := roleScopedNames[name]; ok {
+			cap.Visible = false
+			cap.Callable = false
+			cap.DenialReason = "current_entity_contract_unavailable"
 		}
 		caps = append(caps, cap)
 	}

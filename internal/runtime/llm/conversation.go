@@ -54,6 +54,10 @@ type CapabilityAwareToolExecutor interface {
 	ToolCapabilitiesForActor(models.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
 }
 
+type ContextAwareCapabilityToolExecutor interface {
+	ToolCapabilitiesForActorInContext(context.Context, models.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
+}
+
 type executedToolCall struct {
 	Name     string
 	OK       bool
@@ -402,8 +406,9 @@ func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context
 	if c.toolExecutor == nil {
 		return ctx
 	}
-	names := make([]string, 0, len(c.Tools))
-	for _, def := range c.Tools {
+	defs := c.turnToolDefinitions()
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
 		name := strings.TrimSpace(def.Name)
 		if name == "" {
 			continue
@@ -412,6 +417,9 @@ func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context
 	}
 	if len(names) == 0 {
 		return ctx
+	}
+	if contextAware, ok := c.toolExecutor.(ContextAwareCapabilityToolExecutor); ok {
+		return toolcapabilities.WithContext(ctx, contextAware.ToolCapabilitiesForActorInContext(ctx, actor, names, nil))
 	}
 	return toolcapabilities.WithContext(ctx, c.toolExecutor.ToolCapabilitiesForActor(actor, names, nil))
 }

@@ -239,6 +239,11 @@ contract_formats:
       no_contract_surface: Normal agents that do not resolve to a flow-owned entity contract receive no entity tools.
       current_entity_binding: 'Generated role-scoped entity tools operate on the current entity resolved from the triggering
         event/session context. Agent-supplied entity_id, entity_type, or flow_instance arguments are not accepted.'
+      turn_eligibility: 'A generated current-entity tool is provider-visible and callable for a concrete turn only when
+        the turn current entity resolves to the same flow-owned entity contract as the actor. If the current entity is absent,
+        root/run-owned, missing, or belongs to another flow/entity contract, generated current-entity read/save/update tools
+        MUST be removed from provider-visible catalogs and marked not callable for that turn. Executor validation remains
+        fail-closed defense-in-depth.'
       generated_reads:
         read_entity: 'read_{entity_type}() returns the complete current entity envelope and fields for the actor''s flow-owned
           entity contract.'
@@ -2351,10 +2356,10 @@ tool_model:
       tools nor emit tools require explicit tools entry.'
     role_scoped_entity_tools: 'When a normal actor resolves to a flow-owned entity contract, the platform generates
       current-entity read/save/update tools from that contract and the actor''s entity_writes declaration. The generated
-      tools are included in the agent-visible/provider-visible surface without explicit tools entries. The legacy entity
-      names create_entity, get_entity, get_subject_status, query_entities, search_entities, query_metrics, and
-      save_entity_field are removed before provider delivery and remain denied by runtime authorization as defense-in-depth.
-      Normal actors without an entity contract receive no entity tools.'
+      tools are eligible for the agent-visible/provider-visible surface without explicit tools entries, then filtered per
+      turn by current-entity contract eligibility. The legacy entity names create_entity, get_entity, get_subject_status,
+      query_entities, search_entities, query_metrics, and save_entity_field are removed before provider delivery and remain
+      denied by runtime authorization as defense-in-depth. Normal actors without an entity contract receive no entity tools.'
     context_cost: An agent with 4 tools in tools pays for 4 tool schemas in LLM context, regardless of how many tools
       exist in the registry or how many tools an MCP server exposes. The filter is the contract, not the source.
     default_deny: If an agent calls a tool that is not in its tools list, not a universal communication tool, not an emit
