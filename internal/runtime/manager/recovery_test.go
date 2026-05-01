@@ -2,6 +2,8 @@ package manager
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -242,8 +244,91 @@ func TestRecoverRejectsSelectedContractRouteRecoveryFromCurrentRouteOwner(t *tes
 	}
 }
 
+func TestRecoverRejectsSelectedContractRouteRecoveryFingerprintMismatch(t *testing.T) {
+	record := selectedContractRouteRecoveryRecord(t, "00000000-0000-0000-0000-000000000603")
+	record.RecipientPlanning = mustRecoveryJSON(t, map[string]any{
+		"owner":                         selectedContractRecipientPlanningOwner,
+		"route_topology_owner":          selectedContractRouteTopologyOwner,
+		"non_mutating":                  true,
+		"recipient_planning_supported":  true,
+		"delivery_writes_supported":     false,
+		"frontier_evidence_fingerprint": "frontier-fp",
+		"recipient_plan_events": []map[string]any{{
+			"source_event_id": "source-event-1",
+			"event_name":      "work.ready",
+			"recipients": []map[string]any{{
+				"subscriber_type": "agent",
+				"subscriber_id":   "agent-tampered",
+				"path":            "review/inst-1",
+				"route_source":    "selected_contract_route_topology",
+			}},
+			"disposition": "selected_contract_recipient_planning",
+		}},
+	})
+	bus := &recoveryTestBus{
+		selectedRouteRecoveries: []SelectedContractRouteRecoveryRecord{record},
+	}
+	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, &recoveryTestStore{})
+
+	err := am.Recover(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "recipient planning fingerprint mismatch") {
+		t.Fatalf("Recover error = %v, want recipient planning fingerprint mismatch", err)
+	}
+}
+
 func selectedContractRouteRecoveryRecord(t *testing.T, forkRunID string) SelectedContractRouteRecoveryRecord {
 	t.Helper()
+	routeTopology := mustRecoveryJSON(t, map[string]any{
+		"owner":                           selectedContractRouteTopologyOwner,
+		"non_mutating":                    true,
+		"route_persistence_supported":     false,
+		"executable_recipients_supported": false,
+		"frontier_evidence_fingerprint":   "frontier-fp",
+		"static_route_events": []map[string]any{{
+			"source_event_id": "source-event-1",
+			"event_name":      "work.ready",
+			"derived_recipients": []map[string]any{{
+				"subscriber_type": "agent",
+				"subscriber_id":   "agent-a",
+				"path":            "review/inst-1",
+				"route_source":    "selected_contract_route_topology",
+			}},
+			"disposition": "selected_contract_route_topology",
+		}},
+		"dynamic_topology_proofs": []map[string]any{{
+			"flow_instance":    "review/inst-1",
+			"source_event_ids": []string{"source-event-1"},
+			"event_names":      []string{"work.ready"},
+			"derived_recipients": []map[string]any{{
+				"subscriber_type": "agent",
+				"subscriber_id":   "agent-a",
+				"path":            "review/inst-1",
+				"route_source":    "selected_contract_route_topology",
+			}},
+			"disposition": "selected_contract_dynamic_route_topology",
+		}},
+	})
+	recipientPlanning := mustRecoveryJSON(t, map[string]any{
+		"owner":                         selectedContractRecipientPlanningOwner,
+		"route_topology_owner":          selectedContractRouteTopologyOwner,
+		"non_mutating":                  true,
+		"recipient_planning_supported":  true,
+		"delivery_writes_supported":     false,
+		"frontier_evidence_fingerprint": "frontier-fp",
+		"recipient_plan_events": []map[string]any{{
+			"source_event_id": "source-event-1",
+			"event_name":      "work.ready",
+			"recipients": []map[string]any{{
+				"subscriber_type": "agent",
+				"subscriber_id":   "agent-a",
+				"path":            "review/inst-1",
+				"route_source":    "selected_contract_route_topology",
+			}},
+			"disposition": "selected_contract_recipient_planning",
+		}},
+	})
 	return SelectedContractRouteRecoveryRecord{
 		Owner:                        SelectedContractRoutePersistenceOwner,
 		RuntimeRecoveryOwner:         SelectedContractRouteRecoveryOwner,
@@ -254,62 +339,20 @@ func selectedContractRouteRecoveryRecord(t *testing.T, forkRunID string) Selecte
 		DynamicTopologyOwner:         "runtime.run_fork.selected_contract_dynamic_route_topology",
 		RecipientPlanningOwner:       selectedContractRecipientPlanningOwner,
 		FrontierEvidenceFingerprint:  "frontier-fp",
-		RouteTopologyFingerprint:     "topology-fp",
-		RecipientPlanningFingerprint: "recipient-fp",
+		RouteTopologyFingerprint:     recoveryJSONFingerprint(routeTopology),
+		RecipientPlanningFingerprint: recoveryJSONFingerprint(recipientPlanning),
 		StaticRouteEventCount:        1,
 		DynamicTopologyProofCount:    1,
 		RecipientPlanEventCount:      1,
-		RouteTopology: mustRecoveryJSON(t, map[string]any{
-			"owner":                           selectedContractRouteTopologyOwner,
-			"non_mutating":                    true,
-			"route_persistence_supported":     false,
-			"executable_recipients_supported": false,
-			"frontier_evidence_fingerprint":   "frontier-fp",
-			"static_route_events": []map[string]any{{
-				"source_event_id": "source-event-1",
-				"event_name":      "work.ready",
-				"derived_recipients": []map[string]any{{
-					"subscriber_type": "agent",
-					"subscriber_id":   "agent-a",
-					"path":            "review/inst-1",
-					"route_source":    "selected_contract_route_topology",
-				}},
-				"disposition": "selected_contract_route_topology",
-			}},
-			"dynamic_topology_proofs": []map[string]any{{
-				"flow_instance":    "review/inst-1",
-				"source_event_ids": []string{"source-event-1"},
-				"event_names":      []string{"work.ready"},
-				"derived_recipients": []map[string]any{{
-					"subscriber_type": "agent",
-					"subscriber_id":   "agent-a",
-					"path":            "review/inst-1",
-					"route_source":    "selected_contract_route_topology",
-				}},
-				"disposition": "selected_contract_dynamic_route_topology",
-			}},
-		}),
-		RecipientPlanning: mustRecoveryJSON(t, map[string]any{
-			"owner":                         selectedContractRecipientPlanningOwner,
-			"route_topology_owner":          selectedContractRouteTopologyOwner,
-			"non_mutating":                  true,
-			"recipient_planning_supported":  true,
-			"delivery_writes_supported":     false,
-			"frontier_evidence_fingerprint": "frontier-fp",
-			"recipient_plan_events": []map[string]any{{
-				"source_event_id": "source-event-1",
-				"event_name":      "work.ready",
-				"recipients": []map[string]any{{
-					"subscriber_type": "agent",
-					"subscriber_id":   "agent-a",
-					"path":            "review/inst-1",
-					"route_source":    "selected_contract_route_topology",
-				}},
-				"disposition": "selected_contract_recipient_planning",
-			}},
-		}),
-		CreatedAt: time.Now().UTC(),
+		RouteTopology:                routeTopology,
+		RecipientPlanning:            recipientPlanning,
+		CreatedAt:                    time.Now().UTC(),
 	}
+}
+
+func recoveryJSONFingerprint(raw json.RawMessage) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {

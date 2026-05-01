@@ -2,6 +2,8 @@ package manager
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -161,6 +163,12 @@ func decodeSelectedContractRouteRecoveryTruth(record SelectedContractRouteRecove
 	if err := validateSelectedContractRouteRecoveryRecord(record); err != nil {
 		return SelectedContractRouteRecoveryTruth{}, err
 	}
+	if got := selectedContractRecoveredJSONFingerprint(record.RouteTopology); got != strings.TrimSpace(record.RouteTopologyFingerprint) {
+		return SelectedContractRouteRecoveryTruth{}, fmt.Errorf("selected-contract recovered route topology fingerprint mismatch")
+	}
+	if got := selectedContractRecoveredJSONFingerprint(record.RecipientPlanning); got != strings.TrimSpace(record.RecipientPlanningFingerprint) {
+		return SelectedContractRouteRecoveryTruth{}, fmt.Errorf("selected-contract recovered recipient planning fingerprint mismatch")
+	}
 	var topology selectedContractRecoveredRouteTopology
 	if err := json.Unmarshal(record.RouteTopology, &topology); err != nil {
 		return SelectedContractRouteRecoveryTruth{}, fmt.Errorf("decode selected-contract route topology recovery: %w", err)
@@ -196,6 +204,11 @@ func decodeSelectedContractRouteRecoveryTruth(record SelectedContractRouteRecove
 		RecipientPlanning: planning,
 		recipientGuard:    newSelectedContractRecoveredRecipientGuard(planning),
 	}, nil
+}
+
+func selectedContractRecoveredJSONFingerprint(raw json.RawMessage) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func newSelectedContractRecoveredRecipientGuard(planning selectedContractRecoveredRecipientPlanning) selectedContractRecoveredRecipientGuard {
