@@ -415,9 +415,6 @@ func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context
 		}
 		names = append(names, name)
 	}
-	if len(names) == 0 {
-		return ctx
-	}
 	if contextAware, ok := c.toolExecutor.(ContextAwareCapabilityToolExecutor); ok {
 		return toolcapabilities.WithContext(ctx, contextAware.ToolCapabilitiesForActorInContext(ctx, actor, names, nil))
 	}
