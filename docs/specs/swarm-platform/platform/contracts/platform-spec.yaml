@@ -2771,8 +2771,10 @@ platform_tables:
       description: Durable fork-local selected-contract route/topology recovery evidence. This table is owned by
         store.run_fork.selected_contract_route_persistence and consumed by runtime.run_fork.selected_contract_route_recovery
         after restart. Rows are keyed by fork run_id and selected binding/topology/recipient evidence; they are not copied
-        source routing_rules rows and are not current operational flow-instance route rows. Runtime recovery must consume
-        these rows as route truth for selected-contract forks and must continue to gate recipients through
+        source routing_rules rows and are not current operational flow-instance route rows. The topology and recipient
+        fingerprints are computed over canonical JSON semantics so JSONB storage normalization cannot invalidate honest
+        rows while tampered payloads still fail closed. Runtime recovery must consume these rows as route truth for
+        selected-contract forks and must continue to gate recipients through
         runtime.run_fork.selected_contract_recipient_planning before publish. This table does not authorize delivery
         replay, handler execution, receipts, dead letters, idempotency, timers, sessions, contract swap, or UI/API
         ownership.
@@ -3366,7 +3368,8 @@ run_model:
       store.run_fork.selected_contract_route_persistence and runtime recovery consumption is owned by
       runtime.run_fork.selected_contract_route_recovery. The store owner persists selected route topology, dynamic
       topology proof or fail-closed state, recipient-plan evidence, selected binding identity, and evidence
-      fingerprints under the fork run_id. Runtime recovery MUST read this owner after restart for selected-contract
+      fingerprints under the fork run_id. Topology and recipient-planning fingerprints MUST be computed and verified
+      over canonical JSON semantics rather than raw JSONB storage bytes. Runtime recovery MUST read this owner after restart for selected-contract
       fork route truth and MUST NOT read source/current routing_rules, source flow_instance_routes, current
       ListFlowInstanceRoutes output, or source event_deliveries as executable fork route or recipient truth. Recipient
       planning and EventBus.Publish recipient-plan guards remain authoritative before publish. This owner MUST NOT write

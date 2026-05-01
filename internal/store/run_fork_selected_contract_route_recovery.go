@@ -1,12 +1,14 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -352,8 +354,30 @@ func runForkSelectedContractRecoveryJSONFingerprint(value any) (json.RawMessage,
 	if err != nil {
 		return nil, "", err
 	}
-	sum := sha256.Sum256(payload)
-	return append(json.RawMessage(nil), payload...), hex.EncodeToString(sum[:]), nil
+	fingerprint, err := runForkSelectedContractRecoveryCanonicalJSONFingerprint(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	return append(json.RawMessage(nil), payload...), fingerprint, nil
+}
+
+func runForkSelectedContractRecoveryCanonicalJSONFingerprint(raw json.RawMessage) (string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return "", err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return "", fmt.Errorf("unexpected trailing JSON")
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func runForkSelectedContractRouteRecoverySelect() string {
