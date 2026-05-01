@@ -249,6 +249,30 @@ func (c *capabilityAwareToolExec) ToolCapabilitiesForActor(_ models.AgentConfig,
 	return toolcapabilities.NewSet(caps)
 }
 
+type emptyTurnCapabilityToolExec struct {
+	contextNames []string
+}
+
+func (e *emptyTurnCapabilityToolExec) Execute(ctx context.Context, name string, _ any) (any, error) {
+	set, ok := toolcapabilities.FromContext(ctx)
+	if !ok {
+		return map[string]any{"accepted_without_capabilities": name}, nil
+	}
+	if _, ok := set.Capability(name); !ok {
+		return nil, errors.New("tool not offered for this turn")
+	}
+	return map[string]any{"name": name}, nil
+}
+
+func (e *emptyTurnCapabilityToolExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	return toolcapabilities.NewSet(nil)
+}
+
+func (e *emptyTurnCapabilityToolExec) ToolCapabilitiesForActorInContext(_ context.Context, _ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	e.contextNames = append([]string(nil), names...)
+	return toolcapabilities.NewSet(nil)
+}
+
 func testAsString(v any) string {
 	s, _ := v.(string)
 	return s
@@ -309,6 +333,34 @@ func TestConversationStep_AttachesCanonicalToolCapabilitySetToExecutionContext(t
 	}
 	if _, ok := te.captured.Capability("emit_scan_requested"); !ok {
 		t.Fatalf("expected capability set to include emit_scan_requested, got %#v", te.captured.ByName)
+	}
+}
+
+func TestConversationExecuteToolCalls_PreservesEmptyTurnDenialContext(t *testing.T) {
+	te := &emptyTurnCapabilityToolExec{}
+	c := NewConversation("market-research-agent", "t1", "sys", nil, SessionScoped, 10, &scriptedRuntime{})
+	c.SetToolExecutor(te)
+
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:   "market-research-agent",
+		Role: "market_research",
+	})
+	raw, executed := c.executeToolCalls(ctx, []ToolCall{{
+		Name:      "read_scan_campaign",
+		Arguments: map[string]any{},
+	}})
+
+	if len(te.contextNames) != 0 {
+		t.Fatalf("expected empty turn capability request, got %#v", te.contextNames)
+	}
+	if len(executed) != 1 || executed[0].OK {
+		t.Fatalf("expected hallucinated tool call to fail closed, got executed=%#v raw=%s", executed, raw)
+	}
+	if !strings.Contains(raw, "tool not offered for this turn") {
+		t.Fatalf("expected explicit turn-denial error, got %s", raw)
+	}
+	if strings.Contains(raw, "accepted_without_capabilities") {
+		t.Fatalf("tool call executed without turn capability context: %s", raw)
 	}
 }
 
