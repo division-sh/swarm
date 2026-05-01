@@ -66,6 +66,11 @@ type claudeStartupToolSource interface {
 	ToolCapabilitiesForActor(runtimeactors.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
 }
 
+type claudeStartupContextAwareToolSource interface {
+	ToolDefinitionsForActorInContext(context.Context, runtimeactors.AgentConfig) []llm.ToolDefinition
+	ToolCapabilitiesForActorInContext(context.Context, runtimeactors.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
+}
+
 func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, startupProbe llm.StartupVisibleToolSurfaceProber, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
 	if cfg == nil || strings.TrimSpace(cfg.LLM.RuntimeMode) != "cli_test" {
 		return nil
@@ -115,14 +120,11 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		if len(surface.RuntimeToolNames) == 0 {
 			continue
 		}
-		expectedNames, capabilities, err := expectedStartupMCPTools(agentCfg, tools, sessionTools)
+		agentCtx := runtimeactors.WithActor(ctx, agentCfg)
+		expectedNames, capabilities, err := expectedStartupMCPTools(agentCtx, agentCfg, tools, sessionTools)
 		if err != nil {
 			return fmt.Errorf("mcp startup probe expected tools for agent %s: %w", agentID, err)
 		}
-		if len(expectedNames) == 0 {
-			return fmt.Errorf("mcp startup probe found no visible tools for agent %s", agentID)
-		}
-		agentCtx := runtimeactors.WithActor(ctx, agentCfg)
 		binding, enabled, err := llm.BuildMCPHTTPBinding(agentCtx, cfg, turnStore, &llm.Session{
 			AgentID: agentID,
 			Tools:   sessionTools,
@@ -179,31 +181,55 @@ func runtimeConfiguredMCPGatewayToken() string {
 	return strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"))
 }
 
-func expectedStartupMCPTools(agentCfg runtimeactors.AgentConfig, tools claudeStartupToolSource, sessionTools []llm.ToolDefinition) ([]string, toolcapabilities.Set, error) {
-	names := llm.AgentVisibleToolSurfaceForActor(agentCfg, sessionTools).RuntimeToolNames
-	if len(names) == 0 {
+func expectedStartupMCPTools(ctx context.Context, agentCfg runtimeactors.AgentConfig, tools claudeStartupToolSource, sessionTools []llm.ToolDefinition) ([]string, toolcapabilities.Set, error) {
+	staticNames := llm.AgentVisibleToolSurfaceForActor(agentCfg, sessionTools).RuntimeToolNames
+	if len(staticNames) == 0 {
 		return nil, toolcapabilities.Set{}, nil
 	}
-	allowed := make(map[string]struct{}, len(names))
-	for _, name := range names {
+	allowed := make(map[string]struct{}, len(staticNames))
+	for _, name := range staticNames {
 		allowed[name] = struct{}{}
 	}
-	caps := tools.ToolCapabilitiesForActor(agentCfg, names, allowed)
-	if len(caps.ByName) == 0 {
-		return nil, toolcapabilities.Set{}, fmt.Errorf("tool capability set is required")
+	staticCaps := tools.ToolCapabilitiesForActor(agentCfg, staticNames, allowed)
+	staticVisible, err := visibleStartupCapabilityNames(staticNames, staticCaps)
+	if err != nil {
+		return nil, toolcapabilities.Set{}, err
 	}
+	if len(staticVisible) == 0 {
+		return nil, toolcapabilities.Set{}, fmt.Errorf("found no visible tools")
+	}
+
+	concreteTools := sessionTools
+	if contextAware, ok := tools.(claudeStartupContextAwareToolSource); ok {
+		concreteTools = contextAware.ToolDefinitionsForActorInContext(ctx, agentCfg)
+	}
+	concreteNames := llm.AgentVisibleToolSurfaceForActor(agentCfg, concreteTools).RuntimeToolNames
+	var concreteCaps toolcapabilities.Set
+	if contextAware, ok := tools.(claudeStartupContextAwareToolSource); ok {
+		concreteCaps = contextAware.ToolCapabilitiesForActorInContext(ctx, agentCfg, concreteNames, allowed)
+	} else {
+		concreteCaps = tools.ToolCapabilitiesForActor(agentCfg, concreteNames, allowed)
+	}
+	visible, err := visibleStartupCapabilityNames(concreteNames, concreteCaps)
+	if err != nil {
+		return nil, toolcapabilities.Set{}, err
+	}
+	sort.Strings(visible)
+	return visible, concreteCaps, nil
+}
+
+func visibleStartupCapabilityNames(names []string, caps toolcapabilities.Set) ([]string, error) {
 	visible := make([]string, 0, len(names))
 	for _, name := range names {
 		capability, ok := caps.Capability(name)
 		if !ok {
-			return nil, toolcapabilities.Set{}, fmt.Errorf("missing tool capability for %s", name)
+			return nil, fmt.Errorf("missing tool capability for %s", name)
 		}
 		if capability.Visible {
 			visible = append(visible, name)
 		}
 	}
-	sort.Strings(visible)
-	return visible, caps, nil
+	return visible, nil
 }
 
 func startupSessionToolNames(tools []llm.ToolDefinition) []string {

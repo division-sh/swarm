@@ -99,10 +99,14 @@ func TestValidateClaudeManagedAgentWorkspaces_AcceptsContainerTargets(t *testing
 }
 
 type startupProbeToolExecutor struct {
-	defs     []llm.ToolDefinition
-	caps     map[string]toolcapabilities.Capability
-	executed []string
-	execErrs map[string]error
+	defs             []llm.ToolDefinition
+	contextDefs      []llm.ToolDefinition
+	caps             map[string]toolcapabilities.Capability
+	contextCaps      map[string]toolcapabilities.Capability
+	contextDefCalls  int
+	contextCapsCalls int
+	executed         []string
+	execErrs         map[string]error
 }
 
 func (s *startupProbeToolExecutor) Execute(_ context.Context, name string, _ any) (any, error) {
@@ -123,9 +127,29 @@ func (s *startupProbeToolExecutor) ToolDefinitionsForActor(runtimeactors.AgentCo
 }
 
 func (s *startupProbeToolExecutor) ToolCapabilitiesForActor(_ runtimeactors.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	return startupProbeCapabilitySet(names, s.caps)
+}
+
+func (s *startupProbeToolExecutor) ToolDefinitionsForActorInContext(context.Context, runtimeactors.AgentConfig) []llm.ToolDefinition {
+	s.contextDefCalls++
+	if s.contextDefs != nil {
+		return append([]llm.ToolDefinition(nil), s.contextDefs...)
+	}
+	return append([]llm.ToolDefinition(nil), s.defs...)
+}
+
+func (s *startupProbeToolExecutor) ToolCapabilitiesForActorInContext(_ context.Context, _ runtimeactors.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	s.contextCapsCalls++
+	if s.contextCaps != nil {
+		return startupProbeCapabilitySet(names, s.contextCaps)
+	}
+	return startupProbeCapabilitySet(names, s.caps)
+}
+
+func startupProbeCapabilitySet(names []string, source map[string]toolcapabilities.Capability) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	for _, name := range names {
-		capability, ok := s.caps[strings.TrimSpace(name)]
+		capability, ok := source[strings.TrimSpace(name)]
 		if !ok {
 			capability = toolcapabilities.Capability{
 				Name:               strings.TrimSpace(name),
@@ -245,6 +269,84 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesRealFilteredTransport(t *tes
 	}
 	if !slices.Equal(exec.executed, []string{"health_check"}) {
 		t.Fatalf("executed = %#v, want health_check tools/call smoke", exec.executed)
+	}
+}
+
+func TestValidateClaudeMCPToolsForManagedAgents_SeparatesStaticInventoryFromNoCurrentTurnSurface(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
+		ID:     "analysis-agent",
+		Role:   "analysis",
+		Config: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: []llm.ToolDefinition{
+			{Name: "emit_vertical_derived", Schema: map[string]any{"type": "object", "properties": map[string]any{}}},
+			{Name: "read_vertical", Schema: map[string]any{"type": "object", "properties": map[string]any{}}},
+			{Name: "save_vertical_scores", Schema: map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "object"}}}},
+			{Name: "update_vertical_scores_signal_strength", Schema: map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "number"}}}},
+		},
+		contextDefs: []llm.ToolDefinition{
+			{Name: "emit_vertical_derived", Schema: map[string]any{"type": "object", "properties": map[string]any{}}},
+		},
+		caps: map[string]toolcapabilities.Capability{
+			"emit_vertical_derived":                  {Name: "emit_vertical_derived", Kind: toolcapabilities.KindEmit, Visible: true, Callable: true},
+			"read_vertical":                          {Name: "read_vertical", Visible: true, Callable: true, ContextRequirement: toolcapabilities.ContextRequirementTurnContext},
+			"save_vertical_scores":                   {Name: "save_vertical_scores", Visible: true, Callable: true, ContextRequirement: toolcapabilities.ContextRequirementTurnContext},
+			"update_vertical_scores_signal_strength": {Name: "update_vertical_scores_signal_strength", Visible: true, Callable: true, ContextRequirement: toolcapabilities.ContextRequirementTurnContext},
+		},
+		contextCaps: map[string]toolcapabilities.Capability{
+			"emit_vertical_derived": {Name: "emit_vertical_derived", Kind: toolcapabilities.KindEmit, Visible: true, Callable: true},
+		},
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, nil, turns, exec, manager); err != nil {
+		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if exec.contextDefCalls == 0 || exec.contextCapsCalls == 0 {
+		t.Fatalf("expected startup MCP proof to consume context-aware surface, defCalls=%d capCalls=%d", exec.contextDefCalls, exec.contextCapsCalls)
+	}
+	if len(exec.executed) != 0 {
+		t.Fatalf("executed = %#v, want visibility-only proof for no-current generated entity tools", exec.executed)
+	}
+}
+
+func TestValidateClaudeMCPToolsForManagedAgents_AllowsEmptyConcreteSurfaceWhenStaticInventoryIsGeneratedCurrentEntityOnly(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
+		ID:   "validation-agent",
+		Role: "validation",
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	exec := &startupProbeToolExecutor{
+		defs: []llm.ToolDefinition{
+			{Name: "read_validation_case", Schema: map[string]any{"type": "object", "properties": map[string]any{}}},
+			{Name: "save_validation_case_mvp_spec", Schema: map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "object"}}}},
+			{Name: "update_validation_case_mvp_spec_summary", Schema: map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}}},
+		},
+		contextDefs: []llm.ToolDefinition{},
+		caps: map[string]toolcapabilities.Capability{
+			"read_validation_case":                    {Name: "read_validation_case", Visible: true, Callable: true, ContextRequirement: toolcapabilities.ContextRequirementTurnContext},
+			"save_validation_case_mvp_spec":           {Name: "save_validation_case_mvp_spec", Visible: true, Callable: true, ContextRequirement: toolcapabilities.ContextRequirementTurnContext},
+			"update_validation_case_mvp_spec_summary": {Name: "update_validation_case_mvp_spec_summary", Visible: true, Callable: true, ContextRequirement: toolcapabilities.ContextRequirementTurnContext},
+		},
+		contextCaps: map[string]toolcapabilities.Capability{},
+	}
+	turns := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+
+	if err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, nil, turns, exec, manager); err != nil {
+		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+	if len(exec.executed) != 0 {
+		t.Fatalf("executed = %#v, want no callable startup probe for empty concrete surface", exec.executed)
 	}
 }
 

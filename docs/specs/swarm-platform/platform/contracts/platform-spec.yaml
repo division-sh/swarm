@@ -244,6 +244,10 @@ contract_formats:
         root/run-owned, missing, or belongs to another flow/entity contract, generated current-entity read/save/update tools
         MUST be removed from provider-visible catalogs and marked not callable for that turn. Executor validation remains
         fail-closed defense-in-depth.'
+      startup_validation_surface: 'Runtime startup validation distinguishes actor-static generated schema inventory from
+        concrete turn-eligible MCP tools/list. Actor-static inventory may prove generated read/save/update schemas exist for
+        an actor, but a no-current startup MCP tools/list probe MUST be compared against the concrete startup turn context
+        and MUST NOT require generated current-entity tools to appear without a valid current entity.'
       generated_reads:
         read_entity: 'read_{entity_type}() returns the complete current entity envelope and fields for the actor''s flow-owned
           entity contract.'
