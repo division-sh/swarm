@@ -184,6 +184,12 @@ active_issues:
     maps_to:
       - timestamp_fork_replay_resume_ownership
       - delivery_and_replay_ownership
+  - id: 625
+    title: Gate contract-swap boot/resume semantics for timestamp forks
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+      - run_isolated_current_state_ownership
+      - delivery_and_replay_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
     maps_to:
@@ -328,6 +334,7 @@ nodes:
       - selected-contract delivery writes are now closed for the supported swarm fork --contracts path through runtime.run_fork.selected_contract_execution consuming runtime.run_fork.selected_contract_recipient_planning; source deliveries remain lineage/blocker evidence and route persistence remains split
       - selected-contract parent-tail rebaseline must close or narrow stale #588/#608 tracker state while keeping #564/#549 open for full replay/resume and fork architecture siblings
       - selected-contract route persistence/runtime recovery needs a fork-local owner keyed by fork run_id and selected binding/topology/recipient evidence; current routing_rules, flow_instance_routes, and startup ListFlowInstanceRoutes recovery remain current-route infrastructure and must not become selected-fork route truth
+      - contract-swap boot/resume readiness needs a non-mutating runtime owner that consumes selected binding, selected source admission, replay/resume taxonomy, selected route/recipient/recovery evidence, and classifies source deliveries/outcomes/timers/routes/sessions/non-agent facts as lineage, blockers, or split siblings before any full historical replay mutation
     representative_issues:
       - 564
       - 565
@@ -350,6 +357,7 @@ nodes:
       - 618
       - 619
       - 621
+      - 625
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
