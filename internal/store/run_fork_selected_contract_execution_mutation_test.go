@@ -129,6 +129,45 @@ func TestSelectedContractExecutionMaterializationPreflightsBranchDivergenceOwner
 	}
 }
 
+func TestSelectedContractExecutionMaterializationPreflightsRouteRecoveryCapability(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700002485, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	if _, err := db.ExecContext(ctx, `DROP TABLE run_fork_selected_contract_route_recoveries`); err != nil {
+		t.Fatalf("drop selected route recovery table: %v", err)
+	}
+
+	_, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "run_fork_selected_contract_route_recoveries") {
+		t.Fatalf("materialization error = %v, want route recovery capability failure", err)
+	}
+	var strayForks int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM runs
+		WHERE forked_from_run_id = $1::uuid
+	`, sourceRunID).Scan(&strayForks); err != nil {
+		t.Fatalf("count stray forks: %v", err)
+	}
+	if strayForks != 0 {
+		t.Fatalf("stray materialized forks = %d, want 0", strayForks)
+	}
+}
+
 func TestSelectedContractExecutionActivationPreservesTimerBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
