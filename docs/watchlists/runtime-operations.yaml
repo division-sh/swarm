@@ -170,6 +170,20 @@ active_issues:
     title: Gate selected-contract recipient planning owner and publish-path consumer migration
     maps_to:
       - timestamp_fork_replay_resume_ownership
+  - id: 618
+    title: Gate fork-local selected-contract route persistence owner before delivery writes
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+  - id: 619
+    title: Gate selected-contract delivery writes from recipient planning
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+      - delivery_and_replay_ownership
+  - id: 621
+    title: Rebaseline selected-contract fork parent tail after delivery proof
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+      - delivery_and_replay_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
     maps_to:
@@ -255,6 +269,7 @@ nodes:
       - timestamp-fork non-agent delivery facts are not safe to replay through the agent delivery primitive; node/system delivery execution requires a separate handler/idempotency/receipt owner
       - selected-contract fork execution must classify delivery-write boundaries before future mutation; source deliveries remain lineage/blocker evidence, not executable fork work
       - selected-contract fork execution must write fresh fork-local event/delivery/outcome rows through the runtime selected-contract execution owner, with source rows used only as lineage evidence
+      - selected-contract delivery writes from recipient planning are execution-proven through runtime.run_fork.selected_contract_execution and EventBus.Publish recipient-plan guards; a delivery-row-only writer would be a non-authoritative duplicate
     representative_issues:
       - 112
       - 144
@@ -266,6 +281,8 @@ nodes:
       - 583
       - 585
       - 598
+      - 619
+      - 621
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
@@ -302,6 +319,8 @@ nodes:
       - selected-contract route/topology truth needs a canonical owner beyond route admission before recipient delivery; route admission is prerequisite evidence, static selected-source topology is fork-local truth only through the selected route derivation owner, and dynamic flow-instance topology must be fork-local-proven or fail-closed without copying source routing rows
       - selected-contract dynamic route topology proof is a non-mutating child under route topology; it may clear selected_contract_dynamic_route_topology_unproven only from fork-local selected-contract route/frontier/admission/flow-instance evidence and must keep route persistence, delivery writes, handlers, timers, sessions, source-advanced policy, contract swap, and UI/API split
       - selected-contract recipient planning needs a canonical owner beyond route topology before selected execution publishes fork-local events; selected execution and EventBus.Publish must consume that owner before recipient derivation, while delivery writes, route persistence, handlers, timers, sessions, turns, source-advanced policy, contract swap, and UI/API remain separately gated siblings
+      - selected-contract delivery writes are now closed for the supported swarm fork --contracts path through runtime.run_fork.selected_contract_execution consuming runtime.run_fork.selected_contract_recipient_planning; source deliveries remain lineage/blocker evidence and route persistence remains split
+      - selected-contract parent-tail rebaseline must close or narrow stale #588/#608 tracker state while keeping #564/#549 open for full replay/resume and fork architecture siblings
     representative_issues:
       - 564
       - 565
@@ -321,6 +340,9 @@ nodes:
       - 609
       - 611
       - 615
+      - 618
+      - 619
+      - 621
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
