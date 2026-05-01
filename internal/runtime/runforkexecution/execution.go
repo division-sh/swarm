@@ -125,6 +125,20 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
+	if _, err := req.Store.RecordRunForkSelectedContractRouteRecovery(ctx, store.RunForkSelectedContractRouteRecoveryRequest{
+		ForkRunID:         materialization.ForkRunID,
+		SourceRunID:       plan.SourceRunID,
+		ForkEventID:       plan.ForkPoint.EventID,
+		ContractSelection: selection,
+		RouteTopology:     routeTopology,
+		RecipientPlanning: *model.RecipientPlanning,
+	}); err != nil {
+		return SelectedContractExecutionResult{
+			Owner:                              store.RunForkSelectedContractExecutionOwner,
+			Materialization:                    materialization,
+			SelectedContractExecutionAdmission: &admission,
+		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+	}
 	published, err := publishSelectedContractForkEvents(ctx, publishSelectedContractForkEventsRequest{
 		Store:             req.Store,
 		LoadedSource:      loadedSource,

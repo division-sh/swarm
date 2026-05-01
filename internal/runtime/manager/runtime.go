@@ -500,6 +500,9 @@ func (am *AgentManager) recover(ctx context.Context, startupReplayDiagnostics bo
 	if err := am.restoreFlowInstanceRoutes(ctx); err != nil {
 		return summary, err
 	}
+	if err := am.restoreSelectedContractRouteRecoveries(ctx); err != nil {
+		return summary, err
+	}
 
 	if err := runtimepipeline.NewRecoveryManagerWith(am.bus.Store(), am.bus).Recover(ctx); err != nil {
 		return summary, fmt.Errorf("recover pipeline receipts: %w", err)
@@ -514,13 +517,17 @@ func (am *AgentManager) recover(ctx context.Context, startupReplayDiagnostics bo
 }
 
 type RecoverableStateSnapshot struct {
-	PersistedAgentCount             int
-	PersistedFlowInstanceRouteCount int
-	ReplayEligibleEventPresent      bool
+	PersistedAgentCount                         int
+	PersistedFlowInstanceRouteCount             int
+	PersistedSelectedContractRouteRecoveryCount int
+	ReplayEligibleEventPresent                  bool
 }
 
 func (s RecoverableStateSnapshot) HasRecoverableWork() bool {
-	return s.PersistedAgentCount > 0 || s.PersistedFlowInstanceRouteCount > 0 || s.ReplayEligibleEventPresent
+	return s.PersistedAgentCount > 0 ||
+		s.PersistedFlowInstanceRouteCount > 0 ||
+		s.PersistedSelectedContractRouteRecoveryCount > 0 ||
+		s.ReplayEligibleEventPresent
 }
 
 func (s RecoverableStateSnapshot) Classes() []string {
@@ -531,6 +538,9 @@ func (s RecoverableStateSnapshot) Classes() []string {
 	if s.PersistedFlowInstanceRouteCount > 0 {
 		classes = append(classes, "persisted flow instance routes")
 	}
+	if s.PersistedSelectedContractRouteRecoveryCount > 0 {
+		classes = append(classes, "selected-contract route recoveries")
+	}
 	if s.ReplayEligibleEventPresent {
 		classes = append(classes, "events missing pipeline receipts")
 	}
@@ -540,9 +550,10 @@ func (s RecoverableStateSnapshot) Classes() []string {
 
 func (s RecoverableStateSnapshot) Detail() map[string]any {
 	return map[string]any{
-		"persisted_agent_count":               s.PersistedAgentCount,
-		"persisted_flow_instance_route_count": s.PersistedFlowInstanceRouteCount,
-		"replay_eligible_event_present":       s.ReplayEligibleEventPresent,
+		"persisted_agent_count":                            s.PersistedAgentCount,
+		"persisted_flow_instance_route_count":              s.PersistedFlowInstanceRouteCount,
+		"persisted_selected_contract_route_recovery_count": s.PersistedSelectedContractRouteRecoveryCount,
+		"replay_eligible_event_present":                    s.ReplayEligibleEventPresent,
 	}
 }
 
@@ -571,6 +582,13 @@ func (am *AgentManager) RecoverableStateSnapshot(ctx context.Context) (Recoverab
 			return RecoverableStateSnapshot{}, fmt.Errorf("list persisted flow instance routes: %w", err)
 		}
 		snapshot.PersistedFlowInstanceRouteCount = len(routes)
+	}
+	if routeRecoveryStore, ok := store.(selectedContractRouteRecoveryLister); ok && routeRecoveryStore != nil {
+		recoveries, err := routeRecoveryStore.ListSelectedContractRouteRecoveryRecords(ctx)
+		if err != nil {
+			return RecoverableStateSnapshot{}, fmt.Errorf("list selected-contract route recoveries: %w", err)
+		}
+		snapshot.PersistedSelectedContractRouteRecoveryCount = len(recoveries)
 	}
 	replayStore, ok := store.(runtimereplayclaim.Lister)
 	if ok && replayStore != nil {

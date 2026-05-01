@@ -171,7 +171,7 @@ active_issues:
     maps_to:
       - timestamp_fork_replay_resume_ownership
   - id: 618
-    title: Gate fork-local selected-contract route persistence owner before delivery writes
+    title: Gate fork-local selected-contract route persistence/runtime recovery
     maps_to:
       - timestamp_fork_replay_resume_ownership
   - id: 619
@@ -321,6 +321,7 @@ nodes:
       - selected-contract recipient planning needs a canonical owner beyond route topology before selected execution publishes fork-local events; selected execution and EventBus.Publish must consume that owner before recipient derivation, while delivery writes, route persistence, handlers, timers, sessions, turns, source-advanced policy, contract swap, and UI/API remain separately gated siblings
       - selected-contract delivery writes are now closed for the supported swarm fork --contracts path through runtime.run_fork.selected_contract_execution consuming runtime.run_fork.selected_contract_recipient_planning; source deliveries remain lineage/blocker evidence and route persistence remains split
       - selected-contract parent-tail rebaseline must close or narrow stale #588/#608 tracker state while keeping #564/#549 open for full replay/resume and fork architecture siblings
+      - selected-contract route persistence/runtime recovery needs a fork-local owner keyed by fork run_id and selected binding/topology/recipient evidence; current routing_rules, flow_instance_routes, and startup ListFlowInstanceRoutes recovery remain current-route infrastructure and must not become selected-fork route truth
     representative_issues:
       - 564
       - 565

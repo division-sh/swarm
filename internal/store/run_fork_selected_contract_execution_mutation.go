@@ -67,6 +67,9 @@ func RequireRunForkSelectedContractExecutionCapabilities(caps StoreSchemaCapabil
 	if err := RequireRunForkActivationCapabilities(caps, catalog); err != nil {
 		return err
 	}
+	if err := RequireRunForkSelectedContractRouteRecoveryCapabilities(caps, catalog); err != nil {
+		return err
+	}
 	required := []struct {
 		table   string
 		columns []string
@@ -433,6 +436,14 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 		WHERE fork_run_id = $1::uuid
 	`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract branch divergence: %w", err)
+	}
+	if catalog.hasColumns(runForkSelectedContractRouteRecoveryTable, "fork_run_id") {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM run_fork_selected_contract_route_recoveries
+			WHERE fork_run_id = $1::uuid
+		`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract route recovery: %w", err)
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM run_fork_selected_contract_executions

@@ -321,8 +321,10 @@ func platformTableOrder(name string) int {
 		return 18
 	case "run_fork_selected_contract_branch_divergences":
 		return 19
-	case "dead_letters":
+	case "run_fork_selected_contract_route_recoveries":
 		return 20
+	case "dead_letters":
+		return 22
 	case "agents":
 		return 30
 	case "flow_instances":

@@ -18,12 +18,13 @@ import (
 )
 
 type recoveryTestBus struct {
-	storedRoutes []runtimebus.FlowInstanceRouteRecord
-	restored     []string
-	replayable   []events.PersistedReplayEvent
-	deliveries   map[string][]string
-	runtimeLogs  []runtimepipeline.RuntimeLogEntry
-	direct       []events.Event
+	storedRoutes            []runtimebus.FlowInstanceRouteRecord
+	selectedRouteRecoveries []SelectedContractRouteRecoveryRecord
+	restored                []string
+	replayable              []events.PersistedReplayEvent
+	deliveries              map[string][]string
+	runtimeLogs             []runtimepipeline.RuntimeLogEntry
+	direct                  []events.Event
 }
 
 func (*recoveryTestBus) Publish(context.Context, events.Event) error                 { return nil }
@@ -65,6 +66,9 @@ func (b *recoveryTestBus) ListFlowInstanceRoutes(context.Context) ([]runtimeflow
 		out = append(out, route.Identity)
 	}
 	return out, nil
+}
+func (b *recoveryTestBus) ListSelectedContractRouteRecoveryRecords(context.Context) ([]SelectedContractRouteRecoveryRecord, error) {
+	return append([]SelectedContractRouteRecoveryRecord(nil), b.selectedRouteRecoveries...), nil
 }
 func (b *recoveryTestBus) AddFlowInstanceRoute(_ runtimecontracts.SystemNodeContract, identity runtimeflowidentity.Route) error {
 	b.restored = append(b.restored, identity.InstancePath)
@@ -154,6 +158,79 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	}
 	if len(bus.restored) != 1 || bus.restored[0] != "review/inst-1" {
 		t.Fatalf("restored routes = %#v, want [review/inst-1]", bus.restored)
+	}
+}
+
+func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *testing.T) {
+	forkRunID := "00000000-0000-0000-0000-000000000601"
+	bus := &recoveryTestBus{
+		selectedRouteRecoveries: []SelectedContractRouteRecoveryRecord{{
+			Owner:                        SelectedContractRoutePersistenceOwner,
+			RuntimeRecoveryOwner:         SelectedContractRouteRecoveryOwner,
+			ForkRunID:                    forkRunID,
+			SourceRunID:                  "00000000-0000-0000-0000-000000000501",
+			ForkEventID:                  "00000000-0000-0000-0000-000000000701",
+			RouteTopologyOwner:           "runtime.run_fork.selected_contract_route_topology",
+			DynamicTopologyOwner:         "runtime.run_fork.selected_contract_dynamic_route_topology",
+			RecipientPlanningOwner:       "runtime.run_fork.selected_contract_recipient_planning",
+			FrontierEvidenceFingerprint:  "frontier-fp",
+			RouteTopologyFingerprint:     "topology-fp",
+			RecipientPlanningFingerprint: "recipient-fp",
+			StaticRouteEventCount:        1,
+			DynamicTopologyProofCount:    1,
+			RecipientPlanEventCount:      1,
+			CreatedAt:                    time.Now().UTC(),
+		}},
+	}
+	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, &recoveryTestStore{})
+
+	if err := am.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	snapshot := am.SelectedContractRouteRecoverySnapshot()
+	if len(snapshot) != 1 {
+		t.Fatalf("selected route recovery snapshot len = %d, want 1", len(snapshot))
+	}
+	if got := snapshot[forkRunID]; got.Owner != SelectedContractRoutePersistenceOwner || got.RuntimeRecoveryOwner != SelectedContractRouteRecoveryOwner {
+		t.Fatalf("selected route recovery owner = (%q, %q), want canonical owners", got.Owner, got.RuntimeRecoveryOwner)
+	}
+	if len(bus.restored) != 0 {
+		t.Fatalf("current route restore was used for selected route recovery: %#v", bus.restored)
+	}
+	state, err := am.RecoverableStateSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("RecoverableStateSnapshot: %v", err)
+	}
+	if state.PersistedSelectedContractRouteRecoveryCount != 1 {
+		t.Fatalf("selected route recovery count = %d, want 1", state.PersistedSelectedContractRouteRecoveryCount)
+	}
+}
+
+func TestRecoverRejectsSelectedContractRouteRecoveryFromCurrentRouteOwner(t *testing.T) {
+	bus := &recoveryTestBus{
+		selectedRouteRecoveries: []SelectedContractRouteRecoveryRecord{{
+			Owner:                        "routing_rules",
+			RuntimeRecoveryOwner:         SelectedContractRouteRecoveryOwner,
+			ForkRunID:                    "00000000-0000-0000-0000-000000000602",
+			SourceRunID:                  "00000000-0000-0000-0000-000000000502",
+			ForkEventID:                  "00000000-0000-0000-0000-000000000702",
+			RouteTopologyOwner:           "runtime.run_fork.selected_contract_route_topology",
+			RecipientPlanningOwner:       "runtime.run_fork.selected_contract_recipient_planning",
+			FrontierEvidenceFingerprint:  "frontier-fp",
+			RouteTopologyFingerprint:     "topology-fp",
+			RecipientPlanningFingerprint: "recipient-fp",
+			CreatedAt:                    time.Now().UTC(),
+		}},
+	}
+	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, &recoveryTestStore{})
+
+	err := am.Recover(context.Background())
+	if err == nil || !strings.Contains(err.Error(), SelectedContractRoutePersistenceOwner) {
+		t.Fatalf("Recover error = %v, want canonical owner rejection", err)
 	}
 }
 

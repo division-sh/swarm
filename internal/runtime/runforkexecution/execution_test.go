@@ -97,6 +97,44 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if lineageCount != 1 {
 		t.Fatalf("selected execution lineage rows = %d, want 1", lineageCount)
 	}
+	routeRecovery, ok, err := pg.LoadRunForkSelectedContractRouteRecovery(ctx, result.Materialization.ForkRunID)
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractRouteRecovery: %v", err)
+	}
+	if !ok {
+		t.Fatal("selected-contract route recovery row missing")
+	}
+	if routeRecovery.Owner != store.RunForkSelectedContractRoutePersistenceOwner ||
+		routeRecovery.RuntimeRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner ||
+		routeRecovery.RouteTopologyOwner != store.RunForkSelectedContractRouteTopologyOwner ||
+		routeRecovery.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
+		routeRecovery.ForkRunID != result.Materialization.ForkRunID ||
+		routeRecovery.RecipientPlanEventCount != 1 ||
+		routeRecovery.FrontierEvidenceFingerprint == "" ||
+		routeRecovery.RouteTopologyFingerprint == "" ||
+		routeRecovery.RecipientPlanningFingerprint == "" {
+		t.Fatalf("route recovery = %#v", routeRecovery)
+	}
+	recoveredRoutes, err := RecoverSelectedContractRouteTruth(ctx, pg)
+	if err != nil {
+		t.Fatalf("RecoverSelectedContractRouteTruth: %v", err)
+	}
+	if len(recoveredRoutes) != 1 || recoveredRoutes[0].ForkRunID != result.Materialization.ForkRunID {
+		t.Fatalf("recovered route truth = %#v", recoveredRoutes)
+	}
+
+	var copiedCurrentRoutes int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM routing_rules
+		WHERE flow_instance = 'flow-a/1'
+		  AND is_materialized = true
+	`).Scan(&copiedCurrentRoutes); err != nil {
+		t.Fatalf("count current route rows: %v", err)
+	}
+	if copiedCurrentRoutes != 0 {
+		t.Fatalf("selected route recovery copied current routing_rules rows = %d, want 0", copiedCurrentRoutes)
+	}
 
 	var sourceCopiedEvents int
 	if err := db.QueryRowContext(ctx, `
@@ -590,7 +628,7 @@ func assertSelectedContractExecutionCleanup(t *testing.T, db *sql.DB, sourceRunI
 	if sourceStatus != "running" {
 		t.Fatalf("source status = %q, want running", sourceStatus)
 	}
-	var forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows int
+	var forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows, routeRecoveryRows int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, sourceRunID).Scan(&forkRows); err != nil {
 		t.Fatalf("count fork rows: %v", err)
 	}
@@ -616,10 +654,13 @@ func assertSelectedContractExecutionCleanup(t *testing.T, db *sql.DB, sourceRunI
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`, forkRunID).Scan(&lineageRows); err != nil {
 			t.Fatalf("count fork lineage: %v", err)
 		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE fork_run_id = $1::uuid`, forkRunID).Scan(&routeRecoveryRows); err != nil {
+			t.Fatalf("count fork route recoveries: %v", err)
+		}
 	}
-	if forkRows != 0 || forkEvents != 0 || forkDeliveries != 0 || forkReceipts != 0 || forkState != 0 || forkMutations != 0 || bindingRows != 0 || lineageRows != 0 {
-		t.Fatalf("cleanup left fork rows runs:%d events:%d deliveries:%d receipts:%d state:%d mutations:%d bindings:%d lineage:%d",
-			forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows)
+	if forkRows != 0 || forkEvents != 0 || forkDeliveries != 0 || forkReceipts != 0 || forkState != 0 || forkMutations != 0 || bindingRows != 0 || lineageRows != 0 || routeRecoveryRows != 0 {
+		t.Fatalf("cleanup left fork rows runs:%d events:%d deliveries:%d receipts:%d state:%d mutations:%d bindings:%d lineage:%d route_recoveries:%d",
+			forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows, routeRecoveryRows)
 	}
 }
 
