@@ -7,6 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimemanager "swarm/internal/runtime/manager"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/testutil"
 )
 
@@ -64,6 +69,148 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 		t.Fatalf("seed fork point event: %v", err)
 	}
 
+	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
+
+	record, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
+		ForkRunID:         forkRunID,
+		SourceRunID:       sourceRunID,
+		ForkEventID:       eventID,
+		ContractSelection: selection,
+		RouteTopology:     topology,
+		RecipientPlanning: planning,
+	})
+	if err != nil {
+		t.Fatalf("RecordRunForkSelectedContractRouteRecovery: %v", err)
+	}
+	if record.Owner != RunForkSelectedContractRoutePersistenceOwner ||
+		record.RuntimeRecoveryOwner != RunForkSelectedContractRouteRecoveryOwner ||
+		record.StaticRouteEventCount != 1 ||
+		record.RecipientPlanEventCount != 1 ||
+		record.RouteTopologyFingerprint == "" ||
+		record.RecipientPlanningFingerprint == "" {
+		t.Fatalf("record = %#v", record)
+	}
+	loaded, ok, err := pg.LoadRunForkSelectedContractRouteRecovery(ctx, forkRunID)
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractRouteRecovery: %v", err)
+	}
+	if !ok {
+		t.Fatal("route recovery row not found")
+	}
+	if loaded.RouteTopologyFingerprint != record.RouteTopologyFingerprint ||
+		loaded.RecipientPlanningFingerprint != record.RecipientPlanningFingerprint ||
+		!strings.Contains(string(loaded.RouteTopology), "item.received") ||
+		!strings.Contains(string(loaded.RecipientPlanning), "node-a") {
+		t.Fatalf("loaded = %#v", loaded)
+	}
+}
+
+func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJSONB(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	forkRunID := uuid.NewString()
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+	`, sourceRunID, forkRunID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type)
+		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform')
+	`, sourceRunID, eventID); err != nil {
+		t.Fatalf("seed fork point event: %v", err)
+	}
+	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
+	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
+		ForkRunID:         forkRunID,
+		SourceRunID:       sourceRunID,
+		ForkEventID:       eventID,
+		ContractSelection: selection,
+		RouteTopology:     topology,
+		RecipientPlanning: planning,
+	}); err != nil {
+		t.Fatalf("RecordRunForkSelectedContractRouteRecovery: %v", err)
+	}
+	bus := &selectedRouteRecoveryPostgresBus{store: selectedRouteRecoveryStoreWrapper{pg: pg}}
+	am := runtimemanager.NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return selectedRouteRecoveryAgent{id: cfg.ID}, nil
+	}, pg)
+
+	if err := am.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	guard, ok := am.SelectedContractRouteRecoveryRecipientGuard(forkRunID)
+	if !ok {
+		t.Fatalf("missing recovered recipient guard for fork %s", forkRunID)
+	}
+	guard.ExpectForkEvent("00000000-0000-0000-0000-000000000991", eventID)
+	evt := events.Event{
+		ID:          "00000000-0000-0000-0000-000000000991",
+		Type:        events.EventType("item.received"),
+		SourceAgent: RunForkSelectedContractExecutionOwner,
+	}
+	if err := guard.Authorize(ctx, evt, runtimebus.PublishRecipientPlan{
+		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
+			Type:        "node",
+			ID:          "node-a",
+			Path:        "flow-a/node-a",
+			RouteSource: "selected_contracts",
+		}},
+	}); err != nil {
+		t.Fatalf("Authorize recovered JSONB recipient plan: %v", err)
+	}
+}
+
+func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManagerRecovery(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	forkRunID := uuid.NewString()
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+	`, sourceRunID, forkRunID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (run_id, event_id, event_name, payload, produced_by_type)
+		VALUES ($1::uuid, $2::uuid, 'item.received', '{}'::jsonb, 'platform')
+	`, sourceRunID, eventID); err != nil {
+		t.Fatalf("seed fork point event: %v", err)
+	}
+	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
+	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
+		ForkRunID:         forkRunID,
+		SourceRunID:       sourceRunID,
+		ForkEventID:       eventID,
+		ContractSelection: selection,
+		RouteTopology:     topology,
+		RecipientPlanning: planning,
+	}); err != nil {
+		t.Fatalf("RecordRunForkSelectedContractRouteRecovery: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE run_fork_selected_contract_route_recoveries
+		SET recipient_planning = jsonb_set(recipient_planning, '{recipient_plan_events,0,recipients,0,subscriber_id}', '"node-tampered"'::jsonb)
+		WHERE fork_run_id = $1::uuid
+	`, forkRunID); err != nil {
+		t.Fatalf("tamper recipient planning: %v", err)
+	}
+	am := runtimemanager.NewAgentManager(&selectedRouteRecoveryPostgresBus{store: selectedRouteRecoveryStoreWrapper{pg: pg}}, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return selectedRouteRecoveryAgent{id: cfg.ID}, nil
+	}, pg)
+
+	err := am.Recover(ctx)
+	if err == nil || !strings.Contains(err.Error(), "recipient planning fingerprint mismatch") {
+		t.Fatalf("Recover error = %v, want recipient planning fingerprint mismatch", err)
+	}
+}
+
+func testSelectedRouteRecoveryEvidence(eventID string) (RunForkContractSelection, RunForkSelectedContractRouteTopology, RunForkSelectedContractRecipientPlanning) {
 	selection := RunForkContractSelection{
 		Mode:            "selected_contracts",
 		ContractsRoot:   "/tmp/contracts",
@@ -119,37 +266,57 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 			Disposition: RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
+	return selection, topology, planning
+}
 
-	record, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
-		ForkRunID:         forkRunID,
-		SourceRunID:       sourceRunID,
-		ForkEventID:       eventID,
-		ContractSelection: selection,
-		RouteTopology:     topology,
-		RecipientPlanning: planning,
-	})
-	if err != nil {
-		t.Fatalf("RecordRunForkSelectedContractRouteRecovery: %v", err)
-	}
-	if record.Owner != RunForkSelectedContractRoutePersistenceOwner ||
-		record.RuntimeRecoveryOwner != RunForkSelectedContractRouteRecoveryOwner ||
-		record.StaticRouteEventCount != 1 ||
-		record.RecipientPlanEventCount != 1 ||
-		record.RouteTopologyFingerprint == "" ||
-		record.RecipientPlanningFingerprint == "" {
-		t.Fatalf("record = %#v", record)
-	}
-	loaded, ok, err := pg.LoadRunForkSelectedContractRouteRecovery(ctx, forkRunID)
-	if err != nil {
-		t.Fatalf("LoadRunForkSelectedContractRouteRecovery: %v", err)
-	}
-	if !ok {
-		t.Fatal("route recovery row not found")
-	}
-	if loaded.RouteTopologyFingerprint != record.RouteTopologyFingerprint ||
-		loaded.RecipientPlanningFingerprint != record.RecipientPlanningFingerprint ||
-		!strings.Contains(string(loaded.RouteTopology), "item.received") ||
-		!strings.Contains(string(loaded.RecipientPlanning), "node-a") {
-		t.Fatalf("loaded = %#v", loaded)
-	}
+type selectedRouteRecoveryPostgresBus struct {
+	store runtimebus.EventStore
+	logs  []runtimepipeline.RuntimeLogEntry
+}
+
+func (*selectedRouteRecoveryPostgresBus) Publish(context.Context, events.Event) error { return nil }
+func (*selectedRouteRecoveryPostgresBus) PublishDirect(context.Context, events.Event, []string) error {
+	return nil
+}
+func (*selectedRouteRecoveryPostgresBus) PublishPersistedRecipients(context.Context, events.Event, []string) error {
+	return nil
+}
+func (*selectedRouteRecoveryPostgresBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+	return make(chan events.Event)
+}
+func (*selectedRouteRecoveryPostgresBus) Unsubscribe(string)        {}
+func (*selectedRouteRecoveryPostgresBus) ResetInMemoryState() error { return nil }
+func (b *selectedRouteRecoveryPostgresBus) Store() runtimebus.EventStore {
+	return b.store
+}
+func (b *selectedRouteRecoveryPostgresBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	b.logs = append(b.logs, entry)
+	return nil
+}
+
+type selectedRouteRecoveryAgent struct{ id string }
+
+func (a selectedRouteRecoveryAgent) ID() string                      { return a.id }
+func (selectedRouteRecoveryAgent) Type() string                      { return "generic" }
+func (selectedRouteRecoveryAgent) Subscriptions() []events.EventType { return nil }
+func (selectedRouteRecoveryAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
+	return nil, nil
+}
+
+type selectedRouteRecoveryStoreWrapper struct {
+	pg *PostgresStore
+}
+
+func (s selectedRouteRecoveryStoreWrapper) AppendEvent(context.Context, events.Event) error {
+	return nil
+}
+func (s selectedRouteRecoveryStoreWrapper) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
+func (s selectedRouteRecoveryStoreWrapper) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (s selectedRouteRecoveryStoreWrapper) SupportsPersistedReplay() bool { return false }
+func (s selectedRouteRecoveryStoreWrapper) ListSelectedContractRouteRecoveryRecords(ctx context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
+	return s.pg.ListSelectedContractRouteRecoveryRecords(ctx)
 }

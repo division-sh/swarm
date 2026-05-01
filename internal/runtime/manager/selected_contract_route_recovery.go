@@ -1,11 +1,13 @@
 package manager
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -163,10 +165,18 @@ func decodeSelectedContractRouteRecoveryTruth(record SelectedContractRouteRecove
 	if err := validateSelectedContractRouteRecoveryRecord(record); err != nil {
 		return SelectedContractRouteRecoveryTruth{}, err
 	}
-	if got := selectedContractRecoveredJSONFingerprint(record.RouteTopology); got != strings.TrimSpace(record.RouteTopologyFingerprint) {
+	got, err := selectedContractRecoveredJSONFingerprint(record.RouteTopology)
+	if err != nil {
+		return SelectedContractRouteRecoveryTruth{}, fmt.Errorf("fingerprint selected-contract recovered route topology: %w", err)
+	}
+	if got != strings.TrimSpace(record.RouteTopologyFingerprint) {
 		return SelectedContractRouteRecoveryTruth{}, fmt.Errorf("selected-contract recovered route topology fingerprint mismatch")
 	}
-	if got := selectedContractRecoveredJSONFingerprint(record.RecipientPlanning); got != strings.TrimSpace(record.RecipientPlanningFingerprint) {
+	got, err = selectedContractRecoveredJSONFingerprint(record.RecipientPlanning)
+	if err != nil {
+		return SelectedContractRouteRecoveryTruth{}, fmt.Errorf("fingerprint selected-contract recovered recipient planning: %w", err)
+	}
+	if got != strings.TrimSpace(record.RecipientPlanningFingerprint) {
 		return SelectedContractRouteRecoveryTruth{}, fmt.Errorf("selected-contract recovered recipient planning fingerprint mismatch")
 	}
 	var topology selectedContractRecoveredRouteTopology
@@ -206,9 +216,23 @@ func decodeSelectedContractRouteRecoveryTruth(record SelectedContractRouteRecove
 	}, nil
 }
 
-func selectedContractRecoveredJSONFingerprint(raw json.RawMessage) string {
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
+func selectedContractRecoveredJSONFingerprint(raw json.RawMessage) (string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return "", err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return "", fmt.Errorf("unexpected trailing JSON")
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func newSelectedContractRecoveredRecipientGuard(planning selectedContractRecoveredRecipientPlanning) selectedContractRecoveredRecipientGuard {
