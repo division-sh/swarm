@@ -17,6 +17,7 @@ const (
 	RunForkSelectedContractRouteTopologyOwner           = "runtime.run_fork.selected_contract_route_topology"
 	RunForkSelectedContractDynamicRouteTopologyOwner    = "runtime.run_fork.selected_contract_dynamic_route_topology"
 	RunForkSelectedContractRecipientPlanningOwner       = "runtime.run_fork.selected_contract_recipient_planning"
+	RunForkContractSwapBootResumeAdmissionOwner         = "runtime.run_fork.contract_swap_boot_resume_admission"
 	RunForkSelectedContractBranchDivergenceOwner        = "store.run_fork.selected_contract_branch_divergence"
 
 	RunForkSelectedContractExecutionAdmissionUseEvidenceOnly   = "prerequisite_evidence_only"
@@ -37,6 +38,8 @@ const (
 	RunForkBlockerSelectedContractRouteTopologyNonMutating      = "selected_contract_route_topology_non_mutating"
 	RunForkBlockerSelectedContractDynamicRouteTopologyUnproven  = "selected_contract_dynamic_route_topology_unproven"
 	RunForkBlockerSelectedContractRecipientPlanningNonMutating  = "selected_contract_recipient_planning_non_mutating"
+	RunForkBlockerContractSwapBootResumeAdmissionNonMutating    = "contract_swap_boot_resume_admission_non_mutating"
+	RunForkBlockerContractSwapRouteRecoveryMissing              = "contract_swap_route_recovery_missing"
 
 	RunForkSelectedContractSourceAdvancedBranchPolicy = "selected_contract_source_advanced_branch"
 )
@@ -188,6 +191,32 @@ type RunForkSelectedContractExecutionBoundary struct {
 	Disposition string `json:"disposition"`
 	Owner       string `json:"owner,omitempty"`
 	Reason      string `json:"reason"`
+}
+
+type RunForkContractSwapBootResumeAdmission struct {
+	Owner                           string                                     `json:"owner"`
+	NonMutating                     bool                                       `json:"non_mutating"`
+	BootResumeSupported             bool                                       `json:"boot_resume_supported"`
+	FutureExecutionOwner            string                                     `json:"future_execution_owner"`
+	ForkRunID                       string                                     `json:"fork_run_id"`
+	SourceRunID                     string                                     `json:"source_run_id"`
+	ForkEventID                     string                                     `json:"fork_event_id"`
+	ContractSelection               RunForkContractSelection                   `json:"contract_selection"`
+	SelectedBindingOwner            string                                     `json:"selected_binding_owner"`
+	SelectedExecutionAdmissionOwner string                                     `json:"selected_execution_admission_owner"`
+	ReplayResumeAdmissionOwner      string                                     `json:"replay_resume_admission_owner"`
+	RouteTopologyOwner              string                                     `json:"route_topology_owner,omitempty"`
+	RouteRecoveryOwner              string                                     `json:"route_recovery_owner,omitempty"`
+	RuntimeRouteRecoveryOwner       string                                     `json:"runtime_route_recovery_owner,omitempty"`
+	RecipientPlanningOwner          string                                     `json:"recipient_planning_owner,omitempty"`
+	SourceWorkflowName              string                                     `json:"source_workflow_name"`
+	SourceWorkflowVersion           string                                     `json:"source_workflow_version"`
+	FrontierEventCount              int                                        `json:"frontier_event_count"`
+	Prerequisites                   []RunForkSelectedContractExecutionBoundary `json:"prerequisites,omitempty"`
+	Classifications                 []RunForkReplayResumeDisposition           `json:"classifications,omitempty"`
+	BlockedSiblings                 []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
+	InvalidPaths                    []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
+	UnsupportedBlockers             []RunForkUnsupportedBlocker                `json:"unsupported_blockers,omitempty"`
 }
 
 func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmission) (int, []string, string) {

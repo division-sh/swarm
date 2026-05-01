@@ -70,6 +70,12 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 		result.SelectedContractExecutionAdmission.FrontierEventCount != 0 {
 		t.Fatalf("selected admission = %#v", result.SelectedContractExecutionAdmission)
 	}
+	if result.ContractSwapBootResumeAdmission == nil ||
+		result.ContractSwapBootResumeAdmission.Owner != store.RunForkContractSwapBootResumeAdmissionOwner ||
+		result.ContractSwapBootResumeAdmission.BootResumeSupported ||
+		!unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, store.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) {
+		t.Fatalf("contract-swap admission = %#v", result.ContractSwapBootResumeAdmission)
+	}
 	if result.RunForkActivation.ForkRunID != forkRunID || !result.Activated {
 		t.Fatalf("activation = %#v", result.RunForkActivation)
 	}
@@ -111,6 +117,10 @@ func TestActivateSelectedContractRunForkBlocksReplayableSourceDeliveryBeforeMuta
 	}
 	if !fakeStore.requireCalled || result.SelectedContractExecutionAdmission == nil {
 		t.Fatalf("admission not consumed before block; require:%v result:%#v", fakeStore.requireCalled, result)
+	}
+	if result.ContractSwapBootResumeAdmission == nil ||
+		!unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, store.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) {
+		t.Fatalf("contract-swap admission = %#v, want non-mutating blocker before source replay block", result.ContractSwapBootResumeAdmission)
 	}
 }
 

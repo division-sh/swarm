@@ -3409,6 +3409,19 @@ run_model:
       NOT become executable fork work or fork suppressors. Route persistence, timer reconstruction, session/turn/audit
       reconstruction, non-agent delivery replay, runtime restart recovery, contract-swap boot/resume beyond selected
       frontier execution, and UI/API ownership remain separately gated siblings.'
+    contract_swap_boot_resume_admission: 'Contract-swap boot/resume readiness for timestamp forks is owned by
+      runtime.run_fork.contract_swap_boot_resume_admission. This owner is non-mutating and consumes the durable
+      store.run_fork.selected_contract_binding, runtime.run_fork.selected_contract_execution_admission,
+      store.run_fork.replay_resume_admission, selected route topology, selected recipient planning, and fork-local
+      selected route recovery evidence before answering whether full boot/resume under selected or swapped contracts is
+      allowed. It MUST fail closed with named blockers for source deliveries, receipts, dead letters, retry/idempotency
+      state, post-fork source outcomes, timers, current/source routes, sessions, turns, audits, committed replay-scope
+      rows, non-agent replay, missing selected route recovery, or any missing/stale selected binding/source evidence. It
+      MUST NOT run handlers, create fork-local events or event_deliveries, copy source rows, write receipts, dead
+      letters, idempotency state, emitted follow-up events, timers, sessions, turns, route rows, API/UI state, or
+      otherwise implement mutating historical replay/resume. CLI, API, dashboard, Builder, route helpers, delivery
+      writers, and pipeline boot paths may consume this owner but MUST NOT compute contract-swap boot/resume readiness
+      independently.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -3486,6 +3499,14 @@ run_model:
         persistence/recovery, timer reconstruction, session/turn/audit reconstruction, non-agent replay, contract-swap
         boot/resume beyond selected frontier execution, runtime restart recovery, and UI/API ownership remain separate
         parents or siblings.'
+      3i_contract_swap_boot_resume_admission: 'For timestamp forks with selected or swapped contracts, full boot/resume
+        readiness is answered by runtime.run_fork.contract_swap_boot_resume_admission before any mutating historical
+        replay/resume work. The owner consumes selected binding/source admission, replay/resume taxonomy, selected route
+        topology, selected recipient planning, and selected route recovery evidence. Source rows and post-T outcomes
+        remain lineage/evidence or fail-closed blockers; they are not executable fork work and do not suppress future
+        fork-local work. This owner is non-mutating and does not authorize handler execution, delivery writes, receipts,
+        dead letters, idempotency, emitted follow-ups, timers, sessions, turns, non-agent replay, route row mutation, or
+        API/UI state.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.
@@ -3493,10 +3514,11 @@ run_model:
     parallel_safety: 'Timestamp-based fork handles parallel agent execution naturally. At timestamp T, all
       concurrent branches either committed their mutations or did not. No DAG traversal, no branch
       classification, no sibling carry-over logic. The reconstructed state is simply "what was the world at T."'
-    contract_swap: 'When --contracts specifies a new contract path, the forked run uses the new handler logic
-      for all re-delivered events. This is the primary use case: fix a bug in a handler or prompt, fork to
-      before the failure, resume with the fix. All re-delivered events use the new contracts uniformly —
-      no mixed-version state.'
+    contract_swap: 'When --contracts specifies a new contract path, the intended full historical replay/resume behavior
+      is that admitted re-delivered events use the new handler logic uniformly with no mixed-version state. This product
+      intent is not itself an execution owner. Runtime/store readiness for full boot/resume is governed by
+      runtime.run_fork.contract_swap_boot_resume_admission, and mutating replay/resume requires separately approved
+      owners for any admitted historical work.'
     timestamp_precision: 'Events committed in the same millisecond are disambiguated by (created_at, event_id)
       composite ordering. The fork point is inclusive: mutations from the target moment are included in
       reconstructed state. Only mutations strictly after T are undone.'
