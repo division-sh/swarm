@@ -230,6 +230,8 @@ func (s *PostgresStore) ListSelectedContractRouteRecoveryRecords(ctx context.Con
 			StaticRouteEventCount:        record.StaticRouteEventCount,
 			DynamicTopologyProofCount:    record.DynamicTopologyProofCount,
 			RecipientPlanEventCount:      record.RecipientPlanEventCount,
+			RouteTopology:                append([]byte(nil), record.RouteTopology...),
+			RecipientPlanning:            append([]byte(nil), record.RecipientPlanning...),
 			CreatedAt:                    record.CreatedAt,
 		})
 	}
