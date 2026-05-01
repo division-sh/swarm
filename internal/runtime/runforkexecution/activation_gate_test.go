@@ -124,6 +124,53 @@ func TestActivateSelectedContractRunForkBlocksReplayableSourceDeliveryBeforeMuta
 	}
 }
 
+func TestActivateSelectedContractRunForkPassesRecoveredRouteEvidenceToContractSwapAdmission(t *testing.T) {
+	forkRunID := uuid.NewString()
+	binding := testSelectedContractBinding(forkRunID)
+	plan := testSelectedContractStateOnlyPlan(binding)
+	routeRecovery := store.RunForkSelectedContractRouteRecovery{
+		Owner:                  store.RunForkSelectedContractRoutePersistenceOwner,
+		RuntimeRecoveryOwner:   store.RunForkSelectedContractRouteRecoveryOwner,
+		ForkRunID:              binding.ForkRunID,
+		SourceRunID:            binding.SourceRunID,
+		ForkEventID:            binding.ForkEventID,
+		ContractSelection:      binding.ContractSelection,
+		RouteTopologyOwner:     store.RunForkSelectedContractRouteTopologyOwner,
+		RecipientPlanningOwner: store.RunForkSelectedContractRecipientPlanningOwner,
+	}
+	fakeStore := &fakeSelectedContractActivationStore{
+		binding:       binding,
+		bindingOK:     true,
+		plan:          plan,
+		routeRecovery: routeRecovery,
+		routeOK:       true,
+		activation:    store.RunForkActivation{SourceRunID: binding.SourceRunID, ForkRunID: forkRunID, Activated: true, SourceFrozen: true},
+	}
+	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
+
+	result, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{
+		ForkRunID:    forkRunID,
+		Store:        fakeStore,
+		SourceLoader: loader,
+	})
+	if err != nil {
+		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
+	}
+	if !fakeStore.loadRouteCalled {
+		t.Fatal("LoadRunForkSelectedContractRouteRecovery was not called")
+	}
+	if result.ContractSwapBootResumeAdmission == nil {
+		t.Fatalf("missing contract-swap admission: %#v", result)
+	}
+	if result.ContractSwapBootResumeAdmission.RouteRecoveryOwner != store.RunForkSelectedContractRoutePersistenceOwner ||
+		result.ContractSwapBootResumeAdmission.RuntimeRouteRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner {
+		t.Fatalf("contract-swap route recovery owners = %#v", result.ContractSwapBootResumeAdmission)
+	}
+	if unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, store.RunForkBlockerContractSwapRouteRecoveryMissing) {
+		t.Fatalf("unexpected missing-route blocker with route recovery evidence: %#v", result.ContractSwapBootResumeAdmission.UnsupportedBlockers)
+	}
+}
+
 func TestActivateSelectedContractRunForkFailsBeforeMutationOnUnavailableSource(t *testing.T) {
 	forkRunID := uuid.NewString()
 	binding := testSelectedContractBinding(forkRunID)
@@ -205,13 +252,17 @@ type fakeSelectedContractActivationStore struct {
 	requireErr    error
 	plan          store.RunForkPlan
 	planErr       error
+	routeRecovery store.RunForkSelectedContractRouteRecovery
+	routeOK       bool
+	routeErr      error
 	activation    store.RunForkActivation
 	activationErr error
 
-	loadCalled     bool
-	requireCalled  bool
-	planCalled     bool
-	activateCalled bool
+	loadCalled      bool
+	requireCalled   bool
+	loadRouteCalled bool
+	planCalled      bool
+	activateCalled  bool
 }
 
 func (s *fakeSelectedContractActivationStore) LoadRunForkSelectedContractBinding(_ context.Context, _ string) (store.RunForkSelectedContractBinding, bool, error) {
@@ -231,6 +282,14 @@ func (s *fakeSelectedContractActivationStore) RequireRunForkSelectedContractBind
 		return store.RunForkSelectedContractBinding{}, errors.New("selected contract binding not found")
 	}
 	return s.binding, nil
+}
+
+func (s *fakeSelectedContractActivationStore) LoadRunForkSelectedContractRouteRecovery(_ context.Context, _ string) (store.RunForkSelectedContractRouteRecovery, bool, error) {
+	s.loadRouteCalled = true
+	if s.routeErr != nil {
+		return store.RunForkSelectedContractRouteRecovery{}, false, s.routeErr
+	}
+	return s.routeRecovery, s.routeOK, nil
 }
 
 func (s *fakeSelectedContractActivationStore) PlanRunFork(_ context.Context, _ store.RunForkPlanRequest) (store.RunForkPlan, error) {

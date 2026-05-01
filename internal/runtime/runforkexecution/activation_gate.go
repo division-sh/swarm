@@ -14,6 +14,7 @@ import (
 type SelectedContractActivationStore interface {
 	LoadRunForkSelectedContractBinding(context.Context, string) (store.RunForkSelectedContractBinding, bool, error)
 	RequireRunForkSelectedContractBinding(context.Context, string) (store.RunForkSelectedContractBinding, error)
+	LoadRunForkSelectedContractRouteRecovery(context.Context, string) (store.RunForkSelectedContractRouteRecovery, bool, error)
 	PlanRunFork(context.Context, store.RunForkPlanRequest) (store.RunForkPlan, error)
 	ActivateRunFork(context.Context, store.RunForkActivateRequest) (store.RunForkActivation, error)
 }
@@ -107,9 +108,18 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{}, err
 	}
+	var routeRecovery *store.RunForkSelectedContractRouteRecovery
+	recoveredRoute, ok, err := req.Store.LoadRunForkSelectedContractRouteRecovery(ctx, forkRunID)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected-contract route recovery for contract-swap admission: %w", err)
+	}
+	if ok {
+		routeRecovery = &recoveredRoute
+	}
 	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
 		SelectedExecutionAdmission: admission,
 		ReplayResumeAdmission:      plan.ReplayResumeAdmission,
+		RouteRecovery:              routeRecovery,
 	})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, err
