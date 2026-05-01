@@ -37,7 +37,7 @@ type AgentManager struct {
 	inFlightMu                      sync.Mutex
 	inFlight                        map[string]struct{}
 	workflowInstances               flowInstancePersistence
-	selectedContractRouteRecoveries map[string]SelectedContractRouteRecoveryRecord
+	selectedContractRouteRecoveries map[string]SelectedContractRouteRecoveryTruth
 
 	runMu              sync.Mutex
 	running            bool
@@ -105,7 +105,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		semanticSource:                  opts.SemanticSource,
 		promptResolver:                  opts.PromptResolver,
 		workflowInstances:               opts.WorkflowInstances,
-		selectedContractRouteRecoveries: map[string]SelectedContractRouteRecoveryRecord{},
+		selectedContractRouteRecoveries: map[string]SelectedContractRouteRecoveryTruth{},
 		runtimeMode:                     strings.TrimSpace(opts.RuntimeMode),
 		budget:                          opts.Budget,
 		resetRuntimeOwnedState:          opts.ResetRuntimeOwnedState,

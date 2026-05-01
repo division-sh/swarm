@@ -164,23 +164,9 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *testing.T) {
 	forkRunID := "00000000-0000-0000-0000-000000000601"
 	bus := &recoveryTestBus{
-		selectedRouteRecoveries: []SelectedContractRouteRecoveryRecord{{
-			Owner:                        SelectedContractRoutePersistenceOwner,
-			RuntimeRecoveryOwner:         SelectedContractRouteRecoveryOwner,
-			ForkRunID:                    forkRunID,
-			SourceRunID:                  "00000000-0000-0000-0000-000000000501",
-			ForkEventID:                  "00000000-0000-0000-0000-000000000701",
-			RouteTopologyOwner:           "runtime.run_fork.selected_contract_route_topology",
-			DynamicTopologyOwner:         "runtime.run_fork.selected_contract_dynamic_route_topology",
-			RecipientPlanningOwner:       "runtime.run_fork.selected_contract_recipient_planning",
-			FrontierEvidenceFingerprint:  "frontier-fp",
-			RouteTopologyFingerprint:     "topology-fp",
-			RecipientPlanningFingerprint: "recipient-fp",
-			StaticRouteEventCount:        1,
-			DynamicTopologyProofCount:    1,
-			RecipientPlanEventCount:      1,
-			CreatedAt:                    time.Now().UTC(),
-		}},
+		selectedRouteRecoveries: []SelectedContractRouteRecoveryRecord{
+			selectedContractRouteRecoveryRecord(t, forkRunID),
+		},
 	}
 	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
@@ -193,8 +179,40 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 	if len(snapshot) != 1 {
 		t.Fatalf("selected route recovery snapshot len = %d, want 1", len(snapshot))
 	}
-	if got := snapshot[forkRunID]; got.Owner != SelectedContractRoutePersistenceOwner || got.RuntimeRecoveryOwner != SelectedContractRouteRecoveryOwner {
-		t.Fatalf("selected route recovery owner = (%q, %q), want canonical owners", got.Owner, got.RuntimeRecoveryOwner)
+	if got := snapshot[forkRunID]; got.Record.Owner != SelectedContractRoutePersistenceOwner ||
+		got.Record.RuntimeRecoveryOwner != SelectedContractRouteRecoveryOwner ||
+		got.RouteTopology.Owner != selectedContractRouteTopologyOwner ||
+		got.RecipientPlanning.Owner != selectedContractRecipientPlanningOwner ||
+		len(got.RecipientPlanning.RecipientPlanEvents) != 1 {
+		t.Fatalf("selected route recovery truth = %#v, want canonical recovered topology and recipient planning", got)
+	}
+	guard, ok := am.SelectedContractRouteRecoveryRecipientGuard(forkRunID)
+	if !ok {
+		t.Fatalf("missing selected route recovery recipient guard for %s", forkRunID)
+	}
+	guard.ExpectForkEvent("fork-event-1", "source-event-1")
+	evt := events.Event{
+		ID:          "fork-event-1",
+		Type:        events.EventType("work.ready"),
+		SourceAgent: selectedContractExecutionOwner,
+	}
+	if err := guard.AuthorizeEvent(context.Background(), evt); err != nil {
+		t.Fatalf("AuthorizeEvent recovered guard: %v", err)
+	}
+	if err := guard.Authorize(context.Background(), evt, runtimebus.PublishRecipientPlan{
+		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
+			Type:        "agent",
+			ID:          "agent-a",
+			Path:        "review/inst-1",
+			RouteSource: "selected_contract_route_topology",
+		}},
+	}); err != nil {
+		t.Fatalf("Authorize recovered recipients: %v", err)
+	}
+	if err := guard.Authorize(context.Background(), evt, runtimebus.PublishRecipientPlan{
+		SubscriptionRecipients: []string{"agent-a"},
+	}); err == nil || !strings.Contains(err.Error(), "live subscriptions") {
+		t.Fatalf("Authorize subscription bypass error = %v, want live subscription rejection", err)
 	}
 	if len(bus.restored) != 0 {
 		t.Fatalf("current route restore was used for selected route recovery: %#v", bus.restored)
@@ -209,20 +227,10 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 }
 
 func TestRecoverRejectsSelectedContractRouteRecoveryFromCurrentRouteOwner(t *testing.T) {
+	record := selectedContractRouteRecoveryRecord(t, "00000000-0000-0000-0000-000000000602")
+	record.Owner = "routing_rules"
 	bus := &recoveryTestBus{
-		selectedRouteRecoveries: []SelectedContractRouteRecoveryRecord{{
-			Owner:                        "routing_rules",
-			RuntimeRecoveryOwner:         SelectedContractRouteRecoveryOwner,
-			ForkRunID:                    "00000000-0000-0000-0000-000000000602",
-			SourceRunID:                  "00000000-0000-0000-0000-000000000502",
-			ForkEventID:                  "00000000-0000-0000-0000-000000000702",
-			RouteTopologyOwner:           "runtime.run_fork.selected_contract_route_topology",
-			RecipientPlanningOwner:       "runtime.run_fork.selected_contract_recipient_planning",
-			FrontierEvidenceFingerprint:  "frontier-fp",
-			RouteTopologyFingerprint:     "topology-fp",
-			RecipientPlanningFingerprint: "recipient-fp",
-			CreatedAt:                    time.Now().UTC(),
-		}},
+		selectedRouteRecoveries: []SelectedContractRouteRecoveryRecord{record},
 	}
 	am := NewAgentManager(bus, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
@@ -231,6 +239,76 @@ func TestRecoverRejectsSelectedContractRouteRecoveryFromCurrentRouteOwner(t *tes
 	err := am.Recover(context.Background())
 	if err == nil || !strings.Contains(err.Error(), SelectedContractRoutePersistenceOwner) {
 		t.Fatalf("Recover error = %v, want canonical owner rejection", err)
+	}
+}
+
+func selectedContractRouteRecoveryRecord(t *testing.T, forkRunID string) SelectedContractRouteRecoveryRecord {
+	t.Helper()
+	return SelectedContractRouteRecoveryRecord{
+		Owner:                        SelectedContractRoutePersistenceOwner,
+		RuntimeRecoveryOwner:         SelectedContractRouteRecoveryOwner,
+		ForkRunID:                    forkRunID,
+		SourceRunID:                  "00000000-0000-0000-0000-000000000501",
+		ForkEventID:                  "00000000-0000-0000-0000-000000000701",
+		RouteTopologyOwner:           selectedContractRouteTopologyOwner,
+		DynamicTopologyOwner:         "runtime.run_fork.selected_contract_dynamic_route_topology",
+		RecipientPlanningOwner:       selectedContractRecipientPlanningOwner,
+		FrontierEvidenceFingerprint:  "frontier-fp",
+		RouteTopologyFingerprint:     "topology-fp",
+		RecipientPlanningFingerprint: "recipient-fp",
+		StaticRouteEventCount:        1,
+		DynamicTopologyProofCount:    1,
+		RecipientPlanEventCount:      1,
+		RouteTopology: mustRecoveryJSON(t, map[string]any{
+			"owner":                           selectedContractRouteTopologyOwner,
+			"non_mutating":                    true,
+			"route_persistence_supported":     false,
+			"executable_recipients_supported": false,
+			"frontier_evidence_fingerprint":   "frontier-fp",
+			"static_route_events": []map[string]any{{
+				"source_event_id": "source-event-1",
+				"event_name":      "work.ready",
+				"derived_recipients": []map[string]any{{
+					"subscriber_type": "agent",
+					"subscriber_id":   "agent-a",
+					"path":            "review/inst-1",
+					"route_source":    "selected_contract_route_topology",
+				}},
+				"disposition": "selected_contract_route_topology",
+			}},
+			"dynamic_topology_proofs": []map[string]any{{
+				"flow_instance":    "review/inst-1",
+				"source_event_ids": []string{"source-event-1"},
+				"event_names":      []string{"work.ready"},
+				"derived_recipients": []map[string]any{{
+					"subscriber_type": "agent",
+					"subscriber_id":   "agent-a",
+					"path":            "review/inst-1",
+					"route_source":    "selected_contract_route_topology",
+				}},
+				"disposition": "selected_contract_dynamic_route_topology",
+			}},
+		}),
+		RecipientPlanning: mustRecoveryJSON(t, map[string]any{
+			"owner":                         selectedContractRecipientPlanningOwner,
+			"route_topology_owner":          selectedContractRouteTopologyOwner,
+			"non_mutating":                  true,
+			"recipient_planning_supported":  true,
+			"delivery_writes_supported":     false,
+			"frontier_evidence_fingerprint": "frontier-fp",
+			"recipient_plan_events": []map[string]any{{
+				"source_event_id": "source-event-1",
+				"event_name":      "work.ready",
+				"recipients": []map[string]any{{
+					"subscriber_type": "agent",
+					"subscriber_id":   "agent-a",
+					"path":            "review/inst-1",
+					"route_source":    "selected_contract_route_topology",
+				}},
+				"disposition": "selected_contract_recipient_planning",
+			}},
+		}),
+		CreatedAt: time.Now().UTC(),
 	}
 }
 
