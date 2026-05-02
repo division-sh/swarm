@@ -18,6 +18,8 @@ const (
 	RunForkSelectedContractDynamicRouteTopologyOwner    = "runtime.run_fork.selected_contract_dynamic_route_topology"
 	RunForkSelectedContractRecipientPlanningOwner       = "runtime.run_fork.selected_contract_recipient_planning"
 	RunForkContractSwapBootResumeAdmissionOwner         = "runtime.run_fork.contract_swap_boot_resume_admission"
+	RunForkHistoricalReplayExecutionAdmissionOwner      = "runtime.run_fork.historical_replay_execution_admission"
+	RunForkHistoricalReplayExecutionOwner               = "runtime.run_fork.historical_replay_execution"
 	RunForkSelectedContractBranchDivergenceOwner        = "store.run_fork.selected_contract_branch_divergence"
 
 	RunForkSelectedContractExecutionAdmissionUseEvidenceOnly   = "prerequisite_evidence_only"
@@ -40,8 +42,33 @@ const (
 	RunForkBlockerSelectedContractRecipientPlanningNonMutating  = "selected_contract_recipient_planning_non_mutating"
 	RunForkBlockerContractSwapBootResumeAdmissionNonMutating    = "contract_swap_boot_resume_admission_non_mutating"
 	RunForkBlockerContractSwapRouteRecoveryMissing              = "contract_swap_route_recovery_missing"
+	RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating = "historical_replay_execution_admission_non_mutating"
 
 	RunForkSelectedContractSourceAdvancedBranchPolicy = "selected_contract_source_advanced_branch"
+)
+
+const (
+	RunForkHistoricalReplayFactSourceEvents             = "source_events"
+	RunForkHistoricalReplayFactEventDeliveries          = "event_deliveries"
+	RunForkHistoricalReplayFactReceipts                 = "receipts"
+	RunForkHistoricalReplayFactDeadLetters              = "dead_letters"
+	RunForkHistoricalReplayFactRetryIdempotency         = "retry_idempotency"
+	RunForkHistoricalReplayFactEmittedFollowUps         = "emitted_follow_ups"
+	RunForkHistoricalReplayFactTimers                   = "timers"
+	RunForkHistoricalReplayFactRoutes                   = "routes"
+	RunForkHistoricalReplayFactSessions                 = "sessions"
+	RunForkHistoricalReplayFactTurns                    = "turns"
+	RunForkHistoricalReplayFactAudits                   = "audits"
+	RunForkHistoricalReplayFactNonAgentNodeSystemWork   = "non_agent_node_system_work"
+	RunForkHistoricalReplayFactSourceAdvancedPostTFacts = "source_advanced_post_t_facts"
+	RunForkHistoricalReplayFactRuntimeRestartRecovery   = "runtime_restart_recovery"
+	RunForkHistoricalReplayFactCLIApiDashboardOperator  = "cli_api_dashboard_operator_consumers"
+
+	RunForkHistoricalReplayAdmissionExecutableForkWork     = "executable_fork_work"
+	RunForkHistoricalReplayAdmissionReconstructedForkState = "reconstructed_fork_local_state"
+	RunForkHistoricalReplayAdmissionLineageOnlyEvidence    = "lineage_only_evidence"
+	RunForkHistoricalReplayAdmissionFailClosedBlocker      = "fail_closed_blocker"
+	RunForkHistoricalReplayAdmissionSplitSibling           = "split_sibling"
 )
 
 type RunForkSelectedContractExecution struct {
@@ -217,6 +244,40 @@ type RunForkContractSwapBootResumeAdmission struct {
 	BlockedSiblings                 []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
 	InvalidPaths                    []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
 	UnsupportedBlockers             []RunForkUnsupportedBlocker                `json:"unsupported_blockers,omitempty"`
+}
+
+type RunForkHistoricalReplayExecutionAdmission struct {
+	Owner                           string                                     `json:"owner"`
+	NonMutating                     bool                                       `json:"non_mutating"`
+	ExecutionSupported              bool                                       `json:"execution_supported"`
+	FutureExecutionOwner            string                                     `json:"future_execution_owner"`
+	ForkRunID                       string                                     `json:"fork_run_id,omitempty"`
+	SourceRunID                     string                                     `json:"source_run_id,omitempty"`
+	ForkEventID                     string                                     `json:"fork_event_id,omitempty"`
+	ContractSelection               *RunForkContractSelection                  `json:"contract_selection,omitempty"`
+	ReplayResumeAdmissionOwner      string                                     `json:"replay_resume_admission_owner"`
+	SelectedExecutionAdmissionOwner string                                     `json:"selected_execution_admission_owner,omitempty"`
+	SelectedBindingOwner            string                                     `json:"selected_binding_owner,omitempty"`
+	RouteTopologyOwner              string                                     `json:"route_topology_owner,omitempty"`
+	RouteRecoveryOwner              string                                     `json:"route_recovery_owner,omitempty"`
+	RuntimeRouteRecoveryOwner       string                                     `json:"runtime_route_recovery_owner,omitempty"`
+	RecipientPlanningOwner          string                                     `json:"recipient_planning_owner,omitempty"`
+	ContractSwapAdmissionOwner      string                                     `json:"contract_swap_admission_owner,omitempty"`
+	FactAdmissions                  []RunForkHistoricalReplayFactAdmission     `json:"fact_admissions,omitempty"`
+	Prerequisites                   []RunForkSelectedContractExecutionBoundary `json:"prerequisites,omitempty"`
+	RequiredConsumers               []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
+	BlockedSiblings                 []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
+	InvalidPaths                    []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
+	UnsupportedBlockers             []RunForkUnsupportedBlocker                `json:"unsupported_blockers,omitempty"`
+}
+
+type RunForkHistoricalReplayFactAdmission struct {
+	Fact        string `json:"fact"`
+	Admission   string `json:"admission"`
+	SourceOwner string `json:"source_owner,omitempty"`
+	BlockerCode string `json:"blocker_code,omitempty"`
+	Tracker     string `json:"tracker,omitempty"`
+	Message     string `json:"message"`
 }
 
 func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmission) (int, []string, string) {

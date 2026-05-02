@@ -76,6 +76,13 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 		!unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, store.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) {
 		t.Fatalf("contract-swap admission = %#v", result.ContractSwapBootResumeAdmission)
 	}
+	if result.HistoricalReplayExecutionAdmission == nil ||
+		result.HistoricalReplayExecutionAdmission.Owner != store.RunForkHistoricalReplayExecutionAdmissionOwner ||
+		!result.HistoricalReplayExecutionAdmission.NonMutating ||
+		result.HistoricalReplayExecutionAdmission.ExecutionSupported ||
+		result.HistoricalReplayExecutionAdmission.ReplayResumeAdmissionOwner != store.RunForkReplayResumeAdmissionOwner {
+		t.Fatalf("historical replay admission = %#v", result.HistoricalReplayExecutionAdmission)
+	}
 	if result.RunForkActivation.ForkRunID != forkRunID || !result.Activated {
 		t.Fatalf("activation = %#v", result.RunForkActivation)
 	}
@@ -121,6 +128,11 @@ func TestActivateSelectedContractRunForkBlocksReplayableSourceDeliveryBeforeMuta
 	if result.ContractSwapBootResumeAdmission == nil ||
 		!unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, store.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) {
 		t.Fatalf("contract-swap admission = %#v, want non-mutating blocker before source replay block", result.ContractSwapBootResumeAdmission)
+	}
+	if result.HistoricalReplayExecutionAdmission == nil ||
+		!unsupportedBlockerHas(result.HistoricalReplayExecutionAdmission.UnsupportedBlockers, store.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating) ||
+		!historicalReplayFactHas(result.HistoricalReplayExecutionAdmission.FactAdmissions, store.RunForkHistoricalReplayFactEventDeliveries, store.RunForkHistoricalReplayAdmissionExecutableForkWork) {
+		t.Fatalf("historical replay admission = %#v, want non-mutating replayable-source classification before source replay block", result.HistoricalReplayExecutionAdmission)
 	}
 }
 
@@ -168,6 +180,11 @@ func TestActivateSelectedContractRunForkPassesRecoveredRouteEvidenceToContractSw
 	}
 	if unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, store.RunForkBlockerContractSwapRouteRecoveryMissing) {
 		t.Fatalf("unexpected missing-route blocker with route recovery evidence: %#v", result.ContractSwapBootResumeAdmission.UnsupportedBlockers)
+	}
+	if result.HistoricalReplayExecutionAdmission == nil ||
+		result.HistoricalReplayExecutionAdmission.RouteRecoveryOwner != store.RunForkSelectedContractRoutePersistenceOwner ||
+		result.HistoricalReplayExecutionAdmission.RuntimeRouteRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner {
+		t.Fatalf("historical replay route recovery owners = %#v", result.HistoricalReplayExecutionAdmission)
 	}
 }
 
@@ -243,6 +260,15 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 	if fakeStore.activateCalled {
 		t.Fatal("ActivateRunFork called, want fail closed before mutation")
 	}
+}
+
+func historicalReplayFactHas(items []store.RunForkHistoricalReplayFactAdmission, fact, admission string) bool {
+	for _, item := range items {
+		if item.Fact == fact && item.Admission == admission {
+			return true
+		}
+	}
+	return false
 }
 
 type fakeSelectedContractActivationStore struct {

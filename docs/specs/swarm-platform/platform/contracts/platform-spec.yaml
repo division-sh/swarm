@@ -3422,6 +3422,23 @@ run_model:
       otherwise implement mutating historical replay/resume. CLI, API, dashboard, Builder, route helpers, delivery
       writers, and pipeline boot paths may consume this owner but MUST NOT compute contract-swap boot/resume readiness
       independently.'
+    historical_replay_execution_admission: 'Full historical replay/resume execution admission is owned by
+      runtime.run_fork.historical_replay_execution_admission. This owner is non-mutating and establishes the authority
+      boundary for the future runtime.run_fork.historical_replay_execution owner. It consumes the canonical
+      store.run_fork.replay_resume_admission taxonomy plus selected-contract execution admission, selected binding,
+      selected route topology, selected recipient planning, selected route recovery when present, and
+      runtime.run_fork.contract_swap_boot_resume_admission. It classifies source events, event deliveries, receipts,
+      dead letters, retry/idempotency state, emitted follow-ups, timers, routes/current route rows, sessions, turns,
+      audits, non-agent/node/system work, source-advanced/post-T source outcomes, runtime restart recovery, and
+      CLI/API/dashboard/operator consumers exactly once as executable fork work, reconstructed fork-local state,
+      lineage-only evidence, fail-closed blockers, or split siblings. Source events and outcomes are lineage/proof only;
+      the only admitted executable delivery family is the separately proven delivery_event_replay_ready primitive from
+      store.run_fork.replay_resume_admission. This owner MUST NOT run handlers, create or copy events or
+      event_deliveries, write receipts, dead letters, retry/idempotency state, emitted follow-up events, timers,
+      sessions, turns, route rows, API/UI/dashboard state, suppress fork work from source outcomes, or treat selected
+      frontier execution as full historical replay/resume proof. CLI, API, dashboard, Builder, route helpers, delivery
+      writers, runtime recovery, and pipeline boot paths may consume this owner but MUST NOT compute historical replay
+      execution admission independently.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -3507,6 +3524,13 @@ run_model:
         fork-local work. This owner is non-mutating and does not authorize handler execution, delivery writes, receipts,
         dead letters, idempotency, emitted follow-ups, timers, sessions, turns, non-agent replay, route row mutation, or
         API/UI state.'
+      3j_historical_replay_execution_admission: 'Before any future full historical replay/resume mutation,
+        runtime.run_fork.historical_replay_execution_admission classifies every historical source fact family under one
+        runtime authority. It consumes replay_resume_admission, selected-contract execution admission, route topology,
+        recipient planning, route recovery evidence when present, and contract-swap boot/resume admission. It is
+        admission/model only: it does not run handlers, create fork-local rows, copy source rows, write outcomes, replay
+        timers, reconstruct sessions/turns/audits, mutate routes, or own API/dashboard state. Full mutation remains
+        with the separately gated runtime.run_fork.historical_replay_execution owner.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.
