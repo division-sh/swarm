@@ -30,6 +30,7 @@ type SelectedContractActivationGateResult struct {
 	Owner                              string                                           `json:"selected_contract_activation_gate_owner,omitempty"`
 	SelectedContractExecutionAdmission *store.RunForkSelectedContractExecutionAdmission `json:"selected_contract_execution_admission,omitempty"`
 	ContractSwapBootResumeAdmission    *store.RunForkContractSwapBootResumeAdmission    `json:"contract_swap_boot_resume_admission,omitempty"`
+	HistoricalReplayExecutionAdmission *store.RunForkHistoricalReplayExecutionAdmission `json:"historical_replay_execution_admission,omitempty"`
 }
 
 func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractActivationGateRequest) (SelectedContractActivationGateResult, error) {
@@ -124,10 +125,20 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{}, err
 	}
+	historicalReplayAdmission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
+		ReplayResumeAdmission:      plan.ReplayResumeAdmission,
+		SelectedExecutionAdmission: admission,
+		ContractSwapAdmission:      contractSwapAdmission,
+		RouteRecovery:              routeRecovery,
+	})
+	if err != nil {
+		return SelectedContractActivationGateResult{}, err
+	}
 	result := SelectedContractActivationGateResult{
 		Owner:                              store.RunForkSelectedContractExecutionActivationGateOwner,
 		SelectedContractExecutionAdmission: &admission,
 		ContractSwapBootResumeAdmission:    &contractSwapAdmission,
+		HistoricalReplayExecutionAdmission: &historicalReplayAdmission,
 	}
 	if !plan.ExecutionReady {
 		return result, fmt.Errorf("selected-contract activation gate requires execution-ready plan before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
