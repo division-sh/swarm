@@ -34,6 +34,9 @@ func TestActivateSelectedContractRunForkDelegatesNonSelectedActivation(t *testin
 	if !fakeStore.activateCalled || fakeStore.planCalled {
 		t.Fatalf("store calls = activate:%v plan:%v, want delegate activate without selected plan", fakeStore.activateCalled, fakeStore.planCalled)
 	}
+	if fakeStore.activateRequest.HistoricalReplayExecutionAdmitter == nil {
+		t.Fatal("non-selected activation did not receive historical replay execution admitter")
+	}
 	if result.SelectedContractExecutionAdmission != nil || result.ForkRunID != forkRunID || !result.Activated {
 		t.Fatalf("result = %#v", result)
 	}
@@ -61,6 +64,9 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 	}
 	if !fakeStore.planCalled || !fakeStore.requireCalled || !fakeStore.activateCalled {
 		t.Fatalf("store calls = plan:%v require:%v activate:%v, want admission before activation", fakeStore.planCalled, fakeStore.requireCalled, fakeStore.activateCalled)
+	}
+	if fakeStore.activateRequest.HistoricalReplayExecutionAdmitter == nil {
+		t.Fatal("selected state-only activation did not receive historical replay execution admitter")
 	}
 	if result.Owner != store.RunForkSelectedContractExecutionActivationGateOwner {
 		t.Fatalf("owner = %q, want %q", result.Owner, store.RunForkSelectedContractExecutionActivationGateOwner)
@@ -272,17 +278,18 @@ func historicalReplayFactHas(items []store.RunForkHistoricalReplayFactAdmission,
 }
 
 type fakeSelectedContractActivationStore struct {
-	binding       store.RunForkSelectedContractBinding
-	bindingOK     bool
-	bindingErr    error
-	requireErr    error
-	plan          store.RunForkPlan
-	planErr       error
-	routeRecovery store.RunForkSelectedContractRouteRecovery
-	routeOK       bool
-	routeErr      error
-	activation    store.RunForkActivation
-	activationErr error
+	binding         store.RunForkSelectedContractBinding
+	bindingOK       bool
+	bindingErr      error
+	requireErr      error
+	plan            store.RunForkPlan
+	planErr         error
+	routeRecovery   store.RunForkSelectedContractRouteRecovery
+	routeOK         bool
+	routeErr        error
+	activation      store.RunForkActivation
+	activationErr   error
+	activateRequest store.RunForkActivateRequest
 
 	loadCalled      bool
 	requireCalled   bool
@@ -326,8 +333,9 @@ func (s *fakeSelectedContractActivationStore) PlanRunFork(_ context.Context, _ s
 	return s.plan, nil
 }
 
-func (s *fakeSelectedContractActivationStore) ActivateRunFork(_ context.Context, _ store.RunForkActivateRequest) (store.RunForkActivation, error) {
+func (s *fakeSelectedContractActivationStore) ActivateRunFork(_ context.Context, req store.RunForkActivateRequest) (store.RunForkActivation, error) {
 	s.activateCalled = true
+	s.activateRequest = req
 	if s.activationErr != nil {
 		return store.RunForkActivation{}, s.activationErr
 	}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -269,6 +270,31 @@ type RunForkHistoricalReplayExecutionAdmission struct {
 	BlockedSiblings                 []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
 	InvalidPaths                    []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
 	UnsupportedBlockers             []RunForkUnsupportedBlocker                `json:"unsupported_blockers,omitempty"`
+}
+
+type RunForkHistoricalReplayExecution struct {
+	Owner                      string                                     `json:"owner"`
+	AdmissionOwner             string                                     `json:"admission_owner"`
+	ReplayResumeAdmissionOwner string                                     `json:"replay_resume_admission_owner"`
+	ForkRunID                  string                                     `json:"fork_run_id"`
+	SourceRunID                string                                     `json:"source_run_id"`
+	ForkEventID                string                                     `json:"fork_event_id"`
+	DeliveryEventReplayReady   bool                                       `json:"delivery_event_replay_ready"`
+	EventDeliveriesAdmission   RunForkHistoricalReplayFactAdmission       `json:"event_deliveries_admission"`
+	DeliveryEventReplay        *RunForkDeliveryEventReplayResult          `json:"delivery_event_replay,omitempty"`
+	BlockedSiblings            []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
+	InvalidPaths               []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
+}
+
+type RunForkHistoricalReplayExecutionRequest struct {
+	ForkRunID             string
+	SourceRunID           string
+	ForkEventID           string
+	ReplayResumeAdmission RunForkReplayResumeAdmission
+}
+
+type RunForkHistoricalReplayExecutionAdmitter interface {
+	AdmitRunForkHistoricalReplayExecution(context.Context, RunForkHistoricalReplayExecutionRequest) (RunForkHistoricalReplayExecution, error)
 }
 
 type RunForkHistoricalReplayFactAdmission struct {

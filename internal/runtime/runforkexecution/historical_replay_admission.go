@@ -1,6 +1,7 @@
 package runforkexecution
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -12,6 +13,120 @@ type HistoricalReplayExecutionAdmissionRequest struct {
 	SelectedExecutionAdmission store.RunForkSelectedContractExecutionAdmission
 	ContractSwapAdmission      store.RunForkContractSwapBootResumeAdmission
 	RouteRecovery              *store.RunForkSelectedContractRouteRecovery
+}
+
+type HistoricalReplayDeliveryEventReplayAdmissionRequest struct {
+	ForkRunID             string
+	SourceRunID           string
+	ForkEventID           string
+	ReplayResumeAdmission store.RunForkReplayResumeAdmission
+}
+
+type HistoricalReplayExecutionRequest struct {
+	Admission             store.RunForkHistoricalReplayExecutionAdmission
+	ReplayResumeAdmission store.RunForkReplayResumeAdmission
+}
+
+type HistoricalReplayExecutionAdmitter struct{}
+
+func (HistoricalReplayExecutionAdmitter) AdmitRunForkHistoricalReplayExecution(_ context.Context, req store.RunForkHistoricalReplayExecutionRequest) (store.RunForkHistoricalReplayExecution, error) {
+	admission, err := BuildHistoricalReplayDeliveryEventReplayAdmission(HistoricalReplayDeliveryEventReplayAdmissionRequest{
+		ForkRunID:             req.ForkRunID,
+		SourceRunID:           req.SourceRunID,
+		ForkEventID:           req.ForkEventID,
+		ReplayResumeAdmission: req.ReplayResumeAdmission,
+	})
+	if err != nil {
+		return store.RunForkHistoricalReplayExecution{}, err
+	}
+	return BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
+		Admission:             admission,
+		ReplayResumeAdmission: req.ReplayResumeAdmission,
+	})
+}
+
+func BuildHistoricalReplayDeliveryEventReplayAdmission(req HistoricalReplayDeliveryEventReplayAdmissionRequest) (store.RunForkHistoricalReplayExecutionAdmission, error) {
+	replayAdmission := req.ReplayResumeAdmission
+	if strings.TrimSpace(replayAdmission.Owner) != store.RunForkReplayResumeAdmissionOwner {
+		return store.RunForkHistoricalReplayExecutionAdmission{}, fmt.Errorf("historical replay delivery/event replay admission requires %s; got %q", store.RunForkReplayResumeAdmissionOwner, replayAdmission.Owner)
+	}
+	forkRunID := strings.TrimSpace(req.ForkRunID)
+	sourceRunID := strings.TrimSpace(req.SourceRunID)
+	forkEventID := strings.TrimSpace(req.ForkEventID)
+	if forkRunID == "" || sourceRunID == "" || forkEventID == "" {
+		return store.RunForkHistoricalReplayExecutionAdmission{}, fmt.Errorf("historical replay delivery/event replay admission requires fork/source/event identity")
+	}
+	blockers := []store.RunForkUnsupportedBlocker{}
+	for _, blocker := range replayAdmission.UnsupportedBlockers {
+		blockers = appendRunForkUnsupportedBlocker(blockers, blocker)
+	}
+	blockers = appendRunForkUnsupportedBlocker(blockers, store.RunForkUnsupportedBlocker{
+		Code:    store.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating,
+		Message: "historical replay execution admission is non-mutating; delivery/event replay mutation requires runtime.run_fork.historical_replay_execution",
+	})
+	return store.RunForkHistoricalReplayExecutionAdmission{
+		Owner:                      store.RunForkHistoricalReplayExecutionAdmissionOwner,
+		NonMutating:                true,
+		ExecutionSupported:         false,
+		FutureExecutionOwner:       store.RunForkHistoricalReplayExecutionOwner,
+		ForkRunID:                  forkRunID,
+		SourceRunID:                sourceRunID,
+		ForkEventID:                forkEventID,
+		ReplayResumeAdmissionOwner: replayAdmission.Owner,
+		FactAdmissions:             historicalReplayFactAdmissions(replayAdmission),
+		Prerequisites: []store.RunForkSelectedContractExecutionBoundary{
+			{
+				Concept:     "replay_resume_admission",
+				Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+				Owner:       store.RunForkReplayResumeAdmissionOwner,
+				Reason:      "delivery/event replay mutation consumes the canonical replay taxonomy and does not recompute source fact classifications",
+			},
+		},
+		RequiredConsumers:   historicalReplayRequiredConsumers(),
+		BlockedSiblings:     historicalReplayBlockedSiblings(),
+		InvalidPaths:        historicalReplayInvalidPaths(),
+		UnsupportedBlockers: blockers,
+	}, nil
+}
+
+func BuildHistoricalReplayExecution(req HistoricalReplayExecutionRequest) (store.RunForkHistoricalReplayExecution, error) {
+	admission := req.Admission
+	if strings.TrimSpace(admission.Owner) != store.RunForkHistoricalReplayExecutionAdmissionOwner {
+		return store.RunForkHistoricalReplayExecution{}, fmt.Errorf("historical replay execution requires %s; got %q", store.RunForkHistoricalReplayExecutionAdmissionOwner, admission.Owner)
+	}
+	if !admission.NonMutating {
+		return store.RunForkHistoricalReplayExecution{}, fmt.Errorf("historical replay execution requires non-mutating admission proof")
+	}
+	if strings.TrimSpace(admission.FutureExecutionOwner) != store.RunForkHistoricalReplayExecutionOwner {
+		return store.RunForkHistoricalReplayExecution{}, fmt.Errorf("historical replay execution requires future owner %s; got %q", store.RunForkHistoricalReplayExecutionOwner, admission.FutureExecutionOwner)
+	}
+	if strings.TrimSpace(admission.ReplayResumeAdmissionOwner) != store.RunForkReplayResumeAdmissionOwner {
+		return store.RunForkHistoricalReplayExecution{}, fmt.Errorf("historical replay execution requires replay taxonomy owner %s; got %q", store.RunForkReplayResumeAdmissionOwner, admission.ReplayResumeAdmissionOwner)
+	}
+	replayAdmission := req.ReplayResumeAdmission
+	if strings.TrimSpace(replayAdmission.Owner) != store.RunForkReplayResumeAdmissionOwner {
+		return store.RunForkHistoricalReplayExecution{}, fmt.Errorf("historical replay execution requires %s; got %q", store.RunForkReplayResumeAdmissionOwner, replayAdmission.Owner)
+	}
+	eventDeliveries, ok := historicalReplayFactAdmission(admission.FactAdmissions, store.RunForkHistoricalReplayFactEventDeliveries)
+	if !ok || eventDeliveries.Admission != store.RunForkHistoricalReplayAdmissionExecutableForkWork {
+		return store.RunForkHistoricalReplayExecution{}, fmt.Errorf("historical replay execution requires event_deliveries executable fork work admission")
+	}
+	if !replayAdmission.DeliveryEventReplayReady &&
+		!replayDispositionHas(replayAdmission, store.RunForkReplayResumeFactDeliveryPendingHistory, store.RunForkReplayResumeDispositionForkReplay) {
+		return store.RunForkHistoricalReplayExecution{}, fmt.Errorf("historical replay execution requires delivery_event_replay_ready replay taxonomy")
+	}
+	return store.RunForkHistoricalReplayExecution{
+		Owner:                      store.RunForkHistoricalReplayExecutionOwner,
+		AdmissionOwner:             admission.Owner,
+		ReplayResumeAdmissionOwner: replayAdmission.Owner,
+		ForkRunID:                  strings.TrimSpace(admission.ForkRunID),
+		SourceRunID:                strings.TrimSpace(admission.SourceRunID),
+		ForkEventID:                strings.TrimSpace(admission.ForkEventID),
+		DeliveryEventReplayReady:   true,
+		EventDeliveriesAdmission:   eventDeliveries,
+		BlockedSiblings:            historicalReplayExecutionBlockedSiblings(admission.BlockedSiblings),
+		InvalidPaths:               admission.InvalidPaths,
+	}, nil
 }
 
 func BuildHistoricalReplayExecutionAdmission(req HistoricalReplayExecutionAdmissionRequest) (store.RunForkHistoricalReplayExecutionAdmission, error) {
@@ -264,6 +379,32 @@ func replayDispositionHas(replay store.RunForkReplayResumeAdmission, fact, dispo
 		}
 	}
 	return false
+}
+
+func historicalReplayFactAdmission(admissions []store.RunForkHistoricalReplayFactAdmission, fact string) (store.RunForkHistoricalReplayFactAdmission, bool) {
+	for _, item := range admissions {
+		if strings.TrimSpace(item.Fact) == fact {
+			return item, true
+		}
+	}
+	return store.RunForkHistoricalReplayFactAdmission{}, false
+}
+
+func historicalReplayExecutionBlockedSiblings(items []store.RunForkSelectedContractExecutionBoundary) []store.RunForkSelectedContractExecutionBoundary {
+	out := make([]store.RunForkSelectedContractExecutionBoundary, 0, len(items)+1)
+	for _, item := range items {
+		if strings.TrimSpace(item.Concept) == "mutating_historical_replay_execution" {
+			continue
+		}
+		out = append(out, item)
+	}
+	out = append(out, store.RunForkSelectedContractExecutionBoundary{
+		Concept:     "full_historical_replay_execution",
+		Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+		Owner:       store.RunForkHistoricalReplayExecutionOwner,
+		Reason:      "this child mutates only delivery_event_replay_ready; full replay/resume remains under #564",
+	})
+	return out
 }
 
 func stringInSet(value string, items []string) bool {

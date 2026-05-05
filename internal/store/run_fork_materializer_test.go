@@ -549,9 +549,43 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err == nil || !strings.Contains(err.Error(), RunForkHistoricalReplayExecutionOwner) {
+		t.Fatalf("ActivateRunFork without historical replay owner error = %v, want %s", err, RunForkHistoricalReplayExecutionOwner)
+	}
+	if blocked.Activated || blocked.SourceFrozen {
+		t.Fatalf("blocked activation mutated lifecycle: %#v", blocked)
+	}
+	var sourceStatusAfterBlocked string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatusAfterBlocked); err != nil {
+		t.Fatalf("load source status after blocked activation: %v", err)
+	}
+	if sourceStatusAfterBlocked != "running" {
+		t.Fatalf("source status after blocked activation = %q, want running", sourceStatusAfterBlocked)
+	}
+
+	admitter := &fakeRunForkHistoricalReplayExecutionAdmitter{}
+	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{
+		ForkRunID:                         materialized.ForkRunID,
+		HistoricalReplayExecutionAdmitter: admitter,
+	})
 	if err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
+	}
+	if !admitter.called {
+		t.Fatal("historical replay execution admitter was not called")
+	}
+	if admitter.request.ForkRunID != materialized.ForkRunID ||
+		admitter.request.SourceRunID != sourceRunID ||
+		admitter.request.ForkEventID != eventID ||
+		!admitter.request.ReplayResumeAdmission.DeliveryEventReplayReady {
+		t.Fatalf("historical replay execution request = %#v", admitter.request)
+	}
+	if activated.HistoricalReplayExecution == nil ||
+		activated.HistoricalReplayExecution.Owner != RunForkHistoricalReplayExecutionOwner ||
+		activated.HistoricalReplayExecution.AdmissionOwner != RunForkHistoricalReplayExecutionAdmissionOwner ||
+		activated.HistoricalReplayExecution.DeliveryEventReplay == nil {
+		t.Fatalf("HistoricalReplayExecution = %#v", activated.HistoricalReplayExecution)
 	}
 	if activated.DeliveryEventReplay == nil {
 		t.Fatalf("DeliveryEventReplay = nil, want fork-local replay result: %#v", activated)
@@ -961,6 +995,35 @@ func TestRunForkActivation_ToleratesOptionalLegacyReplaySchemas(t *testing.T) {
 type sqlNullTime struct {
 	Time  time.Time
 	Valid bool
+}
+
+type fakeRunForkHistoricalReplayExecutionAdmitter struct {
+	called  bool
+	request RunForkHistoricalReplayExecutionRequest
+	err     error
+}
+
+func (a *fakeRunForkHistoricalReplayExecutionAdmitter) AdmitRunForkHistoricalReplayExecution(_ context.Context, req RunForkHistoricalReplayExecutionRequest) (RunForkHistoricalReplayExecution, error) {
+	a.called = true
+	a.request = req
+	if a.err != nil {
+		return RunForkHistoricalReplayExecution{}, a.err
+	}
+	return RunForkHistoricalReplayExecution{
+		Owner:                      RunForkHistoricalReplayExecutionOwner,
+		AdmissionOwner:             RunForkHistoricalReplayExecutionAdmissionOwner,
+		ReplayResumeAdmissionOwner: req.ReplayResumeAdmission.Owner,
+		ForkRunID:                  req.ForkRunID,
+		SourceRunID:                req.SourceRunID,
+		ForkEventID:                req.ForkEventID,
+		DeliveryEventReplayReady:   true,
+		EventDeliveriesAdmission: RunForkHistoricalReplayFactAdmission{
+			Fact:        RunForkHistoricalReplayFactEventDeliveries,
+			Admission:   RunForkHistoricalReplayAdmissionExecutableForkWork,
+			SourceOwner: RunForkReplayResumeAdmissionOwner,
+			Message:     "test admission",
+		},
+	}, nil
 }
 
 type execContextDB interface {

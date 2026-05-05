@@ -50,7 +50,10 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected-contract binding for activation gate: %w", err)
 	}
 	if !ok {
-		activation, err := req.Store.ActivateRunFork(ctx, store.RunForkActivateRequest{ForkRunID: forkRunID})
+		activation, err := req.Store.ActivateRunFork(ctx, store.RunForkActivateRequest{
+			ForkRunID:                         forkRunID,
+			HistoricalReplayExecutionAdmitter: HistoricalReplayExecutionAdmitter{},
+		})
 		return SelectedContractActivationGateResult{RunForkActivation: activation}, err
 	}
 	if req.SourceLoader == nil {
@@ -153,7 +156,10 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return result, fmt.Errorf("%s: selected-contract frontier execution remains non-mutating", store.RunForkBlockerContractFrontierExecutionUnsupported)
 	}
 
-	activation, err := req.Store.ActivateRunFork(ctx, store.RunForkActivateRequest{ForkRunID: forkRunID})
+	activation, err := req.Store.ActivateRunFork(ctx, store.RunForkActivateRequest{
+		ForkRunID:                         forkRunID,
+		HistoricalReplayExecutionAdmitter: HistoricalReplayExecutionAdmitter{},
+	})
 	result.RunForkActivation = activation
 	return result, err
 }
