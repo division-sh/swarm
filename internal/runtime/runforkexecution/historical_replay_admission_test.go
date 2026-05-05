@@ -177,6 +177,74 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithou
 	}
 }
 
+func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMutation(t *testing.T) {
+	replayAdmission := store.RunForkReplayResumeAdmission{
+		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+		DeliveryEventReplayReady: true,
+		Dispositions: []store.RunForkReplayResumeDisposition{{
+			Fact:        store.RunForkReplayResumeFactDeliveryPendingHistory,
+			Disposition: store.RunForkReplayResumeDispositionForkReplay,
+			Message:     "pending unstarted source delivery can be replayed",
+		}},
+	}
+	admission, err := BuildHistoricalReplayDeliveryEventReplayAdmission(HistoricalReplayDeliveryEventReplayAdmissionRequest{
+		ForkRunID:             "fork-run",
+		SourceRunID:           "source-run",
+		ForkEventID:           "fork-event",
+		ReplayResumeAdmission: replayAdmission,
+	})
+	if err != nil {
+		t.Fatalf("BuildHistoricalReplayDeliveryEventReplayAdmission: %v", err)
+	}
+
+	execution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
+		Admission:             admission,
+		ReplayResumeAdmission: replayAdmission,
+	})
+	if err != nil {
+		t.Fatalf("BuildHistoricalReplayExecution: %v", err)
+	}
+	if execution.Owner != store.RunForkHistoricalReplayExecutionOwner ||
+		execution.AdmissionOwner != store.RunForkHistoricalReplayExecutionAdmissionOwner ||
+		execution.ReplayResumeAdmissionOwner != store.RunForkReplayResumeAdmissionOwner ||
+		!execution.DeliveryEventReplayReady {
+		t.Fatalf("execution = %#v", execution)
+	}
+	if execution.EventDeliveriesAdmission.Fact != store.RunForkHistoricalReplayFactEventDeliveries ||
+		execution.EventDeliveriesAdmission.Admission != store.RunForkHistoricalReplayAdmissionExecutableForkWork {
+		t.Fatalf("event deliveries admission = %#v", execution.EventDeliveriesAdmission)
+	}
+	if !executionBoundaryHas(execution.InvalidPaths, "source_delivery_copy", store.RunForkSelectedContractDispositionInvalid) ||
+		!executionBoundaryHas(execution.InvalidPaths, "source_outcome_suppression", store.RunForkSelectedContractDispositionInvalid) ||
+		!executionBoundaryHas(execution.BlockedSiblings, "timer_reconstruction", store.RunForkSelectedContractDispositionBlockedSibling) {
+		t.Fatalf("execution boundaries invalid=%#v blocked=%#v", execution.InvalidPaths, execution.BlockedSiblings)
+	}
+}
+
+func TestBuildHistoricalReplayExecutionRejectsNonExecutableAdmission(t *testing.T) {
+	replayAdmission := store.RunForkReplayResumeAdmission{
+		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+		DeliveryEventReplayReady: true,
+	}
+	_, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
+		Admission: store.RunForkHistoricalReplayExecutionAdmission{
+			Owner:                      store.RunForkHistoricalReplayExecutionAdmissionOwner,
+			NonMutating:                true,
+			FutureExecutionOwner:       store.RunForkHistoricalReplayExecutionOwner,
+			ReplayResumeAdmissionOwner: store.RunForkReplayResumeAdmissionOwner,
+			FactAdmissions: []store.RunForkHistoricalReplayFactAdmission{{
+				Fact:      store.RunForkHistoricalReplayFactEventDeliveries,
+				Admission: store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence,
+				Message:   "not executable",
+			}},
+		},
+		ReplayResumeAdmission: replayAdmission,
+	})
+	if err == nil || !strings.Contains(err.Error(), "event_deliveries executable fork work") {
+		t.Fatalf("error = %v, want executable event_deliveries admission failure", err)
+	}
+}
+
 func TestBuildHistoricalReplayExecutionAdmissionRejectsNonCanonicalReplayTaxonomy(t *testing.T) {
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
 	contractSwapAdmission := store.RunForkContractSwapBootResumeAdmission{

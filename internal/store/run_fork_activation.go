@@ -18,26 +18,28 @@ const (
 )
 
 type RunForkActivateRequest struct {
-	ForkRunID string
+	ForkRunID                         string
+	HistoricalReplayExecutionAdmitter RunForkHistoricalReplayExecutionAdmitter
 }
 
 type RunForkActivation struct {
-	SourceRunID              string                                   `json:"source_run_id"`
-	ForkRunID                string                                   `json:"fork_run_id"`
-	ForkRunStatus            string                                   `json:"fork_run_status"`
-	SourceRunStatus          string                                   `json:"source_run_status"`
-	ForkPoint                RunForkPoint                             `json:"fork_point"`
-	Activated                bool                                     `json:"activated"`
-	SourceFrozen             bool                                     `json:"source_frozen"`
-	HistoricalReplayBlocked  bool                                     `json:"historical_replay_blocked"`
-	ReplayResumeAdmission    RunForkReplayResumeAdmission             `json:"replay_resume_admission"`
-	UnsupportedBlockers      []RunForkUnsupportedBlocker              `json:"unsupported_blockers,omitempty"`
-	MaterializedEntityCount  int                                      `json:"materialized_entity_count"`
-	DeliveryEventReplay      *RunForkDeliveryEventReplayResult        `json:"delivery_event_replay,omitempty"`
-	SelectedContractBinding  *RunForkSelectedContractBinding          `json:"selected_contract_binding,omitempty"`
-	BranchDivergence         *RunForkSelectedContractBranchDivergence `json:"selected_contract_branch_divergence,omitempty"`
-	SourceAdvancedAfterFork  bool                                     `json:"source_advanced_after_fork_point,omitempty"`
-	RepeatedActivationFailed bool                                     `json:"repeated_activation_failed,omitempty"`
+	SourceRunID               string                                   `json:"source_run_id"`
+	ForkRunID                 string                                   `json:"fork_run_id"`
+	ForkRunStatus             string                                   `json:"fork_run_status"`
+	SourceRunStatus           string                                   `json:"source_run_status"`
+	ForkPoint                 RunForkPoint                             `json:"fork_point"`
+	Activated                 bool                                     `json:"activated"`
+	SourceFrozen              bool                                     `json:"source_frozen"`
+	HistoricalReplayBlocked   bool                                     `json:"historical_replay_blocked"`
+	ReplayResumeAdmission     RunForkReplayResumeAdmission             `json:"replay_resume_admission"`
+	UnsupportedBlockers       []RunForkUnsupportedBlocker              `json:"unsupported_blockers,omitempty"`
+	MaterializedEntityCount   int                                      `json:"materialized_entity_count"`
+	HistoricalReplayExecution *RunForkHistoricalReplayExecution        `json:"historical_replay_execution,omitempty"`
+	DeliveryEventReplay       *RunForkDeliveryEventReplayResult        `json:"delivery_event_replay,omitempty"`
+	SelectedContractBinding   *RunForkSelectedContractBinding          `json:"selected_contract_binding,omitempty"`
+	BranchDivergence          *RunForkSelectedContractBranchDivergence `json:"selected_contract_branch_divergence,omitempty"`
+	SourceAdvancedAfterFork   bool                                     `json:"source_advanced_after_fork_point,omitempty"`
+	RepeatedActivationFailed  bool                                     `json:"repeated_activation_failed,omitempty"`
 }
 
 type runForkActivationLineage struct {
@@ -167,6 +169,11 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 		return result, err
 	}
 
+	historicalReplayExecution, err := requireRunForkHistoricalReplayExecution(ctx, req.HistoricalReplayExecutionAdmitter, lineage, plan)
+	if err != nil {
+		return result, err
+	}
+
 	now := time.Now().UTC()
 	sourceResult, err := tx.ExecContext(ctx, `
 		UPDATE runs
@@ -209,9 +216,51 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	result.Activated = true
 	result.SourceFrozen = true
 	if replayResult.ReplayedEventCount > 0 || replayResult.ReplayedDeliveryCount > 0 {
+		historicalReplayExecution.DeliveryEventReplay = &replayResult
+		result.HistoricalReplayExecution = &historicalReplayExecution
 		result.DeliveryEventReplay = &replayResult
 	}
 	return result, nil
+}
+
+func requireRunForkHistoricalReplayExecution(
+	ctx context.Context,
+	admitter RunForkHistoricalReplayExecutionAdmitter,
+	lineage runForkActivationLineage,
+	plan RunForkPlan,
+) (RunForkHistoricalReplayExecution, error) {
+	if !plan.ReplayResumeAdmission.DeliveryEventReplayReady && len(runForkReplayablePendingWork(plan.PendingWork)) == 0 {
+		return RunForkHistoricalReplayExecution{}, nil
+	}
+	if admitter == nil {
+		return RunForkHistoricalReplayExecution{}, fmt.Errorf("%s admission required before delivery_event_replay_ready mutation", RunForkHistoricalReplayExecutionOwner)
+	}
+	execution, err := admitter.AdmitRunForkHistoricalReplayExecution(ctx, RunForkHistoricalReplayExecutionRequest{
+		ForkRunID:             lineage.ForkRunID,
+		SourceRunID:           lineage.SourceRunID,
+		ForkEventID:           lineage.ForkEventID,
+		ReplayResumeAdmission: plan.ReplayResumeAdmission,
+	})
+	if err != nil {
+		return RunForkHistoricalReplayExecution{}, err
+	}
+	if strings.TrimSpace(execution.Owner) != RunForkHistoricalReplayExecutionOwner {
+		return RunForkHistoricalReplayExecution{}, fmt.Errorf("delivery/event replay mutation requires %s; got %q", RunForkHistoricalReplayExecutionOwner, execution.Owner)
+	}
+	if strings.TrimSpace(execution.AdmissionOwner) != RunForkHistoricalReplayExecutionAdmissionOwner {
+		return RunForkHistoricalReplayExecution{}, fmt.Errorf("delivery/event replay mutation requires %s; got %q", RunForkHistoricalReplayExecutionAdmissionOwner, execution.AdmissionOwner)
+	}
+	if strings.TrimSpace(execution.ForkRunID) != lineage.ForkRunID ||
+		strings.TrimSpace(execution.SourceRunID) != lineage.SourceRunID ||
+		strings.TrimSpace(execution.ForkEventID) != lineage.ForkEventID {
+		return RunForkHistoricalReplayExecution{}, fmt.Errorf("delivery/event replay mutation historical replay execution identity mismatch")
+	}
+	if !execution.DeliveryEventReplayReady ||
+		execution.EventDeliveriesAdmission.Fact != RunForkHistoricalReplayFactEventDeliveries ||
+		execution.EventDeliveriesAdmission.Admission != RunForkHistoricalReplayAdmissionExecutableForkWork {
+		return RunForkHistoricalReplayExecution{}, fmt.Errorf("delivery/event replay mutation requires event_deliveries executable fork work admission")
+	}
+	return execution, nil
 }
 
 func loadRunForkActivationLineage(ctx context.Context, tx *sql.Tx, forkRunID string) (runForkActivationLineage, error) {

@@ -188,7 +188,10 @@ active_issues:
     title: Gate contract-swap boot/resume semantics for timestamp forks
     maps_to:
       - timestamp_fork_replay_resume_ownership
-      - run_isolated_current_state_ownership
+  - id: 633
+    title: Gate historical replay delivery-event replay mutation from admission
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
       - delivery_and_replay_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
@@ -283,6 +286,7 @@ nodes:
       - selected-contract fork execution must write fresh fork-local event/delivery/outcome rows through the runtime selected-contract execution owner, with source rows used only as lineage evidence
       - selected-contract delivery writes from recipient planning are execution-proven through runtime.run_fork.selected_contract_execution and EventBus.Publish recipient-plan guards; a delivery-row-only writer would be a non-authoritative duplicate
       - historical replay execution admission must classify event deliveries, receipts, dead letters, retry/idempotency state, emitted follow-ups, and non-agent work before any future replay mutation; source delivery/outcome rows must remain lineage, blockers, or split siblings
+      - historical replay delivery/event replay mutation must be owned by runtime.run_fork.historical_replay_execution consuming event_deliveries executable-fork-work admission before the store delivery replay primitive writes fork-local rows
     representative_issues:
       - 112
       - 144
@@ -297,6 +301,7 @@ nodes:
       - 619
       - 621
       - 631
+      - 633
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
@@ -338,6 +343,7 @@ nodes:
       - selected-contract route persistence/runtime recovery needs a fork-local owner keyed by fork run_id and selected binding/topology/recipient evidence; current routing_rules, flow_instance_routes, and startup ListFlowInstanceRoutes recovery remain current-route infrastructure and must not become selected-fork route truth
       - contract-swap boot/resume readiness needs a non-mutating runtime owner that consumes selected binding, selected source admission, replay/resume taxonomy, selected route/recipient/recovery evidence, and classifies source deliveries/outcomes/timers/routes/sessions/non-agent facts as lineage, blockers, or split siblings before any full historical replay mutation
       - historical replay execution admission needs one non-mutating runtime owner that consumes replay_resume_admission, selected execution admission, selected binding/topology/recipient planning, route recovery evidence, and contract-swap admission before any full historical replay/resume mutation; it must classify every source fact family exactly once and keep mutation under a separate future owner
+      - historical replay delivery/event replay mutation must consume runtime.run_fork.historical_replay_execution_admission and runtime.run_fork.historical_replay_execution before store.run_fork.delivery_event_replay writes fresh fork-local rows; activation/store must not directly authorize delivery_event_replay_ready mutation
     representative_issues:
       - 564
       - 565
@@ -362,6 +368,7 @@ nodes:
       - 621
       - 625
       - 631
+      - 633
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
