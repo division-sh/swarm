@@ -189,9 +189,16 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	} else if affected != 1 {
 		return result, fmt.Errorf("fork activation blocked: source_run_freeze_not_applied")
 	}
-	replayResult, err := applyRunForkDeliveryEventReplay(ctx, tx, lineage, plan, now)
-	if err != nil {
-		return result, err
+	replayResult := RunForkDeliveryEventReplayResult{
+		Owner:       RunForkDeliveryEventReplayOwner,
+		SourceRunID: lineage.SourceRunID,
+		ForkRunID:   lineage.ForkRunID,
+	}
+	if historicalReplayExecution.DeliveryEventReplayReady {
+		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, lineage, historicalReplayExecution, now)
+		if err != nil {
+			return result, err
+		}
 	}
 	forkResult, err := tx.ExecContext(ctx, `
 		UPDATE runs
@@ -229,7 +236,7 @@ func requireRunForkHistoricalReplayExecution(
 	lineage runForkActivationLineage,
 	plan RunForkPlan,
 ) (RunForkHistoricalReplayExecution, error) {
-	if !plan.ReplayResumeAdmission.DeliveryEventReplayReady && len(runForkReplayablePendingWork(plan.PendingWork)) == 0 {
+	if !plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 		return RunForkHistoricalReplayExecution{}, nil
 	}
 	if admitter == nil {
@@ -240,6 +247,7 @@ func requireRunForkHistoricalReplayExecution(
 		SourceRunID:           lineage.SourceRunID,
 		ForkEventID:           lineage.ForkEventID,
 		ReplayResumeAdmission: plan.ReplayResumeAdmission,
+		PendingWork:           plan.PendingWork,
 	})
 	if err != nil {
 		return RunForkHistoricalReplayExecution{}, err
@@ -259,6 +267,9 @@ func requireRunForkHistoricalReplayExecution(
 		execution.EventDeliveriesAdmission.Fact != RunForkHistoricalReplayFactEventDeliveries ||
 		execution.EventDeliveriesAdmission.Admission != RunForkHistoricalReplayAdmissionExecutableForkWork {
 		return RunForkHistoricalReplayExecution{}, fmt.Errorf("delivery/event replay mutation requires event_deliveries executable fork work admission")
+	}
+	if len(execution.DeliveryEventReplayWork) == 0 {
+		return RunForkHistoricalReplayExecution{}, fmt.Errorf("delivery/event replay mutation requires owner-authorized delivery_event_replay_ready work")
 	}
 	return execution, nil
 }

@@ -200,6 +200,14 @@ func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMu
 	execution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
 		Admission:             admission,
 		ReplayResumeAdmission: replayAdmission,
+		PendingWork: []store.RunForkPendingWork{{
+			EventID:        "source-event",
+			DeliveryID:     "source-delivery",
+			SubscriberType: "agent",
+			SubscriberID:   "agent-a",
+			Classification: store.RunForkPendingClassificationPending,
+			Status:         "pending",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("BuildHistoricalReplayExecution: %v", err)
@@ -214,10 +222,59 @@ func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMu
 		execution.EventDeliveriesAdmission.Admission != store.RunForkHistoricalReplayAdmissionExecutableForkWork {
 		t.Fatalf("event deliveries admission = %#v", execution.EventDeliveriesAdmission)
 	}
+	if execution.ClosureLevel != "canonical_owner_promotion_with_delivery_event_replay_ready_only" ||
+		execution.FullReplayResumeSupported ||
+		len(execution.FactAdmissions) != 15 ||
+		len(execution.RequiredConsumers) == 0 {
+		t.Fatalf("execution broad owner accounting = %#v", execution)
+	}
+	if len(execution.DeliveryEventReplayWork) != 1 ||
+		execution.DeliveryEventReplayWork[0].SourceEventID != "source-event" ||
+		execution.DeliveryEventReplayWork[0].SourceDeliveryID != "source-delivery" {
+		t.Fatalf("owner-authorized delivery replay work = %#v", execution.DeliveryEventReplayWork)
+	}
 	if !executionBoundaryHas(execution.InvalidPaths, "source_delivery_copy", store.RunForkSelectedContractDispositionInvalid) ||
 		!executionBoundaryHas(execution.InvalidPaths, "source_outcome_suppression", store.RunForkSelectedContractDispositionInvalid) ||
 		!executionBoundaryHas(execution.BlockedSiblings, "timer_reconstruction", store.RunForkSelectedContractDispositionBlockedSibling) {
 		t.Fatalf("execution boundaries invalid=%#v blocked=%#v", execution.InvalidPaths, execution.BlockedSiblings)
+	}
+}
+
+func TestBuildHistoricalReplayExecutionRejectsTaxonomyReadyWithoutOwnerWork(t *testing.T) {
+	replayAdmission := store.RunForkReplayResumeAdmission{
+		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+		DeliveryEventReplayReady: true,
+		Dispositions: []store.RunForkReplayResumeDisposition{{
+			Fact:        store.RunForkReplayResumeFactDeliveryPendingHistory,
+			Disposition: store.RunForkReplayResumeDispositionForkReplay,
+			Message:     "pending unstarted source delivery can be replayed",
+		}},
+	}
+	admission, err := BuildHistoricalReplayDeliveryEventReplayAdmission(HistoricalReplayDeliveryEventReplayAdmissionRequest{
+		ForkRunID:             "fork-run",
+		SourceRunID:           "source-run",
+		ForkEventID:           "fork-event",
+		ReplayResumeAdmission: replayAdmission,
+	})
+	if err != nil {
+		t.Fatalf("BuildHistoricalReplayDeliveryEventReplayAdmission: %v", err)
+	}
+
+	_, err = BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
+		Admission:             admission,
+		ReplayResumeAdmission: replayAdmission,
+		PendingWork: []store.RunForkPendingWork{{
+			EventID:        "source-event",
+			DeliveryID:     "source-delivery",
+			SubscriberType: "agent",
+			SubscriberID:   "agent-a",
+			Classification: store.RunForkPendingClassificationPending,
+			Status:         "pending",
+			RetryCount:     1,
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "owner-authorized delivery_event_replay_ready work") {
+		t.Fatalf("error = %v, want owner-authorized work failure", err)
 	}
 }
 

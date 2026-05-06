@@ -3287,8 +3287,10 @@ run_model:
       rows only after runtime.run_fork.historical_replay_execution consumes a concrete
       runtime.run_fork.historical_replay_execution_admission that marks event_deliveries as executable fork work for
       source pending unstarted agent deliveries that the canonical replay_resume_admission taxonomy marks
-      delivery_event_replay_ready, using fresh fork event IDs, a direct committed replay-scope marker, and
-      run_fork_delivery_event_replays lineage rows. It fails closed with no partial mutation if the source run advanced
+      delivery_event_replay_ready. Activation/store MUST consume owner-authorized executable work from
+      runtime.run_fork.historical_replay_execution and MUST NOT reselect replayable source deliveries directly from
+      RunForkPlan or store.run_fork.replay_resume_admission. The store delivery-event replay primitive uses fresh fork
+      event IDs, a direct committed replay-scope marker, and run_fork_delivery_event_replays lineage rows. It fails closed with no partial mutation if the source run advanced
       after the fork point, if the fork already has events, deliveries, sessions, or turns, or if node, in-progress,
       failed, dead-letter, committed replay-scope, timer, route, session, active-turn, replay, or contract-swap facts
       would require unsupported historical replay. Activation does not copy source event IDs, replay delivered/completed
@@ -3443,15 +3445,31 @@ run_model:
       frontier execution as full historical replay/resume proof. CLI, API, dashboard, Builder, route helpers, delivery
       writers, runtime recovery, and pipeline boot paths may consume this owner but MUST NOT compute historical replay
       execution admission independently.'
+    historical_replay_execution: 'Mutating historical replay/resume execution authority is owned by
+      runtime.run_fork.historical_replay_execution. The owner consumes runtime.run_fork.historical_replay_execution_admission
+      and the canonical store.run_fork.replay_resume_admission taxonomy, validates that every historical source fact
+      family has exactly one executable, reconstructed, lineage-only, fail-closed, or split-sibling classification, and
+      emits the executable work set that downstream store/runtime writers may mutate. The current supported closure
+      level is canonical owner promotion with delivery_event_replay_ready only: full product-complete historical
+      replay/resume for timers, routes, sessions, turns, audits, non-agent/node/system work, contract-swap boot/resume,
+      generic source-advanced policy, broader restart recovery, and API/UI/dashboard surfaces remains unsupported unless
+      separately approved. Activation, store delivery-event replay, recovery, selected/contract-swap consumers, route
+      helpers, timer helpers, session helpers, and operator surfaces MUST consume this owner or remain explicit
+      fail-closed/split outputs. They MUST NOT authorize mutation directly from replay_resume_admission, selected
+      frontier execution, source rows, same-run outbox replay, source outcomes, CLI/API/dashboard state, or local
+      helper predicates.'
     historical_replay_delivery_event_replay_execution: 'The first mutating historical replay execution child is owned by
       runtime.run_fork.historical_replay_execution and is limited to the already-admitted
       delivery_event_replay_ready primitive. It consumes runtime.run_fork.historical_replay_execution_admission before
       any source freeze, fork activation, event row creation, delivery row creation, committed replay-scope marker, or
-      lineage write. It may delegate physical fork-local row writes to store.run_fork.delivery_event_replay, but that
-      store primitive is not the semantic execution owner. The owner may mint fresh fork-local event IDs and delivery
-      IDs under the fork run_id for pending unstarted source-agent deliveries admitted as event_deliveries executable
-      fork work, record run_fork_delivery_event_replays lineage, and let the normal runtime delivery pipeline process
-      the fork-local pending delivery. It MUST NOT copy source event IDs, source delivery IDs, receipts, dead letters,
+      lineage write. It validates the complete historical fact matrix, keeps unsupported families as explicit blockers
+      or split siblings, and emits owner-authorized delivery_event_replay_ready work identities. It may delegate physical
+      fork-local row writes to store.run_fork.delivery_event_replay, but that store primitive is not the semantic
+      execution owner and MUST NOT choose replayable source deliveries from the plan on its own. The owner may mint fresh
+      fork-local event IDs and delivery IDs under the fork run_id for pending unstarted source-agent deliveries admitted
+      as event_deliveries executable fork work, record run_fork_delivery_event_replays lineage, and let the normal
+      runtime delivery pipeline process the fork-local pending delivery. It MUST NOT copy source event IDs, source
+      delivery IDs, receipts, dead letters,
       retry/idempotency state, emitted follow-ups, timers, route rows, sessions, turns, audits, non-agent/node/system
       work, runtime restart state, API/UI/dashboard state, or use source/post-T outcomes as fork suppressors. Timers,
       routes, sessions, turns, audits, non-agent replay, contract-swap/full resume, restart recovery, and operator
@@ -3494,8 +3512,9 @@ run_model:
         Revalidate the original fork point against current source-run facts, require no source advancement and
         no unsupported replay/timer/route/session/turn/contract-swap facts, optionally create fork-local event/delivery
         rows and direct committed replay-scope markers for the delivery_event_replay_ready subset only through
-        runtime.run_fork.historical_replay_execution consuming historical replay execution admission, then atomically
-        mark the source run forked and the fork run running. Future runtime work uses the fork
+        runtime.run_fork.historical_replay_execution consuming historical replay execution admission and owner-authorized
+        executable delivery work, then atomically mark the source run forked and the fork run running. Activation/store
+        does not authorize replay directly from replay_resume_admission or RunForkPlan pending rows. Future runtime work uses the fork
         run_id, fork-local entity_state rows, and fork-local pending delivery rows; full historical replay remains
         unsupported outside the gated delivery/event primitive.'
       3c_selected_contract_source_advanced_branch: 'For selected-contract mutating fork execution, source advancement
@@ -3564,12 +3583,20 @@ run_model:
         admission/model only: it does not run handlers, create fork-local rows, copy source rows, write outcomes, replay
         timers, reconstruct sessions/turns/audits, mutate routes, or own API/dashboard state. Full mutation remains
         with the separately gated runtime.run_fork.historical_replay_execution owner.'
+      3j1_historical_replay_execution_owner: 'The mutating authority for historical replay/resume is
+        runtime.run_fork.historical_replay_execution. It consumes the admission fact matrix, validates exactly one
+        classification for every source fact family, exposes the currently executable fork work set, and keeps unsupported
+        fact families explicit as fail-closed blockers or split siblings. Its current supported mutation scope is only
+        delivery_event_replay_ready; this closes canonical owner promotion, not product-complete historical replay/resume
+        for every future fact family.'
       3k_historical_replay_delivery_event_replay_execution: 'For the first mutating historical replay child,
         runtime.run_fork.historical_replay_execution consumes a concrete historical replay execution admission and may
         execute only the delivery_event_replay_ready primitive. It creates fresh fork-local event/delivery rows and
         lineage through store.run_fork.delivery_event_replay, before source/fork lifecycle mutation, and only when
-        event_deliveries are admitted as executable fork work. All other historical source fact families remain lineage,
-        fail-closed blockers, or split siblings.'
+        event_deliveries are admitted as executable fork work and the owner emits concrete executable work identities.
+        store.run_fork.delivery_event_replay is a physical writer only; it does not select replayable source deliveries
+        from plan/admission data by itself. All other historical source fact families remain lineage, fail-closed
+        blockers, or split siblings.'
       3k1_historical_replay_delivery_event_replay_recovery: 'For the delivery_event_replay_ready primitive, startup
         recovery and sweeper recovery consume the fork-local rows created by
         runtime.run_fork.historical_replay_execution through the existing persisted replay owner. The recovery queue is

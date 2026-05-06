@@ -223,7 +223,9 @@ func runForkReplayResumeDispositionForPendingWork(item RunForkPendingWork) RunFo
 	}
 }
 
-func runForkPendingWorkReplayable(item RunForkPendingWork) bool {
+// RunForkPendingWorkReplayableForHistoricalReplay is the shared taxonomy predicate
+// consumed by the runtime historical replay owner before any fork-local mutation.
+func RunForkPendingWorkReplayableForHistoricalReplay(item RunForkPendingWork) bool {
 	if item.Classification != RunForkPendingClassificationPending {
 		return false
 	}
@@ -240,6 +242,10 @@ func runForkPendingWorkReplayable(item RunForkPendingWork) bool {
 		item.StartedAt == nil &&
 		item.DeliveredAt == nil &&
 		item.ReceiptAt == nil
+}
+
+func runForkPendingWorkReplayable(item RunForkPendingWork) bool {
+	return RunForkPendingWorkReplayableForHistoricalReplay(item)
 }
 
 func runForkPendingWorkIsNonAgent(item RunForkPendingWork) bool {

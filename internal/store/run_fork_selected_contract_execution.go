@@ -279,9 +279,14 @@ type RunForkHistoricalReplayExecution struct {
 	ForkRunID                  string                                     `json:"fork_run_id"`
 	SourceRunID                string                                     `json:"source_run_id"`
 	ForkEventID                string                                     `json:"fork_event_id"`
+	ClosureLevel               string                                     `json:"closure_level"`
+	FullReplayResumeSupported  bool                                       `json:"full_replay_resume_supported"`
 	DeliveryEventReplayReady   bool                                       `json:"delivery_event_replay_ready"`
 	EventDeliveriesAdmission   RunForkHistoricalReplayFactAdmission       `json:"event_deliveries_admission"`
+	FactAdmissions             []RunForkHistoricalReplayFactAdmission     `json:"fact_admissions,omitempty"`
+	DeliveryEventReplayWork    []RunForkHistoricalReplayExecutableWork    `json:"delivery_event_replay_work,omitempty"`
 	DeliveryEventReplay        *RunForkDeliveryEventReplayResult          `json:"delivery_event_replay,omitempty"`
+	RequiredConsumers          []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
 	BlockedSiblings            []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
 	InvalidPaths               []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
 }
@@ -291,6 +296,7 @@ type RunForkHistoricalReplayExecutionRequest struct {
 	SourceRunID           string
 	ForkEventID           string
 	ReplayResumeAdmission RunForkReplayResumeAdmission
+	PendingWork           []RunForkPendingWork
 }
 
 type RunForkHistoricalReplayExecutionAdmitter interface {
@@ -304,6 +310,16 @@ type RunForkHistoricalReplayFactAdmission struct {
 	BlockerCode string `json:"blocker_code,omitempty"`
 	Tracker     string `json:"tracker,omitempty"`
 	Message     string `json:"message"`
+}
+
+type RunForkHistoricalReplayExecutableWork struct {
+	Fact             string `json:"fact"`
+	SourceEventID    string `json:"source_event_id"`
+	SourceDeliveryID string `json:"source_delivery_id"`
+	SubscriberType   string `json:"subscriber_type"`
+	SubscriberID     string `json:"subscriber_id"`
+	ReasonCode       string `json:"reason_code,omitempty"`
+	Classification   string `json:"classification"`
 }
 
 func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmission) (int, []string, string) {
