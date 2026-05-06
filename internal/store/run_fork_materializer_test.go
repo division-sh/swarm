@@ -731,6 +731,210 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 }
 
+func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		seed     func(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, eventID string, at time.Time) string
+		work     func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork
+		wantText string
+	}{
+		{
+			name: "stale missing delivery",
+			seed: func(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, eventID string, at time.Time) string {
+				t.Helper()
+				return uuid.NewString()
+			},
+			work: func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork {
+				item := req.PendingWork[0]
+				item.DeliveryID = targetDeliveryID
+				return []RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkFromPending(item)}
+			},
+			wantText: "is not in current pending evidence",
+		},
+		{
+			name: "foreign delivery",
+			seed: func(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, eventID string, at time.Time) string {
+				t.Helper()
+				foreignRunID := uuid.NewString()
+				foreignEventID := uuid.NewString()
+				if _, err := db.ExecContext(ctx, `
+					INSERT INTO runs (run_id, status, started_at)
+					VALUES ($1::uuid, 'running', $2)
+				`, foreignRunID, at.Add(-time.Minute)); err != nil {
+					t.Fatalf("seed foreign run: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `
+					INSERT INTO events (
+						run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+					)
+					VALUES ($1::uuid, $2::uuid, 'foreign.ready', 'global', '{}'::jsonb, 'test', 'platform', $3)
+				`, foreignRunID, foreignEventID, at); err != nil {
+					t.Fatalf("seed foreign event: %v", err)
+				}
+				var deliveryID string
+				if err := db.QueryRowContext(ctx, `
+					INSERT INTO event_deliveries (
+						run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at
+					)
+					VALUES ($1::uuid, $2::uuid, 'agent', 'foreign-agent', 'pending', 0, $3)
+					RETURNING delivery_id::text
+				`, foreignRunID, foreignEventID, at).Scan(&deliveryID); err != nil {
+					t.Fatalf("seed foreign delivery: %v", err)
+				}
+				return deliveryID
+			},
+			work: func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork {
+				item := req.PendingWork[0]
+				item.DeliveryID = targetDeliveryID
+				return []RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkFromPending(item)}
+			},
+			wantText: "is not in current pending evidence",
+		},
+		{
+			name: "delivered delivery",
+			seed: func(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, eventID string, at time.Time) string {
+				t.Helper()
+				var deliveryID string
+				if err := db.QueryRowContext(ctx, `
+					INSERT INTO event_deliveries (
+						run_id, event_id, subscriber_type, subscriber_id, status, retry_count, delivered_at, created_at
+					)
+					VALUES ($1::uuid, $2::uuid, 'agent', 'done-agent', 'delivered', 0, $3, $3)
+					RETURNING delivery_id::text
+				`, sourceRunID, eventID, at).Scan(&deliveryID); err != nil {
+					t.Fatalf("seed delivered delivery: %v", err)
+				}
+				return deliveryID
+			},
+			work: func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork {
+				return []RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkForDelivery(req, targetDeliveryID)}
+			},
+			wantText: "is not replayable pending agent work",
+		},
+		{
+			name: "duplicate owner work",
+			seed: func(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, eventID string, at time.Time) string {
+				t.Helper()
+				return ""
+			},
+			work: func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork {
+				item := runForkHistoricalReplayWorkFromPending(req.PendingWork[0])
+				return []RunForkHistoricalReplayExecutableWork{item, item}
+			},
+			wantText: "duplicate source delivery",
+		},
+		{
+			name: "subscriber mismatch",
+			seed: func(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, eventID string, at time.Time) string {
+				t.Helper()
+				return ""
+			},
+			work: func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork {
+				item := runForkHistoricalReplayWorkFromPending(req.PendingWork[0])
+				item.SubscriberID = "wrong-agent"
+				return []RunForkHistoricalReplayExecutableWork{item}
+			},
+			wantText: "does not exactly match current pending evidence",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			pg := &PostgresStore{DB: db}
+			ctx := context.Background()
+
+			sourceRunID := uuid.NewString()
+			entityID := uuid.NewString()
+			eventID := uuid.NewString()
+			at := time.Unix(1700000875, 0).UTC()
+			seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO event_deliveries (
+					run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+				)
+				VALUES ($1::uuid, $2::uuid, 'agent', 'safe-agent', 'pending', 0, 'matched_agent_subscription', $3)
+			`, sourceRunID, eventID, at); err != nil {
+				t.Fatalf("seed safe pending delivery: %v", err)
+			}
+			targetDeliveryID := tc.seed(t, ctx, db, sourceRunID, eventID, at)
+			materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+			if err != nil {
+				t.Fatalf("MaterializeRunFork: %v", err)
+			}
+
+			admitter := &fakeRunForkHistoricalReplayExecutionAdmitter{
+				work: func(req RunForkHistoricalReplayExecutionRequest) []RunForkHistoricalReplayExecutableWork {
+					return tc.work(req, targetDeliveryID)
+				},
+			}
+			blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{
+				ForkRunID:                         materialized.ForkRunID,
+				HistoricalReplayExecutionAdmitter: admitter,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("ActivateRunFork error = %v, want %q", err, tc.wantText)
+			}
+			if blocked.Activated || blocked.SourceFrozen {
+				t.Fatalf("blocked activation mutated lifecycle: %#v", blocked)
+			}
+			assertRunForkActivationReplayMutationAbsent(t, db, sourceRunID, materialized.ForkRunID)
+		})
+	}
+}
+
+func TestRunForkDeliveryEventReplayValidationRejectsUnsafeCurrentEvidence(t *testing.T) {
+	base := RunForkPendingWork{
+		EventID:        uuid.NewString(),
+		DeliveryID:     uuid.NewString(),
+		SubscriberType: "agent",
+		SubscriberID:   "safe-agent",
+		Classification: RunForkPendingClassificationPending,
+		Status:         "pending",
+		RetryCount:     0,
+		CreatedAt:      time.Unix(1700000880, 0).UTC(),
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*RunForkPendingWork)
+	}{
+		{
+			name: "in-progress",
+			mutate: func(item *RunForkPendingWork) {
+				started := item.CreatedAt
+				item.Status = "in_progress"
+				item.ActiveSessionID = uuid.NewString()
+				item.StartedAt = &started
+				item.Classification = RunForkPendingClassificationInProgress
+			},
+		},
+		{
+			name: "non-agent",
+			mutate: func(item *RunForkPendingWork) {
+				item.SubscriberType = "node"
+				item.SubscriberID = "node-worker"
+			},
+		},
+		{
+			name: "retry",
+			mutate: func(item *RunForkPendingWork) {
+				item.RetryCount = 1
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := base
+			tc.mutate(&item)
+			err := validateRunForkDeliveryEventReplayWorkAgainstPlan(
+				[]RunForkPendingWork{item},
+				[]RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkFromPending(item)},
+			)
+			if err == nil || !strings.Contains(err.Error(), "is not replayable pending agent work") {
+				t.Fatalf("validateRunForkDeliveryEventReplayWorkAgainstPlan error = %v, want unsafe pending-agent rejection", err)
+			}
+		})
+	}
+}
+
 func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -1010,6 +1214,7 @@ type fakeRunForkHistoricalReplayExecutionAdmitter struct {
 	called  bool
 	request RunForkHistoricalReplayExecutionRequest
 	err     error
+	work    func(RunForkHistoricalReplayExecutionRequest) []RunForkHistoricalReplayExecutableWork
 }
 
 func (a *fakeRunForkHistoricalReplayExecutionAdmitter) AdmitRunForkHistoricalReplayExecution(_ context.Context, req RunForkHistoricalReplayExecutionRequest) (RunForkHistoricalReplayExecution, error) {
@@ -1017,6 +1222,12 @@ func (a *fakeRunForkHistoricalReplayExecutionAdmitter) AdmitRunForkHistoricalRep
 	a.request = req
 	if a.err != nil {
 		return RunForkHistoricalReplayExecution{}, a.err
+	}
+	deliveryEventReplayWork := []RunForkHistoricalReplayExecutableWork{
+		runForkHistoricalReplayWorkFromPending(req.PendingWork[0]),
+	}
+	if a.work != nil {
+		deliveryEventReplayWork = a.work(req)
 	}
 	return RunForkHistoricalReplayExecution{
 		Owner:                      RunForkHistoricalReplayExecutionOwner,
@@ -1033,18 +1244,65 @@ func (a *fakeRunForkHistoricalReplayExecutionAdmitter) AdmitRunForkHistoricalRep
 			SourceOwner: RunForkReplayResumeAdmissionOwner,
 			Message:     "test admission",
 		},
-		DeliveryEventReplayWork: []RunForkHistoricalReplayExecutableWork{
-			{
-				Fact:             RunForkHistoricalReplayFactEventDeliveries,
-				SourceEventID:    req.PendingWork[0].EventID,
-				SourceDeliveryID: req.PendingWork[0].DeliveryID,
-				SubscriberType:   req.PendingWork[0].SubscriberType,
-				SubscriberID:     req.PendingWork[0].SubscriberID,
-				ReasonCode:       req.PendingWork[0].ReasonCode,
-				Classification:   req.PendingWork[0].Classification,
-			},
-		},
+		DeliveryEventReplayWork: deliveryEventReplayWork,
 	}, nil
+}
+
+func runForkHistoricalReplayWorkFromPending(item RunForkPendingWork) RunForkHistoricalReplayExecutableWork {
+	return RunForkHistoricalReplayExecutableWork{
+		Fact:             RunForkHistoricalReplayFactEventDeliveries,
+		SourceEventID:    item.EventID,
+		SourceDeliveryID: item.DeliveryID,
+		SubscriberType:   item.SubscriberType,
+		SubscriberID:     item.SubscriberID,
+		ReasonCode:       item.ReasonCode,
+		Classification:   item.Classification,
+	}
+}
+
+func runForkHistoricalReplayWorkForDelivery(req RunForkHistoricalReplayExecutionRequest, deliveryID string) RunForkHistoricalReplayExecutableWork {
+	for _, item := range req.PendingWork {
+		if item.DeliveryID == deliveryID {
+			return runForkHistoricalReplayWorkFromPending(item)
+		}
+	}
+	return RunForkHistoricalReplayExecutableWork{
+		Fact:             RunForkHistoricalReplayFactEventDeliveries,
+		SourceEventID:    req.PendingWork[0].EventID,
+		SourceDeliveryID: deliveryID,
+		SubscriberType:   req.PendingWork[0].SubscriberType,
+		SubscriberID:     req.PendingWork[0].SubscriberID,
+		ReasonCode:       req.PendingWork[0].ReasonCode,
+		Classification:   req.PendingWork[0].Classification,
+	}
+}
+
+func assertRunForkActivationReplayMutationAbsent(t *testing.T, db *sql.DB, sourceRunID, forkRunID string) {
+	t.Helper()
+	ctx := context.Background()
+	var sourceStatus, forkStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
+		t.Fatalf("load source status after blocked activation: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, forkRunID).Scan(&forkStatus); err != nil {
+		t.Fatalf("load fork status after blocked activation: %v", err)
+	}
+	if sourceStatus != "running" || forkStatus != RunForkMaterializedStatus {
+		t.Fatalf("blocked activation lifecycle = source:%s fork:%s, want running/%s", sourceStatus, forkStatus, RunForkMaterializedStatus)
+	}
+	for name, query := range map[string]string{
+		"fork events":     `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`,
+		"fork deliveries": `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`,
+		"lineage rows":    `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`,
+	} {
+		var count int
+		if err := db.QueryRowContext(ctx, query, forkRunID).Scan(&count); err != nil {
+			t.Fatalf("count %s after blocked activation: %v", name, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s after blocked activation = %d, want 0", name, count)
+		}
+	}
 }
 
 type execContextDB interface {

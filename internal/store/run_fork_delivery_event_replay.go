@@ -102,6 +102,51 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, lineage ru
 	return result, nil
 }
 
+func validateRunForkDeliveryEventReplayWorkAgainstPlan(pending []RunForkPendingWork, work []RunForkHistoricalReplayExecutableWork) error {
+	evidenceByDeliveryID := make(map[string]RunForkPendingWork, len(pending))
+	for _, item := range pending {
+		deliveryID := strings.TrimSpace(item.DeliveryID)
+		if deliveryID == "" {
+			continue
+		}
+		if _, exists := evidenceByDeliveryID[deliveryID]; exists {
+			return fmt.Errorf("store.run_fork.delivery_event_replay current pending evidence has duplicate source delivery %s", deliveryID)
+		}
+		evidenceByDeliveryID[deliveryID] = item
+	}
+
+	seenWork := make(map[string]struct{}, len(work))
+	for _, item := range work {
+		sourceDeliveryID := strings.TrimSpace(item.SourceDeliveryID)
+		if sourceDeliveryID == "" {
+			return fmt.Errorf("store.run_fork.delivery_event_replay owner work missing source delivery identity")
+		}
+		if _, exists := seenWork[sourceDeliveryID]; exists {
+			return fmt.Errorf("store.run_fork.delivery_event_replay owner work has duplicate source delivery %s", sourceDeliveryID)
+		}
+		seenWork[sourceDeliveryID] = struct{}{}
+
+		evidence, ok := evidenceByDeliveryID[sourceDeliveryID]
+		if !ok {
+			return fmt.Errorf("store.run_fork.delivery_event_replay owner work source delivery %s is not in current pending evidence", sourceDeliveryID)
+		}
+		if item.Fact != RunForkHistoricalReplayFactEventDeliveries {
+			return fmt.Errorf("store.run_fork.delivery_event_replay owner work for source delivery %s has fact %q; want %q", sourceDeliveryID, item.Fact, RunForkHistoricalReplayFactEventDeliveries)
+		}
+		if !RunForkPendingWorkReplayableForHistoricalReplay(evidence) {
+			return fmt.Errorf("store.run_fork.delivery_event_replay owner work source delivery %s is not replayable pending agent work", sourceDeliveryID)
+		}
+		if strings.TrimSpace(item.SourceEventID) != strings.TrimSpace(evidence.EventID) ||
+			strings.TrimSpace(item.SubscriberType) != strings.TrimSpace(evidence.SubscriberType) ||
+			strings.TrimSpace(item.SubscriberID) != strings.TrimSpace(evidence.SubscriberID) ||
+			strings.TrimSpace(item.Classification) != strings.TrimSpace(evidence.Classification) ||
+			strings.TrimSpace(item.ReasonCode) != strings.TrimSpace(evidence.ReasonCode) {
+			return fmt.Errorf("store.run_fork.delivery_event_replay owner work source delivery %s does not exactly match current pending evidence", sourceDeliveryID)
+		}
+	}
+	return nil
+}
+
 func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, sourceEventID string) (runForkReplaySourceEvent, error) {
 	var event runForkReplaySourceEvent
 	err := tx.QueryRowContext(ctx, `
