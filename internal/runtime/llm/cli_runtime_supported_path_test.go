@@ -64,7 +64,6 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
 	tempDir := t.TempDir()
-	stateFile := filepath.Join(tempDir, "docker-state")
 	captureDir := filepath.Join(tempDir, "captures")
 	if err := os.MkdirAll(captureDir, 0o755); err != nil {
 		t.Fatalf("mkdir capture dir: %v", err)
@@ -72,31 +71,27 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
 	script := `#!/bin/sh
 set -eu
-state_file="${FAKE_DOCKER_STATE_FILE}"
 capture_dir="${FAKE_DOCKER_CAPTURE_DIR}"
-count=0
-if [ -f "$state_file" ]; then
-  count=$(cat "$state_file")
-fi
-count=$((count + 1))
-printf '%s' "$count" > "$state_file"
-cat > "$capture_dir/$count.stdin"
-if [ "$count" -gt 1 ] && grep -q '"name":"read_file"' "$capture_dir/$count.stdin" && grep -q '"ok":true' "$capture_dir/$count.stdin"; then
+captured="$capture_dir/$$.stdin"
+cat > "$captured"
+if grep -q '"name":"emit_category_assessed"' "$captured" && grep -q '"ok":true' "$captured"; then
   printf '%s\n' '{"type":"result","result":"done"}'
   exit 0
 fi
-  printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
-  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"Read","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}'
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
+if grep -q '"name":"read_file"' "$captured" && grep -q '"ok":true' "$captured"; then
+  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-emit-1","name":"emit_category_assessed","input":{"category":"payments"}}},"session_id":"provider-sess-1"}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}'
-  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool-emit-1","name":"emit_category_assessed","input":{"category":"payments"}}},"session_id":"provider-sess-1"}'
-  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":1},"session_id":"provider-sess-1"}'
   exit 0
+fi
+printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"Read","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}'
+printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}'
+exit 0
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
 	}
 	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
-	t.Setenv("FAKE_DOCKER_STATE_FILE", stateFile)
 	t.Setenv("FAKE_DOCKER_CAPTURE_DIR", captureDir)
 
 	cfg := &config.Config{}
@@ -206,8 +201,8 @@ fi
 	if err := json.Unmarshal(secondInput, &payload); err != nil {
 		t.Fatalf("unmarshal second stdin: %v", err)
 	}
-	if len(payload) != 2 {
-		t.Fatalf("tool payload entries = %d, want 2 (%#v)", len(payload), payload)
+	if len(payload) != 1 {
+		t.Fatalf("tool payload entries = %d, want 1 (%#v)", len(payload), payload)
 	}
 	readEntry := payload[0]
 	if readEntry["name"] != "read_file" || readEntry["ok"] != true {
