@@ -188,6 +188,8 @@ active_issues:
     title: Gate contract-swap boot/resume semantics for timestamp forks
     maps_to:
       - timestamp_fork_replay_resume_ownership
+      - run_isolated_current_state_ownership
+      - delivery_and_replay_ownership
   - id: 633
     title: Gate historical replay delivery-event replay mutation from admission
     maps_to:
