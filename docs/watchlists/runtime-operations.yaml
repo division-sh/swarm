@@ -195,6 +195,11 @@ active_issues:
     maps_to:
       - timestamp_fork_replay_resume_ownership
       - delivery_and_replay_ownership
+  - id: 635
+    title: Gate historical replay delivery-event restart recovery
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+      - delivery_and_replay_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
     maps_to:
@@ -289,6 +294,7 @@ nodes:
       - selected-contract delivery writes from recipient planning are execution-proven through runtime.run_fork.selected_contract_execution and EventBus.Publish recipient-plan guards; a delivery-row-only writer would be a non-authoritative duplicate
       - historical replay execution admission must classify event deliveries, receipts, dead letters, retry/idempotency state, emitted follow-ups, and non-agent work before any future replay mutation; source delivery/outcome rows must remain lineage, blockers, or split siblings
       - historical replay delivery/event replay mutation must be owned by runtime.run_fork.historical_replay_execution consuming event_deliveries executable-fork-work admission before the store delivery replay primitive writes fork-local rows
+      - historical replay delivery/event replay restart and sweeper recovery must consume #633 fork-local event, delivery, and committed replay-scope rows through the persisted replay owner; source deliveries, current subscriptions, source receipts, and source dead letters are not recovery truth or suppressors
     representative_issues:
       - 112
       - 144
@@ -304,6 +310,7 @@ nodes:
       - 621
       - 631
       - 633
+      - 635
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
@@ -346,6 +353,7 @@ nodes:
       - contract-swap boot/resume readiness needs a non-mutating runtime owner that consumes selected binding, selected source admission, replay/resume taxonomy, selected route/recipient/recovery evidence, and classifies source deliveries/outcomes/timers/routes/sessions/non-agent facts as lineage, blockers, or split siblings before any full historical replay mutation
       - historical replay execution admission needs one non-mutating runtime owner that consumes replay_resume_admission, selected execution admission, selected binding/topology/recipient planning, route recovery evidence, and contract-swap admission before any full historical replay/resume mutation; it must classify every source fact family exactly once and keep mutation under a separate future owner
       - historical replay delivery/event replay mutation must consume runtime.run_fork.historical_replay_execution_admission and runtime.run_fork.historical_replay_execution before store.run_fork.delivery_event_replay writes fresh fork-local rows; activation/store must not directly authorize delivery_event_replay_ready mutation
+      - historical replay delivery/event replay recovery must prove startup RecoveryManager and EventBus.SweepUndispatched recover the fork-local rows produced by runtime.run_fork.historical_replay_execution, with source rows/outcomes as lineage only and broader replay/resume siblings still split
     representative_issues:
       - 564
       - 565
@@ -371,6 +379,7 @@ nodes:
       - 625
       - 631
       - 633
+      - 635
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR

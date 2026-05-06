@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
+	"swarm/internal/runtime/runforkexecution"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
 )
@@ -121,6 +123,49 @@ func persistCommittedReplayScope(t *testing.T, ctx context.Context, pg *store.Po
 	t.Helper()
 	if err := pg.UpsertCommittedReplayScope(ctx, eventID, scope); err != nil {
 		t.Fatalf("UpsertCommittedReplayScope(%s): %v", eventID, err)
+	}
+}
+
+func seedHistoricalReplayRecoverySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed source run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.ready', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, sourceRunID, eventID, entityID, at); err != nil {
+		t.Fatalf("seed source event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'recovery-test', 'seed', $4),
+			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"Recovery Entity"'::jsonb, $3::uuid, 'platform', 'recovery-test', 'seed', $4)
+	`, sourceRunID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed source mutations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, name,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'Recovery Entity',
+			'ready', '{}'::jsonb, '{"name":"Recovery Entity"}'::jsonb, '{}'::jsonb, 1,
+			$3, $3, $3
+		)
+	`, sourceRunID, entityID, at); err != nil {
+		t.Fatalf("seed source entity_state: %v", err)
 	}
 }
 
@@ -237,6 +282,156 @@ func TestRecoveryManager_ReplaysPersistedCorrelationEnvelope(t *testing.T) {
 	recipients, _ := detail["persisted_recipients"].([]string)
 	if len(recipients) != 1 || recipients[0] != recipientID {
 		t.Fatalf("persisted_recipients = %#v, want [%q]", detail["persisted_recipients"], recipientID)
+	}
+}
+
+func TestRecoveryManager_ReplaysHistoricalForkDeliveryEventReplayRows(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700001200, 0).UTC()
+	seedHistoricalReplayRecoverySourceRun(t, db, sourceRunID, entityID, sourceEventID, at)
+
+	var sourceDeliveryID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id,
+			status, retry_count, reason_code, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'safe-agent', 'pending', 0, 'source_pending', $3)
+		RETURNING delivery_id::text
+	`, sourceRunID, sourceEventID, at).Scan(&sourceDeliveryID); err != nil {
+		t.Fatalf("seed source pending delivery: %v", err)
+	}
+
+	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          sourceEventID,
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	activated, err := pg.ActivateRunFork(ctx, store.RunForkActivateRequest{
+		ForkRunID:                         materialized.ForkRunID,
+		HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
+	})
+	if err != nil {
+		t.Fatalf("ActivateRunFork: %v", err)
+	}
+	if activated.DeliveryEventReplay == nil || activated.DeliveryEventReplay.ReplayedEventCount != 1 || activated.DeliveryEventReplay.ReplayedDeliveryCount != 1 {
+		t.Fatalf("DeliveryEventReplay = %#v, want one fork-local event and delivery", activated.DeliveryEventReplay)
+	}
+
+	var forkEventID, forkDeliveryID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT fork_event_id::text, fork_delivery_id::text
+		FROM run_fork_delivery_event_replays
+		WHERE fork_run_id = $1::uuid
+		  AND source_delivery_id = $2::uuid
+	`, materialized.ForkRunID, sourceDeliveryID).Scan(&forkEventID, &forkDeliveryID); err != nil {
+		t.Fatalf("load fork replay lineage: %v", err)
+	}
+	if forkEventID == sourceEventID || forkDeliveryID == sourceDeliveryID {
+		t.Fatalf("fork replay reused source ids: fork_event=%s fork_delivery=%s", forkEventID, forkDeliveryID)
+	}
+
+	scope, err := pg.LoadCommittedReplayScope(ctx, forkEventID)
+	if err != nil {
+		t.Fatalf("LoadCommittedReplayScope(fork event): %v", err)
+	}
+	if scope != runtimereplayclaim.CommittedReplayScopeDirect {
+		t.Fatalf("fork replay scope = %q, want direct", scope)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, sourceEventID, "processed", "source_outcome_after_fork"); err != nil {
+		t.Fatalf("mark source pipeline receipt: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, reason_code, side_effects, processed_at
+		)
+		SELECT
+			e.event_id, 'agent', 'safe-agent', e.entity_id, e.flow_instance,
+			'dead_letter', 'source_outcome_after_fork', '{}'::jsonb, now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+	`, sourceEventID); err != nil {
+		t.Fatalf("seed source agent dead-letter receipt: %v", err)
+	}
+
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	capture := &recoveryCapturePublisher{inner: bus}
+	safeAgent := bus.Subscribe("safe-agent", events.EventType("fork.ready"))
+	currentOnly := bus.Subscribe("current-only-agent", events.EventType("fork.ready"))
+
+	rm := runtimepipeline.NewRecoveryManagerWith(pg, capture)
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(capture.direct) != 1 {
+		t.Fatalf("direct replayed events = %#v, want one fork-local replay", capture.direct)
+	}
+	replayed := capture.direct[0]
+	if replayed.ID != forkEventID || replayed.RunID != materialized.ForkRunID {
+		t.Fatalf("replayed event = id:%s run:%s, want fork event %s run %s", replayed.ID, replayed.RunID, forkEventID, materialized.ForkRunID)
+	}
+	select {
+	case evt := <-safeAgent:
+		if evt.ID != forkEventID || evt.RunID != materialized.ForkRunID {
+			t.Fatalf("safe-agent received = id:%s run:%s, want fork event %s run %s", evt.ID, evt.RunID, forkEventID, materialized.ForkRunID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected safe-agent to receive recovered fork replay event")
+	}
+	select {
+	case evt := <-currentOnly:
+		t.Fatalf("current-only subscription should not receive direct fork replay: %#v", evt)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	var forkPipelineOutcome, forkPipelineReason string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, forkEventID).Scan(&forkPipelineOutcome, &forkPipelineReason); err != nil {
+		t.Fatalf("load fork pipeline receipt: %v", err)
+	}
+	if forkPipelineOutcome != "success" || forkPipelineReason != "pipeline_persisted" {
+		t.Fatalf("fork pipeline receipt = outcome:%s reason:%s, want success/pipeline_persisted", forkPipelineOutcome, forkPipelineReason)
+	}
+
+	var sourceDeliveryRun, sourceDeliveryStatus, sourceAgentOutcome string
+	if err := db.QueryRowContext(ctx, `
+		SELECT d.run_id::text, d.status, r.outcome
+		FROM event_deliveries d
+		JOIN event_receipts r
+		  ON r.event_id = d.event_id
+		 AND r.subscriber_type = 'agent'
+		 AND r.subscriber_id = d.subscriber_id
+		WHERE d.delivery_id = $1::uuid
+	`, sourceDeliveryID).Scan(&sourceDeliveryRun, &sourceDeliveryStatus, &sourceAgentOutcome); err != nil {
+		t.Fatalf("load source delivery/receipt after recovery: %v", err)
+	}
+	if sourceDeliveryRun != sourceRunID || sourceDeliveryStatus != "pending" || sourceAgentOutcome != "dead_letter" {
+		t.Fatalf("source state changed or suppressed recovery = run:%s status:%s outcome:%s", sourceDeliveryRun, sourceDeliveryStatus, sourceAgentOutcome)
+	}
+
+	logEntry := findRecoveryAftermathLog(t, capture.logs, forkEventID, "replayed", "persisted_recipients_replayed")
+	detail, _ := logEntry.Detail.(map[string]any)
+	if got := recoveryDetailString(detail["persisted_run_id"]); got != materialized.ForkRunID {
+		t.Fatalf("recovery persisted_run_id = %q, want fork run %q", got, materialized.ForkRunID)
 	}
 }
 

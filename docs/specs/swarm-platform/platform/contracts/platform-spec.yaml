@@ -3456,6 +3456,20 @@ run_model:
       work, runtime restart state, API/UI/dashboard state, or use source/post-T outcomes as fork suppressors. Timers,
       routes, sessions, turns, audits, non-agent replay, contract-swap/full resume, restart recovery, and operator
       surfaces remain separately gated siblings under #564/#549/#618.'
+    historical_replay_delivery_event_replay_recovery: 'Restart and sweeper recovery for the admitted
+      delivery_event_replay_ready primitive is owned by
+      runtime.run_fork.historical_replay_execution.delivery_event_replay_ready_recovery. It consumes the fresh
+      fork-local event rows, fork-local event_deliveries rows, direct committed replay-scope marker rows, and
+      run_fork_delivery_event_replays lineage produced by runtime.run_fork.historical_replay_execution for the fork
+      run_id. Startup RecoveryManager and EventBus.SweepUndispatched MUST consume the existing persisted replay owner:
+      ListEventsMissingPipelineReceipt, ClaimPipelineReplay, ListEventDeliveryRecipients, LoadCommittedReplayScope,
+      and PublishPersistedRecipients. Fork-local event_deliveries are the recipient truth; source event IDs, source
+      delivery IDs, source recipients, current subscriptions, source receipts, source dead letters, retry/idempotency
+      state, emitted follow-ups, and post-fork source outcomes are lineage/proof only and MUST NOT become executable
+      fork work or recovery suppressors. ClaimPipelineReplay remains the duplicate/race owner for fork replay event IDs.
+      This owner MUST NOT reconstruct timers, routes, sessions, turns, audits, non-agent/node/system work,
+      contract-swap boot/resume, runtime-wide restart recovery, API/UI/dashboard state, or close the broader #564/#549
+      historical replay/resume parents.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -3556,6 +3570,14 @@ run_model:
         lineage through store.run_fork.delivery_event_replay, before source/fork lifecycle mutation, and only when
         event_deliveries are admitted as executable fork work. All other historical source fact families remain lineage,
         fail-closed blockers, or split siblings.'
+      3k1_historical_replay_delivery_event_replay_recovery: 'For the delivery_event_replay_ready primitive, startup
+        recovery and sweeper recovery consume the fork-local rows created by
+        runtime.run_fork.historical_replay_execution through the existing persisted replay owner. The recovery queue is
+        the fork event missing its platform pipeline receipt, serialized by ClaimPipelineReplay; recipients come from
+        fork-local event_deliveries; direct replay scope comes from the fork-local committed replay-scope marker. Source
+        rows and source outcomes are lineage/proof only and never suppress fork-local recovery. This is a restart
+        durability child only; timers, routes, sessions, turns, audits, non-agent replay, contract-swap boot/resume,
+        runtime-wide restart recovery, and API/UI/dashboard surfaces remain split under #564/#549/#618.'
       4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
         Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
       5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.
