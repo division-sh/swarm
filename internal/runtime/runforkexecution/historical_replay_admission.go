@@ -25,6 +25,7 @@ type HistoricalReplayDeliveryEventReplayAdmissionRequest struct {
 type HistoricalReplayExecutionRequest struct {
 	Admission             store.RunForkHistoricalReplayExecutionAdmission
 	ReplayResumeAdmission store.RunForkReplayResumeAdmission
+	PendingWork           []store.RunForkPendingWork
 }
 
 type HistoricalReplayExecutionAdmitter struct{}
@@ -42,6 +43,7 @@ func (HistoricalReplayExecutionAdmitter) AdmitRunForkHistoricalReplayExecution(_
 	return BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
 		Admission:             admission,
 		ReplayResumeAdmission: req.ReplayResumeAdmission,
+		PendingWork:           req.PendingWork,
 	})
 }
 
@@ -115,6 +117,13 @@ func BuildHistoricalReplayExecution(req HistoricalReplayExecutionRequest) (store
 		!replayDispositionHas(replayAdmission, store.RunForkReplayResumeFactDeliveryPendingHistory, store.RunForkReplayResumeDispositionForkReplay) {
 		return store.RunForkHistoricalReplayExecution{}, fmt.Errorf("historical replay execution requires delivery_event_replay_ready replay taxonomy")
 	}
+	if err := validateHistoricalReplayFactMatrix(admission.FactAdmissions); err != nil {
+		return store.RunForkHistoricalReplayExecution{}, err
+	}
+	deliveryEventReplayWork := historicalReplayDeliveryEventReplayWork(req.PendingWork)
+	if len(deliveryEventReplayWork) == 0 {
+		return store.RunForkHistoricalReplayExecution{}, fmt.Errorf("historical replay execution requires owner-authorized delivery_event_replay_ready work")
+	}
 	return store.RunForkHistoricalReplayExecution{
 		Owner:                      store.RunForkHistoricalReplayExecutionOwner,
 		AdmissionOwner:             admission.Owner,
@@ -122,8 +131,13 @@ func BuildHistoricalReplayExecution(req HistoricalReplayExecutionRequest) (store
 		ForkRunID:                  strings.TrimSpace(admission.ForkRunID),
 		SourceRunID:                strings.TrimSpace(admission.SourceRunID),
 		ForkEventID:                strings.TrimSpace(admission.ForkEventID),
+		ClosureLevel:               "canonical_owner_promotion_with_delivery_event_replay_ready_only",
+		FullReplayResumeSupported:  false,
 		DeliveryEventReplayReady:   true,
 		EventDeliveriesAdmission:   eventDeliveries,
+		FactAdmissions:             append([]store.RunForkHistoricalReplayFactAdmission(nil), admission.FactAdmissions...),
+		DeliveryEventReplayWork:    deliveryEventReplayWork,
+		RequiredConsumers:          append([]store.RunForkSelectedContractExecutionBoundary(nil), admission.RequiredConsumers...),
 		BlockedSiblings:            historicalReplayExecutionBlockedSiblings(admission.BlockedSiblings),
 		InvalidPaths:               admission.InvalidPaths,
 	}, nil
@@ -388,6 +402,76 @@ func historicalReplayFactAdmission(admissions []store.RunForkHistoricalReplayFac
 		}
 	}
 	return store.RunForkHistoricalReplayFactAdmission{}, false
+}
+
+func validateHistoricalReplayFactMatrix(admissions []store.RunForkHistoricalReplayFactAdmission) error {
+	required := map[string]struct{}{
+		store.RunForkHistoricalReplayFactSourceEvents:             {},
+		store.RunForkHistoricalReplayFactEventDeliveries:          {},
+		store.RunForkHistoricalReplayFactReceipts:                 {},
+		store.RunForkHistoricalReplayFactDeadLetters:              {},
+		store.RunForkHistoricalReplayFactRetryIdempotency:         {},
+		store.RunForkHistoricalReplayFactEmittedFollowUps:         {},
+		store.RunForkHistoricalReplayFactTimers:                   {},
+		store.RunForkHistoricalReplayFactRoutes:                   {},
+		store.RunForkHistoricalReplayFactSessions:                 {},
+		store.RunForkHistoricalReplayFactTurns:                    {},
+		store.RunForkHistoricalReplayFactAudits:                   {},
+		store.RunForkHistoricalReplayFactNonAgentNodeSystemWork:   {},
+		store.RunForkHistoricalReplayFactSourceAdvancedPostTFacts: {},
+		store.RunForkHistoricalReplayFactRuntimeRestartRecovery:   {},
+		store.RunForkHistoricalReplayFactCLIApiDashboardOperator:  {},
+	}
+	allowed := map[string]struct{}{
+		store.RunForkHistoricalReplayAdmissionExecutableForkWork:     {},
+		store.RunForkHistoricalReplayAdmissionReconstructedForkState: {},
+		store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence:    {},
+		store.RunForkHistoricalReplayAdmissionFailClosedBlocker:      {},
+		store.RunForkHistoricalReplayAdmissionSplitSibling:           {},
+	}
+	seen := map[string]struct{}{}
+	for _, admission := range admissions {
+		fact := strings.TrimSpace(admission.Fact)
+		if _, ok := required[fact]; !ok {
+			return fmt.Errorf("historical replay execution encountered unowned fact family %q", admission.Fact)
+		}
+		if _, ok := seen[fact]; ok {
+			return fmt.Errorf("historical replay execution fact family %q admitted more than once", fact)
+		}
+		seen[fact] = struct{}{}
+		disposition := strings.TrimSpace(admission.Admission)
+		if _, ok := allowed[disposition]; !ok {
+			return fmt.Errorf("historical replay execution fact %s has unsupported admission %q", fact, admission.Admission)
+		}
+		if disposition == store.RunForkHistoricalReplayAdmissionExecutableForkWork && fact != store.RunForkHistoricalReplayFactEventDeliveries {
+			return fmt.Errorf("historical replay execution cannot execute unsupported fact family %s", fact)
+		}
+	}
+	for fact := range required {
+		if _, ok := seen[fact]; !ok {
+			return fmt.Errorf("historical replay execution missing fact family %s", fact)
+		}
+	}
+	return nil
+}
+
+func historicalReplayDeliveryEventReplayWork(pending []store.RunForkPendingWork) []store.RunForkHistoricalReplayExecutableWork {
+	work := make([]store.RunForkHistoricalReplayExecutableWork, 0, len(pending))
+	for _, item := range pending {
+		if !store.RunForkPendingWorkReplayableForHistoricalReplay(item) {
+			continue
+		}
+		work = append(work, store.RunForkHistoricalReplayExecutableWork{
+			Fact:             store.RunForkHistoricalReplayFactEventDeliveries,
+			SourceEventID:    strings.TrimSpace(item.EventID),
+			SourceDeliveryID: strings.TrimSpace(item.DeliveryID),
+			SubscriberType:   strings.TrimSpace(item.SubscriberType),
+			SubscriberID:     strings.TrimSpace(item.SubscriberID),
+			ReasonCode:       strings.TrimSpace(item.ReasonCode),
+			Classification:   strings.TrimSpace(item.Classification),
+		})
+	}
+	return work
 }
 
 func historicalReplayExecutionBlockedSiblings(items []store.RunForkSelectedContractExecutionBoundary) []store.RunForkSelectedContractExecutionBoundary {

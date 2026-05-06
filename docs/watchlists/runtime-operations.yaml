@@ -354,6 +354,7 @@ nodes:
       - historical replay execution admission needs one non-mutating runtime owner that consumes replay_resume_admission, selected execution admission, selected binding/topology/recipient planning, route recovery evidence, and contract-swap admission before any full historical replay/resume mutation; it must classify every source fact family exactly once and keep mutation under a separate future owner
       - historical replay delivery/event replay mutation must consume runtime.run_fork.historical_replay_execution_admission and runtime.run_fork.historical_replay_execution before store.run_fork.delivery_event_replay writes fresh fork-local rows; activation/store must not directly authorize delivery_event_replay_ready mutation
       - historical replay delivery/event replay recovery must prove startup RecoveryManager and EventBus.SweepUndispatched recover the fork-local rows produced by runtime.run_fork.historical_replay_execution, with source rows/outcomes as lineage only and broader replay/resume siblings still split
+      - broad historical replay execution owner promotion must make runtime.run_fork.historical_replay_execution the canonical mutating authority that emits executable work identities after validating the full fact matrix; store activation and delivery-event replay writers must consume that owner rather than selecting source deliveries from replay_resume_admission or RunForkPlan directly
     representative_issues:
       - 564
       - 565
@@ -377,6 +378,7 @@ nodes:
       - 619
       - 621
       - 625
+      - 629
       - 631
       - 633
       - 635

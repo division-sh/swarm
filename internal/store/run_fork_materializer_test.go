@@ -578,12 +578,15 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if admitter.request.ForkRunID != materialized.ForkRunID ||
 		admitter.request.SourceRunID != sourceRunID ||
 		admitter.request.ForkEventID != eventID ||
-		!admitter.request.ReplayResumeAdmission.DeliveryEventReplayReady {
+		!admitter.request.ReplayResumeAdmission.DeliveryEventReplayReady ||
+		len(admitter.request.PendingWork) != 1 ||
+		admitter.request.PendingWork[0].DeliveryID != sourceDeliveryID {
 		t.Fatalf("historical replay execution request = %#v", admitter.request)
 	}
 	if activated.HistoricalReplayExecution == nil ||
 		activated.HistoricalReplayExecution.Owner != RunForkHistoricalReplayExecutionOwner ||
 		activated.HistoricalReplayExecution.AdmissionOwner != RunForkHistoricalReplayExecutionAdmissionOwner ||
+		len(activated.HistoricalReplayExecution.DeliveryEventReplayWork) != 1 ||
 		activated.HistoricalReplayExecution.DeliveryEventReplay == nil {
 		t.Fatalf("HistoricalReplayExecution = %#v", activated.HistoricalReplayExecution)
 	}
@@ -1022,12 +1025,24 @@ func (a *fakeRunForkHistoricalReplayExecutionAdmitter) AdmitRunForkHistoricalRep
 		ForkRunID:                  req.ForkRunID,
 		SourceRunID:                req.SourceRunID,
 		ForkEventID:                req.ForkEventID,
+		ClosureLevel:               "canonical_owner_promotion_with_delivery_event_replay_ready_only",
 		DeliveryEventReplayReady:   true,
 		EventDeliveriesAdmission: RunForkHistoricalReplayFactAdmission{
 			Fact:        RunForkHistoricalReplayFactEventDeliveries,
 			Admission:   RunForkHistoricalReplayAdmissionExecutableForkWork,
 			SourceOwner: RunForkReplayResumeAdmissionOwner,
 			Message:     "test admission",
+		},
+		DeliveryEventReplayWork: []RunForkHistoricalReplayExecutableWork{
+			{
+				Fact:             RunForkHistoricalReplayFactEventDeliveries,
+				SourceEventID:    req.PendingWork[0].EventID,
+				SourceDeliveryID: req.PendingWork[0].DeliveryID,
+				SubscriberType:   req.PendingWork[0].SubscriberType,
+				SubscriberID:     req.PendingWork[0].SubscriberID,
+				ReasonCode:       req.PendingWork[0].ReasonCode,
+				Classification:   req.PendingWork[0].Classification,
+			},
 		},
 	}, nil
 }
