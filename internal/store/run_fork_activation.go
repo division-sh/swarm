@@ -173,6 +173,11 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 	if err != nil {
 		return result, err
 	}
+	if historicalReplayExecution.DeliveryEventReplayReady {
+		if err := validateRunForkDeliveryEventReplayWorkAgainstPlan(plan.PendingWork, historicalReplayExecution.DeliveryEventReplayWork); err != nil {
+			return result, err
+		}
+	}
 
 	now := time.Now().UTC()
 	sourceResult, err := tx.ExecContext(ctx, `
