@@ -692,6 +692,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	ch := eb.Subscribe("safe-agent", events.EventType("fork.ready"))
+	currentOnly := eb.Subscribe("current-only-agent", events.EventType("fork.ready"))
 	replayed, err := eb.SweepUndispatched(ctx, time.Hour, 10)
 	if err != nil {
 		t.Fatalf("SweepUndispatched: %v", err)
@@ -706,6 +707,11 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for fork replay event delivery")
+	}
+	select {
+	case evt := <-currentOnly:
+		t.Fatalf("current-only subscription should not receive direct fork replay: %#v", evt)
+	case <-time.After(50 * time.Millisecond):
 	}
 	var pipelineOutcome, pipelineReason string
 	if err := db.QueryRowContext(ctx, `
