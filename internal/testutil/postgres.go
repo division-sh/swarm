@@ -144,6 +144,20 @@ func waitForTestDatabase(ctx context.Context, db *sql.DB, timeout time.Duration)
 }
 
 func (s *sharedPostgresState) startLocked() error {
+	if adminDSN := strings.TrimSpace(os.Getenv("SWARM_TEST_POSTGRES_DSN")); adminDSN != "" {
+		db, err := sql.Open("postgres", adminDSN)
+		if err != nil {
+			return fmt.Errorf("open external postgres: %w", err)
+		}
+		defer db.Close()
+		if err := waitForTestDatabase(context.Background(), db, 180*time.Second); err != nil {
+			return fmt.Errorf("external postgres not ready: %w", err)
+		}
+		s.started = true
+		s.adminDSN = adminDSN
+		return nil
+	}
+
 	dockerBin, err := exec.LookPath("docker")
 	if err != nil {
 		return fmt.Errorf("docker not found in PATH: %w", err)
