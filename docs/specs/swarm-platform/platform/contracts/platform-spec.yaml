@@ -259,6 +259,8 @@ contract_formats:
           entity_writes.<entity_type>.save or entity_writes.<flow_id>.<entity_type>.save.'
         update_path: 'update_{entity_type}_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
           named-object field. The value schema is the exact declared subpath type.'
+        materialized_field_exclusion: 'Fields declaring materialize_from, and every nested subpath below them, MUST NOT
+          appear in generated write tools or writable-path summaries. They are runtime-owned projection fields.'
         create_rule: 'create authorization in entity_writes is author evidence for prompt/boot coverage. Path alpha does not
           expose a generic agent-facing create_entity replacement for current-entity tools.'
       generated_schema_closure: 'Generated entity-tool input and output schemas are closed recursively: additionalProperties
@@ -423,11 +425,51 @@ entity_contracts:
           initial: <value>
           immutable: <bool>
           description: <text>
+          materialize_from: <node_id>.<accumulator_name>
+          project:
+            <target_item_field>: source.<source_item_field>
           _unused_reason: <reason>
     notes:
     - Entity-level metadata is underscore-prefixed.
     - State does not live in entity contracts.
     - Envelope names are reserved and must not be author-declared.
+    - '`materialize_from` is valid only for a list of a declared named type.'
+    - '`materialize_from` and `_unused_reason` are mutually exclusive.'
+    - 'A `materialize_from` field is runtime-owned and not agent-writable.'
+  accumulator_entity_projection:
+    description: |
+      `materialize_from` declares a downstream typed entity-field copy of a
+      same-flow node accumulator. The accumulator remains canonical for
+      receipt acceptance, deduplication, completion, and computation. The
+      entity field is a persisted visibility/audit projection written by the
+      runtime on successful accumulator completion.
+    source_reference: |
+      The value has shape `<node_id>.<accumulator_name>`. The referenced node
+      must belong to the same flow as the declaring entity. The referenced
+      handler accumulator must be declared with `accumulate.into:
+      <accumulator_name>`.
+    target_type: |
+      The target field must be `list<NamedType>` or `[NamedType]`. The source
+      accumulator state_schema field named by `accumulate.into` must also be a
+      named-type list. `jsonb`, `[text]`, and untyped structural targets are
+      invalid for projection.
+    project: |
+      If source and target item named types are identical, `project` is
+      forbidden and identity projection is used. If they differ, `project` is
+      required and must name every field of the target item type. `source.*`
+      references resolve only against declared fields of the source item type.
+      Runtime accumulator metadata (`event_id`, `event_type`, `source`,
+      `received_at`) and event-payload extras outside the source named type are
+      not addressable through `source.*`.
+    writer_ownership: |
+      `materialize_from` is the sole runtime writer for the field after
+      create-time `initial:` materialization. Other authored writes
+      (`data_accumulation`, compute/filter/reduce/count/group_by store_as,
+      query store_as, clear, or agent entity_writes/save tools) are hard
+      invalidity.
+    e1_coverage: |
+      `materialize_from` counts as entity writer coverage for E1. It replaces
+      `_unused_reason`; the two may not coexist.
   one_entity_type_per_flow: |
     Each flow declares and creates at most one entity type. Verify
     rejects multiple entity types per flow in Wave 1.
@@ -564,7 +606,8 @@ handler_specification:
       \           └→ emit-site selection (handler emit OR active branch/rule/timeout/fan_out emit)\n                    \
       \                      └→ advances_to ─┐\n                                             sets_gate ────┤ (independent\
       \ of each other)\n                                             data_accumulation ┘\n                         \
-      \                         └→ emit.fields\n                                                       └→ emit.event\n  \
+      \                         └→ projection (materialize_from, if accumulator on_complete matched)\n                  \
+      \                                └→ emit.fields\n                                                       └→ emit.event\n  \
       \                                                          └→ action\n                                            \
       \                     └→ clear (optional — reset accumulator/state buckets)\n    "
   atomicity:
@@ -646,6 +689,9 @@ handler_specification:
       type: object
       purpose: Track multiple event arrivals for same entity. Wait until completion.
       sub_fields:
+        into: 'string — optional explicit accumulator buffer name. Required when any entity field declares
+          materialize_from: <this_node>.<into>. Must resolve to a state_schema field on this node typed as
+          list<NamedType> or [NamedType]. Within one node, a given into value may be declared by at most one handler.'
         expected_from: string — entity field containing expected count or items list
         completion: all | threshold | timeout
         from: string — optional sender path filter
@@ -657,6 +703,13 @@ handler_specification:
           with the same dedup key are ignored.'
       concept: Track multiple events arriving for the same entity. Fire on_complete when completion condition is met. Expected
         count read from entity state (written by initiating handler).
+      projection_hook: |
+        When a handler accumulator completes and an on_complete branch matches
+        successfully, any same-flow entity field declaring `materialize_from`
+        for this handler's `accumulate.into` buffer is written as a full
+        replacement list after data_accumulation and before emit.fields. No
+        projection occurs for incomplete accumulation, timeout branches, or
+        completion with no matching on_complete rule.
     compute:
       field: compute
       type: object
@@ -708,7 +761,9 @@ handler_specification:
           presence_checks: has(entity.X) and == null / != null comparisons remain available, but they are not required for declared fields.
         does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
           collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
-          only in the accumulator. To reference them, use the accumulated namespace.'
+          only in the accumulator. To reference them in post-accumulation conditions, use the accumulated namespace.
+          To persist a strict typed downstream copy, declare an entity field materialize_from; the runtime projection
+          step owns that write.'
       accumulated:
         resolves_to: 'The items array from the current handler''s accumulate step. Each item is a JSONB object
           representing one accumulated event payload. Available only in on_complete conditions and filter
@@ -719,6 +774,11 @@ handler_specification:
         not_available_in: 'guard.check — guards run before accumulation. data_accumulation.expression — runs
           before accumulation. rules.condition — rules are an alternative to on_complete, not used after
           accumulation.'
+        projection_boundary: |
+          `materialize_from` consumes accumulated items through the source
+          named type's typed view. Runtime accumulator metadata and event
+          payload extras outside the source named type are stripped before
+          writing the entity field and are not addressable as `source.*`.
       fan_out:
         resolves_to: 'Handler context produced by the fan_out step. fan_out.count is the number of items
           that were dispatched. Populated after fan_out executes, before data_accumulation.'
@@ -959,6 +1019,8 @@ handler_specification:
   - 'compute → emit-site selection: computed values written before branch/rule/timeout selection evaluates'
   - 'emit-site selection → {advances_to, sets_gate, data_accumulation}: active branch/rule/timeout may override these fields'
   - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency, any order valid'
+  - 'data_accumulation → projection: accumulator-to-entity materialize_from writes run after selected branch writes'
+  - 'projection → emit.fields: emit payload expressions observe projected entity fields'
   - 'emit.fields → emit.event: output payload constructed before event persisted'
   - 'emit.event → action: events persisted before platform actions execute'
   - 'action → clear: state cleanup runs last, after all side effects committed'
@@ -4301,11 +4363,40 @@ static_analyzer:
         rule: Explicit `initial:` on the field counts as authored creation-time coverage.
       unused_reason:
         rule: Explicit `_unused_reason:` documents intentional no-writer intent and suppresses this slice only.
+      materialize_from:
+        rule: Explicit `materialize_from:` counts as runtime-owned writer coverage when accumulator_entity_projection verify passes.
       handler_write_sites:
         rule: Handler write targets that name the field explicitly count as coverage. This includes data_accumulation, compute,
           filter/group_by/reduce/count store_as, query store_as, and clear targets.
     rule: Emit hard invalidity when a declared entity field has no authored writer coverage, no explicit `initial:`, and no
       `_unused_reason:`.
+  slice_6b_accumulator_entity_projection:
+    id: accumulator_entity_projection
+    domain: semantic_validity
+    authority: hard_invalidity
+    severity: error
+    canonical_owner: internal/runtime/accprojection resolver consumed by bootverify and runtime executor
+    supported_surface: cmd/swarm verify and runtime handler execution
+    spec_basis:
+    - entity_contracts.accumulator_entity_projection
+    - handler_specification.handler_fields.accumulate
+    - canonical_invariants.no_structural_primitive_elides_type_discipline
+    rule: |
+      Verify every `materialize_from` field through the shared projection
+      resolver. Hard invalidity if the reference is malformed, the source node
+      is missing or cross-flow, the source handler lacks matching
+      `accumulate.into`, multiple handlers on one node declare the same
+      projectable buffer, the source/target types are not named-type lists, the
+      source event payload lacks the complete typed view, project coverage is
+      partial or reaches undeclared source fields/metadata/extras, the field
+      also declares `_unused_reason`, or any other authored writer targets the
+      same field.
+    runtime_rule: |
+      On a successful matching accumulator on_complete branch, runtime writes
+      the projection as a full replacement before emit.fields and validates the
+      result through entity named-type normalization. Failure rolls back the
+      whole handler transaction. Projection does not run for timeout,
+      incomplete accumulation, or no-match completion.
   slice_7_entity_reader_compliance:
     id: expression_field_reference_validation
     domain: semantic_validity

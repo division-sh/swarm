@@ -388,6 +388,9 @@ func entityToolWritablePathNames(contract entityruntime.Contract) []string {
 		if err != nil {
 			continue
 		}
+		if strings.TrimSpace(decl.MaterializeFrom) != "" {
+			continue
+		}
 		collectEntityToolWritablePaths(contract, strings.TrimSpace(name), strings.TrimSpace(decl.Type), seen, map[string]struct{}{}, &out)
 	}
 	sort.Strings(out)

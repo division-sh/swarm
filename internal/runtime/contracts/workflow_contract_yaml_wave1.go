@@ -273,10 +273,12 @@ func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
 		return nil
 	}
 	parsed, err := decodeWave1FieldNode(node, wave1FieldNodeOptions{
-		Context:           "entity field",
-		AllowInitial:      true,
-		AllowImmutable:    true,
-		AllowUnusedReason: true,
+		Context:              "entity field",
+		AllowInitial:         true,
+		AllowImmutable:       true,
+		AllowUnusedReason:    true,
+		AllowMaterializeFrom: true,
+		AllowProject:         true,
 	})
 	if err != nil {
 		return err
@@ -285,6 +287,8 @@ func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
 	f.Initial = parsed.Initial
 	f.Immutable = parsed.Immutable
 	f.Description = parsed.Description
+	f.MaterializeFrom = parsed.MaterializeFrom
+	f.Project = parsed.Project
 	f.UnusedReason = parsed.UnusedReason
 	return nil
 }
@@ -334,6 +338,12 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 	if opts.AllowUnusedReason {
 		allowed["_unused_reason"] = struct{}{}
 	}
+	if opts.AllowMaterializeFrom {
+		allowed["materialize_from"] = struct{}{}
+	}
+	if opts.AllowProject {
+		allowed["project"] = struct{}{}
+	}
 
 	var field wave1ParsedFieldNode
 	var listOf string
@@ -354,7 +364,7 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 				}
 				listOf = listValue
 				continue
-			case "initial", "immutable", "_unused_reason":
+			case "initial", "immutable", "_unused_reason", "materialize_from", "project":
 				return wave1ParsedFieldNode{}, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", opts.Context, key)
 			default:
 				return wave1ParsedFieldNode{}, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", opts.Context, key)
@@ -391,6 +401,18 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 				return wave1ParsedFieldNode{}, err
 			}
 			field.UnusedReason = text
+		case "materialize_from":
+			text, err := decodeScalarStringNode(value)
+			if err != nil {
+				return wave1ParsedFieldNode{}, err
+			}
+			field.MaterializeFrom = strings.TrimSpace(text)
+		case "project":
+			project, err := decodeProjectionMapNode(value)
+			if err != nil {
+				return wave1ParsedFieldNode{}, err
+			}
+			field.Project = project
 		}
 	}
 	if strings.EqualFold(strings.TrimSpace(field.Type), "list") {
@@ -409,6 +431,44 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 		return wave1ParsedFieldNode{}, fmt.Errorf("%s _unused_reason must be at least 10 characters", opts.Context)
 	}
 	return field, nil
+}
+
+func decodeProjectionMapNode(node *yaml.Node) (map[string]any, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("entity field project must be a mapping")
+	}
+	out := make(map[string]any, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		var value any
+		switch node.Content[i+1].Kind {
+		case yaml.ScalarNode:
+			switch strings.TrimSpace(node.Content[i+1].Tag) {
+			case "!!int", "!!float", "!!bool":
+				if err := node.Content[i+1].Decode(&value); err != nil {
+					return nil, err
+				}
+			default:
+				text, err := decodeScalarStringNode(node.Content[i+1])
+				if err != nil {
+					return nil, err
+				}
+				value = text
+			}
+		default:
+			if err := node.Content[i+1].Decode(&value); err != nil {
+				return nil, err
+			}
+		}
+		out[key] = value
+	}
+	return out, nil
 }
 
 func validateWave1TypeRef(raw, context string) error {
@@ -465,16 +525,20 @@ func buildFlatEventPayloadSpec(node *yaml.Node) (EventPayloadSpec, error) {
 }
 
 type wave1FieldNodeOptions struct {
-	Context           string
-	AllowInitial      bool
-	AllowImmutable    bool
-	AllowUnusedReason bool
+	Context              string
+	AllowInitial         bool
+	AllowImmutable       bool
+	AllowUnusedReason    bool
+	AllowMaterializeFrom bool
+	AllowProject         bool
 }
 
 type wave1ParsedFieldNode struct {
-	Type         string
-	Initial      any
-	Immutable    bool
-	Description  string
-	UnusedReason string
+	Type            string
+	Initial         any
+	Immutable       bool
+	Description     string
+	MaterializeFrom string
+	Project         map[string]any
+	UnusedReason    string
 }

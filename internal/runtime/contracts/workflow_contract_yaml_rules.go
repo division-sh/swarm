@@ -37,8 +37,13 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 	if a == nil {
 		return nil
 	}
+	if err := validateAccumulateFieldNodes(node); err != nil {
+		return err
+	}
 	var aux struct {
+		Into         string    `yaml:"into"`
 		ExpectedFrom string    `yaml:"expected_from"`
+		From         string    `yaml:"from"`
 		DedupBy      string    `yaml:"dedup_by"`
 		Threshold    int       `yaml:"threshold"`
 		TimeoutMS    int       `yaml:"timeout_ms"`
@@ -50,7 +55,9 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*a = AccumulateSpec{
+		Into:         strings.TrimSpace(aux.Into),
 		ExpectedFrom: strings.TrimSpace(aux.ExpectedFrom),
+		From:         strings.TrimSpace(aux.From),
 		ExpectedPath: paths.Parse(aux.ExpectedFrom),
 		DedupBy:      strings.TrimSpace(aux.DedupBy),
 		DedupPath:    paths.Parse(aux.DedupBy),
@@ -64,6 +71,33 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 	}
 	if a.OnTimeout, err = decodeHandlerRuleEntryNode(&aux.OnTimeout); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateAccumulateFieldNodes(node *yaml.Node) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"into":          {},
+		"expected_from": {},
+		"from":          {},
+		"dedup_by":      {},
+		"threshold":     {},
+		"timeout_ms":    {},
+		"completion":    {},
+		"on_complete":   {},
+		"on_timeout":    {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: accumulate field %q not in platform spec", key)
+		}
 	}
 	return nil
 }

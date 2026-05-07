@@ -120,6 +120,9 @@ type checkerContext struct {
 	nodeStateSchemaLoaded   bool
 	nodeStateSchemaFindings []Finding
 
+	accumulatorProjectionLoaded   bool
+	accumulatorProjectionFindings []Finding
+
 	producesDriftLoaded   bool
 	producesDriftFindings []Finding
 
@@ -200,6 +203,7 @@ var bootCheckRegistry = []Check{
 	{ID: "state_machine_coherence", Severity: "error", Run: checkStateMachineCoherence},
 	{ID: "semantic_drift_unreachable_state", Severity: "warning", Run: checkSemanticDriftUnreachableState},
 	{ID: "node_state_schema_typed_counterpart", Severity: SeverityHardInvalidity, Run: checkNodeStateSchemaTypedCounterpart},
+	{ID: "accumulator_entity_projection", Severity: SeverityHardInvalidity, Run: checkAccumulatorEntityProjection},
 	{ID: "required_agents_match", Severity: "error", Run: checkRequiredAgentsMatch},
 	{ID: "handler_field_compliance", Severity: "error", Run: checkHandlerFieldCompliance},
 	{ID: "tool_resolution", Severity: "warning", Run: checkToolResolution},

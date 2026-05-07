@@ -237,6 +237,13 @@ func cloneEntityContract(in EntityContract) EntityContract {
 	if len(in.Fields) > 0 {
 		out.Fields = make(map[string]EntityFieldDecl, len(in.Fields))
 		for key, value := range in.Fields {
+			if len(value.Project) > 0 {
+				project := make(map[string]any, len(value.Project))
+				for projectKey, projectValue := range value.Project {
+					project[projectKey] = projectValue
+				}
+				value.Project = project
+			}
 			out.Fields[key] = value
 		}
 	}
