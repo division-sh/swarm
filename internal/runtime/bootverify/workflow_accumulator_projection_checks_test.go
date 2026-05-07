@@ -27,8 +27,19 @@ func accumulatorProjectionBundle() *runtimecontracts.WorkflowContractBundle {
 						"score":     {Type: "integer"},
 					},
 				},
+				"DimensionSummary": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"dimension":  {Type: "text"},
+						"score":      {Type: "integer"},
+						"confidence": {Type: "text"},
+						"source":     {Type: "text"},
+					},
+				},
 			},
 		},
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"projection": {Value: map[string]any{"default_confidence": "medium"}},
+		}},
 		RootEntities: runtimecontracts.EntityContractsDocument{
 			"vertical": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
@@ -71,6 +82,28 @@ func TestRun_AcceptsAccumulatorEntityProjectionWithPayloadExtras(t *testing.T) {
 
 	if reportContains(report.HardInvalidities(), "accumulator_entity_projection", "scores") {
 		t.Fatalf("unexpected projection invalidity: %#v", report.HardInvalidities())
+	}
+}
+
+func TestRun_AcceptsAccumulatorProjectionWithPolicyAndLiteralProject(t *testing.T) {
+	bundle := accumulatorProjectionBundle()
+	entity := bundle.RootEntities["vertical"]
+	entity.Fields["summary"] = runtimecontracts.EntityFieldDecl{
+		Type:            "[DimensionSummary]",
+		MaterializeFrom: "scoring-node.dimensions_received",
+		Project: map[string]any{
+			"dimension":  "source.dimension",
+			"score":      "source.score",
+			"confidence": "policy.projection.default_confidence",
+			"source":     "scoring-node",
+		},
+	}
+	bundle.RootEntities["vertical"] = entity
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.HardInvalidities(), "accumulator_entity_projection", "summary") {
+		t.Fatalf("unexpected policy/literal projection invalidity: %#v", report.HardInvalidities())
 	}
 }
 
