@@ -295,6 +295,7 @@ nodes:
       - historical replay execution admission must classify event deliveries, receipts, dead letters, retry/idempotency state, emitted follow-ups, and non-agent work before any future replay mutation; source delivery/outcome rows must remain lineage, blockers, or split siblings
       - historical replay delivery/event replay mutation must be owned by runtime.run_fork.historical_replay_execution consuming event_deliveries executable-fork-work admission before the store delivery replay primitive writes fork-local rows
       - historical replay delivery/event replay restart and sweeper recovery must consume #633 fork-local event, delivery, and committed replay-scope rows through the persisted replay owner; source deliveries, current subscriptions, source receipts, and source dead letters are not recovery truth or suppressors
+      - contract-swap historical replay execution must consume runtime.run_fork.historical_replay_execution plus selected recipient planning before EventBus.Publish writes selected fork deliveries; source delivery subscribers remain lineage only and store.run_fork.delivery_event_replay is not sufficient for selected recipient truth
     representative_issues:
       - 112
       - 144
@@ -311,6 +312,7 @@ nodes:
       - 631
       - 633
       - 635
+      - 639
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
@@ -355,6 +357,7 @@ nodes:
       - historical replay delivery/event replay mutation must consume runtime.run_fork.historical_replay_execution_admission and runtime.run_fork.historical_replay_execution before store.run_fork.delivery_event_replay writes fresh fork-local rows; activation/store must not directly authorize delivery_event_replay_ready mutation
       - historical replay delivery/event replay recovery must prove startup RecoveryManager and EventBus.SweepUndispatched recover the fork-local rows produced by runtime.run_fork.historical_replay_execution, with source rows/outcomes as lineage only and broader replay/resume siblings still split
       - broad historical replay execution owner promotion must make runtime.run_fork.historical_replay_execution the canonical mutating authority that emits executable work identities after validating the full fact matrix; store activation and delivery-event replay writers must consume that owner rather than selecting source deliveries from replay_resume_admission or RunForkPlan directly
+      - contract-swap historical replay execution needs runtime.run_fork.historical_replay_execution.contract_swap_boot_resume as the selected-contract child owner for already-admitted delivery_event_replay_ready work; selected recipient planning owns fork recipients, source delivery subscribers are lineage only, and timers/routes/sessions/turns/audits/non-agent/restart/API siblings stay fail-closed or split
     representative_issues:
       - 564
       - 565
@@ -382,6 +385,7 @@ nodes:
       - 631
       - 633
       - 635
+      - 639
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR

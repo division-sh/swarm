@@ -189,6 +189,125 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 }
 
+func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSelectedRecipients(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+	selection := runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot)
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002600, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET subscriber_type = 'agent',
+		    subscriber_id = 'source-agent-that-must-not-route',
+		    status = 'pending',
+		    retry_count = 0,
+		    reason_code = 'source_pending_agent_delivery',
+		    active_session_id = NULL,
+		    started_at = NULL,
+		    delivered_at = NULL
+		WHERE run_id = $1::uuid
+		  AND event_id = $2::uuid
+	`, sourceRunID, sourceEventID); err != nil {
+		t.Fatalf("seed replayable source agent delivery: %v", err)
+	}
+
+	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{
+		SourceRunID:       sourceRunID,
+		At:                sourceEventID,
+		ContractSelection: &selection,
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+
+	result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
+		ForkRunID:    materialized.ForkRunID,
+		Store:        pg,
+		SourceLoader: loader,
+	})
+	if err != nil {
+		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
+	}
+	if result.ContractSwapBootResumeExecution == nil ||
+		result.ContractSwapBootResumeExecution.Owner != store.RunForkHistoricalReplayContractSwapBootResumeOwner ||
+		result.ContractSwapBootResumeExecution.ParentHistoricalReplayExecutionOwner != store.RunForkHistoricalReplayExecutionOwner ||
+		len(result.ContractSwapBootResumeExecution.ExecutableWork) != 1 {
+		t.Fatalf("contract-swap execution = %#v", result.ContractSwapBootResumeExecution)
+	}
+	if result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || !result.Activated {
+		t.Fatalf("activation result = %#v", result)
+	}
+	forkEventID := result.ForkEvents[0].ForkEventID
+
+	var sourceSubscriberDeliveries, forkEventDeliveries int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND event_id = $2::uuid
+		  AND subscriber_id = 'source-agent-that-must-not-route'
+	`, materialized.ForkRunID, forkEventID).Scan(&sourceSubscriberDeliveries); err != nil {
+		t.Fatalf("count source subscriber deliveries: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND event_id = $2::uuid
+	`, materialized.ForkRunID, forkEventID).Scan(&forkEventDeliveries); err != nil {
+		t.Fatalf("count fork event deliveries: %v", err)
+	}
+	if sourceSubscriberDeliveries != 0 || forkEventDeliveries == 0 {
+		t.Fatalf("fork delivery recipients source=%d total=%d, want selected recipient planning without source subscriber", sourceSubscriberDeliveries, forkEventDeliveries)
+	}
+
+	var genericReplayRows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM run_fork_delivery_event_replays
+		WHERE fork_run_id = $1::uuid
+	`, materialized.ForkRunID).Scan(&genericReplayRows); err != nil {
+		t.Fatalf("count generic delivery replay rows: %v", err)
+	}
+	if genericReplayRows != 0 {
+		t.Fatalf("generic delivery replay rows = %d, want contract-swap execution to avoid source-subscriber writer", genericReplayRows)
+	}
+
+	var forkReceipts, emittedFollowUps int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, forkEventID).Scan(&forkReceipts); err != nil {
+		t.Fatalf("count fork receipts: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name = 'item.processed'
+		  AND source_event_id = $2::uuid
+	`, materialized.ForkRunID, forkEventID).Scan(&emittedFollowUps); err != nil {
+		t.Fatalf("count emitted follow-ups: %v", err)
+	}
+	if forkReceipts == 0 || emittedFollowUps != 1 {
+		t.Fatalf("fork outcomes receipts=%d followUps=%d, want selected handler execution", forkReceipts, emittedFollowUps)
+	}
+}
+
 func TestExecuteSelectedContractRunForkPreservesSessionBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -545,6 +664,42 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 	})
 	if err != nil {
 		t.Fatalf("Authorize canonical recipient plan: %v", err)
+	}
+}
+
+func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapOwner(t *testing.T) {
+	frontier := testContractFrontierAdmission(testContractSelection())
+	sourceEventID := frontier.FrontierEvents[0].SourceEventID
+	routeAdmission := testSelectedContractRouteAdmission(frontier)
+	routeTopology := testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission)
+	planning, err := BuildSelectedContractRecipientPlanning(SelectedContractRecipientPlanningRequest{
+		Admission:      frontier,
+		RouteAdmission: routeAdmission,
+		RouteTopology:  routeTopology,
+	})
+	if err != nil {
+		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
+	}
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, store.RunForkHistoricalReplayContractSwapBootResumeOwner)
+	if err != nil {
+		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
+	}
+	guard.ExpectForkEvent("fork-event", sourceEventID)
+
+	err = guard.Authorize(context.Background(), events.Event{
+		ID:          "fork-event",
+		Type:        "work.begin",
+		SourceAgent: store.RunForkHistoricalReplayContractSwapBootResumeOwner,
+	}, bus.PublishRecipientPlan{
+		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
+			Type:        "node",
+			ID:          "alpha-intake",
+			Path:        "flow-a/alpha-intake",
+			RouteSource: "selected_contracts",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Authorize contract-swap owner recipient plan: %v", err)
 	}
 }
 

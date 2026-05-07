@@ -27,10 +27,13 @@ type SelectedContractActivationGateRequest struct {
 
 type SelectedContractActivationGateResult struct {
 	store.RunForkActivation
-	Owner                              string                                           `json:"selected_contract_activation_gate_owner,omitempty"`
-	SelectedContractExecutionAdmission *store.RunForkSelectedContractExecutionAdmission `json:"selected_contract_execution_admission,omitempty"`
-	ContractSwapBootResumeAdmission    *store.RunForkContractSwapBootResumeAdmission    `json:"contract_swap_boot_resume_admission,omitempty"`
-	HistoricalReplayExecutionAdmission *store.RunForkHistoricalReplayExecutionAdmission `json:"historical_replay_execution_admission,omitempty"`
+	Owner                              string                                               `json:"selected_contract_activation_gate_owner,omitempty"`
+	SelectedContractExecutionAdmission *store.RunForkSelectedContractExecutionAdmission     `json:"selected_contract_execution_admission,omitempty"`
+	ContractSwapBootResumeAdmission    *store.RunForkContractSwapBootResumeAdmission        `json:"contract_swap_boot_resume_admission,omitempty"`
+	HistoricalReplayExecutionAdmission *store.RunForkHistoricalReplayExecutionAdmission     `json:"historical_replay_execution_admission,omitempty"`
+	ContractSwapBootResumeExecution    *store.RunForkHistoricalReplayContractSwapBootResume `json:"contract_swap_boot_resume_execution,omitempty"`
+	ExecutedEventCount                 int                                                  `json:"executed_event_count,omitempty"`
+	ForkEvents                         []SelectedContractExecutionForkEvent                 `json:"fork_events,omitempty"`
 }
 
 func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractActivationGateRequest) (SelectedContractActivationGateResult, error) {
@@ -120,6 +123,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if ok {
 		routeRecovery = &recoveredRoute
 	}
+	pgStore, _ := req.Store.(*store.PostgresStore)
 	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
 		SelectedExecutionAdmission: admission,
 		ReplayResumeAdmission:      plan.ReplayResumeAdmission,
@@ -147,7 +151,85 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return result, fmt.Errorf("selected-contract activation gate requires execution-ready plan before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
 	}
 	if plan.ReplayResumeAdmission.DeliveryEventReplayReady {
-		return result, fmt.Errorf("%s: selected-bound activation cannot consume source delivery/event replay as selected-contract executable work", store.RunForkBlockerSelectedContractSourceReplayUnsupported)
+		if pgStore == nil {
+			return result, fmt.Errorf("%s requires postgres store", store.RunForkHistoricalReplayContractSwapBootResumeOwner)
+		}
+		if routeRecovery == nil {
+			record, err := pgStore.RecordRunForkSelectedContractRouteRecovery(ctx, store.RunForkSelectedContractRouteRecoveryRequest{
+				ForkRunID:         forkRunID,
+				SourceRunID:       binding.SourceRunID,
+				ForkEventID:       binding.ForkEventID,
+				ContractSelection: binding.ContractSelection,
+				RouteTopology:     routeTopology,
+				RecipientPlanning: *model.RecipientPlanning,
+			})
+			if err != nil {
+				return result, fmt.Errorf("record selected-contract route recovery for contract-swap execution: %w", err)
+			}
+			routeRecovery = &record
+			contractSwapAdmission, err = BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
+				SelectedExecutionAdmission: admission,
+				ReplayResumeAdmission:      plan.ReplayResumeAdmission,
+				RouteRecovery:              routeRecovery,
+			})
+			if err != nil {
+				return result, err
+			}
+			historicalReplayAdmission, err = BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
+				ReplayResumeAdmission:      plan.ReplayResumeAdmission,
+				SelectedExecutionAdmission: admission,
+				ContractSwapAdmission:      contractSwapAdmission,
+				RouteRecovery:              routeRecovery,
+			})
+			if err != nil {
+				return result, err
+			}
+			result.ContractSwapBootResumeAdmission = &contractSwapAdmission
+			result.HistoricalReplayExecutionAdmission = &historicalReplayAdmission
+		}
+		historicalReplayExecution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
+			Admission:             historicalReplayAdmission,
+			ReplayResumeAdmission: plan.ReplayResumeAdmission,
+			PendingWork:           plan.PendingWork,
+		})
+		if err != nil {
+			return result, err
+		}
+		contractSwapExecution, err := BuildHistoricalReplayContractSwapBootResumeExecution(HistoricalReplayContractSwapBootResumeRequest{
+			SelectedExecutionAdmission: admission,
+			ContractSwapAdmission:      contractSwapAdmission,
+			HistoricalReplayAdmission:  historicalReplayAdmission,
+			HistoricalReplayExecution:  historicalReplayExecution,
+			RouteRecovery:              routeRecovery,
+		})
+		if err != nil {
+			return result, err
+		}
+		result.ContractSwapBootResumeExecution = &contractSwapExecution
+		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
+		published, err := publishSelectedContractForkEvents(ctx, publishSelectedContractForkEventsRequest{
+			Store:             pgStore,
+			LoadedSource:      loadedSource,
+			RecipientPlanning: *model.RecipientPlanning,
+			SourceRunID:       binding.SourceRunID,
+			ForkRunID:         forkRunID,
+			SourceEvents:      sourceEventIDs,
+			ExecutionOwner:    store.RunForkHistoricalReplayContractSwapBootResumeOwner,
+		})
+		result.ExecutedEventCount = len(published)
+		result.ForkEvents = published
+		if err != nil {
+			return result, cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)
+		}
+		activation, err := pgStore.ActivateRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionActivateRequest{
+			ForkRunID:             forkRunID,
+			AllowedSourceEventIDs: sourceEventIDs,
+		})
+		result.RunForkActivation = activation
+		if err != nil {
+			return result, cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)
+		}
+		return result, nil
 	}
 	if plan.ReplayResumeAdmission.HistoricalReplayRequired {
 		return result, fmt.Errorf("selected-contract activation gate blocks historical replay before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))

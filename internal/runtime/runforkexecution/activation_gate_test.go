@@ -94,7 +94,7 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 	}
 }
 
-func TestActivateSelectedContractRunForkBlocksReplayableSourceDeliveryBeforeMutation(t *testing.T) {
+func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t *testing.T) {
 	forkRunID := uuid.NewString()
 	binding := testSelectedContractBinding(forkRunID)
 	plan := testSelectedContractStateOnlyPlan(binding)
@@ -102,9 +102,11 @@ func TestActivateSelectedContractRunForkBlocksReplayableSourceDeliveryBeforeMuta
 	plan.PendingWorkCount = 1
 	plan.PendingWork = []store.RunForkPendingWork{{
 		EventID:        uuid.NewString(),
+		DeliveryID:     uuid.NewString(),
 		EventName:      "work.begin",
 		SubscriberType: "agent",
 		SubscriberID:   "safe-agent",
+		Status:         "pending",
 		Classification: store.RunForkPendingClassificationPending,
 		CreatedAt:      time.Unix(1700001000, 0).UTC(),
 	}}
@@ -122,8 +124,8 @@ func TestActivateSelectedContractRunForkBlocksReplayableSourceDeliveryBeforeMuta
 		Store:        fakeStore,
 		SourceLoader: loader,
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkBlockerSelectedContractSourceReplayUnsupported) {
-		t.Fatalf("err = %v, want selected source replay blocker", err)
+	if err == nil || !strings.Contains(err.Error(), store.RunForkHistoricalReplayContractSwapBootResumeOwner) {
+		t.Fatalf("err = %v, want concrete store requirement for contract-swap historical replay execution", err)
 	}
 	if fakeStore.activateCalled {
 		t.Fatal("ActivateRunFork called, want fail closed before mutation")

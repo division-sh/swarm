@@ -3450,14 +3450,34 @@ run_model:
       and the canonical store.run_fork.replay_resume_admission taxonomy, validates that every historical source fact
       family has exactly one executable, reconstructed, lineage-only, fail-closed, or split-sibling classification, and
       emits the executable work set that downstream store/runtime writers may mutate. The current supported closure
-      level is canonical owner promotion with delivery_event_replay_ready only: full product-complete historical
-      replay/resume for timers, routes, sessions, turns, audits, non-agent/node/system work, contract-swap boot/resume,
-      generic source-advanced policy, broader restart recovery, and API/UI/dashboard surfaces remains unsupported unless
-      separately approved. Activation, store delivery-event replay, recovery, selected/contract-swap consumers, route
+      level is canonical owner promotion with delivery_event_replay_ready only; the selected-contract contract-swap
+      child runtime.run_fork.historical_replay_execution.contract_swap_boot_resume may execute only that already-admitted
+      primitive under selected/swapped contracts. Full product-complete historical replay/resume for timers, routes,
+      sessions, turns, audits, non-agent/node/system work, broader contract-swap boot/resume, generic source-advanced
+      policy, broader restart recovery, and API/UI/dashboard surfaces remains unsupported unless separately approved.
+      Activation, store delivery-event replay, recovery, selected/contract-swap consumers, route
       helpers, timer helpers, session helpers, and operator surfaces MUST consume this owner or remain explicit
       fail-closed/split outputs. They MUST NOT authorize mutation directly from replay_resume_admission, selected
       frontier execution, source rows, same-run outbox replay, source outcomes, CLI/API/dashboard state, or local
       helper predicates.'
+    historical_replay_contract_swap_boot_resume_execution: 'The selected-contract contract-swap boot/resume historical
+      replay child is owned by runtime.run_fork.historical_replay_execution.contract_swap_boot_resume. It consumes
+      runtime.run_fork.historical_replay_execution, runtime.run_fork.historical_replay_execution_admission,
+      runtime.run_fork.contract_swap_boot_resume_admission, store.run_fork.selected_contract_binding,
+      runtime.run_fork.selected_contract_execution_admission, selected route topology, selected recipient planning, and
+      fork-local selected route recovery before any fork-local event, delivery, handler, receipt, dead-letter,
+      retry/idempotency, or follow-up mutation. Its first-slice closure level is selected-contract execution of
+      owner-authorized delivery_event_replay_ready work only. It MUST map historical source delivery identities to
+      selected recipient-plan work by source event, mint fresh fork-local event IDs under the fork run_id, publish
+      through EventBus with selected recipient-plan guards, run selected handlers through the normal runtime pipeline,
+      and record fork-local lineage without copying source event IDs or source delivery rows. Source delivery
+      subscriber identity, source receipts, source dead letters, source retry/idempotency, emitted source follow-ups,
+      timers, source/current routes, sessions, turns, audits, non-agent/node/system work, source-advanced/post-T facts,
+      runtime restart state, and CLI/API/dashboard/Builder state are lineage-only, fail-closed blockers, split siblings,
+      or consumers; they MUST NOT become selected-fork recipient truth, executable fork work, or fork suppressors. This
+      child MUST NOT use store.run_fork.delivery_event_replay as-is when that writer preserves source subscriber
+      recipients, MUST NOT treat runtime.run_fork.selected_contract_execution as full replay/resume proof, and MUST NOT
+      make CLI/API/dashboard/Builder semantic owners. Product-complete #564 historical replay/resume remains open.'
     historical_replay_delivery_event_replay_execution: 'The first mutating historical replay execution child is owned by
       runtime.run_fork.historical_replay_execution and is limited to the already-admitted
       delivery_event_replay_ready primitive. It consumes runtime.run_fork.historical_replay_execution_admission before
@@ -3589,6 +3609,14 @@ run_model:
         fact families explicit as fail-closed blockers or split siblings. Its current supported mutation scope is only
         delivery_event_replay_ready; this closes canonical owner promotion, not product-complete historical replay/resume
         for every future fact family.'
+      3j2_historical_replay_contract_swap_boot_resume_execution: 'For selected or swapped contracts, the bounded
+        mutating contract-swap boot/resume child is
+        runtime.run_fork.historical_replay_execution.contract_swap_boot_resume. It consumes the promoted historical
+        replay owner plus contract-swap admission, selected binding/admission, selected route topology, selected
+        recipient planning, and selected route recovery. It may execute only owner-authorized delivery_event_replay_ready
+        work, and recipients must come from selected recipient planning rather than source delivery subscribers. Timers,
+        routes beyond selected recovery, sessions, turns, audits, non-agent work, source outcomes, restart recovery, and
+        operator surfaces remain lineage-only, fail-closed, or split siblings under #564/#549/#618.'
       3k_historical_replay_delivery_event_replay_execution: 'For the first mutating historical replay child,
         runtime.run_fork.historical_replay_execution consumes a concrete historical replay execution admission and may
         execute only the delivery_event_replay_ready primitive. It creates fresh fork-local event/delivery rows and

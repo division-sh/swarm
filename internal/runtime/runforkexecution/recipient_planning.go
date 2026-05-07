@@ -304,11 +304,25 @@ func validateSelectedContractRecipientPlanningForPublish(planning store.RunForkS
 type selectedContractRecipientPlanPublishGuard struct {
 	plansBySourceEvent map[string]store.RunForkSelectedContractRecipientPlanEvent
 	sourceByForkEvent  map[string]string
+	sourceAgents       map[string]struct{}
 }
 
-func newSelectedContractRecipientPlanPublishGuard(planning store.RunForkSelectedContractRecipientPlanning) (*selectedContractRecipientPlanPublishGuard, error) {
+func newSelectedContractRecipientPlanPublishGuard(planning store.RunForkSelectedContractRecipientPlanning, sourceAgents ...string) (*selectedContractRecipientPlanPublishGuard, error) {
 	if err := validateSelectedContractRecipientPlanningForPublish(planning); err != nil {
 		return nil, err
+	}
+	if len(sourceAgents) == 0 {
+		sourceAgents = []string{store.RunForkSelectedContractExecutionOwner}
+	}
+	allowedAgents := map[string]struct{}{}
+	for _, agent := range sourceAgents {
+		agent = strings.TrimSpace(agent)
+		if agent != "" {
+			allowedAgents[agent] = struct{}{}
+		}
+	}
+	if len(allowedAgents) == 0 {
+		return nil, fmt.Errorf("selected-contract recipient planning publish guard requires source-agent owner")
 	}
 	plans := map[string]store.RunForkSelectedContractRecipientPlanEvent{}
 	for _, event := range planning.RecipientPlanEvents {
@@ -321,6 +335,7 @@ func newSelectedContractRecipientPlanPublishGuard(planning store.RunForkSelected
 	return &selectedContractRecipientPlanPublishGuard{
 		plansBySourceEvent: plans,
 		sourceByForkEvent:  map[string]string{},
+		sourceAgents:       allowedAgents,
 	}, nil
 }
 
@@ -340,7 +355,7 @@ func (g *selectedContractRecipientPlanPublishGuard) AuthorizeEvent(ctx context.C
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(evt.SourceAgent) != store.RunForkSelectedContractExecutionOwner {
+	if !g.authorizesSourceAgent(evt.SourceAgent) {
 		return nil
 	}
 	_, _, err := g.expectedRecipientPlanEvent(evt)
@@ -351,7 +366,7 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(evt.SourceAgent) != store.RunForkSelectedContractExecutionOwner {
+	if !g.authorizesSourceAgent(evt.SourceAgent) {
 		return nil
 	}
 	sourceEventID, expected, err := g.expectedRecipientPlanEvent(evt)
@@ -365,6 +380,14 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 		return fmt.Errorf("selected-contract publish routed recipients do not match %s for source event %s", store.RunForkSelectedContractRecipientPlanningOwner, sourceEventID)
 	}
 	return nil
+}
+
+func (g *selectedContractRecipientPlanPublishGuard) authorizesSourceAgent(sourceAgent string) bool {
+	if g == nil {
+		return false
+	}
+	_, ok := g.sourceAgents[strings.TrimSpace(sourceAgent)]
+	return ok
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(evt events.Event) (string, store.RunForkSelectedContractRecipientPlanEvent, error) {

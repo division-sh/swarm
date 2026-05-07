@@ -68,7 +68,7 @@ func BuildContractSwapBootResumeAdmission(req ContractSwapBootResumeAdmissionReq
 		Owner:                           store.RunForkContractSwapBootResumeAdmissionOwner,
 		NonMutating:                     true,
 		BootResumeSupported:             false,
-		FutureExecutionOwner:            store.RunForkSelectedContractExecutionOwner + ".contract_swap_boot_resume",
+		FutureExecutionOwner:            store.RunForkHistoricalReplayContractSwapBootResumeOwner,
 		ForkRunID:                       selectedAdmission.ForkRunID,
 		SourceRunID:                     selectedAdmission.SourceRunID,
 		ForkEventID:                     selectedAdmission.ForkEventID,
@@ -183,7 +183,7 @@ func contractSwapBootResumeBlockedSiblings() []store.RunForkSelectedContractExec
 		{
 			Concept:     "mutating_contract_swap_boot_resume",
 			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkSelectedContractExecutionOwner + ".contract_swap_boot_resume",
+			Owner:       store.RunForkHistoricalReplayContractSwapBootResumeOwner,
 			Reason:      "this admission owner classifies readiness only; handler execution and fork-local writes remain separately gated",
 		},
 		{
