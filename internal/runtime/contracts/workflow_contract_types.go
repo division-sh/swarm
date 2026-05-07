@@ -150,7 +150,9 @@ type GuardCheck struct {
 	Check string `yaml:"check"`
 }
 type AccumulateSpec struct {
+	Into         string               `yaml:"into"`
 	ExpectedFrom string               `yaml:"expected_from"`
+	From         string               `yaml:"from"`
 	ExpectedPath paths.Path           `yaml:"-"`
 	DedupBy      string               `yaml:"dedup_by"`
 	DedupPath    paths.Path           `yaml:"-"`
@@ -525,11 +527,13 @@ type EntityContract struct {
 }
 
 type EntityFieldDecl struct {
-	Type         string `yaml:"type"`
-	Initial      any    `yaml:"initial"`
-	Immutable    bool   `yaml:"immutable"`
-	Description  string `yaml:"description"`
-	UnusedReason string `yaml:"_unused_reason"`
+	Type            string         `yaml:"type"`
+	Initial         any            `yaml:"initial"`
+	Immutable       bool           `yaml:"immutable"`
+	Description     string         `yaml:"description"`
+	MaterializeFrom string         `yaml:"materialize_from"`
+	Project         map[string]any `yaml:"project"`
+	UnusedReason    string         `yaml:"_unused_reason"`
 }
 type ProjectPackageRef struct {
 	ID      string `yaml:"id"`

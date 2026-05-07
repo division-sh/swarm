@@ -80,6 +80,9 @@ func (c *checkerContext) entityWriterCoverage() []Finding {
 			if fieldDecl.Initial != nil {
 				continue
 			}
+			if strings.TrimSpace(fieldDecl.MaterializeFrom) != "" {
+				continue
+			}
 			if strings.TrimSpace(fieldDecl.UnusedReason) != "" {
 				continue
 			}

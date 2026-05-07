@@ -702,3 +702,42 @@ action: increment_revision_count
 		t.Fatalf("yaml.Unmarshal error = %v, want unsupported handler action", err)
 	}
 }
+
+func TestEntityFieldDeclDecode_PreservesMaterializeFromProjection(t *testing.T) {
+	var field EntityFieldDecl
+	if err := yaml.Unmarshal([]byte(`
+type: list<DimensionVerdict>
+materialize_from: scoring-node.dimensions_received
+project:
+  dimension: source.dimension
+  score: source.score
+`), &field); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := field.MaterializeFrom; got != "scoring-node.dimensions_received" {
+		t.Fatalf("MaterializeFrom = %q", got)
+	}
+	if got := field.Project["dimension"]; got != "source.dimension" {
+		t.Fatalf("Project[dimension] = %#v", got)
+	}
+}
+
+func TestAccumulateSpecDecode_PreservesIntoAndRejectsUnknownField(t *testing.T) {
+	var spec AccumulateSpec
+	if err := yaml.Unmarshal([]byte(`
+into: dimensions_received
+dedup_by: payload.dimension
+`), &spec); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := spec.Into; got != "dimensions_received" {
+		t.Fatalf("Into = %q", got)
+	}
+
+	err := yaml.Unmarshal([]byte(`
+legacy_buffer: dimensions_received
+`), &spec)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}

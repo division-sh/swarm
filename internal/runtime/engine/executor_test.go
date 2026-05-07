@@ -415,14 +415,17 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	steps := exec.Steps()
-	if len(steps) != 19 {
-		t.Fatalf("step count = %d, want 19", len(steps))
+	if len(steps) != 20 {
+		t.Fatalf("step count = %d, want 20", len(steps))
 	}
 	if steps[0] != StepQuery || steps[len(steps)-1] != StepClear {
 		t.Fatalf("unexpected step order: %v", steps)
 	}
 	if steps[5] != StepGroupBy {
 		t.Fatalf("expected group_by at index 5, got order %v", steps)
+	}
+	if steps[15] != StepProjection {
+		t.Fatalf("expected projection after data_writes at index 15, got order %v", steps)
 	}
 }
 
@@ -490,6 +493,128 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	}
 	if got := shaper.lastReq.State.StateCarrier.Metadata["composite_score"]; got != 80.0 && got != 80 {
 		t.Fatalf("payload shaper saw composite_score = %#v, want 80", got)
+	}
+}
+
+func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"DimensionScore": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"dimension":  {Type: "text"},
+						"tier":       {Type: "integer"},
+						"score":      {Type: "integer"},
+						"evidence":   {Type: "text"},
+						"confidence": {Type: "text"},
+					},
+				},
+			},
+		},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"vertical": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"scores": {
+						Type:            "[DimensionScore]",
+						Initial:         []any{},
+						MaterializeFrom: "scoring-node.dimensions_received",
+					},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"scoring-node": {
+				StateSchema: runtimecontracts.NodeStateSchema{
+					Fields: []runtimecontracts.NodeStateField{{Name: "dimensions_received", Type: "[DimensionScore]"}},
+				},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"score.dimension_complete": {
+						Accumulate: &runtimecontracts.AccumulateSpec{Into: "dimensions_received"},
+					},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"score.dimension_complete": {
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+					"vertical_id": {Type: "uuid"},
+					"dimension":   {Type: "text"},
+					"tier":        {Type: "integer"},
+					"score":       {Type: "integer"},
+					"evidence":    {Type: "text"},
+					"confidence":  {Type: "text"},
+				}},
+			},
+		},
+	})
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     source,
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:      "dimensions_received",
+			DedupBy:   "payload.dimension",
+			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+			OnComplete: []runtimecontracts.HandlerRuleEntry{{
+				ID: "complete",
+				Emit: runtimecontracts.EmitSpec{
+					Event: "vertical.scored",
+					Fields: map[string]runtimecontracts.ExpressionValue{
+						"scores": runtimecontracts.RefExpression("entity.scores"),
+					},
+				},
+			}},
+		},
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "scoring-node",
+		Event: events.Event{
+			ID:      "evt-1",
+			Type:    "score.dimension_complete",
+			Payload: json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`),
+		},
+		Handler: handler,
+		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	scores, ok := result.StateMutation.Metadata["scores"].([]any)
+	if !ok || len(scores) != 1 {
+		t.Fatalf("projected scores = %#v", result.StateMutation.Metadata["scores"])
+	}
+	score, ok := scores[0].(map[string]any)
+	if !ok {
+		t.Fatalf("projected score item = %#v", scores[0])
+	}
+	if _, exists := score["event_id"]; exists {
+		t.Fatalf("projected score leaked accumulator metadata: %#v", score)
+	}
+	if _, exists := score["vertical_id"]; exists {
+		t.Fatalf("projected score leaked payload extra field: %#v", score)
+	}
+	if got := score["dimension"]; got != "market" {
+		t.Fatalf("projected dimension = %#v", got)
+	}
+	if len(result.EmitIntents) != 1 {
+		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))
+	}
+	var emitted map[string]any
+	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload, &emitted); err != nil {
+		t.Fatalf("emit payload json: %v", err)
+	}
+	emittedScores, ok := emitted["scores"].([]any)
+	if !ok || len(emittedScores) != 1 {
+		t.Fatalf("emit payload scores = %#v", emitted["scores"])
 	}
 }
 

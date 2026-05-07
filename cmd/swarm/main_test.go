@@ -1976,6 +1976,91 @@ accumulator:
 	}
 }
 
+func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: verify-accumulator-entity-projection
+version: "1.0.0"
+platform_version: ">=1.1.0"
+flows: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: verify-accumulator-entity-projection
+initial_state: collecting
+terminal_states: [complete]
+states: [collecting, complete]
+pins:
+  inputs:
+    events: [score.dimension_complete]
+  outputs:
+    events: [score.completed]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), `
+types:
+  DimensionScore:
+    dimension: text
+    tier: integer
+    score: integer
+    evidence: text
+    confidence: text
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+vertical:
+  scores:
+    type: list<DimensionScore>
+    materialize_from: scorer.dimensions_received
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+score.dimension_complete:
+  swarm:
+    source: external (verify accumulator projection fixture)
+  entity_id: string
+  expected_dimensions: integer
+  vertical_id: string
+  dimension: text
+  tier: integer
+  score: integer
+  evidence: text
+  confidence: text
+score.completed:
+  entity_id: string
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+scorer:
+  id: scorer
+  execution_type: system_node
+  subscribes_to: [score.dimension_complete]
+  produces: [score.completed]
+  event_handlers:
+    score.dimension_complete:
+      accumulate:
+        into: dimensions_received
+        expected_from: payload.expected_dimensions
+        completion: all
+      on_complete:
+        - condition: "true"
+          emit: score.completed
+      advances_to: complete
+  state_schema:
+    fields:
+      dimensions_received: list<DimensionScore>
+`)
+
+	var buf bytes.Buffer
+	code := runVerifyCommand(context.Background(), repoRoot(), []string{
+		"-contracts", root,
+	}, &buf)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
+	}
+	if out := buf.String(); !strings.Contains(out, "verify ok: contracts=") {
+		t.Fatalf("verify output missing success marker:\n%s", out)
+	}
+}
+
 func testWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	bundle.Platform.Platform.Name = "swarm"

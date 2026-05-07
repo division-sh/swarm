@@ -59,6 +59,9 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, err, "validate field")
 	}
+	if strings.TrimSpace(field.FieldDecl.MaterializeFrom) != "" {
+		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", false, "field %s is materialized by runtime accumulator projection and is not agent-writable", fieldName)
+	}
 	currentFields := entityRowFieldMap(row)
 	value, err := normalizeEntityFieldValue(schema, field, payload["value"])
 	if err != nil {
