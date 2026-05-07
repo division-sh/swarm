@@ -509,8 +509,19 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 						"confidence": {Type: "text"},
 					},
 				},
+				"DimensionSummary": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"dimension":  {Type: "text"},
+						"score":      {Type: "integer"},
+						"confidence": {Type: "text"},
+						"source":     {Type: "text"},
+					},
+				},
 			},
 		},
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"projection": {Value: map[string]any{"default_confidence": "medium"}},
+		}},
 		RootEntities: runtimecontracts.EntityContractsDocument{
 			"vertical": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
@@ -518,6 +529,17 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 						Type:            "[DimensionScore]",
 						Initial:         []any{},
 						MaterializeFrom: "scoring-node.dimensions_received",
+					},
+					"summary": {
+						Type:            "[DimensionSummary]",
+						Initial:         []any{},
+						MaterializeFrom: "scoring-node.dimensions_received",
+						Project: map[string]any{
+							"dimension":  "source.dimension",
+							"score":      "source.score",
+							"confidence": "policy.projection.default_confidence",
+							"source":     "scoring-node",
+						},
 					},
 					"unrelated_invalid_scores": {
 						Type:            "[DimensionScore]",
@@ -616,6 +638,20 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 	}
 	if got := score["dimension"]; got != "market" {
 		t.Fatalf("projected dimension = %#v", got)
+	}
+	summaries, ok := result.StateMutation.Metadata["summary"].([]any)
+	if !ok || len(summaries) != 1 {
+		t.Fatalf("projected summary = %#v", result.StateMutation.Metadata["summary"])
+	}
+	summary, ok := summaries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("projected summary item = %#v", summaries[0])
+	}
+	if got := summary["confidence"]; got != "medium" {
+		t.Fatalf("projected summary confidence = %#v", got)
+	}
+	if got := summary["source"]; got != "scoring-node" {
+		t.Fatalf("projected summary literal source = %#v", got)
 	}
 	if len(result.EmitIntents) != 1 {
 		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))

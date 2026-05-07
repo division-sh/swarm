@@ -428,6 +428,8 @@ entity_contracts:
           materialize_from: <node_id>.<accumulator_name>
           project:
             <target_item_field>: source.<source_item_field>
+            <target_policy_field>: policy.<policy_path>
+            <target_literal_field>: <literal>
           _unused_reason: <reason>
     notes:
     - Entity-level metadata is underscore-prefixed.
@@ -456,11 +458,18 @@ entity_contracts:
     project: |
       If source and target item named types are identical, `project` is
       forbidden and identity projection is used. If they differ, `project` is
-      required and must name every field of the target item type. `source.*`
-      references resolve only against declared fields of the source item type.
-      Runtime accumulator metadata (`event_id`, `event_type`, `source`,
-      `received_at`) and event-payload extras outside the source named type are
-      not addressable through `source.*`.
+      required and must name every field of the target item type. Project
+      expressions support exactly `source.*`, `policy.*`, and literal YAML
+      scalar/sequence/mapping values. `source.*` references resolve only
+      against declared fields of the source item type. Runtime accumulator
+      metadata (`event_id`, `event_type`, `source`, `received_at`) and
+      event-payload extras outside the source named type are not addressable
+      through `source.*`. `policy.*` references resolve against the declaring
+      flow's resolved policy document and must be declared; unknown policy
+      paths are hard invalidity. Literal values are copied as authored and
+      validated through the target entity field's named-type normalizer at
+      runtime. Bindings to `entity.*`, `payload.*`, `event.*`, `fan_out.*`, or
+      `accumulated.*` are unsupported in `project`.
     writer_ownership: |
       `materialize_from` is the sole runtime writer for the field after
       create-time `initial:` materialization. Other authored writes
@@ -4360,7 +4369,8 @@ static_analyzer:
       `accumulate.into`, multiple handlers on one node declare the same
       projectable buffer, the source/target types are not named-type lists, the
       source event payload lacks the complete typed view, project coverage is
-      partial or reaches undeclared source fields/metadata/extras, the field
+      partial, reaches undeclared source fields/metadata/extras, references an
+      undeclared policy path, uses an unsupported binding namespace, the field
       also declares `_unused_reason`, or any other authored writer targets the
       same field.
     runtime_rule: |
