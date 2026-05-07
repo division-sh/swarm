@@ -38,7 +38,8 @@ func TestBuildContractSwapBootResumeAdmissionConsumesCanonicalPrerequisites(t *t
 	}
 	if admission.Owner != store.RunForkContractSwapBootResumeAdmissionOwner ||
 		!admission.NonMutating ||
-		admission.BootResumeSupported {
+		admission.BootResumeSupported ||
+		admission.FutureExecutionOwner != store.RunForkHistoricalReplayContractSwapBootResumeOwner {
 		t.Fatalf("admission ownership = %#v", admission)
 	}
 	if admission.SelectedBindingOwner != store.RunForkSelectedContractBindingOwner ||

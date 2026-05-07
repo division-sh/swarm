@@ -934,7 +934,7 @@ func TestRunForkCommand_ActivateSelectedBindingConsumesRuntimeAdmission(t *testi
 	}
 }
 
-func TestRunForkCommand_ActivateSelectedBindingBlocksSourceReplayBeforeMutation(t *testing.T) {
+func TestRunForkCommand_ActivateSelectedBindingBlocksReplayWithoutSelectedRecipientPlan(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
@@ -979,8 +979,8 @@ func TestRunForkCommand_ActivateSelectedBindingBlocksSourceReplayBeforeMutation(
 	if activateCode != 1 {
 		t.Fatalf("activate code=%d, want 1; output=%s", activateCode, activateOut.String())
 	}
-	if !strings.Contains(activateOut.String(), store.RunForkBlockerSelectedContractSourceReplayUnsupported) {
-		t.Fatalf("activate output = %q, want selected source replay blocker", activateOut.String())
+	if !strings.Contains(activateOut.String(), "no selected recipients") {
+		t.Fatalf("activate output = %q, want selected recipient-plan blocker", activateOut.String())
 	}
 	var sourceStatus, forkStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, runID).Scan(&sourceStatus); err != nil {

@@ -21,6 +21,7 @@ const (
 	RunForkContractSwapBootResumeAdmissionOwner         = "runtime.run_fork.contract_swap_boot_resume_admission"
 	RunForkHistoricalReplayExecutionAdmissionOwner      = "runtime.run_fork.historical_replay_execution_admission"
 	RunForkHistoricalReplayExecutionOwner               = "runtime.run_fork.historical_replay_execution"
+	RunForkHistoricalReplayContractSwapBootResumeOwner  = RunForkHistoricalReplayExecutionOwner + ".contract_swap_boot_resume"
 	RunForkSelectedContractBranchDivergenceOwner        = "store.run_fork.selected_contract_branch_divergence"
 
 	RunForkSelectedContractExecutionAdmissionUseEvidenceOnly   = "prerequisite_evidence_only"
@@ -289,6 +290,40 @@ type RunForkHistoricalReplayExecution struct {
 	RequiredConsumers          []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
 	BlockedSiblings            []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
 	InvalidPaths               []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
+}
+
+type RunForkHistoricalReplayContractSwapBootResume struct {
+	Owner                                   string                                     `json:"owner"`
+	ParentHistoricalReplayExecutionOwner    string                                     `json:"parent_historical_replay_execution_owner"`
+	HistoricalReplayExecutionAdmissionOwner string                                     `json:"historical_replay_execution_admission_owner"`
+	ContractSwapAdmissionOwner              string                                     `json:"contract_swap_admission_owner"`
+	SelectedExecutionAdmissionOwner         string                                     `json:"selected_execution_admission_owner"`
+	SelectedBindingOwner                    string                                     `json:"selected_binding_owner"`
+	RouteTopologyOwner                      string                                     `json:"route_topology_owner"`
+	RouteRecoveryOwner                      string                                     `json:"route_recovery_owner"`
+	RuntimeRouteRecoveryOwner               string                                     `json:"runtime_route_recovery_owner"`
+	RecipientPlanningOwner                  string                                     `json:"recipient_planning_owner"`
+	ForkRunID                               string                                     `json:"fork_run_id"`
+	SourceRunID                             string                                     `json:"source_run_id"`
+	ForkEventID                             string                                     `json:"fork_event_id"`
+	ContractSelection                       RunForkContractSelection                   `json:"contract_selection"`
+	ClosureLevel                            string                                     `json:"closure_level"`
+	DeliveryEventReplayReady                bool                                       `json:"delivery_event_replay_ready"`
+	ExecutableWork                          []RunForkHistoricalReplayContractSwapWork  `json:"executable_work,omitempty"`
+	FactAdmissions                          []RunForkHistoricalReplayFactAdmission     `json:"fact_admissions,omitempty"`
+	RequiredConsumers                       []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
+	BlockedSiblings                         []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
+	InvalidPaths                            []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
+}
+
+type RunForkHistoricalReplayContractSwapWork struct {
+	Fact               string                             `json:"fact"`
+	SourceEventID      string                             `json:"source_event_id"`
+	SourceDeliveryIDs  []string                           `json:"source_delivery_ids"`
+	EventName          string                             `json:"event_name"`
+	SelectedRecipients []RunForkContractFrontierRecipient `json:"selected_recipients,omitempty"`
+	Classification     string                             `json:"classification,omitempty"`
+	ReasonCode         string                             `json:"reason_code,omitempty"`
 }
 
 type RunForkHistoricalReplayExecutionRequest struct {

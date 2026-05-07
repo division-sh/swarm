@@ -146,6 +146,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		SourceRunID:       plan.SourceRunID,
 		ForkRunID:         materialization.ForkRunID,
 		SourceEvents:      sourceEventIDs,
+		ExecutionOwner:    store.RunForkSelectedContractExecutionOwner,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{
@@ -217,6 +218,7 @@ type publishSelectedContractForkEventsRequest struct {
 	SourceRunID       string
 	ForkRunID         string
 	SourceEvents      []string
+	ExecutionOwner    string
 }
 
 func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedContractForkEventsRequest) ([]SelectedContractExecutionForkEvent, error) {
@@ -224,7 +226,11 @@ func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedC
 	if err != nil {
 		return nil, err
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning)
+	executionOwner := strings.TrimSpace(req.ExecutionOwner)
+	if executionOwner == "" {
+		executionOwner = store.RunForkSelectedContractExecutionOwner
+	}
+	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning, executionOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -243,13 +249,13 @@ func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedC
 	out := make([]SelectedContractExecutionForkEvent, 0, len(sourceEvents))
 	for _, sourceEvent := range sourceEvents {
 		forkEventID := uuid.NewString()
-		evt := selectedContractForkEvent(req.ForkRunID, forkEventID, sourceEvent)
+		evt := selectedContractForkEvent(req.ForkRunID, forkEventID, sourceEvent, executionOwner)
 		guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
 		if err := bus.Publish(runCtx, evt); err != nil {
 			return out, fmt.Errorf("execute selected-contract fork event %s as %s: %w", sourceEvent.SourceEventID, forkEventID, err)
 		}
 		lineage := store.RunForkSelectedContractExecutionLineage{
-			Owner:         store.RunForkSelectedContractExecutionLineageOwner,
+			Owner:         executionOwner,
 			ForkRunID:     req.ForkRunID,
 			SourceRunID:   req.SourceRunID,
 			SourceEventID: sourceEvent.SourceEventID,
@@ -269,7 +275,7 @@ func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedC
 	return out, nil
 }
 
-func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.RunForkSelectedContractSourceEvent) events.Event {
+func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.RunForkSelectedContractSourceEvent, sourceAgent string) events.Event {
 	payload := json.RawMessage("{}")
 	if len(sourceEvent.Payload) > 0 && json.Valid(sourceEvent.Payload) {
 		payload = append(json.RawMessage(nil), sourceEvent.Payload...)
@@ -277,7 +283,7 @@ func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.
 	evt := events.Event{
 		ID:          strings.TrimSpace(forkEventID),
 		Type:        events.EventType(strings.TrimSpace(sourceEvent.EventName)),
-		SourceAgent: store.RunForkSelectedContractExecutionOwner,
+		SourceAgent: strings.TrimSpace(sourceAgent),
 		Payload:     payload,
 		RunID:       strings.TrimSpace(forkRunID),
 		CreatedAt:   time.Now().UTC(),
