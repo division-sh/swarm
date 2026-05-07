@@ -519,6 +519,11 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 						Initial:         []any{},
 						MaterializeFrom: "scoring-node.dimensions_received",
 					},
+					"unrelated_invalid_scores": {
+						Type:            "[DimensionScore]",
+						Initial:         []any{},
+						MaterializeFrom: "other-node.missing_buffer",
+					},
 				},
 			},
 		},
@@ -530,6 +535,13 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"score.dimension_complete": {
 						Accumulate: &runtimecontracts.AccumulateSpec{Into: "dimensions_received"},
+					},
+				},
+			},
+			"other-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"score.unrelated": {
+						Accumulate: &runtimecontracts.AccumulateSpec{Into: "missing_buffer"},
 					},
 				},
 			},

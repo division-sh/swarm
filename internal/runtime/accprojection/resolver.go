@@ -33,9 +33,13 @@ type Binding struct {
 }
 
 type Issue struct {
-	Code     string
-	Message  string
-	Location string
+	Code            string
+	Message         string
+	Location        string
+	FlowID          string
+	SourceNodeID    string
+	SourceEventType string
+	AccumulatorName string
 }
 
 type Result struct {
@@ -74,6 +78,7 @@ func ForHandler(source semanticview.Source, flowID, nodeID, eventType string) ([
 	flowID = strings.TrimSpace(flowID)
 	nodeID = strings.TrimSpace(nodeID)
 	eventType = strings.TrimSpace(eventType)
+	activeAccumulatorName := activeHandlerAccumulatorName(source, nodeID, eventType)
 	for _, binding := range resolved.Bindings {
 		if strings.TrimSpace(binding.FlowID) == flowID &&
 			strings.TrimSpace(binding.SourceNodeID) == nodeID &&
@@ -81,7 +86,56 @@ func ForHandler(source semanticview.Source, flowID, nodeID, eventType string) ([
 			out = append(out, binding)
 		}
 	}
-	return out, resolved.Issues
+	issues := make([]Issue, 0)
+	for _, issue := range resolved.Issues {
+		if issueRelevantToHandler(issue, flowID, nodeID, eventType, activeAccumulatorName) {
+			issues = append(issues, issue)
+		}
+	}
+	return out, issues
+}
+
+func activeHandlerAccumulatorName(source semanticview.Source, nodeID, eventType string) string {
+	if source == nil {
+		return ""
+	}
+	node, ok := source.NodeEntries()[strings.TrimSpace(nodeID)]
+	if !ok {
+		return ""
+	}
+	handler, ok := node.EventHandlers[strings.TrimSpace(eventType)]
+	if !ok || handler.Accumulate == nil {
+		return ""
+	}
+	return strings.TrimSpace(handler.Accumulate.Into)
+}
+
+func issueRelevantToHandler(issue Issue, flowID, nodeID, eventType, accumulatorName string) bool {
+	if strings.TrimSpace(issue.SourceNodeID) != strings.TrimSpace(nodeID) {
+		return false
+	}
+	if issueFlowID := strings.TrimSpace(issue.FlowID); issueFlowID != "" && issueFlowID != strings.TrimSpace(flowID) {
+		return false
+	}
+	if issueEventType := strings.TrimSpace(issue.SourceEventType); issueEventType != "" {
+		return issueEventType == strings.TrimSpace(eventType)
+	}
+	if issueAccumulatorName := strings.TrimSpace(issue.AccumulatorName); issueAccumulatorName != "" {
+		return issueAccumulatorName == strings.TrimSpace(accumulatorName)
+	}
+	return false
+}
+
+func scopedIssue(binding Binding, code, location, message string) Issue {
+	return Issue{
+		Code:            code,
+		Message:         message,
+		Location:        location,
+		FlowID:          strings.TrimSpace(binding.FlowID),
+		SourceNodeID:    strings.TrimSpace(binding.SourceNodeID),
+		SourceEventType: strings.TrimSpace(binding.SourceEventType),
+		AccumulatorName: strings.TrimSpace(binding.AccumulatorName),
+	}
 }
 
 type materializedFieldTarget struct {
@@ -143,9 +197,6 @@ func resolveTarget(source semanticview.Source, bundle *runtimecontracts.Workflow
 	}
 	loc := locationFor(target.FlowID, target.EntityType, target.FieldName)
 	issues := make([]Issue, 0)
-	if strings.TrimSpace(target.FieldDecl.UnusedReason) != "" {
-		issues = append(issues, Issue{Code: "unused_reason_with_materialize_from", Location: loc, Message: fmt.Sprintf("field %q declares both materialize_from and _unused_reason; remove _unused_reason", target.FieldName)})
-	}
 	sourceNodeID, accName, ok := parseMaterializeFrom(target.FieldDecl.MaterializeFrom)
 	if !ok {
 		issues = append(issues, Issue{Code: "invalid_reference", Location: loc, Message: fmt.Sprintf("materialize_from %q must have shape <node_id>.<accumulator_name>", strings.TrimSpace(target.FieldDecl.MaterializeFrom))})
@@ -156,7 +207,7 @@ func resolveTarget(source semanticview.Source, bundle *runtimecontracts.Workflow
 
 	node, ok := source.NodeEntries()[sourceNodeID]
 	if !ok {
-		issues = append(issues, Issue{Code: "unknown_source_node", Location: loc, Message: fmt.Sprintf("materialize_from %q references unknown node %q", strings.TrimSpace(target.FieldDecl.MaterializeFrom), sourceNodeID)})
+		issues = append(issues, scopedIssue(binding, "unknown_source_node", loc, fmt.Sprintf("materialize_from %q references unknown node %q", strings.TrimSpace(target.FieldDecl.MaterializeFrom), sourceNodeID)))
 		return binding, issues
 	}
 	sourceFlowID := ""
@@ -164,39 +215,13 @@ func resolveTarget(source semanticview.Source, bundle *runtimecontracts.Workflow
 		sourceFlowID = strings.TrimSpace(sourceRef.FlowID)
 	}
 	if sourceFlowID != strings.TrimSpace(target.FlowID) {
-		issues = append(issues, Issue{Code: "cross_flow_reference", Location: loc, Message: fmt.Sprintf("materialize_from %q references node in flow %s, but target entity %s belongs to flow %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), flowLabel(sourceFlowID), target.EntityType, flowLabel(target.FlowID))})
-	}
-
-	field, ok := nodeStateField(node, accName)
-	if !ok {
-		issues = append(issues, Issue{Code: "unknown_accumulator_state", Location: loc, Message: fmt.Sprintf("materialize_from %q references state_schema field %q missing on node %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), accName, sourceNodeID)})
-	} else {
-		binding.SourceField = field
-		sourceItem, ok := namedListItemType(field.Type)
-		if !ok {
-			issues = append(issues, Issue{Code: "unsupported_source_type", Location: loc, Message: fmt.Sprintf("materialize_from source %q is not a list of a named type; found %q", strings.TrimSpace(target.FieldDecl.MaterializeFrom), strings.TrimSpace(field.Type))})
-		} else if named, declared := target.TypeCatalog.Types[sourceItem]; !declared {
-			issues = append(issues, Issue{Code: "undeclared_source_named_type", Location: loc, Message: fmt.Sprintf("materialize_from source %q references undeclared named type %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), sourceItem)})
-		} else {
-			binding.SourceItemType = sourceItem
-			binding.SourceNamedType = named
-		}
-	}
-
-	targetItem, ok := namedListItemType(target.FieldDecl.Type)
-	if !ok {
-		issues = append(issues, Issue{Code: "unsupported_target_type", Location: loc, Message: fmt.Sprintf("materialize_from target %q must be declared list<NamedType>; found %q", target.FieldName, strings.TrimSpace(target.FieldDecl.Type))})
-	} else if named, declared := target.TypeCatalog.Types[targetItem]; !declared {
-		issues = append(issues, Issue{Code: "undeclared_target_named_type", Location: loc, Message: fmt.Sprintf("materialize_from target %q references undeclared named type %s", target.FieldName, targetItem)})
-	} else {
-		binding.TargetItemType = targetItem
-		binding.TargetNamedType = named
+		issues = append(issues, scopedIssue(binding, "cross_flow_reference", loc, fmt.Sprintf("materialize_from %q references node in flow %s, but target entity %s belongs to flow %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), flowLabel(sourceFlowID), target.EntityType, flowLabel(target.FlowID))))
 	}
 
 	handlers := handlersForAccumulator(node, accName)
 	switch len(handlers) {
 	case 0:
-		issues = append(issues, Issue{Code: "missing_accumulate_into", Location: loc, Message: fmt.Sprintf("materialize_from %q does not resolve to an explicitly declared accumulator (accumulate.into:) on node %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), sourceNodeID)})
+		issues = append(issues, scopedIssue(binding, "missing_accumulate_into", loc, fmt.Sprintf("materialize_from %q does not resolve to an explicitly declared accumulator (accumulate.into:) on node %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), sourceNodeID)))
 	case 1:
 		binding.SourceEventType = handlers[0].EventType
 	default:
@@ -205,15 +230,44 @@ func resolveTarget(source semanticview.Source, bundle *runtimecontracts.Workflow
 			names = append(names, handler.EventType)
 		}
 		sort.Strings(names)
-		issues = append(issues, Issue{Code: "duplicate_accumulate_into", Location: loc, Message: fmt.Sprintf("accumulate.into %q declared by multiple handlers on node %s: %v; v1 supports a single producing handler per projectable buffer", accName, sourceNodeID, names)})
+		issues = append(issues, scopedIssue(binding, "duplicate_accumulate_into", loc, fmt.Sprintf("accumulate.into %q declared by multiple handlers on node %s: %v; v1 supports a single producing handler per projectable buffer", accName, sourceNodeID, names)))
+	}
+	if strings.TrimSpace(target.FieldDecl.UnusedReason) != "" {
+		issues = append(issues, scopedIssue(binding, "unused_reason_with_materialize_from", loc, fmt.Sprintf("field %q declares both materialize_from and _unused_reason; remove _unused_reason", target.FieldName)))
+	}
+
+	field, ok := nodeStateField(node, accName)
+	if !ok {
+		issues = append(issues, scopedIssue(binding, "unknown_accumulator_state", loc, fmt.Sprintf("materialize_from %q references state_schema field %q missing on node %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), accName, sourceNodeID)))
+	} else {
+		binding.SourceField = field
+		sourceItem, ok := namedListItemType(field.Type)
+		if !ok {
+			issues = append(issues, scopedIssue(binding, "unsupported_source_type", loc, fmt.Sprintf("materialize_from source %q is not a list of a named type; found %q", strings.TrimSpace(target.FieldDecl.MaterializeFrom), strings.TrimSpace(field.Type))))
+		} else if named, declared := target.TypeCatalog.Types[sourceItem]; !declared {
+			issues = append(issues, scopedIssue(binding, "undeclared_source_named_type", loc, fmt.Sprintf("materialize_from source %q references undeclared named type %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), sourceItem)))
+		} else {
+			binding.SourceItemType = sourceItem
+			binding.SourceNamedType = named
+		}
+	}
+
+	targetItem, ok := namedListItemType(target.FieldDecl.Type)
+	if !ok {
+		issues = append(issues, scopedIssue(binding, "unsupported_target_type", loc, fmt.Sprintf("materialize_from target %q must be declared list<NamedType>; found %q", target.FieldName, strings.TrimSpace(target.FieldDecl.Type))))
+	} else if named, declared := target.TypeCatalog.Types[targetItem]; !declared {
+		issues = append(issues, scopedIssue(binding, "undeclared_target_named_type", loc, fmt.Sprintf("materialize_from target %q references undeclared named type %s", target.FieldName, targetItem)))
+	} else {
+		binding.TargetItemType = targetItem
+		binding.TargetNamedType = named
 	}
 
 	if binding.SourceItemType != "" && binding.TargetItemType != "" {
 		if binding.SourceItemType == binding.TargetItemType && len(binding.Project) > 0 {
-			issues = append(issues, Issue{Code: "project_forbidden", Location: loc, Message: fmt.Sprintf("materialize_from element types match (%s); project must be absent", binding.SourceItemType)})
+			issues = append(issues, scopedIssue(binding, "project_forbidden", loc, fmt.Sprintf("materialize_from element types match (%s); project must be absent", binding.SourceItemType)))
 		}
 		if binding.SourceItemType != binding.TargetItemType && len(binding.Project) == 0 {
-			issues = append(issues, Issue{Code: "project_required", Location: loc, Message: "materialize_from element types differ; project must be present and name all target fields"})
+			issues = append(issues, scopedIssue(binding, "project_required", loc, "materialize_from element types differ; project must be present and name all target fields"))
 		}
 		if len(binding.Project) > 0 {
 			issues = append(issues, validateProject(source, target, binding)...)
@@ -248,13 +302,13 @@ func validateProject(source semanticview.Source, target materializedFieldTarget,
 	targetFields := sortedTypeFields(binding.TargetNamedType)
 	for _, fieldName := range targetFields {
 		if _, ok := binding.Project[fieldName]; !ok {
-			issues = append(issues, Issue{Code: "project_missing_target_field", Location: loc, Message: fmt.Sprintf("project must name every field of target item type %s; missing %s", binding.TargetItemType, fieldName)})
+			issues = append(issues, scopedIssue(binding, "project_missing_target_field", loc, fmt.Sprintf("project must name every field of target item type %s; missing %s", binding.TargetItemType, fieldName)))
 		}
 	}
 	for fieldName, rawExpr := range binding.Project {
 		fieldName = strings.TrimSpace(fieldName)
 		if _, ok := binding.TargetNamedType.Fields[fieldName]; !ok {
-			issues = append(issues, Issue{Code: "project_unknown_target_field", Location: loc, Message: fmt.Sprintf("project names undeclared target field %q on item type %s", fieldName, binding.TargetItemType)})
+			issues = append(issues, scopedIssue(binding, "project_unknown_target_field", loc, fmt.Sprintf("project names undeclared target field %q on item type %s", fieldName, binding.TargetItemType)))
 		}
 		expr, isString := rawExpr.(string)
 		if !isString {
@@ -264,29 +318,29 @@ func validateProject(source semanticview.Source, target materializedFieldTarget,
 		if sourceField, ok := strings.CutPrefix(expr, "source."); ok {
 			sourceField = strings.TrimSpace(sourceField)
 			if _, reserved := ReservedAccumulatorMetadata[sourceField]; reserved {
-				issues = append(issues, Issue{Code: "project_metadata_reference", Location: loc, Message: fmt.Sprintf("project.%s references %q; reserved accumulator metadata is not addressable through source.*", fieldName, expr)})
+				issues = append(issues, scopedIssue(binding, "project_metadata_reference", loc, fmt.Sprintf("project.%s references %q; reserved accumulator metadata is not addressable through source.*", fieldName, expr)))
 				continue
 			}
 			sourceSpec, ok := binding.SourceNamedType.Fields[sourceField]
 			if !ok {
-				issues = append(issues, Issue{Code: "project_unknown_source_field", Location: loc, Message: fmt.Sprintf("project.%s references %q; %s is not a field of item type %s", fieldName, expr, sourceField, binding.SourceItemType)})
+				issues = append(issues, scopedIssue(binding, "project_unknown_source_field", loc, fmt.Sprintf("project.%s references %q; %s is not a field of item type %s", fieldName, expr, sourceField, binding.SourceItemType)))
 				continue
 			}
 			if targetSpec, ok := binding.TargetNamedType.Fields[fieldName]; ok && !typesAssignable(target.TypeCatalog, sourceSpec.Type, targetSpec.Type) {
-				issues = append(issues, Issue{Code: "project_type_mismatch", Location: loc, Message: fmt.Sprintf("project.%s references %q type %s, not assignable to target field type %s", fieldName, expr, strings.TrimSpace(sourceSpec.Type), strings.TrimSpace(targetSpec.Type))})
+				issues = append(issues, scopedIssue(binding, "project_type_mismatch", loc, fmt.Sprintf("project.%s references %q type %s, not assignable to target field type %s", fieldName, expr, strings.TrimSpace(sourceSpec.Type), strings.TrimSpace(targetSpec.Type))))
 			}
 			continue
 		}
 		if policyPath, ok := strings.CutPrefix(expr, "policy."); ok {
 			policyPath = strings.TrimSpace(policyPath)
 			if _, ok := semanticview.PolicyValueForFlow(source, target.FlowID, policyPath); !ok {
-				issues = append(issues, Issue{Code: "project_unknown_policy_field", Location: loc, Message: fmt.Sprintf("project.%s references %q; policy field %s is not declared for flow %s", fieldName, expr, policyPath, flowLabel(target.FlowID))})
+				issues = append(issues, scopedIssue(binding, "project_unknown_policy_field", loc, fmt.Sprintf("project.%s references %q; policy field %s is not declared for flow %s", fieldName, expr, policyPath, flowLabel(target.FlowID))))
 			}
 			continue
 		}
 		for _, forbidden := range []string{"entity.", "payload.", "event.", "fan_out.", "accumulated."} {
 			if strings.HasPrefix(expr, forbidden) {
-				issues = append(issues, Issue{Code: "project_forbidden_binding", Location: loc, Message: fmt.Sprintf("project.%s uses forbidden binding %q; project supports source.*, policy.*, or literals", fieldName, expr)})
+				issues = append(issues, scopedIssue(binding, "project_forbidden_binding", loc, fmt.Sprintf("project.%s uses forbidden binding %q; project supports source.*, policy.*, or literals", fieldName, expr)))
 				break
 			}
 		}
@@ -303,7 +357,7 @@ func validateEventTypedView(source semanticview.Source, types runtimecontracts.T
 		}
 	}
 	if !ok {
-		return []Issue{{Code: "unknown_source_event", Location: binding.SourceNodeID, Message: fmt.Sprintf("accumulate.into %q references event %q, but no event catalog entry exists", binding.AccumulatorName, binding.SourceEventType)}}
+		return []Issue{scopedIssue(binding, "unknown_source_event", binding.SourceNodeID, fmt.Sprintf("accumulate.into %q references event %q, but no event catalog entry exists", binding.AccumulatorName, binding.SourceEventType))}
 	}
 	issues := make([]Issue, 0)
 	loc := fmt.Sprintf("node %s handler %s", binding.SourceNodeID, binding.SourceEventType)
@@ -311,11 +365,11 @@ func validateEventTypedView(source semanticview.Source, types runtimecontracts.T
 		expected := strings.TrimSpace(binding.SourceNamedType.Fields[fieldName].Type)
 		payloadField, ok := entry.Payload.Properties[fieldName]
 		if !ok {
-			issues = append(issues, Issue{Code: "typed_view_missing_field", Location: loc, Message: fmt.Sprintf("event %q payload missing field %q required by accumulator element type %s", binding.SourceEventType, fieldName, binding.SourceItemType)})
+			issues = append(issues, scopedIssue(binding, "typed_view_missing_field", loc, fmt.Sprintf("event %q payload missing field %q required by accumulator element type %s", binding.SourceEventType, fieldName, binding.SourceItemType)))
 			continue
 		}
 		if !typesAssignable(types, payloadField.Type, expected) {
-			issues = append(issues, Issue{Code: "typed_view_type_mismatch", Location: loc, Message: fmt.Sprintf("event %q payload field %q has type %s not assignable to accumulator element type field %q type %s", binding.SourceEventType, fieldName, strings.TrimSpace(payloadField.Type), fieldName, expected)})
+			issues = append(issues, scopedIssue(binding, "typed_view_type_mismatch", loc, fmt.Sprintf("event %q payload field %q has type %s not assignable to accumulator element type field %q type %s", binding.SourceEventType, fieldName, strings.TrimSpace(payloadField.Type), fieldName, expected)))
 		}
 	}
 	return issues
