@@ -266,6 +266,7 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			fire_payload
 		FROM timers
 		WHERE status = 'active'
+		  AND owner_agent IS NOT NULL
 		ORDER BY created_at ASC
 	`)
 	if err != nil {

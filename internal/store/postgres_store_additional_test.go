@@ -2740,6 +2740,42 @@ func TestSchedules_LoadActiveSchedulesPreservesFlowInstance(t *testing.T) {
 	}
 }
 
+func TestSchedules_LoadActiveSchedulesIgnoresWorkflowSidecarRows(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+	`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO timers (
+			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+			fire_at, recurring, recurrence_cron, recurrence_interval,
+			owner_node, owner_agent, task_type, status
+		)
+		VALUES (
+			$1::uuid, 'workflow-sidecar', $2::uuid, 'review/inst-1', 'timer.workflow', '{}'::jsonb,
+			$3, false, NULL, NULL,
+			'workflow_instance_store', NULL, 'timer', 'active'
+		)
+	`, runID, entityID, time.Now().Add(30*time.Minute).UTC()); err != nil {
+		t.Fatalf("seed workflow sidecar timer: %v", err)
+	}
+
+	active, err := pg.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules: %v", err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("active executable schedules = %+v, want workflow sidecar ignored", active)
+	}
+}
+
 func TestSchedules_LoadActiveSchedulesDoesNotReconstructTaskIDFromTimerName(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
