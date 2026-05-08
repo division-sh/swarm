@@ -642,6 +642,16 @@ func (b *WorkflowContractBundle) NodeHandlerSubscriptions(nodeID string) []strin
 	return out
 }
 
+type NodeEventHandlerResolution struct {
+	NodeID             string
+	RawEventType       string
+	LocalizedEventType string
+	AuthoredEventType  string
+	CanonicalEventType string
+	Handler            SystemNodeEventHandler
+	Matched            bool
+}
+
 func (b *WorkflowContractBundle) nodeContract(nodeID string) (SystemNodeContract, bool) {
 	nodeID = strings.TrimSpace(nodeID)
 	if b == nil || nodeID == "" {
@@ -678,37 +688,59 @@ func (b *WorkflowContractBundle) nodeContract(nodeID string) (SystemNodeContract
 	return SystemNodeContract{}, false
 }
 func (b *WorkflowContractBundle) NodeEventHandler(nodeID, eventType string) (SystemNodeEventHandler, bool) {
-	if b == nil {
+	resolved := b.ResolveNodeEventHandler(nodeID, eventType)
+	if !resolved.Matched {
 		return SystemNodeEventHandler{}, false
 	}
-	nodeID = strings.TrimSpace(nodeID)
-	rawEventType := strings.TrimSpace(eventType)
-	eventType = b.localizeNodeEventType(nodeID, rawEventType)
+	return b.externalizeNodeHandler(nodeID, resolved.Handler), true
+}
+
+func (b *WorkflowContractBundle) ResolveNodeEventHandler(nodeID, eventType string) NodeEventHandlerResolution {
+	resolved := NodeEventHandlerResolution{
+		NodeID:       strings.TrimSpace(nodeID),
+		RawEventType: eventidentity.Normalize(eventType),
+	}
+	if b == nil {
+		return resolved
+	}
+	nodeID = resolved.NodeID
+	rawEventType := resolved.RawEventType
+	localizedEventType := b.localizeNodeEventType(nodeID, rawEventType)
+	resolved.LocalizedEventType = localizedEventType
 	handlers, ok := b.Semantics.NodeHandlers[nodeID]
 	if !ok {
-		return SystemNodeEventHandler{}, false
+		return resolved
 	}
-	if handler, ok := handlers[eventType]; ok {
-		return b.externalizeNodeHandler(nodeID, handler), true
+	if handler, ok := handlers[localizedEventType]; ok {
+		return b.nodeEventHandlerResolution(resolved, localizedEventType, handler)
 	}
-	if rawEventType != "" && rawEventType != eventType {
+	if rawEventType != "" && rawEventType != localizedEventType {
 		if handler, ok := handlers[rawEventType]; ok {
-			return b.externalizeNodeHandler(nodeID, handler), true
+			return b.nodeEventHandlerResolution(resolved, rawEventType, handler)
 		}
 	}
 	for pattern, handler := range handlers {
-		if handlerPatternMatches(pattern, eventType) {
-			return b.externalizeNodeHandler(nodeID, handler), true
+		if handlerPatternMatches(pattern, localizedEventType) {
+			return b.nodeEventHandlerResolution(resolved, pattern, handler)
 		}
 	}
-	if rawEventType != "" && rawEventType != eventType {
+	if rawEventType != "" && rawEventType != localizedEventType {
 		for pattern, handler := range handlers {
 			if handlerPatternMatches(pattern, rawEventType) {
-				return b.externalizeNodeHandler(nodeID, handler), true
+				return b.nodeEventHandlerResolution(resolved, pattern, handler)
 			}
 		}
 	}
-	return SystemNodeEventHandler{}, false
+	return resolved
+}
+
+func (b *WorkflowContractBundle) nodeEventHandlerResolution(resolved NodeEventHandlerResolution, authoredEventType string, handler SystemNodeEventHandler) NodeEventHandlerResolution {
+	authoredEventType = strings.TrimSpace(authoredEventType)
+	resolved.AuthoredEventType = authoredEventType
+	resolved.CanonicalEventType = b.ResolveNodeEventReference(resolved.NodeID, authoredEventType)
+	resolved.Handler = handler
+	resolved.Matched = true
+	return resolved
 }
 func (b *WorkflowContractBundle) RuntimeEventOwners(eventType string) []string {
 	if b == nil {
