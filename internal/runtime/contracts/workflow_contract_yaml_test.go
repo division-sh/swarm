@@ -722,16 +722,20 @@ project:
 	}
 }
 
-func TestAccumulateSpecDecode_PreservesIntoAndRejectsUnknownField(t *testing.T) {
+func TestAccumulateSpecDecode_PreservesDescriptionAndRejectsUnknownField(t *testing.T) {
 	var spec AccumulateSpec
 	if err := yaml.Unmarshal([]byte(`
 into: dimensions_received
+description: all dimension receipts have arrived
 dedup_by: payload.dimension
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if got := spec.Into; got != "dimensions_received" {
 		t.Fatalf("Into = %q", got)
+	}
+	if got := spec.Description; got != "all dimension receipts have arrived" {
+		t.Fatalf("Description = %q", got)
 	}
 
 	err := yaml.Unmarshal([]byte(`

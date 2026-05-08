@@ -44,6 +44,7 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 		Into         string    `yaml:"into"`
 		ExpectedFrom string    `yaml:"expected_from"`
 		From         string    `yaml:"from"`
+		Description  string    `yaml:"description"`
 		DedupBy      string    `yaml:"dedup_by"`
 		Threshold    int       `yaml:"threshold"`
 		TimeoutMS    int       `yaml:"timeout_ms"`
@@ -58,6 +59,7 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 		Into:         strings.TrimSpace(aux.Into),
 		ExpectedFrom: strings.TrimSpace(aux.ExpectedFrom),
 		From:         strings.TrimSpace(aux.From),
+		Description:  strings.TrimSpace(aux.Description),
 		ExpectedPath: paths.Parse(aux.ExpectedFrom),
 		DedupBy:      strings.TrimSpace(aux.DedupBy),
 		DedupPath:    paths.Parse(aux.DedupBy),
@@ -83,6 +85,7 @@ func validateAccumulateFieldNodes(node *yaml.Node) error {
 		"into":          {},
 		"expected_from": {},
 		"from":          {},
+		"description":   {},
 		"dedup_by":      {},
 		"threshold":     {},
 		"timeout_ms":    {},
