@@ -153,6 +153,7 @@ type AccumulateSpec struct {
 	Into         string               `yaml:"into"`
 	ExpectedFrom string               `yaml:"expected_from"`
 	From         string               `yaml:"from"`
+	Description  string               `yaml:"description"`
 	ExpectedPath paths.Path           `yaml:"-"`
 	DedupBy      string               `yaml:"dedup_by"`
 	DedupPath    paths.Path           `yaml:"-"`
