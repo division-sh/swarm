@@ -72,21 +72,31 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	script := `#!/bin/sh
 set -eu
 capture_dir="${FAKE_DOCKER_CAPTURE_DIR}"
-captured="$capture_dir/$$.stdin"
-cat > "$captured"
-if grep -q '"name":"emit_category_assessed"' "$captured" && grep -q '"ok":true' "$captured"; then
-  printf '%s\n' '{"type":"result","result":"done"}'
-  exit 0
+count_file="$capture_dir/invocations"
+if [ -f "$count_file" ]; then
+  count="$(cat "$count_file")"
+else
+  count=0
 fi
-if grep -q '"name":"read_file"' "$captured" && grep -q '"ok":true' "$captured"; then
+count=$((count + 1))
+printf '%s' "$count" > "$count_file"
+captured="$capture_dir/$count.stdin"
+cat > "$captured"
+case "$count" in
+1)
+  printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
+  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"Read","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}'
+  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}'
+  ;;
+2)
   printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-emit-1","name":"emit_category_assessed","input":{"category":"payments"}}},"session_id":"provider-sess-1"}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}'
-  exit 0
-fi
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
-printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"Read","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}'
-printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}'
+  ;;
+*)
+  printf '%s\n' '{"type":"result","result":"done"}'
+  ;;
+esac
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
