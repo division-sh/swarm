@@ -177,6 +177,48 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithou
 	}
 }
 
+func TestBuildHistoricalReplayExecutionAdmissionReportsTimerReconstructionOwner(t *testing.T) {
+	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
+	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+	replayAdmission := store.RunForkReplayResumeAdmission{
+		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+		HistoricalReplayRequired: true,
+		Dispositions: []store.RunForkReplayResumeDisposition{{
+			Fact:           store.RunForkReplayResumeFactTimerHistory,
+			Disposition:    store.RunForkReplayResumeDispositionReconstruct,
+			Classification: store.RunForkHistoricalReplayAdmissionReconstructedForkState,
+			Message:        "timer reconstruction owner admits active source timers",
+		}},
+	}
+	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
+		SelectedExecutionAdmission: selectedAdmission,
+		ReplayResumeAdmission:      replayAdmission,
+		RouteRecovery:              &routeRecovery,
+	})
+	if err != nil {
+		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
+	}
+
+	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
+		ReplayResumeAdmission:      replayAdmission,
+		SelectedExecutionAdmission: selectedAdmission,
+		ContractSwapAdmission:      contractSwapAdmission,
+		RouteRecovery:              &routeRecovery,
+	})
+	if err != nil {
+		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+	}
+	timerAdmission, ok := historicalReplayFactAdmission(admission.FactAdmissions, store.RunForkHistoricalReplayFactTimers)
+	if !ok {
+		t.Fatalf("timer fact admission missing: %#v", admission.FactAdmissions)
+	}
+	if timerAdmission.Admission != store.RunForkHistoricalReplayAdmissionReconstructedForkState ||
+		timerAdmission.SourceOwner != store.RunForkHistoricalReplayTimerReconstructionOwner ||
+		timerAdmission.Tracker != "#642" {
+		t.Fatalf("timer admission = %#v", timerAdmission)
+	}
+}
+
 func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMutation(t *testing.T) {
 	replayAdmission := store.RunForkReplayResumeAdmission{
 		Owner:                    store.RunForkReplayResumeAdmissionOwner,

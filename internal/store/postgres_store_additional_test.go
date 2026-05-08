@@ -2622,6 +2622,92 @@ func TestSchedules_ExactIdentityUsesFlowInstance(t *testing.T) {
 	}
 }
 
+func TestSchedules_ExactIdentityUsesRunID(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	runA := uuid.NewString()
+	runB := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+	`, runA, runB); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	base := runtimepipeline.Schedule{
+		AgentID:      "validation-orchestrator",
+		EventType:    "timer.validation_timeout",
+		Mode:         "once",
+		At:           time.Now().Add(30 * time.Minute).UTC(),
+		EntityID:     entityID,
+		FlowInstance: "review/inst-1",
+		TaskID:       "timer-a",
+		Payload:      []byte(`{"timer_id":"timer-a"}`),
+	}
+	first := base
+	first.RunID = runA
+	second := base
+	second.RunID = runB
+	second.At = time.Now().Add(60 * time.Minute).UTC()
+
+	if err := pg.UpsertSchedule(ctx, first); err != nil {
+		t.Fatalf("UpsertSchedule(first): %v", err)
+	}
+	if err := pg.UpsertSchedule(ctx, second); err != nil {
+		t.Fatalf("UpsertSchedule(second): %v", err)
+	}
+
+	active, err := pg.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("LoadActiveSchedules: %v", err)
+	}
+	var exact []runtimepipeline.Schedule
+	for _, sc := range active {
+		if sc.AgentID == base.AgentID &&
+			sc.EventType == base.EventType &&
+			sc.EntityID == base.EntityID &&
+			sc.FlowInstance == base.FlowInstance &&
+			sc.TaskID == base.TaskID {
+			exact = append(exact, sc)
+		}
+	}
+	if len(exact) != 2 {
+		t.Fatalf("expected two exact schedules to coexist across run_id, got %+v", exact)
+	}
+
+	if err := pg.MarkScheduleFiredExact(ctx, first); err != nil {
+		t.Fatalf("MarkScheduleFiredExact(first): %v", err)
+	}
+	statuses := map[string]string{}
+	rows, err := db.QueryContext(ctx, `
+		SELECT run_id::text, status
+		FROM timers
+		WHERE owner_agent = $1
+		  AND fire_event = $2
+		  AND entity_id = $3::uuid
+		  AND flow_instance = $4
+		  AND `+exactScheduleTaskIDSQL()+` = $5
+	`, base.AgentID, base.EventType, base.EntityID, base.FlowInstance, base.TaskID)
+	if err != nil {
+		t.Fatalf("query timer statuses: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var runID, status string
+		if err := rows.Scan(&runID, &status); err != nil {
+			t.Fatalf("scan timer status: %v", err)
+		}
+		statuses[runID] = status
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate timer statuses: %v", err)
+	}
+	if statuses[runA] != "fired" || statuses[runB] != "active" {
+		t.Fatalf("timer statuses = %#v, want runA fired and runB active", statuses)
+	}
+}
+
 func TestSchedules_LoadActiveSchedulesPreservesFlowInstance(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

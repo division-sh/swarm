@@ -256,7 +256,7 @@ func historicalReplayFactAdmissions(replay store.RunForkReplayResumeAdmission) [
 		historicalReplayDeadLettersAdmission(replay),
 		historicalReplaySplitFact(store.RunForkHistoricalReplayFactRetryIdempotency, "runtime idempotency and retry state must be owned by a later mutating replay child; source state cannot suppress fork work", "#564"),
 		historicalReplaySplitFact(store.RunForkHistoricalReplayFactEmittedFollowUps, "emitted follow-up regeneration belongs to the future mutating replay owner; source follow-up rows are not copied", "#564"),
-		historicalReplayFactFromReplay(replay, store.RunForkHistoricalReplayFactTimers, []string{store.RunForkReplayResumeFactTimerHistory}, store.RunForkHistoricalReplayAdmissionSplitSibling, "timer reconstruction remains a split sibling unless timer_history is present and fail-closed", "#564"),
+		historicalReplayTimersAdmission(replay),
 		historicalReplayFactFromReplay(replay, store.RunForkHistoricalReplayFactRoutes, []string{store.RunForkReplayResumeFactRouteHistory}, store.RunForkHistoricalReplayAdmissionSplitSibling, "route and route-recovery truth remains split under fork-local route persistence/runtime recovery", "#618"),
 		historicalReplayFactFromReplay(replay, store.RunForkHistoricalReplayFactSessions, []string{store.RunForkReplayResumeFactSessionHistory}, store.RunForkHistoricalReplayAdmissionSplitSibling, "session reconstruction remains a split sibling unless active session facts are present and fail-closed", "#564"),
 		historicalReplayFactFromReplay(replay, store.RunForkHistoricalReplayFactTurns, []string{store.RunForkReplayResumeFactActiveTurnHistory}, store.RunForkHistoricalReplayAdmissionSplitSibling, "turn reconstruction remains a split sibling unless active turn facts are present and fail-closed", "#564"),
@@ -266,6 +266,28 @@ func historicalReplayFactAdmissions(replay store.RunForkReplayResumeAdmission) [
 		historicalReplaySplitFact(store.RunForkHistoricalReplayFactRuntimeRestartRecovery, "runtime restart recovery remains a consumer/sibling and cannot reconstruct historical replay state from current rows", "#564"),
 		historicalReplaySplitFact(store.RunForkHistoricalReplayFactCLIApiDashboardOperator, "CLI, API, dashboard, and Builder surfaces are consumers only and must not compute historical replay admission independently", "#549"),
 	}
+}
+
+func historicalReplayTimersAdmission(replay store.RunForkReplayResumeAdmission) store.RunForkHistoricalReplayFactAdmission {
+	if blocker, ok := replayBlockerForFacts(replay, store.RunForkReplayResumeFactTimerHistory); ok {
+		return store.RunForkHistoricalReplayFactAdmission{
+			Fact:        store.RunForkHistoricalReplayFactTimers,
+			Admission:   store.RunForkHistoricalReplayAdmissionFailClosedBlocker,
+			SourceOwner: store.RunForkReplayResumeAdmissionOwner,
+			BlockerCode: blocker.Code,
+			Message:     blocker.Message,
+		}
+	}
+	if replayDispositionHas(replay, store.RunForkReplayResumeFactTimerHistory, store.RunForkReplayResumeDispositionReconstruct) {
+		return store.RunForkHistoricalReplayFactAdmission{
+			Fact:        store.RunForkHistoricalReplayFactTimers,
+			Admission:   store.RunForkHistoricalReplayAdmissionReconstructedForkState,
+			SourceOwner: store.RunForkHistoricalReplayTimerReconstructionOwner,
+			Tracker:     "#642",
+			Message:     "active source timers are lineage inputs only; fork-local timer rows are reconstructed under the fork run_id by the timer reconstruction owner",
+		}
+	}
+	return historicalReplaySplitFact(store.RunForkHistoricalReplayFactTimers, "timer reconstruction remains split unless the canonical replay taxonomy admits active timer reconstruction", "#564")
 }
 
 func historicalReplayEventDeliveriesAdmission(replay store.RunForkReplayResumeAdmission) store.RunForkHistoricalReplayFactAdmission {

@@ -358,6 +358,7 @@ nodes:
       - historical replay delivery/event replay recovery must prove startup RecoveryManager and EventBus.SweepUndispatched recover the fork-local rows produced by runtime.run_fork.historical_replay_execution, with source rows/outcomes as lineage only and broader replay/resume siblings still split
       - broad historical replay execution owner promotion must make runtime.run_fork.historical_replay_execution the canonical mutating authority that emits executable work identities after validating the full fact matrix; store activation and delivery-event replay writers must consume that owner rather than selecting source deliveries from replay_resume_admission or RunForkPlan directly
       - contract-swap historical replay execution needs runtime.run_fork.historical_replay_execution.contract_swap_boot_resume as the selected-contract child owner for already-admitted delivery_event_replay_ready work; selected recipient planning owns fork recipients, source delivery subscribers are lineage only, and timers/routes/sessions/turns/audits/non-agent/restart/API siblings stay fail-closed or split
+      - selected-contract timer reconstruction needs runtime.run_fork.historical_replay_execution.timer_reconstruction plus run-scoped scheduler identity; active source timers are lineage inputs only, reconstructed fork timers must be fresh fork-local rows under fork run_id, and unsupported source timer histories or post-T source timer facts remain fail-closed
     representative_issues:
       - 564
       - 565
@@ -386,6 +387,7 @@ nodes:
       - 633
       - 635
       - 639
+      - 642
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR

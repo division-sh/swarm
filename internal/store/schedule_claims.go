@@ -20,6 +20,8 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return false, fmt.Errorf("agent_id and event_type are required")
 	}
+	sc = scheduleWithContextRunID(ctx, sc)
+	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	key := scheduleClaimLockKey(sc)
@@ -69,6 +71,8 @@ func (s *PostgresStore) ReleaseSchedule(ctx context.Context, sc runtimepipeline.
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	sc = scheduleWithContextRunID(ctx, sc)
+	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	key := scheduleClaimLockKey(sc)
@@ -167,14 +171,15 @@ func scheduleActiveOnConn(ctx context.Context, conn *sql.Conn, sc runtimepipelin
 		SELECT EXISTS (
 			SELECT 1
 			FROM timers
-			WHERE owner_agent = $1
-			  AND fire_event = $2
-			  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
-			  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
-			  AND %s = $5
+			WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
+			  AND owner_agent = $2
+			  AND fire_event = $3
+			  AND entity_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
+			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
+			  AND %s = $6
 			  AND status = 'active'
 		)
-	`, exactScheduleTaskIDSQL()), sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)).Scan(&active)
+	`, exactScheduleTaskIDSQL()), sc.RunID, sc.AgentID, sc.EventType, sc.EntityID, sc.FlowInstance, strings.TrimSpace(sc.TaskID)).Scan(&active)
 	if err != nil {
 		return false, fmt.Errorf("check active schedule ownership target: %w", err)
 	}

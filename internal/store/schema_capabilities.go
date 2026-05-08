@@ -230,7 +230,8 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 
 	caps.Schedules = detectSchemaFlavor(catalog, "timers",
 		[]string{
-			"timer_id", "timer_name", "entity_id", "flow_instance", "fire_event", "fire_payload",
+			"timer_id", "run_id", "source_timer_id", "forked_from_run_id", "forked_from_event_id",
+			"reconstruction_owner", "timer_name", "entity_id", "flow_instance", "fire_event", "fire_payload",
 			"fire_at", "recurring", "recurrence_cron", "recurrence_interval", "owner_node",
 			"owner_agent", "task_type", "status", "fired_at", "created_at",
 		},

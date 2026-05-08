@@ -122,12 +122,31 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	if err != nil {
 		return RunForkMaterialization{}, err
 	}
-	if blockers := runForkSelectedContractExecutionPlanBlockers(plan, nil); len(blockers) > 0 {
+	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
+		return RunForkMaterialization{}, err
+	}
+	timerReconstruction, err := s.planRunForkSelectedContractTimerReconstruction(ctx, catalog, plan)
+	if err != nil {
+		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+			admission := runForkReplayResumeAdmissionWithBlocker(plan.ReplayResumeAdmission, fact, blocker)
+			return RunForkMaterialization{
+				SourceRunID:           plan.SourceRunID,
+				ForkPoint:             plan.ForkPoint,
+				ExecutionReady:        false,
+				ReplayResumeAdmission: admission,
+				UnsupportedBlockers:   admission.UnsupportedBlockers,
+				DeliveryResumeBlocked: true,
+			}, err
+		}
+		return RunForkMaterialization{}, err
+	}
+	if blockers := runForkSelectedContractExecutionPlanBlockersWithTimerResolution(plan, nil, timerReconstruction.Required); len(blockers) > 0 {
 		return RunForkMaterialization{
 			SourceRunID:           plan.SourceRunID,
 			ForkPoint:             plan.ForkPoint,
 			ExecutionReady:        false,
-			ReplayResumeAdmission: plan.ReplayResumeAdmission,
+			ReplayResumeAdmission: runForkReplayResumeAdmissionWithTimerReconstruction(plan.ReplayResumeAdmission, timerReconstruction),
 			UnsupportedBlockers:   blockers,
 			DeliveryResumeBlocked: true,
 		}, fmt.Errorf("selected-contract fork execution materialization blocked: %s", runForkBlockerCodes(blockers))
@@ -181,10 +200,15 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	if err != nil {
 		return RunForkMaterialization{}, err
 	}
+	if err := insertRunForkSelectedContractTimerReconstructions(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, timerReconstruction, now); err != nil {
+		return RunForkMaterialization{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("commit selected-contract fork materialization: %w", err)
 	}
 	committed = true
+	replayAdmission := runForkReplayResumeAdmissionWithTimerReconstruction(plan.ReplayResumeAdmission, timerReconstruction)
+	unsupportedBlockers := runForkSelectedContractExecutionPlanBlockersWithTimerResolution(plan, nil, timerReconstruction.Required)
 	return RunForkMaterialization{
 		SourceRunID:              plan.SourceRunID,
 		ForkRunID:                forkRunID,
@@ -192,9 +216,9 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		ForkPoint:                plan.ForkPoint,
 		MaterializedEntityCount:  len(plan.Entities),
 		ExecutionReady:           false,
-		ReplayResumeAdmission:    plan.ReplayResumeAdmission,
+		ReplayResumeAdmission:    replayAdmission,
 		SelectedContractBinding:  &binding,
-		UnsupportedBlockers:      plan.UnsupportedBlockers,
+		UnsupportedBlockers:      unsupportedBlockers,
 		DeliveryResumeBlocked:    true,
 		SourceRunStatusUnchanged: true,
 	}, nil
@@ -264,7 +288,12 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		return result, err
 	}
 	result.ReplayResumeAdmission = plan.ReplayResumeAdmission
-	if blockers := runForkSelectedContractExecutionPlanBlockers(plan, req.AllowedSourceEventIDs); len(blockers) > 0 {
+	timerResolved, err := runForkSelectedContractTimerReconstructionComplete(ctx, tx, lineage, plan)
+	if err != nil {
+		return result, err
+	}
+	result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithTimerReconstruction(plan.ReplayResumeAdmission, runForkTimerReconstructionPlan{Required: timerResolved})
+	if blockers := runForkSelectedContractExecutionPlanBlockersWithTimerResolution(plan, req.AllowedSourceEventIDs, timerResolved); len(blockers) > 0 {
 		result.UnsupportedBlockers = blockers
 		return result, fmt.Errorf("selected-contract fork activation blocked: %s", runForkBlockerCodes(blockers))
 	}
@@ -474,6 +503,11 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 		   OR event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
 	`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork deliveries: %w", err)
+	}
+	if catalog.hasColumns("timers", "run_id") {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM timers WHERE run_id = $1::uuid`, forkRunID); err != nil {
+			return fmt.Errorf("delete selected-contract fork timers: %w", err)
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_mutations WHERE run_id = $1::uuid`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork mutations: %w", err)

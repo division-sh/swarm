@@ -12,6 +12,7 @@ import (
 	"swarm/internal/events"
 	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
@@ -194,6 +195,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	}
 
 	schedule := Schedule{
+		RunID:        runtimecorrelation.RunIDFromContext(ctx),
 		AgentID:      in.AgentID,
 		EventType:    in.EventType,
 		Mode:         in.Mode,

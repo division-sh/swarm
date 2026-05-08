@@ -559,7 +559,7 @@ func (s *PostgresStore) loadRunForkAdmissionEvidence(ctx context.Context, catalo
 	if err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
-	relevantTimer, err := s.hasRunForkRelevantTimer(ctx, catalog, facts, cursor)
+	relevantTimer, err := s.hasRunForkRelevantTimer(ctx, catalog, runID, facts, cursor)
 	if err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
@@ -639,8 +639,8 @@ func (s *PostgresStore) loadRunForkSourceFacts(ctx context.Context, runID string
 	}, nil
 }
 
-func (s *PostgresStore) hasRunForkRelevantTimer(ctx context.Context, catalog schemaColumnCatalog, facts runForkSourceFacts, cursor runForkEventCursor) (bool, error) {
-	if !catalog.hasColumns("timers", "entity_id", "flow_instance", "created_at") {
+func (s *PostgresStore) hasRunForkRelevantTimer(ctx context.Context, catalog schemaColumnCatalog, runID string, facts runForkSourceFacts, cursor runForkEventCursor) (bool, error) {
+	if !catalog.hasColumns("timers", "run_id", "entity_id", "flow_instance", "created_at") {
 		return false, nil
 	}
 	if len(facts.EntityIDs) == 0 && len(facts.FlowInstances) == 0 {
@@ -651,14 +651,15 @@ func (s *PostgresStore) hasRunForkRelevantTimer(ctx context.Context, catalog sch
 		SELECT EXISTS (
 			SELECT 1
 			FROM timers
-			WHERE created_at <= $1::timestamptz
+			WHERE run_id = $1::uuid
+			  AND created_at <= $2::timestamptz
 			  AND (
-					(entity_id IS NOT NULL AND entity_id::text = ANY($2::text[]))
+					(entity_id IS NOT NULL AND entity_id::text = ANY($3::text[]))
 					OR
-					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($3::text[]))
+					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($4::text[]))
 			  )
 		)
-	`, cursor.CreatedAt, pq.Array(facts.EntityIDs), pq.Array(facts.FlowInstances)).Scan(&exists); err != nil {
+	`, runID, cursor.CreatedAt, pq.Array(facts.EntityIDs), pq.Array(facts.FlowInstances)).Scan(&exists); err != nil {
 		return false, fmt.Errorf("check fork timer blockers: %w", err)
 	}
 	return exists, nil

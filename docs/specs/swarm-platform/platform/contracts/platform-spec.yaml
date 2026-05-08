@@ -3082,28 +3082,36 @@ platform_tables:
         \ 'draining', 'terminated')),\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    terminated_at     TIMESTAMPTZ\n\
         );"
     timers:
-      description: 'Durable timer and scheduled task store. Persisted across restarts. Entity-scoped timers: entity_id and
-        flow_instance set, tied to a specific entity lifecycle. Global timers: entity_id and flow_instance NULL, used for
-        recurring platform-level work (periodic scans, health checks, digest compilation). fire_payload carries context when
-        the timer fires. owner_node OR owner_agent identifies who declared the timer (mutually exclusive). recurrence_cron
-        supports cron expressions for global recurring schedules. recurrence_interval supports duration strings (e.g., "24h")
-        for entity-scoped recurring timers. task_type: timer (one-shot entity), scheduled_task (recurring entity), deadline
-        (hard cutoff), global_recurring (platform-level periodic work).'
+      description: 'Durable timer and scheduled task store. Persisted across restarts. Run-scoped timers carry run_id and
+        are claimed, fired, cancelled, and recovered under that run identity. Entity-scoped timers: entity_id and
+        flow_instance set, tied to a specific entity lifecycle inside run_id. Global timers: entity_id, flow_instance,
+        and run_id NULL, used for recurring platform-level work (periodic scans, health checks, digest compilation).
+        fire_payload carries context when the timer fires. owner_node OR owner_agent identifies who declared the timer
+        (mutually exclusive). source_timer_id, forked_from_run_id, forked_from_event_id, and reconstruction_owner are
+        lineage-only fields for fork-local reconstructed timers and must not make the source timer executable fork truth.
+        recurrence_cron supports cron expressions for global recurring schedules. recurrence_interval supports duration
+        strings (e.g., "24h") for entity-scoped recurring timers. task_type: timer (one-shot entity), scheduled_task
+        (recurring entity), deadline (hard cutoff), global_recurring (platform-level periodic work).'
       ddl: "CREATE TABLE timers (\n    timer_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    timer_name     \
-        \   TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    fire_event        TEXT NOT NULL,\n\
+        \   TEXT NOT NULL,\n    run_id            UUID REFERENCES runs(run_id),\n    source_timer_id   UUID REFERENCES timers(timer_id),\n\
+        \    forked_from_run_id UUID REFERENCES runs(run_id),\n    forked_from_event_id UUID REFERENCES events(event_id),\n\
+        \    reconstruction_owner TEXT,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    fire_event        TEXT NOT NULL,\n\
         \    fire_payload      JSONB NOT NULL DEFAULT '{}',\n    fire_at           TIMESTAMPTZ NOT NULL,\n    recurring  \
         \       BOOLEAN NOT NULL DEFAULT FALSE,\n    recurrence_cron   TEXT,\n    recurrence_interval TEXT,\n    owner_node\
         \        TEXT,\n    owner_agent       TEXT,\n    task_type         TEXT NOT NULL DEFAULT 'timer' CHECK (task_type\
         \ IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')),\n    status            TEXT NOT NULL DEFAULT 'active'\
         \ CHECK (status IN ('active', 'fired', 'cancelled', 'expired')),\n    fired_at          TIMESTAMPTZ,\n    created_at\
-        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_timers_fire (status, fire_at),\n    INDEX idx_timers_entity\
+        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_timers_run (run_id, status, fire_at) WHERE run_id IS NOT NULL,\n\
+        \    INDEX idx_timers_source_lineage (source_timer_id) WHERE source_timer_id IS NOT NULL,\n    INDEX idx_timers_fire (status, fire_at),\n    INDEX idx_timers_entity\
         \ (entity_id) WHERE entity_id IS NOT NULL,\n    INDEX idx_timers_flow (flow_instance) WHERE flow_instance IS NOT NULL,\n\
         \    INDEX idx_timers_global (task_type, status) WHERE entity_id IS NULL\n);"
       scope_rules:
-        entity_scoped: entity_id NOT NULL, flow_instance NOT NULL. Tied to entity lifecycle. Cancelled when entity reaches
-          terminal state.
-        global: entity_id NULL, flow_instance NULL. Platform-level. Not tied to any entity. Survives entity lifecycle.
-        flow_scoped: entity_id NULL, flow_instance NOT NULL. Tied to flow instance. Cancelled when flow instance terminates.
+        entity_scoped: entity_id NOT NULL, flow_instance NOT NULL, run_id set for runtime-owned entity timers. Tied to entity
+          lifecycle inside run_id. Cancelled when entity reaches terminal state.
+        global: entity_id NULL, flow_instance NULL, run_id NULL. Platform-level. Not tied to any entity. Survives entity
+          lifecycle.
+        flow_scoped: entity_id NULL, flow_instance NOT NULL, run_id set for runtime-owned flow timers. Tied to flow instance
+          inside run_id. Cancelled when flow instance terminates.
     dead_letters:
       description: Failed events after retry exhaustion or chain depth overflow.
       ddl: "CREATE TABLE dead_letters (\n    dead_letter_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    original_event_id\
@@ -3422,13 +3430,17 @@ run_model:
         source run, must record terminal source status at activation as divergence evidence, must not copy post-fork source
         events or event_deliveries, and must continue to regenerate fork-local events, deliveries, receipts, dead letters,
         idempotency effects, and emitted follow-ups under the fork run_id.'
-    selected_contract_timer_route_policy: 'Mutating selected-contract timestamp-fork execution treats source timer and
-      route facts as evidence-only fail-closed blockers until separately approved timer and route reconstruction owners
-      exist. The runtime.run_fork.selected_contract_execution owner consumes the canonical
-      store.run_fork.replay_resume_admission timer_history and flow_route_history blockers before selected-contract
-      materialization or activation can create fork-local executable work. It MUST NOT copy source timers or
-      routing_rules, fire or replay source timers, persist fork-local timer/route rows, derive selected-source recipients
-      for execution, or use source timer/route outcomes as selected-fork suppressors in this policy slice.'
+    selected_contract_timer_route_policy: 'Mutating selected-contract timestamp-fork execution treats source route facts
+      as evidence-only fail-closed blockers until a separately approved route reconstruction owner exists. Active source
+      timers may be reconstructed only by runtime.run_fork.historical_replay_execution.timer_reconstruction, which
+      consumes store.run_fork.replay_resume_admission timer_history as lineage, writes fresh fork-local timer rows under
+      the fork run_id with source_timer_id/forked_from_run_id/forked_from_event_id/reconstruction_owner lineage, and
+      requires scheduler claim/fire/recovery identity to include run_id. Source timer rows are never copied as executable
+      truth, fired as source work, or used as selected-fork suppressors. Unsupported source timer histories and post-T
+      source timer facts remain fail-closed. The runtime.run_fork.selected_contract_execution owner must continue to
+      consume flow_route_history blockers and MUST NOT copy routing_rules, persist fork-local route rows, derive
+      selected-source recipients for execution outside recipient planning, or use source route outcomes as selected-fork
+      suppressors.'
     selected_contract_route_admission: 'Selected-contract route/subscription reconstruction admission is a
       non-mutating prerequisite owned by runtime.run_fork.selected_contract_route_admission. It consumes
       runtime.run_fork.contract_frontier_admission for selected frontier work, consumes selected-source static route
@@ -3527,11 +3539,16 @@ run_model:
       and the canonical store.run_fork.replay_resume_admission taxonomy, validates that every historical source fact
       family has exactly one executable, reconstructed, lineage-only, fail-closed, or split-sibling classification, and
       emits the executable work set that downstream store/runtime writers may mutate. The current supported closure
-      level is canonical owner promotion with delivery_event_replay_ready only; the selected-contract contract-swap
-      child runtime.run_fork.historical_replay_execution.contract_swap_boot_resume may execute only that already-admitted
-      primitive under selected/swapped contracts. Full product-complete historical replay/resume for timers, routes,
-      sessions, turns, audits, non-agent/node/system work, broader contract-swap boot/resume, generic source-advanced
-      policy, broader restart recovery, and API/UI/dashboard surfaces remains unsupported unless separately approved.
+      level is canonical owner promotion with delivery_event_replay_ready plus the selected-contract active-timer
+      reconstruction child runtime.run_fork.historical_replay_execution.timer_reconstruction. The timer reconstruction
+      child may reconstruct only active source timers at T into fresh fork-local timer rows under fork run_id with
+      lineage fields; it does not copy source rows, fire source timers, clear route/session/turn/audit/non-agent
+      blockers, or authorize full scheduler/recovery replay beyond run-scoped timer claim/fire/reload identity. The
+      selected-contract contract-swap child runtime.run_fork.historical_replay_execution.contract_swap_boot_resume may
+      execute only already-admitted delivery_event_replay_ready work under selected/swapped contracts. Full
+      product-complete historical replay/resume for routes, sessions, turns, audits, non-agent/node/system work,
+      broader contract-swap boot/resume, generic source-advanced policy, broader restart recovery, and API/UI/dashboard
+      surfaces remains unsupported unless separately approved.
       Activation, store delivery-event replay, recovery, selected/contract-swap consumers, route
       helpers, timer helpers, session helpers, and operator surfaces MUST consume this owner or remain explicit
       fail-closed/split outputs. They MUST NOT authorize mutation directly from replay_resume_admission, selected

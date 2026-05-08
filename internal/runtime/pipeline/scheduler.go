@@ -11,6 +11,7 @@ import (
 )
 
 type Schedule struct {
+	RunID        string
 	AgentID      string
 	EventType    string
 	Mode         string // once | cron
@@ -20,6 +21,17 @@ type Schedule struct {
 	FlowInstance string
 	TaskID       string
 	Payload      []byte
+}
+
+func (s Schedule) EffectiveRunID() string {
+	return strings.TrimSpace(s.RunID)
+}
+
+func (s *Schedule) NormalizeRunID() {
+	if s == nil {
+		return
+	}
+	s.RunID = s.EffectiveRunID()
 }
 
 func (s Schedule) EffectiveEntityID() string {
@@ -76,6 +88,7 @@ func (s *Scheduler) Register(sc Schedule) error {
 	if sc.AgentID == "" || sc.EventType == "" {
 		return errors.New("agent_id and event_type are required")
 	}
+	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if sc.Mode == "" {
@@ -121,9 +134,8 @@ func (s *Scheduler) Cancel(agentID string, eventType string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	prefix := schedulePrefix(agentID, eventType)
 	for key, task := range s.tasks {
-		if !strings.HasPrefix(key, prefix) {
+		if !scheduleKeyMatchesAgentEvent(key, agentID, eventType) {
 			continue
 		}
 		close(task.stop)
@@ -226,6 +238,7 @@ func (s *Scheduler) unregisterTask(key string, task *scheduledTask) {
 
 func scheduleKey(sc Schedule) string {
 	return strings.Join([]string{
+		strings.TrimSpace(sc.EffectiveRunID()),
 		strings.TrimSpace(sc.AgentID),
 		strings.TrimSpace(sc.EventType),
 		strings.TrimSpace(sc.EffectiveEntityID()),
@@ -234,8 +247,11 @@ func scheduleKey(sc Schedule) string {
 	}, "|")
 }
 
-func schedulePrefix(agentID, eventType string) string {
-	return strings.TrimSpace(agentID) + "|" + strings.TrimSpace(eventType) + "|"
+func scheduleKeyMatchesAgentEvent(key, agentID, eventType string) bool {
+	parts := strings.Split(key, "|")
+	return len(parts) >= 3 &&
+		strings.TrimSpace(parts[1]) == strings.TrimSpace(agentID) &&
+		strings.TrimSpace(parts[2]) == strings.TrimSpace(eventType)
 }
 
 func parseCronSpec(expr string) (cronSpec, error) {
