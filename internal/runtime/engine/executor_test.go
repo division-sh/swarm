@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -663,6 +665,88 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 	emittedScores, ok := emitted["scores"].([]any)
 	if !ok || len(emittedScores) != 1 {
 		t.Fatalf("emit payload scores = %#v", emitted["scores"])
+	}
+}
+
+func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *testing.T) {
+	source := semanticview.Wrap(loadEngineProjectionFlowBundle(t))
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     source,
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	handler, ok := source.NodeEventHandler("scoring-node", "scoring/score.dimension_complete")
+	if !ok {
+		t.Fatal("expected qualified runtime event to resolve to authored local handler")
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "scoring-node",
+		FlowID:   "scoring",
+		Event: events.Event{
+			ID:      "evt-1",
+			Type:    "scoring/score.dimension_complete",
+			Payload: json.RawMessage(`{"dimension":"market","score":87}`),
+		},
+		Handler: handler,
+		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	scores, ok := result.StateMutation.Metadata["scores"].([]any)
+	if !ok || len(scores) != 1 {
+		t.Fatalf("projected scores = %#v", result.StateMutation.Metadata["scores"])
+	}
+	score, ok := scores[0].(map[string]any)
+	if !ok {
+		t.Fatalf("projected score item = %#v", scores[0])
+	}
+	if got := score["dimension"]; got != "market" {
+		t.Fatalf("projected dimension = %#v", got)
+	}
+	if _, exists := score["event_type"]; exists {
+		t.Fatalf("projected score leaked accumulator metadata: %#v", score)
+	}
+}
+
+func TestExecutor_AccumulatorProjectionFailsClosedWhenDeclaredBindingDoesNotResolveAtRuntime(t *testing.T) {
+	source := semanticview.Wrap(loadEngineProjectionFlowBundle(t))
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     source,
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	handler, ok := source.NodeEventHandler("scoring-node", "scoring/score.dimension_complete")
+	if !ok {
+		t.Fatal("expected qualified runtime event to resolve to authored local handler")
+	}
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "scoring-node",
+		FlowID:   "scoring",
+		Event: events.Event{
+			ID:      "evt-1",
+			Type:    "scoring/score.unregistered_dimension_complete",
+			Payload: json.RawMessage(`{"dimension":"market","score":87}`),
+		},
+		Handler: handler,
+		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime_invariant_violation") {
+		t.Fatalf("Execute error = %v, want runtime_invariant_violation", err)
 	}
 }
 
@@ -2273,4 +2357,103 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 	if len(shaper.lastPayload) != 0 {
 		t.Fatalf("guard escalation payload = %#v, want empty explicit business payload", shaper.lastPayload)
 	}
+}
+
+func loadEngineProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: projection-flow
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: scoring
+    flow: scoring
+    mode: static
+`)
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-flow\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
+name: scoring
+initial_state: pending
+states: [pending, scored]
+terminal_states: [scored]
+pins:
+  inputs:
+    events:
+      - score.dimension_complete
+  outputs:
+    events:
+      - vertical.scored
+`)
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "types.yaml"), `
+types:
+  DimensionScore:
+    dimension: text
+    score: integer
+`)
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
+vertical:
+  scores:
+    type: "[DimensionScore]"
+    initial: []
+    materialize_from: scoring-node.dimensions_received
+`)
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), `
+score.dimension_complete:
+  dimension: text
+  score: integer
+vertical.scored:
+  scores: "[DimensionScore]"
+`)
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), `
+scoring-node:
+  id: scoring-node
+  execution_type: system_node
+  event_handlers:
+    score.dimension_complete:
+      accumulate:
+        into: dimensions_received
+        completion: all
+        dedup_by: payload.dimension
+        on_complete:
+          - id: complete
+            emit:
+              event: vertical.scored
+              fields:
+                scores: entity.scores
+  state_schema:
+    fields:
+      dimensions_received: "[DimensionScore]"
+`)
+
+	repoRoot := repoRootForEngineProjectionTest(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
+}
+
+func writeEngineProjectionFixtureFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(content, "\n")), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func repoRootForEngineProjectionTest(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	return filepath.Clean(filepath.Join(wd, "..", "..", ".."))
 }

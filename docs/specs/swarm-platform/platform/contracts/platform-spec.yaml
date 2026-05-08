@@ -476,6 +476,12 @@ entity_contracts:
       (`data_accumulation`, compute/filter/reduce/count/group_by store_as,
       query store_as, clear, or agent entity_writes/save tools) are hard
       invalidity.
+    runtime_binding_identity: |
+      Runtime projection binding uses the same node event identity semantics as
+      handler dispatch. A flow-local authored handler key and the
+      namespace-qualified runtime event that dispatched that handler are the
+      same projection source when the node event resolver canonicalizes them to
+      the same event identity.
     e1_coverage: |
       `materialize_from` counts as entity writer coverage for E1. It replaces
       `_unused_reason`; the two may not coexist.
@@ -4405,7 +4411,10 @@ static_analyzer:
       On a successful matching accumulator on_complete branch, runtime writes
       the projection as a full replacement before emit.fields and validates the
       result through entity named-type normalization. Failure rolls back the
-      whole handler transaction. Projection does not run for timeout,
+      whole handler transaction. If a verify-clean declaration exists for the
+      active handler accumulator but runtime resolves zero projection bindings,
+      execution fails closed as a runtime invariant violation rather than
+      silently skipping the projection. Projection does not run for timeout,
       incomplete accumulation, or no-match completion.
   slice_7_entity_reader_compliance:
     id: expression_field_reference_validation

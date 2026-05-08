@@ -1110,18 +1110,21 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 	if !frame.accumulatorProjectionEligible {
 		return nil
 	}
-	bindings, issues := accprojection.ForHandler(e.deps.Source, frame.req.FlowID.String(), frame.req.NodeID.String(), string(frame.req.Event.Type))
-	if len(issues) > 0 {
-		return fmt.Errorf("accumulator projection declarations are invalid: %s", issues[0].Message)
+	result := accprojection.ForHandlerWithAccumulator(e.deps.Source, frame.req.FlowID.String(), frame.req.NodeID.String(), string(frame.req.Event.Type), activeAccumulatorName(frame.req.Handler))
+	if len(result.Issues) > 0 {
+		return fmt.Errorf("accumulator projection declarations are invalid: %s", result.Issues[0].Message)
 	}
-	if len(bindings) == 0 {
+	if len(result.Bindings) == 0 {
+		if result.ExpectedBindingCount > 0 {
+			return fmt.Errorf("runtime_invariant_violation: materialize_from binding declared for node %s accumulator %s but no accumulator buffer resolved at runtime for event %s; likely event identity drift between verify-time declaration and execution-time lookup", frame.req.NodeID.String(), result.ActiveAccumulatorName, string(frame.req.Event.Type))
+		}
 		return nil
 	}
 	acc, ok := loadAccumulator(frame.state.State, frame.req.NodeID, frame.req.Event.Type)
 	if !ok {
 		return fmt.Errorf("accumulator projection source missing for node %s event %s", frame.req.NodeID.String(), string(frame.req.Event.Type))
 	}
-	for _, binding := range bindings {
+	for _, binding := range result.Bindings {
 		projected, err := e.projectAccumulatorItems(frame, binding, acc.Items)
 		if err != nil {
 			return err
@@ -1131,6 +1134,13 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 		}
 	}
 	return nil
+}
+
+func activeAccumulatorName(handler runtimecontracts.SystemNodeEventHandler) string {
+	if handler.Accumulate == nil {
+		return ""
+	}
+	return strings.TrimSpace(handler.Accumulate.Into)
 }
 
 func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accprojection.Binding, items []map[string]any) ([]any, error) {

@@ -47,6 +47,15 @@ type Result struct {
 	Issues   []Issue
 }
 
+type HandlerResult struct {
+	Bindings                 []Binding
+	Issues                   []Issue
+	ExpectedBindingCount     int
+	ActiveAccumulatorName    string
+	ActiveAuthoredEventType  string
+	ActiveCanonicalEventType string
+}
+
 func Resolve(source semanticview.Source) Result {
 	if source == nil {
 		return Result{}
@@ -73,44 +82,86 @@ func Resolve(source semanticview.Source) Result {
 }
 
 func ForHandler(source semanticview.Source, flowID, nodeID, eventType string) ([]Binding, []Issue) {
+	result := ForHandlerWithAccumulator(source, flowID, nodeID, eventType, "")
+	return result.Bindings, result.Issues
+}
+
+func ForHandlerWithAccumulator(source semanticview.Source, flowID, nodeID, eventType, activeAccumulatorName string) HandlerResult {
 	resolved := Resolve(source)
+	result := HandlerResult{}
 	out := make([]Binding, 0)
 	flowID = strings.TrimSpace(flowID)
 	nodeID = strings.TrimSpace(nodeID)
-	eventType = strings.TrimSpace(eventType)
-	activeAccumulatorName := activeHandlerAccumulatorName(source, nodeID, eventType)
+	eventType = normalizeEventType(eventType)
+	activeAccumulatorName = strings.TrimSpace(activeAccumulatorName)
+	active := activeHandlerResolution(source, nodeID, eventType)
+	if activeAccumulatorName == "" {
+		activeAccumulatorName = active.AccumulatorName
+	}
+	result.ActiveAccumulatorName = activeAccumulatorName
+	result.ActiveAuthoredEventType = active.AuthoredEventType
+	result.ActiveCanonicalEventType = active.CanonicalEventType
 	for _, binding := range resolved.Bindings {
+		if bindingMatchesActiveAccumulator(binding, flowID, nodeID, activeAccumulatorName) {
+			result.ExpectedBindingCount++
+		}
 		if strings.TrimSpace(binding.FlowID) == flowID &&
 			strings.TrimSpace(binding.SourceNodeID) == nodeID &&
-			strings.TrimSpace(binding.SourceEventType) == eventType {
+			handlerEventMatches(source, nodeID, binding.SourceEventType, eventType, active) {
 			out = append(out, binding)
 		}
 	}
 	issues := make([]Issue, 0)
 	for _, issue := range resolved.Issues {
-		if issueRelevantToHandler(issue, flowID, nodeID, eventType, activeAccumulatorName) {
+		if issueMatchesActiveAccumulator(issue, flowID, nodeID, activeAccumulatorName) {
+			result.ExpectedBindingCount++
+		}
+		if issueRelevantToHandler(source, issue, flowID, nodeID, eventType, activeAccumulatorName, active) {
 			issues = append(issues, issue)
 		}
 	}
-	return out, issues
+	result.Bindings = out
+	result.Issues = issues
+	return result
 }
 
-func activeHandlerAccumulatorName(source semanticview.Source, nodeID, eventType string) string {
+type activeHandler struct {
+	AccumulatorName    string
+	AuthoredEventType  string
+	CanonicalEventType string
+}
+
+func activeHandlerResolution(source semanticview.Source, nodeID, eventType string) activeHandler {
+	var active activeHandler
 	if source == nil {
-		return ""
+		return active
+	}
+	if bundle, ok := semanticview.Bundle(source); ok && bundle != nil {
+		resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
+		if resolved.Matched {
+			active.AuthoredEventType = strings.TrimSpace(resolved.AuthoredEventType)
+			active.CanonicalEventType = normalizeEventType(resolved.CanonicalEventType)
+			if resolved.Handler.Accumulate != nil {
+				active.AccumulatorName = strings.TrimSpace(resolved.Handler.Accumulate.Into)
+			}
+			return active
+		}
 	}
 	node, ok := source.NodeEntries()[strings.TrimSpace(nodeID)]
 	if !ok {
-		return ""
+		return active
 	}
-	handler, ok := node.EventHandlers[strings.TrimSpace(eventType)]
+	handler, ok := node.EventHandlers[normalizeEventType(eventType)]
 	if !ok || handler.Accumulate == nil {
-		return ""
+		return active
 	}
-	return strings.TrimSpace(handler.Accumulate.Into)
+	active.AuthoredEventType = normalizeEventType(eventType)
+	active.CanonicalEventType = canonicalNodeEvent(source, nodeID, eventType)
+	active.AccumulatorName = strings.TrimSpace(handler.Accumulate.Into)
+	return active
 }
 
-func issueRelevantToHandler(issue Issue, flowID, nodeID, eventType, accumulatorName string) bool {
+func issueRelevantToHandler(source semanticview.Source, issue Issue, flowID, nodeID, eventType, accumulatorName string, active activeHandler) bool {
 	if strings.TrimSpace(issue.SourceNodeID) != strings.TrimSpace(nodeID) {
 		return false
 	}
@@ -118,12 +169,71 @@ func issueRelevantToHandler(issue Issue, flowID, nodeID, eventType, accumulatorN
 		return false
 	}
 	if issueEventType := strings.TrimSpace(issue.SourceEventType); issueEventType != "" {
-		return issueEventType == strings.TrimSpace(eventType)
+		return handlerEventMatches(source, nodeID, issueEventType, eventType, active)
 	}
 	if issueAccumulatorName := strings.TrimSpace(issue.AccumulatorName); issueAccumulatorName != "" {
 		return issueAccumulatorName == strings.TrimSpace(accumulatorName)
 	}
 	return false
+}
+
+func bindingMatchesActiveAccumulator(binding Binding, flowID, nodeID, accumulatorName string) bool {
+	if strings.TrimSpace(accumulatorName) == "" {
+		return false
+	}
+	return strings.TrimSpace(binding.FlowID) == strings.TrimSpace(flowID) &&
+		strings.TrimSpace(binding.SourceNodeID) == strings.TrimSpace(nodeID) &&
+		strings.TrimSpace(binding.AccumulatorName) == strings.TrimSpace(accumulatorName)
+}
+
+func issueMatchesActiveAccumulator(issue Issue, flowID, nodeID, accumulatorName string) bool {
+	if strings.TrimSpace(accumulatorName) == "" {
+		return false
+	}
+	if strings.TrimSpace(issue.FlowID) != "" && strings.TrimSpace(issue.FlowID) != strings.TrimSpace(flowID) {
+		return false
+	}
+	return strings.TrimSpace(issue.SourceNodeID) == strings.TrimSpace(nodeID) &&
+		strings.TrimSpace(issue.AccumulatorName) == strings.TrimSpace(accumulatorName)
+}
+
+func handlerEventMatches(source semanticview.Source, nodeID, authoredEventType, runtimeEventType string, active activeHandler) bool {
+	authoredEventType = normalizeEventType(authoredEventType)
+	runtimeEventType = normalizeEventType(runtimeEventType)
+	if authoredEventType == "" || runtimeEventType == "" {
+		return false
+	}
+	if authoredEventType == runtimeEventType {
+		return true
+	}
+	if active.AuthoredEventType != "" && authoredEventType == active.AuthoredEventType {
+		return true
+	}
+	authoredCanonical := canonicalNodeEvent(source, nodeID, authoredEventType)
+	runtimeCanonical := canonicalNodeEvent(source, nodeID, runtimeEventType)
+	if authoredCanonical != "" && runtimeCanonical != "" && authoredCanonical == runtimeCanonical {
+		return true
+	}
+	return active.CanonicalEventType != "" && authoredCanonical == active.CanonicalEventType
+}
+
+func canonicalNodeEvent(source semanticview.Source, nodeID, eventType string) string {
+	eventType = normalizeEventType(eventType)
+	if eventType == "" {
+		return ""
+	}
+	if source == nil {
+		return eventType
+	}
+	canonical := normalizeEventType(source.ResolveNodeEventReference(strings.TrimSpace(nodeID), eventType))
+	if canonical == "" {
+		return eventType
+	}
+	return canonical
+}
+
+func normalizeEventType(eventType string) string {
+	return strings.Trim(strings.TrimSpace(eventType), "/")
 }
 
 func scopedIssue(binding Binding, code, location, message string) Issue {
