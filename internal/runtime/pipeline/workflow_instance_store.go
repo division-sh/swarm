@@ -94,6 +94,8 @@ type WorkflowInstanceStore struct {
 
 var workflowInstancePathNamespace = uuid.MustParse("5e7507c8-bd4f-46e0-a098-b016dc31df23")
 
+const workflowInstanceTimerOwnerNode = "workflow_instance_store"
+
 type workflowCreateEntityInitialValuesContextKey struct{}
 
 type workflowCreateEntityInitialValues struct {
@@ -389,7 +391,7 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 	}
 	item.StorageRef = persistedIdentity.StorageRef
 	item.InstanceID = persistedIdentity.InstanceID
-	timers, err := s.loadWorkflowTimersSpec(ctx, keys[0])
+	timers, err := s.loadWorkflowTimersSpec(ctx, runID, keys[0])
 	if err != nil {
 		return WorkflowInstance{}, false, err
 	}
@@ -501,7 +503,7 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 		item.StorageRef = persistedIdentity.StorageRef
 		item.InstanceID = persistedIdentity.InstanceID
 		item.TransitionHistory = append([]WorkflowTransitionRecord{}, projection.Control.TransitionHistory...)
-		timers, err := s.loadWorkflowTimersSpec(ctx, persistedIdentity.RowID())
+		timers, err := s.loadWorkflowTimersSpec(ctx, runID, persistedIdentity.RowID())
 		if err != nil {
 			return nil, err
 		}
@@ -633,10 +635,12 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM timers
-		WHERE entity_id = $1::uuid
-		  AND flow_instance = $2
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+		  AND flow_instance = $3
+		  AND owner_node = $4
 		  AND owner_agent IS NULL
-	`, rowID, storageRef); err != nil {
+	`, runID, rowID, storageRef, workflowInstanceTimerOwnerNode); err != nil {
 		return err
 	}
 	for _, timer := range instance.TimerState {
@@ -653,16 +657,16 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO timers (
-				timer_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 				fire_at, recurring, owner_node, task_type, status, created_at
 			)
 			VALUES (
-				$1::uuid, $2, $3::uuid, $4, $5, $6::jsonb,
-				$7, $8, NULL, $9, $10, $11
+				$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb,
+				$8, $9, $10, $11, $12, $13
 			)
-		`, workflowInstanceTimerRowID(strings.TrimSpace(timer.TimerID), rowID), strings.TrimSpace(timer.TimerID), rowID, storageRef,
+		`, workflowInstanceTimerRowID(runID, strings.TrimSpace(timer.TimerID), rowID), runID, strings.TrimSpace(timer.TimerID), rowID, storageRef,
 			strings.TrimSpace(timer.EventType), jsonOrDefault(payloadJSON, "{}"), timer.FiresAt, timer.Recurring,
-			workflowInstanceTimerTaskType(timer), status, workflowTimeOrNow(timer.CreatedAt),
+			workflowInstanceTimerOwnerNode, workflowInstanceTimerTaskType(timer), status, workflowTimeOrNow(timer.CreatedAt),
 		); err != nil {
 			return err
 		}
@@ -804,7 +808,7 @@ func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, runID, en
 	}, nil
 }
 
-func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, entityID string) ([]WorkflowTimerState, error) {
+func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, runID, entityID string) ([]WorkflowTimerState, error) {
 	rows, err := dbQueryContext(ctx, s.db, `
 		SELECT
 			timer_name,
@@ -815,10 +819,12 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, enti
 			recurring,
 			status = 'cancelled'
 		FROM timers
-		WHERE entity_id = $1::uuid
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+		  AND owner_node = $3
 		  AND owner_agent IS NULL
 		ORDER BY created_at ASC, timer_name ASC
-	`, entityID)
+	`, runID, entityID, workflowInstanceTimerOwnerNode)
 	if err != nil {
 		return nil, err
 	}
@@ -1149,8 +1155,8 @@ func workflowInstanceMode(storageRef string) string {
 	return "static"
 }
 
-func workflowInstanceTimerRowID(timerID, entityID string) string {
-	return uuid.NewSHA1(workflowInstancePathNamespace, []byte(strings.TrimSpace(entityID)+":"+strings.TrimSpace(timerID))).String()
+func workflowInstanceTimerRowID(runID, timerID, entityID string) string {
+	return uuid.NewSHA1(workflowInstancePathNamespace, []byte(strings.TrimSpace(runID)+":"+strings.TrimSpace(entityID)+":"+strings.TrimSpace(timerID))).String()
 }
 
 func workflowInstanceTimerTaskType(timer WorkflowTimerState) string {
