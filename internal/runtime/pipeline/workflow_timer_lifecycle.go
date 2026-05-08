@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -72,10 +73,10 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 		return err
 	}
 	for _, sc := range toCancel {
-		pc.persistWorkflowTimerCancellation(ctx, sc)
+		pc.persistWorkflowTimerCancellation(ctx, scheduleWithRunIDFromContext(ctx, sc))
 	}
 	for _, sc := range toSchedule {
-		pc.persistWorkflowTimerSchedule(ctx, sc)
+		pc.persistWorkflowTimerSchedule(ctx, scheduleWithRunIDFromContext(ctx, sc))
 	}
 	return nil
 }
@@ -160,10 +161,10 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 		return
 	}
 	for _, sc := range toCancel {
-		pc.cancelWorkflowTimerSchedule(ctx, sc)
+		pc.cancelWorkflowTimerSchedule(ctx, scheduleWithRunIDFromContext(ctx, sc))
 	}
 	for _, sc := range toSchedule {
-		pc.registerWorkflowTimerSchedule(ctx, sc)
+		pc.registerWorkflowTimerSchedule(ctx, scheduleWithRunIDFromContext(ctx, sc))
 	}
 }
 
@@ -192,6 +193,9 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 		return nil
 	}
 	sc := accumulationTimeoutSchedule(entityID, evt.FlowInstance(), bucketRef, time.Time{}, spec.TimeoutMS)
+	if runID := strings.TrimSpace(evt.RunID); runID != "" {
+		sc.RunID = runID
+	}
 	if isAccumulationTimeoutEvent(evt.Type) || !waiting {
 		pc.persistWorkflowTimerCancellation(ctx, sc)
 		return nil
@@ -265,6 +269,19 @@ func accumulationTimeoutPayload(handle timeridentity.TimerHandle, timeoutMS int)
 	}
 	payload["timeout_ms"] = timeoutMS
 	return payload
+}
+
+func scheduleWithRunIDFromContext(ctx context.Context, sc Schedule) Schedule {
+	if strings.TrimSpace(sc.RunID) == "" {
+		sc.RunID = runtimecorrelation.RunIDFromContext(ctx)
+	}
+	if strings.TrimSpace(sc.RunID) == "" {
+		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+			sc.RunID = strings.TrimSpace(inbound.RunID)
+		}
+	}
+	sc.NormalizeRunID()
+	return sc
 }
 
 func workflowTimerStateActive(items []WorkflowTimerState, timerID string) bool {

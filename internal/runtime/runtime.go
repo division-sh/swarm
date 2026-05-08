@@ -22,6 +22,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	llm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
@@ -278,6 +279,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 				handleRuntimeLogPersistenceError("scheduler", "publish_failed", rt.Logger.Error(callbackCtx, "scheduler", "publish_failed", map[string]any{
 					"agent_id":   sc.AgentID,
 					"event_type": sc.EventType,
+					"run_id":     sc.EffectiveRunID(),
 					"entity_id":  sc.EffectiveEntityID(),
 				}, err))
 			}
@@ -288,6 +290,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 					handleRuntimeLogPersistenceError("scheduler", "mark_fired_failed", rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
 						"agent_id":   sc.AgentID,
 						"event_type": sc.EventType,
+						"run_id":     sc.EffectiveRunID(),
 						"entity_id":  sc.EffectiveEntityID(),
 					}, err))
 				}
@@ -506,6 +509,7 @@ func scheduledEvent(sc runtimepipeline.Schedule) events.Event {
 		SourceAgent: sc.AgentID,
 		TaskID:      sc.TaskID,
 		Payload:     scheduleEventPayload(sc),
+		RunID:       sc.EffectiveRunID(),
 		CreatedAt:   time.Now(),
 	}).WithEnvelope(events.EventEnvelope{
 		EntityID:     sc.EffectiveEntityID(),
@@ -865,6 +869,7 @@ func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline
 			continue
 		}
 		sc := runtimepipeline.Schedule{
+			RunID:     runtimecorrelation.RunIDFromContext(ctx),
 			AgentID:   owner,
 			EventType: eventType,
 			Mode:      "cron",
@@ -921,6 +926,7 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 				continue
 			}
 			sc := runtimepipeline.Schedule{
+				RunID:        runtimecorrelation.RunIDFromContext(ctx),
 				AgentID:      owner,
 				EventType:    eventType,
 				Mode:         "once",

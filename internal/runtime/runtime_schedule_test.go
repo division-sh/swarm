@@ -72,6 +72,7 @@ func TestScheduleEventPayloadPreservesAccumulationTimeoutHandle(t *testing.T) {
 
 func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 	evt := scheduledEvent(runtimepipeline.Schedule{
+		RunID:        "11111111-1111-1111-1111-111111111111",
 		AgentID:      "runtime",
 		EventType:    "timer.check",
 		EntityID:     "ent-001",
@@ -84,6 +85,9 @@ func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 	}
 	if got := evt.FlowInstance(); got != "review/inst-1" {
 		t.Fatalf("event flow_instance = %q, want review/inst-1", got)
+	}
+	if evt.RunID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("event run_id = %q, want schedule run_id", evt.RunID)
 	}
 	if got := evt.Scope(); got != events.EventScopeEntity {
 		t.Fatalf("event scope = %q, want %q", got, events.EventScopeEntity)

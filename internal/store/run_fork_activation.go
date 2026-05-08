@@ -432,7 +432,7 @@ func ensureRunForkSourceNotAdvanced(ctx context.Context, tx *sql.Tx, catalog sch
 }
 
 func ensureRunForkNoRelevantPostForkTimers(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage) error {
-	if !catalog.hasColumns("timers", "entity_id", "flow_instance", "created_at") {
+	if !catalog.hasColumns("timers", "run_id", "entity_id", "flow_instance", "created_at") {
 		return nil
 	}
 	if len(lineage.EntityIDs) == 0 && len(lineage.FlowInstances) == 0 {
@@ -443,14 +443,15 @@ func ensureRunForkNoRelevantPostForkTimers(ctx context.Context, tx *sql.Tx, cata
 		SELECT EXISTS (
 			SELECT 1
 			FROM timers
-			WHERE created_at > $1::timestamptz
+			WHERE run_id = $1::uuid
+			  AND created_at > $2::timestamptz
 			  AND (
-					(entity_id IS NOT NULL AND entity_id::text = ANY($2::text[]))
+					(entity_id IS NOT NULL AND entity_id::text = ANY($3::text[]))
 					OR
-					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($3::text[]))
+					(COALESCE(flow_instance, '') <> '' AND flow_instance = ANY($4::text[]))
 			  )
 		)
-	`, lineage.ForkEventTime, pq.Array(lineage.EntityIDs), pq.Array(lineage.FlowInstances)).Scan(&exists); err != nil {
+	`, lineage.SourceRunID, lineage.ForkEventTime, pq.Array(lineage.EntityIDs), pq.Array(lineage.FlowInstances)).Scan(&exists); err != nil {
 		return fmt.Errorf("check source timer advancement: %w", err)
 	}
 	if exists {

@@ -168,7 +168,7 @@ func TestSelectedContractExecutionMaterializationPreflightsRouteRecoveryCapabili
 	}
 }
 
-func TestSelectedContractExecutionActivationPreservesTimerBlocker(t *testing.T) {
+func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -178,9 +178,9 @@ func TestSelectedContractExecutionActivationPreservesTimerBlocker(t *testing.T) 
 	at := time.Unix(1700002500, 0).UTC()
 	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (timer_name, entity_id, flow_instance, fire_event, fire_at, status, created_at)
-		VALUES ('selected-timer', $1::uuid, 'flow-a/1', 'timer.selected', $2, 'active', $3)
-	`, entityID, at.Add(time.Hour), at); err != nil {
+		INSERT INTO timers (run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, fire_at, owner_agent, task_type, status, created_at)
+		VALUES ($1::uuid, 'selected-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb, $3, 'agent-a', 'timer', 'active', $4)
+	`, sourceRunID, entityID, at.Add(time.Hour), at); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
@@ -193,13 +193,46 @@ func TestSelectedContractExecutionActivationPreservesTimerBlocker(t *testing.T) 
 			WorkflowVersion: "v1",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), RunForkBlockerTimerHistoryUnproven) {
-		t.Fatalf("materialization error = %v, want timer blocker", err)
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
-	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized fork despite timer blocker: %#v", materialized)
+	if materialized.ForkRunID == "" {
+		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
 	}
-	assertNoSelectedContractForkRows(t, db, sourceRunID)
+	for _, blocker := range materialized.ReplayResumeAdmission.UnsupportedBlockers {
+		if blocker.Code == RunForkBlockerTimerHistoryUnproven {
+			t.Fatalf("timer blocker survived reconstruction: %#v", materialized.ReplayResumeAdmission.UnsupportedBlockers)
+		}
+	}
+	var forkTimerCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM timers
+		WHERE run_id = $1::uuid
+		  AND source_timer_id IS NOT NULL
+		  AND forked_from_run_id = $2::uuid
+		  AND forked_from_event_id = $3::uuid
+		  AND reconstruction_owner = $4
+		  AND status = 'active'
+	`, materialized.ForkRunID, sourceRunID, eventID, RunForkHistoricalReplayTimerReconstructionOwner).Scan(&forkTimerCount); err != nil {
+		t.Fatalf("count reconstructed fork timers: %v", err)
+	}
+	if forkTimerCount != 1 {
+		t.Fatalf("reconstructed fork timers = %d, want 1", forkTimerCount)
+	}
+	var sourceTimerCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM timers
+		WHERE run_id = $1::uuid
+		  AND source_timer_id IS NULL
+		  AND status = 'active'
+	`, sourceRunID).Scan(&sourceTimerCount); err != nil {
+		t.Fatalf("count source timers: %v", err)
+	}
+	if sourceTimerCount != 1 {
+		t.Fatalf("source timers = %d, want 1", sourceTimerCount)
+	}
 }
 
 func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testing.T) {

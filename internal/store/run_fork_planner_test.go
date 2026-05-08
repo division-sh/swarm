@@ -566,10 +566,10 @@ func TestRunForkPlanner_StateOnlyPlanExecutionReadyWithEmptyAndUnrelatedTimerRou
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
-			timer_name, entity_id, flow_instance, fire_event, fire_at, owner_node, task_type, status, created_at
+			run_id, timer_name, entity_id, flow_instance, fire_event, fire_at, owner_node, task_type, status, created_at
 		)
-		VALUES ('unrelated', $1::uuid, 'flow-other/1', 'timer.fire', $2, 'other-node', 'timer', 'active', $3)
-	`, uuid.NewString(), at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
+		VALUES ($1::uuid, 'unrelated', $2::uuid, 'flow-other/1', 'timer.fire', $3, 'other-node', 'timer', 'active', $4)
+	`, runID, uuid.NewString(), at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed unrelated timer: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -645,10 +645,10 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
-			timer_name, entity_id, flow_instance, fire_event, fire_at, owner_node, task_type, status, created_at
+			run_id, timer_name, entity_id, flow_instance, fire_event, fire_at, owner_node, task_type, status, created_at
 		)
-		VALUES ('relevant', $1::uuid, 'flow-a/1', 'timer.fire', $2, 'node-a', 'timer', 'active', $3)
-	`, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
+		VALUES ($1::uuid, 'relevant', $2::uuid, 'flow-a/1', 'timer.fire', $3, 'node-a', 'timer', 'active', $4)
+	`, runID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed relevant timer: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
