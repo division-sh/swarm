@@ -528,6 +528,55 @@ func TestValidateAutoEmitPayload_RejectsListTypeViolation(t *testing.T) {
 	}
 }
 
+func TestValidateAutoEmitPayload_AllowsNamedTypeThroughCanonicalSchema(t *testing.T) {
+	bundle := testFlowBundleWithAutoEmitEntry("task.started", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"instance_id":      {Type: "string"},
+				"template_id":      {Type: "string"},
+				"flow_path":        {Type: "string"},
+				"parent_entity_id": {Type: "string"},
+				"details":          {Type: "ReviewDetails"},
+			},
+		},
+		Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id", "details"},
+	})
+	bundle.RootTypes = runtimecontracts.TypeCatalogDocument{
+		Types: map[string]runtimecontracts.NamedTypeDecl{
+			"ReviewDetails": {
+				Fields: map[string]runtimecontracts.TypeFieldSpec{
+					"summary": {Type: "text"},
+				},
+			},
+		},
+	}
+
+	err := validateAutoEmitPayload(semanticview.Wrap(bundle), "review", "task.started", map[string]any{
+		"instance_id":      "inst-1",
+		"template_id":      "review",
+		"flow_path":        "review/inst-1",
+		"parent_entity_id": "ent-parent",
+		"details":          map[string]any{"summary": "ready"},
+	})
+	if err != nil {
+		t.Fatalf("validateAutoEmitPayload valid named type: %v", err)
+	}
+
+	err = validateAutoEmitPayload(semanticview.Wrap(bundle), "review", "task.started", map[string]any{
+		"instance_id":      "inst-1",
+		"template_id":      "review",
+		"flow_path":        "review/inst-1",
+		"parent_entity_id": "ent-parent",
+		"details":          "not-object",
+	})
+	if err == nil {
+		t.Fatal("expected named-type auto-emit violation")
+	}
+	if !strings.Contains(err.Error(), "$.details must be object") {
+		t.Fatalf("validateAutoEmitPayload error = %v, want named-type detail", err)
+	}
+}
+
 func TestNormalizedStaticFlowEmitEvents_ExternalizesLocalEvents(t *testing.T) {
 	got := normalizedStaticFlowEmitEvents(
 		[]string{"analysis.done", "shared.event"},

@@ -853,6 +853,68 @@ func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *test
 	}
 }
 
+func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *testing.T) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml":             "name: child-output-named-type\nversion: 1.0.0\ndescription: child output named type proof\nplatform_version: \">=1.1.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
+		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  outputs:\n    events: [handoff.completed]\n",
+		"types.yaml":               "types:\n  Evidence:\n    root_field: text\n",
+		"events.yaml":              "handoff.completed:\n  evidence: Evidence\n  required: [evidence]\n",
+		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=1.1.0\"\nflows: []\n",
+		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  outputs:\n    events: [handoff.completed]\n",
+	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	shaper := pipelineEnginePayloadShaper{
+		coordinator: &PipelineCoordinator{
+			module: &previewWorkflowModule{
+				bundle: bundle,
+			},
+		},
+	}
+	req := runtimeengine.ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("ent-child"),
+		FlowID:   identity.NormalizeFlowID("child"),
+		Event: events.Event{
+			Type:    events.EventType("child/child.internal"),
+			Payload: json.RawMessage(`{"entity_id":"ent-child"}`),
+		}.WithEntityID("ent-child"),
+		State: runtimeengine.StateSnapshot{
+			EntityID:     identity.NormalizeEntityID("ent-child"),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1"}, nil, nil),
+		},
+	}
+
+	for _, eventType := range []string{"handoff.completed", "child/handoff.completed"} {
+		t.Run(eventType, func(t *testing.T) {
+			payload, err := shaper.ShapeEmitPayload(context.Background(), req, eventType, map[string]any{
+				"evidence": map[string]any{"root_field": "ok"},
+			})
+			if err != nil {
+				t.Fatalf("ShapeEmitPayload valid root named type: %v", err)
+			}
+			evidence, _ := payload["evidence"].(map[string]any)
+			if _, ok := evidence["root_field"]; !ok {
+				t.Fatalf("payload = %#v, want root_field evidence", payload)
+			}
+
+			_, err = shaper.ShapeEmitPayload(context.Background(), req, eventType, map[string]any{
+				"evidence": map[string]any{"child_field": "wrong catalog"},
+			})
+			if err == nil {
+				t.Fatal("expected child Evidence override to fail for root-declared output event")
+			}
+			if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
+				t.Fatalf("ShapeEmitPayload invalid catalog error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
+			}
+			if !strings.Contains(err.Error(), "$.evidence.root_field is required") {
+				t.Fatalf("ShapeEmitPayload error = %v, want root_field required proof", err)
+			}
+		})
+	}
+}
+
 func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsOnActionSurface(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
 	bundle, ok := semanticview.Bundle(source)

@@ -202,19 +202,14 @@ func validateAutoEmitPayload(source semanticview.Source, flowID, eventType strin
 	if !proof.HasSchema {
 		return nil
 	}
-	registry := runtimecontracts.EventSchemaRegistryFromCatalog(map[string]runtimecontracts.EventCatalogEntry{
-		proof.CatalogKey: proof.Entry,
-	})
-	schema, ok := registry[proof.CatalogKey]
-	if bundle, okBundle := semanticview.Bundle(source); okBundle && bundle != nil {
-		if resolved, _, okResolved := runtimecontracts.EventSchemaForFlowEvent(bundle, flowID, eventType); okResolved {
-			schema = resolved
-			ok = true
-		}
-	}
-	if !ok {
+	resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
+	if !resolution.HasSchema {
 		return nil
 	}
+	if err := resolution.UnresolvedTypeError(); err != nil {
+		return fmt.Errorf("%w for %s: %v", runtimebus.ErrPayloadValidation, proof.EventKey(), err)
+	}
+	schema := resolution.Schema
 	validationPayload := runtimeeventpayload.StripUndeclaredRuntimeOwnedCanonicalContext(payload, autoEmitSchemaPropertyNames(schema.Schema))
 	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, validationPayload); err != nil {
 		return fmt.Errorf("%w for %s: %v", runtimebus.ErrPayloadValidation, proof.EventKey(), err)

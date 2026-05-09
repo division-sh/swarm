@@ -184,6 +184,11 @@ contract_formats:
       producer-owned payload fields.
       The platform validates emit calls against the declared payload
       contract and populates envelope fields separately.
+      Runtime emit-payload validators MUST validate against the
+      canonical type-aware event schema lowered through the active
+      Wave 1 type catalog. Runtime validators MUST NOT pass unresolved
+      contract type names such as named types, scalar aliases, or enums
+      to the primitive JSON schema validator as literal schema types.
     format:
       event_name: |
         swarm:
@@ -3997,8 +4002,8 @@ observation_model:
           site. Consumers read envelope fields through event.*.
         runtime_validation:
           description: Runtime validates the emitted payload fail-closed on this surface.
-          validation_view: Validate the producer-authored payload carrier against the target event schema. Runtime-owned envelope
-            fields are not synthesized into payload for validation.
+          validation_view: Validate the producer-authored payload carrier against the target event schema after canonical
+            Wave 1 type-aware schema lowering. Runtime-owned envelope fields are not synthesized into payload for validation.
           rejection_rule: If any producer-authored field is absent from the target event schema, if any declared field violates
             the schema, or if emit.fields authors an envelope-owned key, handler execution fails. Runtime does not silently trim
             producer-authored business payload keys.
@@ -4013,8 +4018,8 @@ observation_model:
           read envelope fields through event.* rather than payload.*.
         runtime_validation:
           description: Runtime validates the emitted payload fail-closed on this surface before publish.
-          validation_view: Validate the emitted payload carrier that will actually be published. Runtime-owned envelope fields are
-            not synthesized into payload for validation.
+          validation_view: Validate the emitted payload carrier that will actually be published after canonical Wave 1 type-aware
+            schema lowering. Runtime-owned envelope fields are not synthesized into payload for validation.
           rejection_rule: If any inherited or producer-authored business field is undeclared or violates the schema, handler execution
             fails. Runtime does not silently trim inherited trigger-payload keys and does not clear the failure by projecting
             envelope-owned fields back into payload.
@@ -4031,8 +4036,8 @@ observation_model:
         runtime_validation:
           description: Runtime validates the constructed auto-emit payload fail-closed before either immediate publish or queued
             post-commit publish.
-          validation_view: Validate the constructed payload carrier against the target event schema. Runtime-owned envelope fields are
-            not synthesized into payload for validation.
+          validation_view: Validate the constructed payload carrier against the target event schema after canonical Wave 1 type-aware
+            schema lowering. Runtime-owned envelope fields are not synthesized into payload for validation.
           rejection_rule: If any lifecycle/config-authored field is undeclared or violates the schema, flow activation fails. Runtime
             does not downgrade auto_emit_on_create schema violations into warning-only success on the queued post-commit branch.
   entity_state:

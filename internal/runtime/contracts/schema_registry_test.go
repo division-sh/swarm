@@ -295,3 +295,80 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 		t.Fatalf("instance priority enum = %#v, want [urgent]", got)
 	}
 }
+
+func TestEventSchemaForFlowEvent_UsesDeclaringRootTypeCatalogForChildOutput(t *testing.T) {
+	childFlow := FlowContractView{
+		Paths: FlowContractPaths{ID: "child", Flow: "child"},
+		Path:  "child",
+		Schema: FlowSchemaDocument{
+			Pins: FlowPins{
+				Outputs: FlowOutputPins{Events: []string{"handoff.completed"}},
+			},
+		},
+	}
+	root := &FlowContractView{
+		Events: map[string]EventCatalogEntry{
+			"handoff.completed": {
+				Payload: EventPayloadSpec{
+					Properties: map[string]EventFieldSpec{
+						"evidence": {Type: "Evidence"},
+					},
+					Required: []string{"evidence"},
+				},
+			},
+		},
+		Children: []FlowContractView{childFlow},
+	}
+	bundle := &WorkflowContractBundle{
+		RootTypes: TypeCatalogDocument{
+			Types: map[string]NamedTypeDecl{
+				"Evidence": {
+					Fields: map[string]TypeFieldSpec{
+						"root_field": {Type: "text"},
+					},
+				},
+			},
+		},
+		FlowTree: FlowTree{
+			Root: root,
+			ByID: map[string]*FlowContractView{
+				"child": &root.Children[0],
+			},
+		},
+		flowTypes: map[string]TypeCatalogDocument{
+			"child": {
+				Types: map[string]NamedTypeDecl{
+					"Evidence": {
+						Fields: map[string]TypeFieldSpec{
+							"child_field": {Type: "text"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, eventType := range []string{"handoff.completed", "child/handoff.completed"} {
+		t.Run(eventType, func(t *testing.T) {
+			schema, key, ok := EventSchemaForFlowEvent(bundle, "child", eventType)
+			if !ok {
+				t.Fatal("missing child output event schema")
+			}
+			if key != "handoff.completed" {
+				t.Fatalf("schema key = %q, want root declaration handoff.completed", key)
+			}
+			props, _ := schema.Schema["properties"].(map[string]any)
+			evidence, _ := props["evidence"].(map[string]any)
+			evidenceProps, _ := evidence["properties"].(map[string]any)
+			if _, ok := evidenceProps["root_field"]; !ok {
+				t.Fatalf("evidence properties = %#v, want root_field", evidenceProps)
+			}
+			if _, ok := evidenceProps["child_field"]; ok {
+				t.Fatalf("evidence properties = %#v, must not use child Evidence override for root-declared event", evidenceProps)
+			}
+		})
+	}
+	if _, _, ok := EventSchemaForFlowEvent(bundle, "child", "sibling/handoff.completed"); ok {
+		t.Fatal("sibling-qualified event must not match root declaration by leaf name")
+	}
+}

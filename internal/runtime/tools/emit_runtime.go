@@ -216,20 +216,11 @@ func (r *EmitRegistry) schemaForActorEvent(actor models.AgentConfig, eventType s
 	if flowID == "" {
 		return EmitSchema{}, false
 	}
-	proof := semanticview.ResolveFlowEventProof(r.source, flowID, eventType)
-	if !proof.HasSchema {
+	resolution := semanticview.ResolveEventSchema(r.source, flowID, eventType)
+	if !resolution.HasSchema || len(resolution.UnresolvedTypes) > 0 {
 		return EmitSchema{}, false
 	}
-	if bundle, ok := semanticview.Bundle(r.source); ok && bundle != nil {
-		if schema, _, ok := runtimecontracts.EventSchemaForFlowEvent(bundle, flowID, eventType); ok {
-			return closeGeneratedEmitSchema(schema), true
-		}
-	}
-	registry := runtimecontracts.EventSchemaRegistryFromCatalog(map[string]runtimecontracts.EventCatalogEntry{
-		proof.CatalogKey: proof.Entry,
-	})
-	schema, ok := closeGeneratedEmitSchemaRegistry(registry)[proof.CatalogKey]
-	return schema, ok
+	return closeGeneratedEmitSchema(resolution.Schema), true
 }
 
 func (r *EmitRegistry) GeneratedEmitSchemasForAgentRoles() []string {
@@ -271,8 +262,28 @@ func ValidateGeneratedEmitToolSchemasForSource(source semanticview.Source) []err
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 	var errs []error
 	for _, actor := range providerSchemaValidationActors(source) {
+		validatedTools := map[string]struct{}{}
 		for _, tool := range registry.GenerateEmitToolsForActor(actor, nil) {
+			validatedTools[tool.Name] = struct{}{}
 			if err := llm.ValidateProviderToolSchema(tool.Name, tool.Schema); err != nil {
+				errs = append(errs, fmt.Errorf("agent %s: %w", strings.TrimSpace(actor.ID), err))
+			}
+		}
+		for _, eventType := range UniqueNonEmpty(actor.EmitEvents) {
+			toolName := EmitToolName(eventType)
+			if _, ok := validatedTools[toolName]; ok {
+				continue
+			}
+			flowID := strings.TrimSpace(actor.Mode)
+			if flowID == "" {
+				continue
+			}
+			resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
+			if !resolution.HasSchema {
+				continue
+			}
+			schema := closeGeneratedEmitSchema(resolution.Schema)
+			if err := llm.ValidateProviderToolSchema(toolName, schema.Schema); err != nil {
 				errs = append(errs, fmt.Errorf("agent %s: %w", strings.TrimSpace(actor.ID), err))
 			}
 		}
