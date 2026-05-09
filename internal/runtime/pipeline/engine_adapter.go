@@ -755,6 +755,11 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 			return true, err
 		}
 		return true, nil
+	case "mailbox_write":
+		if err := pc.materializeMailboxItem(ctx, action, execCtx); err != nil {
+			return true, err
+		}
+		return true, nil
 	default:
 		return false, nil
 	}

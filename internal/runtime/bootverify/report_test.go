@@ -690,6 +690,79 @@ func TestRun_ReportsRecordEvidenceMissingEvidenceTarget(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsMailboxWriteMissingMailboxSpec(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"mailbox-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"mailbox.review_requested": {
+						Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "mailbox_write is missing mailbox") {
+		t.Fatalf("expected handler_field_compliance missing mailbox error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsMailboxWriteMissingRequiredFields(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"mailbox-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"mailbox.review_requested": {
+						Action: runtimecontracts.ActionSpec{
+							ID:      "mailbox_write",
+							Mailbox: &runtimecontracts.MailboxWriteSpec{},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "mailbox_write is missing mailbox.item_type") {
+		t.Fatalf("expected handler_field_compliance missing mailbox.item_type error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "mailbox_write is missing mailbox.summary") {
+		t.Fatalf("expected handler_field_compliance missing mailbox.summary error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsMailboxDeclarationOnNonMailboxAction(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"mailbox-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"mailbox.review_requested": {
+						Action: runtimecontracts.ActionSpec{
+							ID: "record_evidence",
+							Mailbox: &runtimecontracts.MailboxWriteSpec{
+								ItemType: runtimecontracts.LiteralExpression("review_request"),
+								Summary:  runtimecontracts.LiteralExpression("review"),
+							},
+						},
+						EvidenceTarget: "evidence",
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "mailbox declaration requires action mailbox_write") {
+		t.Fatalf("expected handler_field_compliance mailbox/action mismatch error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsPromptStubToPromptExistsWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-prompt-stub")
 

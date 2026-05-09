@@ -693,6 +693,80 @@ evidence_target: validation.results
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_PreservesMailboxWriteAction(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+action:
+  id: mailbox_write
+  mailbox:
+    item_type:
+      literal: review_request
+    severity:
+      literal: urgent
+    summary:
+      literal: Review validation package
+    entity_id:
+      ref: event.entity_id
+    flow_instance:
+      ref: event.flow_instance
+    payload:
+      review_kind:
+        ref: payload.review_kind
+      operator_hint:
+        literal: inspect_package
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := handler.Action.ID; got != "mailbox_write" {
+		t.Fatalf("Action.ID = %q", got)
+	}
+	if handler.Action.Mailbox == nil {
+		t.Fatal("expected Action.Mailbox")
+	}
+	if got := handler.Action.Mailbox.ItemType.Literal; got != "review_request" {
+		t.Fatalf("Mailbox.ItemType.Literal = %#v", got)
+	}
+	if got := handler.Action.Mailbox.EntityID.Ref; got != "event.entity_id" {
+		t.Fatalf("Mailbox.EntityID.Ref = %q", got)
+	}
+	if got := handler.Action.Mailbox.Payload["review_kind"].Ref; got != "payload.review_kind" {
+		t.Fatalf("Mailbox.Payload[review_kind].Ref = %q", got)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsUnknownMailboxWriteField(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+action:
+  id: mailbox_write
+  mailbox:
+    item_type:
+      literal: review_request
+    summary:
+      literal: Review validation package
+    implicit_payload: true
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsUnsupportedMailboxExpressionShape(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+action:
+  id: mailbox_write
+  mailbox:
+    item_type:
+      literal: review_request
+    summary:
+      from_payload: summary
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "explicit expression keys") {
+		t.Fatalf("yaml.Unmarshal error = %v, want explicit expression keys", err)
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_RejectsUnsupportedActionID(t *testing.T) {
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`

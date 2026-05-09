@@ -134,6 +134,99 @@ func decodeEmitFieldsNode(node *yaml.Node) (map[string]ExpressionValue, error) {
 	return fields, nil
 }
 
+func (m *MailboxWriteSpec) UnmarshalYAML(node *yaml.Node) error {
+	if m == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		*m = MailboxWriteSpec{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("INVALID-MAILBOX-WRITE: mailbox must be a mapping")
+	}
+	allowed := map[string]struct{}{
+		"item_type":     {},
+		"severity":      {},
+		"summary":       {},
+		"entity_id":     {},
+		"flow_instance": {},
+		"payload":       {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: mailbox field %q not in platform spec", key)
+		}
+	}
+	var out MailboxWriteSpec
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		var err error
+		switch key {
+		case "item_type":
+			out.ItemType, err = decodeMailboxExpressionValueNode(value)
+		case "severity":
+			out.Severity, err = decodeMailboxExpressionValueNode(value)
+		case "summary":
+			out.Summary, err = decodeMailboxExpressionValueNode(value)
+		case "entity_id":
+			out.EntityID, err = decodeMailboxExpressionValueNode(value)
+		case "flow_instance":
+			out.FlowInstance, err = decodeMailboxExpressionValueNode(value)
+		case "payload":
+			out.Payload, err = decodeMailboxPayloadNode(value)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	*m = out
+	return nil
+}
+
+func decodeMailboxPayloadNode(node *yaml.Node) (map[string]ExpressionValue, error) {
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("INVALID-MAILBOX-WRITE: mailbox.payload must be a mapping")
+	}
+	fields := make(map[string]ExpressionValue, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		target := strings.TrimSpace(node.Content[i].Value)
+		if target == "" {
+			continue
+		}
+		value, err := decodeMailboxExpressionValueNode(node.Content[i+1])
+		if err != nil {
+			return nil, fmt.Errorf("INVALID-MAILBOX-WRITE: mailbox.payload.%s: %w", target, err)
+		}
+		fields[target] = value
+	}
+	return fields, nil
+}
+
+func decodeMailboxExpressionValueNode(node *yaml.Node) (ExpressionValue, error) {
+	if node == nil || node.Kind == 0 {
+		return ExpressionValue{}, nil
+	}
+	if node.Kind == yaml.MappingNode {
+		if err := validateEmitFieldExpressionMappingNode(node); err != nil {
+			return ExpressionValue{}, fmt.Errorf("mailbox expression values must use explicit expression keys literal, ref, cel, or expression: %w", err)
+		}
+	}
+	var value ExpressionValue
+	if err := node.Decode(&value); err != nil {
+		return ExpressionValue{}, err
+	}
+	return value, nil
+}
+
 func decodeEmitFieldValueNode(node *yaml.Node) (ExpressionValue, error) {
 	if node == nil {
 		return ExpressionValue{}, nil
@@ -715,6 +808,7 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 			"template":         {},
 			"instance_id_from": {},
 			"config_from":      {},
+			"mailbox":          {},
 		}
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := strings.TrimSpace(node.Content[i].Value)
@@ -732,10 +826,11 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 			}
 		}
 		var aux struct {
-			ID             string    `yaml:"id"`
-			Template       string    `yaml:"template"`
-			InstanceIDFrom string    `yaml:"instance_id_from"`
-			ConfigFrom     yaml.Node `yaml:"config_from"`
+			ID             string            `yaml:"id"`
+			Template       string            `yaml:"template"`
+			InstanceIDFrom string            `yaml:"instance_id_from"`
+			ConfigFrom     yaml.Node         `yaml:"config_from"`
+			Mailbox        *MailboxWriteSpec `yaml:"mailbox"`
 		}
 		if err := node.Decode(&aux); err != nil {
 			return ActionSpec{}, err
@@ -757,6 +852,7 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 			InstanceIDFrom: strings.TrimSpace(aux.InstanceIDFrom),
 			InstanceIDPath: paths.Parse(aux.InstanceIDFrom),
 			ConfigFrom:     configFrom,
+			Mailbox:        aux.Mailbox,
 		}, nil
 	default:
 		return ActionSpec{}, fmt.Errorf("unsupported action yaml node kind %d", node.Kind)

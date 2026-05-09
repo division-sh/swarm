@@ -1115,6 +1115,40 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 						Location: nodeID,
 					})
 				}
+				if normalizeWorkflowBuiltinActionID(actionID) == "mailbox_write" {
+					if handler.Action.Mailbox == nil {
+						c.handlerFindings = append(c.handlerFindings, Finding{
+							CheckID:  "handler_field_compliance",
+							Severity: "error",
+							Message:  fmt.Sprintf("node %s handler %s mailbox_write is missing mailbox", nodeID, eventType),
+							Location: nodeID,
+						})
+					} else {
+						if handler.Action.Mailbox.ItemType.IsZero() {
+							c.handlerFindings = append(c.handlerFindings, Finding{
+								CheckID:  "handler_field_compliance",
+								Severity: "error",
+								Message:  fmt.Sprintf("node %s handler %s mailbox_write is missing mailbox.item_type", nodeID, eventType),
+								Location: nodeID,
+							})
+						}
+						if handler.Action.Mailbox.Summary.IsZero() {
+							c.handlerFindings = append(c.handlerFindings, Finding{
+								CheckID:  "handler_field_compliance",
+								Severity: "error",
+								Message:  fmt.Sprintf("node %s handler %s mailbox_write is missing mailbox.summary", nodeID, eventType),
+								Location: nodeID,
+							})
+						}
+					}
+				} else if handler.Action.Mailbox != nil {
+					c.handlerFindings = append(c.handlerFindings, Finding{
+						CheckID:  "handler_field_compliance",
+						Severity: "error",
+						Message:  fmt.Sprintf("node %s handler %s mailbox declaration requires action mailbox_write", nodeID, eventType),
+						Location: nodeID,
+					})
+				}
 				if !handlerActionExecutable(c.source, actionID) {
 					c.handlerFindings = append(c.handlerFindings, Finding{
 						CheckID:  "handler_field_compliance",

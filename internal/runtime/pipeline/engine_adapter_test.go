@@ -569,6 +569,143 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 	}
 }
 
+func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pc := &PipelineCoordinator{db: db}
+	runner := pipelineEngineActionRunner{coordinator: pc}
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	txctx := WithPipelineSQLTxContext(ctx, tx)
+	eventID := "11111111-1111-1111-1111-111111111111"
+	entityID := "22222222-2222-2222-2222-222222222222"
+	action := runtimecontracts.ActionSpec{
+		ID: "mailbox_write",
+		Mailbox: &runtimecontracts.MailboxWriteSpec{
+			ItemType:     runtimecontracts.LiteralExpression("review_request"),
+			Severity:     runtimecontracts.LiteralExpression("urgent"),
+			Summary:      runtimecontracts.LiteralExpression("Review validation package"),
+			EntityID:     runtimecontracts.RefExpression("event.entity_id"),
+			FlowInstance: runtimecontracts.RefExpression("event.flow_instance"),
+			Payload: map[string]runtimecontracts.ExpressionValue{
+				"review_kind":   runtimecontracts.RefExpression("payload.review_kind"),
+				"operator_hint": runtimecontracts.LiteralExpression("inspect_package"),
+			},
+		},
+	}
+	evt := (events.Event{
+		ID:      eventID,
+		Type:    "mailbox.review_requested",
+		Payload: []byte(`{"review_kind":"validation"}`),
+	}).WithEnvelope(events.EventEnvelope{
+		EntityID:     entityID,
+		FlowInstance: "validation/case-1",
+		Scope:        events.EventScopeEntity,
+	})
+	base := values.NewContext()
+	base.Event = values.Wrap(evt.ContextMap(""))
+	base.Payload = values.Wrap(parsePayloadMap(evt.Payload))
+	execCtx := runtimeengine.ExecutionContext{
+		Base: base,
+		Request: runtimeengine.ExecutionRequest{
+			EntityID: identity.NormalizeEntityID(entityID),
+			NodeID:   identity.NormalizeNodeID("mailbox-node"),
+			Event:    evt,
+		},
+	}
+	for i := 0; i < 2; i++ {
+		ok, err := runner.ExecuteAction(txctx, action, runtimeregistry.ActionInstruction{Builtin: "mailbox_write"}, execCtx)
+		if err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("ExecuteAction iteration %d: %v", i, err)
+		}
+		if !ok {
+			_ = tx.Rollback()
+			t.Fatalf("ExecuteAction iteration %d was not claimed", i)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	var count int
+	var sourceEventID, gotEntityID, flowInstance, itemType, severity, summary, payloadKind, fromAgent, status string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*),
+		       COALESCE(MAX(source_event_id::text), ''),
+		       COALESCE(MAX(entity_id::text), ''),
+		       COALESCE(MAX(flow_instance), ''),
+		       COALESCE(MAX(item_type), ''),
+		       COALESCE(MAX(severity), ''),
+		       COALESCE(MAX(summary), ''),
+		       COALESCE(MAX(payload->>'review_kind'), ''),
+		       COALESCE(MAX(from_agent), ''),
+		       COALESCE(MAX(status), '')
+		FROM mailbox
+		WHERE source_event_id = $1::uuid
+	`, eventID).Scan(&count, &sourceEventID, &gotEntityID, &flowInstance, &itemType, &severity, &summary, &payloadKind, &fromAgent, &status); err != nil {
+		t.Fatalf("query mailbox: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("mailbox row count = %d, want 1", count)
+	}
+	if sourceEventID != eventID || gotEntityID != entityID || flowInstance != "validation/case-1" {
+		t.Fatalf("mailbox identity = source %q entity %q flow %q", sourceEventID, gotEntityID, flowInstance)
+	}
+	if itemType != "review_request" || severity != "urgent" || summary != "Review validation package" || status != "pending" {
+		t.Fatalf("mailbox row fields type=%q severity=%q summary=%q status=%q", itemType, severity, summary, status)
+	}
+	if payloadKind != "validation" {
+		t.Fatalf("payload review_kind = %q", payloadKind)
+	}
+	if fromAgent != "system_node:mailbox-node" {
+		t.Fatalf("from_agent = %q", fromAgent)
+	}
+}
+
+func TestPipelineEngineActionRunner_MailboxWriteFailsClosedOnMissingRequiredExpression(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	runner := pipelineEngineActionRunner{coordinator: &PipelineCoordinator{db: db}}
+	ctx := context.Background()
+	eventID := "33333333-3333-3333-3333-333333333333"
+	action := runtimecontracts.ActionSpec{
+		ID: "mailbox_write",
+		Mailbox: &runtimecontracts.MailboxWriteSpec{
+			ItemType: runtimecontracts.LiteralExpression("review_request"),
+			Summary:  runtimecontracts.RefExpression("payload.missing_summary"),
+		},
+	}
+	evt := events.Event{ID: eventID, Type: "mailbox.review_requested", Payload: []byte(`{}`)}
+	base := values.NewContext()
+	base.Event = values.Wrap(evt.ContextMap(""))
+	base.Payload = values.Wrap(parsePayloadMap(evt.Payload))
+
+	ok, err := runner.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "mailbox_write"}, runtimeengine.ExecutionContext{
+		Base: base,
+		Request: runtimeengine.ExecutionRequest{
+			NodeID: identity.NormalizeNodeID("mailbox-node"),
+			Event:  evt,
+		},
+	})
+	if !ok {
+		t.Fatal("expected mailbox_write action to be claimed")
+	}
+	if err == nil || !strings.Contains(err.Error(), "mailbox.summary resolved empty") {
+		t.Fatalf("ExecuteAction error = %v, want missing summary", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE source_event_id = $1::uuid`, eventID).Scan(&count); err != nil {
+		t.Fatalf("query mailbox count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("mailbox row count = %d, want 0", count)
+	}
+}
+
 func TestPipelineEngineEvaluator_ExposesAccumulatedScopeForCEL(t *testing.T) {
 	eval := pipelineEngineEvaluator{evaluator: newWorkflowExpressionEvaluator()}
 	ok, err := eval.EvalBool(
@@ -1062,20 +1199,21 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 
 func TestPipelineEngineActionRegistry_SynthesizesSupportedBuiltinActions(t *testing.T) {
 	registry := pipelineEngineActionRegistry{}
-	id := identity.NormalizeActionKey("create_flow_instance")
-
-	if !registry.HasAction(id) {
-		t.Fatal("expected builtin action to be discoverable without explicit registry entry")
-	}
-	if !registry.IsExecutable(id) {
-		t.Fatal("expected builtin action to be executable without explicit registry entry")
-	}
-	instruction, ok := registry.Action(id)
-	if !ok {
-		t.Fatal("expected builtin action instruction")
-	}
-	if got := instruction.Builtin; got != "create_flow_instance" {
-		t.Fatalf("Builtin = %q", got)
+	for _, builtin := range []string{"create_flow_instance", "mailbox_write"} {
+		id := identity.NormalizeActionKey(builtin)
+		if !registry.HasAction(id) {
+			t.Fatalf("expected builtin action %s to be discoverable without explicit registry entry", builtin)
+		}
+		if !registry.IsExecutable(id) {
+			t.Fatalf("expected builtin action %s to be executable without explicit registry entry", builtin)
+		}
+		instruction, ok := registry.Action(id)
+		if !ok {
+			t.Fatalf("expected builtin action %s instruction", builtin)
+		}
+		if got := instruction.Builtin; got != builtin {
+			t.Fatalf("Builtin = %q, want %q", got, builtin)
+		}
 	}
 }
 
