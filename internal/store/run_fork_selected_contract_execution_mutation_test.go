@@ -407,6 +407,92 @@ func TestSelectedContractTimerReconstructionFailsClosedWhenRelevantTimerDisappea
 	}
 }
 
+func TestPostTSourceTimerFailsClosedForSelectedContractActivation(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700003600, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	if materialized.ForkRunID == "" {
+		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
+	}
+
+	timerID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO timers (
+			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+			fire_at, owner_agent, task_type, status, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'post-t-source-timer', $3::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
+			$4, 'agent-a', 'timer', 'active', $5
+		)
+	`, timerID, sourceRunID, entityID, at.Add(time.Hour), at.Add(time.Minute)); err != nil {
+		t.Fatalf("seed post-T timer: %v", err)
+	}
+
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+		ForkRunID:             materialized.ForkRunID,
+		AllowedSourceEventIDs: []string{eventID},
+	})
+	if err == nil || !strings.Contains(err.Error(), "source_timers_advanced_after_fork_point") {
+		t.Fatalf("activation error = %v, want post-T timer blocker", err)
+	}
+	if activation.Activated || activation.BranchDivergence != nil {
+		t.Fatalf("activation = %#v, want blocked before selected branch divergence", activation)
+	}
+	if !runForkTestHasActivationBlocker(activation, "source_timers_advanced_after_fork_point") {
+		t.Fatalf("activation blockers = %#v, want source_timers_advanced_after_fork_point", activation.UnsupportedBlockers)
+	}
+	if !runForkTestHasDispositionBlocker(activation.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced, "source_timers_advanced_after_fork_point") {
+		t.Fatalf("activation replay admission = %#v, want source advanced timer blocker", activation.ReplayResumeAdmission)
+	}
+
+	var sourceStatus, forkStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
+		t.Fatalf("load source status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
+		t.Fatalf("load fork status: %v", err)
+	}
+	if sourceStatus != "running" || forkStatus != RunForkMaterializedStatus {
+		t.Fatalf("run statuses source=%q fork=%q, want source running and fork materialized", sourceStatus, forkStatus)
+	}
+
+	var branchRows, forkTimerRows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM run_fork_selected_contract_branch_divergences
+		WHERE fork_run_id = $1::uuid
+	`, materialized.ForkRunID).Scan(&branchRows); err != nil {
+		t.Fatalf("count branch divergences: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkTimerRows); err != nil {
+		t.Fatalf("count fork timers: %v", err)
+	}
+	if branchRows != 0 || forkTimerRows != 0 {
+		t.Fatalf("branch rows=%d fork timer rows=%d, want no branch divergence and no fork timer copies", branchRows, forkTimerRows)
+	}
+	assertNoForkTimerCopiesForSource(t, db, sourceRunID)
+}
+
 func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
