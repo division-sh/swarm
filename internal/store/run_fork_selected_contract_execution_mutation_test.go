@@ -493,6 +493,105 @@ func TestPostTSourceTimerFailsClosedForSelectedContractActivation(t *testing.T) 
 	assertNoForkTimerCopiesForSource(t, db, sourceRunID)
 }
 
+func TestPostTSourceRouteFailsClosedForSelectedContractActivation(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700003610, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	if materialized.ForkRunID == "" {
+		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO routing_rules (
+			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow,
+			is_materialized, status, created_at
+		)
+		VALUES ('item.received', 'node', 'post-t-source-route-node', 'flow-a/1', 'flow-a', true, 'active', $1)
+	`, at.Add(time.Minute)); err != nil {
+		t.Fatalf("seed post-T route: %v", err)
+	}
+
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+		ForkRunID:             materialized.ForkRunID,
+		AllowedSourceEventIDs: []string{eventID},
+	})
+	if err == nil || !strings.Contains(err.Error(), "source_routes_advanced_after_fork_point") {
+		t.Fatalf("activation error = %v, want post-T route blocker", err)
+	}
+	if activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+		t.Fatalf("activation = %#v, want blocked before selected branch divergence", activation)
+	}
+	if !runForkTestHasActivationBlocker(activation, "source_routes_advanced_after_fork_point") {
+		t.Fatalf("activation blockers = %#v, want source_routes_advanced_after_fork_point", activation.UnsupportedBlockers)
+	}
+	if !runForkTestHasDispositionBlocker(activation.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced, "source_routes_advanced_after_fork_point") {
+		t.Fatalf("activation replay admission = %#v, want source advanced route blocker", activation.ReplayResumeAdmission)
+	}
+
+	var sourceStatus, forkStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
+		t.Fatalf("load source status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
+		t.Fatalf("load fork status: %v", err)
+	}
+	if sourceStatus != "running" || forkStatus != RunForkMaterializedStatus {
+		t.Fatalf("run statuses source=%q fork=%q, want source running and fork materialized", sourceStatus, forkStatus)
+	}
+
+	var branchRows, forkDeliveryRows, sourceRouteRows, routeRecoveryRows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM run_fork_selected_contract_branch_divergences
+		WHERE fork_run_id = $1::uuid
+	`, materialized.ForkRunID).Scan(&branchRows); err != nil {
+		t.Fatalf("count branch divergences: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+	`, materialized.ForkRunID).Scan(&forkDeliveryRows); err != nil {
+		t.Fatalf("count fork deliveries: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM routing_rules
+		WHERE subscriber_id = 'post-t-source-route-node'
+	`).Scan(&sourceRouteRows); err != nil {
+		t.Fatalf("count source route rows: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM run_fork_selected_contract_route_recoveries
+		WHERE fork_run_id = $1::uuid
+	`, materialized.ForkRunID).Scan(&routeRecoveryRows); err != nil {
+		t.Fatalf("count route recovery rows: %v", err)
+	}
+	if branchRows != 0 || forkDeliveryRows != 0 || sourceRouteRows != 1 || routeRecoveryRows != 0 {
+		t.Fatalf("branch rows=%d fork delivery rows=%d source route rows=%d route recovery rows=%d, want no divergence, no fork deliveries, one source route, no fork route recovery", branchRows, forkDeliveryRows, sourceRouteRows, routeRecoveryRows)
+	}
+}
+
 func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
