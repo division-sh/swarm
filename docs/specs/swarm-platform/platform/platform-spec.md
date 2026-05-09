@@ -330,7 +330,7 @@ query (optional — pre-fetch cross-entity data into handler context)
 ### description_field
 
 - `field`: description
-- `type`: string or object
+- `type`: string
 - `purpose`: Human-readable description of what this handler does. Not executed.
 ### guard
 
