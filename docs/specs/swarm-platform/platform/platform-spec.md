@@ -22,7 +22,7 @@ This section defines the platform vocabulary for `state_change`, `guard`, `actio
 
 ## action
 
-- `description`: A platform-provided operation executed as the final step of a handler. Only two valid actions exist: create_flow_instance and record_evidence. Product-specific actions are not supported.
+- `description`: A platform-provided operation executed as the final step of a handler. Valid actions are create_flow_instance, record_evidence, and mailbox_write. Product-specific actions are not supported.
 ## timer
 
 - `description`: A time-based trigger attached to a stage. When the delay elapses, the platform emits the timer's event, which can trigger a transition.
@@ -330,7 +330,7 @@ query (optional — pre-fetch cross-entity data into handler context)
 ### description_field
 
 - `field`: description
-- `type`: string
+- `type`: string or object
 - `purpose`: Human-readable description of what this handler does. Not executed.
 ### guard
 
@@ -544,7 +544,7 @@ data_accumulation:
 
 - `field`: action
 - `type`: string
-- `purpose`: Names a platform-provided action. Valid values: create_flow_instance, record_evidence. The platform executes the named action. NOT for platform actions — all behavior must be declarative.
+- `purpose`: Names a platform-provided action. Valid values: create_flow_instance, record_evidence, mailbox_write. The platform executes the named action. NOT for platform actions — all behavior must be declarative.
 #### valid_values
 
 ##### create_flow_instance
@@ -560,6 +560,21 @@ data_accumulation:
 - `description`: Append event payload to entity accumulator state.
 - `behavior`: Reads the event payload and appends it as a new entry in the entity's evidence accumulator (from state_schema). Append-only — never replaces. Used for building an audit trail of signals, scores, or decisions.
 - `required_sibling_fields`:
+
+##### mailbox_write
+
+- `description`: Deterministically materialize an authored mailbox request event into public.mailbox.
+- `required_mapping`:
+  - `action.id`: mailbox_write
+  - `action.mailbox`: object — typed mailbox row declaration.
+- `mailbox_fields`:
+  - `item_type`: expression value resolving to the mailbox item/review kind. Required. Normalized by lowercasing and replacing hyphen/dot with underscore.
+  - `severity`: optional expression value resolving to normal, urgent, or critical. Defaults to normal.
+  - `summary`: expression value resolving to human-readable row summary. Required.
+  - `entity_id`: optional expression value. Defaults to the triggering event entity_id when present.
+  - `flow_instance`: optional expression value. Defaults to the triggering event flow_instance when present.
+  - `payload`: optional mapping of payload/context fields to expression values. Only explicitly declared fields are copied; no implicit event payload pass-through occurs.
+- `behavior`: Inserts a pending public.mailbox row inside the system-node handler transaction. source_event_id is the triggering event id. from_agent is the deterministic system node identity. item_id is deterministic for source_event_id and materializer node so duplicate/replayed node delivery does not create duplicate mailbox rows.
 
 ### clear_gates
 
@@ -1140,6 +1155,7 @@ Boot-time and runtime compliance enforcement.
 - `State state_changes only follow declared advances_to paths`
 - `Guards evaluated before state advancement — block if false`
 - `Events validated against payload schema before publish`
+- `mailbox_write handler actions preserve source_event_id and are row-idempotent for the same source event and materializer`
 - `Accumulation is idempotent — duplicate events do not double-count`
 - `Permission checks read from agent.permissions, not hardcoded policy functions`
 - `Scan mode behavior read from policy.scan_modes, not hardcoded`
@@ -1155,6 +1171,7 @@ Boot-time and runtime compliance enforcement.
 - `Every declared handler has a matching Handle() implementation`
 - `Every state state_change follows declared advances_to paths`
 - `Every emitted event has a payload schema in events.yaml`
+- `mailbox_write materializes exactly one mailbox row per source event/materializer and rejects unsupported declarations`
 - `Every agent subscription resolves to an event some node or agent produces`
 - `Permission enforcement blocks unauthorized tool calls`
 - `Accumulation is idempotent under duplicate event delivery`
@@ -1282,6 +1299,7 @@ The platform owns ALL tool schema serving. It reads tool definition YAML, genera
 - `tools`:
   - `create_flow_instance`: Create a new dynamic flow instance from a template. Handler action only.
   - `record_evidence`: Append payload to entity accumulator. Requires evidence_target field on the handler specifying which accumulator key to write to.
+  - `mailbox_write`: Deterministically materialize authored mailbox request events into public.mailbox. Handler action only.
   - `create_entity`: Create a new entity row in entity_state. Legacy/operator/system compatibility surface; removed from fully opted-in role-scoped agent surfaces.
   - `get_entity`: Read an entity by ID. Legacy/operator/system compatibility surface; removed from fully opted-in role-scoped agent surfaces in favor of generated `read_{entity_type}` tools.
   - `query_entities`: Query entities by state, fields, or aggregation. Legacy/operator/system compatibility surface; removed from fully opted-in role-scoped agent surfaces.
@@ -1291,7 +1309,7 @@ The platform owns ALL tool schema serving. It reads tool definition YAML, genera
   - `agent_message`: Send a message to another agent (auto-granted to all agents).
   - `mailbox_send`: Send an item to the human mailbox (auto-granted to all agents).
 
-- `note`: create_flow_instance is a handler ACTION field value, not a tool agents can call. It is listed here for completeness but invoked via action: create_flow_instance in node handlers.
+- `note`: create_flow_instance, record_evidence, and mailbox_write are handler ACTION field values, not tools agents can call.
 - `handler_registration`: At bootstrap, the workflow module registers handlers for its tools. The platform provides the MCP gateway and schema validation. One tools file per workflow contains all tool schemas for the actor's visible surface: universal communication tools, generated emit tools, generated role-scoped entity tools for opted-in actors, and explicitly configured workflow-specific tools.
 - `default_deny`: If an agent calls a tool that is not in its `tools` list, not a universal communication tool, not an emit tool, not a generated role-scoped entity tool for an opted-in actor, and not an authorized `native_tools` capability, the call is rejected.
 ## custom_tool_schema

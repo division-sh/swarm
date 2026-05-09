@@ -297,11 +297,21 @@ func (s *QuerySpec) hydratePaths() {
 }
 
 type ActionSpec struct {
-	ID             string          `yaml:"id"`
-	Template       string          `yaml:"template"`
-	InstanceIDFrom string          `yaml:"instance_id_from"`
-	InstanceIDPath paths.Path      `yaml:"-"`
-	ConfigFrom     *ConfigFromSpec `yaml:"config_from"`
+	ID             string            `yaml:"id"`
+	Template       string            `yaml:"template"`
+	InstanceIDFrom string            `yaml:"instance_id_from"`
+	InstanceIDPath paths.Path        `yaml:"-"`
+	ConfigFrom     *ConfigFromSpec   `yaml:"config_from"`
+	Mailbox        *MailboxWriteSpec `yaml:"mailbox"`
+}
+
+type MailboxWriteSpec struct {
+	ItemType     ExpressionValue            `yaml:"item_type"`
+	Severity     ExpressionValue            `yaml:"severity"`
+	Summary      ExpressionValue            `yaml:"summary"`
+	EntityID     ExpressionValue            `yaml:"entity_id"`
+	FlowInstance ExpressionValue            `yaml:"flow_instance"`
+	Payload      map[string]ExpressionValue `yaml:"payload"`
 }
 type EntitySchema struct {
 	Groups []EntitySchemaGroup `yaml:"groups"`

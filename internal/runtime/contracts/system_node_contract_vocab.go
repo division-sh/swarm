@@ -13,7 +13,7 @@ func NormalizeHandlerActionID(id string) string {
 
 func IsSupportedHandlerActionID(id string) bool {
 	switch NormalizeHandlerActionID(id) {
-	case "create_flow_instance", "record_evidence":
+	case "create_flow_instance", "record_evidence", "mailbox_write":
 		return true
 	default:
 		return false

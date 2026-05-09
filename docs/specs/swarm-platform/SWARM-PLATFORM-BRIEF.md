@@ -90,7 +90,7 @@ When an order gets approved, the platform creates a new fulfillment flow instanc
 ## Platform Capabilities
 
 ### Handler primitives
-guard, advances_to, sets_gate, clear_gates, data_accumulation, emit, rules, on_complete, accumulate, compute, fan_out, filter, reduce, count, group_by, query, clear, record_evidence, action (create_flow_instance)
+guard, advances_to, sets_gate, clear_gates, data_accumulation, emit, rules, on_complete, accumulate, compute, fan_out, filter, reduce, count, group_by, query, clear, record_evidence, action (create_flow_instance, mailbox_write)
 
 ### Expression language
 CEL (Common Expression Language) for all conditions, guards, and filters. Strongly typed, non-Turing-complete, safe for policy evaluation.
