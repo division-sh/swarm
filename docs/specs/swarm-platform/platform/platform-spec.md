@@ -543,7 +543,7 @@ data_accumulation:
 ### action
 
 - `field`: action
-- `type`: string
+- `type`: string or object
 - `purpose`: Names a platform-provided action. Valid values: create_flow_instance, record_evidence, mailbox_write. The platform executes the named action. NOT for platform actions — all behavior must be declarative.
 #### valid_values
 
