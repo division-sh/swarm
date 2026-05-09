@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CONTRACTS_ROOT="${CONTRACTS_ROOT:-/Users/youmew/swarm/empire/contracts}"
-HEALTH_ADDR="${HEALTH_ADDR:-127.0.0.1:8081}"
+HEALTH_ADDR="${HEALTH_ADDR:-0.0.0.0:8081}"
 HEALTH_PORT="${HEALTH_ADDR##*:}"
 HEALTH_HOST="${HEALTH_ADDR%:*}"
 if [[ "${HEALTH_HOST}" == "${HEALTH_ADDR}" ]]; then
