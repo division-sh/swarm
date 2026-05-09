@@ -805,19 +805,14 @@ func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType s
 	if !proof.HasSchema {
 		return nil
 	}
-	registry := runtimecontracts.EventSchemaRegistryFromCatalog(map[string]runtimecontracts.EventCatalogEntry{
-		proof.CatalogKey: proof.Entry,
-	})
-	schema, ok := registry[proof.CatalogKey]
-	if bundle, okBundle := semanticview.Bundle(source); okBundle && bundle != nil {
-		if resolved, _, okResolved := runtimecontracts.EventSchemaForFlowEvent(bundle, flowID, eventType); okResolved {
-			schema = resolved
-			ok = true
-		}
-	}
-	if !ok {
+	resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
+	if !resolution.HasSchema {
 		return nil
 	}
+	if err := resolution.UnresolvedTypeError(); err != nil {
+		return fmt.Errorf("%w: event %s payload schema is unresolved: %v", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), err)
+	}
+	schema := resolution.Schema
 	allowed := eventPayloadProperties(proof.Entry)
 	validationPayload := cloneStringAnyMap(payload)
 	if surface != runtimeengine.EmitSurfaceDeclarative {

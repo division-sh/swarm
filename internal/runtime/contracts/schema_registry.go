@@ -295,11 +295,38 @@ func eventSchemaDeclarationEntry(bundle *WorkflowContractBundle, declaration eve
 }
 
 func eventSchemaLookupKeys(bundle *WorkflowContractBundle, flowID, eventType string) []string {
-	keys := []string{resolvedEventSchemaKey(bundle, flowID, eventType)}
+	keys := []string{
+		eventType,
+		resolvedEventSchemaKey(bundle, flowID, eventType),
+	}
+	if strings.TrimSpace(flowID) != "" {
+		keys = append(keys, eventSchemaScopedLeafKey(bundle, flowID, eventType))
+	}
 	if key := instanceScopedEventSchemaKey(bundle, eventType); key != "" {
 		keys = append(keys, key)
 	}
 	return uniqueNormalizedEventSchemaKeys(keys...)
+}
+
+func eventSchemaScopedLeafKey(bundle *WorkflowContractBundle, flowID, eventType string) string {
+	eventType = normalizedEventSchemaKey(eventType)
+	if eventType == "" || !strings.Contains(eventType, "/") {
+		return ""
+	}
+	flowPath := ""
+	if bundle != nil {
+		flowPath = normalizedEventSchemaKey(bundle.FlowPath(flowID))
+	}
+	if flowPath == "" {
+		flowPath = normalizedEventSchemaKey(flowID)
+	}
+	if flowPath == "" || !strings.HasPrefix(eventType, flowPath+"/") {
+		return ""
+	}
+	if idx := strings.LastIndex(eventType, "/"); idx >= 0 && idx+1 < len(eventType) {
+		return strings.TrimSpace(eventType[idx+1:])
+	}
+	return ""
 }
 
 func resolvedEventSchemaKey(bundle *WorkflowContractBundle, flowID, eventType string) string {
