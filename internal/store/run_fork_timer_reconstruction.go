@@ -174,24 +174,32 @@ func loadRunForkReconstructableSourceTimers(ctx context.Context, q timerReconstr
 		); err != nil {
 			return nil, fmt.Errorf("scan source timer for reconstruction: %w", err)
 		}
-		if strings.TrimSpace(row.Status) != "active" || row.FiredAt.Valid {
-			return nil, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: source timer history is not active-at-fork only")
+		normalized, err := validateRunForkReconstructableSourceTimer(row)
+		if err != nil {
+			return nil, err
 		}
-		if strings.TrimSpace(row.OwnerAgent) == "" || strings.TrimSpace(row.FireEvent) == "" {
-			return nil, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: source timer lacks executable owner/event identity")
-		}
-		if len(row.FirePayload) == 0 || string(row.FirePayload) == "null" {
-			row.FirePayload = []byte("{}")
-		}
-		if !json.Valid(row.FirePayload) {
-			return nil, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: source timer payload is invalid JSON")
-		}
-		out = append(out, row)
+		out = append(out, normalized)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate source timers for reconstruction: %w", err)
 	}
 	return out, nil
+}
+
+func validateRunForkReconstructableSourceTimer(row runForkTimerReconstructionRow) (runForkTimerReconstructionRow, error) {
+	if strings.TrimSpace(row.Status) != "active" || row.FiredAt.Valid {
+		return runForkTimerReconstructionRow{}, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: source timer history is not active-at-fork only")
+	}
+	if strings.TrimSpace(row.OwnerAgent) == "" || strings.TrimSpace(row.FireEvent) == "" {
+		return runForkTimerReconstructionRow{}, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: source timer lacks executable owner/event identity")
+	}
+	if len(row.FirePayload) == 0 || string(row.FirePayload) == "null" {
+		row.FirePayload = []byte("{}")
+	}
+	if !json.Valid(row.FirePayload) {
+		return runForkTimerReconstructionRow{}, runForkReplayResumeError(RunForkBlockerTimerHistoryUnproven, RunForkReplayResumeFactTimerHistory, "selected-contract timer reconstruction blocked: source timer payload is invalid JSON")
+	}
+	return row, nil
 }
 
 func insertRunForkSelectedContractTimerReconstructions(ctx context.Context, tx *sql.Tx, forkRunID, sourceRunID, forkEventID string, reconstruction runForkTimerReconstructionPlan, now time.Time) error {

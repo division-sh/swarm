@@ -235,6 +235,178 @@ func TestSelectedContractExecutionMaterializationReconstructsActiveTimer(t *test
 	}
 }
 
+func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerHistory(t *testing.T) {
+	cases := []struct {
+		name           string
+		insertTimer    func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time)
+		expectedReason string
+	}{
+		{
+			name: "fired timer",
+			insertTimer: func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time) {
+				t.Helper()
+				if _, err := db.ExecContext(context.Background(), `
+					INSERT INTO timers (
+						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+						fire_at, owner_agent, task_type, status, fired_at, created_at
+					)
+					VALUES (
+						$1::uuid, 'selected-fired-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
+						$3, 'agent-a', 'timer', 'fired', $4, $5
+					)
+				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(30*time.Minute), at.Add(-time.Minute)); err != nil {
+					t.Fatalf("seed fired timer: %v", err)
+				}
+			},
+			expectedReason: "source timer history is not active-at-fork only",
+		},
+		{
+			name: "non-active timer",
+			insertTimer: func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time) {
+				t.Helper()
+				if _, err := db.ExecContext(context.Background(), `
+					INSERT INTO timers (
+						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+						fire_at, owner_agent, task_type, status, created_at
+					)
+					VALUES (
+						$1::uuid, 'selected-cancelled-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
+						$3, 'agent-a', 'timer', 'cancelled', $4
+					)
+				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
+					t.Fatalf("seed cancelled timer: %v", err)
+				}
+			},
+			expectedReason: "source timer history is not active-at-fork only",
+		},
+		{
+			name: "missing executable owner",
+			insertTimer: func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time) {
+				t.Helper()
+				if _, err := db.ExecContext(context.Background(), `
+					INSERT INTO timers (
+						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+						fire_at, owner_node, task_type, status, created_at
+					)
+					VALUES (
+						$1::uuid, 'selected-ownerless-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
+						$3, 'timer-node', 'timer', 'active', $4
+					)
+				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
+					t.Fatalf("seed ownerless timer: %v", err)
+				}
+			},
+			expectedReason: "source timer lacks executable owner/event identity",
+		},
+		{
+			name: "missing fire event",
+			insertTimer: func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time) {
+				t.Helper()
+				if _, err := db.ExecContext(context.Background(), `
+					INSERT INTO timers (
+						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+						fire_at, owner_agent, task_type, status, created_at
+					)
+					VALUES (
+						$1::uuid, 'selected-eventless-timer', $2::uuid, 'flow-a/1', '', '{"source":true}'::jsonb,
+						$3, 'agent-a', 'timer', 'active', $4
+					)
+				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
+					t.Fatalf("seed eventless timer: %v", err)
+				}
+			},
+			expectedReason: "source timer lacks executable owner/event identity",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			pg := &PostgresStore{DB: db}
+			ctx := context.Background()
+			sourceRunID := uuid.NewString()
+			entityID := uuid.NewString()
+			eventID := uuid.NewString()
+			at := time.Unix(1700003525, 0).UTC()
+			seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+			tc.insertTimer(t, db, sourceRunID, entityID, at)
+
+			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+				SourceRunID: sourceRunID,
+				At:          eventID,
+				ContractSelection: RunForkContractSelection{
+					Mode:            "selected_contracts",
+					ContractsRoot:   "/tmp/selected-contracts",
+					WorkflowName:    "selected-workflow",
+					WorkflowVersion: "v1",
+				},
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.expectedReason) {
+				t.Fatalf("materialization error = %v, want %q", err, tc.expectedReason)
+			}
+			if materialized.ForkRunID != "" {
+				t.Fatalf("materialized fork despite unsupported timer history: %#v", materialized)
+			}
+			assertNoSelectedContractForkRows(t, db, sourceRunID)
+			assertNoForkTimerCopiesForSource(t, db, sourceRunID)
+		})
+	}
+}
+
+func TestSelectedContractTimerReconstructionFailsClosedForInvalidPayload(t *testing.T) {
+	_, err := validateRunForkReconstructableSourceTimer(runForkTimerReconstructionRow{
+		Status:      "active",
+		OwnerAgent:  "agent-a",
+		FireEvent:   "timer.selected",
+		FirePayload: []byte(`{"broken"`),
+	})
+	if err == nil || !strings.Contains(err.Error(), "source timer payload is invalid JSON") {
+		t.Fatalf("validate invalid timer payload error = %v", err)
+	}
+}
+
+func TestSelectedContractTimerReconstructionFailsClosedWhenRelevantTimerDisappearsAfterPlanning(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700003550, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	timerID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO timers (
+			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+			fire_at, owner_agent, task_type, status, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'selected-vanishing-timer', $3::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
+			$4, 'agent-a', 'timer', 'active', $5
+		)
+	`, timerID, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed timer: %v", err)
+	}
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if !runForkPlanHasTimerBlocker(plan) {
+		t.Fatalf("plan missing timer blocker: %#v", plan.ReplayResumeAdmission)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM timers WHERE timer_id = $1::uuid`, timerID); err != nil {
+		t.Fatalf("delete timer after planning: %v", err)
+	}
+	catalog, err := pg.requireRunForkSelectedContractExecutionCapabilities(ctx)
+	if err != nil {
+		t.Fatalf("require selected contract capabilities: %v", err)
+	}
+	_, err = pg.planRunForkSelectedContractTimerReconstruction(ctx, catalog, plan)
+	if err == nil || !strings.Contains(err.Error(), "no reconstructable active source timers") {
+		t.Fatalf("timer reconstruction error = %v, want no reconstructable timer blocker", err)
+	}
+}
+
 func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -320,6 +492,26 @@ func seedSelectedContractExecutionStoreSource(t *testing.T, db execContextDB, so
 		)
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
+	}
+}
+
+func assertNoForkTimerCopiesForSource(t *testing.T, db *sql.DB, sourceRunID string) {
+	t.Helper()
+	var copied int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM timers
+		WHERE forked_from_run_id = $1::uuid
+		   OR source_timer_id IN (
+				SELECT timer_id
+				FROM timers
+				WHERE run_id = $1::uuid
+		   )
+	`, sourceRunID).Scan(&copied); err != nil {
+		t.Fatalf("count fork timer copies: %v", err)
+	}
+	if copied != 0 {
+		t.Fatalf("fork timer copies for source run = %d, want 0", copied)
 	}
 }
 
