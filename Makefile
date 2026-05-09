@@ -1,7 +1,7 @@
 .PHONY: run-clear
 
 CONTRACTS_ROOT ?= /Users/youmew/swarm/empire/contracts
-HEALTH_ADDR ?= 127.0.0.1:8081
+HEALTH_ADDR ?= 0.0.0.0:8081
 
 SWARM_DB_HOST ?= 127.0.0.1
 SWARM_DB_PORT ?= 5432

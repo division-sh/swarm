@@ -14,6 +14,7 @@ type runClearConfig struct {
 	builderToken     string
 	directiveAgent   string
 	directiveMessage string
+	healthAddr       string
 	hostGatewayURL   string
 	containerURL     string
 	launcherMode     string
@@ -102,6 +103,9 @@ func TestRunClear_BuildsAndLaunchesBinaryDirectly(t *testing.T) {
 	}
 	if got := filepath.Base(strings.TrimSpace(result.builtBinaryPath)); got != "swarm" {
 		t.Fatalf("built binary basename = %q, want swarm", got)
+	}
+	if got := strings.TrimSpace(result.launchedHealthAddr); got != "0.0.0.0:8081" {
+		t.Fatalf("launched health addr = %q, want WLAN-reachable default bind", got)
 	}
 }
 
@@ -210,6 +214,7 @@ type runClearResult struct {
 	containerGatewayURL string
 	builtBinaryPath     string
 	launchedBinaryPath  string
+	launchedHealthAddr  string
 	healthHeaders       string
 	healthURL           string
 	rpcHeaders          string
@@ -242,6 +247,7 @@ func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error)
 	containerGatewayURLSink := filepath.Join(t.TempDir(), "container-gateway-url.txt")
 	goBuildOutputSink := filepath.Join(t.TempDir(), "go-build-output.txt")
 	pythonBinaryPathSink := filepath.Join(t.TempDir(), "python-binary-path.txt")
+	pythonHealthAddrSink := filepath.Join(t.TempDir(), "python-health-addr.txt")
 	psStateCountSink := filepath.Join(t.TempDir(), "ps-state-count.txt")
 	healthHeadersSink := filepath.Join(t.TempDir(), "api-health-headers.txt")
 	healthURLSink := filepath.Join(t.TempDir(), "api-health-url.txt")
@@ -358,6 +364,7 @@ printf '%s' "${SWARM_BUILDER_AUTH_TOKEN:-}" > "${PYTHON_ENV_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_URL:-}" > "${PYTHON_HOST_GATEWAY_URL_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" > "${PYTHON_CONTAINER_GATEWAY_URL_SINK}"
 printf '%s' "${BINARY_PATH:-}" > "${PYTHON_BINARY_PATH_SINK}"
+printf '%s' "${HEALTH_ADDR:-}" > "${PYTHON_HEALTH_ADDR_SINK}"
 (
   exec "${BINARY_PATH}" -contracts "${CONTRACTS_ROOT}" -health-addr "${HEALTH_ADDR}" >> "${LOG_FILE}" 2>&1 < /dev/null
 ) &
@@ -492,6 +499,7 @@ printf '{}'
 		"PYTHON_HOST_GATEWAY_URL_SINK=" + hostGatewayURLSink,
 		"PYTHON_CONTAINER_GATEWAY_URL_SINK=" + containerGatewayURLSink,
 		"PYTHON_BINARY_PATH_SINK=" + pythonBinaryPathSink,
+		"PYTHON_HEALTH_ADDR_SINK=" + pythonHealthAddrSink,
 		"GO_BUILD_OUTPUT_SINK=" + goBuildOutputSink,
 		"GO_BUILD_LAUNCHER_MODE=" + defaultString(cfg.launcherMode, "steady"),
 		"GO_BUILD_LAUNCHER_LOG_TEXT=" + cfg.launcherLogText,
@@ -509,7 +517,7 @@ printf '{}'
 		"CURL_DIRECTIVE_BODY_SINK=" + directiveBodySink,
 		"CURL_DIRECTIVE_URL_SINK=" + directiveURLSink,
 		"CONTRACTS_ROOT=/tmp/contracts",
-		"HEALTH_ADDR=127.0.0.1:8081",
+		"HEALTH_ADDR=" + defaultString(cfg.healthAddr, "0.0.0.0:8081"),
 		"BINARY_PATH=" + filepath.Join(t.TempDir(), "swarm"),
 		"LOG_FILE=" + logFile,
 		"PID_FILE=" + pidFile,
@@ -547,6 +555,7 @@ printf '{}'
 		containerGatewayURL: readFileTrimmed(t, containerGatewayURLSink),
 		builtBinaryPath:     readFileTrimmed(t, goBuildOutputSink),
 		launchedBinaryPath:  readFileTrimmed(t, pythonBinaryPathSink),
+		launchedHealthAddr:  readFileTrimmed(t, pythonHealthAddrSink),
 		healthHeaders:       readFileTrimmedOptional(t, healthHeadersSink),
 		healthURL:           readFileTrimmedOptional(t, healthURLSink),
 		rpcHeaders:          readFileTrimmedOptional(t, rpcHeadersSink),
