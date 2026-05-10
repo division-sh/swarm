@@ -366,6 +366,49 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractReplaySco
 	}
 }
 
+func TestBuildHistoricalReplayExecutionAdmissionReportsActiveSourceDeliveryCouplingOwner(t *testing.T) {
+	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
+	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+	replayAdmission := store.RunForkReplayResumeAdmission{
+		Owner:                   store.RunForkReplayResumeAdmissionOwner,
+		StateOnlyExecutionReady: true,
+		Dispositions: []store.RunForkReplayResumeDisposition{{
+			Fact:           store.RunForkReplayResumeFactDeliveryInProgressHistory,
+			Disposition:    store.RunForkReplayResumeDispositionLineageOnly,
+			Owner:          store.RunForkSelectedContractActiveSourceDeliveryConversationCouplingPolicyOwner,
+			Classification: store.RunForkSelectedContractActiveSourceDeliveryConversationCouplingClassification,
+			Message:        "selected-contract same-source active delivery lineage/no-action evidence",
+		}},
+	}
+	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
+		SelectedExecutionAdmission: selectedAdmission,
+		ReplayResumeAdmission:      replayAdmission,
+		RouteRecovery:              &routeRecovery,
+	})
+	if err != nil {
+		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
+	}
+
+	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
+		ReplayResumeAdmission:      replayAdmission,
+		SelectedExecutionAdmission: selectedAdmission,
+		ContractSwapAdmission:      contractSwapAdmission,
+		RouteRecovery:              &routeRecovery,
+	})
+	if err != nil {
+		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+	}
+	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, store.RunForkHistoricalReplayFactEventDeliveries)
+	if !ok {
+		t.Fatalf("missing event_deliveries admission: %#v", admission.FactAdmissions)
+	}
+	if item.Admission != store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
+		item.SourceOwner != store.RunForkSelectedContractActiveSourceDeliveryConversationCouplingPolicyOwner ||
+		item.Tracker != "#678" {
+		t.Fatalf("event_deliveries admission = %#v, want #678 active source delivery owner", item)
+	}
+}
+
 func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMutation(t *testing.T) {
 	replayAdmission := store.RunForkReplayResumeAdmission{
 		Owner:                    store.RunForkReplayResumeAdmissionOwner,

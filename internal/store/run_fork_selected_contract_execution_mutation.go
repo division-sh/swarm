@@ -344,7 +344,9 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		}
 		return result, err
 	}
-	sourceAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedFacts(ctx, tx, catalog, lineage, conversationAdvancedFacts)
+	sourceAdvancedAdmissionFacts := append([]string{}, conversationAdvancedFacts...)
+	sourceAdvancedAdmissionFacts = append(sourceAdvancedAdmissionFacts, runForkSelectedContractActiveSourceDeliveryConversationCouplingFacts(result.ReplayResumeAdmission)...)
+	sourceAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedFacts(ctx, tx, catalog, lineage, sourceAdvancedAdmissionFacts)
 	if err != nil {
 		return result, err
 	}
@@ -867,6 +869,9 @@ func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan RunForkPlan,
 				continue
 			}
 			blockers = appendRunForkBlocker(blockers, runForkReplayResumeBlocker(RunForkBlockerCommittedReplayScopeReplayUnsupported))
+			continue
+		}
+		if runForkSelectedContractActiveSourceDeliveryConversationCouplingAdmitted(plan, item) {
 			continue
 		}
 		if len(allowedEvents) == 0 {

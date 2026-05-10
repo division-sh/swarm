@@ -205,6 +205,11 @@ active_issues:
     maps_to:
       - timestamp_fork_replay_resume_ownership
       - delivery_and_replay_ownership
+  - id: 678
+    title: Gate selected-contract active source delivery conversation-coupling policy
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+      - delivery_and_replay_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
     maps_to:
@@ -370,6 +375,7 @@ nodes:
       - selected-contract committed replay-scope marker policy needs runtime.run_fork.historical_replay_execution.selected_contract_committed_replay_scope_marker_policy to classify at/before-T source committed replay-scope marker rows by underlying source event position as lineage/no-action only, including delayed marker delivery write-skew after T, while keeping those marker rows out of generic selected-contract source_deliveries_advanced_after_fork_point evidence and preserving source marker copying, fork-local recovery proof reuse, marker rows whose source event is after T, same-run recovery, and full replay/resume as split or fail-closed
       - selected-contract diagnostic platform outcome policy needs runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy to classify at/before-T source platform.runtime_log/platform.inbound_recorded outcome facts as lineage/no-action before route topology, recipient planning, and selected execution, while preserving real frontier unresolved-route blockers and generic non-agent/dead-letter replay blockers
       - selected-contract source-advanced conversation-history policy needs runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy to classify post-T source agent_sessions, agent_turns, and agent_conversation_audits as branch-divergence lineage/no-action evidence while keeping source row copy/reuse, source suppressors, active delivery/session coupling, fork-local pre-existing rows, full reconstruction, and non-selected surfaces split or fail-closed
+      - selected-contract active source delivery conversation-coupling policy needs runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy to classify only the same-source in-progress delivery that emitted the fork-point event as lineage/no-action and branch-divergence evidence, while preserving fail-closed behavior for unrelated active deliveries, active_session_id/receipt/outcome coupling, source row copy/reuse, source outcome suppressors, fork-local pre-existing rows, post-T conversation facts outside #671, full reconstruction, and non-selected surfaces
     representative_issues:
       - 564
       - 565
@@ -403,6 +409,7 @@ nodes:
       - 663
       - 668
       - 671
+      - 678
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR

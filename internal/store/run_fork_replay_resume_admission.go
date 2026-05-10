@@ -63,6 +63,10 @@ type RunForkReplayResumeDisposition struct {
 	Owner          string `json:"owner,omitempty"`
 	BlockerCode    string `json:"blocker_code,omitempty"`
 	Classification string `json:"classification,omitempty"`
+	EventID        string `json:"event_id,omitempty"`
+	DeliveryID     string `json:"delivery_id,omitempty"`
+	SubscriberType string `json:"subscriber_type,omitempty"`
+	SubscriberID   string `json:"subscriber_id,omitempty"`
 	Message        string `json:"message"`
 }
 
@@ -178,22 +182,26 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) RunForkRepl
 }
 
 func runForkReplayResumeDispositionForPendingWork(item RunForkPendingWork) RunForkReplayResumeDisposition {
+	disposition := RunForkReplayResumeDisposition{
+		EventID:        strings.TrimSpace(item.EventID),
+		DeliveryID:     strings.TrimSpace(item.DeliveryID),
+		SubscriberType: strings.TrimSpace(item.SubscriberType),
+		SubscriberID:   strings.TrimSpace(item.SubscriberID),
+	}
 	switch item.Classification {
 	case RunForkPendingClassificationDeliveredCompleted:
-		return RunForkReplayResumeDisposition{
-			Fact:           RunForkReplayResumeFactDeliveryCompletedHistory,
-			Disposition:    RunForkReplayResumeDispositionLineageOnly,
-			Classification: item.Classification,
-			Message:        "completed delivery and receipt facts are preserved as source-run lineage/proof only; they are not redelivered into the fork",
-		}
+		disposition.Fact = RunForkReplayResumeFactDeliveryCompletedHistory
+		disposition.Disposition = RunForkReplayResumeDispositionLineageOnly
+		disposition.Classification = item.Classification
+		disposition.Message = "completed delivery and receipt facts are preserved as source-run lineage/proof only; they are not redelivered into the fork"
+		return disposition
 	case RunForkPendingClassificationPending:
 		if runForkPendingWorkReplayable(item) {
-			return RunForkReplayResumeDisposition{
-				Fact:           RunForkReplayResumeFactDeliveryPendingHistory,
-				Disposition:    RunForkReplayResumeDispositionForkReplay,
-				Classification: item.Classification,
-				Message:        "pending unstarted source delivery can be replayed by creating fork-local event and delivery rows with explicit source lineage",
-			}
+			disposition.Fact = RunForkReplayResumeFactDeliveryPendingHistory
+			disposition.Disposition = RunForkReplayResumeDispositionForkReplay
+			disposition.Classification = item.Classification
+			disposition.Message = "pending unstarted source delivery can be replayed by creating fork-local event and delivery rows with explicit source lineage"
+			return disposition
 		}
 		if runForkPendingWorkIsNonAgent(item) {
 			return runForkReplayResumeNonAgentBlocker(item, RunForkReplayResumeFactDeliveryPendingHistory)
@@ -260,6 +268,10 @@ func runForkReplayResumePendingBlocker(item RunForkPendingWork, fact string) Run
 		Disposition:    RunForkReplayResumeDispositionFailClosedBlocker,
 		BlockerCode:    blocker.Code,
 		Classification: item.Classification,
+		EventID:        strings.TrimSpace(item.EventID),
+		DeliveryID:     strings.TrimSpace(item.DeliveryID),
+		SubscriberType: strings.TrimSpace(item.SubscriberType),
+		SubscriberID:   strings.TrimSpace(item.SubscriberID),
 		Message:        blocker.Message,
 	}
 }
@@ -271,6 +283,10 @@ func runForkReplayResumeNonAgentBlocker(item RunForkPendingWork, fact string) Ru
 		Disposition:    RunForkReplayResumeDispositionFailClosedBlocker,
 		BlockerCode:    blocker.Code,
 		Classification: item.Classification,
+		EventID:        strings.TrimSpace(item.EventID),
+		DeliveryID:     strings.TrimSpace(item.DeliveryID),
+		SubscriberType: strings.TrimSpace(item.SubscriberType),
+		SubscriberID:   strings.TrimSpace(item.SubscriberID),
 		Message:        blocker.Message,
 	}
 }
@@ -282,6 +298,10 @@ func runForkReplayResumeCommittedReplayScopeBlocker(item RunForkPendingWork) Run
 		Disposition:    RunForkReplayResumeDispositionFailClosedBlocker,
 		BlockerCode:    blocker.Code,
 		Classification: item.Classification,
+		EventID:        strings.TrimSpace(item.EventID),
+		DeliveryID:     strings.TrimSpace(item.DeliveryID),
+		SubscriberType: strings.TrimSpace(item.SubscriberType),
+		SubscriberID:   strings.TrimSpace(item.SubscriberID),
 		Message:        blocker.Message,
 	}
 }
