@@ -778,6 +778,40 @@ func TestPostTSourceSessionMaterializationTreatsAsSourceAdvancedConversationHist
 	}
 }
 
+func TestPostTSourceConversationHistoryMaterializationKeepsActiveCouplingFailClosed(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	sessionID := uuid.NewString()
+	at := time.Unix(1700003608, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedPostTActiveConversationCoupling(t, db, sourceRunID, entityID, eventID, sessionID, at)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "source_active_conversation_session_coupling_after_fork_point") {
+		t.Fatalf("materialization error = %v, want active post-T conversation coupling blocker", err)
+	}
+	if materialized.ForkRunID != "" {
+		t.Fatalf("materialized fork despite active post-T conversation coupling: %#v", materialized)
+	}
+	if !runForkTestHasMaterializationBlocker(materialized, "source_active_conversation_session_coupling_after_fork_point") {
+		t.Fatalf("materialization blockers = %#v, want active post-T coupling blocker", materialized.UnsupportedBlockers)
+	}
+	assertNoSelectedContractForkRows(t, db, sourceRunID)
+}
+
 func TestPostTSourceRouteFailsClosedForSelectedContractActivation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -988,6 +1022,47 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 	}
 }
 
+func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	sessionID := uuid.NewString()
+	at := time.Unix(1700003623, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	seedPostTActiveConversationCoupling(t, db, sourceRunID, entityID, eventID, sessionID, at)
+
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+		ForkRunID:             materialized.ForkRunID,
+		AllowedSourceEventIDs: []string{eventID},
+	})
+	if err == nil || !strings.Contains(err.Error(), "source_active_conversation_session_coupling_after_fork_point") {
+		t.Fatalf("activation error = %v, want active post-T conversation coupling blocker", err)
+	}
+	if activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+		t.Fatalf("activation = %#v, want active coupling blocked before branch divergence", activation)
+	}
+	if !runForkTestHasActivationBlocker(activation, "source_active_conversation_session_coupling_after_fork_point") {
+		t.Fatalf("activation blockers = %#v, want active post-T coupling blocker", activation.UnsupportedBlockers)
+	}
+}
+
 func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -1189,6 +1264,38 @@ func seedSelectedContractSourceReplayScopeMarker(t *testing.T, db execContextDB,
 		)
 	`, sourceRunID, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, reasonCode, at); err != nil {
 		t.Fatalf("seed source replay-scope marker: %v", err)
+	}
+}
+
+func seedPostTActiveConversationCoupling(t *testing.T, db execContextDB, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode, status, created_at)
+		VALUES ('active-agent', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
+		ON CONFLICT (agent_id) DO NOTHING
+	`, at); err != nil {
+		t.Fatalf("seed active coupling agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			runtime_mode, status, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'active-agent', $3::uuid, 'flow-a/1', $3::text, 'entity',
+			'session_per_entity', 'active', $4, $4)
+	`, sessionID, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
+		t.Fatalf("seed post-T active source session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status,
+			active_session_id, started_at, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'active-agent', 'in_progress',
+			$3::uuid, $4, $4)
+	`, sourceRunID, eventID, sessionID, at.Add(time.Minute)); err != nil {
+		t.Fatalf("seed post-T active source delivery: %v", err)
 	}
 }
 
