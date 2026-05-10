@@ -71,6 +71,43 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 }
 
+func TestGeneratedOpenRPCApplicationErrorCodesAreUnique(t *testing.T) {
+	api := loadRepoAPISpec(t)
+	generated, err := GenerateOpenRPC(api)
+	if err != nil {
+		t.Fatalf("GenerateOpenRPC() error = %v", err)
+	}
+	var doc OpenRPCDocument
+	if err := json.Unmarshal(generated, &doc); err != nil {
+		t.Fatalf("unmarshal generated openrpc: %v", err)
+	}
+	componentCodes := make(map[int]string, len(doc.Components.Errors))
+	for name, errDef := range doc.Components.Errors {
+		if errDef.Code > OpenRPCApplicationErrorCodeStart || errDef.Code < OpenRPCApplicationErrorCodeMinimum {
+			t.Fatalf("component error %s numeric code = %d, want %d..%d", name, errDef.Code, OpenRPCApplicationErrorCodeMinimum, OpenRPCApplicationErrorCodeStart)
+		}
+		if existing, ok := componentCodes[errDef.Code]; ok {
+			t.Fatalf("component errors %s and %s share numeric code %d", existing, name, errDef.Code)
+		}
+		componentCodes[errDef.Code] = name
+	}
+	if len(componentCodes) != len(api.Components.Errors) {
+		t.Fatalf("unique OpenRPC component error codes = %d, want %d", len(componentCodes), len(api.Components.Errors))
+	}
+	for _, method := range doc.Methods {
+		methodCodes := make(map[int]struct{}, len(method.Errors))
+		for _, errDef := range method.Errors {
+			if _, ok := componentCodes[errDef.Code]; !ok {
+				t.Fatalf("method %s references numeric error code %d absent from components.errors", method.Name, errDef.Code)
+			}
+			if _, ok := methodCodes[errDef.Code]; ok {
+				t.Fatalf("method %s has duplicate numeric error code %d", method.Name, errDef.Code)
+			}
+			methodCodes[errDef.Code] = struct{}{}
+		}
+	}
+}
+
 func TestMutatingMethodsDeclareIdempotencyKey(t *testing.T) {
 	api := loadRepoAPISpec(t)
 	for _, methodName := range api.Conventions.Idempotency.MutatingMethods {

@@ -12,7 +12,9 @@ import (
 )
 
 const (
-	OpenRPCVersion = "1.2.6"
+	OpenRPCVersion                     = "1.2.6"
+	OpenRPCApplicationErrorCodeStart   = -32000
+	OpenRPCApplicationErrorCodeMinimum = -32099
 )
 
 type PlatformSpec struct {
@@ -146,6 +148,9 @@ func Validate(api *APISpecification) (ValidationReport, error) {
 	if report.ErrorCodeCount == 0 {
 		problems = append(problems, "components.errors is empty")
 	}
+	if report.ErrorCodeCount > openRPCApplicationErrorCodeCapacity() {
+		problems = append(problems, fmt.Sprintf("components.errors has %d entries; generated OpenRPC application error code range supports at most %d unique codes", report.ErrorCodeCount, openRPCApplicationErrorCodeCapacity()))
+	}
 	if _, ok := api.MethodCatalog["description"]; ok {
 		problems = append(problems, "method_catalog.description must be metadata, not a method")
 	}
@@ -224,13 +229,14 @@ func GenerateOpenRPC(api *APISpecification) ([]byte, error) {
 	if _, err := Validate(api); err != nil {
 		return nil, err
 	}
+	errorCodes := openRPCApplicationErrorCodes(api.Components.Errors)
 	methods := make([]OpenRPCMethod, 0, len(api.MethodCatalog))
 	for _, entry := range sortedMethods(api.MethodCatalog) {
 		methodName := entry.name
 		method := entry.method
 		errors := make([]OpenRPCError, 0, len(method.Errors))
 		for _, code := range method.Errors {
-			errors = append(errors, openRPCApplicationError(code, api.Components.Errors[code]))
+			errors = append(errors, openRPCApplicationError(code, api.Components.Errors[code], errorCodes[code]))
 		}
 		methods = append(methods, OpenRPCMethod{
 			Name:        methodName,
@@ -242,7 +248,7 @@ func GenerateOpenRPC(api *APISpecification) ([]byte, error) {
 	}
 	componentErrors := make(map[string]OpenRPCError, len(api.Components.Errors))
 	for code, schema := range api.Components.Errors {
-		componentErrors[code] = openRPCApplicationError(code, schema)
+		componentErrors[code] = openRPCApplicationError(code, schema, errorCodes[code])
 	}
 	doc := OpenRPCDocument{
 		OpenRPC: OpenRPCVersion,
@@ -415,9 +421,9 @@ func normalizeDescriptorPointer(in *ContentDescriptor) *ContentDescriptor {
 	return &normalized
 }
 
-func openRPCApplicationError(code string, detailsSchema any) OpenRPCError {
+func openRPCApplicationError(code string, detailsSchema any, numericCode int) OpenRPCError {
 	return OpenRPCError{
-		Code:    -32000,
+		Code:    numericCode,
 		Message: "Application error: " + code,
 		Data: map[string]any{
 			"type":                 "object",
@@ -434,6 +440,20 @@ func openRPCApplicationError(code string, detailsSchema any) OpenRPCError {
 			},
 		},
 	}
+}
+
+func openRPCApplicationErrorCodes(errors map[string]any) map[string]int {
+	names := keys(errors)
+	sort.Strings(names)
+	out := make(map[string]int, len(names))
+	for i, name := range names {
+		out[name] = OpenRPCApplicationErrorCodeStart - i
+	}
+	return out
+}
+
+func openRPCApplicationErrorCodeCapacity() int {
+	return OpenRPCApplicationErrorCodeStart - OpenRPCApplicationErrorCodeMinimum + 1
 }
 
 type methodEntry struct {
