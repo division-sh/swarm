@@ -3091,6 +3091,14 @@ platform_tables:
         \    INDEX idx_mailbox_status (status, severity, created_at),\n    INDEX idx_mailbox_entity (entity_id) WHERE entity_id\
         \ IS NOT NULL,\n    INDEX idx_mailbox_type (item_type, status),\n    INDEX idx_mailbox_global (scope, status) WHERE\
         \ scope = 'global'\n);"
+    api_idempotency:
+      description: 'Reusable v1 API idempotency replay store. One row per (method, actor token id, idempotency key). Stores
+        the canonical request hash and original completed response for the TTL window required by api_specification.conventions.idempotency.'
+      ddl: "CREATE TABLE api_idempotency (\n    method            TEXT NOT NULL,\n    actor_token_id    TEXT NOT NULL,\n\
+        \    idempotency_key   TEXT NOT NULL,\n    request_hash      TEXT NOT NULL,\n    resource_id       TEXT NOT NULL,\n\
+        \    response          JSONB NOT NULL,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    expires_at\
+        \        TIMESTAMPTZ NOT NULL,\n    PRIMARY KEY (method, actor_token_id, idempotency_key),\n    INDEX idx_api_idempotency_expires\
+        \ (expires_at)\n);"
     spend_ledger:
       description: LLM token and API cost tracking. One row per agent invocation.
       ddl: "CREATE TABLE spend_ledger (\n    ledger_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id\
@@ -4886,6 +4894,17 @@ api_specification:
       - agent.replay_backlog
       - runtime.pause
       - runtime.resume
+    mailbox:
+      status_storage_model: 'The storage table keeps terminal defer decisions as status = decided and decision = deferred.
+        v1 read projections expose that row as MailboxStatus deferred. Approval/reject terminal rows remain status = decided
+        with decision approved/rejected; expired/cancelled rows project as expired.'
+      approval_event_routes:
+      - item_type: review_request
+        event_name: mailbox.item_decided
+      - item_type: approval
+        event_name: mailbox.item_decided
+      - item_type: operational_decision
+        event_name: mailbox.item_decided
     scopes:
       vocabulary: action-resource (read:<resource>, write:<resource>, control:<resource>, admin:<resource>, approve:<resource>,
         verify:<resource>)
@@ -6097,6 +6116,17 @@ api_specification:
             - expired
           decided_at:
             $ref: '#/components/schemas/Timestamp'
+      MAILBOX_APPROVAL_EVENT_UNCONFIGURED:
+        type: object
+        additionalProperties: false
+        required:
+        - mailbox_id
+        - item_type
+        properties:
+          mailbox_id:
+            $ref: '#/components/schemas/OpaqueId'
+          item_type:
+            type: string
       INVALID_DEFER_UNTIL:
         type: object
         additionalProperties: false
@@ -6810,7 +6840,7 @@ api_specification:
       - MAILBOX_NOT_FOUND
     mailbox.approve:
       tier: must_have
-      description: Approve a pending mailbox item. Triggers the downstream event configured for the item's type.
+      description: Approve a pending mailbox item. Triggers the downstream event configured for the item's type by api_specification.conventions.mailbox.approval_event_routes.
       scope:
         required:
         - approve:mailbox
@@ -6838,6 +6868,7 @@ api_specification:
       errors:
       - MAILBOX_NOT_FOUND
       - MAILBOX_ALREADY_DECIDED
+      - MAILBOX_APPROVAL_EVENT_UNCONFIGURED
       - IDEMPOTENCY_CONFLICT
     mailbox.reject:
       tier: must_have
