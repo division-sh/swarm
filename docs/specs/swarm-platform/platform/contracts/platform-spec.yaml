@@ -4604,3 +4604,2817 @@ static_analyzer:
       - audit/lint confidence bands
       - delivery/session-primer derivation
     rule: Emit hard invalidity when a parseable structural prompt reference drifts from the declared event or entity contract.
+
+api_specification:
+  description: "Single canonical user-facing API for the Swarm platform. JSON-RPC 2.0 over\nHTTP for request/response, JSON-RPC\
+    \ subscriptions over WebSocket for live\nstreams. One transport, one auth model, one envelope. All operator,\nbuilder,\
+    \ CLI, and dashboard consumers route through this surface.\n\nThe spec is Phase-1 in scope (internal \u2014 Empire as\
+    \ the only consumer at\nspec time) but Phase-2-publishable by construction: no internal jargon in\nmethod names, no [PROPOSED]\
+    \ placeholders that the impl never honors, all\nmethod signatures typed, all shapes consistent across read paths. This\n\
+    YAML is the OpenRPC source-of-truth \u2014 the openrpc.json artifact is\ngenerated mechanically from method_catalog +\
+    \ components.\n"
+  foundations:
+    transport:
+      json_rpc_over_http:
+        endpoint: POST /v1/rpc
+        envelope: JSON-RPC 2.0 (https://www.jsonrpc.org/specification)
+        request_shape: '{"jsonrpc":"2.0","id":<id>,"method":"<namespace>.<verb>","params":{...}}'
+        success_response: '{"jsonrpc":"2.0","id":<id>,"result":{...}}'
+        error_response: '{"jsonrpc":"2.0","id":<id>,"error":{"code":...,"message":"...","data":{...}}}'
+      json_rpc_over_websocket:
+        endpoint: 'GET /v1/ws (Upgrade: websocket)'
+        purpose: "Subscriptions. Once a subscription is established via a `*.subscribe`\nmethod on the WebSocket connection,\
+          \ the runtime pushes notifications\nusing the geth-style envelope:\n\n  {\n    \"jsonrpc\": \"2.0\",\n    \"method\"\
+          : \"rpc.subscription\",\n    \"params\": {\n      \"subscription\": \"<subscription_id>\",\n      \"result\": {\
+          \ ... }\n    }\n  }\n"
+        unsubscribe: "rpc.unsubscribe({subscription_id}) \u2192 {ok: true}"
+      process_probes:
+        description: 'HTTP endpoints `/healthz` and `/readyz` are out-of-band process
+
+          probes for infrastructure that needs unauthenticated binary
+
+          aliveness signals (kubernetes liveness/readiness, load balancer
+
+          health monitoring, etc.). They are NOT part of this JSON-RPC API
+
+          and do NOT require bearer-token auth. They live alongside /v1/rpc
+
+          and /v1/ws but are intentionally separate concerns.
+
+          '
+        endpoints:
+          /healthz: GET, no auth, returns 200 OK if the process is alive.
+          /readyz: GET, no auth, returns 200 OK if the runtime is ready to accept requests (database connection up, contracts
+            loaded).
+        relationship_to_health_namespace: "The health.* JSON-RPC namespace is OPERATOR-grade authenticated\nhealth. health.check\
+          \ returns rich structured health (db, runtime,\nbundle identity); health.ping is a cheap aliveness over the\nauthenticated\
+          \ channel. Process probes (/healthz, /readyz) are a\nseparate concern for INFRASTRUCTURE consumers that cannot present\n\
+          a bearer token. The two surfaces are not redundant \u2014 they serve\ndifferent consumers and answer different questions\
+          \ (\"is the\nprocess up?\" vs \"is the operator API ready and what is it serving?\").\n"
+    versioning:
+      url_prefix: /v1/
+      policy: 'Breaking changes (renamed methods, removed methods, changed result
+
+        shapes, changed required parameter sets, changed error semantics) bump
+
+        the URL prefix to /v2/. Additive changes (new optional parameters, new
+
+        optional result fields, new methods, new error codes added to existing
+
+        methods'' allowed-error lists) do not bump the version. Deprecation: a
+
+        method or field marked deprecated in /v1/ MUST stay functional within
+
+        /v1/ for at least one minor spec revision before removal under /v2/.
+
+        '
+    auth:
+      v1_model: 'Single bearer token in `Authorization: Bearer <token>` header on every
+
+        HTTP request and on the WebSocket upgrade. Token presence and validity
+
+        are the only check in v1; the token grants every scope in the catalog.
+
+        '
+      forward_compatibility: "Each method declares its required scope(s) in this spec (see scopes\nsection). v1 enforcement\
+        \ does not check scopes \u2014 every valid token\ngrants every scope. Phase 2/3 enforcement may add per-token scope\n\
+        restrictions without spec changes. The scope declarations exist in\nv1 specifically to make later enforcement non-breaking.\n"
+    cli_consumption_rule: "The `swarm investigate` CLI (and any future `swarm control` CLI) consumes\nthis API. The CLI MUST\
+      \ NOT reach directly into internal packages for\nruntime reads or actions. One narrow exception: `swarm verify` \u2014\
+      \ which\noperates on contract files on disk and does not require a running runtime\n\u2014 may continue to call into\
+      \ the verification packages directly. All\nother CLI commands route through the API.\n\nSame rule applies to the dashboard\
+      \ (when one ships) and any future\nexternal SDK or third-party tooling.\n"
+  namespaces:
+    description: "Nine canonical owner namespaces. Every concept the API exposes lives in\nexactly one namespace. No overlap.\
+      \ Two ownership rules locked because\nthey were the source of the prior dual-API spec drift:\n  - conversation.* owns\
+      \ sessions, turns, transcripts. agent.* owns\n    agent identity, current status, and control actions only. Reading\n\
+      \    a session goes through conversation.*, not agent.*.\n  - event.subscribe is the only canonical event stream. run.subscribe_trace\n\
+      \    is a separate stream because trace is a composed view (events +\n    deliveries + sessions + turns), not raw events.\n"
+    entries:
+      health:
+        owns: aliveness, readiness, structured server health, runtime identity
+        streams: heartbeat
+      run:
+        owns: run lifecycle (start/stop/pause/continue), composed run diagnosis, composed live trace
+        streams: composed live trace
+      entity:
+        owns: entity state (consolidates legacy "instance"-shaped reads)
+        streams: none
+      event:
+        owns: "canonical event stream \u2014 raw events, deliveries, dead letters"
+        streams: filtered live event stream
+      mailbox:
+        owns: mailbox items, approval/reject/defer decision actions (idempotent)
+        streams: none
+      agent:
+        owns: agent registry, current status, control actions (restart, replay, send_directive). Returns session refs, not
+          session content.
+        streams: none
+      conversation:
+        owns: conversations, sessions, turns, transcripts
+        streams: none
+      runtime:
+        owns: runtime control (ingress pause/resume), runtime observability (structured logs, incidents)
+        streams: none
+  conventions:
+    error_format:
+      envelope: JSON-RPC 2.0 standard {code, message, data}
+      data_structure:
+        code: "Application-level error code, namespaced and uppercase. Examples:\nBUNDLE_MISMATCH, MAILBOX_ALREADY_DECIDED,\
+          \ IDEMPOTENCY_CONFLICT,\nENTITY_NOT_FOUND. Distinct from the JSON-RPC top-level numeric\n`code` (which carries category\
+          \ \u2014 invalid params, internal error,\nmethod not found, etc.).\n"
+        details: Per-error-code structured object. See components.errors for the schema of each code's details.
+        retryable: Boolean. true = transient (network, temporary lock); false = permanent (validation failure, missing resource).
+        correlation_id: Opaque string. Echo of request id, or runtime-assigned for traceability across logs.
+      reserved_top_level_codes:
+      - '-32700: Parse error (JSON-RPC standard)'
+      - '-32600: Invalid request (JSON-RPC standard)'
+      - '-32601: Method not found (JSON-RPC standard)'
+      - '-32602: Invalid params (JSON-RPC standard)'
+      - '-32603: Internal error (JSON-RPC standard)'
+      - '-32000: Application error (Swarm uses this for all data.code-discriminated errors)'
+    pagination:
+      style: cursor-based
+      list_method_pattern: 'All list methods accept `limit?` (default 50, max 500) and `cursor?`
+
+        (opaque string, omitted for first page). All list methods return
+
+        `next_cursor?` (omitted when no more pages).
+
+        '
+      no_offset: "Offset pagination is forbidden \u2014 concurrent inserts make offset unstable. Cursor opaqueness is the\
+        \ runtime's discretion (encoded sort key, content hash, or both)."
+    subscriptions:
+      establishment: 'Call `<namespace>.subscribe({filter?, replay_since?})` over the
+
+        WebSocket connection. Returns `{subscription_id: "<opaque>"}`. The
+
+        runtime then pushes notifications on the same WebSocket using the
+
+        geth-style envelope (see foundations).
+
+        '
+      parameter_classes: "Subscribe and list methods share three parameter classes with\ndifferent rules \u2014 they are NOT\
+        \ interchangeable:\n\n  filter      \u2014 selection criteria (e.g., run_id, event_name,\n                delivery_status).\
+        \ Defined as a named schema in\n                components.schemas (e.g. EventListFilter). The\n                filter\
+        \ shape MUST be identical between a list\n                method and its subscribe sibling. This is what\n       \
+        \         makes them \"the same query\" with different\n                delivery modes.\n  pagination  \u2014 limit\
+        \ + cursor. LIST-ONLY. Subscriptions do not\n                accept these \u2014 subscriptions deliver everything\n\
+        \                matching the filter live, not in pages.\n  time_window \u2014 different parameters per delivery mode:\n\
+        \                  * list:      `since` and `until` bound the\n                               result set to events\
+        \ with\n                               timestamps in that interval.\n                               Either may be\
+        \ omitted.\n                  * subscribe: only `replay_since` is accepted.\n                               It seeds\
+        \ the subscription by\n                               delivering events from `replay_since`\n                    \
+        \           forward (catch-up window), then\n                               continues live. No `until` for\n     \
+        \                          subscriptions; they run until\n                               unsubscribed or disconnected.\n\
+        \nThe \"filter parity\" rule applies ONLY to the filter parameter.\nPagination and time-window parameters are deliberately\
+        \ not shared\nbetween list and subscribe.\n"
+      ordering_per_stream: 'Notifications within a single subscription are delivered in causal
+
+        order per stream key (e.g., per run, per filter). Ordering across
+
+        subscriptions is not guaranteed.
+
+        '
+      delivery: 'Subscriptions are eventually-delivered and not durable across
+
+        disconnects. On reconnect: re-subscribe and use `replay_since` if
+
+        the consumer needs to recover events from before the disconnect
+
+        (subject to the runtime''s retention window). Subscriptions may
+
+        also drop notifications under backpressure; consumers SHOULD
+
+        reconcile by paginating the equivalent list method with the same
+
+        `filter` plus a `since` time bound.
+
+        '
+      filter_parity: 'For every subscribe method that has a list sibling, the filter
+
+        parameter MUST reference the same components.schemas type as the
+
+        list method''s filter parameter (e.g., event.subscribe and event.list
+
+        both reference EventListFilter). Implementations that diverge the
+
+        two filter shapes are spec violations.
+
+        '
+      unsubscribe: "rpc.unsubscribe({subscription_id}) \u2192 {ok}"
+    idempotency:
+      one_rule: "All mutating methods accept an optional `idempotency_key` parameter.\nIf provided, the runtime stores `(method,\
+        \ actor_token, idempotency_key)\n\u2192 original_response` for a TTL window of 24 hours starting after the\nfirst\
+        \ completed response is stored. Replay with the same triple and\nthe same request body returns the stored response.\
+        \ Replay with the\nsame triple and a DIFFERENT request body returns IDEMPOTENCY_CONFLICT.\n"
+      conflict_response_shape: See components.errors.IDEMPOTENCY_CONFLICT for the canonical schema.
+      without_key: 'Methods called without `idempotency_key` are treated as fresh. Natural
+
+        resource-state semantics still apply (e.g., mailbox.approve on an
+
+        already-decided item returns MAILBOX_ALREADY_DECIDED regardless of
+
+        idempotency_key). Idempotency keys protect against client retries;
+
+        resource-state errors protect against logic violations. Two separate
+
+        layers, both useful, neither overlapping.
+
+        '
+      ttl: 24 hours after first completed response stored.
+      mutating_methods:
+      - run.start
+      - run.stop
+      - run.pause
+      - run.continue
+      - mailbox.approve
+      - mailbox.reject
+      - mailbox.defer
+      - agent.send_directive
+      - agent.restart
+      - agent.replay_backlog
+      - runtime.pause
+      - runtime.resume
+    scopes:
+      vocabulary: action-resource (read:<resource>, write:<resource>, control:<resource>, admin:<resource>, approve:<resource>,
+        verify:<resource>)
+      catalog:
+      - read:health
+      - read:runs
+      - write:runs
+      - admin:runs
+      - read:entities
+      - read:events
+      - read:mailbox
+      - approve:mailbox
+      - read:agents
+      - control:agents
+      - read:conversations
+      - read:runtime
+      - control:runtime
+      - admin:runtime
+      assignment_rule: Each method in the method catalog declares its required scope(s) in its `scope.required` field. Methods
+        that join across resources declare the union of relevant read scopes.
+      v1_enforcement: Scope check is NOT enforced in v1. Every valid bearer token grants every scope. Spec declarations exist
+        for Phase 2/3 forward compatibility.
+    time:
+      format: RFC3339 strings (e.g., "2026-05-09T18:31:41.367722Z")
+      timezone: Always UTC in API responses; clients render to local.
+      input_acceptance: Methods accepting time inputs accept any RFC3339 form; runtime normalizes to UTC.
+    ids:
+      shape: opaque strings
+      uuid_compatibility: 'Where the runtime currently uses UUIDs, the API exposes them as opaque
+
+        strings. Clients MUST NOT assume UUID shape; future ID forms (content-
+
+        derived, externally-supplied, hierarchical) may not be UUIDs.
+
+        '
+      validation: IDs are validated by length (max 256 chars) and character set ([A-Za-z0-9_:.-]+) only; semantic validation
+        is per-method.
+    consistency:
+      synchronous_path: Read-after-write within the same connection is strict for mutating methods.
+      subscriptions: Eventually delivered. Notifications within a single subscription are ordered per stream key.
+      cross_consumer: Reads from different connections may briefly observe stale state after a mutation; bounded by replication/cache
+        propagation. Spec does not commit to a maximum staleness window in v1.
+    bundle_fingerprint:
+      algorithm: sha256
+      shape: sha256:<hex>
+      input: sha256 over the canonically-normalized loaded bundle contents (sorted file order, normalized whitespace, normalized
+        line endings) concatenated with the canonically-normalized effective platform spec. Stable across paths/worktrees
+        where content is identical.
+      algorithm_migration: If a future version migrates to a different hash algorithm, the prefix changes (e.g., `blake3:<hex>`).
+        v1 commits to sha256 only.
+      role_in_v1: "fingerprint is the load-bearing bundle identity in v1. BundleRef\n(passed by callers in run.start) carries\
+        \ fingerprint only \u2014 no\nfilesystem paths. BundleIdentity (returned by health.check)\ncarries fingerprint + workflow_name\
+        \ + workflow_version, again\nwithout paths. This makes every API surface that touches bundle\nidentity safely callable\
+        \ by external Phase-2 consumers without\nleaking server deployment internals.\n"
+  components:
+    description: 'Reusable JSON Schema components. Methods reference these via $ref. The
+
+      shapes here are the canonical contract; method param/result schemas
+
+      MUST NOT redefine fields locally that have a named component.
+
+      '
+    schemas:
+      Timestamp:
+        type: string
+        format: date-time
+        description: 'RFC3339 timestamp, UTC. Example: "2026-05-09T18:31:41.367722Z".'
+      OpaqueId:
+        type: string
+        minLength: 1
+        maxLength: 256
+        pattern: ^[A-Za-z0-9_:.-]+$
+        description: Opaque identifier. Currently UUID-shaped for runtime-assigned IDs; clients MUST NOT assume UUID shape.
+      Cursor:
+        type: string
+        description: Opaque pagination cursor. Encoded by the runtime; clients MUST treat as opaque and pass back unchanged.
+      Sha256Fingerprint:
+        type: string
+        pattern: ^sha256:[a-f0-9]{64}$
+        description: Content-hash fingerprint of a bundle. Stable across paths/worktrees where content is identical.
+      ScopeName:
+        description: 'Action-resource scopes used for v1 authorization. v1 enforcement
+
+          treats every valid token as granting every scope; the enum exists
+
+          for forward-compat with Phase 2/3 per-token scope restrictions.
+
+          New scopes added by deferred namespaces (e.g., verify:contracts
+
+          when verify.* lands, debug:* when debug.* lands) are additive.
+
+          '
+        type: string
+        enum:
+        - read:health
+        - read:runs
+        - write:runs
+        - admin:runs
+        - read:entities
+        - read:events
+        - read:mailbox
+        - approve:mailbox
+        - read:agents
+        - control:agents
+        - read:conversations
+        - read:runtime
+        - control:runtime
+        - admin:runtime
+      BundleRef:
+        description: "Bundle reference passed by callers to assert \"I expect the server\nto be running this bundle.\" Identified\
+          \ by content fingerprint,\nNOT server-local filesystem paths \u2014 paths cannot be safely\nreferenced by external\
+          \ Phase-2 consumers, and the runtime's\nactual identity check is fingerprint comparison.\n\nv1 runtime requires\
+          \ the fingerprint to match the orchestrator's\nboot-time loaded bundle, or the call fails with BUNDLE_MISMATCH.\n\
+          Per-run dynamic bundle loading (a content-addressable bundle\nuploaded or referenced by registry coordinate) is\
+          \ part of the\ndeferred bundle_lifecycle namespace; v1 BundleRef carries\nfingerprint only.\n\nA typical caller\
+          \ flow: call health.check first to read the\nserver's current bundle.fingerprint, then pass the same\nfingerprint\
+          \ in run.start.bundle_ref to assert continuity.\n"
+        type: object
+        additionalProperties: false
+        required:
+        - fingerprint
+        properties:
+          fingerprint:
+            $ref: '#/components/schemas/Sha256Fingerprint'
+      BundleIdentity:
+        description: "Server bundle identity returned by health.check. Three fields:\nfingerprint is the load-bearing identity\
+          \ (sha256 of normalized\ncontents); workflow_name and workflow_version are human-friendly\nlabels. Server-local\
+          \ filesystem paths are intentionally NOT\nexposed \u2014 they leak deployment internals and aren't meaningful\n\
+          to external Phase-2 consumers. Operators querying \"what bundle\nis this server running?\" get the fingerprint (definitive)\
+          \ and\nthe labels (informational).\n"
+        type: object
+        additionalProperties: false
+        required:
+        - workflow_name
+        - workflow_version
+        - fingerprint
+        properties:
+          workflow_name:
+            type: string
+          workflow_version:
+            type: string
+          fingerprint:
+            $ref: '#/components/schemas/Sha256Fingerprint'
+      HealthCheckResult:
+        type: object
+        additionalProperties: false
+        required:
+        - alive
+        - ready
+        - db_ok
+        - runtime_ok
+        - bundle
+        properties:
+          alive:
+            type: boolean
+          ready:
+            type: boolean
+          db_ok:
+            type: boolean
+          runtime_ok:
+            type: boolean
+          bundle:
+            $ref: '#/components/schemas/BundleIdentity'
+      RunStatus:
+        type: string
+        enum:
+        - running
+        - paused
+        - completed
+        - failed
+        - cancelled
+        - forked
+      RunHeader:
+        type: object
+        additionalProperties: false
+        required:
+        - run_id
+        - status
+        - trigger_event_type
+        - trigger_event_id
+        - entity_count
+        - event_count
+        - started_at
+        properties:
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          status:
+            $ref: '#/components/schemas/RunStatus'
+          trigger_event_type:
+            type: string
+          trigger_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          entity_count:
+            type: integer
+            minimum: 0
+          event_count:
+            type: integer
+            minimum: 0
+          started_at:
+            $ref: '#/components/schemas/Timestamp'
+          ended_at:
+            $ref: '#/components/schemas/Timestamp'
+            description: Omitted while run is active; present once status is terminal (completed/failed/cancelled/forked).
+          forked_from_run_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Present only if status indicates a fork.
+          error_summary:
+            type: string
+            description: Present only if a top-level error terminated the run.
+      OperationalState:
+        type: string
+        description: 'Operational state of a run. Source of truth:
+
+          internal/store/run_operational_status_read_surface.go
+
+          ProjectRunOperationalStatus. Values are RunTableStatus values
+
+          lowercased plus "stalled" as the projection''s special
+
+          "running-but-not-progressing" state.
+
+          '
+        enum:
+        - running
+        - stalled
+        - paused
+        - completed
+        - failed
+        - cancelled
+        - forked
+      BlockingLayer:
+        type: string
+        description: "Layer-of-the-system identifier when operational_state is \"stalled\".\nEmpty string when state is running\
+          \ or terminal. Source of truth:\nProjectRunOperationalStatus. Current owner emits:\n  \"\" (empty) \u2014 state\
+          \ is running or terminal\n  \"scoring_terminal_outcome\" \u2014 scoring entities have not reached\n    a terminal\
+          \ scoring outcome (shortlisted/marginal/rejected)\n  \"delivery_lifecycle\" \u2014 no active deliveries but events\
+          \ exist\nAdditional values may be added as the operator-state owner gains\nmore diagnostic semantics. Type stays\
+          \ string (not enum) for\nforward compatibility \u2014 additive owner extensions must not\nrequire a /v2/ bump.\n"
+      DiagnosisEvidence:
+        description: "Reserved for future owner extension. Currently unreferenced by any\nv1 method \u2014 the operator-state\
+          \ projection does not yet emit\nevidence pointers. Kept in components.schemas as the canonical\nshape so that when\
+          \ the owner gains evidence emission (a follow-on\nslice), RunDiagnosis can additively reference this type.\n"
+        type: object
+        additionalProperties: false
+        required:
+        - kind
+        - ref
+        - summary
+        properties:
+          kind:
+            type: string
+            description: e.g., event, entity, turn, mailbox_item, dead_letter.
+          ref:
+            $ref: '#/components/schemas/OpaqueId'
+          summary:
+            type: string
+            description: Human-readable one-line description of why this evidence supports the diagnosis.
+      RunDiagnosis:
+        description: "Run header plus the canonical operator-state projection. Source of\ntruth: ProjectRunOperationalStatus.\
+          \ Spec exposes exactly what the\nowner produces in v1; richer fields (evidence pointers,\nsuggested_next_action)\
+          \ are additive owner extensions for a future\nslice \u2014 when the store owner gains them, the spec adds them\n\
+          additively (no /v2/ bump).\n"
+        type: object
+        additionalProperties: false
+        required:
+        - run
+        - operational_state
+        - blocking_layer
+        - blocking_reason
+        - heuristics
+        properties:
+          run:
+            $ref: '#/components/schemas/RunHeader'
+          operational_state:
+            $ref: '#/components/schemas/OperationalState'
+          blocking_layer:
+            $ref: '#/components/schemas/BlockingLayer'
+          blocking_reason:
+            type: string
+            description: "Free-form reason string when operational_state is \"stalled\".\nEmpty when state is running or terminal.\
+              \ Current owner emits:\n  \"\" (empty)\n  \"terminal_scoring_outcome_missing\"\n  \"no_active_deliveries\"\n\
+              Additional values may be added additively.\n"
+          heuristics:
+            type: array
+            items:
+              type: string
+            description: 'Free-form diagnostic notes from the projection. Current owner
+
+              emits one entry per detected condition, e.g. "dead letters
+
+              exist for this run".
+
+              '
+      EntitySummary:
+        type: object
+        additionalProperties: false
+        required:
+        - entity_id
+        - run_id
+        - flow_instance
+        - entity_type
+        - current_state
+        - revision
+        - created_at
+        - updated_at
+        properties:
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          flow_instance:
+            type: string
+          entity_type:
+            type: string
+          current_state:
+            type: string
+          slug:
+            type: string
+          name:
+            type: string
+          revision:
+            type: integer
+            minimum: 0
+          created_at:
+            $ref: '#/components/schemas/Timestamp'
+          updated_at:
+            $ref: '#/components/schemas/Timestamp'
+      EntityFull:
+        description: 'Entity-native shape: typed fields, gates, accumulator state. This
+
+          is the destination shape entity.get returns. v1 implementation
+
+          may need to translate from the existing instance-shaped readers
+
+          in internal/dashboard/server/server.go (which return flat
+
+          WorkflowInstance structs without the typed-fields/gates/
+
+          accumulated decomposition). The spec commits to the entity-native
+
+          shape; implementations are responsible for providing it. A real
+
+          entity-read owner may need to land before entity.* methods can
+
+          honor this shape, which is why the entity.* methods are
+
+          should_have rather than must_have for v1.
+
+          '
+        type: object
+        additionalProperties: false
+        required:
+        - entity
+        - fields
+        - gates
+        - accumulated
+        properties:
+          entity:
+            $ref: '#/components/schemas/EntitySummary'
+          fields:
+            type: object
+            description: Typed entity fields per the entity contract. Shape depends on entity_type.
+            additionalProperties: true
+          gates:
+            type: object
+            description: "Gate state. Map of gate_name \u2192 boolean."
+            additionalProperties:
+              type: boolean
+          accumulated:
+            type: object
+            description: "Per-handler accumulator buckets. Map of bucket_key \u2192 array of typed items."
+            additionalProperties:
+              type: array
+              items:
+                type: object
+      EntityAggregateResult:
+        type: object
+        additionalProperties: false
+        required:
+        - counts
+        properties:
+          counts:
+            type: object
+            description: "Map of group_value \u2192 integer count."
+            additionalProperties:
+              type: integer
+              minimum: 0
+      DeliveryStatus:
+        type: string
+        enum:
+        - pending
+        - in_progress
+        - delivered
+        - failed
+        - dead_letter
+      SubscriberType:
+        type: string
+        enum:
+        - node
+        - agent
+      EventDelivery:
+        type: object
+        additionalProperties: false
+        required:
+        - delivery_id
+        - subscriber_type
+        - subscriber_id
+        - status
+        properties:
+          delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+          subscriber_type:
+            $ref: '#/components/schemas/SubscriberType'
+          subscriber_id:
+            type: string
+          status:
+            $ref: '#/components/schemas/DeliveryStatus'
+          reason_code:
+            type: string
+          last_error:
+            type: string
+      DeadLetterRecord:
+        type: object
+        additionalProperties: false
+        required:
+        - dead_letter_id
+        - failure_type
+        - retry_count
+        - chain_depth
+        - created_at
+        properties:
+          dead_letter_id:
+            $ref: '#/components/schemas/OpaqueId'
+          failure_type:
+            type: string
+            enum:
+            - handler_error
+            - chain_depth_exceeded
+            - retry_exhausted
+          error_message:
+            type: string
+          retry_count:
+            type: integer
+            minimum: 0
+          chain_depth:
+            type: integer
+            minimum: 0
+          handler_node:
+            type: string
+          created_at:
+            $ref: '#/components/schemas/Timestamp'
+      EventFull:
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        - event_name
+        - created_at
+        - source
+        - payload
+        - deliveries
+        - dead_letters
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_name:
+            type: string
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          created_at:
+            $ref: '#/components/schemas/Timestamp'
+          source:
+            type: string
+            description: Producer identifier (node_id, agent_id, or "external").
+          payload:
+            type: object
+            additionalProperties: true
+          deliveries:
+            type: array
+            items:
+              $ref: '#/components/schemas/EventDelivery'
+          dead_letters:
+            type: array
+            items:
+              $ref: '#/components/schemas/DeadLetterRecord'
+      EventListFilter:
+        type: object
+        additionalProperties: false
+        properties:
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_name:
+            type: string
+          delivery_status:
+            $ref: '#/components/schemas/DeliveryStatus'
+          subscriber_id:
+            type: string
+          subscriber_type:
+            $ref: '#/components/schemas/SubscriberType'
+          reason_code:
+            type: string
+          has_dead_letter:
+            type: boolean
+      MailboxStatus:
+        type: string
+        enum:
+        - pending
+        - decided
+        - expired
+        - deferred
+      MailboxPriority:
+        type: string
+        enum:
+        - normal
+        - high
+        - critical
+      MailboxItem:
+        type: object
+        additionalProperties: false
+        required:
+        - mailbox_id
+        - type
+        - status
+        - priority
+        - source_event_id
+        - source_flow
+        - payload
+        - created_at
+        properties:
+          mailbox_id:
+            $ref: '#/components/schemas/OpaqueId'
+          type:
+            type: string
+          status:
+            $ref: '#/components/schemas/MailboxStatus'
+          priority:
+            $ref: '#/components/schemas/MailboxPriority'
+          source_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          source_flow:
+            type: string
+          source_entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          payload:
+            type: object
+            additionalProperties: true
+          created_at:
+            $ref: '#/components/schemas/Timestamp'
+          decided_at:
+            $ref: '#/components/schemas/Timestamp'
+          decision:
+            type: string
+            enum:
+            - approved
+            - rejected
+            - deferred
+            - expired
+      MailboxHistoryEntry:
+        type: object
+        additionalProperties: false
+        required:
+        - action
+        - actor_token_id
+        - ts
+        properties:
+          action:
+            type: string
+            enum:
+            - created
+            - approved
+            - rejected
+            - deferred
+            - expired
+          actor_token_id:
+            type: string
+          ts:
+            $ref: '#/components/schemas/Timestamp'
+          decision_payload:
+            type: object
+            additionalProperties: true
+          reason:
+            type: string
+      MailboxItemDetail:
+        type: object
+        additionalProperties: false
+        required:
+        - item
+        - payload
+        - history
+        properties:
+          item:
+            $ref: '#/components/schemas/MailboxItem'
+          payload:
+            type: object
+            additionalProperties: true
+          history:
+            type: array
+            items:
+              $ref: '#/components/schemas/MailboxHistoryEntry'
+      MailboxDecisionResult:
+        type: object
+        additionalProperties: false
+        required:
+        - ok
+        - mailbox_decision_id
+        - status
+        properties:
+          ok:
+            type: boolean
+            const: true
+          mailbox_decision_id:
+            $ref: '#/components/schemas/OpaqueId'
+          downstream_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Present only when the decision triggered an event emission (typically on approve).
+          status:
+            $ref: '#/components/schemas/MailboxStatus'
+      ConversationMode:
+        type: string
+        enum:
+        - task
+        - session
+        - session_per_entity
+      SessionScope:
+        type: string
+        enum:
+        - global
+        - flow
+        - entity
+      AgentStatus:
+        type: string
+        enum:
+        - idle
+        - running
+        - paused
+        - failed
+        - terminated
+      AgentSummary:
+        type: object
+        additionalProperties: false
+        required:
+        - agent_id
+        - role
+        - type
+        - model_tier
+        - conversation_mode
+        - session_scope
+        - status
+        properties:
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          role:
+            type: string
+          type:
+            type: string
+          model_tier:
+            type: string
+          conversation_mode:
+            $ref: '#/components/schemas/ConversationMode'
+          session_scope:
+            $ref: '#/components/schemas/SessionScope'
+          status:
+            $ref: '#/components/schemas/AgentStatus'
+      SessionRef:
+        type: object
+        additionalProperties: false
+        required:
+        - session_id
+        - started_at
+        properties:
+          session_id:
+            $ref: '#/components/schemas/OpaqueId'
+          started_at:
+            $ref: '#/components/schemas/Timestamp'
+      TurnRef:
+        type: object
+        additionalProperties: false
+        required:
+        - turn_id
+        - completed_at
+        - parse_ok
+        properties:
+          turn_id:
+            $ref: '#/components/schemas/OpaqueId'
+          completed_at:
+            $ref: '#/components/schemas/Timestamp'
+          parse_ok:
+            type: boolean
+          error:
+            type: string
+      AgentDetail:
+        type: object
+        additionalProperties: false
+        required:
+        - agent
+        properties:
+          agent:
+            $ref: '#/components/schemas/AgentSummary'
+          current_session_ref:
+            $ref: '#/components/schemas/SessionRef'
+          last_turn_ref:
+            $ref: '#/components/schemas/TurnRef'
+      ConversationSummary:
+        type: object
+        additionalProperties: false
+        required:
+        - session_id
+        - agent_id
+        - started_at
+        - turn_count
+        - message_count
+        - status
+        properties:
+          session_id:
+            $ref: '#/components/schemas/OpaqueId'
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          started_at:
+            $ref: '#/components/schemas/Timestamp'
+          ended_at:
+            $ref: '#/components/schemas/Timestamp'
+          turn_count:
+            type: integer
+            minimum: 0
+          message_count:
+            type: integer
+            minimum: 0
+          status:
+            type: string
+            enum:
+            - active
+            - terminated
+      Turn:
+        type: object
+        additionalProperties: false
+        required:
+        - turn_id
+        - trigger_event_id
+        - trigger_event_type
+        - parse_ok
+        - latency_ms
+        properties:
+          turn_id:
+            $ref: '#/components/schemas/OpaqueId'
+          trigger_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          trigger_event_type:
+            type: string
+          request_payload:
+            type: object
+            additionalProperties: true
+          response_payload:
+            type: object
+            additionalProperties: true
+          tool_calls:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          turn_blocks:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          parse_ok:
+            type: boolean
+          latency_ms:
+            type: integer
+            minimum: 0
+          error:
+            type: string
+      ConversationDetail:
+        type: object
+        additionalProperties: false
+        required:
+        - conversation
+        - turns
+        properties:
+          conversation:
+            $ref: '#/components/schemas/ConversationSummary'
+          turns:
+            type: array
+            items:
+              $ref: '#/components/schemas/Turn'
+      LogLevel:
+        type: string
+        enum:
+        - debug
+        - info
+        - warn
+        - error
+      LogEntry:
+        type: object
+        additionalProperties: false
+        required:
+        - log_id
+        - ts
+        - level
+        - component
+        - source
+        - message
+        properties:
+          log_id:
+            $ref: '#/components/schemas/OpaqueId'
+          ts:
+            $ref: '#/components/schemas/Timestamp'
+          level:
+            $ref: '#/components/schemas/LogLevel'
+          component:
+            type: string
+          source:
+            type: string
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          error_code:
+            type: string
+          message:
+            type: string
+          details:
+            type: object
+            additionalProperties: true
+      Incident:
+        type: object
+        additionalProperties: false
+        required:
+        - incident_id
+        - first_seen
+        - last_seen
+        - count
+        - level
+        - component
+        - sample_message
+        - sample_log_ids
+        properties:
+          incident_id:
+            $ref: '#/components/schemas/OpaqueId'
+          first_seen:
+            $ref: '#/components/schemas/Timestamp'
+          last_seen:
+            $ref: '#/components/schemas/Timestamp'
+          count:
+            type: integer
+            minimum: 1
+          level:
+            $ref: '#/components/schemas/LogLevel'
+          component:
+            type: string
+          error_code:
+            type: string
+          sample_message:
+            type: string
+          sample_log_ids:
+            type: array
+            items:
+              $ref: '#/components/schemas/OpaqueId'
+      RunTraceRow:
+        description: "One joined trace row. Every row is anchored on an event; delivery,\nsession, and turn fields are sparse\
+          \ and present only where the join\nfinds a corresponding row. Matches the runtime's canonical\nRunDebugTraceRow\
+          \ shape (internal/store/run_debug_read_surface.go).\nThe runtime owns the join \u2014 clients MUST consume rows\
+          \ as-emitted\nand MUST NOT reconstruct the join from separate event/delivery/\nsession/turn lists.\n"
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        - event_name
+        - event_created_at
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_name:
+            type: string
+          source_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          event_source:
+            type: string
+          event_source_type:
+            type: string
+          event_created_at:
+            $ref: '#/components/schemas/Timestamp'
+          delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+          subscriber_type:
+            $ref: '#/components/schemas/SubscriberType'
+          subscriber_id:
+            type: string
+          delivery_status:
+            $ref: '#/components/schemas/DeliveryStatus'
+          delivery_reason_code:
+            type: string
+          active_session_id:
+            $ref: '#/components/schemas/OpaqueId'
+          delivery_created_at:
+            $ref: '#/components/schemas/Timestamp'
+          delivery_started_at:
+            $ref: '#/components/schemas/Timestamp'
+          delivery_delivered_at:
+            $ref: '#/components/schemas/Timestamp'
+          session_id:
+            $ref: '#/components/schemas/OpaqueId'
+          session_kind:
+            type: string
+          session_runtime_mode:
+            type: string
+          session_status:
+            type: string
+          session_updated_at:
+            $ref: '#/components/schemas/Timestamp'
+          turn_id:
+            $ref: '#/components/schemas/OpaqueId'
+          turn_trigger_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          turn_trigger_event_type:
+            type: string
+          turn_runtime_mode:
+            type: string
+          turn_scope_key:
+            type: string
+          turn_entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          turn_task_id:
+            type: string
+          turn_parse_ok:
+            type: boolean
+          turn_retry_count:
+            type: integer
+            minimum: 0
+          turn_error:
+            type: string
+          turn_created_at:
+            $ref: '#/components/schemas/Timestamp'
+      RunTraceListResult:
+        type: object
+        additionalProperties: false
+        required:
+        - trace
+        properties:
+          trace:
+            type: array
+            items:
+              $ref: '#/components/schemas/RunTraceRow'
+          next_cursor:
+            $ref: '#/components/schemas/Cursor'
+      VerifyError:
+        type: object
+        additionalProperties: false
+        required:
+        - check_id
+        - severity
+        - message
+        properties:
+          check_id:
+            type: string
+          severity:
+            type: string
+            enum:
+            - hard_invalidity
+            - warning
+          message:
+            type: string
+          location:
+            type: object
+            additionalProperties: false
+            properties:
+              file:
+                type: string
+              line:
+                type: integer
+              field:
+                type: string
+      VerifyResult:
+        type: object
+        additionalProperties: false
+        required:
+        - ok
+        - errors
+        - warnings
+        properties:
+          ok:
+            type: boolean
+          errors:
+            type: array
+            items:
+              $ref: '#/components/schemas/VerifyError'
+          warnings:
+            type: array
+            items:
+              $ref: '#/components/schemas/VerifyError'
+      OkResult:
+        type: object
+        additionalProperties: false
+        required:
+        - ok
+        properties:
+          ok:
+            type: boolean
+            const: true
+      SubscriptionId:
+        type: object
+        additionalProperties: false
+        required:
+        - subscription_id
+        properties:
+          subscription_id:
+            $ref: '#/components/schemas/OpaqueId'
+      RpcSubscriptionNotification:
+        type: object
+        additionalProperties: false
+        required:
+        - jsonrpc
+        - method
+        - params
+        properties:
+          jsonrpc:
+            type: string
+            const: '2.0'
+          method:
+            type: string
+            const: rpc.subscription
+          params:
+            type: object
+            additionalProperties: false
+            required:
+            - subscription
+            - result
+            properties:
+              subscription:
+                $ref: '#/components/schemas/OpaqueId'
+              result:
+                description: Per-method notification payload. See each subscribe method's notification_schema field.
+    error_catalog_metadata:
+      description: 'Per-error-code schemas for the structured `data.details` field. The
+
+        outer envelope (top-level code, message, data.{code, retryable,
+
+        correlation_id}) is constant; this section types `data.details`.
+
+        '
+    errors:
+      IDEMPOTENCY_CONFLICT:
+        type: object
+        additionalProperties: false
+        required:
+        - original_request_hash
+        - conflicting_request_hash
+        - original_response_ref
+        properties:
+          original_request_hash:
+            $ref: '#/components/schemas/Sha256Fingerprint'
+          conflicting_request_hash:
+            $ref: '#/components/schemas/Sha256Fingerprint'
+          original_response_ref:
+            type: object
+            additionalProperties: false
+            required:
+            - method
+            - resource_id
+            properties:
+              method:
+                type: string
+              resource_id:
+                $ref: '#/components/schemas/OpaqueId'
+      BUNDLE_MISMATCH:
+        type: object
+        additionalProperties: false
+        required:
+        - provided_fingerprint
+        - boot_fingerprint
+        properties:
+          provided_fingerprint:
+            $ref: '#/components/schemas/Sha256Fingerprint'
+          boot_fingerprint:
+            $ref: '#/components/schemas/Sha256Fingerprint'
+      UNSUPPORTED_BUNDLE_REF:
+        type: object
+        additionalProperties: false
+        properties:
+          reason:
+            type: string
+      EVENT_NOT_DECLARED:
+        type: object
+        additionalProperties: false
+        required:
+        - event_name
+        properties:
+          event_name:
+            type: string
+          declared_events:
+            type: array
+            items:
+              type: string
+      PAYLOAD_VALIDATION_FAILED:
+        type: object
+        additionalProperties: false
+        required:
+        - violations
+        properties:
+          violations:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required:
+              - field_path
+              - rule
+              - message
+              properties:
+                field_path:
+                  type: string
+                rule:
+                  type: string
+                message:
+                  type: string
+      RUN_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required:
+        - run_id
+        properties:
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+      RUN_ALREADY_TERMINAL:
+        type: object
+        additionalProperties: false
+        required:
+        - run_id
+        - current_status
+        properties:
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          current_status:
+            $ref: '#/components/schemas/RunStatus'
+      RUN_NOT_PAUSED:
+        type: object
+        additionalProperties: false
+        required:
+        - run_id
+        - current_status
+        properties:
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          current_status:
+            $ref: '#/components/schemas/RunStatus'
+      RUN_ALREADY_PAUSED:
+        type: object
+        additionalProperties: false
+        required:
+        - run_id
+        properties:
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+      ENTITY_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required:
+        - entity_id
+        properties:
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+      EVENT_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+      MAILBOX_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required:
+        - mailbox_id
+        properties:
+          mailbox_id:
+            $ref: '#/components/schemas/OpaqueId'
+      MAILBOX_ALREADY_DECIDED:
+        type: object
+        additionalProperties: false
+        required:
+        - mailbox_id
+        - existing_decision
+        - decided_at
+        properties:
+          mailbox_id:
+            $ref: '#/components/schemas/OpaqueId'
+          existing_decision:
+            type: string
+            enum:
+            - approved
+            - rejected
+            - deferred
+            - expired
+          decided_at:
+            $ref: '#/components/schemas/Timestamp'
+      INVALID_DEFER_UNTIL:
+        type: object
+        additionalProperties: false
+        required:
+        - reason
+        properties:
+          reason:
+            type: string
+            enum:
+            - in_past
+            - beyond_max_window
+          max_until:
+            $ref: '#/components/schemas/Timestamp'
+      AGENT_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required:
+        - agent_id
+        properties:
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+      AGENT_NOT_RUNNING:
+        type: object
+        additionalProperties: false
+        required:
+        - agent_id
+        - current_status
+        properties:
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          current_status:
+            $ref: '#/components/schemas/AgentStatus'
+      SESSION_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required:
+        - session_id
+        properties:
+          session_id:
+            $ref: '#/components/schemas/OpaqueId'
+      RUNTIME_ALREADY_PAUSED:
+        type: object
+        additionalProperties: false
+        properties: {}
+      RUNTIME_NOT_PAUSED:
+        type: object
+        additionalProperties: false
+        properties: {}
+  method_catalog_metadata:
+    description: "All v1 methods. Each method declares: tier, description, scope.required,\nparams (array of contentDescriptors),\
+      \ result (contentDescriptor), errors\n(array of error codes from components.errors). Mutating methods include\nidempotency.\
+      \ Subscription methods include notification_schema.\n\ncontentDescriptor shape (per OpenRPC):\n  { name: string, required:\
+      \ boolean, description?: string,\n    schema: <JSON Schema or $ref> }\n\ntier values:\n  must_have   \u2014 closure-gate\
+      \ set. The minimal API surface required to:\n                (a) close Empire #57 (mailbox approval API gap blocking\n\
+      \                    every end-to-end run), and\n                (b) back the `swarm investigate` first-slice CLI\n\
+      \                    subcommands (runs, run, trace, health) per\n                    docs/SWARM_INVESTIGATE_COMMAND_DRAFT.md.\n\
+      \                Implementable as one PR; 12 methods total.\n  should_have \u2014 v1-scoped but ships in subsequent\
+      \ slices. Spec is\n                authoritative now (so consumers can plan against it),\n                but implementation\
+      \ is sequenced after the must_have set.\n                Includes streaming subscriptions, observability drill-down\n\
+      \                (event/entity/runtime), agent control, conversation reads,\n                production run-control\
+      \ (pause/continue/stop), runtime\n                ingress control.\n  deferred    \u2014 explicitly out of v1 scope.\
+      \ Listed in deferred_namespaces.\n"
+  method_catalog:
+    health.ping:
+      tier: must_have
+      description: Cheap aliveness check. Always returns success when the runtime is responsive.
+      scope:
+        required:
+        - read:health
+      params: []
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - ok
+          - ts
+          properties:
+            ok:
+              type: boolean
+              const: true
+            ts:
+              $ref: '#/components/schemas/Timestamp'
+      errors: []
+    health.check:
+      tier: must_have
+      description: Structured health and runtime identity. Operators use this to confirm what server they are talking to and
+        whether it is ready to handle requests.
+      scope:
+        required:
+        - read:health
+      params: []
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/HealthCheckResult'
+      errors: []
+    health.subscribe:
+      tier: should_have
+      description: WebSocket heartbeat subscription. Notifications carry the same shape as health.check returns.
+      scope:
+        required:
+        - read:health
+      params: []
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/SubscriptionId'
+      notification_schema:
+        $ref: '#/components/schemas/HealthCheckResult'
+      notification_cadence: Every 5 seconds.
+      errors: []
+    rpc.unsubscribe:
+      tier: should_have
+      description: Cancel an active WebSocket subscription on the current connection. This is a JSON-RPC protocol method for
+        the subscription transport, not a durable resource mutation.
+      scope:
+        required: []
+      params:
+      - name: subscription_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/OkResult'
+      errors: []
+    run.start:
+      tier: must_have
+      description: 'Start a new run by injecting an event into the runtime bus.
+
+        Optionally declares a bundle_ref by fingerprint; v1 runtime
+
+        requires the fingerprint to match the orchestrator''s boot-time
+
+        bundle (or the bundle_ref to be omitted, in which case the
+
+        boot-time bundle is used). Per-run dynamic bundle loading is
+
+        deferred (see deferred_namespaces.bundle_lifecycle).
+
+        '
+      scope:
+        required:
+        - write:runs
+      idempotency: per the convention.
+      params:
+      - name: bundle_ref
+        required: false
+        schema:
+          $ref: '#/components/schemas/BundleRef'
+      - name: event_name
+        required: true
+        schema:
+          type: string
+      - name: payload
+        required: true
+        schema:
+          type: object
+          additionalProperties: true
+      - name: run_id
+        required: false
+        description: Caller-provided ID; if omitted, runtime assigns.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - run_id
+          - status
+          properties:
+            run_id:
+              $ref: '#/components/schemas/OpaqueId'
+            status:
+              $ref: '#/components/schemas/RunStatus'
+      errors:
+      - BUNDLE_MISMATCH
+      - UNSUPPORTED_BUNDLE_REF
+      - EVENT_NOT_DECLARED
+      - PAYLOAD_VALIDATION_FAILED
+      - IDEMPOTENCY_CONFLICT
+    run.stop:
+      tier: should_have
+      description: Stop an in-progress run. Pending events are abandoned; in-flight handlers complete or roll back per their
+        own semantics.
+      scope:
+        required:
+        - write:runs
+      idempotency: per the convention.
+      params:
+      - name: run_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/OkResult'
+      errors:
+      - RUN_NOT_FOUND
+      - RUN_ALREADY_TERMINAL
+      - IDEMPOTENCY_CONFLICT
+    run.pause:
+      tier: should_have
+      description: Pause a run by halting event dispatch. In-flight handlers complete; queued events wait. Run continues on
+        run.continue.
+      scope:
+        required:
+        - write:runs
+      idempotency: per the convention.
+      params:
+      - name: run_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/OkResult'
+      errors:
+      - RUN_NOT_FOUND
+      - RUN_ALREADY_TERMINAL
+      - RUN_ALREADY_PAUSED
+      - IDEMPOTENCY_CONFLICT
+    run.continue:
+      tier: should_have
+      description: Resume a paused run.
+      scope:
+        required:
+        - write:runs
+      idempotency: per the convention.
+      params:
+      - name: run_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/OkResult'
+      errors:
+      - RUN_NOT_FOUND
+      - RUN_NOT_PAUSED
+      - IDEMPOTENCY_CONFLICT
+    run.get:
+      tier: must_have
+      description: Cheap canonical read of the run header. Used by lists, hovers, and any consumer that needs run status without
+        paying for diagnostic interpretation.
+      scope:
+        required:
+        - read:runs
+      params:
+      - name: run_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - run
+          properties:
+            run:
+              $ref: '#/components/schemas/RunHeader'
+      errors:
+      - RUN_NOT_FOUND
+    run.list:
+      tier: must_have
+      description: List runs with optional filters. Cursor-paginated.
+      scope:
+        required:
+        - read:runs
+      params:
+      - name: status
+        required: false
+        schema:
+          $ref: '#/components/schemas/RunStatus'
+      - name: since
+        required: false
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      - name: until
+        required: false
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - runs
+          properties:
+            runs:
+              type: array
+              items:
+                $ref: '#/components/schemas/RunHeader'
+            next_cursor:
+              $ref: '#/components/schemas/Cursor'
+      errors: []
+    run.trace:
+      tier: must_have
+      description: "Persisted composed run trace as an ordered list of joined rows. Each\nrow is anchored on an event and\
+        \ carries delivery, session, and turn\nfields where the join finds them. The runtime owns the join \u2014 clients\n\
+        MUST consume rows as-emitted and MUST NOT reconstruct the join from\nseparate event/delivery/session/turn lists. Backed\
+        \ by the canonical\nRunDebugTraceRow surface in internal/store/run_debug_read_surface.go.\n"
+      scope:
+        required:
+        - read:runs
+        - read:events
+        - read:agents
+        - read:conversations
+      params:
+      - name: run_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 2000
+          default: 200
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/RunTraceListResult'
+      errors:
+      - RUN_NOT_FOUND
+    run.diagnose:
+      tier: must_have
+      description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go.\
+        \ The single\ncanonical owner for \"why isn't this run progressing?\" \u2014 routes the\nexisting projection through\
+        \ the API instead of having every\nconsumer recompute it. Today the projection produces\noperational_state, blocking_layer,\
+        \ blocking_reason, and\nheuristics; richer fields (evidence pointers, suggested_next_action)\nare additive owner extensions\
+        \ for a future slice.\n"
+      scope:
+        required:
+        - read:runs
+        - read:events
+        - read:entities
+      params:
+      - name: run_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/RunDiagnosis'
+      errors:
+      - RUN_NOT_FOUND
+    run.subscribe_trace:
+      tier: should_have
+      description: 'Live composed trace stream for one run. Each notification carries one
+
+        joined trace row (the same RunTraceRow shape returned by run.trace).
+
+        Distinct from event.subscribe because trace is a composed view (event
+
+        + delivery + session + turn joined by the runtime), not raw events.
+
+        '
+      scope:
+        required:
+        - read:runs
+        - read:events
+        - read:agents
+        - read:conversations
+      params:
+      - name: run_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: replay_since
+        required: false
+        description: Optional catch-up window. If present, delivers trace rows from this time forward, then continues live.
+          Subject to runtime trace retention.
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/SubscriptionId'
+      notification_schema:
+        $ref: '#/components/schemas/RunTraceRow'
+      notification_cadence: Pushed per joined row as trace rows are committed by the runtime.
+      errors:
+      - RUN_NOT_FOUND
+    entity.list:
+      tier: should_have
+      description: List entities with optional filters. Consolidates legacy "instance" and "entity" reads.
+      scope:
+        required:
+        - read:entities
+      params:
+      - name: run_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: flow
+        required: false
+        schema:
+          type: string
+      - name: type
+        required: false
+        schema:
+          type: string
+      - name: current_state
+        required: false
+        schema:
+          type: string
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - entities
+          properties:
+            entities:
+              type: array
+              items:
+                $ref: '#/components/schemas/EntitySummary'
+            next_cursor:
+              $ref: '#/components/schemas/Cursor'
+      errors: []
+    entity.get:
+      tier: should_have
+      description: Read one entity in full, including fields, gates, and accumulator state.
+      scope:
+        required:
+        - read:entities
+      params:
+      - name: entity_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: run_id
+        required: false
+        description: Disambiguates entities reused across runs.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/EntityFull'
+      errors:
+      - ENTITY_NOT_FOUND
+    entity.aggregate:
+      tier: should_have
+      description: Aggregate entity counts grouped by a field.
+      scope:
+        required:
+        - read:entities
+      params:
+      - name: run_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: group_by
+        required: false
+        description: Field to group by. Defaults to current_state when omitted.
+        schema:
+          type: string
+          default: current_state
+      - name: type
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/EntityAggregateResult'
+      errors: []
+    event.list:
+      tier: should_have
+      description: 'Canonical event store query. Folds dead-letter inspection in via the
+
+        has_dead_letter and reason_code filters; no separate dead_letter.*
+
+        namespace in v1.
+
+        '
+      scope:
+        required:
+        - read:events
+      params:
+      - name: filter
+        required: false
+        schema:
+          $ref: '#/components/schemas/EventListFilter'
+      - name: since
+        required: false
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      - name: until
+        required: false
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - events
+          properties:
+            events:
+              type: array
+              items:
+                $ref: '#/components/schemas/EventFull'
+            next_cursor:
+              $ref: '#/components/schemas/Cursor'
+      errors: []
+    event.get:
+      tier: should_have
+      description: Read one event with its full delivery and dead-letter detail.
+      scope:
+        required:
+        - read:events
+      params:
+      - name: event_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/EventFull'
+      errors:
+      - EVENT_NOT_FOUND
+    event.subscribe:
+      tier: should_have
+      description: "Live event stream with the same filter shape as event.list. Filter\nparity is required by the conventions\
+        \ section. Pagination params\n(limit, cursor) and the time-window `until` are NOT accepted here\n\u2014 subscriptions\
+        \ deliver everything matching the filter live.\n"
+      scope:
+        required:
+        - read:events
+      params:
+      - name: filter
+        required: false
+        schema:
+          $ref: '#/components/schemas/EventListFilter'
+      - name: replay_since
+        required: false
+        description: Optional catch-up window. If present, delivers events from this time forward, then continues live. Subject
+          to runtime event retention.
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/SubscriptionId'
+      notification_schema:
+        $ref: '#/components/schemas/EventFull'
+      notification_cadence: Pushed per event matching filter.
+      errors: []
+    mailbox.list:
+      tier: must_have
+      description: List mailbox items. Filters cover the operator workflow of "find items requiring my attention."
+      scope:
+        required:
+        - read:mailbox
+      params:
+      - name: status
+        required: false
+        schema:
+          $ref: '#/components/schemas/MailboxStatus'
+      - name: run_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: entity_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: type
+        required: false
+        schema:
+          type: string
+      - name: priority
+        required: false
+        schema:
+          $ref: '#/components/schemas/MailboxPriority'
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - items
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/MailboxItem'
+            next_cursor:
+              $ref: '#/components/schemas/Cursor'
+      errors: []
+    mailbox.get:
+      tier: must_have
+      description: Read one mailbox item with full payload and decision history.
+      scope:
+        required:
+        - read:mailbox
+      params:
+      - name: mailbox_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/MailboxItemDetail'
+      errors:
+      - MAILBOX_NOT_FOUND
+    mailbox.approve:
+      tier: must_have
+      description: Approve a pending mailbox item. Triggers the downstream event configured for the item's type.
+      scope:
+        required:
+        - approve:mailbox
+      idempotency: per the convention.
+      params:
+      - name: mailbox_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: decision_payload
+        required: false
+        description: Additional decision context attached to the downstream event.
+        schema:
+          type: object
+          additionalProperties: true
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/MailboxDecisionResult'
+      errors:
+      - MAILBOX_NOT_FOUND
+      - MAILBOX_ALREADY_DECIDED
+      - IDEMPOTENCY_CONFLICT
+    mailbox.reject:
+      tier: must_have
+      description: Reject a pending mailbox item with a stated reason. No downstream event is emitted.
+      scope:
+        required:
+        - approve:mailbox
+      idempotency: per the convention.
+      params:
+      - name: mailbox_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: reason
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/MailboxDecisionResult'
+      errors:
+      - MAILBOX_NOT_FOUND
+      - MAILBOX_ALREADY_DECIDED
+      - IDEMPOTENCY_CONFLICT
+    mailbox.defer:
+      tier: must_have
+      description: Defer a pending mailbox item until a specified time.
+      scope:
+        required:
+        - approve:mailbox
+      idempotency: per the convention.
+      params:
+      - name: mailbox_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: until
+        required: true
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/MailboxDecisionResult'
+      errors:
+      - MAILBOX_NOT_FOUND
+      - MAILBOX_ALREADY_DECIDED
+      - INVALID_DEFER_UNTIL
+      - IDEMPOTENCY_CONFLICT
+    agent.list:
+      tier: should_have
+      description: List declared agents in the loaded bundle, with current operational status.
+      scope:
+        required:
+        - read:agents
+      params:
+      - name: flow
+        required: false
+        schema:
+          type: string
+      - name: role
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - agents
+          properties:
+            agents:
+              type: array
+              items:
+                $ref: '#/components/schemas/AgentSummary'
+      errors: []
+    agent.get:
+      tier: should_have
+      description: "Read one agent's identity, current operational status, and references\nto its current session and last\
+        \ turn. Returns refs only \u2014 full session\nand transcript content is read via conversation.* methods. Ownership\n\
+        boundary: agent.* never returns transcripts.\n"
+      scope:
+        required:
+        - read:agents
+      params:
+      - name: agent_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/AgentDetail'
+      errors:
+      - AGENT_NOT_FOUND
+    agent.send_directive:
+      tier: should_have
+      description: Send a directive (free-form instruction) to a running agent. Optionally kills the previous turn first.
+      scope:
+        required:
+        - control:agents
+      idempotency: per the convention.
+      params:
+      - name: agent_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: directive
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: kill_previous
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - ok
+          properties:
+            ok:
+              type: boolean
+              const: true
+            response:
+              type: string
+              description: Optional acknowledgement or error from the agent.
+      errors:
+      - AGENT_NOT_FOUND
+      - AGENT_NOT_RUNNING
+      - IDEMPOTENCY_CONFLICT
+    agent.restart:
+      tier: should_have
+      description: Restart an agent's session. Existing in-flight turn is killed; agent re-initializes.
+      scope:
+        required:
+        - control:agents
+      idempotency: per the convention.
+      params:
+      - name: agent_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/OkResult'
+      errors:
+      - AGENT_NOT_FOUND
+      - IDEMPOTENCY_CONFLICT
+    agent.replay_backlog:
+      tier: should_have
+      description: Replay the agent's pending event backlog. Used for recovery after restart or ingress pause.
+      scope:
+        required:
+        - control:agents
+      idempotency: per the convention.
+      params:
+      - name: agent_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - ok
+          - replayed_count
+          properties:
+            ok:
+              type: boolean
+              const: true
+            replayed_count:
+              type: integer
+              minimum: 0
+      errors:
+      - AGENT_NOT_FOUND
+      - IDEMPOTENCY_CONFLICT
+    conversation.list:
+      tier: should_have
+      description: List conversation summaries (one per session).
+      scope:
+        required:
+        - read:conversations
+      params:
+      - name: agent_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: run_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - conversations
+          properties:
+            conversations:
+              type: array
+              items:
+                $ref: '#/components/schemas/ConversationSummary'
+            next_cursor:
+              $ref: '#/components/schemas/Cursor'
+      errors: []
+    conversation.get:
+      tier: should_have
+      description: "Read one conversation in full \u2014 session metadata plus all turns and turn blocks."
+      scope:
+        required:
+        - read:conversations
+      params:
+      - name: session_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/ConversationDetail'
+      errors:
+      - SESSION_NOT_FOUND
+    conversation.current_for_agent:
+      tier: should_have
+      description: "Read the agent's current (most-recent active) session. Replaces the\nownership-violating agent.get_session\
+        \ that earlier drafts proposed \u2014\nagent.* doesn't own sessions; conversation.* does.\n"
+      scope:
+        required:
+        - read:conversations
+      params:
+      - name: agent_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      result:
+        name: result
+        required: true
+        description: Returns null if the agent has no active session.
+        schema:
+          oneOf:
+          - $ref: '#/components/schemas/ConversationDetail'
+          - type: 'null'
+      errors:
+      - AGENT_NOT_FOUND
+    runtime.logs:
+      tier: should_have
+      description: Filtered structured runtime log query.
+      scope:
+        required:
+        - read:runtime
+      params:
+      - name: run_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: entity_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: component
+        required: false
+        schema:
+          type: string
+      - name: level
+        required: false
+        schema:
+          $ref: '#/components/schemas/LogLevel'
+      - name: error_code
+        required: false
+        schema:
+          type: string
+      - name: source
+        required: false
+        schema:
+          type: string
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      - name: order
+        required: false
+        schema:
+          type: string
+          enum:
+          - asc
+          - desc
+          default: desc
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - logs
+          properties:
+            logs:
+              type: array
+              items:
+                $ref: '#/components/schemas/LogEntry'
+            next_cursor:
+              $ref: '#/components/schemas/Cursor'
+      errors: []
+    runtime.incidents:
+      tier: should_have
+      description: Aggregated runtime incidents (errors and warnings grouped by error_code/component for triage).
+      scope:
+        required:
+        - read:runtime
+      params:
+      - name: since_hours
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 720
+          default: 24
+      - name: component
+        required: false
+        schema:
+          type: string
+      - name: level
+        required: false
+        schema:
+          $ref: '#/components/schemas/LogLevel'
+      - name: mcp_only
+        required: false
+        schema:
+          type: boolean
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
+      result:
+        name: result
+        required: true
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+          - incidents
+          properties:
+            incidents:
+              type: array
+              items:
+                $ref: '#/components/schemas/Incident'
+            next_cursor:
+              $ref: '#/components/schemas/Cursor'
+      errors: []
+    runtime.pause:
+      tier: should_have
+      description: Pause runtime ingress. New events are queued but not dispatched. In-flight handlers complete.
+      scope:
+        required:
+        - control:runtime
+      idempotency: per the convention.
+      params:
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/OkResult'
+      errors:
+      - RUNTIME_ALREADY_PAUSED
+      - IDEMPOTENCY_CONFLICT
+    runtime.resume:
+      tier: should_have
+      description: Resume runtime ingress.
+      scope:
+        required:
+        - control:runtime
+      idempotency: per the convention.
+      params:
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/OkResult'
+      errors:
+      - RUNTIME_NOT_PAUSED
+      - IDEMPOTENCY_CONFLICT
+  deferred_namespaces:
+    description: 'Explicitly out of v1 scope. Listed here so consumers know to expect them
+
+      in a follow-on slice. Do NOT implement these methods in v1; do NOT
+
+      reserve their names in code unless the implementer is also drafting
+
+      the follow-on slice.
+
+      '
+    debug:
+      methods:
+      - debug.add_breakpoint
+      - debug.remove_breakpoint
+      - debug.list_breakpoints
+      - debug.run_step
+      - debug.run_inject
+      - debug.run_skip
+      - debug.run_retry
+      - debug.fire_timer
+      - debug.cancel_timer
+      rationale: Developer/debug controls, not production operator surface. If they entered v1, the permission and safety
+        semantics would dominate Layer 3 conventions. Defer until there is a real consumer driving the design.
+    dead_letter:
+      methods:
+      - dead_letter.replay
+      - dead_letter.quarantine
+      - dead_letter.assign
+      - dead_letter.resolve
+      rationale: For v1, dead-letter inspection folds into event.list via filters. Break out as its own namespace only when
+        dead-letter workflow gains actions beyond inspection.
+    timer:
+      methods:
+      - timer.list
+      - timer.get
+      rationale: Read-only timer introspection. Useful for admin debugging; not load-bearing for v1 operator workflow.
+    contract:
+      methods:
+      - contract.list_flows
+      - contract.list_agents
+      - contract.list_events
+      - contract.get_node
+      rationale: Runtime introspection of loaded contracts. verify.full covers static validation; runtime introspection becomes
+        useful when there is a contract-editing UI (Phase 3).
+    credentials:
+      methods:
+      - credentials.list
+      - credentials.set
+      - credentials.delete
+      - credentials.test
+      rationale: Existing Builder API methods kept as-is in their current location. Re-spec under v1 in a follow-on if a unified
+        credentials story is needed.
+    runtime_admin:
+      methods:
+      - runtime.reset_state
+      rationale: Dangerous operation. Defer until operator-permission scoping is more concrete than the v1 single-token model.
+    bundle_lifecycle:
+      methods:
+      - bundle.open
+      - bundle.reload
+      - bundle.close
+      rationale: "Per-run dynamic bundle loading is deferred. v1 runtime uses\nboot-time bundle configuration; run.start may\
+        \ carry a bundle_ref\nwhose fingerprint must match the boot-time fingerprint, or the\nbundle_ref may be omitted entirely.\
+        \ When dynamic loading lands,\nBundleRef likely gains content-addressable forms (registry\ncoordinate, uploaded content\
+        \ hash) \u2014 additive change to the\nBundleRef schema, not a breaking one.\n"
+    verify:
+      methods:
+      - verify.full
+      - verify.upload
+      rationale: "verify.full as originally drafted took server-local contracts_path\nand platform_spec parameters. That is\
+        \ not safely callable from\nexternal Phase-2 consumers \u2014 they cannot meaningfully reference\nlocal filesystem\
+        \ paths on the server. v1 keeps verification\nCLI-local: `swarm verify` operates directly on contract files on\ndisk\
+        \ (the one carve-out from the cli_consumption_rule). A\ncontent-based verify.upload (takes the bundle contents inline)\n\
+        is the right Phase-2 API shape and is deferred until that consumer\nis real. No verify.* method is implemented in\
+        \ v1 over JSON-RPC.\n"
+    runtime_identity:
+      methods:
+      - runtime.identity
+      rationale: health.check covers bundle identity in v1. Break out as runtime.identity if Phase 2/3 grows non-bundle identity
+        dimensions (region, deployment, version).
+  migration:
+    description: How the existing dual-API surface deprecates to v1.
+    builder_api_disposition:
+      transport: "JSON-RPC at /rpc and /api/rpc \u2014 kept as a deprecated alias for v1 endpoint /v1/rpc during a transition\
+        \ window."
+      methods:
+      - "project.open / project.reload / project.close \u2192 deferred bundle_lifecycle namespace. Existing methods kept as\
+        \ deprecated aliases."
+      - "run.start / run.stop / run.pause / run.continue \u2192 renamed to v1 run.* methods (same semantics, new request envelope\
+        \ under /v1/rpc, bundle_ref nesting)."
+      - "run.step / run.retry / run.skip \u2192 debug.* deferred namespace."
+      - "state.list_instances \u2192 entity.list (consolidated with /api/instances)."
+      - "state.get_entity \u2192 entity.get (consolidated with /api/instances/{id})."
+      - "credentials.list / set / delete \u2192 kept as-is in deferred credentials.* namespace."
+      - "validate.full \u2192 DEPRECATED. No JSON-RPC equivalent in v1; verify.* namespace is deferred (see deferred_namespaces.verify).\
+        \ Use `swarm verify` CLI for static contract validation in v1."
+      - "[PROPOSED] methods that were never implemented \u2192 either v1 method on the equivalent namespace, deferred namespace,\
+        \ or removed from spec entirely. None remain as [PROPOSED] in v1."
+    operator_api_disposition:
+      transport: "REST at /api/* \u2014 kept as a deprecated alias surface for one minor revision; consumers redirected to\
+        \ /v1/rpc equivalents."
+      methods:
+      - "GET /api/health \u2192 health.check"
+      - "GET /api/agents \u2192 agent.list"
+      - "GET /api/agents/{id} \u2192 agent.get"
+      - "POST /api/agents/{id}/actions/directive \u2192 agent.send_directive"
+      - "POST /api/agents/{id}/actions/restart \u2192 agent.restart"
+      - "POST /api/agents/{id}/actions/replay \u2192 agent.replay_backlog"
+      - "GET /api/conversations \u2192 conversation.list"
+      - "GET /api/conversations/{sessionID} \u2192 conversation.get"
+      - "GET /api/events \u2192 event.list"
+      - "GET /api/events/{id} \u2192 event.get"
+      - "GET /api/events/flow \u2192 event.subscribe"
+      - "GET /api/mailbox \u2192 mailbox.list"
+      - "GET /api/mailbox/{id} \u2192 mailbox.get"
+      - "(NEW) \u2192 mailbox.approve / mailbox.reject / mailbox.defer"
+      - "GET /api/instances \u2192 entity.list"
+      - "GET /api/instances/{id} \u2192 entity.get"
+      - "GET /api/instances/aggregate \u2192 entity.aggregate"
+      - "GET /api/runtime/logs \u2192 runtime.logs"
+      - "GET /api/runtime/incidents \u2192 runtime.incidents"
+      - "POST /api/runtime/actions {pause/resume} \u2192 runtime.pause / runtime.resume"
+      - "POST /api/runtime/actions {reset_state} \u2192 deferred to runtime_admin.runtime.reset_state"
+      - "GET /api/runs/{runID}/trace \u2192 run.trace (also adds run.subscribe_trace as the live variant)"
+    auth_token_disposition:
+      v1_model: SWARM_BUILDER_AUTH_TOKEN and SWARM_OPERATOR_AUTH_TOKEN are merged into a single SWARM_API_TOKEN env var. Legacy
+        env vars kept as fallbacks during the deprecation window. Phase 2 removes legacy env vars.
+      auth_boundary_bug_fix: "The current bug where /api/rpc and /api/ws bypass operator auth is moot under v1 \u2014 one\
+        \ auth surface, one token."
+    cli_consumer_migration:
+      make_run_clear: 'Migrates from `curl /api/rpc {method: run.start}` (legacy /api/rpc with builder token) to `curl /v1/rpc
+        {method: run.start, params: {bundle_ref?, event_name, payload, idempotency_key?}}` with the unified token.'
+      swarm_investigate: "First-slice subcommands map to v1 methods:\n  swarm investigate runs   \u2192 run.list\n  swarm\
+        \ investigate run    \u2192 run.diagnose (default), run.get (--no-diagnose)\n  swarm investigate trace  \u2192 run.trace\n\
+        \  swarm investigate health \u2192 health.check\nFollow-on subcommands map to event.*, runtime.logs, runtime.incidents,\
+        \ agent.*, conversation.*, entity.* per the canonical-owner rule.\n"
+      dashboard: "When a dashboard ships, it consumes v1 \u2014 no direct DB or internal-package access."
+  out_of_scope_for_v1:
+    multi_tenancy: No org_id, tenant_id, workspace_id in v1. URL paths reserved for tenant prefix in Phase 3 without breaking
+      v1 URL shape.
+    rate_limiting: No rate limiting in v1. Phase 2/3 may add per-token quotas (returns RATE_LIMITED error).
+    sla_contracts: No latency/availability SLA in v1.
+    openrpc_schema_publication: The spec emits a parallel openrpc.json. Publication on a public docs site is a Phase 2 concern.
+    streaming_durability: Subscriptions are best-effort within their connection lifetime; no durable replay-from-disconnect.
+    bulk_mutation: No batch endpoints in v1.
+    websocket_authentication_refresh: Tokens validated at WebSocket upgrade; not re-validated for connection lifetime. Token
+      rotation requires reconnect.
+  closure_proof_requirements:
+    spec:
+    - platform-spec.yaml gains an api_specification section that references this draft as the canonical method-catalog source.
+    - BUILDER-API.md is marked DEPRECATED with a top-line note pointing to this spec.
+    - 'CHANGELOG entry references Empire #57 (mailbox approval API gap closed) and the dual-API consolidation.'
+    runtime:
+    - /v1/rpc HTTP endpoint and /v1/ws WebSocket endpoint exist alongside the legacy /api/* and /rpc endpoints.
+    - Every must_have method in the catalog is implemented and reachable via /v1/rpc with the documented params, returns,
+      scopes, and errors.
+    - "Idempotency replay-store implementation: (method, actor, idempotency_key) \u2192 response; 24h TTL; IDEMPOTENCY_CONFLICT\
+      \ response on body mismatch."
+    - For each subscription method when implemented in a should_have slice, the wire format matches the geth-style rpc.subscription
+      shape. Not a must_have closure gate (no subscription method is must_have in v1).
+    - health.check returns the BundleIdentity block including fingerprint.
+    - mailbox.approve / reject / defer mutate the mailbox table and emit downstream events as configured.
+    - run.diagnose exposes the existing operator-state projection from internal/store/run_operational_status_read_surface.go.ProjectRunOperationalStatus
+      over the JSON-RPC API, returning operational_state + blocking_layer + blocking_reason + heuristics. The projection itself
+      is the canonical owner and is unchanged; this proof confirms the API surface routes through it (no second interpretation
+      layer in the API handler).
+    cli:
+    - '`swarm investigate runs/run/trace/health` first-slice consumes /v1/rpc methods, no direct internal-package access (except
+      `swarm verify` carve-out).'
+    - '`make run-clear` migrated to /v1/rpc and unified token.'
+    deprecation:
+    - 'Legacy /rpc and /api/* endpoints respond with X-Deprecated-Endpoint: true; X-Replacement: /v1/rpc and continue to function
+      for one minor spec revision, then removed.'
+    - Legacy SWARM_BUILDER_AUTH_TOKEN / SWARM_OPERATOR_AUTH_TOKEN env vars accepted as fallbacks alongside SWARM_API_TOKEN;
+      legacy vars removed in Phase 2.
+    openrpc_artifact:
+    - A generator (verify-pipeline tool) reads this YAML and emits openrpc.json from method_catalog + components. Drift between
+      the two is hard_invalidity at boot verify.
+    - 'Generator wraps the method catalog in OpenRPC envelope: {openrpc: "1.2.6", info: {title, version, description}, servers:
+      [{url: "<host>/v1/rpc"}], methods: [...], components: {schemas, errors, contentDescriptors}}.'
+    - Every component schema in this YAML maps 1:1 to a component in the generated openrpc.json.
+    - Every method in method_catalog maps to one OpenRPC method object with params (array of contentDescriptors), result (contentDescriptor),
+      errors (array of error objects derived from components.errors).

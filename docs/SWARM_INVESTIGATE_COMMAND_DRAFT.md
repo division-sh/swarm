@@ -1,5 +1,13 @@
 # Swarm Investigate Command Draft
 
+API authority note: current `/api/*`, `/rpc`, and `/api/rpc` references in this
+document describe existing legacy adapter/helper surfaces. They are not
+competing API specs. The canonical user-facing API contract is
+`docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+`api_specification`, with OpenRPC generated from that section. Future
+`swarm investigate` implementation must consume that API except for the
+existing `swarm verify` local-contract carve-out.
+
 ## Purpose
 
 `swarm investigate` should become the operator-facing CLI entrypoint for runtime diagnosis.

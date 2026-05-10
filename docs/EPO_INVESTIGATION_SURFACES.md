@@ -1,5 +1,11 @@
 # EPO Investigation Surfaces
 
+API authority note: current `/api/*`, `/rpc`, and `/api/rpc` surfaces listed
+here are supported legacy adapter/helper surfaces for investigation. They are
+not competing API specs. The canonical user-facing API contract lives in
+`docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+`api_specification`, and `openrpc.json` is generated from that section.
+
 ## Purpose
 
 This document lists the investigation surfaces and evidence sources available to the Empire Product Compatibility Owner.
