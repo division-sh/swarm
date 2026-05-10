@@ -199,9 +199,14 @@ func runStartPayload(params map[string]any, runID string) (json.RawMessage, stri
 	for key, value := range payload {
 		cloned[key] = value
 	}
-	entityID := strings.TrimSpace(runStartPayloadString(cloned["entity_id"]))
-	if entityID == "" {
+	entityID, supplied, err := runStartPayloadEntityID(cloned["entity_id"])
+	if err != nil {
+		return nil, "", err
+	}
+	if !supplied {
 		entityID = strings.TrimSpace(runID)
+		cloned["entity_id"] = entityID
+	} else {
 		cloned["entity_id"] = entityID
 	}
 	encoded, err := json.Marshal(cloned)
@@ -211,9 +216,23 @@ func runStartPayload(params map[string]any, runID string) (json.RawMessage, stri
 	return encoded, entityID, nil
 }
 
-func runStartPayloadString(value any) string {
-	text, _ := value.(string)
-	return text
+func runStartPayloadEntityID(value any) (string, bool, error) {
+	if value == nil {
+		return "", false, nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", false, NewInvalidParamsError(map[string]any{"field": "payload.entity_id", "reason": "must be a UUID string"})
+	}
+	entityID := strings.TrimSpace(text)
+	if entityID == "" {
+		return "", false, nil
+	}
+	parsed, err := uuid.Parse(entityID)
+	if err != nil {
+		return "", false, NewInvalidParamsError(map[string]any{"field": "payload.entity_id", "reason": "must be a UUID string"})
+	}
+	return parsed.String(), true, nil
 }
 
 func runStartIdempotencyError(err error) error {
