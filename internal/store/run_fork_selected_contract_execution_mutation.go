@@ -143,20 +143,11 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return RunForkMaterialization{}, err
 	}
 	replayAdmission = runForkReplayResumeAdmissionWithTimerReconstruction(replayAdmission, timerReconstruction)
-	if err := ensureRunForkNoPostForkConversationHistory(ctx, s.DB, catalog, plan.SourceRunID, plan.ForkPoint.Timestamp); err != nil {
-		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
-			admission := runForkReplayResumeAdmissionWithBlocker(replayAdmission, fact, blocker)
-			return RunForkMaterialization{
-				SourceRunID:           plan.SourceRunID,
-				ForkPoint:             plan.ForkPoint,
-				ExecutionReady:        false,
-				ReplayResumeAdmission: admission,
-				UnsupportedBlockers:   admission.UnsupportedBlockers,
-				DeliveryResumeBlocked: true,
-			}, err
-		}
+	conversationAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx, s.DB, catalog, plan.SourceRunID, plan.ForkPoint.Timestamp)
+	if err != nil {
 		return RunForkMaterialization{}, err
 	}
+	replayAdmission = runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(replayAdmission, conversationAdvancedFacts)
 	if err := ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, s.DB, catalog, plan.SourceRunID, plan.ForkPoint.Timestamp); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			admission := runForkReplayResumeAdmissionWithBlocker(replayAdmission, fact, blocker)
@@ -326,13 +317,11 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		result.UnsupportedBlockers = blockers
 		return result, fmt.Errorf("selected-contract fork activation blocked: %s", runForkBlockerCodes(blockers))
 	}
-	if err := ensureRunForkNoPostForkConversationHistory(ctx, tx, catalog, lineage.SourceRunID, lineage.ForkEventTime); err != nil {
-		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
-			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
-			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
-		}
+	conversationAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx, tx, catalog, lineage.SourceRunID, lineage.ForkEventTime)
+	if err != nil {
 		return result, err
 	}
+	result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(result.ReplayResumeAdmission, conversationAdvancedFacts)
 	if err := ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, tx, catalog, lineage.SourceRunID, lineage.ForkEventTime); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
@@ -340,7 +329,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		}
 		return result, err
 	}
-	sourceAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedFacts(ctx, tx, catalog, lineage)
+	sourceAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedFacts(ctx, tx, catalog, lineage, conversationAdvancedFacts)
 	if err != nil {
 		return result, err
 	}
@@ -656,7 +645,7 @@ func runForkSelectedContractBranchSourceStatusSupported(status string) bool {
 	}
 }
 
-func collectRunForkSelectedContractSourceAdvancedFacts(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage) ([]string, error) {
+func collectRunForkSelectedContractSourceAdvancedFacts(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, lineage runForkActivationLineage, conversationAdvancedFacts []string) ([]string, error) {
 	checks := []struct {
 		code    string
 		enabled bool
@@ -755,6 +744,7 @@ func collectRunForkSelectedContractSourceAdvancedFacts(ctx context.Context, tx *
 	case "completed", "failed", "cancelled":
 		facts = append(facts, "source_run_terminal_at_activation")
 	}
+	facts = append(facts, conversationAdvancedFacts...)
 	for _, check := range checks {
 		if !check.enabled {
 			continue
@@ -911,7 +901,7 @@ func runForkPostForkCommittedReplayScopeMarkerPredicates(catalog schemaColumnCat
 	return predicates
 }
 
-func ensureRunForkNoPostForkConversationHistory(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID string, forkTime time.Time) error {
+func collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID string, forkTime time.Time) ([]string, error) {
 	checks := []struct {
 		code       string
 		table      string
@@ -933,6 +923,7 @@ func ensureRunForkNoPostForkConversationHistory(ctx context.Context, q timerReco
 			predicates: runForkPostForkConversationPredicates(catalog, "agent_turns", "created_at"),
 		},
 	}
+	facts := []string{}
 	for _, check := range checks {
 		if len(check.predicates) == 0 || !catalog.hasColumns(check.table, "run_id") {
 			continue
@@ -947,13 +938,44 @@ func ensureRunForkNoPostForkConversationHistory(ctx context.Context, q timerReco
 			)
 		`, check.table, strings.Join(check.predicates, " OR "))
 		if err := q.QueryRowContext(ctx, query, sourceRunID, forkTime).Scan(&exists); err != nil {
-			return fmt.Errorf("check selected-contract %s: %w", check.code, err)
+			return nil, fmt.Errorf("check selected-contract %s: %w", check.code, err)
 		}
 		if exists {
-			return runForkReplayResumeError(check.code, RunForkReplayResumeFactSourceAdvanced, fmt.Sprintf("selected-contract conversation lineage policy blocked: %s", check.code))
+			facts = append(facts, check.code)
 		}
 	}
-	return nil
+	return uniqueNonEmptyStrings(facts), nil
+}
+
+func runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(admission RunForkReplayResumeAdmission, facts []string) RunForkReplayResumeAdmission {
+	if len(facts) == 0 {
+		return admission
+	}
+	if strings.TrimSpace(admission.Owner) == "" {
+		admission.Owner = RunForkReplayResumeAdmissionOwner
+	}
+	seen := map[string]struct{}{}
+	for _, disposition := range admission.Dispositions {
+		if strings.TrimSpace(disposition.Fact) != RunForkReplayResumeFactSourceAdvanced ||
+			strings.TrimSpace(disposition.Disposition) != RunForkReplayResumeDispositionLineageOnly ||
+			strings.TrimSpace(disposition.Owner) != RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner {
+			continue
+		}
+		seen[strings.TrimSpace(disposition.Classification)] = struct{}{}
+	}
+	for _, fact := range uniqueNonEmptyStrings(facts) {
+		if _, ok := seen[fact]; ok {
+			continue
+		}
+		admission.Dispositions = append(admission.Dispositions, RunForkReplayResumeDisposition{
+			Fact:           RunForkReplayResumeFactSourceAdvanced,
+			Disposition:    RunForkReplayResumeDispositionLineageOnly,
+			Owner:          RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner,
+			Classification: fact,
+			Message:        fmt.Sprintf("%s classifies post-T source conversation-history fact %s as selected-contract branch-divergence lineage only; fresh fork-local conversation rows must be created by normal runtime execution under the fork run_id", RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner, fact),
+		})
+	}
+	return admission
 }
 
 func runForkPostForkConversationPredicates(catalog schemaColumnCatalog, table string, columns ...string) []string {
