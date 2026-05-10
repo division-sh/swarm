@@ -132,7 +132,7 @@ type apiIdempotencyRecord struct {
 	Response    json.RawMessage
 }
 
-func loadAPIIdempotency(ctx context.Context, q *sql.Conn, req APIIdempotencyRequest) (apiIdempotencyRecord, bool, error) {
+func loadAPIIdempotency(ctx context.Context, q execQueryer, req APIIdempotencyRequest) (apiIdempotencyRecord, bool, error) {
 	var record apiIdempotencyRecord
 	err := q.QueryRowContext(ctx, `
 		SELECT request_hash, resource_id, response
@@ -152,7 +152,7 @@ func loadAPIIdempotency(ctx context.Context, q *sql.Conn, req APIIdempotencyRequ
 	}
 }
 
-func storeAPIIdempotency(ctx context.Context, q *sql.Conn, req APIIdempotencyRequest, completion APIIdempotencyCompletion) error {
+func storeAPIIdempotency(ctx context.Context, q execQueryer, req APIIdempotencyRequest, completion APIIdempotencyCompletion) error {
 	_, err := q.ExecContext(ctx, `
 		INSERT INTO api_idempotency (
 			method, actor_token_id, idempotency_key, request_hash,
@@ -166,7 +166,7 @@ func storeAPIIdempotency(ctx context.Context, q *sql.Conn, req APIIdempotencyReq
 	return nil
 }
 
-func purgeExpiredAPIIdempotency(ctx context.Context, q *sql.Conn, now time.Time) error {
+func purgeExpiredAPIIdempotency(ctx context.Context, q execQueryer, now time.Time) error {
 	_, err := q.ExecContext(ctx, `DELETE FROM api_idempotency WHERE expires_at <= $1`, now)
 	if err != nil {
 		return fmt.Errorf("purge expired api idempotency responses: %w", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -165,6 +166,93 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	}
 }
 
+func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceEventID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:      sourceEventID,
+		Type:    "review.requested",
+		RunID:   uuid.NewString(),
+		Payload: json.RawMessage(`{"request":true}`),
+	}); err != nil {
+		t.Fatalf("append source event: %v", err)
+	}
+	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		EventID: sourceEventID,
+		Type:    "review_request",
+		Summary: "needs approval",
+		Context: []byte(`{"title":"review this"}`),
+	})
+	if err != nil {
+		t.Fatalf("insert mailbox: %v", err)
+	}
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	failingHandler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:      func() time.Time { return now },
+			Ready:    func() bool { return true },
+			Database: fakePinger{},
+			Mailbox:  pg,
+			Events:   failingTxPublisher{},
+			MailboxApprovalRoutes: map[string]string{
+				"review_request": "mailbox.item_decided",
+			},
+		}),
+	})
+	approveBody := `{"jsonrpc":"2.0","id":"approve","method":"mailbox.approve","params":{"mailbox_id":"` + mailboxID + `","decision_payload":{"approved":true},"idempotency_key":"idem-publish-fails"}}`
+	failed := rpcCall(t, failingHandler, approveBody)
+	if failed.Error == nil {
+		t.Fatal("mailbox.approve with failing publisher error = nil")
+	}
+	detail, err := pg.GetV1MailboxItem(ctx, mailboxID)
+	if err != nil {
+		t.Fatalf("get mailbox after failed publish: %v", err)
+	}
+	if detail.Item.Status != "pending" {
+		t.Fatalf("mailbox status after failed publish = %s, want pending", detail.Item.Status)
+	}
+	if count := countEventsByName(t, db, "mailbox.item_decided"); count != 0 {
+		t.Fatalf("mailbox.item_decided event count after failed publish = %d, want 0", count)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 0 {
+		t.Fatalf("api_idempotency rows after failed publish = %d, want 0", count)
+	}
+
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	successHandler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:      func() time.Time { return now },
+			Ready:    func() bool { return true },
+			Database: fakePinger{},
+			Mailbox:  pg,
+			Events:   bus,
+			MailboxApprovalRoutes: map[string]string{
+				"review_request": "mailbox.item_decided",
+			},
+		}),
+	})
+	succeeded := rpcCall(t, successHandler, approveBody)
+	if succeeded.Error != nil {
+		t.Fatalf("mailbox.approve retry after failed publish error = %#v", succeeded.Error)
+	}
+	if status := asMap(t, succeeded.Result)["status"]; status != "decided" {
+		t.Fatalf("mailbox.approve retry status = %v, want decided", status)
+	}
+	if count := countEventsByName(t, db, "mailbox.item_decided"); count != 1 {
+		t.Fatalf("mailbox.item_decided event count after retry = %d, want 1", count)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows after retry = %d, want 1", count)
+	}
+}
+
 func countEventsByName(t *testing.T, db *sql.DB, eventName string) int {
 	t.Helper()
 	var count int
@@ -172,4 +260,23 @@ func countEventsByName(t *testing.T, db *sql.DB, eventName string) int {
 		t.Fatalf("count events %s: %v", eventName, err)
 	}
 	return count
+}
+
+func countAPIIdempotencyRows(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM api_idempotency`).Scan(&count); err != nil {
+		t.Fatalf("count api_idempotency rows: %v", err)
+	}
+	return count
+}
+
+type failingTxPublisher struct{}
+
+func (failingTxPublisher) Publish(context.Context, events.Event) error {
+	return nil
+}
+
+func (failingTxPublisher) PublishTx(context.Context, *sql.Tx, events.Event) error {
+	return errors.New("publish failed")
 }
