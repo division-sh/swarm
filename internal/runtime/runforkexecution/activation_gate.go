@@ -71,6 +71,13 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("plan selected-contract activation gate: %w", err)
 	}
+	replayAdmission := store.RunForkSelectedContractSessionTurnAuditLineageAdmission(plan)
+	if len(plan.ReplayResumeAdmission.Dispositions) > 0 || len(plan.ReplayResumeAdmission.UnsupportedBlockers) > 0 {
+		plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
+		plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
+	}
+	plan.ReplayResumeAdmission = replayAdmission
+	plan.ExecutionReady = replayAdmission.StateOnlyExecutionReady || replayAdmission.DeliveryEventReplayReady
 	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
 		Plan:              plan,
 		Source:            loadedSource.Source,

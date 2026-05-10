@@ -51,6 +51,112 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	}
 }
 
+func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistoryAsLineage(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	sessionID := uuid.NewString()
+	auditID := uuid.NewString()
+	turnID := uuid.NewString()
+	at := time.Unix(1700002410, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	for _, code := range []string{
+		RunForkBlockerSessionHistoryUnproven,
+		RunForkBlockerConversationAuditUnproven,
+		RunForkBlockerActiveTurnHistoryUnproven,
+	} {
+		if !runForkTestHasPlanBlocker(plan, code) {
+			t.Fatalf("plan blockers = %#v, want %s", plan.UnsupportedBlockers, code)
+		}
+	}
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	if materialized.ForkRunID == "" {
+		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
+	}
+	for _, code := range []string{
+		RunForkBlockerSessionHistoryUnproven,
+		RunForkBlockerConversationAuditUnproven,
+		RunForkBlockerActiveTurnHistoryUnproven,
+	} {
+		if runForkTestHasMaterializationBlocker(materialized, code) {
+			t.Fatalf("selected-contract materialization kept %s: %#v", code, materialized.UnsupportedBlockers)
+		}
+	}
+	for _, fact := range []string{
+		RunForkReplayResumeFactSessionHistory,
+		RunForkReplayResumeFactConversationAuditHistory,
+		RunForkReplayResumeFactActiveTurnHistory,
+	} {
+		if !runForkTestHasLineageDispositionOwner(materialized.ReplayResumeAdmission, fact, RunForkSelectedContractSessionTurnAuditLineagePolicyOwner) {
+			t.Fatalf("admission missing %s lineage owner: %#v", fact, materialized.ReplayResumeAdmission)
+		}
+	}
+	assertNoCopiedConversationRows(t, db, materialized.ForkRunID, sessionID, auditID, turnID)
+}
+
+func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCouplingFailClosed(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700002420, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, started_at, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'active-agent', 'in_progress', $4::uuid, $3, $3)
+	`, sourceRunID, eventID, at, uuid.NewString()); err != nil {
+		t.Fatalf("seed active delivery coupling: %v", err)
+	}
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err == nil || (!strings.Contains(err.Error(), RunForkBlockerSessionHistoryUnproven) && !strings.Contains(err.Error(), RunForkBlockerActiveTurnHistoryUnproven)) {
+		t.Fatalf("materialization error = %v, want active session/turn blocker", err)
+	}
+	if materialized.ForkRunID != "" {
+		t.Fatalf("materialized fork despite active coupling: %#v", materialized)
+	}
+	if !runForkTestHasMaterializationBlocker(materialized, RunForkBlockerSessionHistoryUnproven) ||
+		!runForkTestHasMaterializationBlocker(materialized, RunForkBlockerActiveTurnHistoryUnproven) {
+		t.Fatalf("materialization blockers = %#v, want active session and turn blockers", materialized.UnsupportedBlockers)
+	}
+	assertNoSelectedContractForkRows(t, db, sourceRunID)
+}
+
 func TestSelectedContractExecutionMaterializationPreflightsLineageCapability(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -493,6 +599,52 @@ func TestPostTSourceTimerFailsClosedForSelectedContractActivation(t *testing.T) 
 	assertNoForkTimerCopiesForSource(t, db, sourceRunID)
 }
 
+func TestPostTSourceSessionFailsClosedBeforeSelectedContractMaterialization(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700003605, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode, status, created_at)
+		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
+		ON CONFLICT (agent_id) DO NOTHING
+	`, at); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			runtime_mode, status, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
+			'session_per_entity', 'active', $4, $4)
+	`, uuid.NewString(), sourceRunID, entityID, at.Add(time.Minute)); err != nil {
+		t.Fatalf("seed post-T source session: %v", err)
+	}
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "source_sessions_advanced_after_fork_point") {
+		t.Fatalf("materialization error = %v, want post-T source session blocker", err)
+	}
+	if materialized.ForkRunID != "" {
+		t.Fatalf("materialized fork despite post-T source session: %#v", materialized)
+	}
+	assertNoSelectedContractForkRows(t, db, sourceRunID)
+}
+
 func TestPostTSourceRouteFailsClosedForSelectedContractActivation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -592,6 +744,112 @@ func TestPostTSourceRouteFailsClosedForSelectedContractActivation(t *testing.T) 
 	}
 }
 
+func TestPostTSourceConversationHistoryFailsClosedForSelectedContractActivation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		code string
+		seed func(context.Context, *sql.DB, string, string, string, time.Time) error
+	}{
+		{
+			name: "session",
+			code: "source_sessions_advanced_after_fork_point",
+			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+				_, err := db.ExecContext(ctx, `
+					INSERT INTO agent_sessions (
+						session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+						runtime_mode, status, created_at, updated_at
+					)
+					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
+						'session_per_entity', 'active', $4, $4)
+				`, uuid.NewString(), sourceRunID, entityID, at.Add(time.Minute))
+				return err
+			},
+		},
+		{
+			name: "conversation audit",
+			code: "source_conversation_audits_advanced_after_fork_point",
+			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+				_, err := db.ExecContext(ctx, `
+					INSERT INTO agent_conversation_audits (
+						session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+						runtime_mode, runtime_state, status, created_at, updated_at
+					)
+					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
+						'task', '{}'::jsonb, 'active', $4, $4)
+				`, uuid.NewString(), sourceRunID, entityID, at.Add(time.Minute))
+				return err
+			},
+		},
+		{
+			name: "turn",
+			code: "source_turns_advanced_after_fork_point",
+			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+				_, err := db.ExecContext(ctx, `
+					INSERT INTO agent_turns (
+						turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+						trigger_event_id, trigger_event_type, task_id, created_at
+					)
+					VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'task', $4::text, $4::uuid,
+						$5::uuid, 'item.received', 'task-a', $6)
+				`, uuid.NewString(), sourceRunID, uuid.NewString(), entityID, eventID, at.Add(time.Minute))
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			pg := &PostgresStore{DB: db}
+			ctx := context.Background()
+			sourceRunID := uuid.NewString()
+			entityID := uuid.NewString()
+			eventID := uuid.NewString()
+			at := time.Unix(1700003620, 0).UTC()
+			seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode, status, created_at)
+				VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
+				ON CONFLICT (agent_id) DO NOTHING
+			`, at); err != nil {
+				t.Fatalf("seed agent: %v", err)
+			}
+
+			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+				SourceRunID: sourceRunID,
+				At:          eventID,
+				ContractSelection: RunForkContractSelection{
+					Mode:            "selected_contracts",
+					ContractsRoot:   "/tmp/selected-contracts",
+					WorkflowName:    "selected-workflow",
+					WorkflowVersion: "v1",
+				},
+			})
+			if err != nil {
+				t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+			}
+			if err := tc.seed(ctx, db, sourceRunID, entityID, eventID, at); err != nil {
+				t.Fatalf("seed post-T %s: %v", tc.name, err)
+			}
+
+			activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+				ForkRunID:             materialized.ForkRunID,
+				AllowedSourceEventIDs: []string{eventID},
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.code) {
+				t.Fatalf("activation error = %v, want %s", err, tc.code)
+			}
+			if activation.Activated || activation.BranchDivergence != nil || activation.SourceAdvancedAfterFork {
+				t.Fatalf("activation = %#v, want conversation post-T blocked before branch divergence", activation)
+			}
+			if !runForkTestHasActivationBlocker(activation, tc.code) {
+				t.Fatalf("activation blockers = %#v, want %s", activation.UnsupportedBlockers, tc.code)
+			}
+			if !runForkTestHasDispositionBlocker(activation.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced, tc.code) {
+				t.Fatalf("activation replay admission = %#v, want source advanced blocker %s", activation.ReplayResumeAdmission, tc.code)
+			}
+		})
+	}
+}
+
 func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -678,6 +936,108 @@ func seedSelectedContractExecutionStoreSource(t *testing.T, db execContextDB, so
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
+}
+
+func seedSelectedContractSourceConversationHistory(t *testing.T, db execContextDB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode, status, created_at)
+		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
+		ON CONFLICT (agent_id) DO NOTHING
+	`, at); err != nil {
+		t.Fatalf("seed conversation agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			runtime_mode, status, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
+			'session_per_entity', 'active', $4, $4)
+	`, sessionID, sourceRunID, entityID, at); err != nil {
+		t.Fatalf("seed source session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_conversation_audits (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			runtime_mode, runtime_state, status, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
+			'task', '{}'::jsonb, 'active', $4, $4)
+	`, auditID, sourceRunID, entityID, at); err != nil {
+		t.Fatalf("seed source conversation audit: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_turns (
+			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			trigger_event_id, trigger_event_type, task_id, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'session_per_entity', $4::text, $4::uuid,
+			$5::uuid, 'item.received', 'task-a', $6)
+	`, turnID, sourceRunID, sessionID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed source turn: %v", err)
+	}
+}
+
+func assertNoCopiedConversationRows(t *testing.T, db *sql.DB, forkRunID, sourceSessionID, sourceAuditID, sourceTurnID string) {
+	t.Helper()
+	ctx := context.Background()
+	checks := map[string]struct {
+		query string
+		id    string
+	}{
+		"agent_sessions": {
+			query: `SELECT COUNT(*) FROM agent_sessions WHERE run_id = $1::uuid OR session_id = $2::uuid`,
+			id:    sourceSessionID,
+		},
+		"agent_conversation_audits": {
+			query: `SELECT COUNT(*) FROM agent_conversation_audits WHERE run_id = $1::uuid OR session_id = $2::uuid`,
+			id:    sourceAuditID,
+		},
+		"agent_turns": {
+			query: `SELECT COUNT(*) FROM agent_turns WHERE run_id = $1::uuid OR turn_id = $2::uuid`,
+			id:    sourceTurnID,
+		},
+	}
+	for name, check := range checks {
+		var count int
+		if err := db.QueryRowContext(ctx, check.query, forkRunID, check.id).Scan(&count); err != nil {
+			t.Fatalf("count copied %s: %v", name, err)
+		}
+		if count != 1 {
+			t.Fatalf("%s fork/copy count = %d, want exactly the original source row only", name, count)
+		}
+	}
+}
+
+func runForkTestHasPlanBlocker(plan RunForkPlan, code string) bool {
+	for _, blocker := range plan.UnsupportedBlockers {
+		if blocker.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func runForkTestHasMaterializationBlocker(materialized RunForkMaterialization, code string) bool {
+	for _, blocker := range materialized.UnsupportedBlockers {
+		if blocker.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func runForkTestHasLineageDispositionOwner(admission RunForkReplayResumeAdmission, fact, owner string) bool {
+	for _, disposition := range admission.Dispositions {
+		if disposition.Fact == fact &&
+			disposition.Disposition == RunForkReplayResumeDispositionLineageOnly &&
+			disposition.Owner == owner {
+			return true
+		}
+	}
+	return false
 }
 
 func assertNoForkTimerCopiesForSource(t *testing.T, db *sql.DB, sourceRunID string) {

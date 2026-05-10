@@ -308,7 +308,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	}
 }
 
-func TestExecuteSelectedContractRunForkPreservesSessionBlocker(t *testing.T) {
+func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
@@ -328,6 +328,8 @@ func TestExecuteSelectedContractRunForkPreservesSessionBlocker(t *testing.T) {
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	sessionID := uuid.NewString()
+	auditID := uuid.NewString()
+	turnID := uuid.NewString()
 	at := time.Unix(1700002300, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	if _, err := db.ExecContext(ctx, `
@@ -347,8 +349,28 @@ func TestExecuteSelectedContractRunForkPreservesSessionBlocker(t *testing.T) {
 	`, sessionID, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source session: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_conversation_audits (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			runtime_mode, runtime_state, status, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', $3::text, 'entity',
+			'task', '{}'::jsonb, 'active', $4, $4)
+	`, auditID, sourceRunID, entityID, at); err != nil {
+		t.Fatalf("seed source conversation audit: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_turns (
+			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			trigger_event_id, trigger_event_type, task_id, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent-a', $3::uuid, 'session_per_entity', $4::text, $4::uuid,
+			$5::uuid, 'item.received', 'task-a', $6)
+	`, turnID, sourceRunID, sessionID, entityID, sourceEventID, at); err != nil {
+		t.Fatalf("seed source turn: %v", err)
+	}
 
-	_, err = ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:  sourceRunID,
 		At:           sourceEventID,
 		Store:        pg,
@@ -358,8 +380,39 @@ func TestExecuteSelectedContractRunForkPreservesSessionBlocker(t *testing.T) {
 			contractsRoot,
 		),
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkBlockerSessionHistoryUnproven) {
-		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want session blocker", err)
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	}
+	if result.Materialization.ForkRunID == "" || !result.Activation.Activated {
+		t.Fatalf("selected execution result = %#v", result)
+	}
+	for _, code := range []string{
+		store.RunForkBlockerSessionHistoryUnproven,
+		store.RunForkBlockerConversationAuditUnproven,
+		store.RunForkBlockerActiveTurnHistoryUnproven,
+	} {
+		if selectedExecutionResultHasBlocker(result, code) {
+			t.Fatalf("selected execution retained %s: materialization=%#v activation=%#v", code, result.Materialization.UnsupportedBlockers, result.Activation.UnsupportedBlockers)
+		}
+	}
+	var copiedSessions, copiedAudits, copiedTurns int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM agent_sessions WHERE run_id = $1::uuid OR session_id = $2::uuid
+	`, result.Materialization.ForkRunID, sessionID).Scan(&copiedSessions); err != nil {
+		t.Fatalf("count session copies: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM agent_conversation_audits WHERE run_id = $1::uuid OR session_id = $2::uuid
+	`, result.Materialization.ForkRunID, auditID).Scan(&copiedAudits); err != nil {
+		t.Fatalf("count audit copies: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM agent_turns WHERE run_id = $1::uuid OR turn_id = $2::uuid
+	`, result.Materialization.ForkRunID, turnID).Scan(&copiedTurns); err != nil {
+		t.Fatalf("count turn copies: %v", err)
+	}
+	if copiedSessions != 1 || copiedAudits != 1 || copiedTurns != 1 {
+		t.Fatalf("copied conversation rows sessions=%d audits=%d turns=%d, want source-only 1/1/1", copiedSessions, copiedAudits, copiedTurns)
 	}
 }
 
@@ -904,6 +957,20 @@ func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEv
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func selectedExecutionResultHasBlocker(result SelectedContractExecutionResult, code string) bool {
+	for _, blocker := range result.Materialization.UnsupportedBlockers {
+		if blocker.Code == code {
+			return true
+		}
+	}
+	for _, blocker := range result.Activation.UnsupportedBlockers {
+		if blocker.Code == code {
 			return true
 		}
 	}

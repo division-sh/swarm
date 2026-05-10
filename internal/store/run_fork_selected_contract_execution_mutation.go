@@ -126,10 +126,11 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	if err != nil {
 		return RunForkMaterialization{}, err
 	}
+	replayAdmission := RunForkSelectedContractSessionTurnAuditLineageAdmission(plan)
 	timerReconstruction, err := s.planRunForkSelectedContractTimerReconstruction(ctx, catalog, plan)
 	if err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
-			admission := runForkReplayResumeAdmissionWithBlocker(plan.ReplayResumeAdmission, fact, blocker)
+			admission := runForkReplayResumeAdmissionWithBlocker(replayAdmission, fact, blocker)
 			return RunForkMaterialization{
 				SourceRunID:           plan.SourceRunID,
 				ForkPoint:             plan.ForkPoint,
@@ -141,12 +142,27 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		}
 		return RunForkMaterialization{}, err
 	}
-	if blockers := runForkSelectedContractExecutionPlanBlockersWithTimerResolution(plan, nil, timerReconstruction.Required); len(blockers) > 0 {
+	replayAdmission = runForkReplayResumeAdmissionWithTimerReconstruction(replayAdmission, timerReconstruction)
+	if err := ensureRunForkNoPostForkConversationHistory(ctx, s.DB, catalog, plan.SourceRunID, plan.ForkPoint.Timestamp); err != nil {
+		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+			admission := runForkReplayResumeAdmissionWithBlocker(replayAdmission, fact, blocker)
+			return RunForkMaterialization{
+				SourceRunID:           plan.SourceRunID,
+				ForkPoint:             plan.ForkPoint,
+				ExecutionReady:        false,
+				ReplayResumeAdmission: admission,
+				UnsupportedBlockers:   admission.UnsupportedBlockers,
+				DeliveryResumeBlocked: true,
+			}, err
+		}
+		return RunForkMaterialization{}, err
+	}
+	if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, replayAdmission, nil); len(blockers) > 0 {
 		return RunForkMaterialization{
 			SourceRunID:           plan.SourceRunID,
 			ForkPoint:             plan.ForkPoint,
 			ExecutionReady:        false,
-			ReplayResumeAdmission: runForkReplayResumeAdmissionWithTimerReconstruction(plan.ReplayResumeAdmission, timerReconstruction),
+			ReplayResumeAdmission: replayAdmission,
 			UnsupportedBlockers:   blockers,
 			DeliveryResumeBlocked: true,
 		}, fmt.Errorf("selected-contract fork execution materialization blocked: %s", runForkBlockerCodes(blockers))
@@ -207,8 +223,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return RunForkMaterialization{}, fmt.Errorf("commit selected-contract fork materialization: %w", err)
 	}
 	committed = true
-	replayAdmission := runForkReplayResumeAdmissionWithTimerReconstruction(plan.ReplayResumeAdmission, timerReconstruction)
-	unsupportedBlockers := runForkSelectedContractExecutionPlanBlockersWithTimerResolution(plan, nil, timerReconstruction.Required)
+	unsupportedBlockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, replayAdmission, nil)
 	return RunForkMaterialization{
 		SourceRunID:              plan.SourceRunID,
 		ForkRunID:                forkRunID,
@@ -287,15 +302,22 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 	if err != nil {
 		return result, err
 	}
-	result.ReplayResumeAdmission = plan.ReplayResumeAdmission
+	result.ReplayResumeAdmission = RunForkSelectedContractSessionTurnAuditLineageAdmission(plan)
 	timerResolved, err := runForkSelectedContractTimerReconstructionComplete(ctx, tx, lineage, plan)
 	if err != nil {
 		return result, err
 	}
-	result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithTimerReconstruction(plan.ReplayResumeAdmission, runForkTimerReconstructionPlan{Required: timerResolved})
-	if blockers := runForkSelectedContractExecutionPlanBlockersWithTimerResolution(plan, req.AllowedSourceEventIDs, timerResolved); len(blockers) > 0 {
+	result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithTimerReconstruction(result.ReplayResumeAdmission, runForkTimerReconstructionPlan{Required: timerResolved})
+	if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, result.ReplayResumeAdmission, req.AllowedSourceEventIDs); len(blockers) > 0 {
 		result.UnsupportedBlockers = blockers
 		return result, fmt.Errorf("selected-contract fork activation blocked: %s", runForkBlockerCodes(blockers))
+	}
+	if err := ensureRunForkNoPostForkConversationHistory(ctx, tx, catalog, lineage.SourceRunID, lineage.ForkEventTime); err != nil {
+		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
+			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
+		}
+		return result, err
 	}
 	sourceAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedFacts(ctx, tx, catalog, lineage)
 	if err != nil {
@@ -770,6 +792,10 @@ func insertRunForkSelectedContractBranchDivergence(ctx context.Context, tx *sql.
 }
 
 func runForkSelectedContractExecutionPlanBlockers(plan RunForkPlan, allowedSourceEventIDs []string) []RunForkUnsupportedBlocker {
+	return runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, RunForkSelectedContractSessionTurnAuditLineageAdmission(plan), allowedSourceEventIDs)
+}
+
+func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan RunForkPlan, admission RunForkReplayResumeAdmission, allowedSourceEventIDs []string) []RunForkUnsupportedBlocker {
 	allowedEvents := map[string]struct{}{}
 	for _, eventID := range allowedSourceEventIDs {
 		if eventID = strings.TrimSpace(eventID); eventID != "" {
@@ -777,7 +803,7 @@ func runForkSelectedContractExecutionPlanBlockers(plan RunForkPlan, allowedSourc
 		}
 	}
 	blockers := []RunForkUnsupportedBlocker{}
-	for _, blocker := range plan.UnsupportedBlockers {
+	for _, blocker := range admission.UnsupportedBlockers {
 		switch strings.TrimSpace(blocker.Code) {
 		case RunForkBlockerDeliveryHistoryUnproven, RunForkBlockerNonAgentDeliveryReplayUnsupported:
 			continue
@@ -805,6 +831,61 @@ func runForkSelectedContractExecutionPlanBlockers(plan RunForkPlan, allowedSourc
 		}
 	}
 	return blockers
+}
+
+func ensureRunForkNoPostForkConversationHistory(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID string, forkTime time.Time) error {
+	checks := []struct {
+		code       string
+		table      string
+		predicates []string
+	}{
+		{
+			code:       "source_sessions_advanced_after_fork_point",
+			table:      "agent_sessions",
+			predicates: runForkPostForkConversationPredicates(catalog, "agent_sessions", "created_at", "updated_at", "terminated_at"),
+		},
+		{
+			code:       "source_conversation_audits_advanced_after_fork_point",
+			table:      "agent_conversation_audits",
+			predicates: runForkPostForkConversationPredicates(catalog, "agent_conversation_audits", "created_at", "updated_at"),
+		},
+		{
+			code:       "source_turns_advanced_after_fork_point",
+			table:      "agent_turns",
+			predicates: runForkPostForkConversationPredicates(catalog, "agent_turns", "created_at"),
+		},
+	}
+	for _, check := range checks {
+		if len(check.predicates) == 0 || !catalog.hasColumns(check.table, "run_id") {
+			continue
+		}
+		var exists bool
+		query := fmt.Sprintf(`
+			SELECT EXISTS (
+				SELECT 1
+				FROM %s
+				WHERE run_id = $1::uuid
+				  AND (%s)
+			)
+		`, check.table, strings.Join(check.predicates, " OR "))
+		if err := q.QueryRowContext(ctx, query, sourceRunID, forkTime).Scan(&exists); err != nil {
+			return fmt.Errorf("check selected-contract %s: %w", check.code, err)
+		}
+		if exists {
+			return runForkReplayResumeError(check.code, RunForkReplayResumeFactSourceAdvanced, fmt.Sprintf("selected-contract conversation lineage policy blocked: %s", check.code))
+		}
+	}
+	return nil
+}
+
+func runForkPostForkConversationPredicates(catalog schemaColumnCatalog, table string, columns ...string) []string {
+	predicates := []string{}
+	for _, column := range columns {
+		if catalog.hasColumns(table, column) {
+			predicates = append(predicates, fmt.Sprintf("%s > $2::timestamptz", column))
+		}
+	}
+	return predicates
 }
 
 func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID string, allowedSourceEventIDs []string) error {
