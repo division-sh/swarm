@@ -58,7 +58,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 		return store.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract workflow nodes: %w", err)
 	}
 
-	frontier := runForkFrontierEvents(req.Plan.PendingWork)
+	frontier, lineageOnly := runForkFrontierEvents(req.Plan.PendingWork)
 	for i := range frontier {
 		eventName := frontier[i].EventName
 		frontier[i].RuntimeEventOwners = sortedUnique(req.Source.RuntimeEventOwners(eventName))
@@ -96,11 +96,12 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 		HistoricalExecutionSupported: false,
 		FrontierEventCount:           len(frontier),
 		FrontierEvents:               frontier,
+		LineageOnlyEvents:            lineageOnly,
 		UnsupportedBlockers:          blockers,
 	}, nil
 }
 
-func runForkFrontierEvents(pending []store.RunForkPendingWork) []store.RunForkContractFrontierEvent {
+func runForkFrontierEvents(pending []store.RunForkPendingWork) ([]store.RunForkContractFrontierEvent, []store.RunForkContractFrontierLineageEvent) {
 	type aggregate struct {
 		event           store.RunForkContractFrontierEvent
 		classifications map[string]struct{}
@@ -108,7 +109,15 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) []store.RunForkCo
 		subscriberTypes map[string]struct{}
 		subscriberIDs   map[string]struct{}
 	}
+	type lineageAggregate struct {
+		event           store.RunForkContractFrontierLineageEvent
+		classifications map[string]struct{}
+		flowInstances   map[string]struct{}
+		subscriberTypes map[string]struct{}
+		subscriberIDs   map[string]struct{}
+	}
 	byEvent := map[string]*aggregate{}
+	lineageByEvent := map[string]*lineageAggregate{}
 	for _, item := range pending {
 		switch strings.TrimSpace(item.Classification) {
 		case store.RunForkPendingClassificationDeliveredCompleted, store.RunForkPendingClassificationCommittedReplay:
@@ -116,6 +125,30 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) []store.RunForkCo
 		}
 		eventID := strings.TrimSpace(item.EventID)
 		if eventID == "" {
+			continue
+		}
+		if store.RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item) {
+			agg := lineageByEvent[eventID]
+			if agg == nil {
+				agg = &lineageAggregate{
+					event: store.RunForkContractFrontierLineageEvent{
+						SourceEventID: eventID,
+						EventName:     strings.TrimSpace(item.EventName),
+						Owner:         store.RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner,
+						Disposition:   store.RunForkContractFrontierDispositionLineageNoAction,
+						Reason:        "spec-declared diagnostic platform outcome facts are persisted for lineage and are not selected-contract frontier work",
+					},
+					classifications: map[string]struct{}{},
+					flowInstances:   map[string]struct{}{},
+					subscriberTypes: map[string]struct{}{},
+					subscriberIDs:   map[string]struct{}{},
+				}
+				lineageByEvent[eventID] = agg
+			}
+			addString(agg.classifications, item.Classification)
+			addString(agg.flowInstances, item.FlowInstance)
+			addString(agg.subscriberTypes, item.SubscriberType)
+			addString(agg.subscriberIDs, item.SubscriberID)
 			continue
 		}
 		agg := byEvent[eventID]
@@ -145,7 +178,21 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) []store.RunForkCo
 		agg.event.SourceSubscriberIDs = sortedSet(agg.subscriberIDs)
 		out = append(out, agg.event)
 	}
-	return out
+	lineage := make([]store.RunForkContractFrontierLineageEvent, 0, len(lineageByEvent))
+	for _, agg := range lineageByEvent {
+		agg.event.SourceClassifications = sortedSet(agg.classifications)
+		agg.event.SourceFlowInstances = sortedSet(agg.flowInstances)
+		agg.event.SourceSubscriberTypes = sortedSet(agg.subscriberTypes)
+		agg.event.SourceSubscriberIDs = sortedSet(agg.subscriberIDs)
+		lineage = append(lineage, agg.event)
+	}
+	sort.Slice(lineage, func(i, j int) bool {
+		if lineage[i].EventName != lineage[j].EventName {
+			return lineage[i].EventName < lineage[j].EventName
+		}
+		return lineage[i].SourceEventID < lineage[j].SourceEventID
+	})
+	return out, lineage
 }
 
 func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable, source semanticview.Source, pending []store.RunForkPendingWork) error {

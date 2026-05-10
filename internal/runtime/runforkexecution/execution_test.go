@@ -189,6 +189,97 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 }
 
+func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	diagnosticEventID := uuid.NewString()
+	at := time.Unix(1700002215, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	}
+	if result.Materialization.ForkRunID == "" || !result.Activation.Activated || result.ExecutedEventCount != 1 {
+		t.Fatalf("selected execution result = %#v", result)
+	}
+	if result.SelectedContractExecutionAdmission == nil || result.SelectedContractExecutionAdmission.FrontierEventCount != 1 {
+		t.Fatalf("selected execution admission = %#v, want only selected source frontier", result.SelectedContractExecutionAdmission)
+	}
+	if selectedExecutionResultHasBlocker(result, store.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("selected execution retained unresolved route blocker: materialization=%#v activation=%#v", result.Materialization.UnsupportedBlockers, result.Activation.UnsupportedBlockers)
+	}
+
+	var diagnosticCopies int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND (
+			event_id = $2::uuid
+			OR COALESCE(source_event_id::text, '') = $2::text
+			OR event_name = 'platform.runtime_log'
+		  )
+	`, result.Materialization.ForkRunID, diagnosticEventID).Scan(&diagnosticCopies); err != nil {
+		t.Fatalf("count copied diagnostic events: %v", err)
+	}
+	if diagnosticCopies != 0 {
+		t.Fatalf("diagnostic platform events copied into fork = %d, want 0", diagnosticCopies)
+	}
+
+	var diagnosticExecutionLineage int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM run_fork_selected_contract_executions
+		WHERE fork_run_id = $1::uuid
+		  AND source_event_id = $2::uuid
+	`, result.Materialization.ForkRunID, diagnosticEventID).Scan(&diagnosticExecutionLineage); err != nil {
+		t.Fatalf("count diagnostic execution lineage: %v", err)
+	}
+	if diagnosticExecutionLineage != 0 {
+		t.Fatalf("diagnostic platform execution lineage rows = %d, want 0", diagnosticExecutionLineage)
+	}
+
+	var selectedExecutionLineage int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM run_fork_selected_contract_executions
+		WHERE fork_run_id = $1::uuid
+		  AND source_event_id = $2::uuid
+	`, result.Materialization.ForkRunID, sourceEventID).Scan(&selectedExecutionLineage); err != nil {
+		t.Fatalf("count selected execution lineage: %v", err)
+	}
+	if selectedExecutionLineage != 1 {
+		t.Fatalf("selected source execution lineage rows = %d, want 1", selectedExecutionLineage)
+	}
+}
+
 func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSelectedRecipients(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -1155,6 +1246,37 @@ func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEv
 		VALUES ($1::uuid, 'item.received', $2::uuid, 'flow-a/1', 'handler_error', 'source dead letter must not suppress fork', 'old-source-node', $3)
 	`, sourceEventID, entityID, at); err != nil {
 		t.Fatalf("seed source dead letter: %v", err)
+	}
+}
+
+func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, sourceRunID, diagnosticEventID string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	payload, _ := json.Marshal(map[string]any{
+		"level":   "info",
+		"message": "diagnostic platform row must remain lineage-only",
+	})
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'platform.runtime_log', NULL, NULL, 'global',
+			$3::jsonb, 'pipeline', 'platform', $4
+		)
+	`, sourceRunID, diagnosticEventID, string(payload), at); err != nil {
+		t.Fatalf("seed diagnostic platform event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at
+		)
+		VALUES (
+			$1::uuid, 'platform', 'pipeline', NULL, NULL,
+			'dead_letter', 'runtime_log_pipeline_dead_letter', '{}'::jsonb, $2
+		)
+	`, diagnosticEventID, at); err != nil {
+		t.Fatalf("seed diagnostic platform receipt: %v", err)
 	}
 }
 

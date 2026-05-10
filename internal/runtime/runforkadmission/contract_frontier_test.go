@@ -121,6 +121,95 @@ func TestAdmitContractFrontier_CommittedReplayScopeMarkersAreNotFrontierWork(t *
 	}
 }
 
+func TestAdmitContractFrontier_DiagnosticPlatformOutcomesAreLineageOnly(t *testing.T) {
+	for _, eventName := range []string{"platform.runtime_log", "platform.inbound_recorded"} {
+		t.Run(eventName, func(t *testing.T) {
+			plan := testRunForkPlan(eventName, store.RunForkPendingClassificationDeadLetter, "platform", "pipeline")
+			source := testContractFrontierSource("consumer-node")
+
+			admission, err := AdmitContractFrontier(ContractFrontierRequest{
+				Plan:              plan,
+				Source:            source,
+				ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+			})
+			if err != nil {
+				t.Fatalf("AdmitContractFrontier: %v", err)
+			}
+			if admission.FrontierEventCount != 0 || len(admission.FrontierEvents) != 0 {
+				t.Fatalf("frontier events = %#v, want none for diagnostic platform outcome", admission.FrontierEvents)
+			}
+			if len(admission.UnsupportedBlockers) != 0 {
+				t.Fatalf("blockers = %#v, want none for diagnostic platform outcome", admission.UnsupportedBlockers)
+			}
+			if len(admission.LineageOnlyEvents) != 1 {
+				t.Fatalf("lineage-only events = %#v, want one diagnostic lineage event", admission.LineageOnlyEvents)
+			}
+			lineage := admission.LineageOnlyEvents[0]
+			if lineage.EventName != eventName {
+				t.Fatalf("lineage event name = %q, want %q", lineage.EventName, eventName)
+			}
+			if lineage.Owner != store.RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner {
+				t.Fatalf("lineage owner = %q, want %q", lineage.Owner, store.RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner)
+			}
+			if lineage.Disposition != store.RunForkContractFrontierDispositionLineageNoAction {
+				t.Fatalf("lineage disposition = %q, want %q", lineage.Disposition, store.RunForkContractFrontierDispositionLineageNoAction)
+			}
+			if !hasString(lineage.SourceClassifications, store.RunForkPendingClassificationDeadLetter) || !hasString(lineage.SourceSubscriberTypes, "platform") {
+				t.Fatalf("lineage evidence = classifications:%v subscriber_types:%v", lineage.SourceClassifications, lineage.SourceSubscriberTypes)
+			}
+		})
+	}
+}
+
+func TestAdmitContractFrontier_NonDiagnosticPlatformDeadLetterRemainsFailClosed(t *testing.T) {
+	plan := testRunForkPlan("platform.dead_letter", store.RunForkPendingClassificationDeadLetter, "platform", "pipeline")
+	source := testContractFrontierSource("consumer-node")
+
+	admission, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
+		t.Fatalf("frontier events = %#v, want non-diagnostic platform outcome to remain frontier", admission.FrontierEvents)
+	}
+	if len(admission.LineageOnlyEvents) != 0 {
+		t.Fatalf("lineage-only events = %#v, want none for non-diagnostic platform outcome", admission.LineageOnlyEvents)
+	}
+	if !hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("blockers = %#v, want unresolved-route blocker", admission.UnsupportedBlockers)
+	}
+}
+
+func TestAdmitContractFrontier_SelectedDeadLetterRemainsExecutableFrontier(t *testing.T) {
+	plan := testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationDeadLetter, "node", "source-node")
+	source := testContractFrontierSource("consumer-node")
+
+	admission, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
+		t.Fatalf("frontier events = %#v, want selected dead-letter source fact to remain frontier", admission.FrontierEvents)
+	}
+	if len(admission.LineageOnlyEvents) != 0 {
+		t.Fatalf("lineage-only events = %#v, want none for selected dead-letter source fact", admission.LineageOnlyEvents)
+	}
+	if hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+		t.Fatalf("blockers = %#v, want no unresolved-route blocker for selected source fact", admission.UnsupportedBlockers)
+	}
+	if !hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierExecutionUnsupported) {
+		t.Fatalf("blockers = %#v, want execution unsupported", admission.UnsupportedBlockers)
+	}
+}
+
 func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", store.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].FlowInstance = "review/inst-1"
