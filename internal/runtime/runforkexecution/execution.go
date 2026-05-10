@@ -145,6 +145,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		RecipientPlanning: *model.RecipientPlanning,
 		SourceRunID:       plan.SourceRunID,
 		ForkRunID:         materialization.ForkRunID,
+		ForkTime:          plan.ForkPoint.Timestamp,
 		SourceEvents:      sourceEventIDs,
 		ExecutionOwner:    store.RunForkSelectedContractExecutionOwner,
 	})
@@ -217,11 +218,15 @@ type publishSelectedContractForkEventsRequest struct {
 	RecipientPlanning store.RunForkSelectedContractRecipientPlanning
 	SourceRunID       string
 	ForkRunID         string
+	ForkTime          time.Time
 	SourceEvents      []string
 	ExecutionOwner    string
 }
 
 func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedContractForkEventsRequest) ([]SelectedContractExecutionForkEvent, error) {
+	if err := req.Store.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.ForkTime); err != nil {
+		return nil, err
+	}
 	sourceEvents, err := req.Store.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.SourceEvents)
 	if err != nil {
 		return nil, err

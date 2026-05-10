@@ -857,6 +857,17 @@ func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan RunForkPlan,
 	return blockers
 }
 
+func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID string, forkTime time.Time) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("postgres store is required")
+	}
+	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
+		return err
+	}
+	return ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, s.DB, catalog, sourceRunID, forkTime)
+}
+
 func ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID string, forkTime time.Time) error {
 	if !catalog.hasColumns("event_deliveries", "run_id", "subscriber_type", "subscriber_id", "reason_code") {
 		return nil
