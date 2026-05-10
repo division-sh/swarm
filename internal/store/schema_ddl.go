@@ -347,6 +347,8 @@ func platformTableOrder(name string) int {
 		return 95
 	case "mailbox":
 		return 100
+	case "api_idempotency":
+		return 105
 	case "spend_ledger":
 		return 110
 	case "timers":

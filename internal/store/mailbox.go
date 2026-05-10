@@ -427,9 +427,11 @@ func scanSpecMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {
 }
 
 func normalizeMailboxSeverity(priority string) string {
-	switch strings.TrimSpace(priority) {
-	case "critical", "urgent":
-		return strings.TrimSpace(priority)
+	switch strings.TrimSpace(strings.ToLower(priority)) {
+	case "critical":
+		return "critical"
+	case "urgent", "high":
+		return "urgent"
 	default:
 		return "normal"
 	}

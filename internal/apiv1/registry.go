@@ -11,8 +11,13 @@ import (
 )
 
 const (
-	MethodUnavailableCode = "METHOD_UNAVAILABLE"
-	RunNotFoundCode       = "RUN_NOT_FOUND"
+	MethodUnavailableCode                = "METHOD_UNAVAILABLE"
+	RunNotFoundCode                      = "RUN_NOT_FOUND"
+	MailboxNotFoundCode                  = "MAILBOX_NOT_FOUND"
+	MailboxAlreadyDecidedCode            = "MAILBOX_ALREADY_DECIDED"
+	MailboxApprovalEventUnconfiguredCode = "MAILBOX_APPROVAL_EVENT_UNCONFIGURED"
+	InvalidDeferUntilCode                = "INVALID_DEFER_UNTIL"
+	IdempotencyConflictCode              = "IDEMPOTENCY_CONFLICT"
 )
 
 type Registry struct {
@@ -81,6 +86,22 @@ func (r *Registry) ApplicationErrorCode(code string) (int, bool) {
 	return numeric, ok
 }
 
+func (r *Registry) MailboxApprovalEventRoutes() map[string]string {
+	out := map[string]string{}
+	if r == nil || r.api == nil {
+		return out
+	}
+	for _, route := range r.api.Conventions.Mailbox.ApprovalEventRoutes {
+		itemType := strings.TrimSpace(route.ItemType)
+		eventName := strings.TrimSpace(route.EventName)
+		if itemType == "" || eventName == "" {
+			continue
+		}
+		out[itemType] = eventName
+	}
+	return out
+}
+
 func OpenRPCMethodNames(path string) ([]string, error) {
 	raw, err := os.ReadFile(strings.TrimSpace(path))
 	if err != nil {
@@ -96,4 +117,12 @@ func OpenRPCMethodNames(path string) ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+func MailboxApprovalRoutesFromSpec(path string) (map[string]string, error) {
+	registry, err := LoadRegistry(path)
+	if err != nil {
+		return nil, err
+	}
+	return registry.MailboxApprovalEventRoutes(), nil
 }

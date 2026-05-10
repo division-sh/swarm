@@ -3,6 +3,8 @@ package apiv1
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -49,6 +51,8 @@ type Request struct {
 	Params        map[string]any
 	CorrelationID string
 	Transport     string
+	ActorTokenID  string
+	RequestHash   string
 }
 
 type rpcRequest struct {
@@ -154,7 +158,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleRPC(w http.ResponseWriter, r *http.Request) {
 	correlationID := requestCorrelationID(r, nil)
 	w.Header().Set("X-Correlation-ID", correlationID)
-	if failure := h.authorize(r); failure != nil {
+	token, failure := h.authorize(r)
+	if failure != nil {
 		writeAuthFailure(w, failure)
 		return
 	}
@@ -163,12 +168,13 @@ func (h *Handler) handleRPC(w http.ResponseWriter, r *http.Request) {
 		writeRPC(w, rpcResponse{JSONRPC: jsonRPCVersion, ID: nil, Error: h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "read body failed"})})
 		return
 	}
-	resp := h.dispatch(r.Context(), raw, "http", correlationID)
+	resp := h.dispatch(r.Context(), raw, "http", correlationID, actorTokenID(token))
 	writeRPC(w, resp)
 }
 
 func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
-	if failure := h.authorize(r); failure != nil {
+	token, failure := h.authorize(r)
+	if failure != nil {
 		writeAuthFailure(w, failure)
 		return
 	}
@@ -182,19 +188,21 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		resp := h.dispatch(r.Context(), raw, "websocket", requestCorrelationID(r, nil))
+		resp := h.dispatch(r.Context(), raw, "websocket", requestCorrelationID(r, nil), actorTokenID(token))
 		if err := conn.WriteJSON(resp); err != nil {
 			return
 		}
 	}
 }
 
-func (h *Handler) dispatch(ctx context.Context, raw []byte, transport, fallbackCorrelationID string) rpcResponse {
+func (h *Handler) dispatch(ctx context.Context, raw []byte, transport, fallbackCorrelationID, actorTokenID string) rpcResponse {
 	req, id, correlationID, rpcErr := h.parseRequest(raw, fallbackCorrelationID)
 	if rpcErr != nil {
 		return rpcResponse{JSONRPC: jsonRPCVersion, ID: id, Error: rpcErr}
 	}
 	req.Transport = transport
+	req.ActorTokenID = strings.TrimSpace(actorTokenID)
+	req.RequestHash = requestBodyHash(req.Method, req.Params)
 	if method, ok := h.registry.Method(req.Method); ok {
 		if rpcErr := validateParams(method, req.Params, req.CorrelationID); rpcErr != nil {
 			return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr}
@@ -487,22 +495,23 @@ type authFailure struct {
 	message string
 }
 
-func (h *Handler) authorize(r *http.Request) *authFailure {
+func (h *Handler) authorize(r *http.Request) (string, *authFailure) {
 	if len(h.tokens) == 0 {
-		return &authFailure{status: http.StatusServiceUnavailable, message: "v1 API auth is not configured"}
+		return "", &authFailure{status: http.StatusServiceUnavailable, message: "v1 API auth is not configured"}
 	}
 	authz := strings.TrimSpace(r.Header.Get("Authorization"))
 	if authz == "" {
-		return &authFailure{status: http.StatusUnauthorized, message: "missing authorization bearer token"}
+		return "", &authFailure{status: http.StatusUnauthorized, message: "missing authorization bearer token"}
 	}
 	const prefix = "bearer "
 	if !strings.HasPrefix(strings.ToLower(authz), prefix) {
-		return &authFailure{status: http.StatusUnauthorized, message: "invalid authorization header"}
+		return "", &authFailure{status: http.StatusUnauthorized, message: "invalid authorization header"}
 	}
-	if _, ok := h.tokens[strings.TrimSpace(authz[len(prefix):])]; !ok {
-		return &authFailure{status: http.StatusUnauthorized, message: "invalid bearer token"}
+	token := strings.TrimSpace(authz[len(prefix):])
+	if _, ok := h.tokens[token]; !ok {
+		return "", &authFailure{status: http.StatusUnauthorized, message: "invalid bearer token"}
 	}
-	return nil
+	return token, nil
 }
 
 func writeAuthFailure(w http.ResponseWriter, failure *authFailure) {
@@ -559,4 +568,26 @@ func tokenSet(tokens []string) map[string]struct{} {
 		}
 	}
 	return out
+}
+
+func actorTokenID(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func requestBodyHash(method string, params map[string]any) string {
+	body := map[string]any{
+		"method": strings.TrimSpace(method),
+		"params": params,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		raw = []byte(strings.TrimSpace(method))
+	}
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }

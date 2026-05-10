@@ -23,11 +23,15 @@ type RunReadStore interface {
 }
 
 type OperatorReadOptions struct {
-	Now      func() time.Time
-	Ready    func() bool
-	Database Pinger
-	Runs     RunReadStore
-	Bundle   runtimecontracts.BundleIdentity
+	Now                   func() time.Time
+	Ready                 func() bool
+	Database              Pinger
+	Runs                  RunReadStore
+	Mailbox               MailboxAPIStore
+	Idempotency           APIIdempotencyStore
+	Events                EventPublisher
+	MailboxApprovalRoutes map[string]string
+	Bundle                runtimecontracts.BundleIdentity
 }
 
 type healthPingResult struct {
@@ -78,7 +82,7 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	if ready == nil {
 		ready = func() bool { return false }
 	}
-	return map[string]MethodHandler{
+	handlers := map[string]MethodHandler{
 		"health.ping": func(context.Context, Request) (any, error) {
 			return healthPingResult{OK: true, TS: now().UTC().Format(time.RFC3339Nano)}, nil
 		},
@@ -162,6 +166,10 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 			}, nil
 		},
 	}
+	for name, handler := range OperatorMailboxHandlers(opts) {
+		handlers[name] = handler
+	}
+	return handlers
 }
 
 func requireRunReadStore(runs RunReadStore) (RunReadStore, error) {

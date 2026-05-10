@@ -42,6 +42,15 @@ type Conventions struct {
 	Scopes struct {
 		Catalog []string `yaml:"catalog" json:"catalog"`
 	} `yaml:"scopes" json:"scopes"`
+	Mailbox struct {
+		StatusStorageModel  string                      `yaml:"status_storage_model" json:"status_storage_model,omitempty"`
+		ApprovalEventRoutes []MailboxApprovalEventRoute `yaml:"approval_event_routes" json:"approval_event_routes,omitempty"`
+	} `yaml:"mailbox" json:"mailbox,omitempty"`
+}
+
+type MailboxApprovalEventRoute struct {
+	ItemType  string `yaml:"item_type" json:"item_type"`
+	EventName string `yaml:"event_name" json:"event_name"`
 }
 
 type Method struct {
@@ -218,6 +227,7 @@ func Validate(api *APISpecification) (ValidationReport, error) {
 			problems = append(problems, fmt.Sprintf("conventions.idempotency.mutating_methods references missing method %s", mutating))
 		}
 	}
+	problems = append(problems, validateMailboxConventions(api.Conventions.Mailbox.ApprovalEventRoutes)...)
 	if _, ok := api.MethodCatalog["rpc.unsubscribe"]; !ok {
 		problems = append(problems, "rpc.unsubscribe is described by subscription conventions but missing from method_catalog")
 	}
@@ -228,6 +238,30 @@ func Validate(api *APISpecification) (ValidationReport, error) {
 		return report, fmt.Errorf("api specification validation failed:\n- %s", strings.Join(problems, "\n- "))
 	}
 	return report, nil
+}
+
+func validateMailboxConventions(routes []MailboxApprovalEventRoute) []string {
+	var problems []string
+	seen := map[string]struct{}{}
+	for i, route := range routes {
+		itemType := strings.TrimSpace(route.ItemType)
+		eventName := strings.TrimSpace(route.EventName)
+		if itemType == "" {
+			problems = append(problems, fmt.Sprintf("conventions.mailbox.approval_event_routes[%d] missing item_type", i))
+		}
+		if eventName == "" {
+			problems = append(problems, fmt.Sprintf("conventions.mailbox.approval_event_routes[%d] missing event_name", i))
+		}
+		if itemType == "" {
+			continue
+		}
+		if _, ok := seen[itemType]; ok {
+			problems = append(problems, fmt.Sprintf("conventions.mailbox.approval_event_routes duplicate item_type %q", itemType))
+			continue
+		}
+		seen[itemType] = struct{}{}
+	}
+	return problems
 }
 
 func GenerateOpenRPC(api *APISpecification) ([]byte, error) {

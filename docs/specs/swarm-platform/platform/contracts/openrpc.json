@@ -665,7 +665,7 @@
       },
       "errors": [
         {
-          "code": -32018,
+          "code": -32019,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1146,7 +1146,7 @@
     },
     {
       "name": "mailbox.approve",
-      "description": "Approve a pending mailbox item. Triggers the downstream event configured for the item's type.",
+      "description": "Approve a pending mailbox item. Triggers the downstream event configured for the item's type by api_specification.conventions.mailbox.approval_event_routes.",
       "params": [
         {
           "name": "mailbox_id",
@@ -1181,7 +1181,7 @@
       },
       "errors": [
         {
-          "code": -32009,
+          "code": -32010,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1254,6 +1254,48 @@
                   "mailbox_id",
                   "existing_decision",
                   "decided_at"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32009,
+          "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "item_type": {
+                    "type": "string"
+                  },
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "mailbox_id",
+                  "item_type"
                 ],
                 "type": "object"
               },
@@ -1366,7 +1408,7 @@
       },
       "errors": [
         {
-          "code": -32009,
+          "code": -32010,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1582,7 +1624,7 @@
       },
       "errors": [
         {
-          "code": -32009,
+          "code": -32010,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1737,7 +1779,7 @@
       },
       "errors": [
         {
-          "code": -32009,
+          "code": -32010,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1935,7 +1977,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1973,7 +2015,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -2096,7 +2138,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2165,7 +2207,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2298,7 +2340,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2336,7 +2378,7 @@
           }
         },
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2378,7 +2420,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32015,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -2582,7 +2624,7 @@
           }
         },
         {
-          "code": -32019,
+          "code": -32020,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -2661,7 +2703,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -2807,7 +2849,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2845,7 +2887,7 @@
           }
         },
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2976,7 +3018,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3053,7 +3095,7 @@
       },
       "errors": [
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3288,7 +3330,7 @@
       },
       "errors": [
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: RUNTIME_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -3400,7 +3442,7 @@
       },
       "errors": [
         {
-          "code": -32013,
+          "code": -32014,
           "message": "Application error: RUNTIME_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -5147,8 +5189,50 @@
           "type": "object"
         }
       },
-      "MAILBOX_NOT_FOUND": {
+      "MAILBOX_APPROVAL_EVENT_UNCONFIGURED": {
         "code": -32009,
+        "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "item_type": {
+                  "type": "string"
+                },
+                "mailbox_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "mailbox_id",
+                "item_type"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "MAILBOX_NOT_FOUND": {
+        "code": -32010,
         "message": "Application error: MAILBOX_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -5186,7 +5270,7 @@
         }
       },
       "METHOD_UNAVAILABLE": {
-        "code": -32010,
+        "code": -32011,
         "message": "Application error: METHOD_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -5224,7 +5308,7 @@
         }
       },
       "PAYLOAD_VALIDATION_FAILED": {
-        "code": -32011,
+        "code": -32012,
         "message": "Application error: PAYLOAD_VALIDATION_FAILED",
         "data": {
           "additionalProperties": false,
@@ -5282,7 +5366,7 @@
         }
       },
       "RUNTIME_ALREADY_PAUSED": {
-        "code": -32012,
+        "code": -32013,
         "message": "Application error: RUNTIME_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5313,7 +5397,7 @@
         }
       },
       "RUNTIME_NOT_PAUSED": {
-        "code": -32013,
+        "code": -32014,
         "message": "Application error: RUNTIME_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5344,7 +5428,7 @@
         }
       },
       "RUN_ALREADY_PAUSED": {
-        "code": -32014,
+        "code": -32015,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5382,7 +5466,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32015,
+        "code": -32016,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -5424,7 +5508,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32016,
+        "code": -32017,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -5462,7 +5546,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32017,
+        "code": -32018,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5504,7 +5588,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32018,
+        "code": -32019,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -5542,7 +5626,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_REF": {
-        "code": -32019,
+        "code": -32020,
         "message": "Application error: UNSUPPORTED_BUNDLE_REF",
         "data": {
           "additionalProperties": false,

@@ -179,6 +179,10 @@ func main() {
 			log.Printf("runtime shutdown failed: %v", err)
 		}
 	}()
+	mailboxApprovalRoutes, err := apiv1.MailboxApprovalRoutesFromSpec(resolvedPlatformSpecPath)
+	if err != nil {
+		log.Fatalf("load v1 api mailbox approval routes: %v", err)
+	}
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath: resolvedPlatformSpecPath,
 		AuthTokens:       apiv1.AuthTokensFromEnvironment(),
@@ -186,9 +190,13 @@ func main() {
 			Ready: func() bool {
 				return ready.Load()
 			},
-			Database: stores.Postgres,
-			Runs:     stores.Postgres,
-			Bundle:   bootBundleIdentity,
+			Database:              stores.Postgres,
+			Runs:                  stores.Postgres,
+			Mailbox:               stores.Postgres,
+			Idempotency:           stores.Postgres,
+			Events:                rt.Bus,
+			MailboxApprovalRoutes: mailboxApprovalRoutes,
+			Bundle:                bootBundleIdentity,
 		}),
 	})
 	if err != nil {
