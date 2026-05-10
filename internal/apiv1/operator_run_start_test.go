@@ -143,6 +143,39 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 }
 
+func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := runStartTestHandler(t, pg, bus, source)
+	runID := uuid.NewString()
+	cases := []struct {
+		method string
+		params string
+	}{
+		{method: "run.stop", params: fmt.Sprintf(`{"run_id":%q,"idempotency_key":"idem-stop"}`, runID)},
+		{method: "run.pause", params: fmt.Sprintf(`{"run_id":%q,"idempotency_key":"idem-pause"}`, runID)},
+		{method: "run.continue", params: fmt.Sprintf(`{"run_id":%q,"idempotency_key":"idem-continue"}`, runID)},
+		{method: "runtime.pause", params: `{"idempotency_key":"idem-runtime-pause"}`},
+		{method: "runtime.resume", params: `{"idempotency_key":"idem-runtime-resume"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method, func(t *testing.T) {
+			resp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"control","method":%q,"params":%s}`, tc.method, tc.params))
+			if resp.Error == nil {
+				t.Fatalf("%s error = nil, want METHOD_UNAVAILABLE", tc.method)
+			}
+			if data := asMap(t, resp.Error.Data); data["code"] != MethodUnavailableCode {
+				t.Fatalf("%s data = %#v, want METHOD_UNAVAILABLE", tc.method, data)
+			}
+		})
+	}
+}
+
 func runStartTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, source semanticview.Source) *Handler {
 	t.Helper()
 	return testHandler(t, Options{
