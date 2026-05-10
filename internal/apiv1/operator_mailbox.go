@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -27,6 +28,10 @@ type APIIdempotencyStore interface {
 
 type EventPublisher interface {
 	Publish(context.Context, events.Event) error
+}
+
+type TransactionalEventPublisher interface {
+	PublishTx(context.Context, *sql.Tx, events.Event) error
 }
 
 type mailboxListResult struct {
@@ -111,49 +116,26 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 
 func executeMailboxDecision(ctx context.Context, req Request, opts OperatorReadOptions, decision store.MailboxV1DecisionRequest) (any, error) {
 	idempotencyKey := stringParam(req.Params, "idempotency_key")
-	execute := func(context.Context) (any, error) {
-		outcome, err := opts.Mailbox.DecideV1MailboxItem(ctx, decision)
-		if err != nil {
-			return nil, mailboxDecisionError(decision.MailboxID, err)
+	action := strings.ToLower(strings.TrimSpace(decision.Action))
+	if action == "approved" || action == "approve" {
+		txPublisher, ok := opts.Events.(TransactionalEventPublisher)
+		if !ok || txPublisher == nil {
+			return nil, errors.New("transactional event publisher is required for mailbox approval")
 		}
-		if outcome.ApprovalEvent != nil {
-			if opts.Events == nil {
-				return nil, errors.New("event publisher is required for mailbox approval")
-			}
-			if err := opts.Events.Publish(ctx, *outcome.ApprovalEvent); err != nil {
-				return nil, err
-			}
-		}
-		return outcome.Result, nil
+		decision.ApprovalEventTx = txPublisher.PublishTx
 	}
-	if strings.TrimSpace(idempotencyKey) == "" {
-		return execute(ctx)
-	}
-	if opts.Idempotency == nil {
-		return nil, errors.New("api idempotency store is required")
-	}
-	completion, _, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
-		Method:         req.Method,
-		ActorTokenID:   req.ActorTokenID,
-		IdempotencyKey: idempotencyKey,
-		RequestHash:    req.RequestHash,
-		ResourceID:     decision.MailboxID,
-		TTL:            24 * time.Hour,
-		Now:            decision.Now,
-	}, func(context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := execute(ctx)
-		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+	if strings.TrimSpace(idempotencyKey) != "" {
+		decision.Idempotency = &store.APIIdempotencyRequest{
+			Method:         req.Method,
+			ActorTokenID:   req.ActorTokenID,
+			IdempotencyKey: idempotencyKey,
+			RequestHash:    req.RequestHash,
+			ResourceID:     decision.MailboxID,
+			TTL:            24 * time.Hour,
+			Now:            decision.Now,
 		}
-		raw, err := json.Marshal(result)
-		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
-		}
-		return store.APIIdempotencyCompletion{
-			ResourceID: decision.MailboxID,
-			Response:   raw,
-		}, nil
-	})
+	}
+	outcome, err := opts.Mailbox.DecideV1MailboxItem(ctx, decision)
 	if err != nil {
 		var conflict *store.APIIdempotencyConflictError
 		if errors.As(err, &conflict) {
@@ -166,13 +148,9 @@ func executeMailboxDecision(ctx context.Context, req Request, opts OperatorReadO
 				},
 			})
 		}
-		return nil, err
+		return nil, mailboxDecisionError(decision.MailboxID, err)
 	}
-	var replayed any
-	if err := json.Unmarshal(completion.Response, &replayed); err != nil {
-		return nil, err
-	}
-	return replayed, nil
+	return outcome.Result, nil
 }
 
 func mailboxDecisionError(mailboxID string, err error) error {

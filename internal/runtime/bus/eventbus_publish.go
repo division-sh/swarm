@@ -125,6 +125,83 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
 }
 
+// PublishTx persists the canonical event record and recipient manifest in a
+// caller-owned transaction. Callers use this when another persisted state
+// transition must commit atomically with event emission.
+func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	if tx == nil {
+		return errors.New("publish tx is required")
+	}
+	if evt.Type == "" {
+		return errors.New("event type is required")
+	}
+	if !isValidEventTypeName(string(evt.Type)) {
+		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	}
+	if eb.payloadValidator != nil {
+		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
+			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		}
+	}
+	if evt.ID == "" {
+		evt.ID = uuid.NewString()
+	}
+	if evt.CreatedAt.IsZero() {
+		evt.CreatedAt = time.Now()
+	}
+	ictx, evt := runtimecorrelation.CorrelateEvent(ctx, evt)
+	txStore, ok := eb.store.(TransactionalEventStore)
+	if !ok || txStore == nil {
+		return errors.New("transactional event store is required")
+	}
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ictx, tx)
+	if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
+		return fmt.Errorf("persist event: %w", err)
+	}
+	if err := eb.authorizePublishRecipientPlanning(txctx, evt); err != nil {
+		return err
+	}
+	inboundPlan, err := eb.deliveryPlanner.Plan(txctx, evt)
+	if err != nil {
+		return err
+	}
+	if err := eb.authorizePublishRecipientPlan(txctx, evt, inboundPlan); err != nil {
+		return err
+	}
+	eb.recordPublishDiagnostic(txctx, evt, inboundPlan)
+	if len(inboundPlan.PersistedRecipients) > 0 {
+		if err := txStore.InsertEventDeliveriesTx(txctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
+			return fmt.Errorf("persist event deliveries: %w", err)
+		}
+	}
+	if scopeWriter, ok := eb.store.(TransactionalEventReplayScopePersistence); ok && scopeWriter != nil {
+		if err := scopeWriter.UpsertCommittedReplayScopeTx(txctx, tx, evt.ID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+			return fmt.Errorf("persist committed replay scope: %w", err)
+		}
+	} else if replayScopePersistenceRequired(eb.store) {
+		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
+	}
+	passthrough, deferred, err := eb.runInterceptors(txctx, evt)
+	if err != nil {
+		return err
+	}
+	if !passthrough {
+		return errors.New("transactional publish interceptors cannot consume v1 API events")
+	}
+	if len(deferred) > 0 {
+		return errors.New("transactional publish interceptors cannot defer v1 API events")
+	}
+	status, errText := pipelineReceiptStatus(txctx, nil)
+	if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, status, errText); err != nil {
+		return fmt.Errorf("persist pipeline receipt: %w", err)
+	}
+	return nil
+}
+
 func (eb *EventBus) pipelineTransitionCapability() func(context.Context) (bool, error) {
 	if eb == nil || eb.store == nil {
 		return nil

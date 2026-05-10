@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
 
 var ErrMailboxV1NotFound = errors.New("mailbox item not found")
@@ -65,6 +66,8 @@ type MailboxV1DecisionRequest struct {
 	DeferUntil        time.Time
 	Now               time.Time
 	ApprovalEventType string
+	ApprovalEventTx   func(context.Context, *sql.Tx, events.Event) error
+	Idempotency       *APIIdempotencyRequest
 }
 
 type MailboxV1DecisionResult struct {
@@ -77,6 +80,7 @@ type MailboxV1DecisionResult struct {
 type MailboxV1DecisionOutcome struct {
 	Result        MailboxV1DecisionResult
 	ApprovalEvent *events.Event
+	Replayed      bool
 }
 
 type MailboxV1AlreadyDecidedError struct {
@@ -223,17 +227,6 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return MailboxV1DecisionOutcome{}, err
 	}
-	row, err := s.loadMailboxV1Row(ctx, input.MailboxID)
-	if err != nil {
-		return MailboxV1DecisionOutcome{}, err
-	}
-	if row.Status != "pending" {
-		return MailboxV1DecisionOutcome{}, &MailboxV1AlreadyDecidedError{
-			MailboxID:        row.ID,
-			ExistingDecision: row.existingDecision(),
-			DecidedAt:        row.decisionTime(input.Now),
-		}
-	}
 
 	action := strings.TrimSpace(strings.ToLower(input.Action))
 	switch action {
@@ -248,6 +241,65 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 	}
 	if action == "deferred" && !input.DeferUntil.After(input.Now) {
 		return MailboxV1DecisionOutcome{}, &MailboxV1InvalidDeferUntilError{Reason: "in_past"}
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return MailboxV1DecisionOutcome{}, fmt.Errorf("begin v1 mailbox decision tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	idempotencyReq, hasIdempotency, err := prepareMailboxV1IdempotencyRequest(input)
+	if err != nil {
+		return MailboxV1DecisionOutcome{}, err
+	}
+	if hasIdempotency {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, apiIdempotencyLockKey(idempotencyReq.Method, idempotencyReq.ActorTokenID, idempotencyReq.IdempotencyKey)); err != nil {
+			return MailboxV1DecisionOutcome{}, fmt.Errorf("lock api idempotency key: %w", err)
+		}
+		if err := purgeExpiredAPIIdempotency(ctx, tx, idempotencyReq.Now); err != nil {
+			return MailboxV1DecisionOutcome{}, err
+		}
+		existing, ok, err := loadAPIIdempotency(ctx, tx, idempotencyReq)
+		if err != nil {
+			return MailboxV1DecisionOutcome{}, err
+		}
+		if ok {
+			if existing.RequestHash != idempotencyReq.RequestHash {
+				return MailboxV1DecisionOutcome{}, &APIIdempotencyConflictError{
+					OriginalRequestHash:    existing.RequestHash,
+					ConflictingRequestHash: idempotencyReq.RequestHash,
+					Method:                 idempotencyReq.Method,
+					ResourceID:             existing.ResourceID,
+				}
+			}
+			var result MailboxV1DecisionResult
+			if err := json.Unmarshal(existing.Response, &result); err != nil {
+				return MailboxV1DecisionOutcome{}, fmt.Errorf("decode api idempotency mailbox response: %w", err)
+			}
+			if err := tx.Commit(); err != nil {
+				return MailboxV1DecisionOutcome{}, fmt.Errorf("commit v1 mailbox idempotency replay tx: %w", err)
+			}
+			committed = true
+			return MailboxV1DecisionOutcome{Result: result, Replayed: true}, nil
+		}
+	}
+
+	row, err := s.loadMailboxV1RowTx(ctx, tx, input.MailboxID, true)
+	if err != nil {
+		return MailboxV1DecisionOutcome{}, err
+	}
+	if row.Status != "pending" {
+		return MailboxV1DecisionOutcome{}, &MailboxV1AlreadyDecidedError{
+			MailboxID:        row.ID,
+			ExistingDecision: row.existingDecision(),
+			DecidedAt:        row.decisionTime(input.Now),
+		}
 	}
 	if action == "approved" && strings.TrimSpace(input.ApprovalEventType) == "" {
 		return MailboxV1DecisionOutcome{}, &MailboxV1ApprovalRouteError{MailboxID: row.ID, ItemType: row.Type}
@@ -278,7 +330,7 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		outcome.Result.DownstreamEventID = eventID
 		outcome.ApprovalEvent = &evt
 	}
-	res, err := s.DB.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		UPDATE mailbox
 		SET status = 'decided',
 		    decision = $2,
@@ -293,7 +345,7 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		return MailboxV1DecisionOutcome{}, fmt.Errorf("decide v1 mailbox item: %w", err)
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
-		latest, latestErr := s.loadMailboxV1Row(ctx, row.ID)
+		latest, latestErr := s.loadMailboxV1RowTx(ctx, tx, row.ID, false)
 		if latestErr != nil {
 			return MailboxV1DecisionOutcome{}, latestErr
 		}
@@ -303,7 +355,74 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 			DecidedAt:        latest.decisionTime(input.Now),
 		}
 	}
+	if outcome.ApprovalEvent != nil {
+		publishTx := input.ApprovalEventTx
+		if publishTx == nil {
+			publishTx = s.appendMailboxV1ApprovalEventTx
+		}
+		if err := publishTx(ctx, tx, *outcome.ApprovalEvent); err != nil {
+			return MailboxV1DecisionOutcome{}, fmt.Errorf("publish v1 mailbox approval event: %w", err)
+		}
+	}
+	if hasIdempotency {
+		raw, err := json.Marshal(outcome.Result)
+		if err != nil {
+			return MailboxV1DecisionOutcome{}, err
+		}
+		if err := storeAPIIdempotency(ctx, tx, idempotencyReq, APIIdempotencyCompletion{
+			ResourceID: row.ID,
+			Response:   raw,
+		}); err != nil {
+			return MailboxV1DecisionOutcome{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return MailboxV1DecisionOutcome{}, fmt.Errorf("commit v1 mailbox decision tx: %w", err)
+	}
+	committed = true
 	return outcome, nil
+}
+
+func prepareMailboxV1IdempotencyRequest(input MailboxV1DecisionRequest) (APIIdempotencyRequest, bool, error) {
+	if input.Idempotency == nil || strings.TrimSpace(input.Idempotency.IdempotencyKey) == "" {
+		return APIIdempotencyRequest{}, false, nil
+	}
+	req := *input.Idempotency
+	req.Method = strings.TrimSpace(req.Method)
+	req.ActorTokenID = strings.TrimSpace(req.ActorTokenID)
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	req.RequestHash = strings.TrimSpace(req.RequestHash)
+	req.ResourceID = strings.TrimSpace(req.ResourceID)
+	if req.ResourceID == "" {
+		req.ResourceID = strings.TrimSpace(input.MailboxID)
+	}
+	if req.Method == "" || req.ActorTokenID == "" || req.RequestHash == "" {
+		return APIIdempotencyRequest{}, false, fmt.Errorf("method, actor token id, and request hash are required")
+	}
+	if req.TTL <= 0 {
+		req.TTL = 24 * time.Hour
+	}
+	if req.Now.IsZero() {
+		req.Now = input.Now
+	}
+	if req.Now.IsZero() {
+		req.Now = time.Now().UTC()
+	}
+	req.Now = req.Now.UTC()
+	return req, true, nil
+}
+
+func (s *PostgresStore) appendMailboxV1ApprovalEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+	if err := s.AppendEventTx(ctx, tx, evt); err != nil {
+		return err
+	}
+	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
+		return err
+	}
+	if err := s.UpsertPipelineReceiptTx(ctx, tx, evt.ID, "processed", ""); err != nil {
+		return err
+	}
+	return nil
 }
 
 type mailboxV1Cursor struct {
@@ -393,8 +512,24 @@ type mailboxV1Row struct {
 	RunID         string
 }
 
+type mailboxV1RowQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 func (s *PostgresStore) loadMailboxV1Row(ctx context.Context, id string) (mailboxV1Row, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	return s.loadMailboxV1RowTx(ctx, nil, id, false)
+}
+
+func (s *PostgresStore) loadMailboxV1RowTx(ctx context.Context, tx *sql.Tx, id string, forUpdate bool) (mailboxV1Row, error) {
+	var q mailboxV1RowQueryer = s.DB
+	if tx != nil {
+		q = tx
+	}
+	lockClause := ""
+	if forUpdate {
+		lockClause = " FOR UPDATE OF m"
+	}
+	rows, err := q.QueryContext(ctx, `
 		SELECT
 			m.item_id::text,
 			m.item_type,
@@ -414,6 +549,7 @@ func (s *PostgresStore) loadMailboxV1Row(ctx context.Context, id string) (mailbo
 		FROM mailbox m
 		LEFT JOIN events e ON e.event_id = m.source_event_id
 		WHERE m.item_id = $1::uuid
+		`+lockClause+`
 	`, strings.TrimSpace(id))
 	if err != nil {
 		return mailboxV1Row{}, fmt.Errorf("load v1 mailbox item: %w", err)
