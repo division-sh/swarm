@@ -239,9 +239,6 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 	default:
 		return MailboxV1DecisionOutcome{}, fmt.Errorf("unsupported mailbox decision action %q", input.Action)
 	}
-	if action == "deferred" && !input.DeferUntil.After(input.Now) {
-		return MailboxV1DecisionOutcome{}, &MailboxV1InvalidDeferUntilError{Reason: "in_past"}
-	}
 
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -288,6 +285,9 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 			committed = true
 			return MailboxV1DecisionOutcome{Result: result, Replayed: true}, nil
 		}
+	}
+	if action == "deferred" && !input.DeferUntil.After(input.Now) {
+		return MailboxV1DecisionOutcome{}, &MailboxV1InvalidDeferUntilError{Reason: "in_past"}
 	}
 
 	row, err := s.loadMailboxV1RowTx(ctx, tx, input.MailboxID, true)

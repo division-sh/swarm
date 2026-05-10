@@ -156,6 +156,34 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if status := asMap(t, deferred.Result)["status"]; status != "deferred" {
 		t.Fatalf("mailbox.defer status = %v, want deferred", status)
 	}
+	laterHandler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now: func() time.Time { return time.Date(2026, 5, 10, 14, 0, 0, 0, time.UTC) },
+			Ready: func() bool {
+				return true
+			},
+			Database:    fakePinger{},
+			Mailbox:     pg,
+			Idempotency: pg,
+			Events:      bus,
+			MailboxApprovalRoutes: map[string]string{
+				"review_request": "mailbox.item_decided",
+			},
+			Bundle: runtimecontracts.BundleIdentity{
+				WorkflowName:    "empire",
+				WorkflowVersion: "1.0.0",
+				Fingerprint:     "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			},
+		}),
+	})
+	deferReplay := rpcCall(t, laterHandler, `{"jsonrpc":"2.0","id":"defer-replay","method":"mailbox.defer","params":{"mailbox_id":"`+deferID+`","until":"2026-05-10T13:00:00Z","idempotency_key":"idem-defer"}}`)
+	if deferReplay.Error != nil {
+		t.Fatalf("mailbox.defer replay after until passed error = %#v", deferReplay.Error)
+	}
+	if status := asMap(t, deferReplay.Result)["status"]; status != "deferred" {
+		t.Fatalf("mailbox.defer replay status = %v, want deferred", status)
+	}
 
 	empty := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"empty","method":"mailbox.list","params":{"status":"pending","type":"review_request"}}`)
 	if empty.Error != nil {
