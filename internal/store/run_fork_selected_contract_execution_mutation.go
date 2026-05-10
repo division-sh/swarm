@@ -145,6 +145,17 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	replayAdmission = runForkReplayResumeAdmissionWithTimerReconstruction(replayAdmission, timerReconstruction)
 	conversationAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx, s.DB, catalog, plan.SourceRunID, plan.ForkPoint.Timestamp)
 	if err != nil {
+		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+			admission := runForkReplayResumeAdmissionWithBlocker(replayAdmission, fact, blocker)
+			return RunForkMaterialization{
+				SourceRunID:           plan.SourceRunID,
+				ForkPoint:             plan.ForkPoint,
+				ExecutionReady:        false,
+				ReplayResumeAdmission: admission,
+				UnsupportedBlockers:   admission.UnsupportedBlockers,
+				DeliveryResumeBlocked: true,
+			}, err
+		}
 		return RunForkMaterialization{}, err
 	}
 	replayAdmission = runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(replayAdmission, conversationAdvancedFacts)
@@ -319,6 +330,10 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 	}
 	conversationAdvancedFacts, err := collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx, tx, catalog, lineage.SourceRunID, lineage.ForkEventTime)
 	if err != nil {
+		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
+			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
+		}
 		return result, err
 	}
 	result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(result.ReplayResumeAdmission, conversationAdvancedFacts)
@@ -902,6 +917,9 @@ func runForkPostForkCommittedReplayScopeMarkerPredicates(catalog schemaColumnCat
 }
 
 func collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID string, forkTime time.Time) ([]string, error) {
+	if err := ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx, q, catalog, sourceRunID, forkTime); err != nil {
+		return nil, err
+	}
 	checks := []struct {
 		code       string
 		table      string
@@ -945,6 +963,46 @@ func collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx co
 		}
 	}
 	return uniqueNonEmptyStrings(facts), nil
+}
+
+func ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID string, forkTime time.Time) error {
+	if !catalog.hasColumns("event_deliveries", "run_id", "status") {
+		return nil
+	}
+	postForkPredicates := []string{}
+	for _, column := range []string{"created_at", "started_at", "delivered_at"} {
+		if catalog.hasColumns("event_deliveries", column) {
+			postForkPredicates = append(postForkPredicates, fmt.Sprintf("d.%s > $2::timestamptz", column))
+		}
+	}
+	if len(postForkPredicates) == 0 {
+		return nil
+	}
+	couplingPredicates := []string{"d.status = 'in_progress'"}
+	if catalog.hasColumns("event_deliveries", "active_session_id") {
+		couplingPredicates = append(couplingPredicates, "d.active_session_id IS NOT NULL")
+	}
+	if catalog.hasColumns("event_deliveries", "started_at", "delivered_at") {
+		couplingPredicates = append(couplingPredicates, "(d.started_at IS NOT NULL AND d.delivered_at IS NULL)")
+	}
+	var exists bool
+	query := fmt.Sprintf(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM event_deliveries d
+			WHERE d.run_id = $1::uuid
+			  AND (%s)
+			  AND (%s)
+		)
+	`, strings.Join(postForkPredicates, " OR "), strings.Join(couplingPredicates, " OR "))
+	if err := q.QueryRowContext(ctx, query, sourceRunID, forkTime).Scan(&exists); err != nil {
+		return fmt.Errorf("check selected-contract source_active_conversation_session_coupling_after_fork_point: %w", err)
+	}
+	if exists {
+		code := "source_active_conversation_session_coupling_after_fork_point"
+		return runForkReplayResumeError(code, RunForkReplayResumeFactSessionHistory, fmt.Sprintf("%s blocked unsafe post-T active source delivery/session coupling: %s", RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner, code))
+	}
+	return nil
 }
 
 func runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(admission RunForkReplayResumeAdmission, facts []string) RunForkReplayResumeAdmission {
