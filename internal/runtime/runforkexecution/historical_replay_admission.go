@@ -258,9 +258,9 @@ func historicalReplayFactAdmissions(replay store.RunForkReplayResumeAdmission) [
 		historicalReplaySplitFact(store.RunForkHistoricalReplayFactEmittedFollowUps, "emitted follow-up regeneration belongs to the future mutating replay owner; source follow-up rows are not copied", "#564"),
 		historicalReplayTimersAdmission(replay),
 		historicalReplayFactFromReplay(replay, store.RunForkHistoricalReplayFactRoutes, []string{store.RunForkReplayResumeFactRouteHistory}, store.RunForkHistoricalReplayAdmissionSplitSibling, "route and route-recovery truth remains split under fork-local route persistence/runtime recovery", "#618"),
-		historicalReplayFactFromReplay(replay, store.RunForkHistoricalReplayFactSessions, []string{store.RunForkReplayResumeFactSessionHistory}, store.RunForkHistoricalReplayAdmissionSplitSibling, "session reconstruction remains a split sibling unless active session facts are present and fail-closed", "#564"),
-		historicalReplayFactFromReplay(replay, store.RunForkHistoricalReplayFactTurns, []string{store.RunForkReplayResumeFactActiveTurnHistory}, store.RunForkHistoricalReplayAdmissionSplitSibling, "turn reconstruction remains a split sibling unless active turn facts are present and fail-closed", "#564"),
-		historicalReplayFactFromReplay(replay, store.RunForkHistoricalReplayFactAudits, []string{store.RunForkReplayResumeFactConversationAuditHistory}, store.RunForkHistoricalReplayAdmissionSplitSibling, "task conversation audit reconstruction remains a split sibling unless audit facts are present and fail-closed", "#564"),
+		historicalReplayConversationFactAdmission(replay, store.RunForkHistoricalReplayFactSessions, store.RunForkReplayResumeFactSessionHistory, "source session rows admitted by the selected-contract lineage policy are lineage/no-action evidence only; fresh fork-local sessions must be created by normal runtime execution"),
+		historicalReplayConversationFactAdmission(replay, store.RunForkHistoricalReplayFactTurns, store.RunForkReplayResumeFactActiveTurnHistory, "source turn rows admitted by the selected-contract lineage policy are lineage/no-action evidence only; fresh fork-local turns must be created by normal runtime execution"),
+		historicalReplayConversationFactAdmission(replay, store.RunForkHistoricalReplayFactAudits, store.RunForkReplayResumeFactConversationAuditHistory, "source task conversation audit rows admitted by the selected-contract lineage policy are lineage/no-action evidence only; fresh fork-local audits must be created by normal runtime execution"),
 		historicalReplayNonAgentAdmission(replay),
 		historicalReplayFactFromReplay(replay, store.RunForkHistoricalReplayFactSourceAdvancedPostTFacts, []string{store.RunForkReplayResumeFactSourceAdvanced}, store.RunForkHistoricalReplayAdmissionSplitSibling, "source-advanced and post-T source outcomes remain source-run evidence and cannot suppress fork-local replay", "#564"),
 		historicalReplaySplitFact(store.RunForkHistoricalReplayFactRuntimeRestartRecovery, "runtime restart recovery remains a consumer/sibling and cannot reconstruct historical replay state from current rows", "#564"),
@@ -346,6 +346,32 @@ func historicalReplayNonAgentAdmission(replay store.RunForkReplayResumeAdmission
 	return historicalReplaySplitFact(store.RunForkHistoricalReplayFactNonAgentNodeSystemWork, "node, system, platform, and non-agent delivery replay requires a separate handler/idempotency/receipt owner", "#564")
 }
 
+func historicalReplayConversationFactAdmission(replay store.RunForkReplayResumeAdmission, fact, replayFact, lineageMessage string) store.RunForkHistoricalReplayFactAdmission {
+	if blocker, ok := replayBlockerForFacts(replay, replayFact); ok {
+		return store.RunForkHistoricalReplayFactAdmission{
+			Fact:        fact,
+			Admission:   store.RunForkHistoricalReplayAdmissionFailClosedBlocker,
+			SourceOwner: store.RunForkReplayResumeAdmissionOwner,
+			BlockerCode: blocker.Code,
+			Message:     blocker.Message,
+		}
+	}
+	if disposition, ok := replayDispositionForFact(replay, replayFact, store.RunForkReplayResumeDispositionLineageOnly); ok {
+		sourceOwner := strings.TrimSpace(disposition.Owner)
+		if sourceOwner == "" {
+			sourceOwner = store.RunForkReplayResumeAdmissionOwner
+		}
+		return store.RunForkHistoricalReplayFactAdmission{
+			Fact:        fact,
+			Admission:   store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence,
+			SourceOwner: sourceOwner,
+			Tracker:     "#661",
+			Message:     lineageMessage,
+		}
+	}
+	return historicalReplaySplitFact(fact, "session/turn/audit reconstruction remains a split sibling unless the selected-contract lineage policy admits source conversation history as lineage/no-action evidence", "#564")
+}
+
 func historicalReplayFactFromReplay(replay store.RunForkReplayResumeAdmission, fact string, replayFacts []string, fallbackAdmission, fallbackMessage, tracker string) store.RunForkHistoricalReplayFactAdmission {
 	if blocker, ok := replayBlockerForFacts(replay, replayFacts...); ok {
 		return store.RunForkHistoricalReplayFactAdmission{
@@ -409,12 +435,17 @@ func replayBlockerForFacts(replay store.RunForkReplayResumeAdmission, facts ...s
 }
 
 func replayDispositionHas(replay store.RunForkReplayResumeAdmission, fact, disposition string) bool {
+	_, ok := replayDispositionForFact(replay, fact, disposition)
+	return ok
+}
+
+func replayDispositionForFact(replay store.RunForkReplayResumeAdmission, fact, disposition string) (store.RunForkReplayResumeDisposition, bool) {
 	for _, item := range replay.Dispositions {
 		if strings.TrimSpace(item.Fact) == fact && strings.TrimSpace(item.Disposition) == disposition {
-			return true
+			return item, true
 		}
 	}
-	return false
+	return store.RunForkReplayResumeDisposition{}, false
 }
 
 func historicalReplayFactAdmission(admissions []store.RunForkHistoricalReplayFactAdmission, fact string) (store.RunForkHistoricalReplayFactAdmission, bool) {

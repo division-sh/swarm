@@ -219,6 +219,68 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsTimerReconstructionOwner(
 	}
 }
 
+func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversationLineageOwner(t *testing.T) {
+	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
+	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+	replayAdmission := store.RunForkReplayResumeAdmission{
+		Owner:                   store.RunForkReplayResumeAdmissionOwner,
+		StateOnlyExecutionReady: true,
+		Dispositions: []store.RunForkReplayResumeDisposition{
+			{
+				Fact:        store.RunForkReplayResumeFactSessionHistory,
+				Disposition: store.RunForkReplayResumeDispositionLineageOnly,
+				Owner:       store.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner,
+				Message:     "selected-contract session lineage/no-action evidence",
+			},
+			{
+				Fact:        store.RunForkReplayResumeFactActiveTurnHistory,
+				Disposition: store.RunForkReplayResumeDispositionLineageOnly,
+				Owner:       store.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner,
+				Message:     "selected-contract turn lineage/no-action evidence",
+			},
+			{
+				Fact:        store.RunForkReplayResumeFactConversationAuditHistory,
+				Disposition: store.RunForkReplayResumeDispositionLineageOnly,
+				Owner:       store.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner,
+				Message:     "selected-contract audit lineage/no-action evidence",
+			},
+		},
+	}
+	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
+		SelectedExecutionAdmission: selectedAdmission,
+		ReplayResumeAdmission:      replayAdmission,
+		RouteRecovery:              &routeRecovery,
+	})
+	if err != nil {
+		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
+	}
+
+	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
+		ReplayResumeAdmission:      replayAdmission,
+		SelectedExecutionAdmission: selectedAdmission,
+		ContractSwapAdmission:      contractSwapAdmission,
+		RouteRecovery:              &routeRecovery,
+	})
+	if err != nil {
+		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+	}
+	for _, fact := range []string{
+		store.RunForkHistoricalReplayFactSessions,
+		store.RunForkHistoricalReplayFactTurns,
+		store.RunForkHistoricalReplayFactAudits,
+	} {
+		item, ok := historicalReplayFactAdmission(admission.FactAdmissions, fact)
+		if !ok {
+			t.Fatalf("missing fact admission for %s", fact)
+		}
+		if item.Admission != store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
+			item.SourceOwner != store.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner ||
+			item.Tracker != "#661" {
+			t.Fatalf("%s admission = %#v, want #661 lineage owner", fact, item)
+		}
+	}
+}
+
 func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMutation(t *testing.T) {
 	replayAdmission := store.RunForkReplayResumeAdmission{
 		Owner:                    store.RunForkReplayResumeAdmissionOwner,

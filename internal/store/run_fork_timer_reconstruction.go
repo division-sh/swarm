@@ -50,18 +50,11 @@ func runForkPlanHasTimerBlocker(plan RunForkPlan) bool {
 }
 
 func runForkSelectedContractExecutionPlanBlockersWithTimerResolution(plan RunForkPlan, allowedSourceEventIDs []string, timerResolved bool) []RunForkUnsupportedBlocker {
-	blockers := runForkSelectedContractExecutionPlanBlockers(plan, allowedSourceEventIDs)
-	if !timerResolved {
-		return blockers
+	admission := RunForkSelectedContractSessionTurnAuditLineageAdmission(plan)
+	if timerResolved {
+		admission = runForkReplayResumeAdmissionWithTimerReconstruction(admission, runForkTimerReconstructionPlan{Required: true})
 	}
-	out := blockers[:0]
-	for _, blocker := range blockers {
-		if strings.TrimSpace(blocker.Code) == RunForkBlockerTimerHistoryUnproven {
-			continue
-		}
-		out = append(out, blocker)
-	}
-	return out
+	return runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, admission, allowedSourceEventIDs)
 }
 
 func runForkReplayResumeAdmissionWithTimerReconstruction(admission RunForkReplayResumeAdmission, reconstruction runForkTimerReconstructionPlan) RunForkReplayResumeAdmission {

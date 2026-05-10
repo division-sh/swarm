@@ -60,6 +60,7 @@ type RunForkReplayResumeAdmission struct {
 type RunForkReplayResumeDisposition struct {
 	Fact           string `json:"fact"`
 	Disposition    string `json:"disposition"`
+	Owner          string `json:"owner,omitempty"`
 	BlockerCode    string `json:"blocker_code,omitempty"`
 	Classification string `json:"classification,omitempty"`
 	Message        string `json:"message"`
