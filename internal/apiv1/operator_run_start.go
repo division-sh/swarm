@@ -57,27 +57,30 @@ func runStartConfigured(opts OperatorReadOptions) bool {
 }
 
 func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
-	params, err := runStartParamsFromRequest(req, opts.Bundle.Fingerprint)
+	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return nil, err
 	}
-	set, err := runtimerunstart.ValidateInputEvents(opts.Source, []string{params.EventName})
-	if err != nil {
-		return nil, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
-			"event_name":      params.EventName,
-			"declared_events": set.Declared,
-		})
-	}
-	result := runStartResult{RunID: params.RunID, Status: "running"}
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
-		IdempotencyKey: params.IdempotencyKey,
+		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
-		ResourceID:     params.RunID,
 		TTL:            runStartIDempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+		params, err := runStartParamsFromRequest(req, opts.Bundle.Fingerprint)
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, err
+		}
+		set, err := runtimerunstart.ValidateInputEvents(opts.Source, []string{params.EventName})
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+				"event_name":      params.EventName,
+				"declared_events": set.Declared,
+			})
+		}
+		result := runStartResult{RunID: params.RunID, Status: "running"}
 		if err := opts.Events.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
 			RunID:       params.RunID,
@@ -86,7 +89,7 @@ func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions,
 			Payload:     params.Payload,
 			CreatedAt:   now,
 		}.WithEntityID(params.EntityID)); err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return store.APIIdempotencyCompletion{}, runStartPublishError(params.EventName, err)
 		}
 		response, err := json.Marshal(result)
 		if err != nil {
@@ -98,16 +101,16 @@ func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions,
 		}, nil
 	})
 	if err != nil {
-		return nil, runStartExecutionError(params.EventName, err)
+		return nil, runStartIdempotencyError(err)
 	}
-	if replay {
-		var stored runStartResult
-		if err := json.Unmarshal(completion.Response, &stored); err != nil {
+	var stored runStartResult
+	if err := json.Unmarshal(completion.Response, &stored); err != nil {
+		if replay {
 			return nil, fmt.Errorf("decode run.start idempotency response: %w", err)
 		}
-		return stored, nil
+		return nil, fmt.Errorf("decode run.start response: %w", err)
 	}
-	return result, nil
+	return stored, nil
 }
 
 func runStartParamsFromRequest(req Request, bootFingerprint string) (runStartParams, error) {
@@ -131,6 +134,10 @@ func runStartParamsFromRequest(req Request, bootFingerprint string) (runStartPar
 	}
 	if runID == "" {
 		runID = uuid.NewString()
+	} else if parsed, err := uuid.Parse(runID); err != nil {
+		return runStartParams{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must be a UUID"})
+	} else {
+		runID = parsed.String()
 	}
 	payload, entityID, err := runStartPayload(req.Params, runID)
 	if err != nil {
@@ -209,7 +216,7 @@ func runStartPayloadString(value any) string {
 	return text
 }
 
-func runStartExecutionError(eventName string, err error) error {
+func runStartIdempotencyError(err error) error {
 	var conflict *store.APIIdempotencyConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
@@ -221,6 +228,10 @@ func runStartExecutionError(eventName string, err error) error {
 			},
 		})
 	}
+	return err
+}
+
+func runStartPublishError(eventName string, err error) error {
 	if errors.Is(err, runtimebus.ErrPayloadValidation) || strings.Contains(err.Error(), "validate event payload") {
 		return NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
 			"violations": []map[string]any{{
