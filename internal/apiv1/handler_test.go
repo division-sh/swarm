@@ -376,6 +376,50 @@ func TestOperatorReadHandlersRunNotFoundAndRunStartStaysUnavailable(t *testing.T
 	}
 }
 
+func TestOperatorReadHandlersRunListRejectsInvalidFilters(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Ready:    func() bool { return true },
+			Database: fakePinger{err: nil},
+			Runs: &fakeRunReadStore{
+				headers: map[string]store.RunHeader{},
+			},
+			Bundle: runtimecontracts.BundleIdentity{
+				WorkflowName:    "review",
+				WorkflowVersion: "1.2.3",
+				Fingerprint:     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			},
+		}),
+	})
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unknown status",
+			body: `{"jsonrpc":"2.0","id":"bad-status","method":"run.list","params":{"status":"runnning"}}`,
+		},
+		{
+			name: "numeric since",
+			body: `{"jsonrpc":"2.0","id":"bad-since","method":"run.list","params":{"since":123}}`,
+		},
+		{
+			name: "numeric until",
+			body: `{"jsonrpc":"2.0","id":"bad-until","method":"run.list","params":{"until":123}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := rpcCall(t, handler, tc.body)
+			if resp.Error == nil || resp.Error.Code != codeInvalidParams {
+				t.Fatalf("run.list error = %#v, want invalid params", resp.Error)
+			}
+		})
+	}
+}
+
 func rpcCall(t *testing.T, handler *Handler, body string) rpcResponse {
 	t.Helper()
 	rec := httptest.NewRecorder()
