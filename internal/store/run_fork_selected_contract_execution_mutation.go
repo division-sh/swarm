@@ -894,18 +894,14 @@ func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx c
 }
 
 func ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID, forkEventID string, forkTime time.Time) error {
-	if !catalog.hasColumns("event_deliveries", "run_id", "subscriber_type", "subscriber_id", "reason_code") {
+	if !catalog.hasColumns("event_deliveries", "run_id", "event_id", "subscriber_type", "subscriber_id", "reason_code") {
 		return nil
 	}
 	if !catalog.hasColumns("events", "event_id", "run_id", "created_at") {
 		return nil
 	}
-	predicates := runForkPostForkCommittedReplayScopeMarkerPredicates(catalog, "created_at", "started_at", "delivered_at")
-	if len(predicates) == 0 {
-		return nil
-	}
 	var exists bool
-	query := fmt.Sprintf(`
+	query := `
 		SELECT EXISTS (
 			SELECT 1
 			FROM event_deliveries d
@@ -915,13 +911,12 @@ func ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, q t
 			  AND d.subscriber_type = $2
 			  AND d.subscriber_id = $3
 			  AND d.reason_code = ANY($4::text[])
-			  AND (%s)
 			  AND (
 					e.event_id IS NULL
 					OR (e.created_at, e.event_id) > ($5::timestamptz, $6::uuid)
 			  )
 		)
-	`, strings.Join(predicates, " OR "))
+	`
 	if err := q.QueryRowContext(ctx, query, sourceRunID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, pq.Array(runForkReplayScopeMarkerReasonCodes()), forkTime, forkEventID).Scan(&exists); err != nil {
 		return fmt.Errorf("check selected-contract source_committed_replay_scope_advanced_after_fork_point: %w", err)
 	}
@@ -930,16 +925,6 @@ func ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, q t
 		return runForkReplayResumeError(code, RunForkReplayResumeFactSourceAdvanced, fmt.Sprintf("selected-contract committed replay-scope marker policy blocked: %s", code))
 	}
 	return nil
-}
-
-func runForkPostForkCommittedReplayScopeMarkerPredicates(catalog schemaColumnCatalog, columns ...string) []string {
-	predicates := []string{}
-	for _, column := range columns {
-		if catalog.hasColumns("event_deliveries", column) {
-			predicates = append(predicates, fmt.Sprintf("d.%s > $5::timestamptz", column))
-		}
-	}
-	return predicates
 }
 
 func runForkReplayScopeMarkerReasonCodes() []string {
