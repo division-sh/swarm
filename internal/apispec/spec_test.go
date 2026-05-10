@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -115,9 +116,33 @@ func TestMutatingMethodsDeclareIdempotencyKey(t *testing.T) {
 		if !ok {
 			t.Fatalf("mutating method %s missing from catalog", methodName)
 		}
-		if !methodHasParam(method, "idempotency_key") {
+		param, ok := methodParam(method, "idempotency_key")
+		if !ok {
 			t.Fatalf("mutating method %s missing idempotency_key", methodName)
 		}
+		if param.Required {
+			t.Fatalf("mutating method %s idempotency_key required = true, want optional", methodName)
+		}
+	}
+}
+
+func TestValidateRejectsRequiredMutatingIdempotencyKey(t *testing.T) {
+	api := loadRepoAPISpec(t)
+	const methodName = "run.start"
+	method := api.MethodCatalog[methodName]
+	for i := range method.Params {
+		if method.Params[i].Name == "idempotency_key" {
+			method.Params[i].Required = true
+		}
+	}
+	api.MethodCatalog[methodName] = method
+
+	_, err := Validate(api)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want required idempotency_key rejection")
+	}
+	if got, want := err.Error(), "mutating method run.start idempotency_key param must be optional"; !strings.Contains(got, want) {
+		t.Fatalf("Validate() error = %q, want substring %q", got, want)
 	}
 }
 
