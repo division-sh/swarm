@@ -1111,8 +1111,8 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 	ctx := context.Background()
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
-	eventID := uuid.NewString()
-	afterEventID := uuid.NewString()
+	eventID := "00000000-0000-0000-0000-000000000001"
+	afterEventID := "00000000-0000-0000-0000-000000000002"
 	at := time.Unix(1700003626, 0).UTC()
 	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
@@ -1132,8 +1132,8 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 	if materialized.ForkRunID == "" {
 		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
 	}
-	seedSelectedContractPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
-	seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, replayScopeReasonDirect, at.Add(time.Second))
+	seedSelectedContractPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at)
+	seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, replayScopeReasonDirect, at.Add(-time.Second))
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
