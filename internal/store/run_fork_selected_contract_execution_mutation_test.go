@@ -157,6 +157,67 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
 
+func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsActiveSessionCoupling(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	sessionID := uuid.NewString()
+	auditID := uuid.NewString()
+	turnID := uuid.NewString()
+	at := time.Unix(1700002430, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count,
+			started_at, delivered_at, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'terminal-agent', 'failed', 2, $3, $3, $3)
+	`, sourceRunID, eventID, at); err != nil {
+		t.Fatalf("seed terminal delivery: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, reason_code, side_effects, processed_at
+		)
+		VALUES ($1::uuid, 'agent', 'terminal-agent', $2::uuid, 'flow-a/1',
+			'reject', 'terminal_source_delivery', '{}'::jsonb, $3)
+	`, eventID, entityID, at); err != nil {
+		t.Fatalf("seed terminal delivery receipt: %v", err)
+	}
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	if materialized.ForkRunID == "" {
+		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
+	}
+	for _, code := range []string{
+		RunForkBlockerSessionHistoryUnproven,
+		RunForkBlockerConversationAuditUnproven,
+		RunForkBlockerActiveTurnHistoryUnproven,
+	} {
+		if runForkTestHasMaterializationBlocker(materialized, code) {
+			t.Fatalf("terminal delivery preserved conversation blocker %s: %#v", code, materialized.UnsupportedBlockers)
+		}
+	}
+	assertNoCopiedConversationRows(t, db, materialized.ForkRunID, sessionID, auditID, turnID)
+}
+
 func TestSelectedContractExecutionMaterializationPreflightsLineageCapability(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

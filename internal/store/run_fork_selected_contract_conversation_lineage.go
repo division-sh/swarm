@@ -71,7 +71,12 @@ func runForkSelectedContractConversationLineageBlocker(code string) bool {
 
 func runForkSelectedContractHasActiveDeliverySessionCoupling(pending []RunForkPendingWork) bool {
 	for _, item := range pending {
-		if strings.TrimSpace(item.Classification) == RunForkPendingClassificationDeliveredCompleted {
+		classification := strings.TrimSpace(item.Classification)
+		switch classification {
+		case RunForkPendingClassificationInProgress:
+			return true
+		case RunForkPendingClassificationPending:
+		default:
 			continue
 		}
 		if strings.TrimSpace(item.ActiveSessionID) != "" ||
@@ -79,9 +84,6 @@ func runForkSelectedContractHasActiveDeliverySessionCoupling(pending []RunForkPe
 			item.DeliveredAt != nil ||
 			item.ReceiptAt != nil ||
 			strings.TrimSpace(item.ReceiptOutcome) != "" {
-			return true
-		}
-		if strings.TrimSpace(item.Classification) == RunForkPendingClassificationInProgress {
 			return true
 		}
 	}
