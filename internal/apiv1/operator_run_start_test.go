@@ -68,6 +68,25 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after conflict = %d, want 1", count)
 	}
+
+	conflictBundle := rpcCall(t, handler, runStartBody(runID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "idem-start"))
+	if conflictBundle.Error == nil {
+		t.Fatal("run.start bundle-change idempotency conflict error = nil")
+	}
+	if data := asMap(t, conflictBundle.Error.Data); data["code"] != IdempotencyConflictCode {
+		t.Fatalf("run.start bundle-change conflict data = %#v", data)
+	}
+
+	conflictEvent := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.missing", `{"topic":"medicine"}`, "idem-start"))
+	if conflictEvent.Error == nil {
+		t.Fatal("run.start event-change idempotency conflict error = nil")
+	}
+	if data := asMap(t, conflictEvent.Error.Data); data["code"] != IdempotencyConflictCode {
+		t.Fatalf("run.start event-change conflict data = %#v", data)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+		t.Fatalf("scan.requested event count after body-domain conflicts = %d, want 1", count)
+	}
 }
 
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
@@ -140,6 +159,37 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 			t.Fatalf("payload validation data = %#v", data)
 		}
 		assertNoRunStartPersistence(t, db, runID)
+	})
+
+	t.Run("invalid caller run id", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := runStartTestHandler(t, pg, bus, source)
+
+		resp := rpcCall(t, handler, runStartBody("abc", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "idem-invalid-run-id"))
+		if resp.Error == nil {
+			t.Fatal("run.start invalid run_id error = nil")
+		}
+		if resp.Error.Code != codeInvalidParams {
+			t.Fatalf("invalid run_id error code = %d, want invalid params", resp.Error.Code)
+		}
+		if details := asMap(t, resp.Error.Data)["details"]; asMap(t, details)["field"] != "run_id" {
+			t.Fatalf("invalid run_id details = %#v", details)
+		}
+		if count := countAllRunRows(t, db); count != 0 {
+			t.Fatalf("run rows after invalid run_id = %d, want 0", count)
+		}
+		if count := countEventsByName(t, db, "scan.requested"); count != 0 {
+			t.Fatalf("event rows after invalid run_id = %d, want 0", count)
+		}
+		if count := countAPIIdempotencyRows(t, db); count != 0 {
+			t.Fatalf("api_idempotency rows after invalid run_id = %d, want 0", count)
+		}
 	})
 }
 
@@ -268,6 +318,15 @@ func countEventRowsByRunID(t *testing.T, db *sql.DB, runID string) int {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
 		t.Fatalf("count event rows: %v", err)
+	}
+	return count
+}
+
+func countAllRunRows(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil {
+		t.Fatalf("count all run rows: %v", err)
 	}
 	return count
 }
