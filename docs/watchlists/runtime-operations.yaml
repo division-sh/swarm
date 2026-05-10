@@ -360,6 +360,7 @@ nodes:
       - contract-swap historical replay execution needs runtime.run_fork.historical_replay_execution.contract_swap_boot_resume as the selected-contract child owner for already-admitted delivery_event_replay_ready work; selected recipient planning owns fork recipients, source delivery subscribers are lineage only, and timers/routes/sessions/turns/audits/non-agent/restart/API siblings stay fail-closed or split
       - selected-contract timer reconstruction needs runtime.run_fork.historical_replay_execution.timer_reconstruction plus run-scoped scheduler identity; active source timers are lineage inputs only, reconstructed fork timers must be fresh fork-local rows under fork run_id, and unsupported source timer histories or post-T source timer facts remain fail-closed
       - selected-contract session/turn/audit lineage policy needs runtime.run_fork.historical_replay_execution.selected_contract_session_turn_audit_lineage_policy to classify at/before-T source agent_sessions, agent_turns, and agent_conversation_audits as lineage/no-action only for selected-contract execution while keeping active delivery/session coupling, post-T source conversation facts, fork-local pre-existing rows, committed replay-scope, and full reconstruction split or fail-closed
+      - selected-contract committed replay-scope marker policy needs runtime.run_fork.historical_replay_execution.selected_contract_committed_replay_scope_marker_policy to classify at/before-T source committed replay-scope marker rows as lineage/no-action only while keeping source marker copying, fork-local recovery proof reuse, post-T/source-advanced marker facts, same-run recovery, and full replay/resume split or fail-closed
     representative_issues:
       - 564
       - 565
@@ -390,6 +391,7 @@ nodes:
       - 639
       - 642
       - 661
+      - 663
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR

@@ -281,6 +281,48 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversat
 	}
 }
 
+func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractReplayScopeMarkerOwner(t *testing.T) {
+	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
+	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+	replayAdmission := store.RunForkReplayResumeAdmission{
+		Owner:                   store.RunForkReplayResumeAdmissionOwner,
+		StateOnlyExecutionReady: true,
+		Dispositions: []store.RunForkReplayResumeDisposition{{
+			Fact:        store.RunForkReplayResumeFactCommittedReplayScope,
+			Disposition: store.RunForkReplayResumeDispositionLineageOnly,
+			Owner:       store.RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner,
+			Message:     "selected-contract replay-scope marker lineage/no-action evidence",
+		}},
+	}
+	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
+		SelectedExecutionAdmission: selectedAdmission,
+		ReplayResumeAdmission:      replayAdmission,
+		RouteRecovery:              &routeRecovery,
+	})
+	if err != nil {
+		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
+	}
+
+	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
+		ReplayResumeAdmission:      replayAdmission,
+		SelectedExecutionAdmission: selectedAdmission,
+		ContractSwapAdmission:      contractSwapAdmission,
+		RouteRecovery:              &routeRecovery,
+	})
+	if err != nil {
+		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+	}
+	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, store.RunForkHistoricalReplayFactEventDeliveries)
+	if !ok {
+		t.Fatalf("missing event_deliveries admission: %#v", admission.FactAdmissions)
+	}
+	if item.Admission != store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
+		item.SourceOwner != store.RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner ||
+		item.Tracker != "#663" {
+		t.Fatalf("event_deliveries admission = %#v, want #663 marker lineage owner", item)
+	}
+}
+
 func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMutation(t *testing.T) {
 	replayAdmission := store.RunForkReplayResumeAdmission{
 		Owner:                    store.RunForkReplayResumeAdmissionOwner,

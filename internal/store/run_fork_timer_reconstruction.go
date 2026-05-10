@@ -50,7 +50,7 @@ func runForkPlanHasTimerBlocker(plan RunForkPlan) bool {
 }
 
 func runForkSelectedContractExecutionPlanBlockersWithTimerResolution(plan RunForkPlan, allowedSourceEventIDs []string, timerResolved bool) []RunForkUnsupportedBlocker {
-	admission := RunForkSelectedContractSessionTurnAuditLineageAdmission(plan)
+	admission := RunForkSelectedContractReplayResumeAdmission(plan)
 	if timerResolved {
 		admission = runForkReplayResumeAdmissionWithTimerReconstruction(admission, runForkTimerReconstructionPlan{Required: true})
 	}
