@@ -191,6 +191,38 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 			t.Fatalf("api_idempotency rows after invalid run_id = %d, want 0", count)
 		}
 	})
+
+	t.Run("invalid payload entity id", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := runStartTestHandler(t, pg, bus, source)
+		runID := uuid.NewString()
+
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"entity_id":"not-a-uuid","topic":"medicine"}`, "idem-invalid-entity-id"))
+		assertInvalidRunStartParam(t, resp, "payload.entity_id")
+		assertNoRunStartPersistence(t, db, runID)
+	})
+
+	t.Run("non-string payload entity id", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := runStartTestHandler(t, pg, bus, source)
+		runID := uuid.NewString()
+
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"entity_id":123,"topic":"medicine"}`, "idem-non-string-entity-id"))
+		assertInvalidRunStartParam(t, resp, "payload.entity_id")
+		assertNoRunStartPersistence(t, db, runID)
+	})
 }
 
 func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.T) {
@@ -256,6 +288,19 @@ func runStartBody(runID, fingerprint, eventName, payload, idempotencyKey string)
 		runID,
 		idempotencyKey,
 	)
+}
+
+func assertInvalidRunStartParam(t *testing.T, resp rpcResponse, field string) {
+	t.Helper()
+	if resp.Error == nil {
+		t.Fatalf("run.start invalid %s error = nil", field)
+	}
+	if resp.Error.Code != codeInvalidParams {
+		t.Fatalf("invalid %s error code = %d, want invalid params", field, resp.Error.Code)
+	}
+	if details := asMap(t, resp.Error.Data)["details"]; asMap(t, details)["field"] != field {
+		t.Fatalf("invalid %s details = %#v", field, details)
+	}
 }
 
 func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName string) {
