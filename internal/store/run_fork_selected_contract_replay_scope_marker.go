@@ -11,9 +11,9 @@ const RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner = "runtime.ru
 // replay/resume policies that are allowed to reinterpret source-run facts before
 // any selected-contract fork mutation.
 func RunForkSelectedContractReplayResumeAdmission(plan RunForkPlan) RunForkReplayResumeAdmission {
-	return RunForkSelectedContractCommittedReplayScopeMarkerAdmission(
-		RunForkSelectedContractSessionTurnAuditLineageAdmission(plan),
-	)
+	admission := RunForkSelectedContractActiveSourceDeliveryConversationCouplingAdmission(plan, plan.ReplayResumeAdmission)
+	admission = runForkSelectedContractSessionTurnAuditLineageAdmission(plan, admission)
+	return RunForkSelectedContractCommittedReplayScopeMarkerAdmission(admission)
 }
 
 // RunForkSelectedContractCommittedReplayScopeMarkerAdmission treats at/before-T

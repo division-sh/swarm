@@ -572,6 +572,153 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	}
 }
 
+func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEmission(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	forkPointEventID := uuid.NewString()
+	sessionID := uuid.NewString()
+	auditID := uuid.NewString()
+	turnID := uuid.NewString()
+	at := time.Unix(1700002303, 0).UTC()
+	forkAt := at.Add(30 * time.Second)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, conversation_mode, status, created_at)
+		VALUES ('validation-coordinator', 'test-agent', 'tier1', 'session_per_entity', 'active', $1)
+		ON CONFLICT (agent_id) DO NOTHING
+	`, at); err != nil {
+		t.Fatalf("seed source session agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			runtime_mode, status, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'validation-coordinator', $3::uuid, 'flow-a/1', $3::text, 'entity',
+			'session_per_entity', 'active', $4, $4)
+	`, sessionID, sourceRunID, entityID, at); err != nil {
+		t.Fatalf("seed source session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_conversation_audits (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			runtime_mode, runtime_state, status, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'validation-coordinator', $3::uuid, 'flow-a/1', $3::text, 'entity',
+			'task', '{}'::jsonb, 'active', $4, $4)
+	`, auditID, sourceRunID, entityID, at); err != nil {
+		t.Fatalf("seed source conversation audit: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_turns (
+			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			trigger_event_id, trigger_event_type, task_id, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'validation-coordinator', $3::uuid, 'session_per_entity', $4::text, $4::uuid,
+			$5::uuid, 'item.received', 'task-a', $6)
+	`, turnID, sourceRunID, sessionID, entityID, sourceEventID, at); err != nil {
+		t.Fatalf("seed source turn: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, started_at, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'validation-coordinator', 'in_progress', $3, $3)
+	`, sourceRunID, sourceEventID, at.Add(5*time.Second)); err != nil {
+		t.Fatalf("seed in-progress source delivery: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, source_event_id, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'item.received', $3::uuid,
+			'flow-a/1', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
+			$4::uuid, $5
+		)
+	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
+		t.Fatalf("seed fork point event: %v", err)
+	}
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           forkPointEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	}
+	if result.Materialization.ForkRunID == "" || !result.Activation.Activated {
+		t.Fatalf("selected execution result = %#v", result)
+	}
+	for _, code := range []string{
+		store.RunForkBlockerDeliveryHistoryUnproven,
+		store.RunForkBlockerSessionHistoryUnproven,
+		store.RunForkBlockerConversationAuditUnproven,
+		store.RunForkBlockerActiveTurnHistoryUnproven,
+	} {
+		if selectedExecutionResultHasBlocker(result, code) {
+			t.Fatalf("selected execution retained %s: materialization=%#v activation=%#v", code, result.Materialization.UnsupportedBlockers, result.Activation.UnsupportedBlockers)
+		}
+	}
+	if !result.Activation.SourceAdvancedAfterFork ||
+		result.Activation.BranchDivergence == nil ||
+		!containsString(result.Activation.BranchDivergence.SourceAdvancedFacts, store.RunForkSelectedContractActiveSourceDeliveryConversationCouplingClassification) {
+		t.Fatalf("activation branch divergence = %#v, want #678 same-source active delivery fact", result.Activation.BranchDivergence)
+	}
+
+	var copiedSessions, copiedAudits, copiedTurns, copiedSourceSubscriberDeliveries int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM agent_sessions WHERE run_id = $1::uuid OR session_id = $2::uuid
+	`, result.Materialization.ForkRunID, sessionID).Scan(&copiedSessions); err != nil {
+		t.Fatalf("count session copies: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM agent_conversation_audits WHERE run_id = $1::uuid OR session_id = $2::uuid
+	`, result.Materialization.ForkRunID, auditID).Scan(&copiedAudits); err != nil {
+		t.Fatalf("count audit copies: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM agent_turns WHERE run_id = $1::uuid OR turn_id = $2::uuid
+	`, result.Materialization.ForkRunID, turnID).Scan(&copiedTurns); err != nil {
+		t.Fatalf("count turn copies: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND subscriber_id = 'validation-coordinator'
+		  AND status = 'in_progress'
+	`, result.Materialization.ForkRunID).Scan(&copiedSourceSubscriberDeliveries); err != nil {
+		t.Fatalf("count copied source delivery: %v", err)
+	}
+	if copiedSessions != 1 || copiedAudits != 1 || copiedTurns != 1 || copiedSourceSubscriberDeliveries != 0 {
+		t.Fatalf("copied source rows sessions=%d audits=%d turns=%d sourceDeliveries=%d, want source-only conversation rows and no source delivery copies", copiedSessions, copiedAudits, copiedTurns, copiedSourceSubscriberDeliveries)
+	}
+}
+
 func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBranchDivergence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}

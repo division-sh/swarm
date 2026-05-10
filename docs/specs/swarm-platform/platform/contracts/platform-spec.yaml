@@ -3467,7 +3467,9 @@ run_model:
         idempotency effects, and emitted follow-ups under the fork run_id. Post-fork source session, turn, and
         conversation-audit facts may be classified only by the separate
         runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy owner as lineage/no-action
-        branch-divergence evidence.'
+        branch-divergence evidence. Same-source in-progress delivery coupling admitted by
+        runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy is also
+        branch-divergence lineage evidence and not executable delivery/session truth.'
     selected_contract_source_advanced_conversation_history_policy: 'Mutating selected-contract timestamp-fork execution
       may consume runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy to classify
       post-fork-T source agent_sessions, agent_turns, and agent_conversation_audits as source-advanced branch-divergence
@@ -3478,6 +3480,18 @@ run_model:
       Pending or in-progress source delivery/session coupling, fork-local pre-existing conversation rows, generic/state-only
       activation, full historical replay/resume, timers, routes, non-agent replay, restart recovery, and operator surfaces
       remain fail-closed or split siblings unless separately approved.'
+    selected_contract_active_source_delivery_conversation_coupling_policy: 'Mutating selected-contract timestamp-fork
+      execution may consume runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy
+      to classify exactly one narrow at-T active delivery/session coupling case as lineage/no-action and branch-divergence
+      evidence: the in-progress source agent delivery is for the source event referenced by the fork-point event
+      source_event_id, the fork-point event was produced by the same agent subscriber, the delivery started at/before T,
+      and the delivery row has no active_session_id, receipt, receipt outcome, or delivered_at at T. The policy does not
+      authorize copying source delivery rows, sessions, turns, audits, provider session IDs, transcripts, receipts,
+      outcomes, or conversation audits into the fork and does not let a source terminal outcome after T suppress or decide
+      selected fork execution. Unrelated in-flight deliveries, active_session_id coupling, partial receipt/outcome state,
+      fork-local pre-existing conversation rows, post-T source conversation facts outside the source-advanced
+      conversation-history owner, non-agent replay, timers, routes, retry/idempotency, follow-up policy, restart recovery,
+      and operator surfaces remain fail-closed or split siblings unless separately approved.'
     selected_contract_timer_route_policy: 'Mutating selected-contract timestamp-fork execution treats source route facts
       as evidence-only fail-closed blockers until a separately approved route reconstruction owner exists. Active source
       timers may be reconstructed only by runtime.run_fork.historical_replay_execution.timer_reconstruction, which
@@ -3495,7 +3509,9 @@ run_model:
       only. This policy is selected-contract execution only and is not session, turn, or audit reconstruction. It applies
       only when selected-contract execution regenerates fresh fork-local work through canonical owners and no pending or
       in-progress source delivery at T requires live session continuity through active_session_id, started_at, partial
-      receipt/outcome state, or equivalent active execution evidence. Source session, turn, audit, provider-session,
+      receipt/outcome state, or equivalent active execution evidence, except for the separately owned same-source
+      fork-point emission case admitted by runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy.
+      Source session, turn, audit, provider-session,
       transcript, receipt, outcome, or task-audit rows MUST NOT be copied into the fork, reused as fork-local runtime
       truth, or used as selected-fork suppressors. Fork-local conversation rows before the selected execution owner
       creates them remain fail-closed. Post-T source session, turn, and conversation-audit facts are outside this
@@ -3784,13 +3800,15 @@ run_model:
         facts may be admitted only as source-advanced branch-divergence lineage/no-action evidence by the separate
         selected-contract source-advanced conversation-history policy. At/before-T source committed replay-scope marker
         rows may be admitted only as lineage/no-action evidence by the separate selected-contract committed replay-scope
-        marker policy.'
+        marker policy. Same-source in-progress source delivery coupling at the fork-point emission boundary may be
+        admitted only by the separate selected-contract active source delivery conversation-coupling policy.'
       3h1_selected_contract_session_turn_audit_lineage_policy: 'For selected-contract timestamp-fork execution,
         runtime.run_fork.historical_replay_execution.selected_contract_session_turn_audit_lineage_policy consumes the
         canonical replay_resume_admission session_history, active_turn_history, and conversation_audit_history facts and
         may demote those at/before-T source facts from fail-closed blockers to lineage/no-action evidence only. The owner
         must keep pending/in-progress delivery session coupling and fork-local pre-existing conversation rows
-        fail-closed. It must not copy or reuse source session IDs, provider session IDs, transcripts, task audits, turns,
+        fail-closed except when the separate selected-contract active source delivery conversation-coupling policy has
+        admitted the same-source fork-point emission case. It must not copy or reuse source session IDs, provider session IDs, transcripts, task audits, turns,
         receipts, outcomes, or source audit rows as fork-local runtime truth or suppressors. Fresh fork-local sessions,
         turns, and audits may appear only through normal selected fork runtime execution under the fork run_id. Post-T
         source conversation facts are outside this at/before-T owner and may be admitted only by
@@ -3820,6 +3838,18 @@ run_model:
         generic non-agent replay, delivery-event replay, committed replay-scope marker policy, sessions, turns, audits,
         timers, routes, retry/idempotency, follow-up policy, restart recovery, contract-swap boot/resume, and operator
         surfaces remain separate fail-closed or split siblings unless independently approved.'
+      3h4_selected_contract_active_source_delivery_conversation_coupling_policy: 'For selected-contract timestamp-fork
+        execution, runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy
+        consumes replay_resume_admission delivery_in_progress_history evidence and fork-point source-event causality to
+        admit only the same-source delivery fork-point emission case: the source delivery is in progress at T, belongs to
+        the fork-point event source_event_id, and its agent subscriber produced the fork-point event, with no
+        active_session_id, receipt, receipt outcome, or delivered_at at T. This owner may demote that delivery fact from a
+        generic delivery_history_unproven blocker to lineage/no-action evidence and may allow the session/turn/audit
+        lineage policy to classify at/before-T source conversation rows. It records the admitted case as selected-contract
+        branch-divergence evidence. It must not copy source delivery/session/turn/audit rows, use source terminal outcomes
+        after T as fork suppressors, or admit unrelated active deliveries, active_session_id coupling, post-T source
+        conversation facts, fork-local pre-existing rows, non-agent replay, timers, routes, retry/idempotency, follow-up
+        policy, restart recovery, or operator surfaces.'
       3i_contract_swap_boot_resume_admission: 'For timestamp forks with selected or swapped contracts, full boot/resume
         readiness is answered by runtime.run_fork.contract_swap_boot_resume_admission before any mutating historical
         replay/resume work. The owner consumes selected binding/source admission, replay/resume taxonomy, selected route

@@ -49,10 +49,13 @@ type RunForkPlan struct {
 }
 
 type RunForkPoint struct {
-	Input     string    `json:"input"`
-	EventID   string    `json:"event_id"`
-	EventName string    `json:"event_name,omitempty"`
-	Timestamp time.Time `json:"timestamp"`
+	Input          string    `json:"input"`
+	EventID        string    `json:"event_id"`
+	EventName      string    `json:"event_name,omitempty"`
+	SourceEventID  string    `json:"source_event_id,omitempty"`
+	ProducedBy     string    `json:"produced_by,omitempty"`
+	ProducedByType string    `json:"produced_by_type,omitempty"`
+	Timestamp      time.Time `json:"timestamp"`
 }
 
 type RunForkEntityState struct {
@@ -89,9 +92,12 @@ type RunForkUnsupportedBlocker struct {
 }
 
 type runForkEventCursor struct {
-	EventID   string
-	EventName string
-	CreatedAt time.Time
+	EventID        string
+	EventName      string
+	SourceEventID  string
+	ProducedBy     string
+	ProducedByType string
+	CreatedAt      time.Time
 }
 
 type runForkAdmissionEvidence struct {
@@ -126,7 +132,7 @@ func RequireCanonicalRunForkPlannerCapabilities(caps StoreSchemaCapabilities, ca
 	}
 	required := map[string][]string{
 		"runs":             {"run_id", "status"},
-		"events":           {"event_id", "run_id", "event_name", "created_at"},
+		"events":           {"event_id", "run_id", "event_name", "source_event_id", "produced_by", "produced_by_type", "created_at"},
 		"event_deliveries": {"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count", "reason_code", "active_session_id", "started_at", "delivered_at", "created_at"},
 		"event_receipts":   {"event_id", "subscriber_type", "subscriber_id", "outcome", "reason_code", "processed_at"},
 		"dead_letters":     {"original_event_id", "handler_node", "created_at"},
@@ -182,10 +188,13 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 		return RunForkPlan{}, err
 	}
 	plan.ForkPoint = RunForkPoint{
-		Input:     at,
-		EventID:   cursor.EventID,
-		EventName: cursor.EventName,
-		Timestamp: cursor.CreatedAt,
+		Input:          at,
+		EventID:        cursor.EventID,
+		EventName:      cursor.EventName,
+		SourceEventID:  cursor.SourceEventID,
+		ProducedBy:     cursor.ProducedBy,
+		ProducedByType: cursor.ProducedByType,
+		Timestamp:      cursor.CreatedAt,
 	}
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -247,11 +256,17 @@ func (s *PostgresStore) resolveRunForkPoint(ctx context.Context, runID, at strin
 	if _, err := uuid.Parse(at); err == nil {
 		var cursor runForkEventCursor
 		if err := s.DB.QueryRowContext(ctx, `
-			SELECT event_id::text, event_name, created_at
+			SELECT
+				event_id::text,
+				event_name,
+				COALESCE(source_event_id::text, ''),
+				COALESCE(produced_by, ''),
+				COALESCE(produced_by_type, ''),
+				created_at
 			FROM events
 			WHERE run_id = $1::uuid
 			  AND event_id = $2::uuid
-		`, runID, at).Scan(&cursor.EventID, &cursor.EventName, &cursor.CreatedAt); err != nil {
+		`, runID, at).Scan(&cursor.EventID, &cursor.EventName, &cursor.SourceEventID, &cursor.ProducedBy, &cursor.ProducedByType, &cursor.CreatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return runForkEventCursor{}, fmt.Errorf("fork point event %s not found in source run %s", at, runID)
 			}
@@ -265,13 +280,19 @@ func (s *PostgresStore) resolveRunForkPoint(ctx context.Context, runID, at strin
 	}
 	var cursor runForkEventCursor
 	if err := s.DB.QueryRowContext(ctx, `
-		SELECT event_id::text, event_name, created_at
+		SELECT
+			event_id::text,
+			event_name,
+			COALESCE(source_event_id::text, ''),
+			COALESCE(produced_by, ''),
+			COALESCE(produced_by_type, ''),
+			created_at
 		FROM events
 		WHERE run_id = $1::uuid
 		  AND created_at <= $2::timestamptz
 		ORDER BY created_at DESC, event_id DESC
 		LIMIT 1
-	`, runID, atTime).Scan(&cursor.EventID, &cursor.EventName, &cursor.CreatedAt); err != nil {
+	`, runID, atTime).Scan(&cursor.EventID, &cursor.EventName, &cursor.SourceEventID, &cursor.ProducedBy, &cursor.ProducedByType, &cursor.CreatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return runForkEventCursor{}, fmt.Errorf("no source-run event exists at or before fork timestamp %s", at)
 		}
