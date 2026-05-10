@@ -195,6 +195,7 @@ func main() {
 			Mailbox:               stores.Postgres,
 			Idempotency:           stores.Postgres,
 			Events:                rt.Bus,
+			Source:                source,
 			MailboxApprovalRoutes: mailboxApprovalRoutes,
 			Bundle:                bootBundleIdentity,
 		}),
