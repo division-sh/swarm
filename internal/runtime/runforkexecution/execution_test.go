@@ -308,6 +308,69 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	}
 }
 
+func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMarker(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+	selection := runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot)
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002605, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET subscriber_type = 'agent',
+		    subscriber_id = 'source-agent-that-must-not-route',
+		    status = 'pending',
+		    retry_count = 0,
+		    reason_code = 'source_pending_agent_delivery',
+		    active_session_id = NULL,
+		    started_at = NULL,
+		    delivered_at = NULL
+		WHERE run_id = $1::uuid
+		  AND event_id = $2::uuid
+	`, sourceRunID, sourceEventID); err != nil {
+		t.Fatalf("seed replayable source agent delivery: %v", err)
+	}
+
+	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{
+		SourceRunID:       sourceRunID,
+		At:                sourceEventID,
+		ContractSelection: &selection,
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, sourceEventID, "replay_scope_direct", at.Add(time.Minute))
+
+	result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
+		ForkRunID:    materialized.ForkRunID,
+		Store:        pg,
+		SourceLoader: loader,
+	})
+	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
+		t.Fatalf("ActivateSelectedContractRunFork error = %v, want post-T marker blocker", err)
+	}
+	if result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 || result.Activated {
+		t.Fatalf("result = %#v, want no fork publish before marker block", result)
+	}
+	assertNoForkExecutionRowsForRun(t, db, materialized.ForkRunID)
+}
+
 func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -489,6 +552,72 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	if forkLocalMarkers == 0 {
 		t.Fatalf("fork-local replay-scope marker missing for selected execution result")
 	}
+}
+
+func TestExecuteSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMarker(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002320, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	if _, err := db.ExecContext(ctx, `
+		CREATE OR REPLACE FUNCTION seed_post_t_replay_scope_marker_after_route_recovery()
+		RETURNS trigger AS $$
+		BEGIN
+			INSERT INTO event_deliveries (
+				run_id, event_id, subscriber_type, subscriber_id, status,
+				retry_count, reason_code, delivered_at, created_at
+			)
+			VALUES (
+				NEW.source_run_id, NEW.fork_event_id, 'node', '__runtime_replay_scope__', 'delivered',
+				0, 'replay_scope_direct', NEW.created_at + interval '1 second', NEW.created_at + interval '1 second'
+			);
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql;
+
+		CREATE TRIGGER seed_post_t_replay_scope_marker_after_route_recovery
+		AFTER INSERT ON run_fork_selected_contract_route_recoveries
+		FOR EACH ROW EXECUTE FUNCTION seed_post_t_replay_scope_marker_after_route_recovery();
+	`); err != nil {
+		t.Fatalf("install post-T marker trigger: %v", err)
+	}
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+	})
+	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
+		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want post-T marker blocker", err)
+	}
+	if result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 || result.Activation.Activated {
+		t.Fatalf("result = %#v, want marker block before selected publish", result)
+	}
+	if result.Materialization.ForkRunID == "" {
+		t.Fatalf("expected materialization before post-route marker trigger, got %#v", result.Materialization)
+	}
+	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
 }
 
 func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterialization(t *testing.T) {
@@ -1042,6 +1171,27 @@ func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sour
 		)
 	`, sourceRunID, sourceEventID, reasonCode, at); err != nil {
 		t.Fatalf("seed source replay-scope marker: %v", err)
+	}
+}
+
+func assertNoForkExecutionRowsForRun(t *testing.T, db *sql.DB, forkRunID string) {
+	t.Helper()
+	ctx := context.Background()
+	for name, query := range map[string]string{
+		"events":                                  `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`,
+		"event_deliveries":                        `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`,
+		"run_fork_selected_contract_executions":   `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`,
+		"run_fork_selected_contract_divergences":  `SELECT COUNT(*) FROM run_fork_selected_contract_branch_divergences WHERE fork_run_id = $1::uuid`,
+		"run_fork_selected_contract_route_rows":   `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE fork_run_id = $1::uuid`,
+		"run_fork_delivery_event_replay_lineages": `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`,
+	} {
+		var count int
+		if err := db.QueryRowContext(ctx, query, forkRunID).Scan(&count); err != nil {
+			t.Fatalf("count %s rows: %v", name, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows for blocked selected fork = %d, want 0", name, count)
+		}
 	}
 }
 
