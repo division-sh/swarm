@@ -987,8 +987,9 @@ type PlatformSpecDocument struct {
 			ID string `yaml:"id"`
 		} `yaml:"actions"`
 	} `yaml:"builtin_hooks"`
-	ComplianceRules yaml.Node `yaml:"compliance_rules"`
-	FileLayout      struct {
+	APISpecification yaml.Node `yaml:"api_specification"`
+	ComplianceRules  yaml.Node `yaml:"compliance_rules"`
+	FileLayout       struct {
 		MigrationNote string `yaml:"migration_note"`
 	} `yaml:"file_layout"`
 }

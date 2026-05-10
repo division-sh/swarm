@@ -1,9 +1,9 @@
 # Swarm Builder API Reference
 
 **Version:** 0.1.0
-**Status:** Draft — existing methods documented from source, proposed methods marked [PROPOSED]
+**Status:** Deprecated adapter reference — existing legacy builder methods documented from source, proposed methods retained only as historical notes.
 **Transport:** JSON-RPC 2.0 over HTTP and WebSocket
-**Authority:** This is a tooling reference, not a platform contract. Data model is defined by platform-spec.yaml.
+**Authority:** Not authoritative. The canonical user-facing API contract is `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml` under `api_specification`, with `docs/specs/swarm-platform/platform/contracts/openrpc.json` generated from that section. Legacy builder endpoints are adapter surfaces until migrated or removed by later #665 slices.
 
 ---
 

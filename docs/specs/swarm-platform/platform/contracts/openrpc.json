@@ -1,0 +1,5543 @@
+{
+  "openrpc": "1.2.6",
+  "info": {
+    "title": "Swarm User-Facing JSON-RPC API",
+    "version": "1.0.0",
+    "description": "Single canonical user-facing API for the Swarm platform. JSON-RPC 2.0 over\nHTTP for request/response, JSON-RPC subscriptions over WebSocket for live\nstreams. One transport, one auth model, one envelope. All operator,\nbuilder, CLI, and dashboard consumers route through this surface.\n\nThe spec is Phase-1 in scope (internal — Empire as the only consumer at\nspec time) but Phase-2-publishable by construction: no internal jargon in\nmethod names, no [PROPOSED] placeholders that the impl never honors, all\nmethod signatures typed, all shapes consistent across read paths. This\nYAML is the OpenRPC source-of-truth — the openrpc.json artifact is\ngenerated mechanically from method_catalog + components."
+  },
+  "servers": [
+    {
+      "name": "v1",
+      "url": "/v1/rpc"
+    }
+  ],
+  "methods": [
+    {
+      "name": "agent.get",
+      "description": "Read one agent's identity, current operational status, and references\nto its current session and last turn. Returns refs only — full session\nand transcript content is read via conversation.* methods. Ownership\nboundary: agent.* never returns transcripts.\n",
+      "params": [
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/AgentDetail"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "agent.list",
+      "description": "List declared agents in the loaded bundle, with current operational status.",
+      "params": [
+        {
+          "name": "flow",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "role",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "agents": {
+              "items": {
+                "$ref": "#/components/schemas/AgentSummary"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "agents"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "agent.replay_backlog",
+      "description": "Replay the agent's pending event backlog. Used for recovery after restart or ingress pause.",
+      "params": [
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "replayed_count": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "replayed_count"
+          ],
+          "type": "object"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "agent.restart",
+      "description": "Restart an agent's session. Existing in-flight turn is killed; agent re-initializes.",
+      "params": [
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/OkResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "agent.send_directive",
+      "description": "Send a directive (free-form instruction) to a running agent. Optionally kills the previous turn first.",
+      "params": [
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "directive",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "kill_previous",
+          "required": false,
+          "schema": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "response": {
+              "description": "Optional acknowledgement or error from the agent.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok"
+          ],
+          "type": "object"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_NOT_RUNNING",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_RUNNING",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "current_status": {
+                    "$ref": "#/components/schemas/AgentStatus"
+                  }
+                },
+                "required": [
+                  "agent_id",
+                  "current_status"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "conversation.current_for_agent",
+      "description": "Read the agent's current (most-recent active) session. Replaces the\nownership-violating agent.get_session that earlier drafts proposed —\nagent.* doesn't own sessions; conversation.* does.\n",
+      "params": [
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "description": "Returns null if the agent has no active session.",
+        "schema": {
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/ConversationDetail"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "conversation.get",
+      "description": "Read one conversation in full — session metadata plus all turns and turn blocks.",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ConversationDetail"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: SESSION_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SESSION_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "session_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "conversation.list",
+      "description": "List conversation summaries (one per session).",
+      "params": [
+        {
+          "name": "agent_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "conversations": {
+              "items": {
+                "$ref": "#/components/schemas/ConversationSummary"
+              },
+              "type": "array"
+            },
+            "next_cursor": {
+              "$ref": "#/components/schemas/Cursor"
+            }
+          },
+          "required": [
+            "conversations"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "entity.aggregate",
+      "description": "Aggregate entity counts grouped by a field.",
+      "params": [
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "group_by",
+          "required": false,
+          "description": "Field to group by. Defaults to current_state when omitted.",
+          "schema": {
+            "default": "current_state",
+            "type": "string"
+          }
+        },
+        {
+          "name": "type",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/EntityAggregateResult"
+        }
+      }
+    },
+    {
+      "name": "entity.get",
+      "description": "Read one entity in full, including fields, gates, and accumulator state.",
+      "params": [
+        {
+          "name": "entity_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "description": "Disambiguates entities reused across runs.",
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/EntityFull"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: ENTITY_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "ENTITY_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "entity_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "entity_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "entity.list",
+      "description": "List entities with optional filters. Consolidates legacy \"instance\" and \"entity\" reads.",
+      "params": [
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "flow",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "type",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "current_state",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "entities": {
+              "items": {
+                "$ref": "#/components/schemas/EntitySummary"
+              },
+              "type": "array"
+            },
+            "next_cursor": {
+              "$ref": "#/components/schemas/Cursor"
+            }
+          },
+          "required": [
+            "entities"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "event.get",
+      "description": "Read one event with its full delivery and dead-letter detail.",
+      "params": [
+        {
+          "name": "event_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/EventFull"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: EVENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "event_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "event.list",
+      "description": "Canonical event store query. Folds dead-letter inspection in via the\nhas_dead_letter and reason_code filters; no separate dead_letter.*\nnamespace in v1.\n",
+      "params": [
+        {
+          "name": "filter",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/EventListFilter"
+          }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        {
+          "name": "until",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "events": {
+              "items": {
+                "$ref": "#/components/schemas/EventFull"
+              },
+              "type": "array"
+            },
+            "next_cursor": {
+              "$ref": "#/components/schemas/Cursor"
+            }
+          },
+          "required": [
+            "events"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "event.subscribe",
+      "description": "Live event stream with the same filter shape as event.list. Filter\nparity is required by the conventions section. Pagination params\n(limit, cursor) and the time-window `until` are NOT accepted here\n— subscriptions deliver everything matching the filter live.\n",
+      "params": [
+        {
+          "name": "filter",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/EventListFilter"
+          }
+        },
+        {
+          "name": "replay_since",
+          "required": false,
+          "description": "Optional catch-up window. If present, delivers events from this time forward, then continues live. Subject to runtime event retention.",
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/SubscriptionId"
+        }
+      }
+    },
+    {
+      "name": "health.check",
+      "description": "Structured health and runtime identity. Operators use this to confirm what server they are talking to and whether it is ready to handle requests.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/HealthCheckResult"
+        }
+      }
+    },
+    {
+      "name": "health.ping",
+      "description": "Cheap aliveness check. Always returns success when the runtime is responsive.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "ts": {
+              "$ref": "#/components/schemas/Timestamp"
+            }
+          },
+          "required": [
+            "ok",
+            "ts"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "health.subscribe",
+      "description": "WebSocket heartbeat subscription. Notifications carry the same shape as health.check returns.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/SubscriptionId"
+        }
+      }
+    },
+    {
+      "name": "mailbox.approve",
+      "description": "Approve a pending mailbox item. Triggers the downstream event configured for the item's type.",
+      "params": [
+        {
+          "name": "mailbox_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "decision_payload",
+          "required": false,
+          "description": "Additional decision context attached to the downstream event.",
+          "schema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/MailboxDecisionResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: MAILBOX_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "mailbox_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: MAILBOX_ALREADY_DECIDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_ALREADY_DECIDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "decided_at": {
+                    "$ref": "#/components/schemas/Timestamp"
+                  },
+                  "existing_decision": {
+                    "enum": [
+                      "approved",
+                      "rejected",
+                      "deferred",
+                      "expired"
+                    ],
+                    "type": "string"
+                  },
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "mailbox_id",
+                  "existing_decision",
+                  "decided_at"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mailbox.defer",
+      "description": "Defer a pending mailbox item until a specified time.",
+      "params": [
+        {
+          "name": "mailbox_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "until",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/MailboxDecisionResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: MAILBOX_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "mailbox_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: MAILBOX_ALREADY_DECIDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_ALREADY_DECIDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "decided_at": {
+                    "$ref": "#/components/schemas/Timestamp"
+                  },
+                  "existing_decision": {
+                    "enum": [
+                      "approved",
+                      "rejected",
+                      "deferred",
+                      "expired"
+                    ],
+                    "type": "string"
+                  },
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "mailbox_id",
+                  "existing_decision",
+                  "decided_at"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: INVALID_DEFER_UNTIL",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "INVALID_DEFER_UNTIL",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "max_until": {
+                    "$ref": "#/components/schemas/Timestamp"
+                  },
+                  "reason": {
+                    "enum": [
+                      "in_past",
+                      "beyond_max_window"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mailbox.get",
+      "description": "Read one mailbox item with full payload and decision history.",
+      "params": [
+        {
+          "name": "mailbox_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/MailboxItemDetail"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: MAILBOX_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "mailbox_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mailbox.list",
+      "description": "List mailbox items. Filters cover the operator workflow of \"find items requiring my attention.\"",
+      "params": [
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/MailboxStatus"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "entity_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "type",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "priority",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/MailboxPriority"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/components/schemas/MailboxItem"
+              },
+              "type": "array"
+            },
+            "next_cursor": {
+              "$ref": "#/components/schemas/Cursor"
+            }
+          },
+          "required": [
+            "items"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "mailbox.reject",
+      "description": "Reject a pending mailbox item with a stated reason. No downstream event is emitted.",
+      "params": [
+        {
+          "name": "mailbox_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "reason",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/MailboxDecisionResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: MAILBOX_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "mailbox_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: MAILBOX_ALREADY_DECIDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_ALREADY_DECIDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "decided_at": {
+                    "$ref": "#/components/schemas/Timestamp"
+                  },
+                  "existing_decision": {
+                    "enum": [
+                      "approved",
+                      "rejected",
+                      "deferred",
+                      "expired"
+                    ],
+                    "type": "string"
+                  },
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "mailbox_id",
+                  "existing_decision",
+                  "decided_at"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "rpc.unsubscribe",
+      "description": "Cancel an active WebSocket subscription on the current connection. This is a JSON-RPC protocol method for the subscription transport, not a durable resource mutation.",
+      "params": [
+        {
+          "name": "subscription_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/OkResult"
+        }
+      }
+    },
+    {
+      "name": "run.continue",
+      "description": "Resume a paused run.",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/OkResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: RUN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: RUN_NOT_PAUSED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_PAUSED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "current_status": {
+                    "$ref": "#/components/schemas/RunStatus"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "current_status"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "run.diagnose",
+      "description": "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go. The single\ncanonical owner for \"why isn't this run progressing?\" — routes the\nexisting projection through the API instead of having every\nconsumer recompute it. Today the projection produces\noperational_state, blocking_layer, blocking_reason, and\nheuristics; richer fields (evidence pointers, suggested_next_action)\nare additive owner extensions for a future slice.\n",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/RunDiagnosis"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: RUN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "run.get",
+      "description": "Cheap canonical read of the run header. Used by lists, hovers, and any consumer that needs run status without paying for diagnostic interpretation.",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "run": {
+              "$ref": "#/components/schemas/RunHeader"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "type": "object"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: RUN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "run.list",
+      "description": "List runs with optional filters. Cursor-paginated.",
+      "params": [
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        {
+          "name": "until",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "$ref": "#/components/schemas/Cursor"
+            },
+            "runs": {
+              "items": {
+                "$ref": "#/components/schemas/RunHeader"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "runs"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "run.pause",
+      "description": "Pause a run by halting event dispatch. In-flight handlers complete; queued events wait. Run continues on run.continue.",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/OkResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: RUN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: RUN_ALREADY_TERMINAL",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_ALREADY_TERMINAL",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "current_status": {
+                    "$ref": "#/components/schemas/RunStatus"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "current_status"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: RUN_ALREADY_PAUSED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_ALREADY_PAUSED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "run.start",
+      "description": "Start a new run by injecting an event into the runtime bus.\nOptionally declares a bundle_ref by fingerprint; v1 runtime\nrequires the fingerprint to match the orchestrator's boot-time\nbundle (or the bundle_ref to be omitted, in which case the\nboot-time bundle is used). Per-run dynamic bundle loading is\ndeferred (see deferred_namespaces.bundle_lifecycle).\n",
+      "params": [
+        {
+          "name": "bundle_ref",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/BundleRef"
+          }
+        },
+        {
+          "name": "event_name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "payload",
+          "required": true,
+          "schema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "description": "Caller-provided ID; if omitted, runtime assigns.",
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "run_id": {
+              "$ref": "#/components/schemas/OpaqueId"
+            },
+            "status": {
+              "$ref": "#/components/schemas/RunStatus"
+            }
+          },
+          "required": [
+            "run_id",
+            "status"
+          ],
+          "type": "object"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: BUNDLE_MISMATCH",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "BUNDLE_MISMATCH",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "boot_fingerprint": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "provided_fingerprint": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  }
+                },
+                "required": [
+                  "provided_fingerprint",
+                  "boot_fingerprint"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: UNSUPPORTED_BUNDLE_REF",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "UNSUPPORTED_BUNDLE_REF",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: EVENT_NOT_DECLARED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_NOT_DECLARED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "declared_events": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "event_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "event_name"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: PAYLOAD_VALIDATION_FAILED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "PAYLOAD_VALIDATION_FAILED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "violations": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "field_path": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "rule": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "field_path",
+                        "rule",
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "violations"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "run.stop",
+      "description": "Stop an in-progress run. Pending events are abandoned; in-flight handlers complete or roll back per their own semantics.",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/OkResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: RUN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: RUN_ALREADY_TERMINAL",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_ALREADY_TERMINAL",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "current_status": {
+                    "$ref": "#/components/schemas/RunStatus"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "current_status"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "run.subscribe_trace",
+      "description": "Live composed trace stream for one run. Each notification carries one\njoined trace row (the same RunTraceRow shape returned by run.trace).\nDistinct from event.subscribe because trace is a composed view (event\n+ delivery + session + turn joined by the runtime), not raw events.\n",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "replay_since",
+          "required": false,
+          "description": "Optional catch-up window. If present, delivers trace rows from this time forward, then continues live. Subject to runtime trace retention.",
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/SubscriptionId"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: RUN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "run.trace",
+      "description": "Persisted composed run trace as an ordered list of joined rows. Each\nrow is anchored on an event and carries delivery, session, and turn\nfields where the join finds them. The runtime owns the join — clients\nMUST consume rows as-emitted and MUST NOT reconstruct the join from\nseparate event/delivery/session/turn lists. Backed by the canonical\nRunDebugTraceRow surface in internal/store/run_debug_read_surface.go.\n",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 200,
+            "maximum": 2000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/RunTraceListResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: RUN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "runtime.incidents",
+      "description": "Aggregated runtime incidents (errors and warnings grouped by error_code/component for triage).",
+      "params": [
+        {
+          "name": "since_hours",
+          "required": false,
+          "schema": {
+            "default": 24,
+            "maximum": 720,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "component",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "level",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/LogLevel"
+          }
+        },
+        {
+          "name": "mcp_only",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "incidents": {
+              "items": {
+                "$ref": "#/components/schemas/Incident"
+              },
+              "type": "array"
+            },
+            "next_cursor": {
+              "$ref": "#/components/schemas/Cursor"
+            }
+          },
+          "required": [
+            "incidents"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "runtime.logs",
+      "description": "Filtered structured runtime log query.",
+      "params": [
+        {
+          "name": "run_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "entity_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "component",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "level",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/LogLevel"
+          }
+        },
+        {
+          "name": "error_code",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "source",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Cursor"
+          }
+        },
+        {
+          "name": "order",
+          "required": false,
+          "schema": {
+            "default": "desc",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "logs": {
+              "items": {
+                "$ref": "#/components/schemas/LogEntry"
+              },
+              "type": "array"
+            },
+            "next_cursor": {
+              "$ref": "#/components/schemas/Cursor"
+            }
+          },
+          "required": [
+            "logs"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "runtime.pause",
+      "description": "Pause runtime ingress. New events are queued but not dispatched. In-flight handlers complete.",
+      "params": [
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/OkResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: RUNTIME_ALREADY_PAUSED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUNTIME_ALREADY_PAUSED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "runtime.resume",
+      "description": "Resume runtime ingress.",
+      "params": [
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/OkResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32000,
+          "message": "Application error: RUNTIME_NOT_PAUSED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUNTIME_NOT_PAUSED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    }
+  ],
+  "components": {
+    "schemas": {
+      "AgentDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/AgentSummary"
+          },
+          "current_session_ref": {
+            "$ref": "#/components/schemas/SessionRef"
+          },
+          "last_turn_ref": {
+            "$ref": "#/components/schemas/TurnRef"
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "type": "object"
+      },
+      "AgentStatus": {
+        "enum": [
+          "idle",
+          "running",
+          "paused",
+          "failed",
+          "terminated"
+        ],
+        "type": "string"
+      },
+      "AgentSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "conversation_mode": {
+            "$ref": "#/components/schemas/ConversationMode"
+          },
+          "model_tier": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "session_scope": {
+            "$ref": "#/components/schemas/SessionScope"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "role",
+          "type",
+          "model_tier",
+          "conversation_mode",
+          "session_scope",
+          "status"
+        ],
+        "type": "object"
+      },
+      "BlockingLayer": {
+        "description": "Layer-of-the-system identifier when operational_state is \"stalled\".\nEmpty string when state is running or terminal. Source of truth:\nProjectRunOperationalStatus. Current owner emits:\n  \"\" (empty) — state is running or terminal\n  \"scoring_terminal_outcome\" — scoring entities have not reached\n    a terminal scoring outcome (shortlisted/marginal/rejected)\n  \"delivery_lifecycle\" — no active deliveries but events exist\nAdditional values may be added as the operator-state owner gains\nmore diagnostic semantics. Type stays string (not enum) for\nforward compatibility — additive owner extensions must not\nrequire a /v2/ bump.\n",
+        "type": "string"
+      },
+      "BundleIdentity": {
+        "additionalProperties": false,
+        "description": "Server bundle identity returned by health.check. Three fields:\nfingerprint is the load-bearing identity (sha256 of normalized\ncontents); workflow_name and workflow_version are human-friendly\nlabels. Server-local filesystem paths are intentionally NOT\nexposed — they leak deployment internals and aren't meaningful\nto external Phase-2 consumers. Operators querying \"what bundle\nis this server running?\" get the fingerprint (definitive) and\nthe labels (informational).\n",
+        "properties": {
+          "fingerprint": {
+            "$ref": "#/components/schemas/Sha256Fingerprint"
+          },
+          "workflow_name": {
+            "type": "string"
+          },
+          "workflow_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_name",
+          "workflow_version",
+          "fingerprint"
+        ],
+        "type": "object"
+      },
+      "BundleRef": {
+        "additionalProperties": false,
+        "description": "Bundle reference passed by callers to assert \"I expect the server\nto be running this bundle.\" Identified by content fingerprint,\nNOT server-local filesystem paths — paths cannot be safely\nreferenced by external Phase-2 consumers, and the runtime's\nactual identity check is fingerprint comparison.\n\nv1 runtime requires the fingerprint to match the orchestrator's\nboot-time loaded bundle, or the call fails with BUNDLE_MISMATCH.\nPer-run dynamic bundle loading (a content-addressable bundle\nuploaded or referenced by registry coordinate) is part of the\ndeferred bundle_lifecycle namespace; v1 BundleRef carries\nfingerprint only.\n\nA typical caller flow: call health.check first to read the\nserver's current bundle.fingerprint, then pass the same\nfingerprint in run.start.bundle_ref to assert continuity.\n",
+        "properties": {
+          "fingerprint": {
+            "$ref": "#/components/schemas/Sha256Fingerprint"
+          }
+        },
+        "required": [
+          "fingerprint"
+        ],
+        "type": "object"
+      },
+      "ConversationDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "conversation": {
+            "$ref": "#/components/schemas/ConversationSummary"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/Turn"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "conversation",
+          "turns"
+        ],
+        "type": "object"
+      },
+      "ConversationMode": {
+        "enum": [
+          "task",
+          "session",
+          "session_per_entity"
+        ],
+        "type": "string"
+      },
+      "ConversationSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "ended_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "message_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "session_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "terminated"
+            ],
+            "type": "string"
+          },
+          "turn_count": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "agent_id",
+          "started_at",
+          "turn_count",
+          "message_count",
+          "status"
+        ],
+        "type": "object"
+      },
+      "Cursor": {
+        "description": "Opaque pagination cursor. Encoded by the runtime; clients MUST treat as opaque and pass back unchanged.",
+        "type": "string"
+      },
+      "DeadLetterRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "chain_depth": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "dead_letter_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "failure_type": {
+            "enum": [
+              "handler_error",
+              "chain_depth_exceeded",
+              "retry_exhausted"
+            ],
+            "type": "string"
+          },
+          "handler_node": {
+            "type": "string"
+          },
+          "retry_count": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dead_letter_id",
+          "failure_type",
+          "retry_count",
+          "chain_depth",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "DeliveryStatus": {
+        "enum": [
+          "pending",
+          "in_progress",
+          "delivered",
+          "failed",
+          "dead_letter"
+        ],
+        "type": "string"
+      },
+      "DiagnosisEvidence": {
+        "additionalProperties": false,
+        "description": "Reserved for future owner extension. Currently unreferenced by any\nv1 method — the operator-state projection does not yet emit\nevidence pointers. Kept in components.schemas as the canonical\nshape so that when the owner gains evidence emission (a follow-on\nslice), RunDiagnosis can additively reference this type.\n",
+        "properties": {
+          "kind": {
+            "description": "e.g., event, entity, turn, mailbox_item, dead_letter.",
+            "type": "string"
+          },
+          "ref": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "summary": {
+            "description": "Human-readable one-line description of why this evidence supports the diagnosis.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "ref",
+          "summary"
+        ],
+        "type": "object"
+      },
+      "EntityAggregateResult": {
+        "additionalProperties": false,
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Map of group_value → integer count.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "counts"
+        ],
+        "type": "object"
+      },
+      "EntityFull": {
+        "additionalProperties": false,
+        "description": "Entity-native shape: typed fields, gates, accumulator state. This\nis the destination shape entity.get returns. v1 implementation\nmay need to translate from the existing instance-shaped readers\nin internal/dashboard/server/server.go (which return flat\nWorkflowInstance structs without the typed-fields/gates/\naccumulated decomposition). The spec commits to the entity-native\nshape; implementations are responsible for providing it. A real\nentity-read owner may need to land before entity.* methods can\nhonor this shape, which is why the entity.* methods are\nshould_have rather than must_have for v1.\n",
+        "properties": {
+          "accumulated": {
+            "additionalProperties": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "description": "Per-handler accumulator buckets. Map of bucket_key → array of typed items.",
+            "type": "object"
+          },
+          "entity": {
+            "$ref": "#/components/schemas/EntitySummary"
+          },
+          "fields": {
+            "additionalProperties": true,
+            "description": "Typed entity fields per the entity contract. Shape depends on entity_type.",
+            "type": "object"
+          },
+          "gates": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "Gate state. Map of gate_name → boolean.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "entity",
+          "fields",
+          "gates",
+          "accumulated"
+        ],
+        "type": "object"
+      },
+      "EntitySummary": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "current_state": {
+            "type": "string"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "flow_instance": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "entity_id",
+          "run_id",
+          "flow_instance",
+          "entity_type",
+          "current_state",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "EventDelivery": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          },
+          "subscriber_id": {
+            "type": "string"
+          },
+          "subscriber_type": {
+            "$ref": "#/components/schemas/SubscriberType"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "subscriber_type",
+          "subscriber_id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "EventFull": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "dead_letters": {
+            "items": {
+              "$ref": "#/components/schemas/DeadLetterRecord"
+            },
+            "type": "array"
+          },
+          "deliveries": {
+            "items": {
+              "$ref": "#/components/schemas/EventDelivery"
+            },
+            "type": "array"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_name": {
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source": {
+            "description": "Producer identifier (node_id, agent_id, or \"external\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_name",
+          "created_at",
+          "source",
+          "payload",
+          "deliveries",
+          "dead_letters"
+        ],
+        "type": "object"
+      },
+      "EventListFilter": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery_status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_name": {
+            "type": "string"
+          },
+          "has_dead_letter": {
+            "type": "boolean"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "subscriber_id": {
+            "type": "string"
+          },
+          "subscriber_type": {
+            "$ref": "#/components/schemas/SubscriberType"
+          }
+        },
+        "type": "object"
+      },
+      "HealthCheckResult": {
+        "additionalProperties": false,
+        "properties": {
+          "alive": {
+            "type": "boolean"
+          },
+          "bundle": {
+            "$ref": "#/components/schemas/BundleIdentity"
+          },
+          "db_ok": {
+            "type": "boolean"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "runtime_ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "alive",
+          "ready",
+          "db_ok",
+          "runtime_ok",
+          "bundle"
+        ],
+        "type": "object"
+      },
+      "Incident": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "first_seen": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "incident_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "last_seen": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "level": {
+            "$ref": "#/components/schemas/LogLevel"
+          },
+          "sample_log_ids": {
+            "items": {
+              "$ref": "#/components/schemas/OpaqueId"
+            },
+            "type": "array"
+          },
+          "sample_message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "incident_id",
+          "first_seen",
+          "last_seen",
+          "count",
+          "level",
+          "component",
+          "sample_message",
+          "sample_log_ids"
+        ],
+        "type": "object"
+      },
+      "LogEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/LogLevel"
+          },
+          "log_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "message": {
+            "type": "string"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source": {
+            "type": "string"
+          },
+          "ts": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "log_id",
+          "ts",
+          "level",
+          "component",
+          "source",
+          "message"
+        ],
+        "type": "object"
+      },
+      "LogLevel": {
+        "enum": [
+          "debug",
+          "info",
+          "warn",
+          "error"
+        ],
+        "type": "string"
+      },
+      "MailboxDecisionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "downstream_event_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Present only when the decision triggered an event emission (typically on approve)."
+          },
+          "mailbox_decision_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MailboxStatus"
+          }
+        },
+        "required": [
+          "ok",
+          "mailbox_decision_id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "MailboxHistoryEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "created",
+              "approved",
+              "rejected",
+              "deferred",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "actor_token_id": {
+            "type": "string"
+          },
+          "decision_payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "ts": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "action",
+          "actor_token_id",
+          "ts"
+        ],
+        "type": "object"
+      },
+      "MailboxItem": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "decided_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "decision": {
+            "enum": [
+              "approved",
+              "rejected",
+              "deferred",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "mailbox_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/MailboxPriority"
+          },
+          "source_entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source_event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "source_flow": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MailboxStatus"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mailbox_id",
+          "type",
+          "status",
+          "priority",
+          "source_event_id",
+          "source_flow",
+          "payload",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "MailboxItemDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/MailboxHistoryEntry"
+            },
+            "type": "array"
+          },
+          "item": {
+            "$ref": "#/components/schemas/MailboxItem"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "item",
+          "payload",
+          "history"
+        ],
+        "type": "object"
+      },
+      "MailboxPriority": {
+        "enum": [
+          "normal",
+          "high",
+          "critical"
+        ],
+        "type": "string"
+      },
+      "MailboxStatus": {
+        "enum": [
+          "pending",
+          "decided",
+          "expired",
+          "deferred"
+        ],
+        "type": "string"
+      },
+      "OkResult": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "OpaqueId": {
+        "description": "Opaque identifier. Currently UUID-shaped for runtime-assigned IDs; clients MUST NOT assume UUID shape.",
+        "maxLength": 256,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_:.-]+$",
+        "type": "string"
+      },
+      "OperationalState": {
+        "description": "Operational state of a run. Source of truth:\ninternal/store/run_operational_status_read_surface.go\nProjectRunOperationalStatus. Values are RunTableStatus values\nlowercased plus \"stalled\" as the projection's special\n\"running-but-not-progressing\" state.\n",
+        "enum": [
+          "running",
+          "stalled",
+          "paused",
+          "completed",
+          "failed",
+          "cancelled",
+          "forked"
+        ],
+        "type": "string"
+      },
+      "RpcSubscriptionNotification": {
+        "additionalProperties": false,
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0",
+            "type": "string"
+          },
+          "method": {
+            "const": "rpc.subscription",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": false,
+            "properties": {
+              "result": {
+                "description": "Per-method notification payload. See each subscribe method's notification_schema field."
+              },
+              "subscription": {
+                "$ref": "#/components/schemas/OpaqueId"
+              }
+            },
+            "required": [
+              "subscription",
+              "result"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "jsonrpc",
+          "method",
+          "params"
+        ],
+        "type": "object"
+      },
+      "RunDiagnosis": {
+        "additionalProperties": false,
+        "description": "Run header plus the canonical operator-state projection. Source of\ntruth: ProjectRunOperationalStatus. Spec exposes exactly what the\nowner produces in v1; richer fields (evidence pointers,\nsuggested_next_action) are additive owner extensions for a future\nslice — when the store owner gains them, the spec adds them\nadditively (no /v2/ bump).\n",
+        "properties": {
+          "blocking_layer": {
+            "$ref": "#/components/schemas/BlockingLayer"
+          },
+          "blocking_reason": {
+            "description": "Free-form reason string when operational_state is \"stalled\".\nEmpty when state is running or terminal. Current owner emits:\n  \"\" (empty)\n  \"terminal_scoring_outcome_missing\"\n  \"no_active_deliveries\"\nAdditional values may be added additively.\n",
+            "type": "string"
+          },
+          "heuristics": {
+            "description": "Free-form diagnostic notes from the projection. Current owner\nemits one entry per detected condition, e.g. \"dead letters\nexist for this run\".\n",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "operational_state": {
+            "$ref": "#/components/schemas/OperationalState"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunHeader"
+          }
+        },
+        "required": [
+          "run",
+          "operational_state",
+          "blocking_layer",
+          "blocking_reason",
+          "heuristics"
+        ],
+        "type": "object"
+      },
+      "RunHeader": {
+        "additionalProperties": false,
+        "properties": {
+          "ended_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Omitted while run is active; present once status is terminal (completed/failed/cancelled/forked)."
+          },
+          "entity_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "error_summary": {
+            "description": "Present only if a top-level error terminated the run.",
+            "type": "string"
+          },
+          "event_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "forked_from_run_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Present only if status indicates a fork."
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "trigger_event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "trigger_event_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "trigger_event_type",
+          "trigger_event_id",
+          "entity_count",
+          "event_count",
+          "started_at"
+        ],
+        "type": "object"
+      },
+      "RunStatus": {
+        "enum": [
+          "running",
+          "paused",
+          "completed",
+          "failed",
+          "cancelled",
+          "forked"
+        ],
+        "type": "string"
+      },
+      "RunTraceListResult": {
+        "additionalProperties": false,
+        "properties": {
+          "next_cursor": {
+            "$ref": "#/components/schemas/Cursor"
+          },
+          "trace": {
+            "items": {
+              "$ref": "#/components/schemas/RunTraceRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "trace"
+        ],
+        "type": "object"
+      },
+      "RunTraceRow": {
+        "additionalProperties": false,
+        "description": "One joined trace row. Every row is anchored on an event; delivery,\nsession, and turn fields are sparse and present only where the join\nfinds a corresponding row. Matches the runtime's canonical\nRunDebugTraceRow shape (internal/store/run_debug_read_surface.go).\nThe runtime owns the join — clients MUST consume rows as-emitted\nand MUST NOT reconstruct the join from separate event/delivery/\nsession/turn lists.\n",
+        "properties": {
+          "active_session_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "delivery_created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "delivery_delivered_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "delivery_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "delivery_reason_code": {
+            "type": "string"
+          },
+          "delivery_started_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "delivery_status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          },
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "event_name": {
+            "type": "string"
+          },
+          "event_source": {
+            "type": "string"
+          },
+          "event_source_type": {
+            "type": "string"
+          },
+          "session_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "session_kind": {
+            "type": "string"
+          },
+          "session_runtime_mode": {
+            "type": "string"
+          },
+          "session_status": {
+            "type": "string"
+          },
+          "session_updated_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "source_event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "subscriber_id": {
+            "type": "string"
+          },
+          "subscriber_type": {
+            "$ref": "#/components/schemas/SubscriberType"
+          },
+          "turn_created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "turn_entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "turn_error": {
+            "type": "string"
+          },
+          "turn_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "turn_parse_ok": {
+            "type": "boolean"
+          },
+          "turn_retry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "turn_runtime_mode": {
+            "type": "string"
+          },
+          "turn_scope_key": {
+            "type": "string"
+          },
+          "turn_task_id": {
+            "type": "string"
+          },
+          "turn_trigger_event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "turn_trigger_event_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_name",
+          "event_created_at"
+        ],
+        "type": "object"
+      },
+      "ScopeName": {
+        "description": "Action-resource scopes used for v1 authorization. v1 enforcement\ntreats every valid token as granting every scope; the enum exists\nfor forward-compat with Phase 2/3 per-token scope restrictions.\nNew scopes added by deferred namespaces (e.g., verify:contracts\nwhen verify.* lands, debug:* when debug.* lands) are additive.\n",
+        "enum": [
+          "read:health",
+          "read:runs",
+          "write:runs",
+          "admin:runs",
+          "read:entities",
+          "read:events",
+          "read:mailbox",
+          "approve:mailbox",
+          "read:agents",
+          "control:agents",
+          "read:conversations",
+          "read:runtime",
+          "control:runtime",
+          "admin:runtime"
+        ],
+        "type": "string"
+      },
+      "SessionRef": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "session_id",
+          "started_at"
+        ],
+        "type": "object"
+      },
+      "SessionScope": {
+        "enum": [
+          "global",
+          "flow",
+          "entity"
+        ],
+        "type": "string"
+      },
+      "Sha256Fingerprint": {
+        "description": "Content-hash fingerprint of a bundle. Stable across paths/worktrees where content is identical.",
+        "pattern": "^sha256:[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "SubscriberType": {
+        "enum": [
+          "node",
+          "agent"
+        ],
+        "type": "string"
+      },
+      "SubscriptionId": {
+        "additionalProperties": false,
+        "properties": {
+          "subscription_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        "required": [
+          "subscription_id"
+        ],
+        "type": "object"
+      },
+      "Timestamp": {
+        "description": "RFC3339 timestamp, UTC. Example: \"2026-05-09T18:31:41.367722Z\".",
+        "format": "date-time",
+        "type": "string"
+      },
+      "Turn": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parse_ok": {
+            "type": "boolean"
+          },
+          "request_payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "response_payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "tool_calls": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "trigger_event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "trigger_event_type": {
+            "type": "string"
+          },
+          "turn_blocks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "turn_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        "required": [
+          "turn_id",
+          "trigger_event_id",
+          "trigger_event_type",
+          "parse_ok",
+          "latency_ms"
+        ],
+        "type": "object"
+      },
+      "TurnRef": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "error": {
+            "type": "string"
+          },
+          "parse_ok": {
+            "type": "boolean"
+          },
+          "turn_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        "required": [
+          "turn_id",
+          "completed_at",
+          "parse_ok"
+        ],
+        "type": "object"
+      },
+      "VerifyError": {
+        "additionalProperties": false,
+        "properties": {
+          "check_id": {
+            "type": "string"
+          },
+          "location": {
+            "additionalProperties": false,
+            "properties": {
+              "field": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "message": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "hard_invalidity",
+              "warning"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_id",
+          "severity",
+          "message"
+        ],
+        "type": "object"
+      },
+      "VerifyResult": {
+        "additionalProperties": false,
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/VerifyError"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/VerifyError"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "errors",
+          "warnings"
+        ],
+        "type": "object"
+      }
+    },
+    "errors": {
+      "AGENT_NOT_FOUND": {
+        "code": -32000,
+        "message": "Application error: AGENT_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "AGENT_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "agent_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "agent_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "AGENT_NOT_RUNNING": {
+        "code": -32000,
+        "message": "Application error: AGENT_NOT_RUNNING",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "AGENT_NOT_RUNNING",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "agent_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "current_status": {
+                  "$ref": "#/components/schemas/AgentStatus"
+                }
+              },
+              "required": [
+                "agent_id",
+                "current_status"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "BUNDLE_MISMATCH": {
+        "code": -32000,
+        "message": "Application error: BUNDLE_MISMATCH",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "BUNDLE_MISMATCH",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "boot_fingerprint": {
+                  "$ref": "#/components/schemas/Sha256Fingerprint"
+                },
+                "provided_fingerprint": {
+                  "$ref": "#/components/schemas/Sha256Fingerprint"
+                }
+              },
+              "required": [
+                "provided_fingerprint",
+                "boot_fingerprint"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "ENTITY_NOT_FOUND": {
+        "code": -32000,
+        "message": "Application error: ENTITY_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "ENTITY_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "entity_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "entity_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "EVENT_NOT_DECLARED": {
+        "code": -32000,
+        "message": "Application error: EVENT_NOT_DECLARED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "EVENT_NOT_DECLARED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "declared_events": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "event_name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event_name"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "EVENT_NOT_FOUND": {
+        "code": -32000,
+        "message": "Application error: EVENT_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "EVENT_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "event_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "event_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "IDEMPOTENCY_CONFLICT": {
+        "code": -32000,
+        "message": "Application error: IDEMPOTENCY_CONFLICT",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "IDEMPOTENCY_CONFLICT",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "conflicting_request_hash": {
+                  "$ref": "#/components/schemas/Sha256Fingerprint"
+                },
+                "original_request_hash": {
+                  "$ref": "#/components/schemas/Sha256Fingerprint"
+                },
+                "original_response_ref": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "method": {
+                      "type": "string"
+                    },
+                    "resource_id": {
+                      "$ref": "#/components/schemas/OpaqueId"
+                    }
+                  },
+                  "required": [
+                    "method",
+                    "resource_id"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "original_request_hash",
+                "conflicting_request_hash",
+                "original_response_ref"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "INVALID_DEFER_UNTIL": {
+        "code": -32000,
+        "message": "Application error: INVALID_DEFER_UNTIL",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "INVALID_DEFER_UNTIL",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "max_until": {
+                  "$ref": "#/components/schemas/Timestamp"
+                },
+                "reason": {
+                  "enum": [
+                    "in_past",
+                    "beyond_max_window"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "MAILBOX_ALREADY_DECIDED": {
+        "code": -32000,
+        "message": "Application error: MAILBOX_ALREADY_DECIDED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "MAILBOX_ALREADY_DECIDED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "decided_at": {
+                  "$ref": "#/components/schemas/Timestamp"
+                },
+                "existing_decision": {
+                  "enum": [
+                    "approved",
+                    "rejected",
+                    "deferred",
+                    "expired"
+                  ],
+                  "type": "string"
+                },
+                "mailbox_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "mailbox_id",
+                "existing_decision",
+                "decided_at"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "MAILBOX_NOT_FOUND": {
+        "code": -32000,
+        "message": "Application error: MAILBOX_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "MAILBOX_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "mailbox_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "mailbox_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "PAYLOAD_VALIDATION_FAILED": {
+        "code": -32000,
+        "message": "Application error: PAYLOAD_VALIDATION_FAILED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "PAYLOAD_VALIDATION_FAILED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "violations": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "field_path": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "rule": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "field_path",
+                      "rule",
+                      "message"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "violations"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "RUNTIME_ALREADY_PAUSED": {
+        "code": -32000,
+        "message": "Application error: RUNTIME_ALREADY_PAUSED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUNTIME_ALREADY_PAUSED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {},
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "RUNTIME_NOT_PAUSED": {
+        "code": -32000,
+        "message": "Application error: RUNTIME_NOT_PAUSED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUNTIME_NOT_PAUSED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {},
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "RUN_ALREADY_PAUSED": {
+        "code": -32000,
+        "message": "Application error: RUN_ALREADY_PAUSED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUN_ALREADY_PAUSED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "run_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "RUN_ALREADY_TERMINAL": {
+        "code": -32000,
+        "message": "Application error: RUN_ALREADY_TERMINAL",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUN_ALREADY_TERMINAL",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "current_status": {
+                  "$ref": "#/components/schemas/RunStatus"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "run_id",
+                "current_status"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "RUN_NOT_FOUND": {
+        "code": -32000,
+        "message": "Application error: RUN_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUN_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "run_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "RUN_NOT_PAUSED": {
+        "code": -32000,
+        "message": "Application error: RUN_NOT_PAUSED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUN_NOT_PAUSED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "current_status": {
+                  "$ref": "#/components/schemas/RunStatus"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "run_id",
+                "current_status"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "SESSION_NOT_FOUND": {
+        "code": -32000,
+        "message": "Application error: SESSION_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "SESSION_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "session_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "session_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "UNSUPPORTED_BUNDLE_REF": {
+        "code": -32000,
+        "message": "Application error: UNSUPPORTED_BUNDLE_REF",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "UNSUPPORTED_BUNDLE_REF",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  }
+}
