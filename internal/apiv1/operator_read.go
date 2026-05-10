@@ -60,6 +60,15 @@ type runDiagnosis struct {
 	Heuristics       []string        `json:"heuristics"`
 }
 
+var runListStatuses = map[string]struct{}{
+	"running":   {},
+	"paused":    {},
+	"completed": {},
+	"failed":    {},
+	"cancelled": {},
+	"forked":    {},
+}
+
 func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	now := opts.Now
 	if now == nil {
@@ -163,10 +172,23 @@ func requireRunReadStore(runs RunReadStore) (RunReadStore, error) {
 }
 
 func runHeaderListOptionsFromParams(params map[string]any) (store.RunHeaderListOptions, error) {
-	out := store.RunHeaderListOptions{
-		Status: strings.ToLower(strings.TrimSpace(stringParam(params, "status"))),
-		Cursor: strings.TrimSpace(stringParam(params, "cursor")),
+	out := store.RunHeaderListOptions{}
+	status, _, err := optionalStringParam(params, "status")
+	if err != nil {
+		return store.RunHeaderListOptions{}, err
 	}
+	status = strings.ToLower(status)
+	if status != "" {
+		if _, ok := runListStatuses[status]; !ok {
+			return store.RunHeaderListOptions{}, NewInvalidParamsError(map[string]any{"field": "status", "reason": "must be a valid RunStatus"})
+		}
+		out.Status = status
+	}
+	cursor, _, err := optionalStringParam(params, "cursor")
+	if err != nil {
+		return store.RunHeaderListOptions{}, err
+	}
+	out.Cursor = cursor
 	if raw, ok := params["limit"]; ok && !isEmptyParam(raw) {
 		limit, ok := integerParam(raw)
 		if !ok || limit < 1 || limit > 500 {
@@ -174,7 +196,6 @@ func runHeaderListOptionsFromParams(params map[string]any) (store.RunHeaderListO
 		}
 		out.Limit = limit
 	}
-	var err error
 	if out.Since, err = timestampParam(params, "since"); err != nil {
 		return store.RunHeaderListOptions{}, err
 	}
@@ -185,8 +206,11 @@ func runHeaderListOptionsFromParams(params map[string]any) (store.RunHeaderListO
 }
 
 func timestampParam(params map[string]any, name string) (*time.Time, error) {
-	raw := strings.TrimSpace(stringParam(params, name))
-	if raw == "" {
+	raw, present, err := optionalStringParam(params, name)
+	if err != nil {
+		return nil, err
+	}
+	if !present || raw == "" {
 		return nil, nil
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, raw)
@@ -195,6 +219,21 @@ func timestampParam(params map[string]any, name string) (*time.Time, error) {
 	}
 	value := parsed.UTC()
 	return &value, nil
+}
+
+func optionalStringParam(params map[string]any, name string) (string, bool, error) {
+	if params == nil {
+		return "", false, nil
+	}
+	value, ok := params[name]
+	if !ok || isEmptyParam(value) {
+		return "", ok, nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", true, NewInvalidParamsError(map[string]any{"field": name, "reason": "must be a string"})
+	}
+	return strings.TrimSpace(text), true, nil
 }
 
 func stringParam(params map[string]any, name string) string {
