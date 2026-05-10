@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	apiv1 "swarm/internal/apiv1"
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/config"
 	dashboardserver "swarm/internal/dashboard/server"
@@ -174,7 +175,14 @@ func main() {
 			log.Printf("runtime shutdown failed: %v", err)
 		}
 	}()
-	healthServer := newHealthServer(*healthAddr, &ready, rt.ToolGateway, dashboardServerOptions(supervisor, stores, &ready, cfg.LLM.Session.RotateAfterTurns, credentialStore))
+	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
+		PlatformSpecPath: resolvedPlatformSpecPath,
+		AuthTokens:       apiv1.AuthTokensFromEnvironment(),
+	})
+	if err != nil {
+		log.Fatalf("init v1 api: %v", err)
+	}
+	healthServer := newHealthServer(*healthAddr, &ready, rt.ToolGateway, apiV1Handler, dashboardServerOptions(supervisor, stores, &ready, cfg.LLM.Session.RotateAfterTurns, credentialStore))
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
@@ -1447,7 +1455,7 @@ func templateFlowCount(source semanticview.Source) int {
 	return count
 }
 
-func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Gateway, dashboardOpts dashboardserver.Options) *http.Server {
+func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Gateway, apiV1Handler http.Handler, dashboardOpts dashboardserver.Options) *http.Server {
 	mux := http.NewServeMux()
 	dashboardHandler := dashboardserver.NewHandler(dashboardOpts)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -1466,6 +1474,10 @@ func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Ga
 		gatewayHandler := toolGateway.Handler()
 		mux.Handle("/mcp", gatewayHandler)
 		mux.Handle("/tools/", gatewayHandler)
+	}
+	if apiV1Handler != nil {
+		mux.Handle("/v1/rpc", apiV1Handler)
+		mux.Handle("/v1/ws", apiV1Handler)
 	}
 	mux.Handle("/api/", dashboardHandler)
 	mux.Handle("/api", dashboardHandler)

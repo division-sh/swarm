@@ -13,11 +13,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	builderpkg "swarm/internal/builder"
+	dashboardserver "swarm/internal/dashboard/server"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
 	runtimebootverify "swarm/internal/runtime/bootverify"
@@ -65,6 +67,48 @@ func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([
 		CreatedAt:   time.Now().UTC(),
 	}).WithEntityID(evt.EntityID())
 	return []events.Event{out}, nil
+}
+
+func TestNewHealthServerPreservesProcessProbesAndMountsV1API(t *testing.T) {
+	var ready atomic.Bool
+	var apiHit atomic.Bool
+	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiHit.Store(true)
+		if r.URL.Path != "/v1/rpc" {
+			t.Errorf("api path = %q, want /v1/rpc", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"test","result":{"ok":true}}`))
+	})
+	server := newHealthServer(":0", &ready, nil, apiHandler, dashboardserver.Options{})
+	handler := server.Handler
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "ok" {
+		t.Fatalf("/healthz status/body = %d/%q, want 200 ok", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("/readyz before ready status = %d, want 503", rec.Code)
+	}
+	ready.Store(true)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "ready" {
+		t.Fatalf("/readyz ready status/body = %d/%q, want 200 ready", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"test","method":"rpc.unsubscribe","params":{"subscription_id":"sub"}}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/v1/rpc status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if !apiHit.Load() {
+		t.Fatal("/v1/rpc did not route to v1 API handler")
+	}
 }
 
 func TestPrintRunStatusReport(t *testing.T) {

@@ -1,0 +1,514 @@
+package apiv1
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"regexp"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	"swarm/internal/apispec"
+)
+
+const (
+	jsonRPCVersion = "2.0"
+
+	codeParseError     = -32700
+	codeInvalidRequest = -32600
+	codeMethodNotFound = -32601
+	codeInvalidParams  = -32602
+	codeInternalError  = -32603
+)
+
+type Handler struct {
+	registry *Registry
+	tokens   map[string]struct{}
+	handlers map[string]MethodHandler
+	upgrader websocket.Upgrader
+}
+
+type MethodHandler func(context.Context, Request) (any, error)
+
+type Options struct {
+	PlatformSpecPath string
+	Registry         *Registry
+	AuthTokens       []string
+	Handlers         map[string]MethodHandler
+}
+
+type Request struct {
+	ID            any
+	Method        string
+	Params        map[string]any
+	CorrelationID string
+	Transport     string
+}
+
+type rpcRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      any             `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+type rpcResponse struct {
+	JSONRPC string    `json:"jsonrpc"`
+	ID      any       `json:"id"`
+	Result  any       `json:"result,omitempty"`
+	Error   *rpcError `json:"error,omitempty"`
+}
+
+type rpcError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
+}
+
+type standardErrorData struct {
+	CorrelationID string `json:"correlation_id"`
+	Details       any    `json:"details,omitempty"`
+}
+
+type applicationErrorData struct {
+	Code          string `json:"code"`
+	Details       any    `json:"details"`
+	Retryable     bool   `json:"retryable"`
+	CorrelationID string `json:"correlation_id"`
+}
+
+func NewHandler(opts Options) (*Handler, error) {
+	registry := opts.Registry
+	if registry == nil {
+		var err error
+		registry, err = LoadRegistry(opts.PlatformSpecPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	handlers := map[string]MethodHandler{
+		"rpc.unsubscribe": func(context.Context, Request) (any, error) {
+			return map[string]any{"ok": true}, nil
+		},
+	}
+	for name, handler := range opts.Handlers {
+		clean := strings.TrimSpace(name)
+		if clean == "" {
+			return nil, errors.New("api handler method name is empty")
+		}
+		if _, ok := registry.Method(clean); !ok {
+			return nil, fmt.Errorf("api handler %s is not in the canonical method catalog", clean)
+		}
+		if handler == nil {
+			return nil, fmt.Errorf("api handler %s is nil", clean)
+		}
+		handlers[clean] = handler
+	}
+	return &Handler{
+		registry: registry,
+		tokens:   tokenSet(opts.AuthTokens),
+		handlers: handlers,
+		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
+	}, nil
+}
+
+func AuthTokensFromEnvironment() []string {
+	keys := []string{"SWARM_API_TOKEN", "SWARM_BUILDER_AUTH_TOKEN", "SWARM_OPERATOR_AUTH_TOKEN"}
+	out := make([]string, 0, len(keys))
+	seen := map[string]struct{}{}
+	for _, key := range keys {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h == nil {
+		http.NotFound(w, r)
+		return
+	}
+	switch {
+	case r.Method == http.MethodPost && r.URL != nil && r.URL.Path == "/v1/rpc":
+		h.handleRPC(w, r)
+	case r.Method == http.MethodGet && r.URL != nil && r.URL.Path == "/v1/ws":
+		h.handleWS(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (h *Handler) handleRPC(w http.ResponseWriter, r *http.Request) {
+	correlationID := requestCorrelationID(r, nil)
+	w.Header().Set("X-Correlation-ID", correlationID)
+	if failure := h.authorize(r); failure != nil {
+		writeAuthFailure(w, failure)
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeRPC(w, rpcResponse{JSONRPC: jsonRPCVersion, ID: nil, Error: h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "read body failed"})})
+		return
+	}
+	resp := h.dispatch(r.Context(), raw, "http", correlationID)
+	writeRPC(w, resp)
+}
+
+func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
+	if failure := h.authorize(r); failure != nil {
+		writeAuthFailure(w, failure)
+		return
+	}
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	for {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		resp := h.dispatch(r.Context(), raw, "websocket", requestCorrelationID(r, nil))
+		if err := conn.WriteJSON(resp); err != nil {
+			return
+		}
+	}
+}
+
+func (h *Handler) dispatch(ctx context.Context, raw []byte, transport, fallbackCorrelationID string) rpcResponse {
+	req, id, correlationID, rpcErr := h.parseRequest(raw, fallbackCorrelationID)
+	if rpcErr != nil {
+		return rpcResponse{JSONRPC: jsonRPCVersion, ID: id, Error: rpcErr}
+	}
+	req.Transport = transport
+	if method, ok := h.registry.Method(req.Method); ok {
+		if rpcErr := validateParams(method, req.Params, req.CorrelationID); rpcErr != nil {
+			return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr}
+		}
+	} else {
+		return rpcResponse{
+			JSONRPC: jsonRPCVersion,
+			ID:      req.ID,
+			Error:   h.standardError(codeMethodNotFound, "method not found", correlationID, map[string]any{"method": req.Method}),
+		}
+	}
+	handler := h.handlers[req.Method]
+	if handler == nil {
+		return rpcResponse{
+			JSONRPC: jsonRPCVersion,
+			ID:      req.ID,
+			Error: h.applicationError(MethodUnavailableCode, req.CorrelationID, false, map[string]any{
+				"method": req.Method,
+			}),
+		}
+	}
+	result, err := handler(ctx, req)
+	if err != nil {
+		return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: h.standardError(codeInternalError, "internal error", req.CorrelationID, map[string]any{"error": err.Error()})}
+	}
+	return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result}
+}
+
+func (h *Handler) parseRequest(raw []byte, fallbackCorrelationID string) (Request, any, string, *rpcError) {
+	correlationID := strings.TrimSpace(fallbackCorrelationID)
+	if correlationID == "" {
+		correlationID = uuid.NewString()
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return Request{}, nil, correlationID, h.standardError(codeParseError, "parse error", correlationID, map[string]any{"reason": "empty request body"})
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return Request{}, nil, correlationID, h.standardError(codeParseError, "parse error", correlationID, map[string]any{"error": err.Error()})
+	}
+	if object == nil {
+		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "request must be an object"})
+	}
+	var req rpcRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"error": err.Error()})
+	}
+	idRaw, hasID := object["id"]
+	if !hasID {
+		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "id is required"})
+	}
+	if strings.TrimSpace(req.JSONRPC) != jsonRPCVersion {
+		return Request{}, req.ID, requestCorrelationID(nil, req.ID, correlationID), h.standardError(codeInvalidRequest, "invalid request", requestCorrelationID(nil, req.ID, correlationID), map[string]any{"reason": "jsonrpc must be 2.0"})
+	}
+	if len(bytes.TrimSpace(idRaw)) == 0 {
+		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "id is invalid"})
+	}
+	correlationID = requestCorrelationID(nil, req.ID, correlationID)
+	method := strings.TrimSpace(req.Method)
+	if method == "" {
+		return Request{}, req.ID, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "method is required"})
+	}
+	params, rpcErr := decodeParams(req.Params, correlationID)
+	if rpcErr != nil {
+		return Request{}, req.ID, correlationID, rpcErr
+	}
+	return Request{
+		ID:            req.ID,
+		Method:        method,
+		Params:        params,
+		CorrelationID: correlationID,
+	}, req.ID, correlationID, nil
+}
+
+func decodeParams(raw json.RawMessage, correlationID string) (map[string]any, *rpcError) {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return map[string]any{}, nil
+	}
+	var params map[string]any
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return nil, &rpcError{
+			Code:    codeInvalidParams,
+			Message: "invalid params",
+			Data:    standardErrorData{CorrelationID: correlationID, Details: map[string]any{"reason": "params must be an object"}},
+		}
+	}
+	if params == nil {
+		params = map[string]any{}
+	}
+	return params, nil
+}
+
+var opaqueIDPattern = regexp.MustCompile(`^[A-Za-z0-9_:.-]+$`)
+
+func validateParams(method apispec.Method, params map[string]any, correlationID string) *rpcError {
+	if params == nil {
+		params = map[string]any{}
+	}
+	declared := make(map[string]apispec.ContentDescriptor, len(method.Params))
+	for _, descriptor := range method.Params {
+		declared[descriptor.Name] = descriptor
+		value, exists := params[descriptor.Name]
+		if descriptor.Required && (!exists || isEmptyParam(value)) {
+			return invalidParams(correlationID, map[string]any{
+				"field":  descriptor.Name,
+				"reason": "required parameter is missing",
+			})
+		}
+		if exists && !isEmptyParam(value) {
+			if reason := validateParamValue(descriptor, value); reason != "" {
+				return invalidParams(correlationID, map[string]any{
+					"field":  descriptor.Name,
+					"reason": reason,
+				})
+			}
+		}
+	}
+	for name := range params {
+		if _, ok := declared[name]; !ok {
+			return invalidParams(correlationID, map[string]any{
+				"field":  name,
+				"reason": "unknown parameter",
+			})
+		}
+	}
+	return nil
+}
+
+func validateParamValue(descriptor apispec.ContentDescriptor, value any) string {
+	schema := asStringMap(descriptor.Schema)
+	ref, _ := schema["$ref"].(string)
+	switch ref {
+	case "#/components/schemas/OpaqueId":
+		text, ok := value.(string)
+		if !ok {
+			return "must be a string"
+		}
+		if strings.TrimSpace(text) == "" {
+			return "must not be empty"
+		}
+		if len(text) > 256 {
+			return "must be at most 256 characters"
+		}
+		if !opaqueIDPattern.MatchString(text) {
+			return "must match OpaqueId pattern"
+		}
+		return ""
+	}
+	if typ, _ := schema["type"].(string); typ != "" {
+		switch typ {
+		case "string":
+			if _, ok := value.(string); !ok {
+				return "must be a string"
+			}
+		case "object":
+			if _, ok := value.(map[string]any); !ok {
+				return "must be an object"
+			}
+		case "array":
+			if _, ok := value.([]any); !ok {
+				return "must be an array"
+			}
+		case "boolean":
+			if _, ok := value.(bool); !ok {
+				return "must be a boolean"
+			}
+		case "number", "integer":
+			switch value.(type) {
+			case float64, int, int64, json.Number:
+			default:
+				return "must be a number"
+			}
+		}
+	}
+	return ""
+}
+
+func invalidParams(correlationID string, details any) *rpcError {
+	return &rpcError{
+		Code:    codeInvalidParams,
+		Message: "invalid params",
+		Data:    standardErrorData{CorrelationID: correlationID, Details: details},
+	}
+}
+
+func isEmptyParam(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(typed) == ""
+	default:
+		return false
+	}
+}
+
+func asStringMap(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	case map[interface{}]interface{}:
+		out := make(map[string]any, len(typed))
+		for key, value := range typed {
+			out[fmt.Sprint(key)] = value
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func (h *Handler) standardError(code int, message, correlationID string, details any) *rpcError {
+	return &rpcError{
+		Code:    code,
+		Message: message,
+		Data: standardErrorData{
+			CorrelationID: strings.TrimSpace(correlationID),
+			Details:       details,
+		},
+	}
+}
+
+func (h *Handler) applicationError(code, correlationID string, retryable bool, details any) *rpcError {
+	numeric, ok := h.registry.ApplicationErrorCode(code)
+	if !ok {
+		return h.standardError(codeInternalError, "internal error", correlationID, map[string]any{"missing_application_error": code})
+	}
+	return &rpcError{
+		Code:    numeric,
+		Message: "Application error: " + code,
+		Data: applicationErrorData{
+			Code:          code,
+			Details:       details,
+			Retryable:     retryable,
+			CorrelationID: correlationID,
+		},
+	}
+}
+
+type authFailure struct {
+	status  int
+	message string
+}
+
+func (h *Handler) authorize(r *http.Request) *authFailure {
+	if len(h.tokens) == 0 {
+		return &authFailure{status: http.StatusServiceUnavailable, message: "v1 API auth is not configured"}
+	}
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authz == "" {
+		return &authFailure{status: http.StatusUnauthorized, message: "missing authorization bearer token"}
+	}
+	const prefix = "bearer "
+	if !strings.HasPrefix(strings.ToLower(authz), prefix) {
+		return &authFailure{status: http.StatusUnauthorized, message: "invalid authorization header"}
+	}
+	if _, ok := h.tokens[strings.TrimSpace(authz[len(prefix):])]; !ok {
+		return &authFailure{status: http.StatusUnauthorized, message: "invalid bearer token"}
+	}
+	return nil
+}
+
+func writeAuthFailure(w http.ResponseWriter, failure *authFailure) {
+	if failure == nil {
+		return
+	}
+	if failure.status == http.StatusUnauthorized {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="swarm-api"`)
+	}
+	w.Header().Set("content-type", "application/json")
+	w.WriteHeader(failure.status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": failure.message})
+}
+
+func writeRPC(w http.ResponseWriter, resp rpcResponse) {
+	w.Header().Set("content-type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func requestCorrelationID(r *http.Request, id any, fallback ...string) string {
+	if r != nil {
+		for _, header := range []string{"X-Correlation-ID", "X-Request-ID"} {
+			if value := strings.TrimSpace(r.Header.Get(header)); value != "" {
+				return value
+			}
+		}
+	}
+	switch typed := id.(type) {
+	case string:
+		if strings.TrimSpace(typed) != "" {
+			return strings.TrimSpace(typed)
+		}
+	case json.Number:
+		if strings.TrimSpace(typed.String()) != "" {
+			return strings.TrimSpace(typed.String())
+		}
+	case float64:
+		return fmt.Sprintf("%v", typed)
+	}
+	for _, value := range fallback {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return uuid.NewString()
+}
+
+func tokenSet(tokens []string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, token := range tokens {
+		if token = strings.TrimSpace(token); token != "" {
+			out[token] = struct{}{}
+		}
+	}
+	return out
+}

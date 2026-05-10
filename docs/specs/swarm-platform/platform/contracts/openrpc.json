@@ -665,7 +665,7 @@
       },
       "errors": [
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1935,7 +1935,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1973,7 +1973,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -2096,7 +2096,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2165,7 +2165,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2298,7 +2298,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2336,7 +2336,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32015,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2378,7 +2378,7 @@
           }
         },
         {
-          "code": -32013,
+          "code": -32014,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -2582,7 +2582,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32019,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -2661,7 +2661,7 @@
           }
         },
         {
-          "code": -32010,
+          "code": -32011,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -2807,7 +2807,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2845,7 +2845,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32015,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2976,7 +2976,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3053,7 +3053,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3288,7 +3288,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: RUNTIME_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -3400,7 +3400,7 @@
       },
       "errors": [
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: RUNTIME_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -5185,8 +5185,46 @@
           "type": "object"
         }
       },
-      "PAYLOAD_VALIDATION_FAILED": {
+      "METHOD_UNAVAILABLE": {
         "code": -32010,
+        "message": "Application error: METHOD_UNAVAILABLE",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "METHOD_UNAVAILABLE",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "method": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "method"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "PAYLOAD_VALIDATION_FAILED": {
+        "code": -32011,
         "message": "Application error: PAYLOAD_VALIDATION_FAILED",
         "data": {
           "additionalProperties": false,
@@ -5244,7 +5282,7 @@
         }
       },
       "RUNTIME_ALREADY_PAUSED": {
-        "code": -32011,
+        "code": -32012,
         "message": "Application error: RUNTIME_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5275,7 +5313,7 @@
         }
       },
       "RUNTIME_NOT_PAUSED": {
-        "code": -32012,
+        "code": -32013,
         "message": "Application error: RUNTIME_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5306,7 +5344,7 @@
         }
       },
       "RUN_ALREADY_PAUSED": {
-        "code": -32013,
+        "code": -32014,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5344,7 +5382,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32014,
+        "code": -32015,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -5386,7 +5424,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32015,
+        "code": -32016,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -5424,7 +5462,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32016,
+        "code": -32017,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5466,7 +5504,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32017,
+        "code": -32018,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -5504,7 +5542,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_REF": {
-        "code": -32018,
+        "code": -32019,
         "message": "Application error: UNSUPPORTED_BUNDLE_REF",
         "data": {
           "additionalProperties": false,

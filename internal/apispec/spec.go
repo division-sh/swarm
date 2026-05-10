@@ -457,6 +457,10 @@ func openRPCApplicationErrorCodes(errors map[string]any) map[string]int {
 	return out
 }
 
+func ApplicationErrorCodes(errors map[string]any) map[string]int {
+	return openRPCApplicationErrorCodes(errors)
+}
+
 func openRPCApplicationErrorCodeCapacity() int {
 	return OpenRPCApplicationErrorCodeStart - OpenRPCApplicationErrorCodeMinimum + 1
 }
