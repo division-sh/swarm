@@ -220,6 +220,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			RecipientPlanning: *model.RecipientPlanning,
 			SourceRunID:       binding.SourceRunID,
 			ForkRunID:         forkRunID,
+			ForkEventID:       plan.ForkPoint.EventID,
 			ForkTime:          plan.ForkPoint.Timestamp,
 			SourceEvents:      sourceEventIDs,
 			ExecutionOwner:    store.RunForkHistoricalReplayContractSwapBootResumeOwner,

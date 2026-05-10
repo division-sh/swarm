@@ -1063,7 +1063,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 	}
 }
 
-func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t *testing.T) {
+func TestSelectedContractActivationTreatsSameEventReplayScopeMarkerWriteSkewAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1089,7 +1089,51 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 	if materialized.ForkRunID == "" {
 		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
 	}
+	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, eventID, replayScopeReasonDirect, at.Add(time.Minute))
+
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+		ForkRunID:             materialized.ForkRunID,
+		AllowedSourceEventIDs: []string{eventID},
+	})
+	if err != nil {
+		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
+	}
+	if !activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
+		t.Fatalf("activation = %#v, want activated without marker-driven source advancement", activation)
+	}
+	assertNoCopiedReplayScopeMarkers(t, db, materialized.ForkRunID)
+}
+
+func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	afterEventID := uuid.NewString()
+	at := time.Unix(1700003626, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	if materialized.ForkRunID == "" {
+		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
+	}
+	seedSelectedContractPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
+	seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, replayScopeReasonDirect, at.Add(time.Second))
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
@@ -1100,9 +1144,6 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 	}
 	if activation.Activated || activation.BranchDivergence != nil || activation.SourceAdvancedAfterFork {
 		t.Fatalf("activation = %#v, want marker post-T blocked before branch divergence", activation)
-	}
-	if !runForkTestHasActivationBlocker(activation, "source_committed_replay_scope_advanced_after_fork_point") {
-		t.Fatalf("activation blockers = %#v, want source_committed_replay_scope_advanced_after_fork_point", activation.UnsupportedBlockers)
 	}
 	if !runForkTestHasDispositionBlocker(activation.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced, "source_committed_replay_scope_advanced_after_fork_point") {
 		t.Fatalf("activation replay admission = %#v, want source advanced marker blocker", activation.ReplayResumeAdmission)
@@ -1264,6 +1305,22 @@ func seedSelectedContractSourceReplayScopeMarker(t *testing.T, db execContextDB,
 		)
 	`, sourceRunID, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, reasonCode, at); err != nil {
 		t.Fatalf("seed source replay-scope marker: %v", err)
+	}
+}
+
+func seedSelectedContractPostForkSourceEvent(t *testing.T, db execContextDB, sourceRunID, eventID, entityID string, at time.Time) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope,
+			payload, produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity',
+			'{}'::jsonb, 'source-runtime', 'platform', $4
+		)
+	`, sourceRunID, eventID, entityID, at); err != nil {
+		t.Fatalf("seed post-fork source event: %v", err)
 	}
 }
 
