@@ -419,6 +419,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
+	afterEventID := uuid.NewString()
 	at := time.Unix(1700002605, 0).UTC()
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
@@ -446,7 +447,8 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, sourceEventID, "replay_scope_direct", at.Add(time.Minute))
+	seedSelectedExecutionPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
+	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, "replay_scope_direct", at.Add(time.Second))
 
 	result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
 		ForkRunID:    materialized.ForkRunID,
@@ -770,7 +772,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	}
 }
 
-func TestExecuteSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMarker(t *testing.T) {
+func TestExecuteSelectedContractRunForkTreatsSameEventReplayScopeMarkerWriteSkewAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	ctx := context.Background()
@@ -824,16 +826,16 @@ func TestExecuteSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMark
 			contractsRoot,
 		),
 	})
-	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
-		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want post-T marker blocker", err)
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
-	if result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 || result.Activation.Activated {
-		t.Fatalf("result = %#v, want marker block before selected publish", result)
+	if !result.Activation.Activated || result.Activation.SourceAdvancedAfterFork || result.Activation.BranchDivergence != nil {
+		t.Fatalf("activation = %#v, want marker write-skew to avoid source advancement", result.Activation)
 	}
-	if result.Materialization.ForkRunID == "" {
-		t.Fatalf("expected materialization before post-route marker trigger, got %#v", result.Materialization)
+	if result.ExecutedEventCount == 0 || len(result.ForkEvents) == 0 {
+		t.Fatalf("result = %#v, want selected fork events published", result)
 	}
-	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
+	assertNoCopiedSourceReplayScopeMarkers(t, db, result.Materialization.ForkRunID, sourceEventID)
 }
 
 func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterialization(t *testing.T) {
@@ -1421,6 +1423,22 @@ func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sour
 	}
 }
 
+func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope,
+			payload, produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'source.after', $3::uuid, 'flow-a/1', 'entity',
+			'{}'::jsonb, 'source-runtime', 'platform', $4
+		)
+	`, sourceRunID, sourceEventID, entityID, at); err != nil {
+		t.Fatalf("seed post-fork source event: %v", err)
+	}
+}
+
 func assertNoForkExecutionRowsForRun(t *testing.T, db *sql.DB, forkRunID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -1439,6 +1457,25 @@ func assertNoForkExecutionRowsForRun(t *testing.T, db *sql.DB, forkRunID string)
 		if count != 0 {
 			t.Fatalf("%s rows for blocked selected fork = %d, want 0", name, count)
 		}
+	}
+}
+
+func assertNoCopiedSourceReplayScopeMarkers(t *testing.T, db *sql.DB, forkRunID, sourceEventID string) {
+	t.Helper()
+	var copied int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND event_id = $2::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = '__runtime_replay_scope__'
+		  AND reason_code IN ('replay_scope_direct', 'replay_scope_subscribed')
+	`, forkRunID, sourceEventID).Scan(&copied); err != nil {
+		t.Fatalf("count copied source replay-scope markers: %v", err)
+	}
+	if copied != 0 {
+		t.Fatalf("copied source replay-scope markers = %d, want 0", copied)
 	}
 }
 

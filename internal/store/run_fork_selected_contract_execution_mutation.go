@@ -159,7 +159,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return RunForkMaterialization{}, err
 	}
 	replayAdmission = runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(replayAdmission, conversationAdvancedFacts)
-	if err := ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, s.DB, catalog, plan.SourceRunID, plan.ForkPoint.Timestamp); err != nil {
+	if err := ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, s.DB, catalog, plan.SourceRunID, plan.ForkPoint.EventID, plan.ForkPoint.Timestamp); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			admission := runForkReplayResumeAdmissionWithBlocker(replayAdmission, fact, blocker)
 			return RunForkMaterialization{
@@ -337,7 +337,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		return result, err
 	}
 	result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(result.ReplayResumeAdmission, conversationAdvancedFacts)
-	if err := ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, tx, catalog, lineage.SourceRunID, lineage.ForkEventTime); err != nil {
+	if err := ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, tx, catalog, lineage.SourceRunID, lineage.ForkEventID, lineage.ForkEventTime); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
 			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
@@ -708,16 +708,33 @@ func collectRunForkSelectedContractSourceAdvancedFacts(ctx context.Context, tx *
 			enabled: true,
 			query: `
 				SELECT EXISTS (
-					SELECT 1 FROM event_deliveries d
+					SELECT 1
+					FROM event_deliveries d
+					LEFT JOIN events e ON e.event_id = d.event_id
+					   AND e.run_id = d.run_id
 					WHERE d.run_id = $1::uuid
 					  AND (
 							d.created_at > $2::timestamptz
 							OR d.started_at > $2::timestamptz
 							OR d.delivered_at > $2::timestamptz
 					  )
+					  AND NOT (
+							d.subscriber_type = $4
+							AND d.subscriber_id = $5
+							AND d.reason_code = ANY($6::text[])
+							AND e.event_id IS NOT NULL
+							AND (e.created_at, e.event_id) <= ($2::timestamptz, $3::uuid)
+					  )
 				)
 			`,
-			args: []any{lineage.SourceRunID, lineage.ForkEventTime},
+			args: []any{
+				lineage.SourceRunID,
+				lineage.ForkEventTime,
+				lineage.ForkEventID,
+				replayScopeMarkerSubscriberType,
+				replayScopeMarkerSubscriberID,
+				pq.Array(runForkReplayScopeMarkerReasonCodes()),
+			},
 		},
 		{
 			code:    "source_receipts_advanced_after_fork_point",
@@ -865,7 +882,7 @@ func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan RunForkPlan,
 	return blockers
 }
 
-func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID string, forkTime time.Time) error {
+func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID, forkEventID string, forkTime time.Time) error {
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required")
 	}
@@ -873,11 +890,14 @@ func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx c
 	if err != nil {
 		return err
 	}
-	return ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, s.DB, catalog, sourceRunID, forkTime)
+	return ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, s.DB, catalog, sourceRunID, forkEventID, forkTime)
 }
 
-func ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID string, forkTime time.Time) error {
+func ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID, forkEventID string, forkTime time.Time) error {
 	if !catalog.hasColumns("event_deliveries", "run_id", "subscriber_type", "subscriber_id", "reason_code") {
+		return nil
+	}
+	if !catalog.hasColumns("events", "event_id", "run_id", "created_at") {
 		return nil
 	}
 	predicates := runForkPostForkCommittedReplayScopeMarkerPredicates(catalog, "created_at", "started_at", "delivered_at")
@@ -888,15 +908,21 @@ func ensureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, q t
 	query := fmt.Sprintf(`
 		SELECT EXISTS (
 			SELECT 1
-			FROM event_deliveries
-			WHERE run_id = $1::uuid
-			  AND subscriber_type = $2
-			  AND subscriber_id = $3
-			  AND reason_code = ANY($4::text[])
+			FROM event_deliveries d
+			LEFT JOIN events e ON e.event_id = d.event_id
+			   AND e.run_id = d.run_id
+			WHERE d.run_id = $1::uuid
+			  AND d.subscriber_type = $2
+			  AND d.subscriber_id = $3
+			  AND d.reason_code = ANY($4::text[])
 			  AND (%s)
+			  AND (
+					e.event_id IS NULL
+					OR (e.created_at, e.event_id) > ($5::timestamptz, $6::uuid)
+			  )
 		)
 	`, strings.Join(predicates, " OR "))
-	if err := q.QueryRowContext(ctx, query, sourceRunID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, pq.Array([]string{replayScopeReasonDirect, replayScopeReasonSubscribed}), forkTime).Scan(&exists); err != nil {
+	if err := q.QueryRowContext(ctx, query, sourceRunID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, pq.Array(runForkReplayScopeMarkerReasonCodes()), forkTime, forkEventID).Scan(&exists); err != nil {
 		return fmt.Errorf("check selected-contract source_committed_replay_scope_advanced_after_fork_point: %w", err)
 	}
 	if exists {
@@ -910,10 +936,14 @@ func runForkPostForkCommittedReplayScopeMarkerPredicates(catalog schemaColumnCat
 	predicates := []string{}
 	for _, column := range columns {
 		if catalog.hasColumns("event_deliveries", column) {
-			predicates = append(predicates, fmt.Sprintf("%s > $5::timestamptz", column))
+			predicates = append(predicates, fmt.Sprintf("d.%s > $5::timestamptz", column))
 		}
 	}
 	return predicates
+}
+
+func runForkReplayScopeMarkerReasonCodes() []string {
+	return []string{replayScopeReasonDirect, replayScopeReasonSubscribed}
 }
 
 func collectRunForkSelectedContractSourceAdvancedConversationHistoryFacts(ctx context.Context, q timerReconstructionQueryer, catalog schemaColumnCatalog, sourceRunID string, forkTime time.Time) ([]string, error) {

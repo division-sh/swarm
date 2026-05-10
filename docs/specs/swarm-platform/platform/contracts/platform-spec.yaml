@@ -3505,11 +3505,14 @@ run_model:
       consume runtime.run_fork.historical_replay_execution.selected_contract_committed_replay_scope_marker_policy to
       classify at/before-fork-T source committed replay-scope marker rows as lineage/no-action evidence only. This policy
       is selected-contract execution only and is not same-run replay recovery, fork-local delivery-event replay recovery,
-      or generic historical replay. Source marker rows MUST NOT be copied into the fork, reused as fork-local recovery
-      proof, treated as executable fork work, or used as selected-fork suppressors. Fork-local committed replay-scope
-      truth must be freshly written under the fork run_id by selected-contract execution or approved fork-local
-      delivery-event replay owners. Post-T/source-advanced source committed replay-scope marker facts remain fail-closed
-      unless a separate approved source-advanced/reconstruction owner changes that policy.'
+      or generic historical replay. At/before-T classification is determined by the underlying source event position
+      relative to the fork point, not by the committed marker delivery row write timestamp; delayed marker delivery
+      write-skew for an at/before-T source event remains lineage/no-action and MUST NOT be reclassified as generic
+      selected-contract source-delivery advancement. Source marker rows MUST NOT be copied into the fork, reused as
+      fork-local recovery proof, treated as executable fork work, or used as selected-fork suppressors. Fork-local
+      committed replay-scope truth must be freshly written under the fork run_id by selected-contract execution or
+      approved fork-local delivery-event replay owners. Source marker facts whose underlying source event is after T
+      remain fail-closed unless a separate approved source-advanced/reconstruction owner changes that policy.'
     selected_contract_diagnostic_platform_outcome_policy: 'Mutating selected-contract timestamp-fork execution may consume
       runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy to classify
       at/before-fork-T source outcome facts for spec-declared diagnostic/non-routed platform events as lineage/no-action
@@ -3799,11 +3802,14 @@ run_model:
         canonical replay_resume_admission committed_replay_scope fact and may demote at/before-T source committed
         replay-scope marker rows from fail-closed blockers to lineage/no-action evidence only. Source marker rows are
         same-run proof only: they are not executable fork work, not fork-local recovery truth, not copied into the fork,
-        and not selected-fork suppressors. Fork-local replay/recovery proof must be newly written under the fork run_id
-        by selected-contract execution or approved fork-local delivery-event replay owners. Post-T/source-advanced source
-        committed replay-scope marker facts remain fail-closed unless a separate approved owner changes that policy. This
-        owner does not close same-run recovery, fork-local delivery-event replay recovery, sessions, turns, audits,
-        timers, routes, non-agent replay, restart recovery, contract-swap boot/resume, or operator surfaces.'
+        and not selected-fork suppressors. The cutoff for marker facts is the underlying source event position, so
+        marker delivery write-skew after T for an at/before-T source event is lineage/no-action and must be excluded from
+        generic selected-contract `source_deliveries_advanced_after_fork_point` evidence. Fork-local replay/recovery
+        proof must be newly written under the fork run_id by selected-contract execution or approved fork-local
+        delivery-event replay owners. Source committed replay-scope marker facts whose underlying source event is after T
+        remain fail-closed unless a separate approved owner changes that policy. This owner does not close same-run
+        recovery, fork-local delivery-event replay recovery, sessions, turns, audits, timers, routes, non-agent replay,
+        restart recovery, contract-swap boot/resume, or operator surfaces.'
       3h3_selected_contract_diagnostic_platform_outcome_policy: 'For selected-contract timestamp-fork execution,
         runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy consumes
         at/before-T source outcome facts for platform_events.routing_rules.diagnostic_events and may demote those
