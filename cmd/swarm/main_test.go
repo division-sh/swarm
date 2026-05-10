@@ -639,8 +639,10 @@ func TestRunForkCommand_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *tes
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
+	diagnosticEventID := uuid.NewString()
 	at := time.Unix(1700000312, 0).UTC()
 	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, at)
+	seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
 
 	var buf bytes.Buffer
 	code := runForkCommand(context.Background(), repo, []string{
@@ -676,6 +678,34 @@ func TestRunForkCommand_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *tes
 	}
 	if lineageRows != 1 {
 		t.Fatalf("selected execution lineage rows = %d, want 1", lineageRows)
+	}
+	var diagnosticCopies int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND (
+			event_id = $2::uuid
+			OR COALESCE(source_event_id::text, '') = $2::text
+			OR event_name = 'platform.runtime_log'
+		  )
+	`, result.Materialization.ForkRunID, diagnosticEventID).Scan(&diagnosticCopies); err != nil {
+		t.Fatalf("count copied diagnostic platform events: %v", err)
+	}
+	if diagnosticCopies != 0 {
+		t.Fatalf("diagnostic platform events copied into fork = %d, want 0", diagnosticCopies)
+	}
+	var diagnosticLineageRows int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM run_fork_selected_contract_executions
+		WHERE fork_run_id = $1::uuid
+		  AND source_event_id = $2::uuid
+	`, result.Materialization.ForkRunID, diagnosticEventID).Scan(&diagnosticLineageRows); err != nil {
+		t.Fatalf("count diagnostic selected execution lineage: %v", err)
+	}
+	if diagnosticLineageRows != 0 {
+		t.Fatalf("diagnostic platform execution lineage rows = %d, want 0", diagnosticLineageRows)
 	}
 }
 
@@ -1160,6 +1190,36 @@ func seedRunForkCLISelectedExecutionSource(t *testing.T, db interface {
 		)
 	`, runID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
+	}
+}
+
+func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, runID, eventID string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'platform.runtime_log', NULL, NULL, 'global',
+			'{"level":"info","message":"diagnostic platform row must remain lineage-only"}'::jsonb,
+			'pipeline', 'platform', $3
+		)
+	`, runID, eventID, at); err != nil {
+		t.Fatalf("seed diagnostic platform event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at
+		)
+		VALUES (
+			$1::uuid, 'platform', 'pipeline', NULL, NULL,
+			'dead_letter', 'runtime_log_pipeline_dead_letter', '{}'::jsonb, $2
+		)
+	`, eventID, at); err != nil {
+		t.Fatalf("seed diagnostic platform receipt: %v", err)
 	}
 }
 

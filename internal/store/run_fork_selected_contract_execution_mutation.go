@@ -837,6 +837,9 @@ func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan RunForkPlan,
 		if classification == RunForkPendingClassificationDeliveredCompleted {
 			continue
 		}
+		if RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item) {
+			continue
+		}
 		if classification == RunForkPendingClassificationCommittedReplay {
 			if runForkSelectedContractCommittedReplayScopeMarkerAdmitted(admission) {
 				continue

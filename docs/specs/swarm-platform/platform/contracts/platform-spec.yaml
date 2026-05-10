@@ -3491,6 +3491,16 @@ run_model:
       truth must be freshly written under the fork run_id by selected-contract execution or approved fork-local
       delivery-event replay owners. Post-T/source-advanced source committed replay-scope marker facts remain fail-closed
       unless a separate approved source-advanced/reconstruction owner changes that policy.'
+    selected_contract_diagnostic_platform_outcome_policy: 'Mutating selected-contract timestamp-fork execution may consume
+      runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy to classify
+      at/before-fork-T source outcome facts for spec-declared diagnostic/non-routed platform events as lineage/no-action
+      evidence only. The diagnostic event set is defined by platform_events.routing_rules.diagnostic_events, currently
+      platform.runtime_log and platform.inbound_recorded. This policy is selected-contract frontier admission only. It
+      MUST NOT route diagnostic platform events through selected contracts, synthesize selected recipients, copy source
+      events, event_deliveries, event_receipts, or dead_letters into the fork, use diagnostic source outcomes as
+      selected-fork suppressors, change generic non-agent/dead-letter replay policy, or make CLI, API, dashboard, or
+      Builder surfaces semantic owners. Non-diagnostic platform/node/system event outcomes remain fail-closed or split
+      unless a separate approved owner changes that policy.'
     selected_contract_route_admission: 'Selected-contract route/subscription reconstruction admission is a
       non-mutating prerequisite owned by runtime.run_fork.selected_contract_route_admission. It consumes
       runtime.run_fork.contract_frontier_admission for selected frontier work, consumes selected-source static route
@@ -3551,7 +3561,9 @@ run_model:
       source event_deliveries, recipients, receipts, dead letters, retry/idempotency state, and post-fork outcomes MUST
       NOT become executable fork work or fork suppressors. At/before-T source committed replay-scope marker rows may be
       consumed only as lineage/no-action evidence by the selected-contract marker policy; fork-local recovery must use
-      fresh fork-run marker rows. Route persistence, timer reconstruction, session/turn/audit
+      fresh fork-run marker rows. At/before-T source outcome facts for spec-declared diagnostic/non-routed platform
+      events may be consumed only as lineage/no-action evidence by the selected-contract diagnostic platform outcome
+      policy. Route persistence, timer reconstruction, session/turn/audit
       reconstruction, non-agent delivery replay, runtime restart recovery, contract-swap boot/resume beyond selected
       frontier execution, and UI/API ownership remain separately gated siblings.'
     contract_swap_boot_resume_admission: 'Contract-swap boot/resume readiness for timestamp forks is owned by
@@ -3758,6 +3770,16 @@ run_model:
         committed replay-scope marker facts remain fail-closed unless a separate approved owner changes that policy. This
         owner does not close same-run recovery, fork-local delivery-event replay recovery, sessions, turns, audits,
         timers, routes, non-agent replay, restart recovery, contract-swap boot/resume, or operator surfaces.'
+      3h3_selected_contract_diagnostic_platform_outcome_policy: 'For selected-contract timestamp-fork execution,
+        runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy consumes
+        at/before-T source outcome facts for platform_events.routing_rules.diagnostic_events and may demote those
+        diagnostic/non-routed platform facts from selected frontier work to lineage/no-action evidence only. The owner is
+        part of selected-contract frontier admission before route topology, recipient planning, and selected execution.
+        Diagnostic platform source facts are not executable fork work, route truth, selected recipients, copied source
+        rows, source outcome suppressors, or operator-surface truth. Non-diagnostic platform/node/system outcome facts,
+        generic non-agent replay, delivery-event replay, committed replay-scope marker policy, sessions, turns, audits,
+        timers, routes, retry/idempotency, follow-up policy, restart recovery, contract-swap boot/resume, and operator
+        surfaces remain separate fail-closed or split siblings unless independently approved.'
       3i_contract_swap_boot_resume_admission: 'For timestamp forks with selected or swapped contracts, full boot/resume
         readiness is answered by runtime.run_fork.contract_swap_boot_resume_admission before any mutating historical
         replay/resume work. The owner consumes selected binding/source admission, replay/resume taxonomy, selected route
