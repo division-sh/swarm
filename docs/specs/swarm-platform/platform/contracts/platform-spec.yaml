@@ -5960,6 +5960,14 @@ api_specification:
                   type: string
                 message:
                   type: string
+      METHOD_UNAVAILABLE:
+        type: object
+        additionalProperties: false
+        required:
+        - method
+        properties:
+          method:
+            type: string
       RUN_NOT_FOUND:
         type: object
         additionalProperties: false
