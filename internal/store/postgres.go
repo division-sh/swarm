@@ -62,6 +62,9 @@ func NewPostgresStore(dsn string) (*PostgresStore, error) {
 }
 
 func (s *PostgresStore) Ping(ctx context.Context) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("postgres store is required")
+	}
 	return s.DB.PingContext(ctx)
 }
 

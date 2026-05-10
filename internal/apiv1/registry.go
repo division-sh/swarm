@@ -10,7 +10,10 @@ import (
 	"swarm/internal/apispec"
 )
 
-const MethodUnavailableCode = "METHOD_UNAVAILABLE"
+const (
+	MethodUnavailableCode = "METHOD_UNAVAILABLE"
+	RunNotFoundCode       = "RUN_NOT_FOUND"
+)
 
 type Registry struct {
 	api        *apispec.APISpecification
@@ -38,8 +41,10 @@ func NewRegistry(api *apispec.APISpecification) (*Registry, error) {
 		methods[strings.TrimSpace(name)] = method
 	}
 	errorCodes := apispec.ApplicationErrorCodes(api.Components.Errors)
-	if _, ok := errorCodes[MethodUnavailableCode]; !ok {
-		return nil, fmt.Errorf("api specification missing components.errors.%s", MethodUnavailableCode)
+	for _, required := range []string{MethodUnavailableCode, RunNotFoundCode} {
+		if _, ok := errorCodes[required]; !ok {
+			return nil, fmt.Errorf("api specification missing components.errors.%s", required)
+		}
 	}
 	return &Registry{
 		api:        api,

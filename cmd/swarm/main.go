@@ -119,6 +119,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("load Swarm contracts: %v", err)
 	}
+	bootBundleIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
+	if err != nil {
+		log.Fatalf("compute boot bundle identity: %v", err)
+	}
 	source := semanticview.Wrap(bundle)
 	stateStoreSummary, err := initializeStateStores(ctx, stores, bundle)
 	if err != nil {
@@ -178,6 +182,14 @@ func main() {
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath: resolvedPlatformSpecPath,
 		AuthTokens:       apiv1.AuthTokensFromEnvironment(),
+		Handlers: apiv1.OperatorReadHandlers(apiv1.OperatorReadOptions{
+			Ready: func() bool {
+				return ready.Load()
+			},
+			Database: stores.Postgres,
+			Runs:     stores.Postgres,
+			Bundle:   bootBundleIdentity,
+		}),
 	})
 	if err != nil {
 		log.Fatalf("init v1 api: %v", err)
