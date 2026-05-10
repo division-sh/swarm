@@ -4695,8 +4695,9 @@ api_specification:
       envelope: JSON-RPC 2.0 standard {code, message, data}
       data_structure:
         code: "Application-level error code, namespaced and uppercase. Examples:\nBUNDLE_MISMATCH, MAILBOX_ALREADY_DECIDED,\
-          \ IDEMPOTENCY_CONFLICT,\nENTITY_NOT_FOUND. Distinct from the JSON-RPC top-level numeric\n`code` (which carries category\
-          \ \u2014 invalid params, internal error,\nmethod not found, etc.).\n"
+          \ IDEMPOTENCY_CONFLICT,\nENTITY_NOT_FOUND. Distinct from the JSON-RPC top-level numeric\n`code`; generated OpenRPC\
+          \ assigns one unique numeric code in the\n-32000..-32099 range per application error, while data.code remains\n\
+          the canonical string discriminator.\n"
         details: Per-error-code structured object. See components.errors for the schema of each code's details.
         retryable: Boolean. true = transient (network, temporary lock); false = permanent (validation failure, missing resource).
         correlation_id: Opaque string. Echo of request id, or runtime-assigned for traceability across logs.
@@ -4706,7 +4707,8 @@ api_specification:
       - '-32601: Method not found (JSON-RPC standard)'
       - '-32602: Invalid params (JSON-RPC standard)'
       - '-32603: Internal error (JSON-RPC standard)'
-      - '-32000: Application error (Swarm uses this for all data.code-discriminated errors)'
+      - '-32000..-32099: Application error range (generated OpenRPC assigns one unique numeric code per components.errors
+        entry; data.code remains the canonical string discriminator)'
     pagination:
       style: cursor-based
       list_method_pattern: 'All list methods accept `limit?` (default 50, max 500) and `cursor?`
@@ -7391,4 +7393,5 @@ api_specification:
       [{url: "<host>/v1/rpc"}], methods: [...], components: {schemas, errors, contentDescriptors}}.'
     - Every component schema in this YAML maps 1:1 to a component in the generated openrpc.json.
     - Every method in method_catalog maps to one OpenRPC method object with params (array of contentDescriptors), result (contentDescriptor),
-      errors (array of error objects derived from components.errors).
+      errors (array of error objects derived from components.errors with unique numeric OpenRPC codes and canonical data.code
+      string discriminators).
