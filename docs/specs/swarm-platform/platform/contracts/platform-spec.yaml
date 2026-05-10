@@ -3402,8 +3402,10 @@ run_model:
       RunForkPlan or store.run_fork.replay_resume_admission. The store delivery-event replay primitive uses fresh fork
       event IDs, a direct committed replay-scope marker, and run_fork_delivery_event_replays lineage rows. It fails closed with no partial mutation if the source run advanced
       after the fork point, if the fork already has events, deliveries, sessions, or turns, or if node, in-progress,
-      failed, dead-letter, committed replay-scope, timer, route, session, active-turn, replay, or contract-swap facts
-      would require unsupported historical replay. Activation does not copy source event IDs, replay delivered/completed
+      failed, dead-letter, timer, route, session, active-turn, replay, or contract-swap facts
+      would require unsupported historical replay. Source committed replay-scope marker facts remain fail-closed unless
+      an approved selected-contract marker policy classifies at/before-T markers as lineage/no-action evidence only.
+      Activation does not copy source event IDs, replay delivered/completed
       or receipt-only facts, reconstruct timer, route, session, turn, or contract rows, or recompute recipients from
       current subscriptions.'
     planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
@@ -3480,6 +3482,15 @@ run_model:
       creates them remain fail-closed. Post-T source session, turn, and conversation-audit facts remain fail-closed unless
       a separate approved source-advanced/reconstruction owner changes that policy. Committed replay-scope marker policy
       is a split sibling.'
+    selected_contract_committed_replay_scope_marker_policy: 'Mutating selected-contract timestamp-fork execution may
+      consume runtime.run_fork.historical_replay_execution.selected_contract_committed_replay_scope_marker_policy to
+      classify at/before-fork-T source committed replay-scope marker rows as lineage/no-action evidence only. This policy
+      is selected-contract execution only and is not same-run replay recovery, fork-local delivery-event replay recovery,
+      or generic historical replay. Source marker rows MUST NOT be copied into the fork, reused as fork-local recovery
+      proof, treated as executable fork work, or used as selected-fork suppressors. Fork-local committed replay-scope
+      truth must be freshly written under the fork run_id by selected-contract execution or approved fork-local
+      delivery-event replay owners. Post-T/source-advanced source committed replay-scope marker facts remain fail-closed
+      unless a separate approved source-advanced/reconstruction owner changes that policy.'
     selected_contract_route_admission: 'Selected-contract route/subscription reconstruction admission is a
       non-mutating prerequisite owned by runtime.run_fork.selected_contract_route_admission. It consumes
       runtime.run_fork.contract_frontier_admission for selected frontier work, consumes selected-source static route
@@ -3538,7 +3549,9 @@ run_model:
       run_fork_selected_contract_executions, runs selected handlers through the normal runtime pipeline, writes fork-local
       outcomes, and regenerates emitted follow-ups under the fork run_id. Source events are payload/lineage inputs only;
       source event_deliveries, recipients, receipts, dead letters, retry/idempotency state, and post-fork outcomes MUST
-      NOT become executable fork work or fork suppressors. Route persistence, timer reconstruction, session/turn/audit
+      NOT become executable fork work or fork suppressors. At/before-T source committed replay-scope marker rows may be
+      consumed only as lineage/no-action evidence by the selected-contract marker policy; fork-local recovery must use
+      fresh fork-run marker rows. Route persistence, timer reconstruction, session/turn/audit
       reconstruction, non-agent delivery replay, runtime restart recovery, contract-swap boot/resume beyond selected
       frontier execution, and UI/API ownership remain separately gated siblings.'
     contract_swap_boot_resume_admission: 'Contract-swap boot/resume readiness for timestamp forks is owned by
@@ -3547,8 +3560,9 @@ run_model:
       store.run_fork.replay_resume_admission, selected route topology, selected recipient planning, and fork-local
       selected route recovery evidence before answering whether full boot/resume under selected or swapped contracts is
       allowed. It MUST fail closed with named blockers for source deliveries, receipts, dead letters, retry/idempotency
-      state, post-fork source outcomes, timers, current/source routes, sessions, turns, audits, committed replay-scope
-      rows, non-agent replay, missing selected route recovery, or any missing/stale selected binding/source evidence. It
+      state, post-fork source outcomes, timers, current/source routes, sessions, turns, audits, source committed
+      replay-scope rows not admitted by the selected-contract marker policy, non-agent replay, missing selected route
+      recovery, or any missing/stale selected binding/source evidence. It
       MUST NOT run handlers, create fork-local events or event_deliveries, copy source rows, write receipts, dead
       letters, idempotency state, emitted follow-up events, timers, sessions, turns, route rows, API/UI state, or
       otherwise implement mutating historical replay/resume. CLI, API, dashboard, Builder, route helpers, delivery
@@ -3720,7 +3734,9 @@ run_model:
         persistence/recovery, timer reconstruction, session/turn/audit reconstruction, non-agent replay, contract-swap
         boot/resume beyond selected frontier execution, runtime restart recovery, and UI/API ownership remain separate
         parents or siblings. At/before-T source session/turn/audit facts may be admitted only as lineage/no-action
-        evidence by the separate selected-contract session/turn/audit lineage policy.'
+        evidence by the separate selected-contract session/turn/audit lineage policy. At/before-T source committed
+        replay-scope marker rows may be admitted only as lineage/no-action evidence by the separate selected-contract
+        committed replay-scope marker policy.'
       3h1_selected_contract_session_turn_audit_lineage_policy: 'For selected-contract timestamp-fork execution,
         runtime.run_fork.historical_replay_execution.selected_contract_session_turn_audit_lineage_policy consumes the
         canonical replay_resume_admission session_history, active_turn_history, and conversation_audit_history facts and
@@ -3732,6 +3748,16 @@ run_model:
         execution under the fork run_id. This owner does not close full session reconstruction, committed replay-scope
         marker policy, timers, routes, non-agent replay, restart recovery, contract-swap boot/resume, or operator
         surfaces.'
+      3h2_selected_contract_committed_replay_scope_marker_policy: 'For selected-contract timestamp-fork execution,
+        runtime.run_fork.historical_replay_execution.selected_contract_committed_replay_scope_marker_policy consumes the
+        canonical replay_resume_admission committed_replay_scope fact and may demote at/before-T source committed
+        replay-scope marker rows from fail-closed blockers to lineage/no-action evidence only. Source marker rows are
+        same-run proof only: they are not executable fork work, not fork-local recovery truth, not copied into the fork,
+        and not selected-fork suppressors. Fork-local replay/recovery proof must be newly written under the fork run_id
+        by selected-contract execution or approved fork-local delivery-event replay owners. Post-T/source-advanced source
+        committed replay-scope marker facts remain fail-closed unless a separate approved owner changes that policy. This
+        owner does not close same-run recovery, fork-local delivery-event replay recovery, sessions, turns, audits,
+        timers, routes, non-agent replay, restart recovery, contract-swap boot/resume, or operator surfaces.'
       3i_contract_swap_boot_resume_admission: 'For timestamp forks with selected or swapped contracts, full boot/resume
         readiness is answered by runtime.run_fork.contract_swap_boot_resume_admission before any mutating historical
         replay/resume work. The owner consumes selected binding/source admission, replay/resume taxonomy, selected route

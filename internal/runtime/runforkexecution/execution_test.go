@@ -416,6 +416,81 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	}
 }
 
+func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002315, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, sourceEventID, "replay_scope_subscribed", at)
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	}
+	if result.Materialization.ForkRunID == "" || !result.Activation.Activated {
+		t.Fatalf("selected execution result = %#v", result)
+	}
+	if selectedExecutionResultHasBlocker(result, store.RunForkBlockerCommittedReplayScopeReplayUnsupported) {
+		t.Fatalf("selected execution retained committed replay-scope blocker: materialization=%#v activation=%#v", result.Materialization.UnsupportedBlockers, result.Activation.UnsupportedBlockers)
+	}
+
+	var copiedSourceMarkers int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = '__runtime_replay_scope__'
+		  AND reason_code = 'replay_scope_subscribed'
+		  AND event_id = $2::uuid
+	`, result.Materialization.ForkRunID, sourceEventID).Scan(&copiedSourceMarkers); err != nil {
+		t.Fatalf("count copied source replay-scope markers: %v", err)
+	}
+	if copiedSourceMarkers != 0 {
+		t.Fatalf("copied source replay-scope markers into fork = %d, want 0", copiedSourceMarkers)
+	}
+	var forkLocalMarkers int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = '__runtime_replay_scope__'
+		  AND reason_code IN ('replay_scope_direct', 'replay_scope_subscribed')
+		  AND event_id <> $2::uuid
+	`, result.Materialization.ForkRunID, sourceEventID).Scan(&forkLocalMarkers); err != nil {
+		t.Fatalf("count fork-local replay-scope markers: %v", err)
+	}
+	if forkLocalMarkers == 0 {
+		t.Fatalf("fork-local replay-scope marker missing for selected execution result")
+	}
+}
+
 func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterialization(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -951,6 +1026,22 @@ func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEv
 		VALUES ($1::uuid, 'item.received', $2::uuid, 'flow-a/1', 'handler_error', 'source dead letter must not suppress fork', 'old-source-node', $3)
 	`, sourceEventID, entityID, at); err != nil {
 		t.Fatalf("seed source dead letter: %v", err)
+	}
+}
+
+func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, reasonCode string, at time.Time) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status,
+			retry_count, reason_code, delivered_at, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'node', '__runtime_replay_scope__', 'delivered',
+			0, $3, $4, $4
+		)
+	`, sourceRunID, sourceEventID, reasonCode, at); err != nil {
+		t.Fatalf("seed source replay-scope marker: %v", err)
 	}
 }
 

@@ -116,6 +116,60 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 	assertNoCopiedConversationRows(t, db, materialized.ForkRunID, sessionID, auditID, turnID)
 }
 
+func TestSelectedContractExecutionMaterializationTreatsSourceReplayScopeMarkersAsLineage(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		reasonCode string
+	}{
+		{name: "direct", reasonCode: replayScopeReasonDirect},
+		{name: "subscribed", reasonCode: replayScopeReasonSubscribed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			pg := &PostgresStore{DB: db}
+			ctx := context.Background()
+			sourceRunID := uuid.NewString()
+			entityID := uuid.NewString()
+			eventID := uuid.NewString()
+			at := time.Unix(1700002415, 0).UTC()
+			seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+			seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, eventID, tc.reasonCode, at)
+
+			plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+			if err != nil {
+				t.Fatalf("PlanRunFork: %v", err)
+			}
+			if !runForkTestHasPlanBlocker(plan, RunForkBlockerCommittedReplayScopeReplayUnsupported) {
+				t.Fatalf("plan blockers = %#v, want committed replay-scope blocker", plan.UnsupportedBlockers)
+			}
+
+			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+				SourceRunID: sourceRunID,
+				At:          eventID,
+				ContractSelection: RunForkContractSelection{
+					Mode:            "selected_contracts",
+					ContractsRoot:   "/tmp/selected-contracts",
+					WorkflowName:    "selected-workflow",
+					WorkflowVersion: "v1",
+				},
+			})
+			if err != nil {
+				t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+			}
+			if materialized.ForkRunID == "" {
+				t.Fatalf("materialized fork run_id is empty: %#v", materialized)
+			}
+			if runForkTestHasMaterializationBlocker(materialized, RunForkBlockerCommittedReplayScopeReplayUnsupported) {
+				t.Fatalf("selected-contract materialization kept committed replay-scope blocker: %#v", materialized.UnsupportedBlockers)
+			}
+			if !runForkTestHasLineageDispositionOwner(materialized.ReplayResumeAdmission, RunForkReplayResumeFactCommittedReplayScope, RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner) {
+				t.Fatalf("admission missing committed replay-scope marker lineage owner: %#v", materialized.ReplayResumeAdmission)
+			}
+			assertNoCopiedReplayScopeMarkers(t, db, materialized.ForkRunID)
+		})
+	}
+}
+
 func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCouplingFailClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -911,6 +965,64 @@ func TestPostTSourceConversationHistoryFailsClosedForSelectedContractActivation(
 	}
 }
 
+func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700003625, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	if materialized.ForkRunID == "" {
+		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
+	}
+	seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, eventID, replayScopeReasonDirect, at.Add(time.Minute))
+
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+		ForkRunID:             materialized.ForkRunID,
+		AllowedSourceEventIDs: []string{eventID},
+	})
+	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
+		t.Fatalf("activation error = %v, want post-T committed replay-scope marker blocker", err)
+	}
+	if activation.Activated || activation.BranchDivergence != nil || activation.SourceAdvancedAfterFork {
+		t.Fatalf("activation = %#v, want marker post-T blocked before branch divergence", activation)
+	}
+	if !runForkTestHasActivationBlocker(activation, "source_committed_replay_scope_advanced_after_fork_point") {
+		t.Fatalf("activation blockers = %#v, want source_committed_replay_scope_advanced_after_fork_point", activation.UnsupportedBlockers)
+	}
+	if !runForkTestHasDispositionBlocker(activation.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced, "source_committed_replay_scope_advanced_after_fork_point") {
+		t.Fatalf("activation replay admission = %#v, want source advanced marker blocker", activation.ReplayResumeAdmission)
+	}
+
+	var sourceStatus, forkStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
+		t.Fatalf("load source status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
+		t.Fatalf("load fork status: %v", err)
+	}
+	if sourceStatus != "running" || forkStatus != RunForkMaterializedStatus {
+		t.Fatalf("run statuses source=%q fork=%q, want source running and fork materialized", sourceStatus, forkStatus)
+	}
+	assertNoCopiedReplayScopeMarkers(t, db, materialized.ForkRunID)
+}
+
 func TestSelectedContractExecutionMaterializationPreservesRouteBlocker(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -1041,6 +1153,22 @@ func seedSelectedContractSourceConversationHistory(t *testing.T, db execContextD
 	}
 }
 
+func seedSelectedContractSourceReplayScopeMarker(t *testing.T, db execContextDB, sourceRunID, eventID, reasonCode string, at time.Time) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status,
+			retry_count, reason_code, delivered_at, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, $3, $4, 'delivered',
+			0, $5, $6, $6
+		)
+	`, sourceRunID, eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, reasonCode, at); err != nil {
+		t.Fatalf("seed source replay-scope marker: %v", err)
+	}
+}
+
 func assertNoCopiedConversationRows(t *testing.T, db *sql.DB, forkRunID, sourceSessionID, sourceAuditID, sourceTurnID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -1069,6 +1197,24 @@ func assertNoCopiedConversationRows(t *testing.T, db *sql.DB, forkRunID, sourceS
 		if count != 1 {
 			t.Fatalf("%s fork/copy count = %d, want exactly the original source row only", name, count)
 		}
+	}
+}
+
+func assertNoCopiedReplayScopeMarkers(t *testing.T, db *sql.DB, forkRunID string) {
+	t.Helper()
+	var copied int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND subscriber_type = $2
+		  AND subscriber_id = $3
+		  AND reason_code IN ($4, $5)
+	`, forkRunID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, replayScopeReasonDirect, replayScopeReasonSubscribed).Scan(&copied); err != nil {
+		t.Fatalf("count copied replay-scope markers: %v", err)
+	}
+	if copied != 0 {
+		t.Fatalf("fork replay-scope marker rows = %d, want 0 copied source markers", copied)
 	}
 }
 

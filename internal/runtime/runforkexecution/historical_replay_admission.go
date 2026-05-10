@@ -315,6 +315,16 @@ func historicalReplayEventDeliveriesAdmission(replay store.RunForkReplayResumeAd
 			Message:     "only the existing delivery_event_replay_ready primitive is admitted as future executable fork work; this admission does not create event or delivery rows",
 		}
 	}
+	if disposition, ok := replayDispositionForFact(replay, store.RunForkReplayResumeFactCommittedReplayScope, store.RunForkReplayResumeDispositionLineageOnly); ok &&
+		strings.TrimSpace(disposition.Owner) == store.RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner {
+		return store.RunForkHistoricalReplayFactAdmission{
+			Fact:        store.RunForkHistoricalReplayFactEventDeliveries,
+			Admission:   store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence,
+			SourceOwner: store.RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner,
+			Tracker:     "#663",
+			Message:     "at/before-T source committed replay-scope marker rows are lineage/no-action evidence only for selected-contract timestamp forks; fork-local recovery proof must be written under the fork run_id",
+		}
+	}
 	return historicalReplayLineageFact(store.RunForkHistoricalReplayFactEventDeliveries, store.RunForkReplayResumeAdmissionOwner, "source delivery history is lineage/no-op evidence unless the canonical replay taxonomy admits the pending unstarted agent-delivery primitive")
 }
 
