@@ -874,6 +874,14 @@ func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan RunForkPlan,
 		if runForkSelectedContractActiveSourceDeliveryConversationCouplingAdmitted(plan, item) {
 			continue
 		}
+		if runForkSelectedContractPendingWorkHasActiveDeliverySessionCoupling(item) {
+			if blocker, ok := runForkSelectedContractAdmissionBlockerForPendingWork(admission, item); ok {
+				blockers = appendRunForkBlocker(blockers, blocker)
+			} else {
+				blockers = appendRunForkBlocker(blockers, runForkReplayResumeBlocker(RunForkBlockerDeliveryHistoryUnproven))
+			}
+			continue
+		}
 		if len(allowedEvents) == 0 {
 			continue
 		}
@@ -885,6 +893,22 @@ func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan RunForkPlan,
 		}
 	}
 	return blockers
+}
+
+func runForkSelectedContractAdmissionBlockerForPendingWork(admission RunForkReplayResumeAdmission, item RunForkPendingWork) (RunForkUnsupportedBlocker, bool) {
+	key := runForkSelectedContractPendingWorkKey(item)
+	for _, disposition := range admission.Dispositions {
+		if strings.TrimSpace(disposition.Disposition) != RunForkReplayResumeDispositionFailClosedBlocker {
+			continue
+		}
+		if runForkSelectedContractDispositionKey(disposition) != key {
+			continue
+		}
+		if code := strings.TrimSpace(disposition.BlockerCode); code != "" {
+			return runForkReplayResumeBlocker(code), true
+		}
+	}
+	return RunForkUnsupportedBlocker{}, false
 }
 
 func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID, forkEventID string, forkTime time.Time) error {

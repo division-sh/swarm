@@ -367,6 +367,74 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
 
+func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliveryWithoutConversationHistoryFailClosed(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	unrelatedEventID := uuid.NewString()
+	forkPointEventID := uuid.NewString()
+	at := time.Unix(1700002428, 0).UTC()
+	forkAt := at.Add(30 * time.Second)
+	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'unrelated.started', $3::uuid,
+			'flow-a/1', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4
+		)
+	`, sourceRunID, unrelatedEventID, entityID, at.Add(10*time.Second)); err != nil {
+		t.Fatalf("seed unrelated event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, started_at, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'unrelated-agent', 'in_progress', $3, $3)
+	`, sourceRunID, unrelatedEventID, at.Add(11*time.Second)); err != nil {
+		t.Fatalf("seed unrelated in-progress delivery: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, source_event_id, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
+			'flow-a/1', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
+			$4::uuid, $5
+		)
+	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
+		t.Fatalf("seed fork point event: %v", err)
+	}
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          forkPointEventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), RunForkBlockerDeliveryHistoryUnproven) {
+		t.Fatalf("materialization error = %v, want unrelated active delivery blocker", err)
+	}
+	if materialized.ForkRunID != "" {
+		t.Fatalf("materialized fork despite unrelated active delivery: %#v", materialized)
+	}
+	if !runForkTestHasMaterializationBlocker(materialized, RunForkBlockerDeliveryHistoryUnproven) {
+		t.Fatalf("materialization blockers = %#v, want delivery history blocker", materialized.UnsupportedBlockers)
+	}
+	assertNoSelectedContractForkRows(t, db, sourceRunID)
+}
+
 func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsActiveSessionCoupling(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -426,6 +494,80 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 		}
 	}
 	assertNoCopiedConversationRows(t, db, materialized.ForkRunID, sessionID, auditID, turnID)
+}
+
+func TestSelectedContractExecutionActivationKeepsUnrelatedInProgressDeliveryWithoutConversationHistoryFailClosed(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	forkPointEventID := uuid.NewString()
+	unrelatedEventID := uuid.NewString()
+	at := time.Unix(1700002435, 0).UTC()
+	forkAt := at.Add(30 * time.Second)
+	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, source_event_id, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'validation/vertical.ready_for_review', $3::uuid,
+			'flow-a/1', 'entity', '{}'::jsonb, 'validation-coordinator', 'agent',
+			$4::uuid, $5
+		)
+	`, sourceRunID, forkPointEventID, entityID, sourceEventID, forkAt); err != nil {
+		t.Fatalf("seed fork point event: %v", err)
+	}
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          forkPointEventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'unrelated.started', $3::uuid,
+			'flow-a/1', 'entity', '{}'::jsonb, 'source-runtime', 'platform', $4
+		)
+	`, sourceRunID, unrelatedEventID, entityID, at.Add(10*time.Second)); err != nil {
+		t.Fatalf("seed unrelated event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, started_at, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'unrelated-agent', 'in_progress', $3, $3)
+	`, sourceRunID, unrelatedEventID, at.Add(11*time.Second)); err != nil {
+		t.Fatalf("seed unrelated in-progress delivery: %v", err)
+	}
+
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+		ForkRunID: materialized.ForkRunID,
+	})
+	if err == nil || !strings.Contains(err.Error(), RunForkBlockerDeliveryHistoryUnproven) {
+		t.Fatalf("activation error = %v, want unrelated active delivery blocker", err)
+	}
+	if activation.Activated || activation.BranchDivergence != nil {
+		t.Fatalf("activation = %#v, want blocked before branch divergence", activation)
+	}
+	if !runForkTestHasActivationBlocker(activation, RunForkBlockerDeliveryHistoryUnproven) {
+		t.Fatalf("activation blockers = %#v, want delivery history blocker", activation.UnsupportedBlockers)
+	}
 }
 
 func TestSelectedContractExecutionMaterializationPreflightsLineageCapability(t *testing.T) {
