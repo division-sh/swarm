@@ -281,6 +281,49 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversat
 	}
 }
 
+func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractSourceAdvancedConversationHistoryOwner(t *testing.T) {
+	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
+	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+	replayAdmission := store.RunForkReplayResumeAdmission{
+		Owner:                   store.RunForkReplayResumeAdmissionOwner,
+		StateOnlyExecutionReady: true,
+		Dispositions: []store.RunForkReplayResumeDisposition{{
+			Fact:           store.RunForkReplayResumeFactSourceAdvanced,
+			Disposition:    store.RunForkReplayResumeDispositionLineageOnly,
+			Owner:          store.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner,
+			Classification: "source_turns_advanced_after_fork_point",
+			Message:        "selected-contract source-advanced conversation-history lineage/no-action evidence",
+		}},
+	}
+	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
+		SelectedExecutionAdmission: selectedAdmission,
+		ReplayResumeAdmission:      replayAdmission,
+		RouteRecovery:              &routeRecovery,
+	})
+	if err != nil {
+		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
+	}
+
+	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
+		ReplayResumeAdmission:      replayAdmission,
+		SelectedExecutionAdmission: selectedAdmission,
+		ContractSwapAdmission:      contractSwapAdmission,
+		RouteRecovery:              &routeRecovery,
+	})
+	if err != nil {
+		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+	}
+	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, store.RunForkHistoricalReplayFactSourceAdvancedPostTFacts)
+	if !ok {
+		t.Fatalf("missing source-advanced admission: %#v", admission.FactAdmissions)
+	}
+	if item.Admission != store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
+		item.SourceOwner != store.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner ||
+		item.Tracker != "#671" {
+		t.Fatalf("source-advanced admission = %#v, want #671 conversation-history lineage owner", item)
+	}
+}
+
 func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractReplayScopeMarkerOwner(t *testing.T) {
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
