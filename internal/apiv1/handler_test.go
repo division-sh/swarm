@@ -11,8 +11,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/store"
 )
 
 const testToken = "test-v1-token"
@@ -238,6 +241,204 @@ func TestHandlerWebSocketAuthAndFrameValidation(t *testing.T) {
 	if result := asMap(t, ok.Result); result["ok"] != true {
 		t.Fatalf("unsubscribe result = %#v, want ok true", ok.Result)
 	}
+}
+
+func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
+	now := time.Unix(1700000000, 123456789).UTC()
+	runID := "run-1"
+	eventID := "event-1"
+	fakeRuns := &fakeRunReadStore{
+		headers: map[string]store.RunHeader{
+			runID: {
+				RunID:            runID,
+				Status:           "running",
+				TriggerEventType: "scan.requested",
+				TriggerEventID:   eventID,
+				EntityCount:      2,
+				EventCount:       1,
+				StartedAt:        now.Add(-time.Hour),
+			},
+		},
+		reports: map[string]store.RunDebugReport{
+			runID: {
+				RunID:          runID,
+				RunTableStatus: "running",
+				RootEventID:    eventID,
+				RootEventType:  "scan.requested",
+				StartedAt:      now.Add(-time.Hour),
+				LastEventAt:    now.Add(-time.Minute),
+				EventCount:     1,
+				EntityCount:    2,
+				Deliveries:     []store.RunDebugDeliveryCount{{SubscriberID: "worker", Status: "pending", Count: 1}},
+			},
+		},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:      func() time.Time { return now },
+			Ready:    func() bool { return true },
+			Database: fakePinger{err: nil},
+			Runs:     fakeRuns,
+			Bundle: runtimecontracts.BundleIdentity{
+				WorkflowName:    "review",
+				WorkflowVersion: "1.2.3",
+				Fingerprint:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			},
+		}),
+	})
+
+	ping := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"ping","method":"health.ping","params":{}}`)
+	if ping.Error != nil {
+		t.Fatalf("health.ping error = %#v", ping.Error)
+	}
+	if got := asMap(t, ping.Result)["ts"]; got != now.Format(time.RFC3339Nano) {
+		t.Fatalf("health.ping ts = %v, want %s", got, now.Format(time.RFC3339Nano))
+	}
+
+	health := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"health","method":"health.check","params":{}}`)
+	if health.Error != nil {
+		t.Fatalf("health.check error = %#v", health.Error)
+	}
+	healthResult := asMap(t, health.Result)
+	if healthResult["ready"] != true || healthResult["db_ok"] != true || healthResult["runtime_ok"] != true {
+		t.Fatalf("health.check result = %#v", healthResult)
+	}
+	bundle := asMap(t, healthResult["bundle"])
+	if bundle["fingerprint"] != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("bundle identity = %#v", bundle)
+	}
+	if raw, _ := json.Marshal(healthResult); strings.Contains(string(raw), "/") {
+		t.Fatalf("health.check leaked path-like content: %s", raw)
+	}
+
+	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"run.get","params":{"run_id":"run-1"}}`)
+	if get.Error != nil {
+		t.Fatalf("run.get error = %#v", get.Error)
+	}
+	if got := asMap(t, asMap(t, get.Result)["run"])["trigger_event_id"]; got != eventID {
+		t.Fatalf("run.get trigger_event_id = %v, want %s", got, eventID)
+	}
+
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"run.list","params":{"limit":1}}`)
+	if list.Error != nil {
+		t.Fatalf("run.list error = %#v", list.Error)
+	}
+	runs, ok := asMap(t, list.Result)["runs"].([]any)
+	if !ok || len(runs) != 1 {
+		t.Fatalf("run.list runs = %#v, want one run", asMap(t, list.Result)["runs"])
+	}
+	if fakeRuns.lastListOpts.Limit != 1 {
+		t.Fatalf("run.list limit = %d, want 1", fakeRuns.lastListOpts.Limit)
+	}
+
+	diagnose := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"diagnose","method":"run.diagnose","params":{"run_id":"run-1"}}`)
+	if diagnose.Error != nil {
+		t.Fatalf("run.diagnose error = %#v", diagnose.Error)
+	}
+	if got := asMap(t, diagnose.Result)["operational_state"]; got != "running" {
+		t.Fatalf("run.diagnose operational_state = %v, want running", got)
+	}
+}
+
+func TestOperatorReadHandlersRunNotFoundAndRunStartStaysUnavailable(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Ready:    func() bool { return true },
+			Database: fakePinger{err: nil},
+			Runs: &fakeRunReadStore{
+				notFound: map[string]bool{"missing": true},
+			},
+			Bundle: runtimecontracts.BundleIdentity{
+				WorkflowName:    "review",
+				WorkflowVersion: "1.2.3",
+				Fingerprint:     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			},
+		}),
+	})
+
+	missing := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"missing","method":"run.get","params":{"run_id":"missing"}}`)
+	if missing.Error == nil {
+		t.Fatal("run.get missing error = nil, want RUN_NOT_FOUND")
+	}
+	data := asMap(t, missing.Error.Data)
+	if data["code"] != RunNotFoundCode || asMap(t, data["details"])["run_id"] != "missing" {
+		t.Fatalf("run.get missing data = %#v", data)
+	}
+
+	start := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"event_name":"system.started","payload":{}}}`)
+	if start.Error == nil {
+		t.Fatal("run.start error = nil, want METHOD_UNAVAILABLE")
+	}
+	if data := asMap(t, start.Error.Data); data["code"] != MethodUnavailableCode {
+		t.Fatalf("run.start error data = %#v, want METHOD_UNAVAILABLE", data)
+	}
+}
+
+func rpcCall(t *testing.T, handler *Handler, body string) rpcResponse {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var resp rpcResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode rpc response: %v body=%s", err, rec.Body.String())
+	}
+	return resp
+}
+
+type fakePinger struct {
+	err error
+}
+
+func (p fakePinger) Ping(context.Context) error {
+	return p.err
+}
+
+type fakeRunReadStore struct {
+	headers      map[string]store.RunHeader
+	reports      map[string]store.RunDebugReport
+	notFound     map[string]bool
+	lastListOpts store.RunHeaderListOptions
+}
+
+func (s *fakeRunReadStore) LoadRunHeader(_ context.Context, runID string) (store.RunHeader, error) {
+	if s.notFound[runID] {
+		return store.RunHeader{}, store.ErrRunNotFound
+	}
+	header, ok := s.headers[runID]
+	if !ok {
+		return store.RunHeader{}, store.ErrRunNotFound
+	}
+	return header, nil
+}
+
+func (s *fakeRunReadStore) ListRunHeaders(_ context.Context, opts store.RunHeaderListOptions) ([]store.RunHeader, string, error) {
+	s.lastListOpts = opts
+	out := make([]store.RunHeader, 0, len(s.headers))
+	for _, header := range s.headers {
+		out = append(out, header)
+	}
+	if opts.Limit > 0 && len(out) > opts.Limit {
+		return out[:opts.Limit], "next", nil
+	}
+	return out, "", nil
+}
+
+func (s *fakeRunReadStore) LoadRunDebugReport(_ context.Context, runID string, _ store.RunDebugQueryOptions) (store.RunDebugReport, error) {
+	if s.notFound[runID] {
+		return store.RunDebugReport{}, store.ErrRunNotFound
+	}
+	report, ok := s.reports[runID]
+	if !ok {
+		return store.RunDebugReport{}, store.ErrRunNotFound
+	}
+	return report, nil
 }
 
 func testHandler(t *testing.T, opts Options) *Handler {

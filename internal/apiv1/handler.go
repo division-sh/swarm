@@ -218,6 +218,14 @@ func (h *Handler) dispatch(ctx context.Context, raw []byte, transport, fallbackC
 	}
 	result, err := handler(ctx, req)
 	if err != nil {
+		var appErr *ApplicationError
+		if errors.As(err, &appErr) && appErr != nil {
+			return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: h.applicationError(appErr.Code, req.CorrelationID, appErr.Retryable, appErr.Details)}
+		}
+		var paramsErr *InvalidParamsError
+		if errors.As(err, &paramsErr) && paramsErr != nil {
+			return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: invalidParams(req.CorrelationID, paramsErr.Details)}
+		}
 		return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: h.standardError(codeInternalError, "internal error", req.CorrelationID, map[string]any{"error": err.Error()})}
 	}
 	return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result}
