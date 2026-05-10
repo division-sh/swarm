@@ -204,8 +204,13 @@ func Validate(api *APISpecification) (ValidationReport, error) {
 		if hasIdempotency && !listedMutating {
 			problems = append(problems, fmt.Sprintf("method %s declares idempotency but is not listed in conventions.idempotency.mutating_methods", methodName))
 		}
-		if listedMutating && !methodHasParam(method, "idempotency_key") {
-			problems = append(problems, fmt.Sprintf("mutating method %s missing idempotency_key param", methodName))
+		if listedMutating {
+			idempotencyKey, ok := methodParam(method, "idempotency_key")
+			if !ok {
+				problems = append(problems, fmt.Sprintf("mutating method %s missing idempotency_key param", methodName))
+			} else if idempotencyKey.Required {
+				problems = append(problems, fmt.Sprintf("mutating method %s idempotency_key param must be optional", methodName))
+			}
 		}
 	}
 	for mutating := range mutatingCatalog {
@@ -359,13 +364,13 @@ func validateFilterParity(api *APISpecification) []string {
 	return problems
 }
 
-func methodHasParam(method Method, name string) bool {
+func methodParam(method Method, name string) (ContentDescriptor, bool) {
 	for _, param := range method.Params {
 		if param.Name == name {
-			return true
+			return param, true
 		}
 	}
-	return false
+	return ContentDescriptor{}, false
 }
 
 func paramSchemaRef(method Method, name string) (string, bool) {
