@@ -12,6 +12,10 @@ import (
 
 const (
 	MethodUnavailableCode                = "METHOD_UNAVAILABLE"
+	BundleMismatchCode                   = "BUNDLE_MISMATCH"
+	UnsupportedBundleRefCode             = "UNSUPPORTED_BUNDLE_REF"
+	EventNotDeclaredCode                 = "EVENT_NOT_DECLARED"
+	PayloadValidationFailedCode          = "PAYLOAD_VALIDATION_FAILED"
 	RunNotFoundCode                      = "RUN_NOT_FOUND"
 	MailboxNotFoundCode                  = "MAILBOX_NOT_FOUND"
 	MailboxAlreadyDecidedCode            = "MAILBOX_ALREADY_DECIDED"

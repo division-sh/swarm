@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 )
 
@@ -30,6 +31,7 @@ type OperatorReadOptions struct {
 	Mailbox               MailboxAPIStore
 	Idempotency           APIIdempotencyStore
 	Events                EventPublisher
+	Source                semanticview.Source
 	MailboxApprovalRoutes map[string]string
 	Bundle                runtimecontracts.BundleIdentity
 }
@@ -167,6 +169,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 		},
 	}
 	for name, handler := range OperatorMailboxHandlers(opts) {
+		handlers[name] = handler
+	}
+	for name, handler := range OperatorRunStartHandlers(opts) {
 		handlers[name] = handler
 	}
 	return handlers
