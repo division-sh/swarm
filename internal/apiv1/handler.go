@@ -252,6 +252,10 @@ func (h *Handler) parseRequest(raw []byte, fallbackCorrelationID string) (Reques
 	if len(bytes.TrimSpace(idRaw)) == 0 {
 		return Request{}, nil, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "id is invalid"})
 	}
+	if !validJSONRPCID(req.ID) {
+		correlationID = requestCorrelationID(nil, req.ID, correlationID)
+		return Request{}, req.ID, correlationID, h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "id must be a string, number, or null"})
+	}
 	correlationID = requestCorrelationID(nil, req.ID, correlationID)
 	method := strings.TrimSpace(req.Method)
 	if method == "" {
@@ -285,6 +289,15 @@ func decodeParams(raw json.RawMessage, correlationID string) (map[string]any, *r
 		params = map[string]any{}
 	}
 	return params, nil
+}
+
+func validJSONRPCID(id any) bool {
+	switch id.(type) {
+	case nil, string, float64, json.Number:
+		return true
+	default:
+		return false
+	}
 }
 
 var opaqueIDPattern = regexp.MustCompile(`^[A-Za-z0-9_:.-]+$`)
@@ -362,14 +375,41 @@ func validateParamValue(descriptor apispec.ContentDescriptor, value any) string 
 				return "must be a boolean"
 			}
 		case "number", "integer":
-			switch value.(type) {
-			case float64, int, int64, json.Number:
-			default:
+			if !isJSONNumber(value) {
 				return "must be a number"
+			}
+			if typ == "integer" && !isJSONInteger(value) {
+				return "must be an integer"
 			}
 		}
 	}
 	return ""
+}
+
+func isJSONNumber(value any) bool {
+	switch typed := value.(type) {
+	case float64:
+		return true
+	case json.Number:
+		_, err := typed.Float64()
+		return err == nil
+	default:
+		return false
+	}
+}
+
+func isJSONInteger(value any) bool {
+	switch typed := value.(type) {
+	case float64:
+		return typed == float64(int64(typed))
+	case json.Number:
+		if _, err := typed.Int64(); err == nil {
+			return true
+		}
+		return false
+	default:
+		return false
+	}
 }
 
 func invalidParams(correlationID string, details any) *rpcError {
