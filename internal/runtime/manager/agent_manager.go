@@ -137,10 +137,13 @@ func (am *AgentManager) runtimeContext() context.Context {
 }
 
 func (am *AgentManager) runtimePlatformControlEventContext(ctx context.Context) context.Context {
-	if ctx != nil && ctx.Err() == nil {
-		return ctx
+	if ctx == nil {
+		return am.runtimeContext()
 	}
-	return am.runtimeContext()
+	if ctx.Err() != nil {
+		return context.WithoutCancel(ctx)
+	}
+	return ctx
 }
 
 func (am *AgentManager) InFlightCount() int {

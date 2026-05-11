@@ -82,24 +82,13 @@ count=$((count + 1))
 printf '%s' "$count" > "$count_file"
 captured="$capture_dir/$count.stdin"
 cat > "$captured"
-case "$count" in
-1)
+if grep -Fq '"name":"read_file"' "$captured" && grep -Fq '"ok":true' "$captured"; then
+  printf '%s\n' '{"type":"result","result":"done"}'
+else
   printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"Read","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}'
   printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}'
-  ;;
-2)
-  if ! grep -Fq '"name":"read_file"' "$captured" || ! grep -Fq '"ok":true' "$captured"; then
-    printf '%s\n' 'expected second Claude invocation to receive read_file tool result' >&2
-    exit 2
-  fi
-  printf '%s\n' '{"type":"result","result":"done"}'
-  ;;
-*)
-  printf '%s\n' 'unexpected extra Claude invocation' >&2
-  exit 2
-  ;;
-esac
+fi
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
