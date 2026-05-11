@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -12,9 +13,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"swarm/internal/config"
 	"swarm/internal/events"
 	"swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/runtime/runforkadmission"
 	"swarm/internal/store"
@@ -382,6 +385,68 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	if agentFollowUps != 1 || finalizedEvents != 1 {
 		t.Fatalf("fork-local follow-ups task.completed=%d task.finalized=%d, want 1/1", agentFollowUps, finalizedEvents)
 	}
+}
+
+func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *testing.T) {
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:9998")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:9998")
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+	eventBus, err := bus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+
+	_, err = startSelectedContractAgentRuntime(context.Background(), publishSelectedContractForkEventsRequest{
+		AgentRuntime: selectedContractAgentRuntimePlan{
+			Proof: SelectedContractAgentRuntimeMaterialization{
+				AgentRecipients: []string{"bad-agent"},
+			},
+			Records: []runtimemanager.PersistedAgent{{
+				Config: runtimeactors.AgentConfig{
+					ID:            "bad-agent",
+					Role:          "worker",
+					LLMBackend:    "cli_test",
+					ModelTier:     "standard",
+					Subscriptions: []string{"item.received"},
+				},
+			}},
+			Options: SelectedContractAgentRuntimeOptions{
+				Config:     &config.Config{},
+				LLMRuntime: selectedContractCleanupRuntime{},
+			},
+		},
+	}, eventBus)
+	if err == nil || !strings.Contains(err.Error(), "missing required system_prompt") {
+		t.Fatalf("startSelectedContractAgentRuntime error = %v, want registration failure", err)
+	}
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != "http://127.0.0.1:9998" {
+		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want restored original", got)
+	}
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL")); got != "http://host.docker.internal:9998" {
+		t.Fatalf("SWARM_TOOL_GATEWAY_CONTAINER_URL = %q, want restored original", got)
+	}
+
+	unlocked := make(chan struct{})
+	go func() {
+		selectedContractAgentRuntimeGatewayEnvMu.Lock()
+		defer selectedContractAgentRuntimeGatewayEnvMu.Unlock()
+		close(unlocked)
+	}()
+	select {
+	case <-unlocked:
+	case <-time.After(time.Second):
+		t.Fatal("selected-fork runtime gateway mutex remained locked after registration failure")
+	}
+}
+
+type selectedContractCleanupRuntime struct{}
+
+func (selectedContractCleanupRuntime) StartSession(context.Context, string, string, []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
+	return &runtimellm.Session{}, nil
+}
+
+func (selectedContractCleanupRuntime) ContinueSession(context.Context, *runtimellm.Session, runtimellm.Message) (*runtimellm.Response, error) {
+	return &runtimellm.Response{}, nil
 }
 
 func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(t *testing.T) {

@@ -182,6 +182,19 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if builder.bindManager != nil {
 		builder.bindManager(manager)
 	}
+	started := false
+	cleanup := func() {
+		_ = manager.Shutdown()
+		if builder.cleanup != nil {
+			builder.cleanup()
+			builder.cleanup = nil
+		}
+	}
+	defer func() {
+		if !started {
+			cleanup()
+		}
+	}()
 	for _, rec := range req.AgentRuntime.Records {
 		if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil && !strings.Contains(err.Error(), "agent already exists") {
 			return nil, fmt.Errorf("%s materialize agent %s: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
@@ -193,6 +206,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		})
 	}
 	manager.RunAuthoritativeDeliveryOnly(ctx)
+	started = true
 	return &selectedContractAgentRuntime{manager: manager, cleanup: builder.cleanup}, nil
 }
 
