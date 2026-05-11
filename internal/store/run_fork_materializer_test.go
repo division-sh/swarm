@@ -381,6 +381,112 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 	}
 }
 
+func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthority(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000508, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed source run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.event_flow_only', $3::uuid, 'event-flow/at-T', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, sourceRunID, eventID, entityID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+			($1::uuid, $2::uuid, 'entity_type', 'null'::jsonb, '"field_case"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
+	`, sourceRunID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed mutations: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if plan.ExecutionReady {
+		t.Fatalf("ExecutionReady = true, want false for field-only entity_type authority")
+	}
+	if !runForkTestHasPlanBlocker(plan, RunForkBlockerEntitySnapshotMetadataUnproven) {
+		t.Fatalf("plan blockers = %#v, want %s", plan.UnsupportedBlockers, RunForkBlockerEntitySnapshotMetadataUnproven)
+	}
+}
+
+func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadata(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000509, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, sourceRunID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed source run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'fork.conflicting_entity_type', $3::uuid, 'event-flow/at-T', 'entity', '{}'::jsonb, 'test', 'platform', $4)
+	`, sourceRunID, eventID, entityID, at); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+			($1::uuid, $2::uuid, 'entity_type', 'null'::jsonb, '"field_case"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
+	`, sourceRunID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed mutations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'state-flow/at-T', 'source_case',
+			'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
+			$3, $3, $3
+		)
+	`, sourceRunID, entityID, at); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if plan.ExecutionReady {
+		t.Fatalf("ExecutionReady = true, want false for conflicting entity_type authority")
+	}
+	if !runForkTestHasPlanBlocker(plan, RunForkBlockerEntitySnapshotMetadataUnproven) {
+		t.Fatalf("plan blockers = %#v, want %s", plan.UnsupportedBlockers, RunForkBlockerEntitySnapshotMetadataUnproven)
+	}
+}
+
 func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
