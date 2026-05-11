@@ -50,7 +50,7 @@ type Store interface {
 	EnsureRuntimeIngressState(context.Context, time.Time) (State, error)
 	LoadRuntimeIngressState(context.Context) (State, error)
 	TransitionRuntimeIngressState(context.Context, Status, string, string, time.Time) (State, bool, error)
-	SetRuntimeIngressTransitionEvent(context.Context, string, time.Time) error
+	SetRuntimeIngressTransitionEvent(context.Context, Status, string, time.Time) (bool, error)
 }
 
 type EventPublisher interface {
@@ -167,20 +167,21 @@ func (c *Controller) transition(ctx context.Context, target Status, req Transiti
 		}
 		return result, nil
 	}
+	// Once the owner state has committed, callers must see the transition as
+	// successful so API idempotency can record and replay the completed write.
 	eventID, err := c.publishTransitionEvent(ctx, target, reason, controlledBy, now)
 	if err != nil {
-		return result, err
+		return result, nil
 	}
 	result.TransitionID = eventID
 	if eventID != "" {
-		if err := c.setTransitionEvent(ctx, eventID, now); err != nil {
-			return result, err
-		}
+		_, _ = c.setTransitionEvent(ctx, target, eventID, state.UpdatedAt)
 	}
 	if target == StatusRunning {
 		released, err := c.releaseQueued(ctx)
 		if err != nil {
-			return result, err
+			result.ReleasedCount = released
+			return result, nil
 		}
 		result.ReleasedCount = released
 	}
@@ -228,18 +229,21 @@ func (c *Controller) ensureState(ctx context.Context, now time.Time) (State, err
 	return c.memory, nil
 }
 
-func (c *Controller) setTransitionEvent(ctx context.Context, eventID string, now time.Time) error {
+func (c *Controller) setTransitionEvent(ctx context.Context, target Status, eventID string, now time.Time) (bool, error) {
 	if strings.TrimSpace(eventID) == "" {
-		return nil
+		return false, nil
 	}
 	if c.store != nil {
-		return c.store.SetRuntimeIngressTransitionEvent(ctx, eventID, now)
+		return c.store.SetRuntimeIngressTransitionEvent(ctx, target, eventID, now)
 	}
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.memory.Status != target || !c.memory.UpdatedAt.Equal(now) {
+		return false, nil
+	}
 	c.memory.TransitionEventID = strings.TrimSpace(eventID)
 	c.memory.UpdatedAt = now
-	c.mu.Unlock()
-	return nil
+	return true, nil
 }
 
 func (c *Controller) publishTransitionEvent(ctx context.Context, target Status, reason, controlledBy string, now time.Time) (string, error) {
