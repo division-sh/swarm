@@ -246,7 +246,7 @@ func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEve
 	}
 	if opts.Since != nil {
 		n := add(opts.Since.UTC())
-		where = append(where, fmt.Sprintf("e.created_at >= $%d", n))
+		where = append(where, fmt.Sprintf("e.created_at > $%d", n))
 	}
 	if opts.Until != nil {
 		n := add(opts.Until.UTC())
@@ -445,7 +445,7 @@ func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts Operat
 	args := []any{opts.RunID, opts.EntityID, opts.Component, opts.Level, opts.ErrorCode, opts.Source, opts.ActionOrEventType}
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())
-		cursorClause += fmt.Sprintf(" AND e.created_at >= $%d", len(args))
+		cursorClause += fmt.Sprintf(" AND e.created_at > $%d", len(args))
 	}
 	if opts.Cursor != "" {
 		cursor, err := decodeObservabilityPositionCursor(opts.Cursor, "runtime.logs")
@@ -543,16 +543,25 @@ func (s *PostgresStore) ListOperatorRuntimeIncidents(ctx context.Context, opts O
 	}
 	opts = defaultOperatorRuntimeIncidentListOptions(opts)
 	cutoff := time.Now().UTC().Add(-time.Duration(opts.SinceHours) * time.Hour)
-	logs, err := s.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
-		Component: opts.Component,
-		Level:     opts.Level,
-		Since:     &cutoff,
-		Limit:     10000,
-		Order:     "desc",
-	})
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT
+			e.event_id::text,
+			COALESCE(e.run_id::text, ''),
+			COALESCE(e.entity_id::text, ''),
+			e.created_at,
+			COALESCE(e.produced_by, ''),
+			COALESCE(e.payload, '{}'::jsonb)
+		FROM events e
+		WHERE e.event_name = 'platform.runtime_log'
+		  AND e.created_at >= $1
+		  AND ($2 = '' OR COALESCE(e.payload->'details'->>'component', '') = $2)
+		  AND ($3 = '' OR COALESCE(e.payload->>'log_level', '') = $3)
+		ORDER BY e.created_at DESC, e.event_id::text DESC
+	`, cutoff, opts.Component, opts.Level)
 	if err != nil {
-		return OperatorRuntimeIncidentListResult{}, err
+		return OperatorRuntimeIncidentListResult{}, fmt.Errorf("list operator runtime incident logs: %w", err)
 	}
+	defer rows.Close()
 	type aggregate struct {
 		item       OperatorRuntimeIncident
 		agents     map[string]struct{}
@@ -560,7 +569,22 @@ func (s *PostgresStore) ListOperatorRuntimeIncidents(ctx context.Context, opts O
 		components map[string]struct{}
 	}
 	aggregates := map[string]*aggregate{}
-	for _, logEntry := range logs.Logs {
+	for rows.Next() {
+		var (
+			eventID    string
+			runID      string
+			entityID   string
+			createdAt  time.Time
+			producedBy string
+			payloadRaw []byte
+		)
+		if err := rows.Scan(&eventID, &runID, &entityID, &createdAt, &producedBy, &payloadRaw); err != nil {
+			return OperatorRuntimeIncidentListResult{}, fmt.Errorf("scan operator runtime incident log: %w", err)
+		}
+		logEntry, err := operatorRuntimeLogEntry(eventID, runID, entityID, producedBy, createdAt, payloadRaw)
+		if err != nil {
+			return OperatorRuntimeIncidentListResult{}, err
+		}
 		if opts.MCPOnly && !strings.HasPrefix(strings.TrimSpace(logEntry.Component), "mcp") {
 			continue
 		}
@@ -609,6 +633,9 @@ func (s *PostgresStore) ListOperatorRuntimeIncidents(ctx context.Context, opts O
 		if logEntry.Component != "" {
 			agg.components[logEntry.Component] = struct{}{}
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return OperatorRuntimeIncidentListResult{}, fmt.Errorf("read operator runtime incident logs: %w", err)
 	}
 	out := make([]OperatorRuntimeIncident, 0, len(aggregates))
 	for _, agg := range aggregates {
