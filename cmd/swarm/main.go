@@ -196,6 +196,7 @@ func main() {
 			Mailbox:               stores.Postgres,
 			Idempotency:           stores.Postgres,
 			Events:                rt.Bus,
+			RunControl:            rt.RunControl,
 			RuntimeIngress:        rt.RuntimeIngress,
 			Source:                source,
 			MailboxApprovalRoutes: mailboxApprovalRoutes,

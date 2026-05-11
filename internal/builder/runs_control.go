@@ -12,6 +12,7 @@ import (
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimeruncontrol "swarm/internal/runtime/runcontrol"
 )
 
 var runCompletionTimeout = 30 * time.Second
@@ -110,7 +111,7 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 	return nil
 }
 
-func (h *runHub) stopRun(runID string) error {
+func (h *runHub) stopRun(ctx context.Context, runID string) error {
 	if h == nil {
 		return fmt.Errorf("run hub is not configured")
 	}
@@ -118,15 +119,14 @@ func (h *runHub) stopRun(runID string) error {
 	if runID == "" {
 		return fmt.Errorf("run_id is required")
 	}
-	if h.session(runID) == nil {
-		return fmt.Errorf("run not found: %s", runID)
+	ctrl, err := h.runControl(runID)
+	if err != nil {
+		return err
+	}
+	if _, err := ctrl.Stop(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "builder_rpc", ControlledBy: "builder.rpc"}); err != nil {
+		return err
 	}
 	h.markTerminal(runID)
-	if h.resetRuntime != nil {
-		if err := h.resetRuntime(); err != nil {
-			return err
-		}
-	}
 	h.emitControl(runID, map[string]any{
 		"id":        uuid.NewString(),
 		"type":      "run.stopped",
@@ -136,7 +136,7 @@ func (h *runHub) stopRun(runID string) error {
 	return nil
 }
 
-func (h *runHub) pauseRun(runID string) error {
+func (h *runHub) pauseRun(ctx context.Context, runID string) error {
 	if h == nil {
 		return fmt.Errorf("run hub is not configured")
 	}
@@ -144,15 +144,14 @@ func (h *runHub) pauseRun(runID string) error {
 	if runID == "" {
 		return fmt.Errorf("run_id is required")
 	}
-	if h.session(runID) == nil {
-		return fmt.Errorf("run not found: %s", runID)
-	}
-	if h.pauseRuntime == nil {
-		return fmt.Errorf("pause runtime is not configured")
-	}
-	if err := h.pauseRuntime(); err != nil {
+	ctrl, err := h.runControl(runID)
+	if err != nil {
 		return err
 	}
+	if _, err := ctrl.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "builder_rpc", ControlledBy: "builder.rpc"}); err != nil {
+		return err
+	}
+	h.markPaused(runID, true)
 	h.emitControl(runID, map[string]any{
 		"id":        uuid.NewString(),
 		"type":      "run.paused",
@@ -162,7 +161,7 @@ func (h *runHub) pauseRun(runID string) error {
 	return nil
 }
 
-func (h *runHub) continueRun(runID string, instanceIDs []string, decision string) error {
+func (h *runHub) continueRun(ctx context.Context, runID string) error {
 	if h == nil {
 		return fmt.Errorf("run hub is not configured")
 	}
@@ -170,25 +169,15 @@ func (h *runHub) continueRun(runID string, instanceIDs []string, decision string
 	if runID == "" {
 		return fmt.Errorf("run_id is required")
 	}
-	if h.session(runID) == nil {
-		return fmt.Errorf("run not found: %s", runID)
-	}
-	if h.resumeRuntime == nil {
-		return fmt.Errorf("resume runtime is not configured")
-	}
-	if err := h.submitPendingHumanDecision(context.Background(), runID, decision); err != nil {
+	ctrl, err := h.runControl(runID)
+	if err != nil {
 		return err
 	}
-	if err := h.resumeRuntime(); err != nil {
+	if _, err := ctrl.Continue(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "builder_rpc", ControlledBy: "builder.rpc"}); err != nil {
 		return err
 	}
+	h.markPaused(runID, false)
 	payload := map[string]any{"run_id": runID}
-	if len(instanceIDs) > 0 {
-		payload["instance_ids"] = instanceIDs
-	}
-	if decision = strings.TrimSpace(decision); decision != "" {
-		payload["decision"] = decision
-	}
 	h.emitControl(runID, map[string]any{
 		"id":        uuid.NewString(),
 		"type":      "run.resumed",
@@ -371,6 +360,10 @@ func (h *runHub) awaitCompletion(runID string) {
 		if session == nil || session.runtime == nil || session.runtime.Bus == nil {
 			return
 		}
+		if h.isPaused(runID) {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), runCompletionTimeout)
 		err := session.runtime.WaitForQuiescence(ctx)
 		cancel()
@@ -441,7 +434,42 @@ func (h *runHub) markTerminal(runID string) {
 	defer h.mu.Unlock()
 	if session := h.sessions[strings.TrimSpace(runID)]; session != nil {
 		session.terminal = true
+		session.paused = false
 	}
+}
+
+func (h *runHub) markPaused(runID string, paused bool) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if session := h.sessions[strings.TrimSpace(runID)]; session != nil {
+		session.paused = paused
+	}
+}
+
+func (h *runHub) isPaused(runID string) bool {
+	if h == nil {
+		return false
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	session := h.sessions[strings.TrimSpace(runID)]
+	return session != nil && session.paused
+}
+
+func (h *runHub) runControl(runID string) (*runtimeruncontrol.Controller, error) {
+	runID = strings.TrimSpace(runID)
+	if runID != "" {
+		if session := h.session(runID); session != nil && session.runtime != nil && session.runtime.RunControl != nil {
+			return session.runtime.RunControl, nil
+		}
+	}
+	if rt := h.currentRuntime(); rt != nil && rt.RunControl != nil {
+		return rt.RunControl, nil
+	}
+	return nil, fmt.Errorf("run control owner is not configured")
 }
 
 func (h *runHub) persistTerminalState(runID, status, errorSummary string, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {

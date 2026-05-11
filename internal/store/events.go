@@ -256,6 +256,33 @@ func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, si
 	return s.listEventsMissingPipelineReceiptSpec(ctx, caps, since, limit)
 }
 
+func (s *PostgresStore) ListEventsMissingPipelineReceiptForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	runID = nullUUIDString(runID)
+	if runID == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	if since.IsZero() {
+		since = time.Now().Add(-24 * time.Hour)
+	}
+	if caps.Events.Receipts != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
+		if caps.Events.Receipts != SchemaFlavorCanonical {
+			return nil, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
+		}
+		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
+	}
+	if !caps.Events.LogRunID {
+		return nil, fmt.Errorf("list missing pipeline receipts by run requires canonical events.run_id")
+	}
+	return s.listEventsMissingPipelineReceiptForRunSpec(ctx, caps, runID, since, limit)
+}
+
 func (s *PostgresStore) ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
@@ -761,6 +788,63 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read missing pipeline receipt events: %w", err)
+	}
+	return out, nil
+}
+
+func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.Context, caps StoreSchemaCapabilities, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT
+			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
+			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
+			e.payload, e.created_at, COALESCE(e.source_event_id::text, '')
+		FROM events e
+		LEFT JOIN event_receipts r
+			ON r.event_id = e.event_id
+			AND r.subscriber_type = 'platform'
+			AND r.subscriber_id = 'pipeline'
+		WHERE r.event_id IS NULL
+		  AND e.run_id = $1::uuid
+		  AND e.created_at >= $2
+		ORDER BY e.created_at ASC
+		LIMIT $3
+	`, runID, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list run events missing pipeline receipt: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]events.PersistedReplayEvent, 0, limit)
+	for rows.Next() {
+		var evt events.Event
+		var entityID, flowInstance, scope string
+		if err := rows.Scan(
+			&evt.ID,
+			&evt.RunID,
+			&evt.Type,
+			&evt.SourceAgent,
+			&entityID,
+			&flowInstance,
+			&scope,
+			&evt.Payload,
+			&evt.CreatedAt,
+			&evt.ParentEventID,
+		); err != nil {
+			return nil, fmt.Errorf("scan run missing pipeline receipt event: %w", err)
+		}
+		evt = evt.WithEnvelope(events.EventEnvelope{
+			EntityID:     entityID,
+			FlowInstance: flowInstance,
+			Scope:        events.EventScope(scope),
+		})
+		record := events.PersistedReplayEvent{Event: evt}
+		if strings.TrimSpace(evt.RunID) == "" {
+			record.ReplayError = "missing canonical run_id"
+		}
+		out = append(out, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read run missing pipeline receipt events: %w", err)
 	}
 	return out, nil
 }

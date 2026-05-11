@@ -28,6 +28,7 @@ import (
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimeruncontrol "swarm/internal/runtime/runcontrol"
 	"swarm/internal/runtime/semanticview"
 	runtimesessions "swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
@@ -143,9 +144,10 @@ func (s stubRunTrace) LoadRunDebugTrace(_ context.Context, runID string, _ store
 }
 
 type stubBuilderRunStore struct {
-	mu        sync.Mutex
-	events    []events.Event
-	snapshots map[string]runtimebus.RunLifecycleSnapshot
+	mu          sync.Mutex
+	events      []events.Event
+	snapshots   map[string]runtimebus.RunLifecycleSnapshot
+	runControls map[string]string
 }
 
 func (s *stubBuilderRunStore) AppendEvent(_ context.Context, evt events.Event) error {
@@ -197,6 +199,113 @@ func (s *stubBuilderRunStore) LoadRunLifecycleSnapshot(_ context.Context, runID 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.snapshots[runID], nil
+}
+
+func (s *stubBuilderRunStore) StopRunControl(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runID := strings.TrimSpace(req.RunID)
+	status, ok := s.stubRunStatusLocked(runID)
+	if !ok {
+		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
+	}
+	if stubRunTerminal(status) {
+		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: runID, CurrentStatus: status}
+	}
+	if s.snapshots == nil {
+		s.snapshots = map[string]runtimebus.RunLifecycleSnapshot{}
+	}
+	if s.runControls == nil {
+		s.runControls = map[string]string{}
+	}
+	snap := s.snapshots[runID]
+	snap.RunID = runID
+	snap.Status = "cancelled"
+	ended := req.Now
+	if ended.IsZero() {
+		ended = time.Now().UTC()
+	}
+	snap.EndedAt = &ended
+	s.snapshots[runID] = snap
+	s.runControls[runID] = "stopped"
+	return runtimeruncontrol.State{RunID: runID, Status: "cancelled", ControlStatus: "stopped"}, nil
+}
+
+func (s *stubBuilderRunStore) PauseRunControl(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runID := strings.TrimSpace(req.RunID)
+	status, ok := s.stubRunStatusLocked(runID)
+	if !ok {
+		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
+	}
+	if stubRunTerminal(status) {
+		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: runID, CurrentStatus: status}
+	}
+	if status == "paused" && s.runControls[runID] == "paused" {
+		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyPaused, RunID: runID, CurrentStatus: status}
+	}
+	if s.snapshots == nil {
+		s.snapshots = map[string]runtimebus.RunLifecycleSnapshot{}
+	}
+	if s.runControls == nil {
+		s.runControls = map[string]string{}
+	}
+	snap := s.snapshots[runID]
+	snap.RunID = runID
+	snap.Status = "paused"
+	s.snapshots[runID] = snap
+	s.runControls[runID] = "paused"
+	return runtimeruncontrol.State{RunID: runID, Status: "paused", ControlStatus: "paused"}, nil
+}
+
+func (s *stubBuilderRunStore) ContinueRunControl(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runID := strings.TrimSpace(req.RunID)
+	status, ok := s.stubRunStatusLocked(runID)
+	if !ok {
+		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
+	}
+	if stubRunTerminal(status) {
+		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: runID, CurrentStatus: status}
+	}
+	if status != "paused" || s.runControls[runID] != "paused" {
+		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: runID, CurrentStatus: status}
+	}
+	snap := s.snapshots[runID]
+	snap.RunID = runID
+	snap.Status = "running"
+	s.snapshots[runID] = snap
+	s.runControls[runID] = "running"
+	return runtimeruncontrol.State{RunID: runID, Status: "running", ControlStatus: "running"}, nil
+}
+
+func (s *stubBuilderRunStore) RunDispatchBlocked(_ context.Context, runID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.runControls[strings.TrimSpace(runID)] == "paused", nil
+}
+
+func (s *stubBuilderRunStore) stubRunStatusLocked(runID string) (string, bool) {
+	if snap, ok := s.snapshots[runID]; ok && strings.TrimSpace(snap.Status) != "" {
+		return strings.TrimSpace(snap.Status), true
+	}
+	for _, evt := range s.events {
+		if strings.TrimSpace(evt.RunID) == runID {
+			return "running", true
+		}
+	}
+	return "", false
+}
+
+func stubRunTerminal(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "completed", "failed", "cancelled", "stopped", "abandoned":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string, _ store.RunDebugQueryOptions) (store.RunDebugReport, error) {
@@ -522,6 +631,9 @@ func newBuilderHandlerForTest(
 		runtimeProvider = func() *runtimepkg.Runtime { return rt }
 		if typed, ok := rt.Bus.Store().(*stubBuilderRunStore); ok {
 			runDebug = typed
+			if rt.RunControl == nil {
+				rt.RunControl = runtimeruncontrol.NewController(typed, nil, runtimeruncontrol.Options{})
+			}
 		}
 	}
 	return builderpkg.NewHandler(builderpkg.Options{
@@ -3328,7 +3440,7 @@ func TestHandler_RunEventStreamPreservesCanonicalRuntimeLogWithoutEntityID(t *te
 	}
 }
 
-func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
+func TestHandler_RunStopUsesRunControlOwnerAndStreamsStopped(t *testing.T) {
 	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
@@ -3404,8 +3516,8 @@ func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
 		if eventType != "run.stopped" {
 			continue
 		}
-		if runtimeCtl.resetCalls != 1 {
-			t.Fatalf("expected runtime reset once, got %d", runtimeCtl.resetCalls)
+		if runtimeCtl.resetCalls != 0 {
+			t.Fatalf("expected run.stop not to reset runtime ingress, got %d reset calls", runtimeCtl.resetCalls)
 		}
 		return
 	}
@@ -3503,11 +3615,11 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 		}
 	}
 
-	if runtimeCtl.pauseCalls != 1 {
-		t.Fatalf("expected runtime pause once, got %d", runtimeCtl.pauseCalls)
+	if runtimeCtl.pauseCalls != 0 {
+		t.Fatalf("expected run.pause not to pause runtime ingress, got %d calls", runtimeCtl.pauseCalls)
 	}
-	if runtimeCtl.resumeCalls != 1 {
-		t.Fatalf("expected runtime resume once, got %d", runtimeCtl.resumeCalls)
+	if runtimeCtl.resumeCalls != 0 {
+		t.Fatalf("expected run.continue not to resume runtime ingress, got %d calls", runtimeCtl.resumeCalls)
 	}
 }
 
@@ -3612,11 +3724,11 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 		}
 	}
 
-	if runtimeCtl.pauseCalls != 1 {
-		t.Fatalf("expected alias runtime pause once, got %d", runtimeCtl.pauseCalls)
+	if runtimeCtl.pauseCalls != 0 {
+		t.Fatalf("expected alias run.pause not to pause runtime ingress, got %d calls", runtimeCtl.pauseCalls)
 	}
-	if runtimeCtl.resumeCalls != 1 {
-		t.Fatalf("expected alias runtime resume once, got %d", runtimeCtl.resumeCalls)
+	if runtimeCtl.resumeCalls != 0 {
+		t.Fatalf("expected alias run.continue not to resume runtime ingress, got %d calls", runtimeCtl.resumeCalls)
 	}
 }
 
@@ -3815,41 +3927,19 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.continue alias status=%d body=%s", rec.Code, rec.Body.String())
 	}
-
-	receivedSubmitted := false
-	receivedResumed := false
-	deadline = time.After(1 * time.Second)
-	for !(receivedSubmitted && receivedResumed) {
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for human submit/resume events")
-		default:
-		}
-
-		var frame builderWSEventFrame
-		if err := conn.ReadJSON(&frame); err != nil {
-			t.Fatalf("read run event: %v", err)
-		}
-		if frame.Channel != "run:events:"+runID {
-			continue
-		}
-		payload, ok := frame.Data.(map[string]any)
-		if !ok {
-			continue
-		}
-		switch payload["type"] {
-		case "human.task_submitted":
-			receivedSubmitted = true
-		case "run.resumed":
-			receivedResumed = true
-		}
+	var rpcResp builderRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &rpcResp); err != nil {
+		t.Fatalf("decode run.continue rejection: %v", err)
+	}
+	if rpcResp.Error == nil || rpcResp.Error.Code != -32602 {
+		t.Fatalf("expected invalid-params rejection for legacy human-decision run.continue, got %#v body=%s", rpcResp.Error, rec.Body.String())
 	}
 
 	if runtimeCtl.pauseCalls != 1 {
 		t.Fatalf("expected runtime pause once, got %d", runtimeCtl.pauseCalls)
 	}
-	if runtimeCtl.resumeCalls != 1 {
-		t.Fatalf("expected runtime resume once, got %d", runtimeCtl.resumeCalls)
+	if runtimeCtl.resumeCalls != 0 {
+		t.Fatalf("expected legacy human-decision run.continue not to resume runtime ingress, got %d", runtimeCtl.resumeCalls)
 	}
 }
 
