@@ -502,6 +502,12 @@ func selectedContractExecutionRequiredConsumers() []store.RunForkSelectedContrac
 			Reason:      "selected execution must consume canonical recipient-plan evidence before publish-path recipient derivation",
 		},
 		{
+			Concept:     "authoritative_agent_delivery_materialization",
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner,
+			Reason:      "selected execution must prove selected-fork agent handler materialization for authoritative agent recipients or fail closed before fork mutation",
+		},
+		{
 			Concept:     "fork_run_id_runtime_context",
 			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
 			Owner:       store.RunForkSelectedContractExecutionOwner,

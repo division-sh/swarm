@@ -104,6 +104,11 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
+	if _, err := RequireSelectedContractAgentDeliveryMaterialization(ctx, SelectedContractAgentDeliveryMaterializationRequest{
+		RecipientPlanning: *model.RecipientPlanning,
+	}); err != nil {
+		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner}, err
+	}
 	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
 	materialization, err := req.Store.MaterializeRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID:       plan.SourceRunID,
