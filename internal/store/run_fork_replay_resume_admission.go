@@ -45,6 +45,7 @@ const (
 	RunForkBlockerSessionHistoryUnproven                = "session_history_unproven"
 	RunForkBlockerConversationAuditUnproven             = "conversation_audit_history_unproven"
 	RunForkBlockerActiveTurnHistoryUnproven             = "active_turn_history_unproven"
+	RunForkBlockerEntitySnapshotMetadataUnproven        = "entity_snapshot_metadata_unproven"
 )
 
 type RunForkReplayResumeAdmission struct {
@@ -63,6 +64,7 @@ type RunForkReplayResumeDisposition struct {
 	Owner          string `json:"owner,omitempty"`
 	BlockerCode    string `json:"blocker_code,omitempty"`
 	Classification string `json:"classification,omitempty"`
+	EntityID       string `json:"entity_id,omitempty"`
 	EventID        string `json:"event_id,omitempty"`
 	DeliveryID     string `json:"delivery_id,omitempty"`
 	SubscriberType string `json:"subscriber_type,omitempty"`
@@ -394,6 +396,11 @@ func runForkReplayResumeBlocker(code string) RunForkUnsupportedBlocker {
 		return RunForkUnsupportedBlocker{
 			Code:    RunForkBlockerActiveTurnHistoryUnproven,
 			Message: "active turn ownership at the fork point cannot be proven from current session/turn rows alone",
+		}
+	case RunForkBlockerEntitySnapshotMetadataUnproven:
+		return RunForkUnsupportedBlocker{
+			Code:    RunForkBlockerEntitySnapshotMetadataUnproven,
+			Message: "fork materialization requires owner-authorized source-at-T entity snapshot metadata for every reconstructed entity",
 		}
 	default:
 		code = strings.TrimSpace(code)

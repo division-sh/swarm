@@ -565,6 +565,20 @@ func TestRunForkPlanner_StateOnlyPlanExecutionReadyWithEmptyAndUnrelatedTimerRou
 		t.Fatalf("seed mutation: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'flow-a/1', 'default',
+			'ready', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
+			$3, $3, $3
+		)
+	`, runID, entityID, at); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			run_id, timer_name, entity_id, flow_instance, fire_event, fire_at, owner_node, task_type, status, created_at
 		)

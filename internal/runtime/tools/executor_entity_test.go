@@ -1136,9 +1136,9 @@ accounts:
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'review/inst-1', 'default', 'done',
-			'{}'::jsonb, '{"status":"closed"}'::jsonb, '{}'::jsonb, 7, $3, $3, $3
+			'{}'::jsonb, '{"status":"closed"}'::jsonb, '{}'::jsonb, 7, $3, $4, $3
 		)
-	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
+	`, sourceRunID, entityID, at.Add(time.Minute), at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
 	result, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})

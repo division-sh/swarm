@@ -199,7 +199,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	if err := ensureRunForkNotAlreadyMaterialized(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID); err != nil {
 		return RunForkMaterialization{}, err
 	}
-	metadata, err := loadRunForkEntityMetadata(ctx, tx, plan)
+	metadata, err := loadRunForkEntityMetadata(plan)
 	if err != nil {
 		return RunForkMaterialization{}, err
 	}
