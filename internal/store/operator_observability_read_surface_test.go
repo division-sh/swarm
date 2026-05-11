@@ -84,6 +84,18 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	if len(page2.Events) != 1 || page2.Events[0].EventID != olderEventID {
 		t.Fatalf("page2 = %#v", page2)
 	}
+	sinceBase := base
+	afterBase, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{
+		Filter: OperatorEventListFilter{RunID: runID},
+		Since:  &sinceBase,
+		Limit:  10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorEvents since: %v", err)
+	}
+	if len(afterBase.Events) != 1 || afterBase.Events[0].EventID != newerEventID {
+		t.Fatalf("since events = %#v, want only newer event", afterBase.Events)
+	}
 
 	if _, err := pg.LoadOperatorEvent(ctx, uuid.NewString()); !errors.Is(err, ErrEventNotFound) {
 		t.Fatalf("LoadOperatorEvent missing error = %v, want ErrEventNotFound", err)
@@ -153,6 +165,21 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	if len(page2.Logs) != 1 || page2.Logs[0].LogID != olderLog {
 		t.Fatalf("runtime log page2 = %#v", page2)
 	}
+	sinceBase := base
+	afterBase, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		Component: "mcp-gateway",
+		Level:     "error",
+		Since:     &sinceBase,
+		Limit:     10,
+		Order:     "desc",
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs since: %v", err)
+	}
+	if len(afterBase.Logs) != 1 || afterBase.Logs[0].LogID != newerLog {
+		t.Fatalf("since logs = %#v, want only newer log", afterBase.Logs)
+	}
 
 	incidents, err := pg.ListOperatorRuntimeIncidents(ctx, OperatorRuntimeIncidentListOptions{
 		SinceHours: 2,
@@ -167,6 +194,44 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	}
 	if incidents.Incidents[0].ErrorCode != "new_code" || len(incidents.Incidents[0].SampleLogIDs) != 1 {
 		t.Fatalf("first incident = %#v", incidents.Incidents[0])
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		SELECT gen_random_uuid(), $1::uuid, 'platform.runtime_log', 'global',
+			jsonb_build_object(
+				'log_level', 'error',
+				'message', 'bulk runtime failed',
+				'details', jsonb_build_object(
+					'component', 'mcp-gateway',
+					'action', 'request_failed',
+					'agent_id', 'agent-1',
+					'error', 'bulk runtime failed',
+					'error_code', 'bulk_code'
+				)
+			),
+			'runtime', 'platform', $2::timestamptz + (g * interval '1 millisecond')
+		FROM generate_series(1, 1005) AS g
+	`, runID, base.Add(2*time.Minute)); err != nil {
+		t.Fatalf("seed bulk runtime logs: %v", err)
+	}
+	bulkIncidents, err := pg.ListOperatorRuntimeIncidents(ctx, OperatorRuntimeIncidentListOptions{
+		SinceHours: 2,
+		MCPOnly:    true,
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeIncidents bulk: %v", err)
+	}
+	var bulk *OperatorRuntimeIncident
+	for idx := range bulkIncidents.Incidents {
+		if bulkIncidents.Incidents[idx].ErrorCode == "bulk_code" {
+			bulk = &bulkIncidents.Incidents[idx]
+			break
+		}
+	}
+	if bulk == nil || bulk.Count != 1005 {
+		t.Fatalf("bulk incident = %#v, want count 1005 in %#v", bulk, bulkIncidents.Incidents)
 	}
 }
 
