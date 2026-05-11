@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
@@ -126,7 +128,8 @@ type RunDebugReport struct {
 }
 
 type RunDebugTraceQueryOptions struct {
-	Limit int
+	Limit  int
+	Cursor string
 }
 
 type RunDebugTraceRow struct {
@@ -182,8 +185,12 @@ func defaultRunDebugQueryOptions(opts RunDebugQueryOptions) RunDebugQueryOptions
 }
 
 func defaultRunDebugTraceQueryOptions(opts RunDebugTraceQueryOptions) RunDebugTraceQueryOptions {
+	opts.Cursor = strings.TrimSpace(opts.Cursor)
 	if opts.Limit <= 0 {
 		opts.Limit = 200
+	}
+	if opts.Limit > 2000 {
+		opts.Limit = 2000
 	}
 	return opts
 }
@@ -579,23 +586,71 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 }
 
 func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, error) {
+	rows, _, err := s.LoadRunDebugTracePage(ctx, runID, opts)
+	return rows, err
+}
+
+func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error) {
 	if s == nil || s.DB == nil {
-		return nil, fmt.Errorf("postgres store is required")
+		return nil, "", fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunDebugCapabilities(ctx); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return nil, fmt.Errorf("run_id is required")
+		return nil, "", ErrRunNotFound
+	}
+	if _, err := uuid.Parse(runID); err != nil {
+		return nil, "", ErrRunNotFound
 	}
 	opts = defaultRunDebugTraceQueryOptions(opts)
+	var exists bool
+	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, runID).Scan(&exists); err != nil {
+		return nil, "", fmt.Errorf("check run debug trace run: %w", err)
+	}
+	if !exists {
+		return nil, "", ErrRunNotFound
+	}
 
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	sessionSources := runDebugTraceSessionSources(caps)
+	args := []any{runID}
+	cursorWhere := ""
+	if opts.Cursor != "" {
+		cursor, err := decodeRunDebugTraceCursor(opts.Cursor)
+		if err != nil {
+			return nil, "", err
+		}
+		args = append(args,
+			cursor.EventCreatedAt,
+			cursor.EventID,
+			nullableCursorTimestamp(cursor.DeliveryCreatedAt),
+			cursor.DeliveryID,
+			nullableCursorTimestamp(cursor.TurnCreatedAt),
+			cursor.TurnID,
+		)
+		cursorWhere = fmt.Sprintf(`
+		  AND (
+			e.created_at > $%d::timestamptz
+			OR (e.created_at = $%d::timestamptz AND e.event_id::text > $%d)
+			OR (e.created_at = $%d::timestamptz AND e.event_id::text = $%d AND COALESCE(d.created_at, '-infinity'::timestamptz) > $%d::timestamptz)
+			OR (e.created_at = $%d::timestamptz AND e.event_id::text = $%d AND COALESCE(d.created_at, '-infinity'::timestamptz) = $%d::timestamptz AND COALESCE(d.delivery_id::text, '') > $%d)
+			OR (e.created_at = $%d::timestamptz AND e.event_id::text = $%d AND COALESCE(d.created_at, '-infinity'::timestamptz) = $%d::timestamptz AND COALESCE(d.delivery_id::text, '') = $%d AND COALESCE(t.created_at, '-infinity'::timestamptz) > $%d::timestamptz)
+			OR (e.created_at = $%d::timestamptz AND e.event_id::text = $%d AND COALESCE(d.created_at, '-infinity'::timestamptz) = $%d::timestamptz AND COALESCE(d.delivery_id::text, '') = $%d AND COALESCE(t.created_at, '-infinity'::timestamptz) = $%d::timestamptz AND COALESCE(t.turn_id::text, '') > $%d)
+		  )`,
+			2, 2, 3,
+			2, 3, 4,
+			2, 3, 4, 5,
+			2, 3, 4, 5, 6,
+			2, 3, 4, 5, 6, 7,
+		)
+	}
+	args = append(args, opts.Limit+1)
+	limitArg := len(args)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		WITH trace_sessions AS (
 			%s
@@ -654,6 +709,7 @@ func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opt
 				OR sess.run_id IS NULL
 		   )
 		WHERE e.run_id = $1::uuid
+		%s
 		ORDER BY
 			e.created_at ASC,
 			e.event_id ASC,
@@ -661,14 +717,14 @@ func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opt
 			d.delivery_id ASC NULLS FIRST,
 			t.created_at ASC NULLS FIRST,
 			t.turn_id ASC NULLS FIRST
-		LIMIT $2
-	`, sessionSources), runID, opts.Limit)
+		LIMIT $%d
+	`, sessionSources, cursorWhere, limitArg), args...)
 	if err != nil {
-		return nil, fmt.Errorf("load run debug trace: %w", err)
+		return nil, "", fmt.Errorf("load run debug trace: %w", err)
 	}
 	defer rows.Close()
 
-	out := make([]RunDebugTraceRow, 0, opts.Limit)
+	out := make([]RunDebugTraceRow, 0, opts.Limit+1)
 	for rows.Next() {
 		var (
 			item                RunDebugTraceRow
@@ -712,7 +768,7 @@ func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opt
 			&item.TurnError,
 			&turnCreatedAt,
 		); err != nil {
-			return nil, fmt.Errorf("scan run debug trace: %w", err)
+			return nil, "", fmt.Errorf("scan run debug trace: %w", err)
 		}
 		item.DeliveryCreatedAt = nullableTimePtr(deliveryCreatedAt)
 		item.DeliveryStartedAt = nullableTimePtr(deliveryStartedAt)
@@ -722,9 +778,73 @@ func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opt
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read run debug trace: %w", err)
+		return nil, "", fmt.Errorf("read run debug trace: %w", err)
 	}
-	return out, nil
+	nextCursor := ""
+	if len(out) > opts.Limit {
+		out = out[:opts.Limit]
+		nextCursor = encodeRunDebugTraceCursor(out[len(out)-1])
+	}
+	return out, nextCursor, nil
+}
+
+type runDebugTraceCursor struct {
+	EventCreatedAt    string `json:"event_created_at"`
+	EventID           string `json:"event_id"`
+	DeliveryCreatedAt string `json:"delivery_created_at,omitempty"`
+	DeliveryID        string `json:"delivery_id,omitempty"`
+	TurnCreatedAt     string `json:"turn_created_at,omitempty"`
+	TurnID            string `json:"turn_id,omitempty"`
+}
+
+func encodeRunDebugTraceCursor(row RunDebugTraceRow) string {
+	cursor := runDebugTraceCursor{
+		EventCreatedAt: row.EventCreatedAt.UTC().Format(time.RFC3339Nano),
+		EventID:        strings.TrimSpace(row.EventID),
+		DeliveryID:     strings.TrimSpace(row.DeliveryID),
+		TurnID:         strings.TrimSpace(row.TurnID),
+	}
+	if row.DeliveryCreatedAt != nil {
+		cursor.DeliveryCreatedAt = row.DeliveryCreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if row.TurnCreatedAt != nil {
+		cursor.TurnCreatedAt = row.TurnCreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	raw, _ := json.Marshal(cursor)
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func decodeRunDebugTraceCursor(cursor string) (runDebugTraceCursor, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(cursor))
+	if err != nil {
+		return runDebugTraceCursor{}, ErrInvalidObservabilityCursor
+	}
+	var decoded runDebugTraceCursor
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return runDebugTraceCursor{}, ErrInvalidObservabilityCursor
+	}
+	if _, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(decoded.EventCreatedAt)); err != nil {
+		return runDebugTraceCursor{}, ErrInvalidObservabilityCursor
+	}
+	if strings.TrimSpace(decoded.EventID) == "" {
+		return runDebugTraceCursor{}, ErrInvalidObservabilityCursor
+	}
+	for _, timestamp := range []string{decoded.DeliveryCreatedAt, decoded.TurnCreatedAt} {
+		if strings.TrimSpace(timestamp) == "" {
+			continue
+		}
+		if _, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(timestamp)); err != nil {
+			return runDebugTraceCursor{}, ErrInvalidObservabilityCursor
+		}
+	}
+	return decoded, nil
+}
+
+func nullableCursorTimestamp(timestamp string) string {
+	if strings.TrimSpace(timestamp) == "" {
+		return "-infinity"
+	}
+	return strings.TrimSpace(timestamp)
 }
 
 func runDebugTraceSessionSources(caps StoreSchemaCapabilities) string {
