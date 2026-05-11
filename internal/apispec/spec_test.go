@@ -158,6 +158,74 @@ func TestEventListSubscribeFilterParity(t *testing.T) {
 	}
 }
 
+func TestRuntimeIngressConventionsRatifyQueueAndRejectSemantics(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	apiNode := mustMappingValue(t, root, "api_specification")
+	conventions := mustMappingValue(t, apiNode, "conventions")
+	ingress := mustMappingValue(t, conventions, "runtime_ingress")
+
+	assertScalarValue(t, mappingValue(ingress, "state_storage"), "runtime_ingress_state")
+	assertScalarContains(t, mappingValue(ingress, "owner"), "canonical runtime ingress controller")
+	assertScalarContains(t, mappingValue(ingress, "owner"), "Low-level runtimebus flags")
+	assertSurfaceListed(t, ingress, "queueable_ingress", "inbound.webhook")
+	assertSurfaceListed(t, ingress, "queueable_ingress", "api.event_producing_methods")
+	assertSurfaceListed(t, ingress, "queueable_ingress", "timer.fire")
+	assertSurfaceListed(t, ingress, "non_queueable_ingress", "mcp.tool_call")
+	assertSurfaceListed(t, ingress, "non_queueable_ingress", "mcp.json_rpc_call")
+	assertSurfaceListed(t, ingress, "non_queueable_ingress", "read_only_operator_api")
+	assertScalarContains(t, mappingValue(ingress, "queued_not_dispatched"), "events table")
+	assertScalarContains(t, mappingValue(ingress, "queued_not_dispatched"), "runtime_ingress_state.status")
+	assertScalarContains(t, mappingValue(ingress, "queued_not_dispatched"), "must not transition to in_progress")
+	assertScalarContains(t, mappingValue(ingress, "resume_release"), "exactly once")
+
+	transitions := mustMappingValue(t, ingress, "transitions")
+	pause := mustMappingValue(t, transitions, "pause")
+	assertScalarValue(t, mappingValue(pause, "method"), "runtime.pause")
+	assertScalarValue(t, mappingValue(pause, "from"), "running")
+	assertScalarValue(t, mappingValue(pause, "to"), "paused")
+	assertScalarValue(t, mappingValue(pause, "already_in_state_error"), "RUNTIME_ALREADY_PAUSED")
+	assertScalarValue(t, mappingValue(pause, "emits"), "platform.paused")
+	assertScalarContains(t, mappingValue(pause, "idempotency"), "replay with the same request body returns the original success response")
+
+	resume := mustMappingValue(t, transitions, "resume")
+	assertScalarValue(t, mappingValue(resume, "method"), "runtime.resume")
+	assertScalarValue(t, mappingValue(resume, "from"), "paused")
+	assertScalarValue(t, mappingValue(resume, "to"), "running")
+	assertScalarValue(t, mappingValue(resume, "already_in_state_error"), "RUNTIME_NOT_PAUSED")
+	assertScalarValue(t, mappingValue(resume, "emits"), "platform.resumed")
+	assertScalarContains(t, mappingValue(resume, "idempotency"), "replay with the same request body returns the original success response")
+
+	consumers := mustMappingValue(t, ingress, "consumers")
+	for _, consumer := range []string{
+		"v1_runtime_methods",
+		"dashboard_runtime_actions",
+		"inbound_webhook",
+		"mcp_tool_gateway",
+		"auth_breaker",
+		"reset",
+	} {
+		if mappingValue(consumers, consumer) == nil {
+			t.Fatalf("runtime_ingress.consumers missing %s", consumer)
+		}
+	}
+
+	tables := mustMappingValue(t, mustMappingValue(t, root, "platform_tables"), "tables")
+	runtimeIngressState := mustMappingValue(t, tables, "runtime_ingress_state")
+	assertScalarContains(t, mappingValue(runtimeIngressState, "ddl"), "CHECK (status IN ('running', 'paused'))")
+
+	events := mustMappingValue(t, mustMappingValue(t, root, "platform_events"), "catalog")
+	paused := mustMappingValue(t, events, "platform.paused")
+	resumed := mustMappingValue(t, events, "platform.resumed")
+	assertScalarContains(t, mappingValue(paused, "description"), "Queueable event-producing ingress is accepted")
+	assertScalarContains(t, mappingValue(paused, "description"), "MCP/tool execution is rejected fail-closed")
+	assertScalarContains(t, mappingValue(resumed, "description"), "exactly once")
+
+	api := loadRepoAPISpec(t)
+	assertMethodDescriptionContains(t, api, "runtime.pause", "Queueable event-producing ingress is persisted")
+	assertMethodDescriptionContains(t, api, "runtime.pause", "MCP/tool request-response ingress fails closed")
+	assertMethodDescriptionContains(t, api, "runtime.resume", "exactly once")
+}
+
 func TestContentDescriptorsDeclareRequiredFlag(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	api := mustMappingValue(t, root, "api_specification")
@@ -249,4 +317,50 @@ func mappingValue(node *yaml.Node, key string) *yaml.Node {
 
 func hasMappingKey(node *yaml.Node, key string) bool {
 	return mappingValue(node, key) != nil
+}
+
+func scalarValue(node *yaml.Node) string {
+	if node == nil {
+		return ""
+	}
+	return strings.TrimSpace(node.Value)
+}
+
+func assertScalarValue(t *testing.T, node *yaml.Node, want string) {
+	t.Helper()
+	if got := scalarValue(node); got != want {
+		t.Fatalf("scalar value = %q, want %q", got, want)
+	}
+}
+
+func assertScalarContains(t *testing.T, node *yaml.Node, want string) {
+	t.Helper()
+	if got := scalarValue(node); !strings.Contains(got, want) {
+		t.Fatalf("scalar value = %q, want substring %q", got, want)
+	}
+}
+
+func assertMethodDescriptionContains(t *testing.T, api *APISpecification, methodName, want string) {
+	t.Helper()
+	method, ok := api.MethodCatalog[methodName]
+	if !ok {
+		t.Fatalf("method %s missing from catalog", methodName)
+	}
+	if !strings.Contains(method.Description, want) {
+		t.Fatalf("method %s description = %q, want substring %q", methodName, method.Description, want)
+	}
+}
+
+func assertSurfaceListed(t *testing.T, ingress *yaml.Node, listName, surface string) {
+	t.Helper()
+	list := mustMappingValue(t, ingress, listName)
+	if list.Kind != yaml.SequenceNode {
+		t.Fatalf("runtime_ingress.%s kind = %v, want sequence", listName, list.Kind)
+	}
+	for _, entry := range list.Content {
+		if scalarValue(mappingValue(entry, "surface")) == surface {
+			return
+		}
+	}
+	t.Fatalf("runtime_ingress.%s missing surface %s", listName, surface)
 }

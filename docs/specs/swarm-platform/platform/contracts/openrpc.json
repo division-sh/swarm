@@ -3311,7 +3311,7 @@
     },
     {
       "name": "runtime.pause",
-      "description": "Pause runtime ingress. New events are queued but not dispatched. In-flight handlers complete.",
+      "description": "Pause runtime ingress. Queueable event-producing ingress is persisted but not dispatched until runtime.resume; synchronous MCP/tool request-response ingress fails closed while paused. In-flight handlers complete.",
       "params": [
         {
           "name": "idempotency_key",
@@ -3423,7 +3423,7 @@
     },
     {
       "name": "runtime.resume",
-      "description": "Resume runtime ingress.",
+      "description": "Resume runtime ingress. Queued event-producing ingress becomes eligible for normal EventBus dispatch exactly once through canonical delivery/idempotency owners.",
       "params": [
         {
           "name": "idempotency_key",
