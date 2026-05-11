@@ -107,6 +107,7 @@ type HandlerTransitionSemantic struct {
 	FlowID           string
 	EventType        string
 	Action           ActionSpec
+	SelectEntity     *SelectEntitySpec
 	Guard            *GuardSpec
 	AdvancesTo       string
 	SetsGate         *GateSpec
@@ -239,6 +240,21 @@ type ConfigBinding struct {
 	Key     string
 	Ref     string
 	RefPath paths.Path
+}
+
+type SelectEntitySpec struct {
+	By       map[string]string        `yaml:"by"`
+	Bindings []SelectEntityKeyBinding `yaml:"-"`
+}
+
+type SelectEntityKeyBinding struct {
+	Field   string
+	Ref     string
+	RefPath paths.Path
+}
+
+func (s *SelectEntitySpec) Empty() bool {
+	return s == nil || len(s.Bindings) == 0
 }
 
 func cloneStringMap(in map[string]string) map[string]string {
@@ -829,6 +845,7 @@ type SystemNodeContract struct {
 type SystemNodeEventHandler struct {
 	Action           ActionSpec               `yaml:"action"`
 	CreateEntity     bool                     `yaml:"create_entity"`
+	SelectEntity     *SelectEntitySpec        `yaml:"select_entity"`
 	Description      string                   `yaml:"description"`
 	EvidenceTarget   string                   `yaml:"evidence_target"`
 	Emit             EmitSpec                 `yaml:"emit"`

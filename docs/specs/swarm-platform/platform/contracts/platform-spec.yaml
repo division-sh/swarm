@@ -619,7 +619,7 @@ handler_specification:
   dependency_graph:
     description: Arrows mean "must complete before". Steps at the same level are independent — the implementer may execute
       them in any order.
-    graph: "\ncreate_entity (optional — mint new entity before any state operations)\n  └→ query (optional — pre-fetch cross-entity\
+    graph: "\nentity acquisition (optional — create_entity mints a new entity; select_entity resolves exactly one target-flow-owned existing entity)\n  └→ query (optional — pre-fetch cross-entity\
       \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
@@ -692,6 +692,46 @@ handler_specification:
         Without it, the first event arriving from outside the flow has no entity to write to unless the runtime creates one
         implicitly. create_entity makes this explicit and unambiguous. For dynamic instances (mode: template), entity
         creation happens in create_flow_instance step 9 — create_entity is not needed on those flows.'
+    select_entity:
+      field: select_entity
+      type: object
+      purpose: Resolve exactly one existing entity owned by the receiving flow before any other handler processing. This is
+        the service-owned acquisition primitive for stateful typed input-pin handlers where the incoming cross-flow request
+        addresses an existing target-flow resource by declared business key, not by source-provided entity identity.
+      default: absent — handler operates on the inbound event entity context unless create_entity is declared
+      when_to_use: When an event arriving from outside the flow represents a request against an already-existing service
+        entity owned by the receiving flow. Example — OpCo emits a typed spend event with vertical_id, and Treasury selects
+        its own budget entity whose vertical_id matches the payload. The source flow must not provide the target entity_id,
+        entity_type, or flow_instance.
+      schema:
+        by: map of target entity field name to explicit payload reference. Each key MUST be a declared field on the receiving
+          flow's entity contract. Each value MUST be a payload.* reference from the triggering event schema.
+      execution_position: First step in the dependency graph. Runs before query, guard, accumulate, data_accumulation,
+        advances_to, emit, and action. Establishes the entity context for the entire handler.
+      entity_selection:
+        ownership_scope: Only entities owned by the receiving flow are candidates. Source-flow entities, source event envelope
+          identity, arbitrary parent/child path inference, and caller-provided target entity identity are not authoritative.
+        matching: Every select_entity.by binding must match exactly one receiving-flow entity field value. Zero matches fail
+          closed. More than one match fails closed. Missing payload refs fail closed.
+        selected_context: The selected entity_id and flow_instance become the handler entity context for state, guard,
+          data_accumulation, emit.fields, and state transition processing.
+      restrictions:
+        lifecycle_scope: Valid only on stateful static-flow input-pin handlers. Stateless flows do not have stateful entity
+          acquisition. Template flows acquire entities through create_flow_instance.
+        with_create_entity: PROHIBITED. A handler must either mint a new entity with create_entity or select an existing
+          target-flow-owned entity with select_entity, never both.
+        source_authority: PROHIBITED. select_entity keys must not target platform envelope/control fields such as entity_id,
+          entity_type, flow_instance, current_state, workflow_name, or workflow_version. Payload refs must not be
+          payload.entity_id, payload.entity_type, or payload.flow_instance.
+        compatibility: PROHIBITED. select_entity does not restore generic existing-entity cross-flow continuation and does
+          not allow a source flow to directly name or mutate another flow's entity row.
+      interactions:
+        with_accumulate: ALLOWED. Accumulate operates on the selected target-flow-owned entity after acquisition.
+        with_guard: ALLOWED. Guards evaluate against the selected entity state before same-handler writes.
+        with_data_accumulation: ALLOWED. Writes are validated against the selected entity's receiving-flow contract and remain
+          subject to same-flow ownership enforcement.
+        with_advances_to: ALLOWED. State transitions advance only the selected receiving-flow entity.
+        with_query: ALLOWED. Query runs after acquisition and cannot replace select_entity ownership checks.
     guard:
       field: guard
       type: object — single check OR list of checks
@@ -1987,9 +2027,9 @@ engine:
     - id: handler_field_compliance
       severity: error
       scope: per-flow
-      trigger: A handler uses a field name not in the defined handler_fields set (create_entity, guard, accumulate, fan_out,
-        filter, reduce, count, compute, on_complete, rules, advances_to, sets_gate, data_accumulation, emit, action,
-        clear_gates, clear, query, description, evidence_target).
+      trigger: A handler uses a field name not in the defined handler_fields set (create_entity, select_entity, guard,
+        accumulate, fan_out, filter, reduce, count, compute, on_complete, rules, advances_to, sets_gate, data_accumulation,
+        emit, action, clear_gates, clear, query, description, evidence_target).
       when: boot-only
     - id: tool_resolution
       severity: warning
@@ -2031,7 +2071,8 @@ engine:
       severity: error
       scope: per-node
       trigger: A handler uses on_complete as a map (dict) instead of a list (ordered). Or uses both on_complete and rules
-        on the same handler. Or uses both create_entity and accumulate on the same handler.
+        on the same handler. Or uses both create_entity and accumulate on the same handler. Or uses both create_entity and
+        select_entity on the same handler.
       when: boot-only
     - id: single_node_per_event
       severity: error
@@ -2768,17 +2809,29 @@ flow_model:
         the owning flow. No flow_states disambiguation needed.'
     cross_flow_handoff:
       description: 'When a business object moves from one flow to the next, the transition is an explicit
-        handoff via events. The receiving flow creates its own entity.'
+        handoff via events. The receiving flow creates its own entity or, for service-owned request handlers,
+        selects one existing receiving-flow-owned entity by declared business key.'
       pattern:
       - '1. Source flow handler emits a cross-flow event (output pin). Example: scoring emits vertical.shortlisted.'
       - '2. Destination flow handler receives the event (input pin) with create_entity: true.'
       - '3. Destination creates its OWN entity row — new entity_id, own current_state, own fields.'
       - '4. Data from the source entity is passed via the event payload or create_flow_instance
         config_from bindings. Direct runtime entity reads do not cross flow ownership boundaries.'
-      enforcement: 'Input pin events that introduce a new business object into a static flow (mode: static)
-        with initial_state MUST use create_entity: true on the receiving handler. Boot error otherwise.
-        Exemptions: (1) stateless flows (initial_state: null) — no entity state machine. (2) Template flows
-        (mode: template) — entity creation happens via create_flow_instance, not create_entity.'
+      service_request_pattern:
+      - '1. Source flow emits a typed request event containing declared business keys, not target entity_id,
+        entity_type, or flow_instance.'
+      - '2. Destination static-flow input-pin handler declares select_entity.by bindings from payload.* to
+        receiving-flow entity fields.'
+      - '3. Runtime resolves exactly one receiving-flow-owned entity. Zero or multiple matches fail closed.
+        The selected entity becomes the handler context.'
+      - '4. Handler writes and transitions remain same-flow owned. select_entity does not authorize generic
+        cross-flow existing-entity continuation.'
+      enforcement: 'Input pin events into a stateful static flow (mode: static) MUST declare either
+        create_entity: true when the event introduces a new receiving-flow entity, or select_entity when the
+        event addresses exactly one existing receiving-flow-owned service entity by declared business key. Boot
+        error otherwise. Exemptions: (1) stateless flows (initial_state: null) — no entity state machine. (2)
+        Template flows (mode: template) — entity creation happens via create_flow_instance, not create_entity
+        or select_entity.'
     cross_flow_writes:
       description: 'Cross-flow entity writes are prohibited by the platform.'
       rule: 'save_entity_field checks that the target entity''s stored flow_instance resolves to the same
@@ -4526,6 +4579,9 @@ static_analyzer:
     source_state_derivation:
       create_entity_handlers:
         rule: create_entity handlers source from initial_state only.
+      select_entity_handlers:
+        rule: select_entity handlers source from all non-terminal declared states because they operate on an existing
+          receiving-flow-owned entity selected at runtime.
       non_create_entity_handlers:
         rule: non-create_entity handlers source from all non-terminal declared states.
       terminal_states:

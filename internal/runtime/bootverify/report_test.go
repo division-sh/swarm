@@ -3158,6 +3158,119 @@ func TestRun_AllowsCreateEntityForStatefulInputPinHandlers(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsSelectEntityForStatefulInputPinHandlers(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      select_entity:
+        by:
+          vertical_id: payload.vertical_id
+      data_accumulation:
+        writes:
+          - source_field: amount_usd
+            target_field: spent_usd
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
+		t.Fatalf("unexpected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "select_entity_validation", "") {
+		t.Fatalf("unexpected select_entity_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsSelectEntityWithSourceEnvelopeAuthority(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      select_entity:
+        by:
+          vertical_id: payload.entity_id
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "select_entity_validation", "must not use source envelope authority") {
+		t.Fatalf("expected select_entity source authority error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsSelectEntityWithEnvelopeTargetField(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      select_entity:
+        by:
+          entity_id: payload.vertical_id
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "select_entity_validation", "is not an entity contract field selection target") {
+		t.Fatalf("expected select_entity envelope target field error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsSelectEntityWithUndeclaredPayloadRef(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      select_entity:
+        by:
+          vertical_id: payload.missing_vertical_id
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "select_entity_validation", "references undeclared payload field") {
+		t.Fatalf("expected select_entity undeclared payload field error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsSelectEntityWithCreateEntity(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      create_entity: true
+      select_entity:
+        by:
+          vertical_id: payload.vertical_id
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "select_entity_validation", "must not declare both create_entity and select_entity") {
+		t.Fatalf("expected create_entity/select_entity error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsTemplateFlowInputPinHandlersWithoutCreateEntity(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	flowID := "child"
@@ -3361,8 +3474,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 48 {
-		t.Fatalf("bootCheckRegistry count = %d, want 48", got)
+	if got := len(bootCheckRegistry); got != 49 {
+		t.Fatalf("bootCheckRegistry count = %d, want 49", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
@@ -3452,6 +3565,56 @@ func repoRootForBootverifyTest(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	return filepath.Clean(filepath.Join(wd, "..", "..", ".."))
+}
+
+func writeSelectEntityInputPinFixture(t *testing.T, treasuryNodes string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: select-entity-fixture
+version: 1.0.0
+platform_version: ">=1.1.0"
+flows:
+  - id: treasury
+    flow: treasury
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: select-entity-fixture\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
+opco.spend_requested:
+  vertical_id: string
+  amount_usd: number
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "schema.yaml"), `
+name: treasury
+mode: static
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events: [opco.spend_requested]
+  outputs:
+    events: []
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "events.yaml"), `
+opco.spend_requested:
+  vertical_id: string
+  amount_usd: number
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "entities.yaml"), `
+opco_budget:
+  vertical_id:
+    type: text
+  spent_usd:
+    type: number
+    initial: 0
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "nodes.yaml"), treasuryNodes)
+	return root
 }
 
 func writeBootverifyFixtureFile(t *testing.T, path, contents string) {

@@ -106,6 +106,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				FlowID:           strings.TrimSpace(source.FlowID),
 				EventType:        rawEventType,
 				Action:           handler.Action,
+				SelectEntity:     handler.SelectEntity,
 				Guard:            handler.Guard,
 				AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 				SetsGate:         handler.SetsGate,

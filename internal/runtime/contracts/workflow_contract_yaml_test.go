@@ -440,6 +440,43 @@ emit: scoring.requested
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_PreservesSelectEntity(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+select_entity:
+  by:
+    vertical_id: payload.vertical_id
+emit: treasury.spend_approved
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if handler.SelectEntity == nil {
+		t.Fatal("expected select_entity to decode")
+	}
+	if got := len(handler.SelectEntity.Bindings); got != 1 {
+		t.Fatalf("len(select_entity bindings) = %d, want 1", got)
+	}
+	binding := handler.SelectEntity.Bindings[0]
+	if binding.Field != "vertical_id" || binding.Ref != "payload.vertical_id" {
+		t.Fatalf("binding = %+v, want vertical_id -> payload.vertical_id", binding)
+	}
+	if binding.RefPath.Root.String() != "payload" {
+		t.Fatalf("binding root = %q, want payload", binding.RefPath.Root.String())
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsUnknownSelectEntityField(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+select_entity:
+  where:
+    vertical_id: payload.vertical_id
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}
+
 func TestHandlerRuleEntryDecode_RejectsEmitFieldsWithoutEvent(t *testing.T) {
 	var rule HandlerRuleEntry
 	err := yaml.Unmarshal([]byte(`
