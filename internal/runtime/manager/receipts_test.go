@@ -173,6 +173,40 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	}
 }
 
+func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	am := NewAgentManager(bus, nil)
+
+	inbound := events.Event{
+		ID:    "evt-canceled",
+		Type:  events.EventType("work.requested"),
+		RunID: "run-canceled",
+	}
+	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
+	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID)
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID, errors.New("claude auth required"))
+
+	var authEvt events.Event
+	for _, evt := range bus.published {
+		if evt.Type == events.EventType("platform.auth_required") {
+			authEvt = evt
+			break
+		}
+	}
+	if authEvt.Type != events.EventType("platform.auth_required") {
+		t.Fatalf("published events = %#v, want platform.auth_required", bus.published)
+	}
+	if got := authEvt.ParentEventID; got != inbound.ID {
+		t.Fatalf("auth event parent_event_id = %q, want %q", got, inbound.ID)
+	}
+	if got := authEvt.RunID; got != inbound.RunID {
+		t.Fatalf("auth event run_id = %q, want %q", got, inbound.RunID)
+	}
+}
+
 func TestRecordDeadLetterEscalation_RequiresThreshold(t *testing.T) {
 	am := NewAgentManager(nil, nil)
 	now := time.Now().UTC()
