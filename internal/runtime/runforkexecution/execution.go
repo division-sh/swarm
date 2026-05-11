@@ -23,6 +23,7 @@ type SelectedContractExecutionRequest struct {
 	Store             *store.PostgresStore
 	SourceLoader      SelectedContractSourceLoader
 	ContractSelection store.RunForkContractSelection
+	AgentRuntime      SelectedContractAgentRuntimeOptions
 }
 
 type SelectedContractExecutionForkEvent struct {
@@ -36,6 +37,7 @@ type SelectedContractExecutionResult struct {
 	Materialization                    store.RunForkMaterialization                     `json:"materialization"`
 	Activation                         store.RunForkActivation                          `json:"activation"`
 	SelectedContractExecutionAdmission *store.RunForkSelectedContractExecutionAdmission `json:"selected_contract_execution_admission,omitempty"`
+	AgentRuntimeMaterialization        *SelectedContractAgentRuntimeMaterialization     `json:"selected_agent_runtime_materialization,omitempty"`
 	ExecutedEventCount                 int                                              `json:"executed_event_count"`
 	ForkEvents                         []SelectedContractExecutionForkEvent             `json:"fork_events,omitempty"`
 }
@@ -104,10 +106,21 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
+	agentRuntime, err := prepareSelectedContractAgentRuntimeMaterialization(ctx, loadedSource, *model.RecipientPlanning, req.AgentRuntime)
+	if err != nil {
+		return SelectedContractExecutionResult{
+			Owner:                       store.RunForkSelectedContractExecutionOwner,
+			AgentRuntimeMaterialization: &agentRuntime.Proof,
+		}, err
+	}
 	if _, err := RequireSelectedContractAgentDeliveryMaterialization(ctx, SelectedContractAgentDeliveryMaterializationRequest{
 		RecipientPlanning: *model.RecipientPlanning,
+		AgentRuntime:      agentRuntime.Proof,
 	}); err != nil {
-		return SelectedContractExecutionResult{Owner: store.RunForkSelectedContractExecutionOwner}, err
+		return SelectedContractExecutionResult{
+			Owner:                       store.RunForkSelectedContractExecutionOwner,
+			AgentRuntimeMaterialization: &agentRuntime.Proof,
+		}, err
 	}
 	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
 	materialization, err := req.Store.MaterializeRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionMaterializeRequest{
@@ -142,12 +155,14 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			Owner:                              store.RunForkSelectedContractExecutionOwner,
 			Materialization:                    materialization,
 			SelectedContractExecutionAdmission: &admission,
+			AgentRuntimeMaterialization:        &agentRuntime.Proof,
 		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
 	}
 	published, err := publishSelectedContractForkEvents(ctx, publishSelectedContractForkEventsRequest{
 		Store:             req.Store,
 		LoadedSource:      loadedSource,
 		RecipientPlanning: *model.RecipientPlanning,
+		AgentRuntime:      agentRuntime,
 		SourceRunID:       plan.SourceRunID,
 		ForkRunID:         materialization.ForkRunID,
 		ForkEventID:       plan.ForkPoint.EventID,
@@ -160,6 +175,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			Owner:                              store.RunForkSelectedContractExecutionOwner,
 			Materialization:                    materialization,
 			SelectedContractExecutionAdmission: &admission,
+			AgentRuntimeMaterialization:        &agentRuntime.Proof,
 			ExecutedEventCount:                 len(published),
 			ForkEvents:                         published,
 		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
@@ -174,6 +190,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			Materialization:                    materialization,
 			Activation:                         activation,
 			SelectedContractExecutionAdmission: &admission,
+			AgentRuntimeMaterialization:        &agentRuntime.Proof,
 			ExecutedEventCount:                 len(published),
 			ForkEvents:                         published,
 		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
@@ -183,6 +200,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		Materialization:                    materialization,
 		Activation:                         activation,
 		SelectedContractExecutionAdmission: &admission,
+		AgentRuntimeMaterialization:        &agentRuntime.Proof,
 		ExecutedEventCount:                 len(published),
 		ForkEvents:                         published,
 	}
@@ -222,6 +240,7 @@ type publishSelectedContractForkEventsRequest struct {
 	Store             *store.PostgresStore
 	LoadedSource      LoadedSelectedContractSource
 	RecipientPlanning store.RunForkSelectedContractRecipientPlanning
+	AgentRuntime      selectedContractAgentRuntimePlan
 	SourceRunID       string
 	ForkRunID         string
 	ForkEventID       string
@@ -258,6 +277,15 @@ func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedC
 	bus.SetInterceptors(pipeline)
 
 	runCtx := runtimecorrelation.WithRunID(ctx, req.ForkRunID)
+	agentRuntime, err := startSelectedContractAgentRuntime(runCtx, req, bus)
+	if err != nil {
+		return nil, err
+	}
+	if agentRuntime != nil {
+		defer func() {
+			_ = agentRuntime.Shutdown()
+		}()
+	}
 	out := make([]SelectedContractExecutionForkEvent, 0, len(sourceEvents))
 	for _, sourceEvent := range sourceEvents {
 		forkEventID := uuid.NewString()
@@ -283,6 +311,17 @@ func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedC
 			ForkEventID:   forkEventID,
 			EventName:     sourceEvent.EventName,
 		})
+	}
+	if agentRuntime != nil {
+		timeout := req.AgentRuntime.Options.QuiescenceTimeout
+		if timeout <= 0 {
+			timeout = selectedContractAgentRuntimeDefaultQuiescenceTimeout
+		}
+		waitCtx, cancel := context.WithTimeout(runCtx, timeout)
+		defer cancel()
+		if err := agentRuntime.WaitForQuiescence(waitCtx, bus); err != nil {
+			return out, fmt.Errorf("%s wait for selected-fork agent runtime quiescence: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, err)
+		}
 	}
 	return out, nil
 }

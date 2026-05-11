@@ -1544,6 +1544,109 @@ func TestSelectedContractActivationTreatsSameEventReplayScopeMarkerWriteSkewAsLi
 	assertNoCopiedReplayScopeMarkers(t, db, materialized.ForkRunID)
 }
 
+func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700003627, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+	sessionID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model_tier, llm_backend, conversation_mode, status, created_at)
+		VALUES ('agent-a', 'worker', 'standard', 'mock', 'session_per_entity', 'active', $1)
+		ON CONFLICT (agent_id) DO NOTHING
+	`, at); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-a', 'delivered', $3)
+	`, materialized.ForkRunID, forkEventID, at.Add(2*time.Second)); err != nil {
+		t.Fatalf("seed selected agent delivery: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'agent.follow_up', $3::uuid, 'flow-a/1', 'entity', '{}'::jsonb,
+			'agent-a', 'agent', $4
+		)
+	`, materialized.ForkRunID, uuid.NewString(), entityID, at.Add(4*time.Second)); err != nil {
+		t.Fatalf("seed selected agent follow-up: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', 'agent-a:entity', 'entity',
+			'[]'::jsonb, 1, 'session_per_entity', '{}'::jsonb, 'active', $4, $4
+		)
+	`, sessionID, materialized.ForkRunID, entityID, at.Add(2*time.Second)); err != nil {
+		t.Fatalf("seed fork session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_conversation_audits (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'agent-a', $3::uuid, 'flow-a/1', 'agent-a:entity', 'entity',
+			'[]'::jsonb, 1, 'task', '{}'::jsonb, 'active', $4, $4
+		)
+	`, uuid.NewString(), materialized.ForkRunID, entityID, at.Add(2*time.Second)); err != nil {
+		t.Fatalf("seed fork conversation audit: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_turns (
+			run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			trigger_event_id, trigger_event_type, available_tools, tool_calls, emitted_events,
+			mcp_servers, mcp_tools_listed, mcp_tools_visible, parse_ok, latency_ms, retry_count, created_at
+		)
+		VALUES (
+			$1::uuid, 'agent-a', $2::uuid, 'task', 'agent-a:entity', $3::uuid,
+			$4::uuid, 'item.received', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+			'{}'::jsonb, '[]'::jsonb, '[]'::jsonb, true, 1, 0, $5
+		)
+	`, materialized.ForkRunID, sessionID, entityID, forkEventID, at.Add(3*time.Second)); err != nil {
+		t.Fatalf("seed fork turn: %v", err)
+	}
+
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+		ForkRunID:             materialized.ForkRunID,
+		AllowedSourceEventIDs: []string{eventID},
+	})
+	if err != nil {
+		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
+	}
+	if !activation.Activated {
+		t.Fatalf("activation = %#v, want activated", activation)
+	}
+}
+
 func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

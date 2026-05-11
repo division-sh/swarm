@@ -215,6 +215,11 @@ active_issues:
     maps_to:
       - timestamp_fork_replay_resume_ownership
       - delivery_and_replay_ownership
+  - id: 690
+    title: Gate selected-contract fork-local agent handler materializer/executor
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+      - delivery_and_replay_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
     maps_to:
@@ -313,6 +318,7 @@ nodes:
       - contract-swap historical replay execution must consume runtime.run_fork.historical_replay_execution plus selected recipient planning before EventBus.Publish writes selected fork deliveries; source delivery subscribers remain lineage only and store.run_fork.delivery_event_replay is not sufficient for selected recipient truth
       - selected-contract diagnostic/non-routed platform event outcome facts such as platform.runtime_log and platform.inbound_recorded are lineage/no-action evidence under frontier admission; they are not routed, copied, replayed, or used as selected-fork suppressors, while non-diagnostic platform/node/system outcomes remain split or fail-closed
       - selected-contract authoritative agent delivery materialization is owned by runtime.run_fork.selected_contract_execution.authoritative_agent_delivery_materialization before any selected fork delivery write; it consumes runtime.run_fork.selected_contract_recipient_planning, treats planned selected agent recipients as authoritative, and fails closed before fork mutation when no selected-fork handler materializer exists, while source event_deliveries, source subscriptions, active EventBus channels, active descriptors, and CLI/API/dashboard state remain invalid delivery truth
+      - selected-contract fork-local agent runtime materializer/executor is owned by runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor; it consumes recipient planning, factors static contract-agent materialization/config semantics, registers only ephemeral fork-local EventBus handlers/descriptors, and allows fresh fork-local agent receipts/follow-ups only from actual selected-fork execution under the fork run_id
     representative_issues:
       - 112
       - 144
@@ -332,6 +338,7 @@ nodes:
       - 639
       - 668
       - 686
+      - 690
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
@@ -385,6 +392,7 @@ nodes:
       - selected-contract source-advanced conversation-history policy needs runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy to classify post-T source agent_sessions, agent_turns, and agent_conversation_audits as branch-divergence lineage/no-action evidence while keeping source row copy/reuse, source suppressors, active delivery/session coupling, fork-local pre-existing rows, full reconstruction, and non-selected surfaces split or fail-closed
       - selected-contract active source delivery conversation-coupling policy needs runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy to classify only the same-source in-progress delivery that emitted the fork-point event as lineage/no-action and branch-divergence evidence, while preserving fail-closed behavior for unrelated active deliveries, active_session_id/receipt/outcome coupling, source row copy/reuse, source outcome suppressors, fork-local pre-existing rows, post-T conversation facts outside #671, full reconstruction, and non-selected surfaces
       - fork materialization needs runtime.run_fork.materialized_entity_snapshot_metadata to classify reconstructed entity_mutations candidates with source-at-T flow_instance/entity_type metadata before generic or selected-contract materializers write fork-local entity_state rows
+      - selected-contract fork-local agent runtime materializer/executor needs runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor to consume selected recipient planning, construct ephemeral fork-local handlers through factored static contract-agent semantics, and execute planned selected agent recipients under the fork run_id without persisting ordinary current-runtime agents or using source deliveries/outcomes/live subscriptions as execution truth
     representative_issues:
       - 564
       - 565
@@ -421,6 +429,7 @@ nodes:
       - 678
       - 681
       - 686
+      - 690
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR

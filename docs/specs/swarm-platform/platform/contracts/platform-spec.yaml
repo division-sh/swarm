@@ -3611,20 +3611,40 @@ run_model:
       materialization is owned by runtime.run_fork.selected_contract_execution.authoritative_agent_delivery_materialization
       as a mutating-execution gate after runtime.run_fork.selected_contract_recipient_planning and before any fork
       materialization. It consumes only canonical selected-recipient planning to identify required agent recipients for
-      selected frontier events. If a selected-fork handler materializer is unavailable for any authoritative agent
-      recipient, the owner MUST fail closed before creating fork runs, selected-contract bindings, route recoveries,
-      fork events, fork deliveries, branch-divergence rows, or fork entity_state. Live source event_deliveries, source
-      subscriptions, current EventBus channels, active agent descriptors, CLI/dry-run JSON, and dashboard/API state are
-      not executable handler-availability truth. Node/system handler execution, route topology, timers, sessions,
-      turns, audits, non-agent replay, retry/idempotency/follow-up policy, restart recovery, and UI/API behavior remain
-      separate owners or split siblings.'
+      selected frontier events. It may pass only when
+      runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor proves every planned
+      selected agent recipient has fork-local handler construction and execution support. If that materializer/executor
+      is unavailable for any authoritative agent recipient, the owner MUST fail closed before creating fork runs,
+      selected-contract bindings, route recoveries, fork events, fork deliveries, branch-divergence rows, or fork
+      entity_state. Live source event_deliveries, source subscriptions, current EventBus channels, active agent
+      descriptors alone, CLI/dry-run JSON, and dashboard/API state are not executable handler-availability truth.
+      Node/system handler execution, route topology, timers, sessions, turns, audits, non-agent replay,
+      retry/idempotency/follow-up policy, restart recovery, and UI/API behavior remain separate owners or split
+      siblings.'
+    selected_contract_fork_local_agent_runtime_materializer_executor: 'Selected-contract fork-local agent runtime
+      materialization and execution is owned by
+      runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor. It consumes
+      runtime.run_fork.selected_contract_recipient_planning as the only selected-fork recipient truth, factors ordinary
+      static contract-agent materialization semantics for ID rendering, subscriptions, emit events, permissions, native
+      tools, flow path, role/model/session scope, prompt resolution, and runtime descriptor normalization, and constructs
+      ephemeral fork-local handlers through the normal AgentManager/buildAgent/applyContractPrompt/factory execution
+      path before selected fork publish. It may register only fork-local in-memory handler channels and runtime-active
+      descriptors for the selected-fork EventBus; it MUST NOT persist those handlers into ordinary current-runtime
+      agents, read source event_deliveries or source outcomes as executable truth, synthesize delivered/processed
+      receipts, or let live subscriptions/active descriptors alone become recipient truth. Fresh event_deliveries,
+      receipts, dead letters, sessions, turns, audits, idempotency state, and emitted follow-ups may appear only as
+      fork-local outputs of actual selected-fork handler execution under the fork run_id. Flow-instance-scoped agent
+      materialization, restart recovery of fork-local handlers, session/turn/audit reconstruction, timers, non-agent
+      replay, retry/idempotency/follow-up policy beyond normal execution, and UI/API behavior remain split unless this
+      owner has explicit fork-local proof for that subcase.'
     selected_contract_supported_execution: 'The supported selected-contract timestamp-fork execution surface is
       swarm fork --contracts. It is owned by runtime.run_fork.selected_contract_execution, not by CLI, route helpers,
       delivery-row helpers, or source-row replay. The owner consumes store.run_fork.selected_contract_binding,
       selected_contract_execution_admission, selected_contract_route_topology, selected_contract_dynamic_route_topology,
       runtime.run_fork.selected_contract_recipient_planning, and
-      runtime.run_fork.selected_contract_execution.authoritative_agent_delivery_materialization before publishing
-      selected frontier work. It creates fresh
+      runtime.run_fork.selected_contract_execution.authoritative_agent_delivery_materialization plus
+      runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor when planned selected
+      agent recipients exist before publishing selected frontier work. It creates fresh
       fork-local events and event_deliveries under the fork run_id, records selected source-to-fork lineage in
       run_fork_selected_contract_executions, runs selected handlers through the normal runtime pipeline, writes fork-local
       outcomes, and regenerates emitted follow-ups under the fork run_id. Source events are payload/lineage inputs only;
@@ -3821,12 +3841,25 @@ run_model:
         still non-mutating: it does not persist route rows, write deliveries, run handlers, or own receipts, dead
         letters, idempotency, emitted follow-ups, timers, sessions, turns, source-advanced policy, contract swap, or
         UI/API execution state.'
+      3g1_selected_contract_fork_local_agent_runtime_materializer_executor: 'For selected-contract mutating fork
+        execution, planned selected agent recipients may execute only through
+        runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor after recipient
+        planning and before selected fork publish. This owner consumes recipient planning as authoritative recipient
+        truth, factors ordinary static contract-agent config/materialization semantics, constructs ephemeral fork-local
+        handlers through the same runtime build/execution primitives as normal agents, and registers only fork-local
+        EventBus channels/descriptors needed for authoritative delivery under the fork run_id. It must not persist
+        selected handlers into ordinary current-runtime agents, use source deliveries/outcomes/live subscriptions as
+        execution truth, synthesize receipts, or claim restart recovery. Flow-instance-scoped materialization without
+        explicit fork-local proof, session/turn/audit reconstruction, timers, non-agent replay, retry/idempotency,
+        follow-up policy beyond normal handler output, and UI/API consumers remain split siblings.'
       3h_selected_contract_supported_execution: 'For the supported swarm fork --contracts surface, selected-contract
         execution is a runtime-owned mutating path after selected binding, execution admission, route topology, dynamic
-        topology proof or fail-closed classification, and recipient planning. It mints fresh fork-local event IDs, writes
-        fork event and delivery rows under the fork run_id, gates EventBus.Publish through recipient-planning evidence,
-        runs selected handlers through the normal runtime pipeline, records selected execution lineage, writes fork-local
-        outcomes, and regenerates follow-up events under the fork run_id. This is not full historical resume: route
+        topology proof or fail-closed classification, recipient planning, authoritative agent delivery materialization,
+        and fork-local selected agent runtime materializer/executor proof when selected agent recipients exist. It mints
+        fresh fork-local event IDs, writes fork event and delivery rows under the fork run_id, gates EventBus.Publish
+        through recipient-planning evidence, runs selected handlers through the normal runtime pipeline, records selected
+        execution lineage, writes fork-local outcomes, and regenerates follow-up events under the fork run_id. This is
+        not full historical resume: route
         persistence/recovery, timer reconstruction, session/turn/audit reconstruction, non-agent replay, contract-swap
         boot/resume beyond selected frontier execution, runtime restart recovery, and UI/API ownership remain separate
         parents or siblings. At/before-T source session/turn/audit facts may be admitted only as lineage/no-action

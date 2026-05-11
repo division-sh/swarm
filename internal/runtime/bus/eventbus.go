@@ -31,6 +31,7 @@ type EventBus struct {
 	subscriptionKinds           map[string]inMemorySubscriberKind
 	pendingInternalByID         map[string][]string
 	routeTable                  *RouteTable
+	runtimeAgentDescriptors     map[string]ActiveAgentDescriptor
 	deliveryPlanner             deliveryPlanner
 	interceptors                []EventInterceptor
 	interceptorProvider         func() []EventInterceptor
@@ -122,6 +123,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		agentChans:                  make(map[string]chan events.Event),
 		subscriptions:               make(map[string][]events.EventType),
 		subscriptionKinds:           make(map[string]inMemorySubscriberKind),
+		runtimeAgentDescriptors:     make(map[string]ActiveAgentDescriptor),
 		pendingInternalByID:         make(map[string][]string),
 		routeTable:                  routeTable,
 		store:                       store,

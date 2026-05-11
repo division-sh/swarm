@@ -517,6 +517,14 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 			return 1
 		}
 		source := semanticview.Wrap(bundle)
+		credentialStore, err := buildCredentialStore()
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: configure credentials: %v\n", err)
+			}
+			return 1
+		}
+		workspaces := configuredWorkspaceLifecycle(stores.SQLDB, repo, contractsRoot, source)
 		result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 			SourceRunID: strings.TrimSpace(*runID),
 			At:          strings.TrimSpace(*at),
@@ -526,6 +534,17 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 				PlatformSpecPath: resolvePath(repo, *platformSpecPath),
 			},
 			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
+			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
+				Config:            cfg,
+				SQLDB:             stores.SQLDB,
+				SessionRegistry:   stores.SessionRegistry,
+				ConversationStore: stores.ConversationStore,
+				TurnStore:         stores.TurnStore,
+				ScheduleStore:     stores.ScheduleStore,
+				MailboxStore:      stores.Postgres,
+				Workspace:         workspaces,
+				Credentials:       credentialStore,
+			},
 		})
 		if err != nil {
 			if out != nil {

@@ -234,27 +234,40 @@ func (am *AgentManager) EnsureStaticFlowRequiredAgents(ctx context.Context, sour
 	if am == nil || source == nil {
 		return nil
 	}
-	for _, scope := range source.ProjectScopes() {
-		if err := am.ensureStaticRequiredAgentsForScope(ctx, source, "", "", scope.Agents, source.RequiredAgents()); err != nil {
-			return err
-		}
+	records, err := StaticFlowRequiredAgentMaterializationRecords(source)
+	if err != nil {
+		return err
 	}
-	for _, scope := range source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-			continue
-		}
-		if err := am.ensureStaticRequiredAgentsForScope(ctx, source, flowID, strings.Trim(scope.Path, "/"), scope.Agents, source.FlowRequiredAgents(flowID)); err != nil {
-			return err
-		}
-	}
-	return nil
+	return am.spawnStaticAgentRecords(ctx, records)
 }
 
 func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticview.Source) error {
 	if am == nil || source == nil {
 		return nil
 	}
+	records, err := StaticAgentMaterializationRecords(source)
+	if err != nil {
+		return err
+	}
+	return am.spawnStaticAgentRecords(ctx, records)
+}
+
+func (am *AgentManager) spawnStaticAgentRecords(ctx context.Context, records []PersistedAgent) error {
+	for _, rec := range records {
+		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !strings.Contains(err.Error(), "already exists") {
+			return err
+		}
+	}
+	return nil
+}
+
+// StaticAgentMaterializationRecords derives the ordinary runtime static-agent
+// materialization records without mutating the manager or persistence store.
+func StaticAgentMaterializationRecords(source semanticview.Source) ([]PersistedAgent, error) {
+	if source == nil {
+		return nil, nil
+	}
+	records := []PersistedAgent{}
 	for _, scope := range source.ProjectScopes() {
 		projectAgents := make(map[string]runtimecontracts.AgentRegistryEntry, len(scope.Agents))
 		packageFlowAgents := map[string]staticAgentFlowGroup{}
@@ -280,9 +293,11 @@ func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticv
 			}
 			projectAgents[strings.TrimSpace(logicalID)] = entry
 		}
-		if err := am.ensureStaticAgentsForScope(ctx, source, "", "", projectAgents); err != nil {
-			return err
+		scopeRecords, err := staticAgentsForScope(source, "", "", projectAgents)
+		if err != nil {
+			return nil, err
 		}
+		records = append(records, scopeRecords...)
 		groupKeys := make([]string, 0, len(packageFlowAgents))
 		for key := range packageFlowAgents {
 			groupKeys = append(groupKeys, key)
@@ -290,9 +305,11 @@ func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticv
 		sort.Strings(groupKeys)
 		for _, key := range groupKeys {
 			group := packageFlowAgents[key]
-			if err := am.ensureStaticAgentsForScope(ctx, source, group.FlowID, group.FlowPath, group.Agents); err != nil {
-				return err
+			scopeRecords, err := staticAgentsForScope(source, group.FlowID, group.FlowPath, group.Agents)
+			if err != nil {
+				return nil, err
 			}
+			records = append(records, scopeRecords...)
 		}
 	}
 	for _, scope := range source.FlowScopes() {
@@ -303,11 +320,41 @@ func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticv
 		proof := semanticview.ResolveAgentSessionScopeProof(source, semanticview.AgentSessionScopeLocator{
 			FlowID: flowID,
 		})
-		if err := am.ensureStaticAgentsForScope(ctx, source, proof.OwningFlowID, proof.FlowPath, scope.Agents); err != nil {
-			return err
+		scopeRecords, err := staticAgentsForScope(source, proof.OwningFlowID, proof.FlowPath, scope.Agents)
+		if err != nil {
+			return nil, err
 		}
+		records = append(records, scopeRecords...)
 	}
-	return nil
+	return records, nil
+}
+
+// StaticFlowRequiredAgentMaterializationRecords derives the ordinary runtime
+// required-flow-agent materialization records without mutating runtime state.
+func StaticFlowRequiredAgentMaterializationRecords(source semanticview.Source) ([]PersistedAgent, error) {
+	if source == nil {
+		return nil, nil
+	}
+	records := []PersistedAgent{}
+	for _, scope := range source.ProjectScopes() {
+		scopeRecords, err := staticRequiredAgentsForScope(source, "", "", scope.Agents, source.RequiredAgents())
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, scopeRecords...)
+	}
+	for _, scope := range source.FlowScopes() {
+		flowID := strings.TrimSpace(scope.ID)
+		if flowID == "" || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+			continue
+		}
+		scopeRecords, err := staticRequiredAgentsForScope(source, flowID, strings.Trim(scope.Path, "/"), scope.Agents, source.FlowRequiredAgents(flowID))
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, scopeRecords...)
+	}
+	return records, nil
 }
 
 type staticAgentFlowGroup struct {
@@ -497,32 +544,44 @@ func (am *AgentManager) ensureStaticRequiredAgentsForScope(
 	agents map[string]runtimecontracts.AgentRegistryEntry,
 	required []runtimecontracts.FlowRequiredAgent,
 ) error {
+	records, err := staticRequiredAgentsForScope(source, flowID, flowPath, agents, required)
+	if err != nil {
+		return err
+	}
+	return am.spawnStaticAgentRecords(ctx, records)
+}
+
+func staticRequiredAgentsForScope(
+	source semanticview.Source,
+	flowID string,
+	flowPath string,
+	agents map[string]runtimecontracts.AgentRegistryEntry,
+	required []runtimecontracts.FlowRequiredAgent,
+) ([]PersistedAgent, error) {
 	flowID = strings.TrimSpace(flowID)
 	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
 	if len(required) == 0 || len(agents) == 0 {
-		return nil
+		return nil, nil
 	}
 	localEvents := staticFlowLocalEventSet(agents)
+	records := make([]PersistedAgent, 0, len(required))
 	for _, requiredAgent := range required {
 		logicalID, entry, ok := resolveRequiredAgentEntry(agents, requiredAgent)
 		if !ok {
-			return fmt.Errorf("required agent %q missing from scope %q", strings.TrimSpace(requiredAgent.Role), flowID)
+			return nil, fmt.Errorf("required agent %q missing from scope %q", strings.TrimSpace(requiredAgent.Role), flowID)
 		}
 		cfg, err := buildStaticFlowAgentConfig(source, flowID, flowPath, logicalID, entry, localEvents)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		rec := PersistedAgent{
+		records = append(records, PersistedAgent{
 			Config:          cfg,
 			Status:          "active",
 			HiredBy:         "static-flow-required-agent",
 			TemplateVersion: "",
-		}
-		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !strings.Contains(err.Error(), "already exists") {
-			return err
-		}
+		})
 	}
-	return nil
+	return records, nil
 }
 
 func (am *AgentManager) ensureStaticAgentsForScope(
@@ -532,10 +591,23 @@ func (am *AgentManager) ensureStaticAgentsForScope(
 	flowPath string,
 	agents map[string]runtimecontracts.AgentRegistryEntry,
 ) error {
+	records, err := staticAgentsForScope(source, flowID, flowPath, agents)
+	if err != nil {
+		return err
+	}
+	return am.spawnStaticAgentRecords(ctx, records)
+}
+
+func staticAgentsForScope(
+	source semanticview.Source,
+	flowID string,
+	flowPath string,
+	agents map[string]runtimecontracts.AgentRegistryEntry,
+) ([]PersistedAgent, error) {
 	flowID = strings.TrimSpace(flowID)
 	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
 	if len(agents) == 0 {
-		return nil
+		return nil, nil
 	}
 	localEvents := staticFlowLocalEventSet(agents)
 	logicalIDs := make([]string, 0, len(agents))
@@ -546,23 +618,21 @@ func (am *AgentManager) ensureStaticAgentsForScope(
 		}
 	}
 	sort.Strings(logicalIDs)
+	records := make([]PersistedAgent, 0, len(logicalIDs))
 	for _, logicalID := range logicalIDs {
 		entry := agents[logicalID]
 		cfg, err := buildStaticFlowAgentConfig(source, flowID, flowPath, logicalID, entry, localEvents)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		rec := PersistedAgent{
+		records = append(records, PersistedAgent{
 			Config:          cfg,
 			Status:          "active",
 			HiredBy:         "static-flow-agent",
 			TemplateVersion: "",
-		}
-		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !strings.Contains(err.Error(), "already exists") {
-			return err
-		}
+		})
 	}
-	return nil
+	return records, nil
 }
 
 func buildStaticFlowAgentConfig(
