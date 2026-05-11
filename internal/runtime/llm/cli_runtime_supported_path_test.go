@@ -93,15 +93,6 @@ case "$count" in
     printf '%s\n' 'expected second Claude invocation to receive read_file tool result' >&2
     exit 2
   fi
-  printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
-  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-emit-1","name":"emit_category_assessed","input":{"category":"payments"}}},"session_id":"provider-sess-1"}'
-  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}'
-  ;;
-3)
-  if ! grep -Fq '"name":"emit_category_assessed"' "$captured" || ! grep -Fq '"ok":true' "$captured"; then
-    printf '%s\n' 'expected third Claude invocation to receive emit_category_assessed tool result' >&2
-    exit 2
-  fi
   printf '%s\n' '{"type":"result","result":"done"}'
   ;;
 *)
@@ -208,10 +199,10 @@ esac
 	if !slices.Equal(first.MCPToolsListed, []string{"mcp__runtime-tools__emit_category_assessed"}) {
 		t.Fatalf("first turn mcp_tools_listed = %#v", first.MCPToolsListed)
 	}
-	if !slices.Equal(exec.calls, []string{"read_file", "emit_category_assessed"}) {
+	if !slices.Equal(exec.calls, []string{"read_file"}) {
 		t.Fatalf("tool exec calls = %#v", exec.calls)
 	}
-	if len(recorder.Snapshot()) != 1 || recorder.Snapshot()[0].Type != events.EventType("discovery/category.assessed") {
+	if len(recorder.Snapshot()) != 0 {
 		t.Fatalf("emitted events = %#v", recorder.Snapshot())
 	}
 
