@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimeengine "swarm/internal/runtime/engine"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimeruncontrol "swarm/internal/runtime/runcontrol"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
@@ -190,6 +192,109 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	}
 	if got := countPipelineReceiptsForEvent(t, ctx, db, queuedEventID); got != 1 {
 		t.Fatalf("queued event receipts after continue = %d, want 1", got)
+	}
+}
+
+func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	ctx := context.Background()
+	pg := &store.PostgresStore{DB: db}
+	eventType := events.EventType("custom.run_control.postcommit")
+	deferredType := events.EventType("custom.run_control.postcommit.deferred")
+	recorder := &runControlRecordingInterceptor{
+		triggerType:  eventType,
+		deferredType: deferredType,
+	}
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{recorder},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	controller := runtimeruncontrol.NewController(pg, eb, runtimeruncontrol.Options{})
+	eb.SetRunDispatchGate(controller)
+
+	agentID := "agent-run-control-postcommit"
+	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
+	ch := eb.Subscribe(agentID, eventType, deferredType)
+	defer eb.Unsubscribe(agentID)
+
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	intent := runtimeengine.EmitIntent{
+		Event: events.Event{
+			ID:          uuid.NewString(),
+			RunID:       runID,
+			Type:        eventType,
+			SourceAgent: "runtime",
+			Payload:     []byte(`{"entity_id":"23000000-0000-0000-0000-000000000001"}`),
+			CreatedAt:   time.Now().UTC(),
+		}.WithEntityID("23000000-0000-0000-0000-000000000001"),
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("WriteOutbox: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit outbox tx: %v", err)
+	}
+
+	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"}); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("DispatchPostCommit while paused: %v", err)
+	}
+	select {
+	case got := <-ch:
+		t.Fatalf("paused post-commit dispatch delivered event %s before continue", got.ID)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if got := recorder.count(); got != 0 {
+		t.Fatalf("post-commit interceptor executions while paused = %d, want 0", got)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID); got != 0 {
+		t.Fatalf("post-commit event receipts while paused = %d, want 0", got)
+	}
+
+	result, err := controller.Continue(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"})
+	if err != nil {
+		t.Fatalf("Continue: %v", err)
+	}
+	if result.ReleasedDeliveries != 1 {
+		t.Fatalf("released deliveries = %d, want 1", result.ReleasedDeliveries)
+	}
+	if got := recorder.count(); got != 1 {
+		t.Fatalf("post-commit interceptor executions after continue = %d, want 1", got)
+	}
+	received := map[events.EventType]struct{}{}
+	deadline := time.After(time.Second)
+	for len(received) < 2 {
+		select {
+		case got := <-ch:
+			received[got.Type] = struct{}{}
+		case <-deadline:
+			t.Fatalf("timed out waiting for released post-commit original and deferred events, got %#v", received)
+		}
+	}
+	if _, ok := received[eventType]; !ok {
+		t.Fatalf("released post-commit original event missing: %#v", received)
+	}
+	if _, ok := received[deferredType]; !ok {
+		t.Fatalf("released post-commit deferred event missing: %#v", received)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID); got != 1 {
+		t.Fatalf("post-commit event receipts after continue = %d, want 1", got)
 	}
 }
 

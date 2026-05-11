@@ -103,47 +103,57 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		return nil
 	}
 	for _, intent := range intents {
-		if err := d.dispatchIntent(ctx, intent); err != nil {
+		queued, err := d.dispatchIntent(ctx, intent)
+		if err != nil {
 			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
 				d.bus.markPipelineReceipt(ctx, intent.Event.ID, "error", err.Error())
 			}
 			return err
+		}
+		if queued {
+			continue
 		}
 		d.bus.markPipelineReceipt(ctx, intent.Event.ID, "processed", "")
 	}
 	return nil
 }
 
-func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) error {
+func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) (bool, error) {
+	if reason, err := d.bus.dispatchQueueReason(ctx, intent.Event); err != nil {
+		return false, err
+	} else if reason != "" {
+		d.bus.logDispatchQueued(ctx, reason, intent.Event, len(intent.Recipients), len(intent.Recipients) > 0, false)
+		return true, nil
+	}
 	if intent.Recipients == nil {
 		passthrough, deferred, err := d.bus.runInterceptors(ctx, intent.Event)
 		if err != nil {
-			return err
+			return false, err
 		}
 		for _, next := range deferred {
 			if err := d.bus.publishDeferred(ctx, next); err != nil {
-				return err
+				return false, err
 			}
 		}
 		if !passthrough {
-			return nil
+			return false, nil
 		}
 	}
 	recipients, err := d.bus.authoritativeRecipientsForEvent(ctx, intent.Event.ID)
 	if err != nil {
 		if len(intent.Recipients) > 0 && errors.Is(err, runtimereplayclaim.ErrAuthoritativeRecipientManifestUnavailable) {
-			return d.dispatchExplicitDirectIntent(ctx, intent)
+			return false, d.dispatchExplicitDirectIntent(ctx, intent)
 		}
-		return err
+		return false, err
 	}
 	internalRecipients := d.bus.pendingInternalRecipients(intent.Event.ID)
 	liveRecipients := uniqueStrings(append(append([]string(nil), recipients...), internalRecipients...))
 	if len(liveRecipients) == 0 {
 		d.bus.clearPendingInternalRecipients(intent.Event.ID)
-		return nil
+		return false, nil
 	}
 	if err := d.bus.deliverToAgents(ctx, intent.Event, liveRecipients); err != nil {
-		return err
+		return false, err
 	}
 	d.bus.clearPendingInternalRecipients(intent.Event.ID)
 	d.bus.logRuntime(ctx, "debug", "Persisted event intent was delivered", "eventbus", "delivered", intent.Event.ID, string(intent.Event.Type), "", intent.Event.EntityID(), "", nil, map[string]any{
@@ -156,7 +166,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		"persisted_recipients":       append([]string(nil), recipients...),
 		"internal_recipients":        append([]string(nil), internalRecipients...),
 	}, "", 0)
-	return nil
+	return false, nil
 }
 
 func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, intent runtimeengine.EmitIntent) error {
