@@ -12,6 +12,9 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimeingress "swarm/internal/runtime/ingress"
+	runtimemanager "swarm/internal/runtime/manager"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
@@ -281,11 +284,185 @@ func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
 	}
 }
 
+func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
+	t.Cleanup(runtimebus.ResumeRuntimeIngress)
+	bus.SetRuntimeIngressDispatchGate(controller)
+
+	ctx := context.Background()
+	agentID := "mailbox-approval-agent"
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, agentID)
+	ch := bus.Subscribe(agentID, events.EventType("mailbox.item_decided"))
+	defer bus.Unsubscribe(agentID)
+
+	interceptorCalls := 0
+	bus.SetInterceptors(interceptorFunc(func(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+		if evt.Type == events.EventType("mailbox.item_decided") {
+			interceptorCalls++
+		}
+		return true, nil, nil
+	}))
+
+	now := time.Now().UTC()
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:      sourceEventID,
+		Type:    "review.requested",
+		RunID:   runID,
+		Payload: json.RawMessage(`{"request":true}`),
+	}.WithEntityID(entityID).WithFlowInstance("empire/review")); err != nil {
+		t.Fatalf("append source event: %v", err)
+	}
+	mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		EventID:   sourceEventID,
+		EntityID:  entityID,
+		FromAgent: "empire-agent",
+		Type:      "review_request",
+		Priority:  "high",
+		Context:   []byte(`{"title":"review this"}`),
+		Summary:   "needs approval",
+	})
+	if err != nil {
+		t.Fatalf("insert mailbox: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET flow_instance = 'empire/review' WHERE item_id = $1::uuid`, mailboxID); err != nil {
+		t.Fatalf("set flow instance: %v", err)
+	}
+	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
+		Reason:       "test_pause",
+		ControlledBy: "test",
+		Now:          now,
+	}); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:      func() time.Time { return now },
+			Ready:    func() bool { return true },
+			Database: fakePinger{},
+			Mailbox:  pg,
+			Events:   bus,
+			MailboxApprovalRoutes: map[string]string{
+				"review_request": "mailbox.item_decided",
+			},
+			Bundle: runtimecontracts.BundleIdentity{
+				WorkflowName:    "empire",
+				WorkflowVersion: "1.0.0",
+				Fingerprint:     "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			},
+		}),
+	})
+
+	approveBody := `{"jsonrpc":"2.0","id":"approve","method":"mailbox.approve","params":{"mailbox_id":"` + mailboxID + `","decision_payload":{"approved":true},"idempotency_key":"idem-paused-approve"}}`
+	approved := rpcCall(t, handler, approveBody)
+	if approved.Error != nil {
+		t.Fatalf("mailbox.approve while paused error = %#v", approved.Error)
+	}
+	downstreamID, _ := asMap(t, approved.Result)["downstream_event_id"].(string)
+	if downstreamID == "" {
+		t.Fatalf("mailbox.approve downstream event id = %#v", approved.Result)
+	}
+	if interceptorCalls != 0 {
+		t.Fatalf("interceptor calls while paused = %d, want 0", interceptorCalls)
+	}
+	select {
+	case got := <-ch:
+		t.Fatalf("paused mailbox approval delivered event %s before resume", got.ID)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if got := countEventDeliveriesForEvent(t, ctx, db, downstreamID); got != 1 {
+		t.Fatalf("mailbox approval event deliveries while paused = %d, want 1", got)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, downstreamID); got != 0 {
+		t.Fatalf("mailbox approval pipeline receipts while paused = %d, want 0", got)
+	}
+	if got := countAPIIdempotencyRows(t, db); got != 1 {
+		t.Fatalf("api_idempotency rows after paused approve = %d, want 1", got)
+	}
+
+	replay := rpcCall(t, handler, approveBody)
+	if replay.Error != nil {
+		t.Fatalf("mailbox.approve paused replay error = %#v", replay.Error)
+	}
+	if got := asMap(t, replay.Result)["downstream_event_id"]; got != downstreamID {
+		t.Fatalf("paused replay downstream_event_id = %v, want %s", got, downstreamID)
+	}
+	if count := countEventsByName(t, db, "mailbox.item_decided"); count != 1 {
+		t.Fatalf("mailbox.item_decided event count after replay = %d, want 1", count)
+	}
+
+	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
+		Reason:       "test_resume",
+		ControlledBy: "test",
+		Now:          now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if resumed.ReleasedCount != 1 {
+		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
+	}
+	select {
+	case got := <-ch:
+		if got.ID != downstreamID {
+			t.Fatalf("released mailbox approval event = %s, want %s", got.ID, downstreamID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for queued mailbox approval release")
+	}
+	if interceptorCalls != 0 {
+		t.Fatalf("interceptor calls after resume release = %d, want 0", interceptorCalls)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, downstreamID); got != 1 {
+		t.Fatalf("mailbox approval pipeline receipts after resume = %d, want 1", got)
+	}
+}
+
 func countEventsByName(t *testing.T, db *sql.DB, eventName string) int {
 	t.Helper()
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = $1`, eventName).Scan(&count); err != nil {
 		t.Fatalf("count events %s: %v", eventName, err)
+	}
+	return count
+}
+
+func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+	`, eventID).Scan(&count); err != nil {
+		t.Fatalf("count event deliveries for %s: %v", eventID, err)
+	}
+	return count
+}
+
+func countPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&count); err != nil {
+		t.Fatalf("count pipeline receipts for %s: %v", eventID, err)
 	}
 	return count
 }
@@ -307,4 +484,28 @@ func (failingTxPublisher) Publish(context.Context, events.Event) error {
 
 func (failingTxPublisher) PublishTx(context.Context, *sql.Tx, events.Event) error {
 	return errors.New("publish failed")
+}
+
+type interceptorFunc func(context.Context, events.Event) (bool, []events.Event, error)
+
+func (f interceptorFunc) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+	return f(ctx, evt)
+}
+
+func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) {
+	t.Helper()
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:     agentID,
+			Role:   "observer",
+			Mode:   "global",
+			Type:   "stub",
+			Config: []byte(`{}`),
+		},
+		Status:    "active",
+		HiredBy:   "test",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
+	}
 }

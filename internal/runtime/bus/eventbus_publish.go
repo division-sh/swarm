@@ -217,6 +217,16 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 	} else if replayScopePersistenceRequired(eb.store) {
 		return fmt.Errorf("persist committed replay scope: %w", runtimereplayclaim.ErrMissingCommittedReplayScope)
 	}
+	if paused, err := eb.runtimeIngressDispatchPaused(txctx, evt); err != nil {
+		return err
+	} else if paused {
+		eb.logRuntime(txctx, "debug", "Runtime ingress is paused; transactional event persisted without dispatch", "eventbus", "runtime_ingress_queued", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+			"transactional":    true,
+			"recipients_count": len(inboundPlan.Recipients),
+			"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+		}, "", 0)
+		return nil
+	}
 	passthrough, deferred, err := eb.runInterceptors(txctx, evt)
 	if err != nil {
 		return err
