@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -101,4 +102,123 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	if got := countPipelineReceiptsForEvent(t, ctx, db, pausedEventID); got != 1 {
 		t.Fatalf("paused run pipeline receipts after continue = %d, want 1", got)
 	}
+}
+
+func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	ctx := context.Background()
+	pg := &store.PostgresStore{DB: db}
+	eventType := events.EventType("custom.run_control.intercepted")
+	deferredType := events.EventType("custom.run_control.deferred")
+	recorder := &runControlRecordingInterceptor{
+		triggerType:  eventType,
+		deferredType: deferredType,
+	}
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{recorder},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	controller := runtimeruncontrol.NewController(pg, eb, runtimeruncontrol.Options{})
+	eb.SetRunDispatchGate(controller)
+
+	agentID := "agent-run-control-interceptor"
+	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
+	ch := eb.Subscribe(agentID, eventType, deferredType)
+	defer eb.Unsubscribe(agentID)
+
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"}); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	queuedEventID := uuid.NewString()
+	if err := eb.Publish(ctx, events.Event{
+		ID:          queuedEventID,
+		RunID:       runID,
+		Type:        eventType,
+		SourceAgent: "api.v1",
+		Payload:     []byte(`{"entity_id":"22000000-0000-0000-0000-000000000001"}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEntityID("22000000-0000-0000-0000-000000000001")); err != nil {
+		t.Fatalf("Publish paused run event: %v", err)
+	}
+	select {
+	case got := <-ch:
+		t.Fatalf("paused run delivered event %s before continue", got.ID)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if got := recorder.count(); got != 0 {
+		t.Fatalf("interceptor executions before continue = %d, want 0", got)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, queuedEventID); got != 0 {
+		t.Fatalf("queued event receipts before continue = %d, want 0", got)
+	}
+
+	result, err := controller.Continue(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"})
+	if err != nil {
+		t.Fatalf("Continue: %v", err)
+	}
+	if result.ReleasedDeliveries != 1 {
+		t.Fatalf("released deliveries = %d, want 1", result.ReleasedDeliveries)
+	}
+	if got := recorder.count(); got != 1 {
+		t.Fatalf("interceptor executions after continue = %d, want 1", got)
+	}
+
+	received := map[events.EventType]struct{}{}
+	deadline := time.After(time.Second)
+	for len(received) < 2 {
+		select {
+		case got := <-ch:
+			received[got.Type] = struct{}{}
+		case <-deadline:
+			t.Fatalf("timed out waiting for released original and deferred events, got %#v", received)
+		}
+	}
+	if _, ok := received[eventType]; !ok {
+		t.Fatalf("released original event missing: %#v", received)
+	}
+	if _, ok := received[deferredType]; !ok {
+		t.Fatalf("released deferred event missing: %#v", received)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, queuedEventID); got != 1 {
+		t.Fatalf("queued event receipts after continue = %d, want 1", got)
+	}
+}
+
+type runControlRecordingInterceptor struct {
+	mu           sync.Mutex
+	triggerType  events.EventType
+	deferredType events.EventType
+	seen         []string
+}
+
+func (i *runControlRecordingInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+	if evt.Type != i.triggerType {
+		return true, nil, nil
+	}
+	i.mu.Lock()
+	i.seen = append(i.seen, evt.ID)
+	i.mu.Unlock()
+	return true, []events.Event{(events.Event{
+		ID:          uuid.NewString(),
+		RunID:       evt.RunID,
+		Type:        i.deferredType,
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"entity_id":"22000000-0000-0000-0000-000000000002"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID("22000000-0000-0000-0000-000000000002")}, nil
+}
+
+func (i *runControlRecordingInterceptor) count() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return len(i.seen)
 }

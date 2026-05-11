@@ -209,7 +209,7 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 			_ = lease.Release(ctx)
 			return redelivered, err
 		}
-		if err := eb.PublishPersistedRecipients(ctx, evt, recipients); err != nil {
+		if err := eb.publishPersistedRecipients(ctx, evt, recipients, true); err != nil {
 			_ = lease.Release(ctx)
 			if errors.Is(err, ErrRunDispatchBlocked) {
 				return redelivered, nil
