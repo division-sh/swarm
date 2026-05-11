@@ -243,7 +243,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 
 	breakerDone := make(chan struct{})
 	go func() {
-		am.maybeTripAuthCircuitBreaker(agent.id, "evt-in-1", errors.New("claude auth required"))
+		am.maybeTripAuthCircuitBreaker(context.Background(), agent.id, "evt-in-1", errors.New("claude auth required"))
 		close(breakerDone)
 	}()
 

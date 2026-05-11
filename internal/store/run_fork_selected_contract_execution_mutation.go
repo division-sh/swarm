@@ -1149,6 +1149,10 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			FROM events child
 			INNER JOIN selected_tree parent ON child.source_event_id = parent.event_id
 			WHERE child.run_id = $1::uuid
+			  AND (
+				child.event_name NOT LIKE 'platform.%'
+				OR child.event_name = ANY($3::text[])
+			  )
 		)
 		SELECT COUNT(*)
 		FROM events e
@@ -1156,7 +1160,7 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 		  AND NOT EXISTS (
 			SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id
 		  )
-	`, forkRunID, pq.Array(allowedEvents)).Scan(&strayEvents); err != nil {
+	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames())).Scan(&strayEvents); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {
@@ -1178,6 +1182,24 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 		return runForkReplayResumeError("fork_deliveries_not_selected_contract_lineage", RunForkReplayResumeFactForkReplayState, "fork activation blocked: fork_deliveries_not_selected_contract_lineage")
 	}
 	return nil
+}
+
+func runForkSelectedContractForkLocalRuntimePlatformEventNames() []string {
+	// runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy:
+	// fresh runtime platform/control outputs are fork-local lineage only when
+	// they remain causally parented to selected-fork execution.
+	return []string{
+		"platform.agent_failed",
+		"platform.agent_panic",
+		"platform.agent_started",
+		"platform.auth_required",
+		"platform.budget_threshold_crossed",
+		"platform.dead_letter_escalation",
+		"platform.event_quarantined",
+		"platform.paused",
+		"platform.resumed",
+		"platform.runtime_log",
+	}
 }
 
 func uniqueNonEmptyStrings(in []string) []string {

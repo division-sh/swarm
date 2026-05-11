@@ -23,8 +23,8 @@ func TestAuthBreakerConsumesRuntimeIngressSafetyPauseOwner(t *testing.T) {
 		},
 	})
 
-	am.maybeTripAuthCircuitBreaker("agent-1", "evt-1", errors.New("claude auth required"))
-	am.maybeTripAuthCircuitBreaker("agent-1", "evt-2", errors.New("claude auth required"))
+	am.maybeTripAuthCircuitBreaker(context.Background(), "agent-1", "evt-1", errors.New("claude auth required"))
+	am.maybeTripAuthCircuitBreaker(context.Background(), "agent-1", "evt-2", errors.New("claude auth required"))
 
 	if pauseCalls != 1 {
 		t.Fatalf("runtime ingress safety pause calls = %d, want 1", pauseCalls)

@@ -202,7 +202,8 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 		"sample_error":          strings.TrimSpace(panicText),
 		"timestamp":             time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if err := am.bus.Publish(am.runtimeContext(), events.Event{
+	eventCtx := am.runtimePlatformControlEventContext(ctx)
+	if err := am.bus.Publish(eventCtx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("platform.event_quarantined"),
 		SourceAgent: "runtime",
@@ -1005,6 +1006,7 @@ func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, 
 		consecutivePanics := 0
 		for {
 			panicked := false
+			panicCtx := loopCtx
 			panicText := ""
 			lastEventType := ""
 			stackTrace := ""
@@ -1055,6 +1057,7 @@ func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, 
 								continue
 							}
 							panicked = true
+							panicCtx = evtCtx
 							panicText = evtPanicText
 							stackTrace = evtStackTrace
 							lastEventType = strings.TrimSpace(string(evt.Type))
@@ -1083,7 +1086,7 @@ func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, 
 				return
 			}
 			consecutivePanics++
-			am.handleAgentLoopPanic(loopCtx, agent, consecutivePanics, lastEventType, panicText, stackTrace)
+			am.handleAgentLoopPanic(panicCtx, agent, consecutivePanics, lastEventType, panicText, stackTrace)
 			if consecutivePanics >= 5 {
 				return
 			}
@@ -1143,7 +1146,8 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		})
 	}
 
-	if err := am.bus.Publish(am.runtimeContext(), (events.Event{
+	eventCtx := am.runtimePlatformControlEventContext(ctx)
+	if err := am.bus.Publish(eventCtx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("platform.agent_panic"),
 		SourceAgent: "runtime",
@@ -1186,7 +1190,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		})
 	}
 
-	if err := am.bus.Publish(am.runtimeContext(), (events.Event{
+	if err := am.bus.Publish(eventCtx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("platform.agent_failed"),
 		SourceAgent: "runtime",

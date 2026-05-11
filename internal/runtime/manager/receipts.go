@@ -120,7 +120,7 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 			strings.TrimSpace(evt.ID),
 			strings.TrimSpace(string(evt.Type)),
 		)
-		am.maybeTripAuthCircuitBreaker(agent.ID(), evt.ID, err)
+		am.maybeTripAuthCircuitBreaker(ctx, agent.ID(), evt.ID, err)
 		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusError, runtimerterr.FormatRuntimeError(agentErr))
 		record.Outcome = startupManagerReplayOutcomeDropped
 		record.ReasonCode = startupManagerReplayReasonProcessFailed
@@ -292,7 +292,7 @@ func isClaudeCreditExhaustedError(err error) bool {
 		(strings.Contains(msg, "resets") && strings.Contains(msg, "utc") && strings.Contains(msg, "limit"))
 }
 
-func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err error) {
+func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, agentID, eventID string, err error) {
 	reason := ""
 	authRequired := false
 	switch {
@@ -313,10 +313,11 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 	running := am.running
 	am.runMu.Unlock()
 
+	eventCtx := am.runtimePlatformControlEventContext(ctx)
 	if am.runtimeIngressSafetyPause != nil {
-		if pauseErr := am.runtimeIngressSafetyPause(am.runtimeContext(), reason); pauseErr != nil {
+		if pauseErr := am.runtimeIngressSafetyPause(eventCtx, reason); pauseErr != nil {
 			if am.bus != nil {
-				am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+				am.bus.LogRuntime(eventCtx, runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
 					Component: "agent-manager",
 					Action:    "runtime_pause_owner_failed",
@@ -330,7 +331,7 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 			}
 		}
 	} else if am.bus != nil {
-		am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+		am.bus.LogRuntime(eventCtx, runtimepipeline.RuntimeLogEntry{
 			Level:     "warn",
 			Component: "agent-manager",
 			Action:    "runtime_pause_owner_missing",
@@ -342,7 +343,7 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 		})
 	}
 	if am.bus != nil {
-		am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+		am.bus.LogRuntime(eventCtx, runtimepipeline.RuntimeLogEntry{
 			Level:     "error",
 			Component: "agent-manager",
 			Action:    "runtime_pause_breaker_tripped",
@@ -379,9 +380,9 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 			}),
 			CreatedAt: now,
 		}.WithEntityID(entityID).WithFlowInstance(flowInstance)
-		if err := am.bus.Publish(am.runtimeContext(), authEvt); err != nil {
+		if err := am.bus.Publish(eventCtx, authEvt); err != nil {
 			if am.bus != nil {
-				am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+				am.bus.LogRuntime(eventCtx, runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
 					Component: "agent-manager",
 					Action:    "publish_auth_required_failed",
@@ -565,7 +566,8 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		return
 	}
 
-	if err := am.bus.Publish(am.runtimeContext(), events.Event{
+	eventCtx := am.runtimePlatformControlEventContext(ctx)
+	if err := am.bus.Publish(eventCtx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("platform.dead_letter_escalation"),
 		SourceAgent: "runtime",
@@ -579,7 +581,7 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		CreatedAt: time.Now().UTC(),
 	}.WithFlowInstance(flowInstance)); err != nil {
 		if am.bus != nil {
-			am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+			am.bus.LogRuntime(eventCtx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
 				Component: "agent-manager",
 				Action:    "dead_letter_escalation_publish_failed",

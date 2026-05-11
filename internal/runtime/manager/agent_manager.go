@@ -136,6 +136,13 @@ func (am *AgentManager) runtimeContext() context.Context {
 	return context.Background()
 }
 
+func (am *AgentManager) runtimePlatformControlEventContext(ctx context.Context) context.Context {
+	if ctx != nil && ctx.Err() == nil {
+		return ctx
+	}
+	return am.runtimeContext()
+}
+
 func (am *AgentManager) InFlightCount() int {
 	if am == nil {
 		return 0
