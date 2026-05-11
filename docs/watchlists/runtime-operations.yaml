@@ -376,6 +376,7 @@ nodes:
       - selected-contract diagnostic platform outcome policy needs runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy to classify at/before-T source platform.runtime_log/platform.inbound_recorded outcome facts as lineage/no-action before route topology, recipient planning, and selected execution, while preserving real frontier unresolved-route blockers and generic non-agent/dead-letter replay blockers
       - selected-contract source-advanced conversation-history policy needs runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy to classify post-T source agent_sessions, agent_turns, and agent_conversation_audits as branch-divergence lineage/no-action evidence while keeping source row copy/reuse, source suppressors, active delivery/session coupling, fork-local pre-existing rows, full reconstruction, and non-selected surfaces split or fail-closed
       - selected-contract active source delivery conversation-coupling policy needs runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy to classify only the same-source in-progress delivery that emitted the fork-point event as lineage/no-action and branch-divergence evidence, while preserving fail-closed behavior for unrelated active deliveries, active_session_id/receipt/outcome coupling, source row copy/reuse, source outcome suppressors, fork-local pre-existing rows, post-T conversation facts outside #671, full reconstruction, and non-selected surfaces
+      - fork materialization needs runtime.run_fork.materialized_entity_snapshot_metadata to classify reconstructed entity_mutations candidates with source-at-T flow_instance/entity_type metadata before generic or selected-contract materializers write fork-local entity_state rows
     representative_issues:
       - 564
       - 565
@@ -410,6 +411,7 @@ nodes:
       - 668
       - 671
       - 678
+      - 681
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
@@ -442,6 +444,7 @@ nodes:
       - run-scoped current-state identity model for entity_state
       - explicit runtime/store current-state context owner for all entity_state reads, writes, queries, and ownership checks
       - entity_mutations.run_id as append-only history and reconstruction owner
+      - runtime.run_fork.materialized_entity_snapshot_metadata as the fork materialization metadata/materializability owner for reconstructed entity_state snapshots
     why_this_node_exists: mutating timestamp forks require source and fork runs to diverge safely while preserving entity identity; global entity_state keyed only by entity_id lets forked execution collide with or overwrite source state
     known_manifestations:
       - entity_state previously had no run_id and used entity_id as a global primary key
@@ -449,6 +452,7 @@ nodes:
       - execution-ready timestamp-fork plans need a store-owned materialization operation that creates fork run lineage plus fork-scoped entity_state and entity_mutations rows without resuming delivery
       - materialized state-only forks need store-owned activation that freezes the source run and starts future fork-local execution without historical delivery replay
       - historical replay/resume after activation requires a separate timestamp-fork replay/resume owner before any pending delivery redelivery or event-copy execution can be honest
+      - reconstructed fork entity candidates from entity_mutations need source-at-T flow_instance/entity_type metadata classification before state-only or selected-contract materialization can safely create fork-local entity_state rows
       - runtime entity tools and workflow projection read and write entity_state by entity_id without run context
       - inbound routing, route ownership, workspace, digest, budget, and tests consume global current-state semantics
     representative_issues:
@@ -457,6 +461,7 @@ nodes:
       - 558
       - 562
       - 564
+      - 681
     common_framing_mistakes:
       too_broad:
         - implement all mutating fork execution in one PR

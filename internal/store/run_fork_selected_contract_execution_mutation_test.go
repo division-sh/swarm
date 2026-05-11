@@ -51,6 +51,72 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	}
 }
 
+func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700002405, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE events
+		SET flow_instance = ''
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, sourceRunID, entityID); err != nil {
+		t.Fatalf("clear event flow metadata: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE entity_state
+		SET flow_instance = 'selected-state-flow/at-T',
+		    entity_type = 'selected_case',
+		    updated_at = $3
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
+		t.Fatalf("update source entity_state metadata: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if len(plan.Entities) != 1 || plan.Entities[0].MaterializationMetadata == nil {
+		t.Fatalf("plan entities = %#v, want materialization metadata", plan.Entities)
+	}
+	if got := plan.Entities[0].MaterializationMetadata.Source; got != RunForkMaterializedEntitySnapshotMetadataSourceEntityState {
+		t.Fatalf("metadata source = %q, want source entity_state", got)
+	}
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	if materialized.ForkRunID == "" {
+		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
+	}
+	var flowInstance, entityType string
+	if err := db.QueryRowContext(ctx, `
+		SELECT flow_instance, entity_type
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, materialized.ForkRunID, entityID).Scan(&flowInstance, &entityType); err != nil {
+		t.Fatalf("load selected fork entity_state: %v", err)
+	}
+	if flowInstance != "selected-state-flow/at-T" || entityType != "selected_case" {
+		t.Fatalf("selected fork metadata = flow:%s type:%s", flowInstance, entityType)
+	}
+}
+
 func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistoryAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

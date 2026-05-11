@@ -59,12 +59,13 @@ type RunForkPoint struct {
 }
 
 type RunForkEntityState struct {
-	EntityID       string         `json:"entity_id"`
-	CurrentState   string         `json:"current_state,omitempty"`
-	EnteredStateAt *time.Time     `json:"entered_state_at,omitempty"`
-	Fields         map[string]any `json:"fields,omitempty"`
-	Gates          map[string]any `json:"gates,omitempty"`
-	Accumulator    map[string]any `json:"accumulator,omitempty"`
+	EntityID                string                                     `json:"entity_id"`
+	CurrentState            string                                     `json:"current_state,omitempty"`
+	EnteredStateAt          *time.Time                                 `json:"entered_state_at,omitempty"`
+	Fields                  map[string]any                             `json:"fields,omitempty"`
+	Gates                   map[string]any                             `json:"gates,omitempty"`
+	Accumulator             map[string]any                             `json:"accumulator,omitempty"`
+	MaterializationMetadata *RunForkMaterializedEntitySnapshotMetadata `json:"materialization_metadata,omitempty"`
 }
 
 type RunForkPendingWork struct {
@@ -209,6 +210,10 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 	if err != nil {
 		return RunForkPlan{}, err
 	}
+	entities, entitySnapshotMetadataAdmission, err := s.attachRunForkMaterializedEntitySnapshotMetadata(ctx, runID, cursor, entities)
+	if err != nil {
+		return RunForkPlan{}, err
+	}
 	plan.Entities = entities
 	plan.ReconstructedEntityCount = len(entities)
 
@@ -223,6 +228,7 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 		return RunForkPlan{}, err
 	}
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(evidence)
+	plan.ReplayResumeAdmission = runForkReplayResumeAdmissionWithMaterializedEntitySnapshotMetadata(plan.ReplayResumeAdmission, entitySnapshotMetadataAdmission)
 	plan.UnsupportedBlockers = plan.ReplayResumeAdmission.UnsupportedBlockers
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
 	plan.ExecutionReady = plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady

@@ -3394,6 +3394,12 @@ run_model:
       processing, change contracts, or mutate delivery/session/timer/route state. Materialized fork current-state
       rows start a new fork-local revision sequence at revision=1; source-at-T entity_state.revision is not
       copied because revision is a current-row commit counter, not append-only historical state in entity_mutations.
+      Materialization MUST consume runtime.run_fork.materialized_entity_snapshot_metadata for every reconstructed
+      entity before writing fork-local entity_state. That owner may use at/before-T event flow evidence, or source
+      entity_state creation metadata when the source row was created at or before T, for flow_instance and
+      entity_type only; it MUST NOT read source current_state, gates, fields, accumulator, revision, or updated_at
+      as fork-point projection truth. If flow_instance/entity_type cannot be proven for a reconstructed entity,
+      materialization fails closed with entity_snapshot_metadata_unproven and writes no fork rows.
       Materialized fork rows preserve entered_state_at from the source-at-T current_state mutation evidence; they
       MUST NOT stamp entered_state_at with the fork point unless that is when the current_state was entered.
       Full fork execution remains a separately gated operation.'
@@ -3713,7 +3719,9 @@ run_model:
         run (SELECT DISTINCT entity_id FROM entity_mutations WHERE run_id = :source_run_id), reverse-apply
         all mutations with created_at > T (newest first, set each field to old_value). Alternative: forward-apply
         from empty entity for reliability. Only committed mutations are included — in-progress deliveries at T
-        are excluded, their partial mutations are not applied.'
+        are excluded, their partial mutations are not applied. A reconstructed entity is materializable only after
+        runtime.run_fork.materialized_entity_snapshot_metadata authorizes its source-at-T flow_instance/entity_type
+        metadata or produces a named fail-closed blocker.'
       2_detect_pending: 'Identify events that were pending at timestamp T — events with created_at <= T whose
         delivery chain was incomplete. This includes: deliveries with status pending or in_progress at T,
         accumulations that had not reached completion at T, entities in non-terminal states expecting further
