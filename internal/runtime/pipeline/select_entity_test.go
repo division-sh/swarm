@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
@@ -87,6 +88,54 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 	if got := instance.Metadata["spent_usd"]; got != float64(99) && got != 99 {
 		t.Fatalf("spent_usd after replay = %#v, want 99", got)
 	}
+}
+
+func TestBackgroundWorkflowNodeSelectEntityDuplicateSameEventIsReceiptIdempotent(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, source := newSelectEntityTestCoordinator(t, db)
+	pc.eventReceiptsCapability = eventReceiptsCapabilityStub{enabled: true}.resolve
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	budgetEntityID := seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
+	evt := seedSelectEntitySpendEvent(t, db, ctx, map[string]any{"vertical_id": "vertical-1", "amount_usd": 42})
+	runner := newSelectEntityBackgroundNode(t, pc, source, db)
+	runner.SetRetryPolicyForTest(1, func(int) time.Duration { return 0 })
+
+	runner.ProcessEventForTest(ctx, evt)
+	instance, ok, err := pc.workflowStore.Load(ctx, budgetEntityID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load after first delivery: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected budget entity to exist after first delivery")
+	}
+	if got := instance.Metadata["spent_usd"]; got != float64(42) && got != 42 {
+		t.Fatalf("spent_usd after first delivery = %#v, want 42", got)
+	}
+
+	if err := pc.workflowStore.Mutate(ctx, budgetEntityID, func(instance *WorkflowInstance) {
+		if instance.Metadata == nil {
+			instance.Metadata = map[string]any{}
+		}
+		instance.Metadata["spent_usd"] = 7
+	}); err != nil {
+		t.Fatalf("workflowStore.Mutate between duplicate deliveries: %v", err)
+	}
+
+	runner.ProcessEventForTest(ctx, evt)
+	instance, ok, err = pc.workflowStore.Load(ctx, budgetEntityID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load after duplicate delivery: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected budget entity to exist after duplicate delivery")
+	}
+	if got := instance.Metadata["spent_usd"]; got != float64(7) && got != 7 {
+		t.Fatalf("spent_usd after duplicate same-event delivery = %#v, want unchanged 7", got)
+	}
+	assertSelectEntityReceiptRow(t, db, evt.ID, "treasury-orchestrator")
+	assertEntityStateRowCount(t, db, 1)
 }
 
 func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatches(t *testing.T) {
@@ -255,6 +304,15 @@ treasury-orchestrator:
   id: treasury-orchestrator
   execution_type: system_node
   subscribes_to: [opco.spend_recorded]
+  event_handlers:
+    opco.spend_recorded:
+      select_entity:
+        by:
+          vertical_id: payload.vertical_id
+      data_accumulation:
+        writes:
+          - source_field: amount_usd
+            target_field: spent_usd
 `,
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -277,6 +335,23 @@ treasury-orchestrator:
 	return pc, source
 }
 
+func newSelectEntityBackgroundNode(t *testing.T, pc *PipelineCoordinator, source semanticview.Source, db *sql.DB) *backgroundWorkflowNode {
+	t.Helper()
+	contract, ok := source.NodeEntries()["treasury-orchestrator"]
+	if !ok {
+		t.Fatal("expected treasury-orchestrator node contract")
+	}
+	executor := NewNode(contract, pc.SemanticSource(), newCoordinatorHandlerExecutionEngine(pc, "treasury-orchestrator"), nil)
+	if executor == nil {
+		t.Fatal("expected treasury-orchestrator node executor")
+	}
+	runner := newBackgroundWorkflowNodeWithRetryBase(executor, &recordingPipelineBus{}, db, pc.eventReceiptsCapability, 0)
+	if runner == nil {
+		t.Fatal("expected treasury-orchestrator background runner")
+	}
+	return runner
+}
+
 func selectEntitySpendHandler() runtimecontracts.SystemNodeEventHandler {
 	return runtimecontracts.SystemNodeEventHandler{
 		SelectEntity: &runtimecontracts.SelectEntitySpec{
@@ -294,6 +369,25 @@ func selectEntitySpendHandler() runtimecontracts.SystemNodeEventHandler {
 			}},
 		},
 	}
+}
+
+func seedSelectEntitySpendEvent(t *testing.T, db *sql.DB, ctx context.Context, payload map[string]any) events.Event {
+	t.Helper()
+	entityID := uuid.NewString()
+	evt := (events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("opco.spend_recorded"),
+		SourceAgent: "opco",
+		Payload:     mustJSON(payload),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(entityID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2, $3::uuid, 'opco/vertical-1', 'entity', $4::jsonb, 'opco', 'node', now())
+	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
+		t.Fatalf("seed select_entity spend event: %v", err)
+	}
+	return evt
 }
 
 func seedSelectEntityBudget(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, verticalID string, spent any) string {
@@ -328,6 +422,24 @@ func seedSelectEntityBudgetWithState(t *testing.T, store *WorkflowInstanceStore,
 		t.Fatalf("seed budget entity: %v", err)
 	}
 	return identity.EntityID
+}
+
+func assertSelectEntityReceiptRow(t *testing.T, db *sql.DB, eventID, nodeID string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+		  AND idempotency_key = $2 || ':' || $1
+	`, eventID, nodeID).Scan(&count); err != nil {
+		t.Fatalf("count select_entity event_receipts: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("select_entity event_receipts rows = %d, want 1", count)
+	}
 }
 
 func assertEntityStateRowCount(t *testing.T, db *sql.DB, want int) {
