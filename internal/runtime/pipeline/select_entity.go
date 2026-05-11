@@ -7,6 +7,7 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/values"
 	"swarm/internal/runtime/entityruntime"
 )
@@ -33,7 +34,12 @@ func (pc *PipelineCoordinator) selectHandlerEntityForFlow(ctx context.Context, f
 	if err != nil {
 		return selectedHandlerEntity{}, fmt.Errorf("select_entity_invalid: node %s flow %s: %w", nodeID, flowID, err)
 	}
-	candidates, err := pc.workflowStore.List(ctx)
+	candidates, err := pc.workflowStore.selectActiveByFields(
+		ctx,
+		runtimeflowidentity.ScopeKey(pc.SemanticSource(), flowID),
+		selectEntityFieldSelectors(expected),
+		selectEntityTerminalStates(pc, flowID),
+	)
 	if err != nil {
 		return selectedHandlerEntity{}, fmt.Errorf("select_entity_lookup_failed: node %s flow %s: %w", nodeID, flowID, err)
 	}
@@ -106,4 +112,27 @@ func selectEntityCandidateMatches(candidate WorkflowInstance, expected map[strin
 		}
 	}
 	return true
+}
+
+func selectEntityFieldSelectors(expected map[string]any) []workflowInstanceFieldSelector {
+	out := make([]workflowInstanceFieldSelector, 0, len(expected))
+	for field, value := range expected {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		out = append(out, workflowInstanceFieldSelector{Field: field, Value: value})
+	}
+	return out
+}
+
+func selectEntityTerminalStates(pc *PipelineCoordinator, flowID string) []string {
+	if pc == nil {
+		return nil
+	}
+	source := pc.SemanticSource()
+	if source == nil {
+		return nil
+	}
+	return source.FlowTerminalStages(flowID)
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -88,6 +89,73 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 	}
 }
 
+func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatches(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, source := newSelectEntityTestCoordinator(t, db)
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	activeBudgetID := seedSelectEntityBudgetWithState(t, pc.workflowStore, ctx, source, "budget-active", "vertical-1", 0, "active")
+	terminalBudgetID := seedSelectEntityBudgetWithState(t, pc.workflowStore, ctx, source, "budget-archived", "vertical-1", 10, "archived")
+	terminatedBudgetID := seedSelectEntityBudgetWithState(t, pc.workflowStore, ctx, source, "budget-terminated", "vertical-1", 20, "active")
+	terminated, ok, err := pc.workflowStore.Load(ctx, terminatedBudgetID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load terminated: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected terminated budget entity to exist")
+	}
+	if err := pc.workflowStore.MarkTerminated(ctx, terminated.StorageRef, time.Now().UTC()); err != nil {
+		t.Fatalf("MarkTerminated: %v", err)
+	}
+
+	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("opco.spend_recorded"),
+			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
+		},
+		State: WorkflowState{},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected selected handler to run")
+	}
+
+	active, ok, err := pc.workflowStore.Load(ctx, activeBudgetID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load active: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected active budget entity to exist")
+	}
+	if got := active.Metadata["spent_usd"]; got != float64(42) && got != 42 {
+		t.Fatalf("active spent_usd = %#v, want 42", got)
+	}
+	terminal, ok, err := pc.workflowStore.Load(ctx, terminalBudgetID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load terminal: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected terminal budget entity to exist")
+	}
+	if got := terminal.Metadata["spent_usd"]; got != float64(10) && got != 10 {
+		t.Fatalf("terminal spent_usd = %#v, want unchanged 10", got)
+	}
+	reloadedTerminated, ok, err := pc.workflowStore.Load(ctx, terminatedBudgetID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load terminated after select: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected terminated budget entity to exist")
+	}
+	if got := reloadedTerminated.Metadata["spent_usd"]; got != float64(20) && got != 20 {
+		t.Fatalf("terminated spent_usd = %#v, want unchanged 20", got)
+	}
+	assertEntityStateRowCount(t, db, 3)
+}
+
 func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnNoMatch(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -163,7 +231,8 @@ flows:
 name: treasury
 mode: static
 initial_state: active
-states: [active]
+states: [active, archived]
+terminal_states: [archived]
 pins:
   inputs:
     events: [opco.spend_recorded]
@@ -234,13 +303,18 @@ func seedSelectEntityBudget(t *testing.T, store *WorkflowInstanceStore, ctx cont
 
 func seedSelectEntityBudgetWithInstance(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID, verticalID string, spent any) string {
 	t.Helper()
+	return seedSelectEntityBudgetWithState(t, store, ctx, source, instanceID, verticalID, spent, "active")
+}
+
+func seedSelectEntityBudgetWithState(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID, verticalID string, spent any, currentState string) string {
+	t.Helper()
 	identity := DeriveFlowInstanceIdentity(source, "treasury", instanceID)
 	instance := WorkflowInstance{
 		InstanceID:      identity.EntityID,
 		StorageRef:      identity.InstancePath,
 		WorkflowName:    "treasury",
 		WorkflowVersion: "1.0.0",
-		CurrentState:    "active",
+		CurrentState:    strings.TrimSpace(currentState),
 		Metadata: map[string]any{
 			"flow_path":   identity.InstancePath,
 			"instance_id": identity.InstanceID,

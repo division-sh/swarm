@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -92,6 +93,11 @@ type WorkflowInstanceStore struct {
 	db *sql.DB
 }
 
+type workflowInstanceFieldSelector struct {
+	Field string
+	Value any
+}
+
 var workflowInstancePathNamespace = uuid.MustParse("5e7507c8-bd4f-46e0-a098-b016dc31df23")
 
 const workflowInstanceTimerOwnerNode = "workflow_instance_store"
@@ -148,6 +154,13 @@ func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, e
 		return nil, nil
 	}
 	return s.listSpec(ctx)
+}
+
+func (s *WorkflowInstanceStore) selectActiveByFields(ctx context.Context, scopeKey string, selectors []workflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	return s.selectActiveByFieldsSpec(ctx, scopeKey, selectors, excludedStates)
 }
 
 func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowInstance) error {
@@ -411,6 +424,61 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 	if err != nil {
 		return nil, err
 	}
+	return s.querySpec(ctx, runID, `
+		WHERE es.run_id = $1::uuid
+		ORDER BY es.created_at ASC
+	`, runID)
+}
+
+func (s *WorkflowInstanceStore) selectActiveByFieldsSpec(ctx context.Context, scopeKey string, selectors []workflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
+	if scopeKey == "" {
+		return nil, nil
+	}
+	selectors = normalizeWorkflowInstanceFieldSelectors(selectors)
+	if len(selectors) == 0 {
+		return nil, nil
+	}
+	args := []any{runID, scopeKey, scopeKey + "/%"}
+	var where strings.Builder
+	where.WriteString(`
+		WHERE es.run_id = $1::uuid
+		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3)
+		  AND COALESCE(fi.status, 'active') NOT IN ('terminated', 'inactive')
+		  AND fi.terminated_at IS NULL
+	`)
+	terminalStates := normalizeWorkflowInstanceExcludedStates(excludedStates)
+	if len(terminalStates) > 0 {
+		args = append(args, pq.Array(terminalStates))
+		where.WriteString(fmt.Sprintf(`
+		  AND NOT (LOWER(COALESCE(es.current_state, '')) = ANY($%d::text[]))
+		`, len(args)))
+	}
+	for _, selector := range selectors {
+		segments := workflowInstanceFieldSelectorPath(selector.Field)
+		if len(segments) == 0 {
+			return nil, fmt.Errorf("workflow instance selector field is required")
+		}
+		valueJSON, err := json.Marshal(selector.Value)
+		if err != nil {
+			return nil, fmt.Errorf("marshal workflow instance selector %s: %w", selector.Field, err)
+		}
+		args = append(args, pq.Array(segments), string(valueJSON))
+		where.WriteString(fmt.Sprintf(`
+		  AND es.fields #> $%d::text[] = $%d::jsonb
+		`, len(args)-1, len(args)))
+	}
+	where.WriteString(`
+		ORDER BY es.created_at ASC
+	`)
+	return s.querySpec(ctx, runID, where.String(), args...)
+}
+
+func (s *WorkflowInstanceStore) querySpec(ctx context.Context, runID, where string, args ...any) ([]WorkflowInstance, error) {
 	rows, err := dbQueryContext(ctx, s.db, `
 		SELECT
 			es.entity_id::text,
@@ -432,9 +500,7 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			es.updated_at
 		FROM entity_state es
 		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE es.run_id = $1::uuid
-		ORDER BY es.created_at ASC
-	`, runID)
+	`+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -520,6 +586,52 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 		return nil, err
 	}
 	return out, nil
+}
+
+func normalizeWorkflowInstanceFieldSelectors(selectors []workflowInstanceFieldSelector) []workflowInstanceFieldSelector {
+	out := make([]workflowInstanceFieldSelector, 0, len(selectors))
+	for _, selector := range selectors {
+		field := strings.TrimSpace(selector.Field)
+		if field == "" {
+			continue
+		}
+		out = append(out, workflowInstanceFieldSelector{Field: field, Value: selector.Value})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Field < out[j].Field
+	})
+	return out
+}
+
+func normalizeWorkflowInstanceExcludedStates(states []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(states))
+	for _, state := range states {
+		state = strings.ToLower(strings.TrimSpace(state))
+		if state == "" {
+			continue
+		}
+		if _, ok := seen[state]; ok {
+			continue
+		}
+		seen[state] = struct{}{}
+		out = append(out, state)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func workflowInstanceFieldSelectorPath(field string) []string {
+	parts := strings.Split(strings.TrimSpace(field), ".")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
 }
 
 func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
