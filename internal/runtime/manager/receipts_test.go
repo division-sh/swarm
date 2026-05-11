@@ -11,6 +11,7 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
@@ -19,7 +20,8 @@ type recordingReceiptBus struct {
 	runtimeLogs []runtimepipeline.RuntimeLogEntry
 }
 
-func (b *recordingReceiptBus) Publish(_ context.Context, evt events.Event) error {
+func (b *recordingReceiptBus) Publish(ctx context.Context, evt events.Event) error {
+	_, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
 	b.published = append(b.published, evt)
 	return nil
 }
@@ -118,13 +120,25 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 		FlowPath: "review/inst-1",
 	}
 
-	am.maybeTripAuthCircuitBreaker("agent-a", "evt-1", errors.New("claude auth required"))
+	inbound := events.Event{
+		ID:    "evt-1",
+		Type:  events.EventType("work.requested"),
+		RunID: "run-1",
+	}
+	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
+	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID)
+	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID, errors.New("claude auth required"))
 
 	if len(bus.published) != 2 {
 		t.Fatalf("published events = %d, want 2", len(bus.published))
 	}
 	if pauseCalls != 1 {
 		t.Fatalf("runtime ingress safety pause calls = %d, want 1", pauseCalls)
+	}
+	for _, evt := range bus.published {
+		if got := evt.ParentEventID; got != inbound.ID {
+			t.Fatalf("%s parent_event_id = %q, want %q", evt.Type, got, inbound.ID)
+		}
 	}
 	var authEvt events.Event
 	for _, evt := range bus.published {
@@ -134,6 +148,12 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	}
 	if authEvt.Type != events.EventType("platform.auth_required") {
 		t.Fatalf("published events = %#v, want platform.auth_required", bus.published)
+	}
+	if got := authEvt.ParentEventID; got != inbound.ID {
+		t.Fatalf("auth event parent_event_id = %q, want %q", got, inbound.ID)
+	}
+	if got := authEvt.RunID; got != inbound.RunID {
+		t.Fatalf("auth event run_id = %q, want %q", got, inbound.RunID)
 	}
 	if got := authEvt.EntityID(); got != "ent-123" {
 		t.Fatalf("auth event entity_id = %q, want ent-123", got)

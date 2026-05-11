@@ -3701,6 +3701,20 @@ run_model:
       materialization, restart recovery of fork-local handlers, session/turn/audit reconstruction, timers, non-agent
       replay, retry/idempotency/follow-up policy beyond normal execution, and UI/API behavior remain split unless this
       owner has explicit fork-local proof for that subcase.'
+    selected_contract_fork_local_runtime_platform_event_lineage_policy: 'Selected-contract fork-local runtime/platform
+      control event lineage is owned by
+      runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy under the broader
+      selected-fork runtime container. This owner covers fresh fork-run platform/control or diagnostic events emitted by
+      the selected-fork runtime container while processing selected fork-local work, including agent-started,
+      auth-required, runtime-ingress pause/resume, budget-threshold, event-quarantine, agent-panic, agent-failed,
+      dead-letter-escalation, and runtime-log records. Such events are fork-local lineage/output evidence only when they
+      are causally parented to selected-fork execution through the fork event parent/source_event_id chain and persisted
+      under the fork run_id. Unrelated platform events without selected-fork causal context, source-run platform facts,
+      source outcomes, source deliveries, source receipts, source dead letters, CLI/API/dashboard JSON, live EventBus
+      descriptors, or produced_by_type alone are not executable fork truth and must remain fail-closed or split. This
+      owner does not copy source rows, suppress fork-local execution with source outcomes, own current-state/entity
+      materialization, reconstruct sessions/turns/audits, replay timers/routes/non-agent work, or claim restart
+      recovery.'
     selected_contract_supported_execution: 'The supported selected-contract timestamp-fork execution surface is
       swarm fork --contracts. It is owned by runtime.run_fork.selected_contract_execution, not by CLI, route helpers,
       delivery-row helpers, or source-row replay. The owner consumes store.run_fork.selected_contract_binding,
@@ -3708,7 +3722,9 @@ run_model:
       runtime.run_fork.selected_contract_recipient_planning, and
       runtime.run_fork.selected_contract_execution.authoritative_agent_delivery_materialization plus
       runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor when planned selected
-      agent recipients exist before publishing selected frontier work. It creates fresh
+      agent recipients exist, and consumes
+      runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy for fork-local
+      runtime/platform control outputs caused by selected execution. It creates fresh
       fork-local events and event_deliveries under the fork run_id, records selected source-to-fork lineage in
       run_fork_selected_contract_executions, runs selected handlers through the normal runtime pipeline, writes fork-local
       outcomes, and regenerates emitted follow-ups under the fork run_id. Source events are payload/lineage inputs only;
@@ -3916,13 +3932,25 @@ run_model:
         execution truth, synthesize receipts, or claim restart recovery. Flow-instance-scoped materialization without
         explicit fork-local proof, session/turn/audit reconstruction, timers, non-agent replay, retry/idempotency,
         follow-up policy beyond normal handler output, and UI/API consumers remain split siblings.'
+      3g2_selected_contract_fork_local_runtime_platform_event_lineage_policy: 'For selected-contract mutating fork
+        execution, runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy owns
+        fresh fork-run runtime/platform control or diagnostic events emitted by the selected-fork runtime container while
+        processing selected fork-local work. The owner may admit only events persisted under the fork run_id that are
+        causally parented to selected-fork execution through the selected fork event parent/source_event_id chain.
+        Unrelated fork-run platform events without selected-fork causal context, source platform facts, source outcomes,
+        source deliveries, live EventBus descriptors, operator surfaces, and produced_by_type alone remain invalid
+        selected-fork lineage. This owner does not change the source diagnostic platform outcome policy for
+        platform.runtime_log/platform.inbound_recorded, does not treat platform.auth_required as source replay truth,
+        and does not own restart recovery, current-state materialization, sessions, turns, audits, timers, routes,
+        non-agent replay, retry/idempotency, or follow-up policy beyond normal selected-fork runtime output.'
       3h_selected_contract_supported_execution: 'For the supported swarm fork --contracts surface, selected-contract
         execution is a runtime-owned mutating path after selected binding, execution admission, route topology, dynamic
         topology proof or fail-closed classification, recipient planning, authoritative agent delivery materialization,
         and fork-local selected agent runtime materializer/executor proof when selected agent recipients exist. It mints
         fresh fork-local event IDs, writes fork event and delivery rows under the fork run_id, gates EventBus.Publish
         through recipient-planning evidence, runs selected handlers through the normal runtime pipeline, records selected
-        execution lineage, writes fork-local outcomes, and regenerates follow-up events under the fork run_id. This is
+        execution lineage, writes fork-local outcomes, consumes the fork-local runtime/platform event lineage policy for
+        causally parented runtime control outputs, and regenerates follow-up events under the fork run_id. This is
         not full historical resume: route
         persistence/recovery, timer reconstruction, session/turn/audit reconstruction, non-agent replay, contract-swap
         boot/resume beyond selected frontier execution, runtime restart recovery, and UI/API ownership remain separate
