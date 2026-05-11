@@ -62,14 +62,15 @@ type storeBundle struct {
 
 func (s storeBundle) runtimeStores() runtime.Stores {
 	return runtime.Stores{
-		SQLDB:             s.SQLDB,
-		EventStore:        s.EventStore,
-		SessionRegistry:   s.SessionRegistry,
-		ConversationStore: s.ConversationStore,
-		ManagerStore:      s.ManagerStore,
-		ScheduleStore:     s.ScheduleStore,
-		StartupOwnership:  s.Postgres,
-		TurnStore:         s.TurnStore,
+		SQLDB:               s.SQLDB,
+		EventStore:          s.EventStore,
+		SessionRegistry:     s.SessionRegistry,
+		ConversationStore:   s.ConversationStore,
+		ManagerStore:        s.ManagerStore,
+		ScheduleStore:       s.ScheduleStore,
+		StartupOwnership:    s.Postgres,
+		RuntimeIngressStore: s.Postgres,
+		TurnStore:           s.TurnStore,
 	}
 }
 
@@ -195,6 +196,7 @@ func main() {
 			Mailbox:               stores.Postgres,
 			Idempotency:           stores.Postgres,
 			Events:                rt.Bus,
+			RuntimeIngress:        rt.RuntimeIngress,
 			Source:                source,
 			MailboxApprovalRoutes: mailboxApprovalRoutes,
 			Bundle:                bootBundleIdentity,

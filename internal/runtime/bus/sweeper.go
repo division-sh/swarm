@@ -76,6 +76,13 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 	if eb == nil || eb.store == nil {
 		return 0, nil
 	}
+	paused, err := eb.runtimeIngressDispatchPaused(ctx, events.Event{Type: events.EventType("__runtime_ingress_probe__")})
+	if err != nil {
+		return 0, err
+	}
+	if paused {
+		return 0, nil
+	}
 	replayStore, participates, err := runtimereplayclaim.RequireStore(eb.store)
 	if err != nil {
 		return 0, err
@@ -115,6 +122,10 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			return redelivered, err
 		}
 		if err := eb.PublishPersistedRecipients(ctx, evt, recipients); err != nil {
+			if errors.Is(err, ErrRuntimeIngressPaused) {
+				_ = lease.Release(ctx)
+				return redelivered, nil
+			}
 			if errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
 				if recordErr := eb.markCommittedReplayScopeUnavailable(ctx, evt, err); recordErr != nil {
 					_ = lease.Release(ctx)
@@ -137,6 +148,10 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 		redelivered++
 	}
 	return redelivered, nil
+}
+
+func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, lookback time.Duration, limit int) (int, error) {
+	return eb.SweepUndispatched(ctx, lookback, limit)
 }
 
 func (eb *EventBus) markCommittedReplayScopeUnavailable(ctx context.Context, evt events.Event, cause error) error {

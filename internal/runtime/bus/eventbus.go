@@ -40,6 +40,7 @@ type EventBus struct {
 	payloadValidator            PayloadValidator
 	recipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	recipientPlanGuard          PublishRecipientPlanGuard
+	runtimeIngressDispatchGate  RuntimeIngressDispatchGate
 	outboxSweeperActive         bool
 	inFlightPublishes           atomic.Int64
 }
@@ -54,6 +55,10 @@ type PublishRecipientPlan struct {
 type PublishRecipientPlanAdmissionGuard func(context.Context, events.Event) error
 type PublishRecipientPlanGuard func(context.Context, events.Event, PublishRecipientPlan) error
 
+type RuntimeIngressDispatchGate interface {
+	QueueableIngressPaused(context.Context) (bool, error)
+}
+
 type EventBusOptions struct {
 	Logger                      LoggerHook
 	Interceptors                []EventInterceptor
@@ -63,6 +68,7 @@ type EventBusOptions struct {
 	PayloadValidator            PayloadValidator
 	RecipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	RecipientPlanGuard          PublishRecipientPlanGuard
+	RuntimeIngressDispatchGate  RuntimeIngressDispatchGate
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -126,9 +132,19 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		payloadValidator:            opts.PayloadValidator,
 		recipientPlanAdmissionGuard: opts.RecipientPlanAdmissionGuard,
 		recipientPlanGuard:          opts.RecipientPlanGuard,
+		runtimeIngressDispatchGate:  opts.RuntimeIngressDispatchGate,
 	}
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 	return eb, nil
+}
+
+func (eb *EventBus) SetRuntimeIngressDispatchGate(gate RuntimeIngressDispatchGate) {
+	if eb == nil {
+		return
+	}
+	eb.mu.Lock()
+	eb.runtimeIngressDispatchGate = gate
+	eb.mu.Unlock()
 }
 
 func (eb *EventBus) Store() EventStore {

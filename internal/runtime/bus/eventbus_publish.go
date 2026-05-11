@@ -38,6 +38,32 @@ func pipelineReceiptStatus(ctx context.Context, publishErr error) (string, strin
 	return "processed", ""
 }
 
+var ErrRuntimeIngressPaused = errors.New("runtime ingress is paused")
+
+func (eb *EventBus) runtimeIngressDispatchPaused(ctx context.Context, evt events.Event) (bool, error) {
+	if eb == nil || runtimeIngressDispatchBypass(evt) {
+		return false, nil
+	}
+	eb.mu.RLock()
+	gate := eb.runtimeIngressDispatchGate
+	eb.mu.RUnlock()
+	if gate == nil {
+		return false, nil
+	}
+	paused, err := gate.QueueableIngressPaused(ctx)
+	if err != nil {
+		return false, err
+	}
+	return paused, nil
+}
+
+func runtimeIngressDispatchBypass(evt events.Event) bool {
+	if strings.TrimSpace(evt.SourceAgent) != "runtime" {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(evt.Type)), "platform.")
+}
+
 func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
@@ -84,9 +110,13 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	}
 
 	persisted := false
+	queued := false
 	passthrough := true
 	deferred := []events.Event{}
 	defer func() {
+		if queued {
+			return
+		}
 		if !shouldPersistPipelineReceipt(persisted, err) {
 			return
 		}
@@ -104,9 +134,11 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	}
 
 	if passthrough {
-		if err := eb.publishSubscribedNonTransactional(ictx, evt); err != nil {
+		var publishQueued bool
+		if publishQueued, err = eb.publishSubscribedNonTransactional(ictx, evt); err != nil {
 			return err
 		}
+		queued = publishQueued
 		persisted = true
 	} else {
 		if err := eb.persistEventRecord(ictx, evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
@@ -291,7 +323,21 @@ func (eb *EventBus) publishTransactional(
 		runtimepipeline.FlushDeferredPipelineTransitions(ctx, *deferredTransitions)
 	}
 
+	queued := false
 	if passthrough {
+		paused, err := eb.runtimeIngressDispatchPaused(ctx, evt)
+		if err != nil {
+			return err
+		}
+		if paused {
+			queued = true
+			eb.logRuntime(ctx, "debug", "Runtime ingress is paused; event persisted without dispatch", "eventbus", "runtime_ingress_queued", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+				"recipients_count": len(inboundPlan.Recipients),
+				"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+			}, "", 0)
+		}
+	}
+	if passthrough && !queued {
 		if len(inboundPlan.Recipients) > 0 {
 			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipients, "matched_agent_subscription", inboundPlan.ExtraDetail)
 			if err := eb.deliverToAgents(ctx, evt, inboundPlan.Recipients); err != nil {
@@ -314,6 +360,9 @@ func (eb *EventBus) publishTransactional(
 		if err := eb.publishDeferred(ctx, d); err != nil {
 			return err
 		}
+	}
+	if queued {
+		return nil
 	}
 	status, errText := pipelineReceiptStatus(txctx, nil)
 	if err := txStore.UpsertPipelineReceiptTx(ctx, nil, evt.ID, status, errText); err != nil {
@@ -397,7 +446,11 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		evt.SourceAgent = "runtime"
 	}
 	persisted := false
+	queued := false
 	defer func() {
+		if queued {
+			return
+		}
 		if !shouldPersistPipelineReceipt(persisted, err) {
 			return
 		}
@@ -417,9 +470,11 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		return err
 	}
 	if passthrough {
-		if err := eb.deliverSubscribedPublishPlan(ctx, evt, plan); err != nil {
+		var deliverQueued bool
+		if deliverQueued, err = eb.deliverSubscribedPublishPlan(ctx, evt, plan); err != nil {
 			return err
 		}
+		queued = deliverQueued
 	}
 	eb.logPublished(ctx, evt, 0)
 	for _, d := range deferred {
@@ -438,13 +493,13 @@ func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, duration
 	}, "", durationUS)
 }
 
-func (eb *EventBus) publishSubscribedNonTransactional(ctx context.Context, evt events.Event) error {
+func (eb *EventBus) publishSubscribedNonTransactional(ctx context.Context, evt events.Event) (bool, error) {
 	plan, err := eb.planSubscribedPublish(ctx, evt)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := eb.persistSubscribedPublishPlan(ctx, evt, plan); err != nil {
-		return err
+		return false, err
 	}
 	return eb.deliverSubscribedPublishPlan(ctx, evt, plan)
 }
@@ -491,22 +546,33 @@ func (eb *EventBus) persistSubscribedPublishPlan(ctx context.Context, evt events
 	return nil
 }
 
-func (eb *EventBus) deliverSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) error {
+func (eb *EventBus) deliverSubscribedPublishPlan(ctx context.Context, evt events.Event, plan eventDeliveryPlan) (bool, error) {
+	paused, err := eb.runtimeIngressDispatchPaused(ctx, evt)
+	if err != nil {
+		return false, err
+	}
+	if paused {
+		eb.logRuntime(ctx, "debug", "Runtime ingress is paused; event persisted without dispatch", "eventbus", "runtime_ingress_queued", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+			"recipients_count": len(plan.Recipients),
+			"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+		}, "", 0)
+		return true, nil
+	}
 	if len(plan.Recipients) > 0 {
 		if err := eb.deliverToAgents(ctx, evt, plan.Recipients); err != nil {
-			return err
+			return false, err
 		}
 		eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
 	}
 	if plan.BlockedByCycle && plan.CycleEscalation != nil {
 		if err := eb.publishDeferred(ctx, *plan.CycleEscalation); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if strings.TrimSpace(plan.ContradictionReason) != "" {
 		_ = eb.emitContradiction(ctx, evt, plan.ContradictionReason)
 	}
-	return nil
+	return false, nil
 }
 
 func (eb *EventBus) persistEventRecord(
@@ -718,7 +784,11 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	}
 	start := time.Now()
 	persisted := false
+	queued := false
 	defer func() {
+		if queued {
+			return
+		}
 		if !shouldPersistPipelineReceipt(persisted, err) {
 			return
 		}
@@ -752,6 +822,17 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	}
 	persisted = true
 	eb.logQueuedDeliveries(ctx, evt, plan.PersistedRecipients, "direct_publish", plan.ExtraDetail)
+	if paused, err := eb.runtimeIngressDispatchPaused(ctx, evt); err != nil {
+		return err
+	} else if paused {
+		queued = true
+		eb.logRuntime(ctx, "debug", "Runtime ingress is paused; direct event persisted without dispatch", "eventbus", "runtime_ingress_queued", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+			"direct":           true,
+			"recipients_count": len(plan.Recipients),
+			"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+		}, "", 0)
+		return nil
+	}
 	if err := eb.deliverToAgents(ctx, evt, plan.Recipients); err != nil {
 		return err
 	}
@@ -786,6 +867,11 @@ func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.E
 	}
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now()
+	}
+	if paused, err := eb.runtimeIngressDispatchPaused(ctx, evt); err != nil {
+		return err
+	} else if paused {
+		return ErrRuntimeIngressPaused
 	}
 	scope, err := eb.authoritativeReplayScopeForEvent(ctx, evt.ID)
 	if err != nil {

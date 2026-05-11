@@ -178,15 +178,16 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	}
 
 	rt, err := runtime.NewRuntime(ctx, cfg, runtime.Stores{
-		SQLDB:             db,
-		EventStore:        pg,
-		SessionRegistry:   sessions.NewPostgresRegistry(db, cfg.LLM.Session.LockTTL),
-		ManagerStore:      pg,
-		ScheduleStore:     pg,
-		StartupOwnership:  pg,
-		MailboxStore:      pg,
-		ConversationStore: nil,
-		TurnStore:         nil,
+		SQLDB:               db,
+		EventStore:          pg,
+		SessionRegistry:     sessions.NewPostgresRegistry(db, cfg.LLM.Session.LockTTL),
+		ManagerStore:        pg,
+		ScheduleStore:       pg,
+		StartupOwnership:    pg,
+		MailboxStore:        pg,
+		RuntimeIngressStore: pg,
+		ConversationStore:   nil,
+		TurnStore:           nil,
 	}, runtime.RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,

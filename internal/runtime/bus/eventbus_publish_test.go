@@ -21,6 +21,7 @@ import (
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/diaglog"
 	"swarm/internal/runtime/flowmodel"
+	runtimeingress "swarm/internal/runtime/ingress"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
@@ -340,6 +341,21 @@ func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, db *sql.DB,
 		  AND subscriber_type = 'agent'
 	`, eventID).Scan(&count); err != nil {
 		t.Fatalf("count event deliveries for %s: %v", eventID, err)
+	}
+	return count
+}
+
+func countPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&count); err != nil {
+		t.Fatalf("count pipeline receipts for %s: %v", eventID, err)
 	}
 	return count
 }
@@ -1120,6 +1136,80 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				t.Fatalf("run status for %s = %q, want completed", tc.eventType, runStatus)
 			}
 		})
+	}
+}
+
+func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	ctx := eventBusTestRunContext(t, db)
+	pg := &store.PostgresStore{DB: db}
+	eb, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	controller := runtimeingress.NewController(pg, eb, runtimeingress.Options{})
+	t.Cleanup(runtimebus.ResumeRuntimeIngress)
+	eb.SetRuntimeIngressDispatchGate(controller)
+
+	agentID := "agent-paused-queue"
+	eventType := events.EventType("custom.paused")
+	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
+	ch := eb.Subscribe(agentID, eventType)
+	defer eb.Unsubscribe(agentID)
+
+	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
+		Reason:       "test_pause",
+		ControlledBy: "test",
+	}); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	eventID := "21000000-0000-0000-0000-000000000001"
+	if err := eb.Publish(ctx, events.Event{
+		ID:          eventID,
+		RunID:       eventBusTestRunID,
+		Type:        eventType,
+		SourceAgent: "api.v1",
+		Payload:     []byte(`{"entity_id":"21000000-0000-0000-0000-000000000002"}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEntityID("21000000-0000-0000-0000-000000000002")); err != nil {
+		t.Fatalf("Publish while paused: %v", err)
+	}
+
+	select {
+	case got := <-ch:
+		t.Fatalf("paused runtime delivered event %s before resume", got.ID)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("event deliveries while paused = %d, want 1", got)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
+	}
+
+	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
+		Reason:       "test_resume",
+		ControlledBy: "test",
+	})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if resumed.ReleasedCount != 1 {
+		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
+	}
+	select {
+	case got := <-ch:
+		if got.ID != eventID {
+			t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for queued event release")
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
 	}
 }
 

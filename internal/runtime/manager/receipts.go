@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
-	runtimebus "swarm/internal/runtime/bus"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
 	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
@@ -314,7 +313,34 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 	running := am.running
 	am.runMu.Unlock()
 
-	runtimebus.PauseRuntimeIngress()
+	if am.runtimeIngressSafetyPause != nil {
+		if pauseErr := am.runtimeIngressSafetyPause(am.runtimeContext(), reason); pauseErr != nil {
+			if am.bus != nil {
+				am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+					Level:     "error",
+					Component: "agent-manager",
+					Action:    "runtime_pause_owner_failed",
+					EventID:   strings.TrimSpace(eventID),
+					AgentID:   strings.TrimSpace(agentID),
+					Error:     strings.TrimSpace(pauseErr.Error()),
+					Detail: map[string]any{
+						"reason": reason,
+					},
+				})
+			}
+		}
+	} else if am.bus != nil {
+		am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+			Level:     "warn",
+			Component: "agent-manager",
+			Action:    "runtime_pause_owner_missing",
+			EventID:   strings.TrimSpace(eventID),
+			AgentID:   strings.TrimSpace(agentID),
+			Detail: map[string]any{
+				"reason": reason,
+			},
+		})
+	}
 	if am.bus != nil {
 		am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
 			Level:     "error",
@@ -365,32 +391,6 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 					Error:     strings.TrimSpace(err.Error()),
 				})
 			}
-		}
-	}
-	if err := am.bus.Publish(am.runtimeContext(), events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("platform.paused"),
-		SourceAgent: "runtime",
-		Payload: mustJSON(map[string]any{
-			"reason":    reason,
-			"paused_by": "runtime",
-			"timestamp": now.Format(time.RFC3339Nano),
-		}),
-		CreatedAt: now,
-	}); err != nil {
-		if am.bus != nil {
-			am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
-				Level:     "error",
-				Component: "agent-manager",
-				Action:    "publish_paused_failed",
-				EventID:   strings.TrimSpace(eventID),
-				AgentID:   strings.TrimSpace(agentID),
-				EntityID:  entityID,
-				Error:     strings.TrimSpace(err.Error()),
-				Detail: map[string]any{
-					"reason": reason,
-				},
-			})
 		}
 	}
 	if running {

@@ -895,6 +895,7 @@ func isStandaloneRuntimePlatformEventType(eventType string) bool {
 		"platform.agent_failed",
 		"platform.auth_required",
 		"platform.paused",
+		"platform.resumed",
 		"platform.dead_letter_escalation",
 		"platform.budget_threshold_crossed":
 		return true

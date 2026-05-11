@@ -24,6 +24,7 @@ import (
 	"swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimecredentials "swarm/internal/runtime/credentials"
+	runtimeingress "swarm/internal/runtime/ingress"
 	llm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
@@ -36,16 +37,17 @@ import (
 )
 
 type Stores struct {
-	SQLDB             *sql.DB
-	EventStore        runtimebus.EventStore
-	SessionRegistry   sessions.Registry
-	ConversationStore llm.ConversationPersistence
-	ManagerStore      runtimemanager.ManagerPersistence
-	ScheduleStore     runtimepipeline.SchedulePersistence
-	StartupOwnership  runtimestartupownership.Store
-	MailboxStore      runtimetools.MailboxPersistence
-	InboundStore      InboundPersistence
-	TurnStore         llm.TurnPersistence
+	SQLDB               *sql.DB
+	EventStore          runtimebus.EventStore
+	SessionRegistry     sessions.Registry
+	ConversationStore   llm.ConversationPersistence
+	ManagerStore        runtimemanager.ManagerPersistence
+	ScheduleStore       runtimepipeline.SchedulePersistence
+	StartupOwnership    runtimestartupownership.Store
+	MailboxStore        runtimetools.MailboxPersistence
+	InboundStore        InboundPersistence
+	RuntimeIngressStore runtimeingress.Store
+	TurnStore           llm.TurnPersistence
 }
 
 type runtimeLogSchemaCapabilityProvider interface {
@@ -88,6 +90,7 @@ type Runtime struct {
 	LLM            llm.Runtime
 	ToolExecutor   *runtimetools.Executor
 	Manager        *runtimemanager.AgentManager
+	RuntimeIngress *runtimeingress.Controller
 	InboundGateway *InboundGateway
 	ToolGateway    *runtimemcp.Gateway
 	MCPTurns       *runtimemcp.TurnContextRegistry
@@ -269,6 +272,11 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
 	rt.Bus = bus
+	rt.RuntimeIngress = runtimeingress.NewController(stores.RuntimeIngressStore, rt.Bus, runtimeingress.Options{})
+	rt.Bus.SetRuntimeIngressDispatchGate(rt.RuntimeIngress)
+	if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
+		return nil, fmt.Errorf("sync runtime ingress state: %w", err)
+	}
 
 	var managerRef *runtimemanager.AgentManager
 	rt.Scheduler = runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
@@ -418,16 +426,24 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			}
 		},
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
-		ThrottleSuppressPrefixes:       runtimeThrottleSuppressPrefixes(source),
-		DisableSpinupControl:           true,
+		RuntimeIngressSafetyPause: func(ctx context.Context, reason string) error {
+			_, err := rt.RuntimeIngress.SafetyPause(ctx, runtimeingress.TransitionRequest{
+				Reason:       reason,
+				ControlledBy: "runtime",
+			})
+			return err
+		},
+		ThrottleSuppressPrefixes: runtimeThrottleSuppressPrefixes(source),
+		DisableSpinupControl:     true,
 	}, stores.ManagerStore)
 	managerRef = rt.Manager
 
 	if stores.InboundStore != nil {
 		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, stores.InboundStore)
+		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 	}
 	if opts.EnableToolGateway {
-		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, strings.TrimSpace(opts.ToolGatewayToken), RuntimeMCPGatewayHooks(rt.Logger, func(agentID string) (runtimeactors.AgentConfig, bool) {
+		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, strings.TrimSpace(opts.ToolGatewayToken), RuntimeMCPGatewayHooks(rt.Logger, rt.RuntimeIngress, func(agentID string) (runtimeactors.AgentConfig, bool) {
 			if rt.Manager == nil {
 				return runtimeactors.AgentConfig{}, false
 			}

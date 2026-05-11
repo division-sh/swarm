@@ -32,6 +32,7 @@ type AgentManager struct {
 	budget                          BudgetGuard
 	resetRuntimeOwnedState          func()
 	runtimeShutdownAdmissionClosed  func() bool
+	runtimeIngressSafetyPause       func(context.Context, string) error
 	runtimeMode                     string
 	throttleSuppressPrefixes        []string
 	inFlightMu                      sync.Mutex
@@ -110,6 +111,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		budget:                          opts.Budget,
 		resetRuntimeOwnedState:          opts.ResetRuntimeOwnedState,
 		runtimeShutdownAdmissionClosed:  opts.RuntimeShutdownAdmissionClosed,
+		runtimeIngressSafetyPause:       opts.RuntimeIngressSafetyPause,
 		throttleSuppressPrefixes:        throttleSuppressPrefixes,
 		inFlight:                        make(map[string]struct{}),
 		loopCancel:                      make(map[string]context.CancelFunc),

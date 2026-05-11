@@ -22,6 +22,8 @@ const (
 	MailboxApprovalEventUnconfiguredCode = "MAILBOX_APPROVAL_EVENT_UNCONFIGURED"
 	InvalidDeferUntilCode                = "INVALID_DEFER_UNTIL"
 	IdempotencyConflictCode              = "IDEMPOTENCY_CONFLICT"
+	RuntimeAlreadyPausedCode             = "RUNTIME_ALREADY_PAUSED"
+	RuntimeNotPausedCode                 = "RUNTIME_NOT_PAUSED"
 )
 
 type Registry struct {

@@ -12,8 +12,8 @@ import (
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/config"
 	"swarm/internal/runtime"
-	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeingress "swarm/internal/runtime/ingress"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	workspace "swarm/internal/runtime/workspace"
@@ -262,8 +262,29 @@ type dashboardDynamicRuntimeControl struct {
 	supervisor *runtimeProjectSupervisor
 }
 
-func (c dashboardDynamicRuntimeControl) PauseIngress()  { runtimebus.PauseRuntimeIngress() }
-func (c dashboardDynamicRuntimeControl) ResumeIngress() { runtimebus.ResumeRuntimeIngress() }
+func (c dashboardDynamicRuntimeControl) PauseIngress() error {
+	rt := c.supervisor.CurrentRuntime()
+	if rt == nil || rt.RuntimeIngress == nil {
+		return fmt.Errorf("runtime ingress controller unavailable")
+	}
+	_, err := rt.RuntimeIngress.Pause(context.Background(), runtimeingress.TransitionRequest{
+		Reason:       "dashboard_action",
+		ControlledBy: "dashboard",
+	})
+	return err
+}
+
+func (c dashboardDynamicRuntimeControl) ResumeIngress() error {
+	rt := c.supervisor.CurrentRuntime()
+	if rt == nil || rt.RuntimeIngress == nil {
+		return fmt.Errorf("runtime ingress controller unavailable")
+	}
+	_, err := rt.RuntimeIngress.Resume(context.Background(), runtimeingress.TransitionRequest{
+		Reason:       "dashboard_action",
+		ControlledBy: "dashboard",
+	})
+	return err
+}
 
 func (c dashboardDynamicRuntimeControl) ResetState() error {
 	rt := c.supervisor.CurrentRuntime()
