@@ -282,6 +282,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	var aux struct {
 		Action           yaml.Node                `yaml:"action"`
 		CreateEntity     bool                     `yaml:"create_entity"`
+		SelectEntity     yaml.Node                `yaml:"select_entity"`
 		Template         string                   `yaml:"template"`
 		InstanceIDFrom   string                   `yaml:"instance_id_from"`
 		ConfigFrom       yaml.Node                `yaml:"config_from"`
@@ -332,6 +333,9 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Count:            aux.Count,
 	}
 	var err error
+	if h.SelectEntity, err = decodeSelectEntitySpecNode(&aux.SelectEntity); err != nil {
+		return err
+	}
 	if h.Action, err = decodeActionSpecNode(&aux.Action); err != nil {
 		return err
 	}
@@ -611,6 +615,7 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		"_note":             {},
 		"evidence_target":   {},
 		"create_entity":     {},
+		"select_entity":     {},
 		"emit":              {},
 		"guard":             {},
 		"advances_to":       {},
@@ -786,6 +791,57 @@ func decodeQuerySpecNode(node *yaml.Node) (*QuerySpec, error) {
 	default:
 		return nil, fmt.Errorf("unsupported query yaml node kind %d", node.Kind)
 	}
+}
+
+func decodeSelectEntitySpecNode(node *yaml.Node) (*SelectEntitySpec, error) {
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("INVALID-SELECT-ENTITY: select_entity must be a mapping")
+	}
+	allowed := map[string]struct{}{
+		"by": {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return nil, fmt.Errorf("UNDEFINED-FIELD: select_entity field %q not in platform spec", key)
+		}
+	}
+	var aux struct {
+		By map[string]string `yaml:"by"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return nil, err
+	}
+	if len(aux.By) == 0 {
+		return nil, fmt.Errorf("INVALID-SELECT-ENTITY: select_entity.by must declare at least one binding")
+	}
+	spec := &SelectEntitySpec{
+		By:       cloneStringMap(aux.By),
+		Bindings: make([]SelectEntityKeyBinding, 0, len(aux.By)),
+	}
+	for field, ref := range aux.By {
+		field = strings.TrimSpace(field)
+		ref = strings.TrimSpace(ref)
+		if field == "" {
+			return nil, fmt.Errorf("INVALID-SELECT-ENTITY: select_entity.by contains an empty entity field")
+		}
+		if ref == "" {
+			return nil, fmt.Errorf("INVALID-SELECT-ENTITY: select_entity.by.%s requires a payload ref", field)
+		}
+		parsed := paths.Parse(ref)
+		spec.Bindings = append(spec.Bindings, SelectEntityKeyBinding{
+			Field:   field,
+			Ref:     ref,
+			RefPath: parsed,
+		})
+	}
+	return spec, nil
 }
 
 func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {

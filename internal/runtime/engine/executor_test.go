@@ -315,6 +315,31 @@ func TestExecutor_ValidateRequestRejectsCreateEntityWithAccumulate(t *testing.T)
 	}
 }
 
+func TestExecutor_ValidateRequestRejectsCreateEntityWithSelectEntity(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	err = exec.ValidateRequest(ExecutionRequest{
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			CreateEntity: true,
+			SelectEntity: &runtimecontracts.SelectEntitySpec{
+				Bindings: []runtimecontracts.SelectEntityKeyBinding{{Field: "vertical_id", Ref: "payload.vertical_id"}},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and select_entity") {
+		t.Fatalf("ValidateRequest error = %v, want create_entity/select_entity error", err)
+	}
+}
+
 func TestExecutor_ValidateRequestRejectsTieredWeightedAverageWithoutDimensionKey(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),

@@ -151,9 +151,18 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		workflowEventEntityID(triggerCtx.Event),
 		triggerCtx.State.EntityID,
 	))
+	source := pc.SemanticSource()
+	if handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
+		selected, err := pc.selectHandlerEntityForFlow(ctx, flowID, nodeID, handler, triggerCtx.Event)
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+		entityID = selected.EntityID
+		triggerCtx.Event = selected.Event
+		triggerCtx.State = selected.State
+	}
 	originalEntityID := entityID
 	originalStateEntityID := strings.TrimSpace(triggerCtx.State.EntityID)
-	source := pc.SemanticSource()
 	entityID, triggerCtx.Event = resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
 	if !handler.CreateEntity && entityID != "" && originalStateEntityID != "" && originalStateEntityID != entityID {
 		triggerCtx.State = pc.currentWorkflowState(ctx, entityID)

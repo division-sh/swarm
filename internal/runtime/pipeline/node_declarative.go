@@ -284,6 +284,14 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	}
 	entityID := workflowEventEntityID(evt)
 	flowID := workflowNodeFlowID(e.coordinator.SemanticSource(), e.nodeID)
+	if handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
+		selected, err := e.coordinator.selectHandlerEntityForFlow(ctx, flowID, e.nodeID, handler, evt)
+		if err != nil {
+			return nil, err
+		}
+		entityID = selected.EntityID
+		evt = selected.Event
+	}
 	entityID, evt = ensureHandlerEntityID(e.coordinator.SemanticSource(), flowID, handler, entityID, evt)
 	ctx = withPipelineFlowScope(ctx, flowID)
 	currentState := e.coordinator.currentWorkflowState(ctx, entityID)

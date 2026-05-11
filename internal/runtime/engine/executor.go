@@ -136,6 +136,9 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if req.Handler.CreateEntity && req.Handler.Accumulate != nil {
 		return fmt.Errorf("%w: handler declares both create_entity and accumulate", ErrInvalidConfig)
 	}
+	if req.Handler.CreateEntity && req.Handler.SelectEntity != nil && !req.Handler.SelectEntity.Empty() {
+		return fmt.Errorf("%w: handler declares both create_entity and select_entity", ErrInvalidConfig)
+	}
 	if err := validateHandlerComputeSpecs(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}

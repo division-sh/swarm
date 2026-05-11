@@ -238,6 +238,7 @@ var bootCheckRegistry = []Check{
 	{ID: "gate_schema_validation", Severity: "error", Run: checkGateSchemaValidation},
 	{ID: "input_pin_wiring", Severity: "warning", Run: checkInputPinWiring},
 	{ID: "cross_flow_pin_ambiguity_validation", Severity: "error", Run: checkCrossFlowPinAmbiguityValidation},
+	{ID: "select_entity_validation", Severity: "error", Run: checkSelectEntityValidation},
 	{ID: "flow_boundary_create_entity_validation", Severity: "error", Run: checkFlowBoundaryCreateEntityValidation},
 }
 
