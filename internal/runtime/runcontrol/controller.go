@@ -161,7 +161,10 @@ func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (Trans
 	if c.queue != nil {
 		released, err := c.queue.ReleaseRunQueue(ctx, state.RunID, c.releaseLookback, c.releaseLimit)
 		if err != nil {
-			return TransitionResult{}, err
+			// The persisted transition is already committed. A transient queue-release
+			// failure must not turn run.continue into a false external failure because
+			// retrying would observe the run as no longer paused.
+			return result, nil
 		}
 		result.ReleasedDeliveries = released
 	}
