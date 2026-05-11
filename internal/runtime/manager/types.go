@@ -134,6 +134,7 @@ type AgentManagerOptions struct {
 	Budget                         BudgetGuard
 	ResetRuntimeOwnedState         func()
 	RuntimeShutdownAdmissionClosed func() bool
+	RuntimeIngressSafetyPause      func(context.Context, string) error
 	ThrottleSuppressPrefixes       []string
 	DisableSpinupControl           bool
 	EnableLegacySpinupControl      bool

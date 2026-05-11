@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimeingress "swarm/internal/runtime/ingress"
 )
 
 type InboundPersistence interface {
@@ -58,6 +59,7 @@ type InboundGateway struct {
 	store                   InboundPersistence
 	logger                  *RuntimeLogger
 	shutdownAdmissionClosed func() bool
+	runtimeIngress          *runtimeingress.Controller
 }
 
 func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
@@ -80,14 +82,23 @@ func (g *InboundGateway) Handler() http.Handler {
 	return g.mux
 }
 
+func (g *InboundGateway) SetRuntimeIngress(controller *runtimeingress.Controller) {
+	if g == nil {
+		return
+	}
+	g.runtimeIngress = controller
+}
+
 func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if g.shutdownAdmissionClosed != nil && g.shutdownAdmissionClosed() {
 		http.Error(w, "runtime shutting down", http.StatusServiceUnavailable)
 		return
 	}
-	if runtimebus.RuntimeIngressPaused() {
-		http.Error(w, "runtime reset in progress", http.StatusServiceUnavailable)
-		return
+	if g.runtimeIngress != nil {
+		if err := g.runtimeIngress.AdmitQueueableIngress(r.Context(), "inbound.webhook"); err != nil {
+			http.Error(w, "runtime ingress unavailable", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

@@ -464,8 +464,14 @@ type stubRuntimeControl struct {
 	resumeCalls int
 }
 
-func (s *stubRuntimeControl) PauseIngress()  { s.pauseCalls++ }
-func (s *stubRuntimeControl) ResumeIngress() { s.resumeCalls++ }
+func (s *stubRuntimeControl) PauseIngress() error {
+	s.pauseCalls++
+	return nil
+}
+func (s *stubRuntimeControl) ResumeIngress() error {
+	s.resumeCalls++
+	return nil
+}
 func (s *stubRuntimeControl) ResetState() error {
 	s.resetCalls++
 	return nil

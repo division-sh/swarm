@@ -184,8 +184,8 @@ type AgentController interface {
 }
 
 type RuntimeController interface {
-	PauseIngress()
-	ResumeIngress()
+	PauseIngress() error
+	ResumeIngress() error
 	ResetState() error
 }
 
@@ -931,10 +931,16 @@ func (h *Handler) handleRuntimeAction(w http.ResponseWriter, r *http.Request) {
 	}
 	switch strings.TrimSpace(req.Action) {
 	case "pause":
-		h.runtime.PauseIngress()
+		if err := h.runtime.PauseIngress(); err != nil {
+			writeJSONError(w, http.StatusConflict, err)
+			return
+		}
 		writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "runtime paused"})
 	case "resume":
-		h.runtime.ResumeIngress()
+		if err := h.runtime.ResumeIngress(); err != nil {
+			writeJSONError(w, http.StatusConflict, err)
+			return
+		}
 		writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "runtime resumed"})
 	case "reset_state":
 		if err := h.runtime.ResetState(); err != nil {

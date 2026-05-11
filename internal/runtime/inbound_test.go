@@ -11,6 +11,7 @@ import (
 
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimeingress "swarm/internal/runtime/ingress"
 )
 
 type failingInboundEventStore struct{}
@@ -93,5 +94,38 @@ func TestInboundGateway_Returns503WhenRuntimeShutdownAdmissionClosed(t *testing.
 	}
 	if store.recorded {
 		t.Fatal("did not expect inbound event recording after shutdown admission closed")
+	}
+}
+
+func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	controller := runtimeingress.NewController(nil, bus, runtimeingress.Options{})
+	bus.SetRuntimeIngressDispatchGate(controller)
+	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
+		Reason:       "test_pause",
+		ControlledBy: "test",
+	}); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	t.Cleanup(runtimebus.ResumeRuntimeIngress)
+	store := &rollbackTrackingInboundStore{}
+	g := NewInboundGateway(bus, nil, nil, store)
+	g.SetRuntimeIngress(controller)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/github", strings.NewReader(`{"id":"evt-1","type":"push"}`))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if !store.recorded {
+		t.Fatal("expected inbound event to be recorded while paused")
+	}
+	if store.rolled {
+		t.Fatal("did not expect inbound marker rollback for queued paused ingress")
 	}
 }

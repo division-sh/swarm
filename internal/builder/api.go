@@ -21,8 +21,8 @@ type InstanceReader interface {
 }
 
 type RuntimeController interface {
-	PauseIngress()
-	ResumeIngress()
+	PauseIngress() error
+	ResumeIngress() error
 	ResetState() error
 }
 
@@ -177,15 +177,13 @@ func NewHandler(opts Options) http.Handler {
 				if h.runtime == nil {
 					return errUnavailable("runtime controller is not configured")
 				}
-				h.runtime.PauseIngress()
-				return nil
+				return h.runtime.PauseIngress()
 			},
 			func() error {
 				if h.runtime == nil {
 					return errUnavailable("runtime controller is not configured")
 				}
-				h.runtime.ResumeIngress()
-				return nil
+				return h.runtime.ResumeIngress()
 			},
 			opts.RunDebug,
 		)

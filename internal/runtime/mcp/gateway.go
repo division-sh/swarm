@@ -21,7 +21,7 @@ import (
 )
 
 type GatewayHooks struct {
-	RuntimeIngressPaused           func() bool
+	RuntimeIngressRequestPaused    func(context.Context) (bool, error)
 	RuntimeShutdownAdmissionClosed func() bool
 	FormatError                    func(error) string
 	NewRuntimeError                func(code, operation string, retryable bool, cause error, format string, args ...any) error
@@ -104,7 +104,7 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusServiceUnavailable, ToolGatewayResponse{OK: false, Error: "runtime shutting down"})
 		return
 	}
-	if g.runtimeIngressPaused() {
+	if g.runtimeIngressPaused(r.Context()) {
 		WriteJSON(w, http.StatusServiceUnavailable, ToolGatewayResponse{OK: false, Error: "runtime reset in progress"})
 		return
 	}
@@ -170,7 +170,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			WriteRPCError(w, nil, -32002, "runtime shutting down")
 			return
 		}
-		if g.runtimeIngressPaused() {
+		if g.runtimeIngressPaused(r.Context()) {
 			WriteRPCError(w, nil, -32002, "runtime reset in progress")
 			return
 		}
@@ -810,11 +810,15 @@ func (g *Gateway) logMCP(r *http.Request, level, action string, err error, detai
 	g.hooks.Log(r.Context(), strings.ToLower(strings.TrimSpace(level)), strings.TrimSpace(action), agentID, entityID, detail, errText)
 }
 
-func (g *Gateway) runtimeIngressPaused() bool {
-	if g == nil || g.hooks.RuntimeIngressPaused == nil {
+func (g *Gateway) runtimeIngressPaused(ctx context.Context) bool {
+	if g == nil {
 		return false
 	}
-	return g.hooks.RuntimeIngressPaused()
+	if g.hooks.RuntimeIngressRequestPaused != nil {
+		paused, err := g.hooks.RuntimeIngressRequestPaused(ctx)
+		return err != nil || paused
+	}
+	return false
 }
 
 func (g *Gateway) runtimeShutdownAdmissionClosed() bool {

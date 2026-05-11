@@ -1870,6 +1870,38 @@ func TestGatewayHandleTool_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T
 	}
 }
 
+func TestGatewayHandleTool_DeniesThroughRuntimeIngressOwnerRead(t *testing.T) {
+	callCount := 0
+	readCount := 0
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		callCount++
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), testGatewayToken, GatewayHooks{
+		RuntimeIngressRequestPaused: func(context.Context) (bool, error) {
+			readCount++
+			return true, nil
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/tools/query_entities", strings.NewReader(`{"input":{"query":"kind='vertical'"}}`))
+	authorizeGatewayRequest(req)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "runtime reset in progress") {
+		t.Fatalf("body = %s, want runtime reset in progress", rec.Body.String())
+	}
+	if readCount != 1 {
+		t.Fatalf("runtime ingress owner reads = %d, want 1", readCount)
+	}
+	if callCount != 0 {
+		t.Fatalf("executor call count = %d, want 0", callCount)
+	}
+}
+
 func TestGatewayHandleMCP_DeniesToolCallWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	callCount := 0

@@ -96,7 +96,22 @@ func (a panicStubAgent) OnEvent(context.Context, events.Event) ([]events.Event, 
 
 func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.T) {
 	bus := &recordingReceiptBus{}
-	am := NewAgentManager(bus, nil)
+	pauseCalls := 0
+	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
+		RuntimeIngressSafetyPause: func(ctx context.Context, reason string) error {
+			pauseCalls++
+			return bus.Publish(ctx, events.Event{
+				Type:        events.EventType("platform.paused"),
+				SourceAgent: "runtime",
+				Payload: mustJSON(map[string]any{
+					"reason":    reason,
+					"paused_by": "runtime",
+					"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+				}),
+				CreatedAt: time.Now().UTC(),
+			})
+		},
+	})
 	am.agentCfg["agent-a"] = runtimeactors.AgentConfig{
 		ID:       "agent-a",
 		EntityID: "ent-123",
@@ -108,9 +123,17 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	if len(bus.published) != 2 {
 		t.Fatalf("published events = %d, want 2", len(bus.published))
 	}
-	authEvt := bus.published[0]
+	if pauseCalls != 1 {
+		t.Fatalf("runtime ingress safety pause calls = %d, want 1", pauseCalls)
+	}
+	var authEvt events.Event
+	for _, evt := range bus.published {
+		if evt.Type == events.EventType("platform.auth_required") {
+			authEvt = evt
+		}
+	}
 	if authEvt.Type != events.EventType("platform.auth_required") {
-		t.Fatalf("first event type = %s, want platform.auth_required", authEvt.Type)
+		t.Fatalf("published events = %#v, want platform.auth_required", bus.published)
 	}
 	if got := authEvt.EntityID(); got != "ent-123" {
 		t.Fatalf("auth event entity_id = %q, want ent-123", got)
