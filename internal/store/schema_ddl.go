@@ -351,6 +351,8 @@ func platformTableOrder(name string) int {
 		return 105
 	case "runtime_ingress_state":
 		return 108
+	case "run_control_state":
+		return 109
 	case "spend_ledger":
 		return 110
 	case "timers":

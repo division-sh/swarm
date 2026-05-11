@@ -29,6 +29,7 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimeruncontrol "swarm/internal/runtime/runcontrol"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	runtimestartupownership "swarm/internal/runtime/startupownership"
@@ -91,6 +92,7 @@ type Runtime struct {
 	ToolExecutor   *runtimetools.Executor
 	Manager        *runtimemanager.AgentManager
 	RuntimeIngress *runtimeingress.Controller
+	RunControl     *runtimeruncontrol.Controller
 	InboundGateway *InboundGateway
 	ToolGateway    *runtimemcp.Gateway
 	MCPTurns       *runtimemcp.TurnContextRegistry
@@ -276,6 +278,10 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	rt.Bus.SetRuntimeIngressDispatchGate(rt.RuntimeIngress)
 	if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
 		return nil, fmt.Errorf("sync runtime ingress state: %w", err)
+	}
+	if runControlStore, ok := stores.EventStore.(runtimeruncontrol.Store); ok && runControlStore != nil {
+		rt.RunControl = runtimeruncontrol.NewController(runControlStore, rt.Bus, runtimeruncontrol.Options{})
+		rt.Bus.SetRunDispatchGate(rt.RunControl)
 	}
 
 	var managerRef *runtimemanager.AgentManager

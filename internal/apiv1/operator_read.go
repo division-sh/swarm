@@ -31,6 +31,7 @@ type OperatorReadOptions struct {
 	Mailbox               MailboxAPIStore
 	Idempotency           APIIdempotencyStore
 	Events                EventPublisher
+	RunControl            RunControlController
 	RuntimeIngress        RuntimeIngressController
 	Source                semanticview.Source
 	MailboxApprovalRoutes map[string]string
@@ -173,6 +174,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorRunStartHandlers(opts) {
+		handlers[name] = handler
+	}
+	for name, handler := range OperatorRunControlHandlers(opts) {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorRuntimeControlHandlers(opts) {

@@ -127,7 +127,7 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 		if runID == "" {
 			return nil, &RPCError{Code: -32602, Message: "run_id is required"}
 		}
-		if err := h.runHub.stopRun(runID); err != nil {
+		if err := h.runHub.stopRun(ctx, runID); err != nil {
 			return nil, internalError(err)
 		}
 		return map[string]any{"run_id": runID, "status": "stopped"}, nil
@@ -139,7 +139,7 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 		if runID == "" {
 			return nil, &RPCError{Code: -32602, Message: "run_id is required"}
 		}
-		if err := h.runHub.pauseRun(runID); err != nil {
+		if err := h.runHub.pauseRun(ctx, runID); err != nil {
 			return nil, internalError(err)
 		}
 		return map[string]any{"run_id": runID, "status": "paused"}, nil
@@ -153,7 +153,10 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 		}
 		instanceIDs := asStringSlice(params["instance_ids"])
 		decision := strings.TrimSpace(asString(params["decision"]))
-		if err := h.runHub.continueRun(runID, instanceIDs, decision); err != nil {
+		if len(instanceIDs) > 0 || decision != "" {
+			return nil, &RPCError{Code: -32602, Message: "run.continue no longer accepts human-decision parameters; use mailbox approval methods"}
+		}
+		if err := h.runHub.continueRun(ctx, runID); err != nil {
 			return nil, internalError(err)
 		}
 		return map[string]any{"run_id": runID, "status": "running"}, nil

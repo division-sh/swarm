@@ -122,9 +122,12 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			return redelivered, err
 		}
 		if err := eb.PublishPersistedRecipients(ctx, evt, recipients); err != nil {
-			if errors.Is(err, ErrRuntimeIngressPaused) {
+			if errors.Is(err, ErrRuntimeIngressPaused) || errors.Is(err, ErrRunDispatchBlocked) {
 				_ = lease.Release(ctx)
-				return redelivered, nil
+				if errors.Is(err, ErrRuntimeIngressPaused) {
+					return redelivered, nil
+				}
+				continue
 			}
 			if errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
 				if recordErr := eb.markCommittedReplayScopeUnavailable(ctx, evt, err); recordErr != nil {
@@ -152,6 +155,72 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 
 func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, lookback time.Duration, limit int) (int, error) {
 	return eb.SweepUndispatched(ctx, lookback, limit)
+}
+
+func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback time.Duration, limit int) (int, error) {
+	if eb == nil || eb.store == nil {
+		return 0, nil
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return 0, nil
+	}
+	if limit <= 0 {
+		limit = DefaultOutboxSweeperConfig().Limit
+	}
+	if lookback <= 0 {
+		lookback = DefaultOutboxSweeperConfig().Lookback
+	}
+	replayStore, participates, err := runtimereplayclaim.RequireStore(eb.store)
+	if err != nil {
+		return 0, err
+	}
+	if !participates {
+		return 0, nil
+	}
+	lister, ok := eb.store.(interface {
+		ListEventsMissingPipelineReceiptForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
+	})
+	if !ok || lister == nil {
+		return 0, nil
+	}
+	records, err := lister.ListEventsMissingPipelineReceiptForRun(ctx, runID, time.Now().Add(-lookback), limit)
+	if err != nil {
+		return 0, err
+	}
+	redelivered := 0
+	for _, record := range records {
+		evt := record.Event
+		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID)
+		if err != nil {
+			return redelivered, err
+		}
+		if !claimed {
+			continue
+		}
+		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
+			eb.markPipelineReceipt(ctx, evt.ID, "error", replayErr)
+			_ = lease.Release(ctx)
+			continue
+		}
+		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID)
+		if err != nil {
+			eb.markPipelineReceipt(ctx, evt.ID, "error", err.Error())
+			_ = lease.Release(ctx)
+			return redelivered, err
+		}
+		if err := eb.PublishPersistedRecipients(ctx, evt, recipients); err != nil {
+			_ = lease.Release(ctx)
+			if errors.Is(err, ErrRunDispatchBlocked) {
+				return redelivered, nil
+			}
+			return redelivered, err
+		}
+		eb.markPipelineReceipt(ctx, evt.ID, "processed", "")
+		_ = lease.Release(ctx)
+		redelivered++
+	}
+	return redelivered, nil
 }
 
 func (eb *EventBus) markCommittedReplayScopeUnavailable(ctx context.Context, evt events.Event, cause error) error {

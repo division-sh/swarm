@@ -3109,6 +3109,16 @@ platform_tables:
         \    status              TEXT NOT NULL CHECK (status IN ('running', 'paused')),\n    reason              TEXT,\n\
         \    controlled_by       TEXT NOT NULL,\n    transition_event_id UUID REFERENCES events(event_id),\n    updated_at\
         \          TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);"
+    run_control_state:
+      description: 'Durable per-run operator lifecycle-control state owned by the canonical run-control owner. It distinguishes
+        operator-paused runs from fork-materialized paused rows, records stop/pause/continue transition reason and actor, and
+        is consumed by run.stop, run.pause, run.continue, EventBus run-scoped dispatch gating, and legacy Builder adapters.
+        Runtime ingress pause/resume does not consume this owner.'
+      ddl: "CREATE TABLE run_control_state (\n    run_id         UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,\n\
+        \    control_status TEXT NOT NULL CHECK (control_status IN ('running', 'paused', 'stopped')),\n    reason         TEXT,\n\
+        \    controlled_by  TEXT NOT NULL,\n    paused_at      TIMESTAMPTZ,\n    stopped_at     TIMESTAMPTZ,\n    updated_at\
+        \      TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_run_control_state_status (control_status, updated_at)\n\
+        );"
     spend_ledger:
       description: LLM token and API cost tracking. One row per agent invocation.
       ddl: "CREATE TABLE spend_ledger (\n    ledger_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id\
@@ -3379,9 +3389,10 @@ run_model:
     failure: 'A run transitions to failed when an unrecoverable platform error occurs (not a handler/agent error —
       those produce dead letters within the run). Examples: database connection loss, contract corruption, boot
       failure mid-run.'
-    pause_resume: 'Run-scoped pause/resume is owned by run.pause and run.continue. It gates dispatch for one run while
-      in-flight events complete. Runtime-scoped external ingress pause/resume is a separate global control owned by
-      api_specification.conventions.runtime_ingress.'
+    pause_resume: 'Run-scoped pause/resume is owned by run.pause and run.continue. Operator run-control transition
+      state is persisted in run_control_state so run.continue can distinguish operator-paused runs from materialized
+      fork rows that also use runs.status=paused. It gates dispatch for one run while in-flight events complete.
+      Runtime-scoped external ingress pause/resume is a separate global control owned by api_specification.conventions.runtime_ingress.'
   fork:
     description: 'Fork creates a new run by reconstructing full system state at a point in time, optionally
       loading new contracts, and resuming execution. The system automatically determines which events need

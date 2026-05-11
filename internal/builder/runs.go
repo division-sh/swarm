@@ -29,6 +29,7 @@ type runSession struct {
 	subs               map[string]func(RunEventEnvelope)
 	controlEvents      []RunEventEnvelope
 	terminal           bool
+	paused             bool
 	debug              runDebugStreamState
 }
 

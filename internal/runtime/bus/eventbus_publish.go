@@ -39,6 +39,7 @@ func pipelineReceiptStatus(ctx context.Context, publishErr error) (string, strin
 }
 
 var ErrRuntimeIngressPaused = errors.New("runtime ingress is paused")
+var ErrRunDispatchBlocked = errors.New("run dispatch is blocked")
 
 func (eb *EventBus) runtimeIngressDispatchPaused(ctx context.Context, evt events.Event) (bool, error) {
 	if eb == nil || runtimeIngressDispatchBypass(evt) {
@@ -55,6 +56,23 @@ func (eb *EventBus) runtimeIngressDispatchPaused(ctx context.Context, evt events
 		return false, err
 	}
 	return paused, nil
+}
+
+func (eb *EventBus) runDispatchBlocked(ctx context.Context, evt events.Event) (bool, error) {
+	if eb == nil {
+		return false, nil
+	}
+	runID := strings.TrimSpace(evt.RunID)
+	if runID == "" {
+		return false, nil
+	}
+	eb.mu.RLock()
+	gate := eb.runDispatchGate
+	eb.mu.RUnlock()
+	if gate == nil {
+		return false, nil
+	}
+	return gate.QueueableRunDispatchBlocked(ctx, runID)
 }
 
 func runtimeIngressDispatchBypass(evt events.Event) bool {
@@ -227,6 +245,17 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 		}, "", 0)
 		return nil
 	}
+	if blocked, err := eb.runDispatchBlocked(txctx, evt); err != nil {
+		return err
+	} else if blocked {
+		eb.logRuntime(txctx, "debug", "Run dispatch is blocked; transactional event persisted without dispatch", "eventbus", "run_dispatch_blocked", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+			"transactional":    true,
+			"run_id":           strings.TrimSpace(evt.RunID),
+			"recipients_count": len(inboundPlan.Recipients),
+			"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+		}, "", 0)
+		return nil
+	}
 	passthrough, deferred, err := eb.runInterceptors(txctx, evt)
 	if err != nil {
 		return err
@@ -345,6 +374,20 @@ func (eb *EventBus) publishTransactional(
 				"recipients_count": len(inboundPlan.Recipients),
 				"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
 			}, "", 0)
+		}
+		if !queued {
+			blocked, err := eb.runDispatchBlocked(ctx, evt)
+			if err != nil {
+				return err
+			}
+			if blocked {
+				queued = true
+				eb.logRuntime(ctx, "debug", "Run dispatch is blocked; event persisted without dispatch", "eventbus", "run_dispatch_blocked", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+					"run_id":           strings.TrimSpace(evt.RunID),
+					"recipients_count": len(inboundPlan.Recipients),
+					"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+				}, "", 0)
+			}
 		}
 	}
 	if passthrough && !queued {
@@ -563,6 +606,16 @@ func (eb *EventBus) deliverSubscribedPublishPlan(ctx context.Context, evt events
 	}
 	if paused {
 		eb.logRuntime(ctx, "debug", "Runtime ingress is paused; event persisted without dispatch", "eventbus", "runtime_ingress_queued", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+			"recipients_count": len(plan.Recipients),
+			"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+		}, "", 0)
+		return true, nil
+	}
+	if blocked, err := eb.runDispatchBlocked(ctx, evt); err != nil {
+		return false, err
+	} else if blocked {
+		eb.logRuntime(ctx, "debug", "Run dispatch is blocked; event persisted without dispatch", "eventbus", "run_dispatch_blocked", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+			"run_id":           strings.TrimSpace(evt.RunID),
 			"recipients_count": len(plan.Recipients),
 			"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
 		}, "", 0)
@@ -843,6 +896,18 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		}, "", 0)
 		return nil
 	}
+	if blocked, err := eb.runDispatchBlocked(ctx, evt); err != nil {
+		return err
+	} else if blocked {
+		queued = true
+		eb.logRuntime(ctx, "debug", "Run dispatch is blocked; direct event persisted without dispatch", "eventbus", "run_dispatch_blocked", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+			"direct":           true,
+			"run_id":           strings.TrimSpace(evt.RunID),
+			"recipients_count": len(plan.Recipients),
+			"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+		}, "", 0)
+		return nil
+	}
 	if err := eb.deliverToAgents(ctx, evt, plan.Recipients); err != nil {
 		return err
 	}
@@ -882,6 +947,11 @@ func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.E
 		return err
 	} else if paused {
 		return ErrRuntimeIngressPaused
+	}
+	if blocked, err := eb.runDispatchBlocked(ctx, evt); err != nil {
+		return err
+	} else if blocked {
+		return ErrRunDispatchBlocked
 	}
 	scope, err := eb.authoritativeReplayScopeForEvent(ctx, evt.ID)
 	if err != nil {
