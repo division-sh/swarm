@@ -193,6 +193,7 @@ func main() {
 			},
 			Database:              stores.Postgres,
 			Runs:                  stores.Postgres,
+			Observability:         stores.Postgres,
 			Mailbox:               stores.Postgres,
 			Idempotency:           stores.Postgres,
 			Events:                rt.Bus,

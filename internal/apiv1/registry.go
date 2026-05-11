@@ -15,6 +15,7 @@ const (
 	BundleMismatchCode                   = "BUNDLE_MISMATCH"
 	UnsupportedBundleRefCode             = "UNSUPPORTED_BUNDLE_REF"
 	EventNotDeclaredCode                 = "EVENT_NOT_DECLARED"
+	EventNotFoundCode                    = "EVENT_NOT_FOUND"
 	PayloadValidationFailedCode          = "PAYLOAD_VALIDATION_FAILED"
 	RunNotFoundCode                      = "RUN_NOT_FOUND"
 	RunAlreadyTerminalCode               = "RUN_ALREADY_TERMINAL"
