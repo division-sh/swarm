@@ -78,15 +78,15 @@ func (s *PostgresStore) loadRunForkMaterializedEntitySnapshotMetadata(ctx contex
 		flowInstance = strings.TrimSpace(sourceState.FlowInstance)
 		source = RunForkMaterializedEntitySnapshotMetadataSourceEntityState
 	}
-	entityType := stringFieldValue(entity.Fields, "entity_type")
-	if entityType == "" && sourceState.Exists {
-		entityType = strings.TrimSpace(sourceState.EntityType)
+	if !sourceState.Exists {
+		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-T entity_state metadata for entity %s", entityID), false, nil
+	}
+	entityType := strings.TrimSpace(sourceState.EntityType)
+	if reconstructedEntityType := stringFieldValue(entity.Fields, "entity_type"); reconstructedEntityType != "" && reconstructedEntityType != entityType {
+		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot reconcile reconstructed entity_type %q with source-at-T entity_state entity_type %q for entity %s", reconstructedEntityType, entityType, entityID), false, nil
 	}
 	if flowInstance == "" || entityType == "" {
 		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-T flow_instance/entity_type metadata for entity %s", entityID), false, nil
-	}
-	if source == RunForkMaterializedEntitySnapshotMetadataSourceEntityState && !sourceState.Exists {
-		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-T entity_state metadata for entity %s", entityID), false, nil
 	}
 	return RunForkMaterializedEntitySnapshotMetadata{
 		Owner:        RunForkMaterializedEntitySnapshotMetadataOwner,
