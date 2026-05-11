@@ -210,6 +210,11 @@ active_issues:
     maps_to:
       - timestamp_fork_replay_resume_ownership
       - delivery_and_replay_ownership
+  - id: 686
+    title: Gate selected-contract authoritative agent delivery materialization
+    maps_to:
+      - timestamp_fork_replay_resume_ownership
+      - delivery_and_replay_ownership
   - id: 571
     title: get_entity truncates large current-entity reads and hides required fields
     maps_to:
@@ -307,6 +312,7 @@ nodes:
       - historical replay delivery/event replay restart and sweeper recovery must consume #633 fork-local event, delivery, and committed replay-scope rows through the persisted replay owner; source deliveries, current subscriptions, source receipts, and source dead letters are not recovery truth or suppressors
       - contract-swap historical replay execution must consume runtime.run_fork.historical_replay_execution plus selected recipient planning before EventBus.Publish writes selected fork deliveries; source delivery subscribers remain lineage only and store.run_fork.delivery_event_replay is not sufficient for selected recipient truth
       - selected-contract diagnostic/non-routed platform event outcome facts such as platform.runtime_log and platform.inbound_recorded are lineage/no-action evidence under frontier admission; they are not routed, copied, replayed, or used as selected-fork suppressors, while non-diagnostic platform/node/system outcomes remain split or fail-closed
+      - selected-contract authoritative agent delivery materialization is owned by runtime.run_fork.selected_contract_execution.authoritative_agent_delivery_materialization before any selected fork delivery write; it consumes runtime.run_fork.selected_contract_recipient_planning, treats planned selected agent recipients as authoritative, and fails closed before fork mutation when no selected-fork handler materializer exists, while source event_deliveries, source subscriptions, active EventBus channels, active descriptors, and CLI/API/dashboard state remain invalid delivery truth
     representative_issues:
       - 112
       - 144
@@ -325,6 +331,7 @@ nodes:
       - 635
       - 639
       - 668
+      - 686
     common_framing_mistakes:
       too_broad:
         - delivery is flaky
@@ -413,6 +420,7 @@ nodes:
       - 671
       - 678
       - 681
+      - 686
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
