@@ -3099,6 +3099,16 @@ platform_tables:
         \    response          JSONB NOT NULL,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    expires_at\
         \        TIMESTAMPTZ NOT NULL,\n    PRIMARY KEY (method, actor_token_id, idempotency_key),\n    INDEX idx_api_idempotency_expires\
         \ (expires_at)\n);"
+    runtime_ingress_state:
+      description: 'Durable singleton runtime ingress state owned by the canonical runtime ingress controller. It records whether
+        queueable event-producing ingress is running or paused, the last transition reason/actor, and the platform event emitted
+        for that transition. Runtime pause/resume API handlers, dashboard adapters, inbound admission, MCP/tool admission,
+        auth-breaker safety triggers, and reset safety triggers consume this owner instead of interpreting a process-local flag
+        as semantic truth.'
+      ddl: "CREATE TABLE runtime_ingress_state (\n    id                  INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),\n\
+        \    status              TEXT NOT NULL CHECK (status IN ('running', 'paused')),\n    reason              TEXT,\n\
+        \    controlled_by       TEXT NOT NULL,\n    transition_event_id UUID REFERENCES events(event_id),\n    updated_at\
+        \          TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);"
     spend_ledger:
       description: LLM token and API cost tracking. One row per agent invocation.
       ddl: "CREATE TABLE spend_ledger (\n    ledger_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id\
@@ -3369,8 +3379,9 @@ run_model:
     failure: 'A run transitions to failed when an unrecoverable platform error occurs (not a handler/agent error —
       those produce dead letters within the run). Examples: database connection loss, contract corruption, boot
       failure mid-run.'
-    pause_resume: 'Admin can pause a run (stop accepting new external events, drain in-flight events). Resume
-      re-enables external ingress. Platform events platform.paused and platform.resumed are emitted within the run.'
+    pause_resume: 'Run-scoped pause/resume is owned by run.pause and run.continue. It gates dispatch for one run while
+      in-flight events complete. Runtime-scoped external ingress pause/resume is a separate global control owned by
+      api_specification.conventions.runtime_ingress.'
   fork:
     description: 'Fork creates a new run by reconstructing full system state at a point in time, optionally
       loading new contracts, and resuming execution. The system automatically determines which events need
@@ -4072,13 +4083,25 @@ platform_events:
         emergency: Spend crossed emergency threshold. Platform pauses all agent sessions until human intervention.
         ok: Spend dropped below warning threshold (after a period boundary reset or budget increase). Resume normal operations.
     platform.paused:
-      description: Platform entered paused state. External ingress blocked — no new events accepted from external sources (API,
-        webhooks, admin CLI, timer fires). In-flight events (already in the event loop) complete their handler execution and commit.
-        Agent sessions in progress complete their current turn. New agent invocations are deferred until resume.
+      description: Runtime ingress entered paused state. Queueable event-producing ingress is accepted into canonical event
+        persistence but is not dispatched until platform.resumed/runtime.resume. Non-queueable synchronous request/response ingress
+        such as MCP/tool execution is rejected fail-closed while paused. In-flight events already dispatched complete their handler
+        execution and commit. Agent sessions in progress complete their current turn; new agent invocations for queued work are
+        deferred until resume.
       scope: global
       payload:
         reason: string
         paused_by: string
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+    platform.resumed:
+      description: Runtime ingress left paused state. Queued event-producing ingress is eligible for normal EventBus dispatch
+        exactly once through the canonical delivery/idempotency owners. Synchronous request/response ingress may execute again
+        after resume.
+      scope: global
+      payload:
+        reason: string
+        resumed_by: string
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.agent_started:
@@ -4125,7 +4148,7 @@ platform_events:
       them. They follow standard routing, delivery, and persistence rules.
     routable_events: 'Platform events that enter the normal event loop: platform.dead_letter, platform.agent_failed,
       platform.agent_panic, platform.event_quarantined, platform.dead_letter_escalation, platform.reset, platform.auth_required,
-      platform.paused, platform.boot, platform.recovery_failed, platform.agent_started, platform.budget_threshold_crossed.
+      platform.paused, platform.resumed, platform.boot, platform.recovery_failed, platform.agent_started, platform.budget_threshold_crossed.
       Products can subscribe to these.'
     diagnostic_events: 'Platform events that bypass the event loop and are persisted directly to the events table:
       platform.runtime_log, platform.inbound_recorded. These are high-frequency diagnostic records. Routing them through the
@@ -4897,6 +4920,72 @@ api_specification:
 
         '
       unsubscribe: "rpc.unsubscribe({subscription_id}) \u2192 {ok}"
+    runtime_ingress:
+      owner: 'The canonical runtime ingress controller owns runtime.pause/runtime.resume transitions, persisted paused/running
+        state, runtime resource-state errors, platform.paused/platform.resumed emission, event-producing ingress admission, dispatch
+        gating, and legacy adapter consumption. Low-level runtimebus flags may exist only as implementation plumbing; they are
+        not semantic owners.'
+      state_storage: runtime_ingress_state
+      states:
+      - running
+      - paused
+      transitions:
+        pause:
+          method: runtime.pause
+          from: running
+          to: paused
+          already_in_state_error: RUNTIME_ALREADY_PAUSED
+          idempotency: 'If idempotency_key is present, replay with the same request body returns the original success response.
+            A fresh pause while already paused returns RUNTIME_ALREADY_PAUSED.'
+          emits: platform.paused
+        resume:
+          method: runtime.resume
+          from: paused
+          to: running
+          already_in_state_error: RUNTIME_NOT_PAUSED
+          idempotency: 'If idempotency_key is present, replay with the same request body returns the original success response.
+            A fresh resume while already running returns RUNTIME_NOT_PAUSED.'
+          emits: platform.resumed
+      queueable_ingress:
+      - surface: inbound.webhook
+        description: External webhook/provider events are queueable. While paused, valid signed ingress is persisted as events
+          and deduplicated normally, but dispatch is gated until resume.
+      - surface: api.event_producing_methods
+        description: Event-producing API/admin surfaces such as run.start and future explicit event-publish APIs are queueable.
+          While paused, they may persist canonical root/input events and lifecycle rows but must not dispatch subscriber work until
+          resume.
+      - surface: timer.fire
+        description: Timer fire events are queueable event-producing ingress. While paused, due timers may persist their event
+          identity but dispatch is gated until resume.
+      non_queueable_ingress:
+      - surface: mcp.tool_call
+        description: Synchronous MCP/tool execution is request/response work, not an async event-producing ingress contract.
+          It fails closed while paused unless a later spec adds an explicit async queue contract.
+      - surface: mcp.json_rpc_call
+        description: Synchronous MCP JSON-RPC calls fail closed while paused for the same reason as tool calls; do not fake
+          queued semantics for a caller waiting on an immediate result.
+      - surface: read_only_operator_api
+        description: Read-only JSON-RPC operator methods are not ingress and remain allowed while paused unless a method publishes
+          events or starts executable work.
+      queued_not_dispatched: 'The events table is the durable queue for queueable ingress. A queued ingress event has a canonical
+        events row and normal deduplication/idempotency metadata, but subscriber work must not execute while runtime_ingress_state.status
+        is paused. Implementations may create event_deliveries in their existing pending state, or delay delivery-row creation
+        until resume, but event_deliveries must not transition to in_progress and handlers/agents/system nodes must not run
+        until resume.'
+      resume_release: 'runtime.resume makes queued ingress eligible for normal EventBus routing/delivery exactly once through the
+        canonical event/delivery/idempotency owners. It must not duplicate already persisted events or bypass normal delivery
+        ownership.'
+      consumers:
+        v1_runtime_methods: runtime.pause and runtime.resume consume this owner and API idempotency.
+        dashboard_runtime_actions: 'POST /api/runtime/actions {pause,resume} is an adapter to this owner, not an independent
+          pause flag writer.'
+        inbound_webhook: Inbound webhook admission consumes this owner for queueable event-producing ingress.
+        mcp_tool_gateway: MCP/tool ingress consumes this owner for fail-closed paused-state rejection unless a later async queue
+          contract is approved.
+        auth_breaker: Auth/credit breaker consumes a safety-trigger entrypoint on this owner and may emit platform.paused, but
+          it does not define public API idempotency/resource-state semantics.
+        reset: Runtime reset consumes a safety-trigger gate or reset-specific entrypoint and remains separate from public
+          runtime.pause/runtime.resume API semantics.
     idempotency:
       one_rule: "All mutating methods accept an optional `idempotency_key` parameter.\nIf provided, the runtime stores `(method,\
         \ actor_token, idempotency_key)\n\u2192 original_response` for a TTL window of 24 hours starting after the\nfirst\
@@ -7322,7 +7411,8 @@ api_specification:
       errors: []
     runtime.pause:
       tier: should_have
-      description: Pause runtime ingress. New events are queued but not dispatched. In-flight handlers complete.
+      description: Pause runtime ingress. Queueable event-producing ingress is persisted but not dispatched until runtime.resume;
+        synchronous MCP/tool request-response ingress fails closed while paused. In-flight handlers complete.
       scope:
         required:
         - control:runtime
@@ -7342,7 +7432,8 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     runtime.resume:
       tier: should_have
-      description: Resume runtime ingress.
+      description: Resume runtime ingress. Queued event-producing ingress becomes eligible for normal EventBus dispatch exactly
+        once through canonical delivery/idempotency owners.
       scope:
         required:
         - control:runtime
