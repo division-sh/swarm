@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 
 	"swarm/internal/events"
 	"swarm/internal/runtime/bus"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/runtime/runforkadmission"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
@@ -235,6 +238,150 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 		t.Fatalf("result mutated before selected agent materialization rejection: %#v", result)
 	}
 	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
+}
+
+func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRuntime(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002202, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at)
+	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
+
+	agent := &selectedContractForkTestAgent{}
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+		AgentRuntime: SelectedContractAgentRuntimeOptions{
+			AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+				agent.Configure(cfg)
+				return agent, nil
+			},
+			QuiescenceTimeout: 5 * time.Second,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
+	}
+	if result.AgentRuntimeMaterialization == nil ||
+		result.AgentRuntimeMaterialization.Owner != store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner ||
+		result.AgentRuntimeMaterialization.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
+		result.AgentRuntimeMaterialization.ExecutionOwner != store.RunForkSelectedContractExecutionOwner ||
+		!result.AgentRuntimeMaterialization.MaterializationRequired ||
+		!result.AgentRuntimeMaterialization.MaterializationSupported ||
+		!result.AgentRuntimeMaterialization.EphemeralForkLocal ||
+		!containsString(result.AgentRuntimeMaterialization.AgentRecipients, "test-agent") ||
+		!containsString(result.AgentRuntimeMaterialization.ConfiguredAgentIDs, "test-agent") {
+		t.Fatalf("agent runtime materialization = %#v", result.AgentRuntimeMaterialization)
+	}
+	if result.Owner != store.RunForkSelectedContractExecutionOwner ||
+		result.Materialization.ForkRunID == "" ||
+		!result.Activation.Activated ||
+		result.ExecutedEventCount != 1 ||
+		len(result.ForkEvents) != 1 {
+		t.Fatalf("selected execution result = %#v", result)
+	}
+	if got := agent.SeenRunIDs(); len(got) != 1 || got[0] != result.Materialization.ForkRunID {
+		t.Fatalf("agent saw run ids = %#v, want fork run %s", got, result.Materialization.ForkRunID)
+	}
+	if got := agent.SeenEventIDs(); len(got) != 1 || got[0] != result.ForkEvents[0].ForkEventID {
+		t.Fatalf("agent saw event ids = %#v, want fork event %s", got, result.ForkEvents[0].ForkEventID)
+	}
+
+	var persistedAgents int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agents
+		WHERE agent_id = 'test-agent'
+	`).Scan(&persistedAgents); err != nil {
+		t.Fatalf("count persisted selected agent rows: %v", err)
+	}
+	if persistedAgents != 0 {
+		t.Fatalf("selected-fork runtime persisted current-runtime agent rows = %d, want 0", persistedAgents)
+	}
+
+	forkEventID := result.ForkEvents[0].ForkEventID
+	var sourceCopiedEvents int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_id = $2::uuid
+	`, result.Materialization.ForkRunID, sourceEventID).Scan(&sourceCopiedEvents); err != nil {
+		t.Fatalf("count copied source event ids: %v", err)
+	}
+	if sourceCopiedEvents != 0 {
+		t.Fatalf("copied source event ids into fork run = %d, want 0", sourceCopiedEvents)
+	}
+
+	var agentDeliveries, agentReceipts int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND event_id = $2::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'test-agent'
+	`, result.Materialization.ForkRunID, forkEventID).Scan(&agentDeliveries); err != nil {
+		t.Fatalf("count fork agent deliveries: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'test-agent'
+		  AND outcome = 'success'
+	`, forkEventID).Scan(&agentReceipts); err != nil {
+		t.Fatalf("count fork agent receipts: %v", err)
+	}
+	if agentDeliveries != 1 || agentReceipts != 1 {
+		t.Fatalf("fork-local agent outcomes deliveries=%d receipts=%d, want 1/1", agentDeliveries, agentReceipts)
+	}
+
+	var agentFollowUps, finalizedEvents int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name = 'task.completed'
+		  AND source_event_id = $2::uuid
+		  AND produced_by = 'test-agent'
+	`, result.Materialization.ForkRunID, forkEventID).Scan(&agentFollowUps); err != nil {
+		t.Fatalf("count fork-local agent follow-ups: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name = 'task.finalized'
+	`, result.Materialization.ForkRunID).Scan(&finalizedEvents); err != nil {
+		t.Fatalf("count finalized events: %v", err)
+	}
+	if agentFollowUps != 1 || finalizedEvents != 1 {
+		t.Fatalf("fork-local follow-ups task.completed=%d task.finalized=%d, want 1/1", agentFollowUps, finalizedEvents)
+	}
 }
 
 func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(t *testing.T) {
@@ -1487,6 +1634,73 @@ func assertSelectedContractExecutionCleanup(t *testing.T, db *sql.DB, sourceRunI
 		t.Fatalf("cleanup left fork rows runs:%d events:%d deliveries:%d receipts:%d state:%d mutations:%d bindings:%d lineage:%d route_recoveries:%d",
 			forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows, routeRecoveryRows)
 	}
+}
+
+type selectedContractForkTestAgent struct {
+	mu       sync.Mutex
+	cfg      runtimeactors.AgentConfig
+	runIDs   []string
+	eventIDs []string
+}
+
+func (a *selectedContractForkTestAgent) Configure(cfg runtimeactors.AgentConfig) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg = cfg
+}
+
+func (a *selectedContractForkTestAgent) ID() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cfg.ID
+}
+
+func (a *selectedContractForkTestAgent) Type() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cfg.Type
+}
+
+func (a *selectedContractForkTestAgent) Subscriptions() []events.EventType {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]events.EventType, 0, len(a.cfg.Subscriptions))
+	for _, raw := range a.cfg.Subscriptions {
+		if eventType := strings.TrimSpace(raw); eventType != "" {
+			out = append(out, events.EventType(eventType))
+		}
+	}
+	return out
+}
+
+func (a *selectedContractForkTestAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
+	a.mu.Lock()
+	a.runIDs = append(a.runIDs, strings.TrimSpace(evt.RunID))
+	a.eventIDs = append(a.eventIDs, strings.TrimSpace(evt.ID))
+	agentID := strings.TrimSpace(a.cfg.ID)
+	a.mu.Unlock()
+
+	return []events.Event{{
+		Type:          events.EventType("task.completed"),
+		SourceAgent:   agentID,
+		Payload:       json.RawMessage(`{}`),
+		RunID:         evt.RunID,
+		ParentEventID: evt.ID,
+		CreatedAt:     time.Now().UTC(),
+		Envelope:      evt.NormalizedEnvelope(),
+	}}, nil
+}
+
+func (a *selectedContractForkTestAgent) SeenRunIDs() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.runIDs...)
+}
+
+func (a *selectedContractForkTestAgent) SeenEventIDs() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.eventIDs...)
 }
 
 func runForkExecutionRepoRoot(t *testing.T) string {

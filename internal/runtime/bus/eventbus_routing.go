@@ -15,15 +15,19 @@ import (
 var errAuthoritativeDeliveryIncomplete = errors.New("authoritative delivery incomplete")
 
 func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[string]ActiveAgentDescriptor, bool, error) {
+	ephemeral := eb.runtimeActiveAgentDescriptors()
 	lister, ok := eb.store.(ActiveAgentDescriptorLister)
 	if !ok {
+		if len(ephemeral) > 0 {
+			return ephemeral, true, nil
+		}
 		return nil, false, nil
 	}
 	descriptors, err := lister.ListActiveAgentDescriptors(ctx)
 	if err != nil {
 		return nil, true, err
 	}
-	set := make(map[string]ActiveAgentDescriptor, len(descriptors))
+	set := make(map[string]ActiveAgentDescriptor, len(descriptors)+len(ephemeral))
 	for _, descriptor := range descriptors {
 		descriptor = descriptor.Normalized()
 		if descriptor.AgentID == "" {
@@ -31,7 +35,46 @@ func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[string]Acti
 		}
 		set[descriptor.AgentID] = descriptor
 	}
+	for id, descriptor := range ephemeral {
+		set[id] = descriptor
+	}
 	return set, true, nil
+}
+
+// RegisterRuntimeActiveAgentDescriptor adds in-memory active-agent metadata for
+// handlers that are intentionally not persisted as ordinary current-runtime
+// agents. Delivery planning still uses the normal authoritative recipient
+// policy; this only supplies runtime-local descriptor evidence to that policy.
+func (eb *EventBus) RegisterRuntimeActiveAgentDescriptor(descriptor ActiveAgentDescriptor) {
+	if eb == nil {
+		return
+	}
+	descriptor = descriptor.Normalized()
+	if descriptor.AgentID == "" {
+		return
+	}
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+	if eb.runtimeAgentDescriptors == nil {
+		eb.runtimeAgentDescriptors = make(map[string]ActiveAgentDescriptor)
+	}
+	eb.runtimeAgentDescriptors[descriptor.AgentID] = descriptor
+}
+
+func (eb *EventBus) runtimeActiveAgentDescriptors() map[string]ActiveAgentDescriptor {
+	if eb == nil {
+		return nil
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	if len(eb.runtimeAgentDescriptors) == 0 {
+		return nil
+	}
+	out := make(map[string]ActiveAgentDescriptor, len(eb.runtimeAgentDescriptors))
+	for id, descriptor := range eb.runtimeAgentDescriptors {
+		out[id] = descriptor
+	}
+	return out
 }
 
 func filterRecipientsForExplicitAgentScope(evt events.Event, recipients []string, descriptors map[string]ActiveAgentDescriptor) []string {

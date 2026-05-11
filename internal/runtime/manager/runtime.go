@@ -467,6 +467,45 @@ func (am *AgentManager) Run(ctx context.Context) {
 	}()
 }
 
+// RunAuthoritativeDeliveryOnly starts agent loops with authoritative recipient
+// channels only. It intentionally avoids live subscription patterns and
+// retry/recovery loops so selected-fork execution can consume canonical
+// recipient planning without reintroducing subscription-derived recipient truth.
+func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) {
+	am.runMu.Lock()
+	if am.running || am.shutdownAdmissionClosedLocked() {
+		am.runMu.Unlock()
+		return
+	}
+	runRoot := runtimebus.WithRuntimeEpoch(ctx, runtimebus.CurrentRuntimeEpoch())
+	am.runCtx, am.cancelRun = context.WithCancel(runRoot)
+	am.running = true
+	am.authBreakerTripped = false
+	am.runMu.Unlock()
+
+	am.mu.RLock()
+	agents := make([]Agent, 0, len(am.agents))
+	for _, a := range am.agents {
+		agents = append(agents, a)
+	}
+	am.mu.RUnlock()
+
+	for _, a := range agents {
+		am.startAgentLoopWithSubscriptions(am.runCtx, a, nil)
+	}
+
+	go func() {
+		<-am.runCtx.Done()
+		am.runMu.Lock()
+		am.running = false
+		for id, cancel := range am.loopCancel {
+			cancel()
+			delete(am.loopCancel, id)
+		}
+		am.runMu.Unlock()
+	}()
+}
+
 func (am *AgentManager) Recover(ctx context.Context) error {
 	_, err := am.recover(ctx, false)
 	return err
@@ -946,6 +985,10 @@ func resetOrphanedSessionsDetail(summary sessions.ResetSummary, source string, r
 }
 
 func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
+	am.startAgentLoopWithSubscriptions(parent, agent, agent.Subscriptions())
+}
+
+func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, agent Agent, subscriptions []events.EventType) {
 	loopCtx, cancel := context.WithCancel(parent)
 
 	am.runMu.Lock()
@@ -955,7 +998,7 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 	am.loopCancel[agent.ID()] = cancel
 	am.runMu.Unlock()
 
-	ch := am.bus.Subscribe(agent.ID(), agent.Subscriptions()...)
+	ch := am.bus.Subscribe(agent.ID(), subscriptions...)
 	am.runWG.Add(1)
 	go func() {
 		defer am.runWG.Done()

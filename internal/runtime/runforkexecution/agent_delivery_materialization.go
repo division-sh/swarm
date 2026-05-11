@@ -11,6 +11,7 @@ import (
 
 type SelectedContractAgentDeliveryMaterializationRequest struct {
 	RecipientPlanning store.RunForkSelectedContractRecipientPlanning
+	AgentRuntime      SelectedContractAgentRuntimeMaterialization
 }
 
 type SelectedContractAgentDeliveryMaterialization struct {
@@ -41,12 +42,42 @@ func RequireSelectedContractAgentDeliveryMaterialization(ctx context.Context, re
 	if len(agents) == 0 {
 		return result, nil
 	}
+	if selectedContractAgentRuntimeCoversRecipients(req.AgentRuntime, agents) {
+		result.MaterializationSupported = true
+		return result, nil
+	}
 	blocker := store.RunForkUnsupportedBlocker{
 		Code:    store.RunForkBlockerSelectedContractAgentHandlerMaterializationUnsupported,
 		Message: fmt.Sprintf("%s requires selected-fork handler materialization for authoritative agent recipients before fork mutation; missing selected-fork handler materializer for %s", store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner, strings.Join(agents, ",")),
 	}
 	result.UnsupportedBlockers = []store.RunForkUnsupportedBlocker{blocker}
 	return result, fmt.Errorf("%s: %s", blocker.Code, blocker.Message)
+}
+
+func selectedContractAgentRuntimeCoversRecipients(runtime SelectedContractAgentRuntimeMaterialization, agents []string) bool {
+	if strings.TrimSpace(runtime.Owner) != store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner ||
+		!runtime.MaterializationSupported {
+		return false
+	}
+	seen := map[string]struct{}{}
+	for _, id := range runtime.ConfiguredAgentIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+	for _, id := range runtime.AgentRecipients {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+	for _, agent := range agents {
+		if _, ok := seen[strings.TrimSpace(agent)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func selectedContractPlannedAgentRecipients(planning store.RunForkSelectedContractRecipientPlanning) []string {

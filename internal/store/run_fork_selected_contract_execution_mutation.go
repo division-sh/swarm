@@ -199,6 +199,9 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	if err := ensureRunForkNotAlreadyMaterialized(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID); err != nil {
 		return RunForkMaterialization{}, err
 	}
+	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, catalog, forkRunID); err != nil {
+		return RunForkMaterialization{}, err
+	}
 	metadata, err := loadRunForkEntityMetadata(plan)
 	if err != nil {
 		return RunForkMaterialization{}, err
@@ -1095,27 +1098,9 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 	if len(allowedEvents) == 0 {
 		return ensureRunForkActivationNoForkReplayState(ctx, tx, catalog, forkRunID)
 	}
-	for _, check := range []struct {
-		code  string
-		table string
-		query string
-	}{
-		{"fork_sessions_already_exist", "agent_sessions", `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid)`},
-		{"fork_conversation_audits_already_exist", "agent_conversation_audits", `SELECT EXISTS (SELECT 1 FROM agent_conversation_audits WHERE run_id = $1::uuid)`},
-		{"fork_turns_already_exist", "agent_turns", `SELECT EXISTS (SELECT 1 FROM agent_turns WHERE run_id = $1::uuid)`},
-	} {
-		if !catalog.hasColumns(check.table, "run_id") {
-			continue
-		}
-		var exists bool
-		if err := tx.QueryRowContext(ctx, check.query, forkRunID).Scan(&exists); err != nil {
-			return fmt.Errorf("check %s: %w", check.code, err)
-		}
-		if exists {
-			return runForkReplayResumeError(check.code, RunForkReplayResumeFactForkReplayState, fmt.Sprintf("fork activation blocked: %s", check.code))
-		}
-	}
 
+	// Materialization preflights empty fork-local replay state. At activation
+	// time, sessions/turns/audits may be fresh outputs from selected execution.
 	var missingLineage int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -1135,7 +1120,17 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 
 	var strayEvents int
 	if err := tx.QueryRowContext(ctx, `
-		WITH RECURSIVE selected_tree AS (
+		WITH RECURSIVE selected_agents AS (
+			SELECT DISTINCT d.subscriber_id AS agent_id
+			FROM event_deliveries d
+			INNER JOIN run_fork_selected_contract_executions x
+				ON x.fork_event_id = d.event_id
+			   AND x.fork_run_id = $1::uuid
+			   AND x.source_event_id = ANY($2::uuid[])
+			WHERE d.run_id = $1::uuid
+			  AND d.subscriber_type = 'agent'
+		),
+		selected_tree AS (
 			SELECT e.event_id
 			FROM events e
 			INNER JOIN run_fork_selected_contract_executions x
@@ -1143,6 +1138,12 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			   AND x.fork_run_id = $1::uuid
 			   AND x.source_event_id = ANY($2::uuid[])
 			WHERE e.run_id = $1::uuid
+			UNION
+			SELECT e.event_id
+			FROM events e
+			INNER JOIN selected_agents a ON a.agent_id = e.produced_by
+			WHERE e.run_id = $1::uuid
+			  AND e.produced_by_type = 'agent'
 			UNION
 			SELECT child.event_id
 			FROM events child

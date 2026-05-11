@@ -188,6 +188,15 @@ func (am *AgentManager) SpawnAgentForEntity(entityID string, cfg models.AgentCon
 	return am.SpawnAgent(cfg)
 }
 
+// RegisterEphemeralAgentForExecution constructs an in-memory agent with the
+// normal runtime construction path without persisting it as current-run truth.
+func (am *AgentManager) RegisterEphemeralAgentForExecution(ctx context.Context, rec PersistedAgent) error {
+	if am == nil {
+		return errors.New("agent manager is required")
+	}
+	return am.spawnAgentInternal(ctx, rec, false)
+}
+
 // SpawnEphemeralClone creates a task-scoped clone of a base agent. Ephemeral
 // clones are persisted with status=ephemeral so crash recovery does not hydrate
 // them as permanent agents.
