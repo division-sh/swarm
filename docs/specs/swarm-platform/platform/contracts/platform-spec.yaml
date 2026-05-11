@@ -3607,11 +3607,24 @@ run_model:
       fork truth or fork suppressors. This owner MUST NOT persist fork-local route rows, write event_deliveries, run
       handlers, write receipts, dead letters, idempotency state, emitted follow-ups, timers, sessions, turns,
       source-advanced policy, contract-swap state, or UI/API execution state.'
+    selected_contract_authoritative_agent_delivery_materialization: 'Selected-contract authoritative agent delivery
+      materialization is owned by runtime.run_fork.selected_contract_execution.authoritative_agent_delivery_materialization
+      as a mutating-execution gate after runtime.run_fork.selected_contract_recipient_planning and before any fork
+      materialization. It consumes only canonical selected-recipient planning to identify required agent recipients for
+      selected frontier events. If a selected-fork handler materializer is unavailable for any authoritative agent
+      recipient, the owner MUST fail closed before creating fork runs, selected-contract bindings, route recoveries,
+      fork events, fork deliveries, branch-divergence rows, or fork entity_state. Live source event_deliveries, source
+      subscriptions, current EventBus channels, active agent descriptors, CLI/dry-run JSON, and dashboard/API state are
+      not executable handler-availability truth. Node/system handler execution, route topology, timers, sessions,
+      turns, audits, non-agent replay, retry/idempotency/follow-up policy, restart recovery, and UI/API behavior remain
+      separate owners or split siblings.'
     selected_contract_supported_execution: 'The supported selected-contract timestamp-fork execution surface is
       swarm fork --contracts. It is owned by runtime.run_fork.selected_contract_execution, not by CLI, route helpers,
       delivery-row helpers, or source-row replay. The owner consumes store.run_fork.selected_contract_binding,
       selected_contract_execution_admission, selected_contract_route_topology, selected_contract_dynamic_route_topology,
-      and runtime.run_fork.selected_contract_recipient_planning before publishing selected frontier work. It creates fresh
+      runtime.run_fork.selected_contract_recipient_planning, and
+      runtime.run_fork.selected_contract_execution.authoritative_agent_delivery_materialization before publishing
+      selected frontier work. It creates fresh
       fork-local events and event_deliveries under the fork run_id, records selected source-to-fork lineage in
       run_fork_selected_contract_executions, runs selected handlers through the normal runtime pipeline, writes fork-local
       outcomes, and regenerates emitted follow-ups under the fork run_id. Source events are payload/lineage inputs only;

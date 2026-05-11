@@ -189,6 +189,54 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 }
 
+func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentRecipientWithoutHandlerMaterializer(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
+	platformSpecPath := filepath.Join(repoRoot, "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: platformSpecPath}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:          "selected_contracts",
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002201, 0).UTC()
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at)
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:  sourceRunID,
+		At:           sourceEventID,
+		Store:        pg,
+		SourceLoader: loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+	})
+	if err == nil ||
+		!strings.Contains(err.Error(), store.RunForkBlockerSelectedContractAgentHandlerMaterializationUnsupported) ||
+		!strings.Contains(err.Error(), store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner) ||
+		!strings.Contains(err.Error(), "test-agent") {
+		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want selected agent materialization blocker for test-agent", err)
+	}
+	if result.Owner != store.RunForkSelectedContractExecutionOwner ||
+		result.Materialization.ForkRunID != "" ||
+		result.Activation.ForkRunID != "" ||
+		result.ExecutedEventCount != 0 ||
+		len(result.ForkEvents) != 0 {
+		t.Fatalf("result mutated before selected agent materialization rejection: %#v", result)
+	}
+	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
+}
+
 func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -1604,6 +1652,40 @@ func assertNoForkExecutionRowsForRun(t *testing.T, db *sql.DB, forkRunID string)
 		if count != 0 {
 			t.Fatalf("%s rows for blocked selected fork = %d, want 0", name, count)
 		}
+	}
+}
+
+func assertNoSelectedContractExecutionMutationForSource(t *testing.T, db *sql.DB, sourceRunID, sourceEventID string) {
+	t.Helper()
+	ctx := context.Background()
+	for name, query := range map[string]string{
+		"fork_runs":                            `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`,
+		"selected_contract_bindings":           `SELECT COUNT(*) FROM run_fork_selected_contract_bindings WHERE source_run_id = $1::uuid`,
+		"selected_contract_executions":         `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE source_run_id = $1::uuid`,
+		"selected_contract_branch_divergences": `SELECT COUNT(*) FROM run_fork_selected_contract_branch_divergences WHERE source_run_id = $1::uuid`,
+		"selected_contract_route_recoveries":   `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE source_run_id = $1::uuid`,
+		"delivery_event_replays":               `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE source_run_id = $1::uuid`,
+	} {
+		var count int
+		if err := db.QueryRowContext(ctx, query, sourceRunID).Scan(&count); err != nil {
+			t.Fatalf("count %s rows: %v", name, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows for blocked selected fork source = %d, want 0", name, count)
+		}
+	}
+
+	var forkEvents int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE source_event_id = $1::uuid
+		  AND run_id <> $2::uuid
+	`, sourceEventID, sourceRunID).Scan(&forkEvents); err != nil {
+		t.Fatalf("count fork events: %v", err)
+	}
+	if forkEvents != 0 {
+		t.Fatalf("fork event rows for blocked selected fork source event = %d, want 0", forkEvents)
 	}
 }
 
