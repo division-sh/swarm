@@ -11,9 +11,7 @@ import (
 	"swarm/internal/store"
 )
 
-const (
-	builderRunDebugReplayLimit = 128
-)
+const builderRunDebugReplayLimit = 128
 
 type runDebugCandidate struct {
 	key   string
@@ -130,22 +128,13 @@ func (h *runHub) loadRunDebugTraceRows(ctx context.Context, runID string) ([]sto
 	if runID == "" {
 		return nil, false
 	}
-	rows := []store.RunDebugTraceRow{}
-	cursor := ""
-	for {
-		pageRows, nextCursor, err := h.runDebug.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{
-			Limit:  builderRunDebugReplayLimit,
-			Cursor: cursor,
-		})
-		if err != nil {
-			return nil, false
-		}
-		rows = append(rows, pageRows...)
-		cursor = strings.TrimSpace(nextCursor)
-		if cursor == "" {
-			return rows, true
-		}
+	rows, _, err := h.runDebug.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{
+		Limit: builderRunDebugReplayLimit,
+	})
+	if err != nil {
+		return nil, false
 	}
+	return rows, true
 }
 
 func (h *runHub) loadOperatorRuntimeLogs(ctx context.Context, runID string) ([]store.OperatorRuntimeLogEntry, bool) {
@@ -156,24 +145,15 @@ func (h *runHub) loadOperatorRuntimeLogs(ctx context.Context, runID string) ([]s
 	if runID == "" {
 		return nil, false
 	}
-	logs := []store.OperatorRuntimeLogEntry{}
-	cursor := ""
-	for {
-		result, err := h.runDebug.ListOperatorRuntimeLogs(ctx, store.OperatorRuntimeLogListOptions{
-			RunID:  runID,
-			Limit:  builderRunDebugReplayLimit,
-			Order:  "asc",
-			Cursor: cursor,
-		})
-		if err != nil {
-			return nil, false
-		}
-		logs = append(logs, result.Logs...)
-		cursor = strings.TrimSpace(result.NextCursor)
-		if cursor == "" {
-			return logs, true
-		}
+	result, err := h.runDebug.ListOperatorRuntimeLogs(ctx, store.OperatorRuntimeLogListOptions{
+		RunID: runID,
+		Limit: builderRunDebugReplayLimit,
+		Order: "desc",
+	})
+	if err != nil {
+		return nil, false
 	}
+	return result.Logs, true
 }
 
 func projectCanonicalRunDebugReplay(snapshot runtimebus.RunLifecycleSnapshot, traceRows []store.RunDebugTraceRow, runtimeLogs []store.OperatorRuntimeLogEntry) ([]RunEventEnvelope, runDebugStreamState) {
