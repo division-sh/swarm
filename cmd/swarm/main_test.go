@@ -741,13 +741,26 @@ func TestRunForkCommand_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *tes
 		  AND (
 			event_id = $2::uuid
 			OR COALESCE(source_event_id::text, '') = $2::text
-			OR event_name = 'platform.runtime_log'
 		  )
 	`, result.Materialization.ForkRunID, diagnosticEventID).Scan(&diagnosticCopies); err != nil {
 		t.Fatalf("count copied diagnostic platform events: %v", err)
 	}
 	if diagnosticCopies != 0 {
 		t.Fatalf("diagnostic platform events copied into fork = %d, want 0", diagnosticCopies)
+	}
+	var typedRuntimeDiagnostics int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name = 'platform.runtime_log'
+		  AND source_event_id = $2::uuid
+		  AND payload->'details'->>'runtime_lineage_owner' = $3
+	`, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID, store.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner).Scan(&typedRuntimeDiagnostics); err != nil {
+		t.Fatalf("count typed fork-local runtime diagnostics: %v", err)
+	}
+	if typedRuntimeDiagnostics == 0 {
+		t.Fatalf("typed fork-local runtime diagnostics = 0, want selected execution runtime logs parented to fork event")
 	}
 	var diagnosticLineageRows int
 	if err := db.QueryRowContext(context.Background(), `

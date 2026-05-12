@@ -115,7 +115,18 @@ func (s *PostgresStore) PersistEventWithDeliveriesAndScope(
 }
 
 func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.Event {
+	if strings.TrimSpace(evt.RunID) == "" {
+		if lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx); ok {
+			evt.RunID = strings.TrimSpace(lineage.RunID)
+		}
+	}
 	parentID := strings.TrimSpace(evt.ParentEventID)
+	if parentID == "" {
+		if lineageParentID := runtimecorrelation.RuntimeLineageParentForEvent(ctx, evt.ID); lineageParentID != "" {
+			parentID = lineageParentID
+			evt.ParentEventID = lineageParentID
+		}
+	}
 	if parentID == "" {
 		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
 			if inboundID := strings.TrimSpace(inbound.ID); inboundID != "" && inboundID != strings.TrimSpace(evt.ID) {

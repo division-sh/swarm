@@ -520,6 +520,12 @@ func selectedContractExecutionRequiredConsumers() []store.RunForkSelectedContrac
 			Reason:      "the fork-local runtime container binds EventBus, AgentManager, RuntimeLogger, and handler execution to the fork run_id rather than the source run_id",
 		},
 		{
+			Concept:     "fork_local_runtime_typed_lineage",
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner,
+			Reason:      "selected execution must carry typed runtime lineage for selected-fork diagnostics and platform events before compiling that model down to persisted ParentEventID/source_event_id truth",
+		},
+		{
 			Concept:     "fork_local_event_delivery_writes",
 			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,

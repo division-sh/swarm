@@ -222,11 +222,27 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 	detailMap := map[string]any{}
 	_ = json.Unmarshal(detail, &detailMap)
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	lineage, hasLineage := runtimecorrelation.RuntimeLineageFromContext(ctx)
+	if runID == "" && hasLineage {
+		runID = strings.TrimSpace(lineage.RunID)
+	}
 	lineageRunID := runID
 	if !hasRunID {
 		lineageRunID = ""
 	}
-	parentEventID, err := runtimeLogLineageParentEventID(ctx, db, lineageRunID, asString(detailMap["parent_event_id"]), e.EventID)
+	explicitParentEventID := asString(detailMap["parent_event_id"])
+	subjectEventID := strings.TrimSpace(e.EventID)
+	if hasLineage {
+		lineage = runtimeLogLineageForEntry(lineage, e)
+		if explicitParentEventID == "" {
+			explicitParentEventID = strings.TrimSpace(lineage.ParentEventID)
+		}
+		if subjectEventID == "" {
+			subjectEventID = strings.TrimSpace(lineage.SubjectEventID)
+		}
+		runtimeLogAddLineageDetails(detailMap, lineage)
+	}
+	parentEventID, err := runtimeLogLineageParentEventID(ctx, db, lineageRunID, explicitParentEventID, subjectEventID)
 	if err != nil {
 		return err
 	}
@@ -275,6 +291,57 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 		return err
 	}
 	return nil
+}
+
+func runtimeLogLineageForEntry(lineage runtimecorrelation.RuntimeLineage, e RuntimeLogEntry) runtimecorrelation.RuntimeLineage {
+	lineage = lineage.Normalized()
+	if v := strings.TrimSpace(e.EventID); v != "" {
+		lineage.SubjectEventID = v
+		if strings.TrimSpace(lineage.ParentEventID) == "" {
+			lineage.ParentEventID = v
+		}
+	}
+	if v := strings.TrimSpace(e.EventType); v != "" {
+		lineage.SubjectEventType = v
+	}
+	if lineage.RowCategory == "" {
+		lineage.RowCategory = runtimecorrelation.RuntimeLineageRowCategoryDiagnostic
+	}
+	return lineage.Normalized()
+}
+
+func runtimeLogAddLineageDetails(detailMap map[string]any, lineage runtimecorrelation.RuntimeLineage) {
+	if detailMap == nil {
+		return
+	}
+	lineage = lineage.Normalized()
+	if v := strings.TrimSpace(lineage.Owner); v != "" {
+		detailMap["runtime_lineage_owner"] = v
+	}
+	if v := strings.TrimSpace(lineage.RunID); v != "" {
+		detailMap["runtime_lineage_run_id"] = v
+	}
+	if v := strings.TrimSpace(lineage.SubjectEventID); v != "" {
+		detailMap["runtime_lineage_subject_event_id"] = v
+	}
+	if v := strings.TrimSpace(lineage.SubjectEventType); v != "" {
+		detailMap["runtime_lineage_subject_event_type"] = v
+	}
+	if v := strings.TrimSpace(lineage.ParentEventID); v != "" {
+		detailMap["runtime_lineage_parent_event_id"] = v
+	}
+	if v := strings.TrimSpace(string(lineage.RowCategory)); v != "" {
+		detailMap["runtime_lineage_row_category"] = v
+	}
+	if v := strings.TrimSpace(lineage.SelectedForkOwner); v != "" {
+		detailMap["runtime_lineage_selected_fork_owner"] = v
+	}
+	if v := strings.TrimSpace(string(lineage.Classification)); v != "" {
+		detailMap["runtime_lineage_classification"] = v
+	}
+	if lineage.SelectedForkContext {
+		detailMap["runtime_lineage_selected_fork_context"] = true
+	}
 }
 
 func runtimeLogLineageParentEventID(ctx context.Context, db *sql.DB, runID, explicitParentEventID, subjectEventID string) (string, error) {
