@@ -1,31 +1,29 @@
 package builder
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
+	runtimebus "swarm/internal/runtime/bus"
 	"swarm/internal/store"
 )
 
-func TestProjectCanonicalRunDebugReplay_PreservesCanonicalEventPayloadAndTimestamp(t *testing.T) {
+func TestProjectCanonicalRunDebugReplay_UsesCanonicalTraceRows(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
-	report := store.RunDebugReport{
-		RunID:      "run-123",
-		StartedAt:  now,
-		EventCount: 1,
-		Events: []store.RunDebugEvent{{
-			EventID:    "evt-1",
-			EventName:  "workflow.started",
-			EntityID:   "entity-1",
-			CreatedAt:  now,
-			Source:     "builder",
-			SourceType: "agent",
-			Payload:    json.RawMessage(`{"topic":"sample"}`),
-		}},
+	snapshot := runtimebus.RunLifecycleSnapshot{
+		RunID:     "run-123",
+		StartedAt: now,
 	}
+	traceRows := []store.RunDebugTraceRow{{
+		EventID:         "evt-1",
+		EventName:       "workflow.started",
+		EntityID:        "entity-1",
+		EventCreatedAt:  now,
+		EventSource:     "builder",
+		EventSourceType: "agent",
+	}}
 
-	replay, _ := projectCanonicalRunDebugReplay(report)
+	replay, _ := projectCanonicalRunDebugReplay(snapshot, traceRows, nil)
 	if len(replay) != 2 {
 		t.Fatalf("replay len = %d, want 2", len(replay))
 	}
@@ -45,31 +43,28 @@ func TestProjectCanonicalRunDebugReplay_PreservesCanonicalEventPayloadAndTimesta
 	if payload["source"] != "builder" {
 		t.Fatalf("payload.source = %#v", payload["source"])
 	}
-	rawPayload, _ := payload["payload"].(map[string]any)
-	if rawPayload["topic"] != "sample" {
-		t.Fatalf("payload.payload = %#v", rawPayload)
-	}
 }
 
 func TestProjectCanonicalRunDebugReplay_PreservesCanonicalRuntimeLogDetailAndTimestamp(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
-	report := store.RunDebugReport{
-		RunID: "run-123",
-		RuntimeLogs: []store.RunDebugRuntimeLog{{
-			EventID:   "evt-log-1",
-			Level:     "warn",
-			Component: "runtime",
-			Action:    "retrying",
-			EventType: "workflow.started",
-			AgentID:   "node-1",
-			EntityID:  "entity-1",
-			Error:     "boom",
-			Detail:    json.RawMessage(`{"component":"runtime","action":"retrying","error":"boom"}`),
-			CreatedAt: now,
-		}},
-	}
+	runtimeLogs := []store.OperatorRuntimeLogEntry{{
+		LogID:     "evt-log-1",
+		Level:     "warn",
+		Component: "runtime",
+		Source:    "node-1",
+		RunID:     "run-123",
+		EntityID:  "entity-1",
+		ErrorCode: "boom",
+		Message:   "retrying",
+		Details: map[string]any{
+			"component": "runtime",
+			"action":    "retrying",
+			"error":     "boom",
+		},
+		TS: now,
+	}}
 
-	replay, _ := projectCanonicalRunDebugReplay(report)
+	replay, _ := projectCanonicalRunDebugReplay(runtimebus.RunLifecycleSnapshot{}, nil, runtimeLogs)
 	if len(replay) != 1 {
 		t.Fatalf("replay len = %d, want 1", len(replay))
 	}

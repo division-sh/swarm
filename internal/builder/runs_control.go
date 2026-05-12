@@ -53,7 +53,7 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 		subs:               map[string]func(RunEventEnvelope){},
 		controlEvents:      []RunEventEnvelope{},
 		debug: runDebugStreamState{
-			eventIDs:      map[string]struct{}{},
+			traceRows:     map[string]string{},
 			runtimeLogIDs: map[string]struct{}{},
 		},
 	}
@@ -302,7 +302,7 @@ func (h *runHub) subscribe(runID string, listener func(RunEventEnvelope)) func()
 			subs:          map[string]func(RunEventEnvelope){},
 			controlEvents: []RunEventEnvelope{},
 			debug: runDebugStreamState{
-				eventIDs:      map[string]struct{}{},
+				traceRows:     map[string]string{},
 				runtimeLogIDs: map[string]struct{}{},
 			},
 		}

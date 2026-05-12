@@ -53,6 +53,26 @@ func asString(v any) string {
 	}
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func cloneAnyMap(values map[string]any) map[string]any {
+	if values == nil {
+		return nil
+	}
+	out := make(map[string]any, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
+}
+
 func ptrTime(v time.Time) *time.Time { return &v }
 
 func parseTestTime(raw string) time.Time {
@@ -591,6 +611,81 @@ func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string
 		report.RootEventType = root.EventName
 	}
 	return report, nil
+}
+
+func (s *stubBuilderRunStore) LoadRunDebugTracePage(_ context.Context, runID string, opts store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runID = strings.TrimSpace(runID)
+	rows := []store.RunDebugTraceRow{}
+	for _, evt := range s.events {
+		if strings.TrimSpace(evt.RunID) != runID {
+			continue
+		}
+		if opts.Since != nil && !evt.CreatedAt.After(opts.Since.UTC()) {
+			continue
+		}
+		rows = append(rows, store.RunDebugTraceRow{
+			EventID:         strings.TrimSpace(evt.ID),
+			EventName:       strings.TrimSpace(string(evt.Type)),
+			SourceEventID:   strings.TrimSpace(evt.ParentEventID),
+			EntityID:        strings.TrimSpace(evt.EntityID()),
+			EventSource:     strings.TrimSpace(evt.SourceAgent),
+			EventSourceType: "agent",
+			EventCreatedAt:  evt.CreatedAt.UTC(),
+		})
+	}
+	slices.SortFunc(rows, func(a, b store.RunDebugTraceRow) int {
+		if cmp := a.EventCreatedAt.Compare(b.EventCreatedAt); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.EventID, b.EventID)
+	})
+	limit := opts.Limit
+	if limit <= 0 || limit > len(rows) {
+		limit = len(rows)
+	}
+	return append([]store.RunDebugTraceRow(nil), rows[:limit]...), "", nil
+}
+
+func (s *stubBuilderRunStore) ListOperatorRuntimeLogs(_ context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	logs := []store.OperatorRuntimeLogEntry{}
+	for _, evt := range s.events {
+		if strings.TrimSpace(evt.RunID) != strings.TrimSpace(opts.RunID) || evt.Type != events.EventType("platform.runtime_log") {
+			continue
+		}
+		if opts.Since != nil && !evt.CreatedAt.After(opts.Since.UTC()) {
+			continue
+		}
+		payload := map[string]any{}
+		_ = json.Unmarshal(evt.Payload, &payload)
+		details, _ := payload["details"].(map[string]any)
+		logs = append(logs, store.OperatorRuntimeLogEntry{
+			LogID:     strings.TrimSpace(evt.ID),
+			TS:        evt.CreatedAt.UTC(),
+			Level:     strings.TrimSpace(asString(payload["log_level"])),
+			Component: strings.TrimSpace(asString(details["component"])),
+			Source:    strings.TrimSpace(firstNonEmpty(asString(details["agent_id"]), evt.SourceAgent)),
+			RunID:     strings.TrimSpace(evt.RunID),
+			EntityID:  strings.TrimSpace(firstNonEmpty(evt.EntityID(), asString(details["entity_id"]))),
+			ErrorCode: strings.TrimSpace(asString(details["error_code"])),
+			Message:   strings.TrimSpace(asString(payload["message"])),
+			Details:   cloneAnyMap(details),
+		})
+	}
+	slices.SortFunc(logs, func(a, b store.OperatorRuntimeLogEntry) int {
+		if cmp := a.TS.Compare(b.TS); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.LogID, b.LogID)
+	})
+	limit := opts.Limit
+	if limit <= 0 || limit > len(logs) {
+		limit = len(logs)
+	}
+	return store.OperatorRuntimeLogListResult{Logs: append([]store.OperatorRuntimeLogEntry(nil), logs[:limit]...)}, nil
 }
 
 type stubConversationCaps struct {
