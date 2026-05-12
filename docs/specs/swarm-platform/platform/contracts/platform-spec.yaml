@@ -3780,10 +3780,29 @@ run_model:
       materialization, restart recovery of fork-local handlers, session/turn/audit reconstruction, timers, non-agent
       replay, retry/idempotency/follow-up policy beyond normal execution, and UI/API behavior remain split unless this
       owner has explicit fork-local proof for that subcase.'
+    selected_contract_fork_local_runtime_container: 'Selected-contract fork-local live runtime container ownership is
+      runtime.run_fork.selected_contract_execution.fork_local_runtime_container. This owner consumes durable selected
+      binding/admission evidence, runtime.run_fork.selected_contract_recipient_planning,
+      runtime.run_fork.selected_contract_execution.authoritative_agent_delivery_materialization,
+      runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor when agent recipients
+      exist, selected route recovery evidence, and
+      runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy before any live
+      selected-fork publish path is authoritative. The container constructs the fork-run EventBus with recipient-plan
+      guards, registers only ephemeral fork-local runtime active-agent descriptors, starts selected handlers through
+      AgentManager under the fork run_id, binds RuntimeLogger/platform diagnostics to the selected-fork lineage policy,
+      waits for runtime quiescence, and owns cleanup obligations for failed selected-fork execution attempts. The same
+      container owner may be consumed by contract-swap/historical replay execution only after that path has independently
+      admitted executable selected work; it must not become a generic historical replay owner. Source events, source
+      deliveries, source recipients, source outcomes, source runtime/platform rows, live subscriptions, normal
+      AgentManager current state, EventBus descriptors alone, readiness JSON, CLI/API/dashboard/Builder output, and
+      produced_by_type alone are invalid as runtime-container truth. Typed runtime lineage, restart/recovery of
+      fork-local containers, current-state snapshot ownership, session/turn/audit reconstruction, non-agent replay,
+      retry/idempotency/follow-up policy beyond normal selected-fork output, and operator consumers remain separate
+      owners or split siblings unless separately approved.'
     selected_contract_fork_local_runtime_platform_event_lineage_policy: 'Selected-contract fork-local runtime/platform
       control event lineage is owned by
-      runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy under the broader
-      selected-fork runtime container. This owner covers fresh fork-run platform/control or diagnostic events emitted by
+      runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy under
+      runtime.run_fork.selected_contract_execution.fork_local_runtime_container. This owner covers fresh fork-run platform/control or diagnostic events emitted by
       the selected-fork runtime container while processing selected fork-local work, including agent-started,
       auth-required, runtime-ingress pause/resume, budget-threshold, event-quarantine, agent-panic, agent-failed,
       dead-letter-escalation, and runtime-log records. Such events are fork-local lineage/output evidence only when they
@@ -3804,11 +3823,12 @@ run_model:
       runtime.run_fork.selected_contract_recipient_planning, and
       runtime.run_fork.selected_contract_execution.authoritative_agent_delivery_materialization plus
       runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor when planned selected
-      agent recipients exist, and consumes
+      agent recipients exist, consumes runtime.run_fork.selected_contract_execution.fork_local_runtime_container for the
+      live fork-run EventBus/AgentManager/RuntimeLogger/cleanup/quiescence boundary, and consumes
       runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy for fork-local
       runtime/platform control outputs caused by selected execution. It creates fresh
       fork-local events and event_deliveries under the fork run_id, records selected source-to-fork lineage in
-      run_fork_selected_contract_executions, runs selected handlers through the normal runtime pipeline, writes fork-local
+      run_fork_selected_contract_executions, runs selected handlers through the fork-local runtime container and normal runtime pipeline, writes fork-local
       outcomes, and regenerates emitted follow-ups under the fork run_id. Source events are payload/lineage inputs only;
       source event_deliveries, recipients, receipts, dead letters, retry/idempotency state, and post-fork outcomes MUST
       NOT become executable fork work or fork suppressors. At/before-T source committed replay-scope marker rows may be
@@ -4024,6 +4044,18 @@ run_model:
         execution truth, synthesize receipts, or claim restart recovery. Flow-instance-scoped materialization without
         explicit fork-local proof, session/turn/audit reconstruction, timers, non-agent replay, retry/idempotency,
         follow-up policy beyond normal handler output, and UI/API consumers remain split siblings.'
+      3g1a_selected_contract_fork_local_runtime_container: 'For selected-contract mutating fork execution, the live
+        runtime container is owned by runtime.run_fork.selected_contract_execution.fork_local_runtime_container. It
+        consumes selected binding/admission, selected recipient planning, authoritative agent delivery materialization,
+        fork-local agent runtime materializer/executor proof when agent recipients exist, selected route recovery, and
+        fork-local runtime/platform lineage policy before EventBus.Publish, AgentManager handlers, RuntimeLogger
+        diagnostics, activation lineage inputs, cleanup, or quiescence are authoritative. The container may be consumed
+        by the contract-swap historical replay path only after that path has independently admitted executable selected
+        work, and it must preserve source rows/outcomes as lineage or blocker evidence only. EventBus descriptors,
+        normal AgentManager current state, readiness JSON, CLI/API/dashboard/Builder output, and produced_by_type alone
+        are not container truth. Typed runtime lineage, restart recovery, current-state snapshot ownership,
+        session/turn/audit reconstruction, non-agent replay, retry/idempotency/follow-up policy beyond normal selected
+        output, and operator consumers remain split siblings.'
       3g2_selected_contract_fork_local_runtime_platform_event_lineage_policy: 'For selected-contract mutating fork
         execution, runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy owns
         fresh fork-run runtime/platform control or diagnostic events emitted by the selected-fork runtime container while
@@ -4043,7 +4075,8 @@ run_model:
         topology proof or fail-closed classification, recipient planning, authoritative agent delivery materialization,
         and fork-local selected agent runtime materializer/executor proof when selected agent recipients exist. It mints
         fresh fork-local event IDs, writes fork event and delivery rows under the fork run_id, gates EventBus.Publish
-        through recipient-planning evidence, runs selected handlers through the normal runtime pipeline, records selected
+        through recipient-planning evidence, runs selected handlers through
+        runtime.run_fork.selected_contract_execution.fork_local_runtime_container and the normal runtime pipeline, records selected
         execution lineage, writes fork-local outcomes, consumes the fork-local runtime/platform event lineage policy for
         causally parented runtime control outputs, and regenerates follow-up events under the fork run_id. This is
         not full historical resume: route

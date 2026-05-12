@@ -367,6 +367,12 @@ func readinessReplayOwner(disposition store.RunForkReplayResumeDisposition) stri
 func selectedContractReadinessRequiredConsumers() []store.RunForkSelectedContractExecutionBoundary {
 	return []store.RunForkSelectedContractExecutionBoundary{
 		{
+			Concept:     "fork_local_runtime_container",
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			Reason:      "mutating selected execution must construct the canonical fork-local runtime container before EventBus, AgentManager, RuntimeLogger, activation, cleanup, or quiescence can be authoritative",
+		},
+		{
 			Concept:     "cli_dry_run_explain_json",
 			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       store.RunForkSelectedContractReadinessClassifierOwner,
@@ -388,12 +394,6 @@ func selectedContractReadinessBlockedSiblings(model store.RunForkSelectedContrac
 			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
 			Owner:       store.RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner,
 			Reason:      "#708 remains the typed-lineage architecture sibling; readiness explains current owner output without requiring that refactor",
-		},
-		{
-			Concept:     "fork_local_runtime_container",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkSelectedContractExecutionOwner + ".fork_local_runtime_container",
-			Reason:      "#709 remains the runtime-container architecture sibling; readiness is non-mutating explanation only",
 		},
 	}
 	out = append(out, model.BlockedSiblings...)

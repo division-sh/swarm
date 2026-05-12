@@ -508,22 +508,28 @@ func selectedContractExecutionRequiredConsumers() []store.RunForkSelectedContrac
 			Reason:      "selected execution must prove selected-fork agent handler materialization for authoritative agent recipients or fail closed before fork mutation",
 		},
 		{
+			Concept:     "fork_local_runtime_container",
+			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			Reason:      "future selected execution must construct one fork-local runtime container that consumes recipient planning, handler materialization, EventBus guards, lineage policy, cleanup, and quiescence",
+		},
+		{
 			Concept:     "fork_run_id_runtime_context",
 			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
-			Owner:       store.RunForkSelectedContractExecutionOwner,
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 			Reason:      "future handlers must execute with the fork run_id, not the source run_id",
 		},
 		{
 			Concept:     "fork_local_event_delivery_writes",
 			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
-			Owner:       store.RunForkSelectedContractExecutionOwner,
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 			Reason:      "future execution must create fresh fork-local IDs and lineage instead of copying source rows",
 		},
 		{
 			Concept:     "handler_execution",
 			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
-			Owner:       "internal/runtime/pipeline",
-			Reason:      "normal handler execution is a required future consumer, but this owner model does not run handlers",
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			Reason:      "normal handler execution must run inside the selected-fork runtime container, not as an unowned runtime side effect",
 		},
 		{
 			Concept:     "receipts_dead_letters_idempotency",
@@ -534,8 +540,8 @@ func selectedContractExecutionRequiredConsumers() []store.RunForkSelectedContrac
 		{
 			Concept:     "emitted_follow_up_events",
 			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
-			Owner:       "internal/runtime/bus",
-			Reason:      "future follow-up events must be regenerated under the fork run_id through the runtime bus",
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			Reason:      "future follow-up events must be regenerated under the fork run_id through the runtime container and bus",
 		},
 		{
 			Concept:     "safe_agent_delivery_event_replay",
