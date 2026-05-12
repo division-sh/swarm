@@ -347,6 +347,90 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	}
 }
 
+func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWatermark(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	deliveryID := uuid.NewString()
+	sessionID := uuid.NewString()
+	turnID := uuid.NewString()
+	entityID := uuid.NewString()
+	base := time.Unix(1700000450, 0).UTC()
+	since := base.Add(time.Second)
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, base.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, 'scan.requested', $3::uuid, 'entity', '{}'::jsonb, 'builder', 'platform', $4)
+	`, runID, eventID, entityID, base); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	seedRunDebugAgent(t, pg, ctx, "agent-late", entityID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			conversation, turn_count, runtime_mode, runtime_state,
+			lease_holder, lease_expires_at, status, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'agent-late', $3::uuid, 'flow-a', 'entity:' || $3::text, 'entity',
+			'[]'::jsonb, 1, 'session', '{}'::jsonb,
+			NULL, NULL, 'active', $4, $5
+		)
+	`, sessionID, runID, entityID, base.Add(2*time.Second), base.Add(2*time.Second)); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, reason_code, active_session_id, started_at, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-late', 'in_progress', 'session_started',
+			$4::uuid, $5, $5
+		)
+	`, deliveryID, runID, eventID, sessionID, base.Add(2*time.Second)); err != nil {
+		t.Fatalf("seed late delivery: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_turns (
+			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
+			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, error, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'agent-late', $3::uuid, 'session', 'entity:' || $4::text, $4::uuid,
+			$5::uuid, 'scan.requested', 'task-late', '[]'::jsonb, '[]'::jsonb,
+			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
+			'{}'::jsonb, '{}'::jsonb, true, 12, 0, '', $6
+		)
+	`, turnID, runID, sessionID, entityID, eventID, base.Add(3*time.Second)); err != nil {
+		t.Fatalf("seed late turn: %v", err)
+	}
+
+	rows, err := pg.LoadRunDebugTrace(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &since})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTrace since: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("trace len = %d, want late composed row: %#v", len(rows), rows)
+	}
+	got := rows[0]
+	if got.EventID != eventID || got.DeliveryID != deliveryID || got.TurnID != turnID {
+		t.Fatalf("late materialized trace row = %#v", got)
+	}
+}
+
 func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessionDoesNotExist(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

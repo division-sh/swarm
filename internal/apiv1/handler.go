@@ -311,8 +311,7 @@ func (s *webSocketSession) writeLoop() {
 			return
 		case msg := <-s.out:
 			if err := s.conn.WriteJSON(msg); err != nil {
-				s.cancel()
-				_ = s.conn.Close()
+				s.close()
 				return
 			}
 		}
@@ -357,11 +356,18 @@ func (s *webSocketSession) enqueue(msg any) bool {
 	case s.out <- msg:
 		return true
 	default:
-		s.cancel()
-		if s.conn != nil {
-			_ = s.conn.Close()
-		}
+		s.close()
 		return false
+	}
+}
+
+func (s *webSocketSession) close() {
+	if s == nil {
+		return
+	}
+	s.cancel()
+	if s.conn != nil {
+		_ = s.conn.Close()
 	}
 }
 

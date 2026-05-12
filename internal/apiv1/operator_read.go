@@ -640,13 +640,24 @@ func eventListFilterParam(params map[string]any) (store.OperatorEventListFilter,
 	if !ok {
 		return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter", "reason": "must be an object"})
 	}
+	for name := range filter {
+		if _, ok := eventListFilterFields[name]; !ok {
+			return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter." + name, "reason": "unknown parameter"})
+		}
+	}
 	out := store.OperatorEventListFilter{}
 	var err error
 	if out.RunID, _, err = optionalStringParam(filter, "run_id"); err != nil {
 		return store.OperatorEventListFilter{}, err
 	}
+	if out.RunID != "" && !opaqueIDPattern.MatchString(out.RunID) {
+		return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.run_id", "reason": "must match OpaqueId pattern"})
+	}
 	if out.EntityID, _, err = optionalStringParam(filter, "entity_id"); err != nil {
 		return store.OperatorEventListFilter{}, err
+	}
+	if out.EntityID != "" && !opaqueIDPattern.MatchString(out.EntityID) {
+		return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must match OpaqueId pattern"})
 	}
 	if out.EventName, _, err = optionalStringParam(filter, "event_name"); err != nil {
 		return store.OperatorEventListFilter{}, err
@@ -654,11 +665,21 @@ func eventListFilterParam(params map[string]any) (store.OperatorEventListFilter,
 	if out.DeliveryStatus, _, err = optionalStringParam(filter, "delivery_status"); err != nil {
 		return store.OperatorEventListFilter{}, err
 	}
+	if out.DeliveryStatus != "" {
+		if _, ok := eventListDeliveryStatuses[out.DeliveryStatus]; !ok {
+			return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.delivery_status", "reason": "must be a valid DeliveryStatus"})
+		}
+	}
 	if out.SubscriberID, _, err = optionalStringParam(filter, "subscriber_id"); err != nil {
 		return store.OperatorEventListFilter{}, err
 	}
 	if out.SubscriberType, _, err = optionalStringParam(filter, "subscriber_type"); err != nil {
 		return store.OperatorEventListFilter{}, err
+	}
+	if out.SubscriberType != "" {
+		if _, ok := eventListSubscriberTypes[out.SubscriberType]; !ok {
+			return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.subscriber_type", "reason": "must be a valid SubscriberType"})
+		}
 	}
 	if out.ReasonCode, _, err = optionalStringParam(filter, "reason_code"); err != nil {
 		return store.OperatorEventListFilter{}, err
@@ -671,6 +692,30 @@ func eventListFilterParam(params map[string]any) (store.OperatorEventListFilter,
 		out.HasDeadLetter = &value
 	}
 	return out, nil
+}
+
+var eventListFilterFields = map[string]struct{}{
+	"run_id":          {},
+	"entity_id":       {},
+	"event_name":      {},
+	"delivery_status": {},
+	"subscriber_id":   {},
+	"subscriber_type": {},
+	"reason_code":     {},
+	"has_dead_letter": {},
+}
+
+var eventListDeliveryStatuses = map[string]struct{}{
+	"pending":     {},
+	"in_progress": {},
+	"delivered":   {},
+	"failed":      {},
+	"dead_letter": {},
+}
+
+var eventListSubscriberTypes = map[string]struct{}{
+	"node":  {},
+	"agent": {},
 }
 
 func operatorRuntimeLogListOptionsFromParams(params map[string]any) (store.OperatorRuntimeLogListOptions, error) {
