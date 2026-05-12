@@ -31,12 +31,19 @@ type ObservabilityReadStore interface {
 	ListOperatorRuntimeIncidents(context.Context, store.OperatorRuntimeIncidentListOptions) (store.OperatorRuntimeIncidentListResult, error)
 }
 
+type EntityReadStore interface {
+	ListOperatorEntities(context.Context, store.OperatorEntityListOptions) (store.OperatorEntityListResult, error)
+	LoadOperatorEntity(context.Context, string, string) (store.OperatorEntityFull, error)
+	AggregateOperatorEntities(context.Context, store.OperatorEntityAggregateOptions) (store.OperatorEntityAggregateResult, error)
+}
+
 type OperatorReadOptions struct {
 	Now                   func() time.Time
 	Ready                 func() bool
 	Database              Pinger
 	Runs                  RunReadStore
 	Observability         ObservabilityReadStore
+	Entities              EntityReadStore
 	Mailbox               MailboxAPIStore
 	Idempotency           APIIdempotencyStore
 	Events                EventPublisher
@@ -199,6 +206,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	for name, handler := range OperatorObservabilityHandlers(opts) {
 		handlers[name] = handler
 	}
+	for name, handler := range OperatorEntityHandlers(opts) {
+		handlers[name] = handler
+	}
 	return handlers
 }
 
@@ -214,6 +224,85 @@ func requireObservabilityReadStore(reads ObservabilityReadStore) (ObservabilityR
 		return nil, fmt.Errorf("observability read store is required")
 	}
 	return reads, nil
+}
+
+func requireEntityReadStore(reads EntityReadStore) (EntityReadStore, error) {
+	if reads == nil {
+		return nil, fmt.Errorf("entity read store is required")
+	}
+	return reads, nil
+}
+
+func OperatorEntityHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+	if opts.Entities == nil {
+		return nil
+	}
+	return map[string]MethodHandler{
+		"entity.list": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireEntityReadStore(opts.Entities)
+			if err != nil {
+				return nil, err
+			}
+			listOpts, err := operatorEntityListOptionsFromParams(req.Params)
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.ListOperatorEntities(ctx, listOpts)
+			if errors.Is(err, store.ErrInvalidEntityCursor) {
+				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid entity list cursor"})
+			}
+			if paramErr := entityReadParamError(err); paramErr != nil {
+				return nil, NewInvalidParamsError(map[string]any{"field": paramErr.Field, "reason": paramErr.Reason})
+			}
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
+		"entity.get": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireEntityReadStore(opts.Entities)
+			if err != nil {
+				return nil, err
+			}
+			entityID := stringParam(req.Params, "entity_id")
+			runID, _, err := optionalStringParam(req.Params, "run_id")
+			if err != nil {
+				return nil, err
+			}
+			entity, err := reads.LoadOperatorEntity(ctx, entityID, runID)
+			if errors.Is(err, store.ErrEntityNotFound) {
+				return nil, NewApplicationError(EntityNotFoundCode, false, map[string]any{"entity_id": entityID})
+			}
+			if errors.Is(err, store.ErrAmbiguousEntityRunID) {
+				return nil, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "required when entity_id exists in multiple runs"})
+			}
+			if paramErr := entityReadParamError(err); paramErr != nil {
+				return nil, NewInvalidParamsError(map[string]any{"field": paramErr.Field, "reason": paramErr.Reason})
+			}
+			if err != nil {
+				return nil, err
+			}
+			return entity, nil
+		},
+		"entity.aggregate": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireEntityReadStore(opts.Entities)
+			if err != nil {
+				return nil, err
+			}
+			aggregateOpts, err := operatorEntityAggregateOptionsFromParams(req.Params)
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.AggregateOperatorEntities(ctx, aggregateOpts)
+			if paramErr := entityReadParamError(err); paramErr != nil {
+				return nil, NewInvalidParamsError(map[string]any{"field": paramErr.Field, "reason": paramErr.Reason})
+			}
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
+	}
 }
 
 func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHandler {
@@ -320,6 +409,60 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 			return result, nil
 		},
 	}
+}
+
+func operatorEntityListOptionsFromParams(params map[string]any) (store.OperatorEntityListOptions, error) {
+	out := store.OperatorEntityListOptions{}
+	var err error
+	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
+		return store.OperatorEntityListOptions{}, err
+	}
+	if out.Flow, _, err = optionalStringParam(params, "flow"); err != nil {
+		return store.OperatorEntityListOptions{}, err
+	}
+	if out.Type, _, err = optionalStringParam(params, "type"); err != nil {
+		return store.OperatorEntityListOptions{}, err
+	}
+	if out.CurrentState, _, err = optionalStringParam(params, "current_state"); err != nil {
+		return store.OperatorEntityListOptions{}, err
+	}
+	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
+		return store.OperatorEntityListOptions{}, err
+	}
+	if raw, ok := params["limit"]; ok && !isEmptyParam(raw) {
+		limit, ok := integerParam(raw)
+		if !ok || limit < 1 || limit > 500 {
+			return store.OperatorEntityListOptions{}, NewInvalidParamsError(map[string]any{"field": "limit", "reason": "must be an integer from 1 to 500"})
+		}
+		out.Limit = limit
+	}
+	return out, nil
+}
+
+func operatorEntityAggregateOptionsFromParams(params map[string]any) (store.OperatorEntityAggregateOptions, error) {
+	out := store.OperatorEntityAggregateOptions{}
+	var err error
+	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
+		return store.OperatorEntityAggregateOptions{}, err
+	}
+	if out.GroupBy, _, err = optionalStringParam(params, "group_by"); err != nil {
+		return store.OperatorEntityAggregateOptions{}, err
+	}
+	if out.Type, _, err = optionalStringParam(params, "type"); err != nil {
+		return store.OperatorEntityAggregateOptions{}, err
+	}
+	return out, nil
+}
+
+func entityReadParamError(err error) *store.EntityReadParamError {
+	if err == nil {
+		return nil
+	}
+	var paramErr *store.EntityReadParamError
+	if errors.As(err, &paramErr) {
+		return paramErr
+	}
+	return nil
 }
 
 func operatorEventListOptionsFromParams(params map[string]any) (store.OperatorEventListOptions, error) {

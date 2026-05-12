@@ -184,6 +184,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("load v1 api mailbox approval routes: %v", err)
 	}
+	var apiEntities apiv1.EntityReadStore
+	if stores.Postgres != nil {
+		apiEntities = stores.Postgres
+	}
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath: resolvedPlatformSpecPath,
 		AuthTokens:       apiv1.AuthTokensFromEnvironment(),
@@ -194,6 +198,7 @@ func main() {
 			Database:              stores.Postgres,
 			Runs:                  stores.Postgres,
 			Observability:         stores.Postgres,
+			Entities:              apiEntities,
 			Mailbox:               stores.Postgres,
 			Idempotency:           stores.Postgres,
 			Events:                rt.Bus,
@@ -1615,9 +1620,15 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		runtimeProvider = supervisor.CurrentRuntime
 		projectControl = supervisor
 	}
+	var builderEntities builderpkg.EntityReader
+	var dashboardEntities dashboardserver.EntityReader
+	if stores.Postgres != nil {
+		builderEntities = stores.Postgres
+		dashboardEntities = stores.Postgres
+	}
 	builderHandler := builderpkg.NewHandler(builderpkg.Options{
 		Health:         healthFn,
-		Instances:      runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
+		Entities:       builderEntities,
 		Runtime:        runtimeCtl,
 		Credentials:    credentialStore,
 		AuthToken:      strings.TrimSpace(os.Getenv("SWARM_BUILDER_AUTH_TOKEN")),
@@ -1632,7 +1643,7 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		Agents:        agents,
 		AgentControl:  agentControl,
 		Mailbox:       mailbox,
-		Instances:     runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
+		Entities:      dashboardEntities,
 		Conversations: conversations,
 		Observability: observability,
 		RunTrace:      stores.Postgres,
