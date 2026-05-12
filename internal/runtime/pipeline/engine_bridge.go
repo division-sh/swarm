@@ -161,6 +161,15 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		triggerCtx.Event = selected.Event
 		triggerCtx.State = selected.State
 	}
+	if handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
+		selected, err := pc.selectOrCreateHandlerEntityForFlow(ctx, flowID, nodeID, handler, triggerCtx.Event)
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+		entityID = selected.EntityID
+		triggerCtx.Event = selected.Event
+		triggerCtx.State = selected.State
+	}
 	originalEntityID := entityID
 	originalStateEntityID := strings.TrimSpace(triggerCtx.State.EntityID)
 	entityID, triggerCtx.Event = resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)

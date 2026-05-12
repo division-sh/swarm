@@ -284,6 +284,8 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	}
 	entityID := workflowEventEntityID(evt)
 	flowID := workflowNodeFlowID(e.coordinator.SemanticSource(), e.nodeID)
+	selectedState := WorkflowState{}
+	hasSelectedState := false
 	if handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
 		selected, err := e.coordinator.selectHandlerEntityForFlow(ctx, flowID, e.nodeID, handler, evt)
 		if err != nil {
@@ -291,10 +293,25 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		}
 		entityID = selected.EntityID
 		evt = selected.Event
+		selectedState = selected.State
+		hasSelectedState = true
+	}
+	if handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
+		selected, err := e.coordinator.selectOrCreateHandlerEntityForFlow(ctx, flowID, e.nodeID, handler, evt)
+		if err != nil {
+			return nil, err
+		}
+		entityID = selected.EntityID
+		evt = selected.Event
+		selectedState = selected.State
+		hasSelectedState = true
 	}
 	entityID, evt = ensureHandlerEntityID(e.coordinator.SemanticSource(), flowID, handler, entityID, evt)
 	ctx = withPipelineFlowScope(ctx, flowID)
 	currentState := e.coordinator.currentWorkflowState(ctx, entityID)
+	if hasSelectedState && strings.TrimSpace(selectedState.EntityID) != "" && strings.TrimSpace(currentState.EntityID) == "" {
+		currentState = selectedState
+	}
 	exec := e.executor
 	node := e.node
 	var (

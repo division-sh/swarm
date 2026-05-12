@@ -467,36 +467,37 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	var aux struct {
-		Action           yaml.Node                `yaml:"action"`
-		CreateEntity     bool                     `yaml:"create_entity"`
-		SelectEntity     yaml.Node                `yaml:"select_entity"`
-		Template         string                   `yaml:"template"`
-		InstanceIDFrom   string                   `yaml:"instance_id_from"`
-		ConfigFrom       yaml.Node                `yaml:"config_from"`
-		EvidenceTarget   string                   `yaml:"evidence_target"`
-		Description      string                   `yaml:"description"`
-		Emit             EmitSpec                 `yaml:"emit"`
-		Guard            yaml.Node                `yaml:"guard"`
-		AdvancesTo       yaml.Node                `yaml:"advances_to"`
-		SetsGate         yaml.Node                `yaml:"sets_gate"`
-		ClearGates       yaml.Node                `yaml:"clear_gates"`
-		DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
-		Condition        string                   `yaml:"condition"`
-		CompletionRule   string                   `yaml:"completion_rule"`
-		Logic            string                   `yaml:"logic"`
-		PolicyRef        string                   `yaml:"policy_ref"`
-		OnComplete       yaml.Node                `yaml:"on_complete"`
-		Rules            yaml.Node                `yaml:"rules"`
-		Accumulate       *AccumulateSpec          `yaml:"accumulate"`
-		Compute          *ComputeSpec             `yaml:"compute"`
-		Query            yaml.Node                `yaml:"query"`
-		FanOut           *FanOutSpec              `yaml:"fan_out"`
-		GroupBy          *GroupBySpec             `yaml:"group_by"`
-		Filter           *FilterSpec              `yaml:"filter"`
-		Reduce           *ReduceSpec              `yaml:"reduce"`
-		Count            *CountSpec               `yaml:"count"`
-		Clear            yaml.Node                `yaml:"clear"`
-		Branch           yaml.Node                `yaml:"branch"`
+		Action               yaml.Node                `yaml:"action"`
+		CreateEntity         bool                     `yaml:"create_entity"`
+		SelectEntity         yaml.Node                `yaml:"select_entity"`
+		SelectOrCreateEntity yaml.Node                `yaml:"select_or_create_entity"`
+		Template             string                   `yaml:"template"`
+		InstanceIDFrom       string                   `yaml:"instance_id_from"`
+		ConfigFrom           yaml.Node                `yaml:"config_from"`
+		EvidenceTarget       string                   `yaml:"evidence_target"`
+		Description          string                   `yaml:"description"`
+		Emit                 EmitSpec                 `yaml:"emit"`
+		Guard                yaml.Node                `yaml:"guard"`
+		AdvancesTo           yaml.Node                `yaml:"advances_to"`
+		SetsGate             yaml.Node                `yaml:"sets_gate"`
+		ClearGates           yaml.Node                `yaml:"clear_gates"`
+		DataAccumulation     WorkflowDataAccumulation `yaml:"data_accumulation"`
+		Condition            string                   `yaml:"condition"`
+		CompletionRule       string                   `yaml:"completion_rule"`
+		Logic                string                   `yaml:"logic"`
+		PolicyRef            string                   `yaml:"policy_ref"`
+		OnComplete           yaml.Node                `yaml:"on_complete"`
+		Rules                yaml.Node                `yaml:"rules"`
+		Accumulate           *AccumulateSpec          `yaml:"accumulate"`
+		Compute              *ComputeSpec             `yaml:"compute"`
+		Query                yaml.Node                `yaml:"query"`
+		FanOut               *FanOutSpec              `yaml:"fan_out"`
+		GroupBy              *GroupBySpec             `yaml:"group_by"`
+		Filter               *FilterSpec              `yaml:"filter"`
+		Reduce               *ReduceSpec              `yaml:"reduce"`
+		Count                *CountSpec               `yaml:"count"`
+		Clear                yaml.Node                `yaml:"clear"`
+		Branch               yaml.Node                `yaml:"branch"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -521,6 +522,9 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	}
 	var err error
 	if h.SelectEntity, err = decodeSelectEntitySpecNode(&aux.SelectEntity); err != nil {
+		return err
+	}
+	if h.SelectOrCreateEntity, err = decodeSelectOrCreateEntitySpecNode(&aux.SelectOrCreateEntity); err != nil {
 		return err
 	}
 	if h.Action, err = decodeActionSpecNode(&aux.Action); err != nil {
@@ -797,39 +801,40 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		return nil
 	}
 	allowed := map[string]struct{}{
-		"action":            {},
-		"description":       {},
-		"_note":             {},
-		"evidence_target":   {},
-		"create_entity":     {},
-		"select_entity":     {},
-		"emit":              {},
-		"guard":             {},
-		"advances_to":       {},
-		"sets_gate":         {},
-		"clear_gates":       {},
-		"data_accumulation": {},
-		"condition":         {},
-		"completion_rule":   {},
-		"logic":             {},
-		"policy_ref":        {},
-		"on_complete":       {},
-		"rules":             {},
-		"accumulate":        {},
-		"compute":           {},
-		"query":             {},
-		"fan_out":           {},
-		"group_by":          {},
-		"filter":            {},
-		"reduce":            {},
-		"count":             {},
-		"clear":             {},
-		"template":          {},
-		"instance_id_from":  {},
-		"config_from":       {},
-		"from":              {},
-		"branch":            {},
-		"dedup_by":          {},
+		"action":                  {},
+		"description":             {},
+		"_note":                   {},
+		"evidence_target":         {},
+		"create_entity":           {},
+		"select_entity":           {},
+		"select_or_create_entity": {},
+		"emit":                    {},
+		"guard":                   {},
+		"advances_to":             {},
+		"sets_gate":               {},
+		"clear_gates":             {},
+		"data_accumulation":       {},
+		"condition":               {},
+		"completion_rule":         {},
+		"logic":                   {},
+		"policy_ref":              {},
+		"on_complete":             {},
+		"rules":                   {},
+		"accumulate":              {},
+		"compute":                 {},
+		"query":                   {},
+		"fan_out":                 {},
+		"group_by":                {},
+		"filter":                  {},
+		"reduce":                  {},
+		"count":                   {},
+		"clear":                   {},
+		"template":                {},
+		"instance_id_from":        {},
+		"config_from":             {},
+		"from":                    {},
+		"branch":                  {},
+		"dedup_by":                {},
 	}
 	deprecated := map[string]struct{}{
 		"condition":          {},
@@ -981,11 +986,33 @@ func decodeQuerySpecNode(node *yaml.Node) (*QuerySpec, error) {
 }
 
 func decodeSelectEntitySpecNode(node *yaml.Node) (*SelectEntitySpec, error) {
+	spec, err := decodeEntitySelectionSpecNode(node, "select_entity")
+	if err != nil || spec == nil {
+		return nil, err
+	}
+	return &SelectEntitySpec{
+		By:       spec.By,
+		Bindings: spec.Bindings,
+	}, nil
+}
+
+func decodeSelectOrCreateEntitySpecNode(node *yaml.Node) (*SelectOrCreateEntitySpec, error) {
+	spec, err := decodeEntitySelectionSpecNode(node, "select_or_create_entity")
+	if err != nil || spec == nil {
+		return nil, err
+	}
+	return &SelectOrCreateEntitySpec{
+		By:       spec.By,
+		Bindings: spec.Bindings,
+	}, nil
+}
+
+func decodeEntitySelectionSpecNode(node *yaml.Node, label string) (*SelectEntitySpec, error) {
 	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
 		return nil, nil
 	}
 	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("INVALID-SELECT-ENTITY: select_entity must be a mapping")
+		return nil, fmt.Errorf("INVALID-SELECT-ENTITY: %s must be a mapping", label)
 	}
 	allowed := map[string]struct{}{
 		"by": {},
@@ -996,7 +1023,7 @@ func decodeSelectEntitySpecNode(node *yaml.Node) (*SelectEntitySpec, error) {
 			continue
 		}
 		if _, ok := allowed[key]; !ok {
-			return nil, fmt.Errorf("UNDEFINED-FIELD: select_entity field %q not in platform spec", key)
+			return nil, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", label, key)
 		}
 	}
 	var aux struct {
@@ -1006,7 +1033,7 @@ func decodeSelectEntitySpecNode(node *yaml.Node) (*SelectEntitySpec, error) {
 		return nil, err
 	}
 	if len(aux.By) == 0 {
-		return nil, fmt.Errorf("INVALID-SELECT-ENTITY: select_entity.by must declare at least one binding")
+		return nil, fmt.Errorf("INVALID-SELECT-ENTITY: %s.by must declare at least one binding", label)
 	}
 	spec := &SelectEntitySpec{
 		By:       cloneStringMap(aux.By),
@@ -1016,10 +1043,10 @@ func decodeSelectEntitySpecNode(node *yaml.Node) (*SelectEntitySpec, error) {
 		field = strings.TrimSpace(field)
 		ref = strings.TrimSpace(ref)
 		if field == "" {
-			return nil, fmt.Errorf("INVALID-SELECT-ENTITY: select_entity.by contains an empty entity field")
+			return nil, fmt.Errorf("INVALID-SELECT-ENTITY: %s.by contains an empty entity field", label)
 		}
 		if ref == "" {
-			return nil, fmt.Errorf("INVALID-SELECT-ENTITY: select_entity.by.%s requires a payload ref", field)
+			return nil, fmt.Errorf("INVALID-SELECT-ENTITY: %s.by.%s requires a payload ref", label, field)
 		}
 		parsed := paths.Parse(ref)
 		spec.Bindings = append(spec.Bindings, SelectEntityKeyBinding{

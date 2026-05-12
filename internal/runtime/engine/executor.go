@@ -139,6 +139,12 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if req.Handler.CreateEntity && req.Handler.SelectEntity != nil && !req.Handler.SelectEntity.Empty() {
 		return fmt.Errorf("%w: handler declares both create_entity and select_entity", ErrInvalidConfig)
 	}
+	if req.Handler.CreateEntity && req.Handler.SelectOrCreateEntity != nil && !req.Handler.SelectOrCreateEntity.Empty() {
+		return fmt.Errorf("%w: handler declares both create_entity and select_or_create_entity", ErrInvalidConfig)
+	}
+	if req.Handler.SelectEntity != nil && !req.Handler.SelectEntity.Empty() && req.Handler.SelectOrCreateEntity != nil && !req.Handler.SelectOrCreateEntity.Empty() {
+		return fmt.Errorf("%w: handler declares both select_entity and select_or_create_entity", ErrInvalidConfig)
+	}
 	if err := validateHandlerComputeSpecs(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
@@ -1329,9 +1335,55 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 			if !handled && strings.TrimSpace(entry.Emits) == "" {
 				return fmt.Errorf("action %q is not executable", actionKey.String())
 			}
+			if handled {
+				if err := e.mergePersistedActionState(frame); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, actionKey.String())
+	return nil
+}
+
+func (e *Executor) mergePersistedActionState(frame *executionFrame) error {
+	if e == nil || e.deps.StateRepo == nil || frame == nil || frame.req.EntityID.IsZero() {
+		return nil
+	}
+	persisted, ok, err := e.deps.StateRepo.LoadState(frame.tx.Context(), frame.req.EntityID)
+	if err != nil || !ok {
+		return err
+	}
+	metadata := cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	for key, value := range persisted.StateCarrier.Metadata {
+		metadata[key] = value
+	}
+	gates := make(map[string]bool, len(frame.state.State.StateCarrier.Gates)+len(persisted.StateCarrier.Gates))
+	for key, value := range frame.state.State.StateCarrier.Gates {
+		gates[key] = value
+	}
+	for key, value := range persisted.StateCarrier.Gates {
+		gates[key] = value
+	}
+	buckets := cloneStateBucketSet(frame.state.State.StateCarrier.StateBuckets)
+	for key, bucket := range persisted.StateCarrier.StateBuckets {
+		buckets[key] = cloneStringAnyMap(bucket)
+	}
+	frame.state.State.StateCarrier.Metadata = metadata
+	frame.state.State.StateCarrier.Gates = gates
+	frame.state.State.StateCarrier.StateBuckets = buckets
+	if strings.TrimSpace(frame.state.State.CurrentState) == "" {
+		frame.state.State.CurrentState = strings.TrimSpace(persisted.CurrentState)
+	}
+	if strings.TrimSpace(frame.state.State.WorkflowName) == "" {
+		frame.state.State.WorkflowName = strings.TrimSpace(persisted.WorkflowName)
+	}
+	if strings.TrimSpace(frame.state.State.WorkflowVersion) == "" {
+		frame.state.State.WorkflowVersion = strings.TrimSpace(persisted.WorkflowVersion)
+	}
+	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(metadata)
+	frame.result.StateMutation.StateCarrier.Gates = gates
+	frame.result.StateMutation.SetStateBuckets(buckets)
 	return nil
 }
 

@@ -3338,6 +3338,34 @@ treasury-node:
 	}
 }
 
+func TestRun_AllowsSelectOrCreateEntityForStatefulInputPinHandlers(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      select_or_create_entity:
+        by:
+          vertical_id: payload.vertical_id
+      data_accumulation:
+        writes:
+          - source_field: amount_usd
+            target_field: spent_usd
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
+		t.Fatalf("unexpected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "select_entity_validation", "") {
+		t.Fatalf("unexpected select_entity_validation error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsSelectEntityWithSourceEnvelopeAuthority(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
@@ -3359,6 +3387,27 @@ treasury-node:
 	}
 }
 
+func TestRun_RejectsSelectOrCreateEntityWithSourceEnvelopeAuthority(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      select_or_create_entity:
+        by:
+          vertical_id: payload.entity_id
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "select_entity_validation", "select_or_create_entity") || !reportContains(report.Errors(), "select_entity_validation", "must not use source envelope authority") {
+		t.Fatalf("expected select_or_create_entity source authority error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsSelectEntityWithEnvelopeTargetField(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
@@ -3377,6 +3426,27 @@ treasury-node:
 
 	if !reportContains(report.Errors(), "select_entity_validation", "is not an entity contract field selection target") {
 		t.Fatalf("expected select_entity envelope target field error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsSelectOrCreateEntityWithUndeclaredPayloadRef(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      select_or_create_entity:
+        by:
+          vertical_id: payload.missing_vertical_id
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "select_entity_validation", "select_or_create_entity") || !reportContains(report.Errors(), "select_entity_validation", "references undeclared payload field") {
+		t.Fatalf("expected select_or_create_entity undeclared payload field error, got %#v", report.Errors())
 	}
 }
 
@@ -3418,8 +3488,54 @@ treasury-node:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "select_entity_validation", "must not declare both create_entity and select_entity") {
+	if !reportContains(report.Errors(), "select_entity_validation", "must not declare create_entity with select_entity or select_or_create_entity") {
 		t.Fatalf("expected create_entity/select_entity error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsSelectOrCreateEntityWithCreateEntity(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      create_entity: true
+      select_or_create_entity:
+        by:
+          vertical_id: payload.vertical_id
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "select_entity_validation", "must not declare create_entity with select_entity or select_or_create_entity") {
+		t.Fatalf("expected create_entity/select_or_create_entity error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsSelectEntityWithSelectOrCreateEntity(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      select_entity:
+        by:
+          vertical_id: payload.vertical_id
+      select_or_create_entity:
+        by:
+          vertical_id: payload.vertical_id
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "select_entity_validation", "must not declare both select_entity and select_or_create_entity") {
+		t.Fatalf("expected select_entity/select_or_create_entity error, got %#v", report.Errors())
 	}
 }
 

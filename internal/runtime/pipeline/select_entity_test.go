@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -87,6 +88,242 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 	}
 	if got := instance.Metadata["spent_usd"]; got != float64(99) && got != 99 {
 		t.Fatalf("spent_usd after replay = %#v, want 99", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, _ := newSelectEntityTestCoordinator(t, db)
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+
+	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("opco.spend_recorded"),
+			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
+		},
+		State: WorkflowState{},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected selected-or-created handler to run")
+	}
+
+	assertEntityStateRowCount(t, db, 1)
+	instance := loadSelectOrCreateBudgetByKey(t, pc.workflowStore, ctx, pc.SemanticSource(), "vertical-1")
+	if got := instance.Metadata["vertical_id"]; got != "vertical-1" {
+		t.Fatalf("vertical_id = %#v, want vertical-1", got)
+	}
+	if got := instance.Metadata["spent_usd"]; got != float64(42) && got != 42 {
+		t.Fatalf("spent_usd = %#v, want 42", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, _ := newSelectEntityTestCoordinator(t, db)
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+
+	for _, amount := range []int{42, 99} {
+		result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
+			Event: events.Event{
+				Type:    events.EventType("opco.spend_recorded"),
+				Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": amount}),
+			},
+			State: WorkflowState{},
+		}, false)
+		if err != nil {
+			t.Fatalf("executeNodeContractHandler amount %d: %v", amount, err)
+		}
+		if !result.Handled {
+			t.Fatalf("expected selected-or-created handler to run for amount %d", amount)
+		}
+		assertEntityStateRowCount(t, db, 1)
+	}
+
+	instance := loadSelectOrCreateBudgetByKey(t, pc.workflowStore, ctx, pc.SemanticSource(), "vertical-1")
+	if got := instance.Metadata["spent_usd"]; got != float64(99) && got != 99 {
+		t.Fatalf("spent_usd after replay = %#v, want 99", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnAmbiguousMatch(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, source := newSelectEntityTestCoordinator(t, db)
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	seedSelectEntityBudgetWithInstance(t, pc.workflowStore, ctx, source, "budget-1", "vertical-1", 0)
+	seedSelectEntityBudgetWithInstance(t, pc.workflowStore, ctx, source, "budget-2", "vertical-1", 0)
+
+	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("opco.spend_recorded"),
+			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
+		},
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "select_or_create_entity_ambiguous") {
+		t.Fatalf("executeNodeContractHandler error = %v, want select_or_create_entity_ambiguous", err)
+	}
+}
+
+func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnDeterministicIDConflict(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, source := newSelectEntityTestCoordinator(t, db)
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	instanceID, err := selectOrCreateEntityInstanceID(source, "treasury", map[string]any{"vertical_id": "vertical-1"})
+	if err != nil {
+		t.Fatalf("selectOrCreateEntityInstanceID: %v", err)
+	}
+	identity := DeriveFlowInstanceIdentity(source, "treasury", instanceID)
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:      identity.EntityID,
+		StorageRef:      identity.InstancePath,
+		WorkflowName:    "treasury",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "active",
+		Metadata: map[string]any{
+			"flow_path":   identity.InstancePath,
+			"instance_id": identity.InstanceID,
+			"vertical_id": "other-key",
+			"storage_ref": identity.InstancePath,
+			"entity_type": "opco_budget",
+		},
+	}); err != nil {
+		t.Fatalf("seed conflicting entity: %v", err)
+	}
+
+	_, err = pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("opco.spend_recorded"),
+			Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
+		},
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "select_or_create_entity_conflict") {
+		t.Fatalf("executeNodeContractHandler error = %v, want select_or_create_entity_conflict", err)
+	}
+}
+
+func TestExecuteNodeContractHandlerSelectOrCreateEntityConcurrentDuplicateCreatesOneEntity(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, _ := newSelectEntityTestCoordinator(t, db)
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
+				Event: events.Event{
+					Type:    events.EventType("opco.spend_recorded"),
+					Payload: mustJSON(map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}),
+				},
+				State: WorkflowState{},
+			}, false)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if !result.Handled {
+				errs <- fmt.Errorf("handler was not handled")
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent select_or_create handler: %v", err)
+		}
+	}
+	assertEntityStateRowCount(t, db, 1)
+}
+
+func TestBackgroundWorkflowNodeSelectOrCreateEntityDuplicateSameEventIsReceiptIdempotent(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, _ := newSelectOrCreateEntityTestCoordinator(t, db)
+	pc.eventReceiptsCapability = eventReceiptsCapabilityStub{enabled: true}.resolve
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	evt := seedSelectEntitySpendEvent(t, db, ctx, map[string]any{"vertical_id": "vertical-1", "amount_usd": 42})
+	runner := newSelectEntityBackgroundNode(t, pc, pc.SemanticSource(), db)
+	runner.SetRetryPolicyForTest(1, func(int) time.Duration { return 0 })
+
+	runner.ProcessEventForTest(ctx, evt)
+	instance := loadSelectOrCreateBudgetByKey(t, pc.workflowStore, ctx, pc.SemanticSource(), "vertical-1")
+	if got := instance.Metadata["spent_usd"]; got != float64(42) && got != 42 {
+		t.Fatalf("spent_usd after first delivery = %#v, want 42", got)
+	}
+
+	if err := pc.workflowStore.Mutate(ctx, FlowInstanceEntityID(instance.StorageRef), func(instance *WorkflowInstance) {
+		if instance.Metadata == nil {
+			instance.Metadata = map[string]any{}
+		}
+		instance.Metadata["spent_usd"] = 7
+	}); err != nil {
+		t.Fatalf("workflowStore.Mutate between duplicate deliveries: %v", err)
+	}
+
+	runner.ProcessEventForTest(ctx, evt)
+	instance = loadSelectOrCreateBudgetByKey(t, pc.workflowStore, ctx, pc.SemanticSource(), "vertical-1")
+	if got := instance.Metadata["spent_usd"]; got != float64(7) && got != 7 {
+		t.Fatalf("spent_usd after duplicate same-event delivery = %#v, want unchanged 7", got)
+	}
+	assertSelectEntityReceiptRow(t, db, evt.ID, "treasury-orchestrator")
+	assertEntityStateRowCount(t, db, 1)
+}
+
+func TestExecuteNodeContractHandlerSelectOrCreateEntityFeedsEntityIDToArtifactRepoCommit(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, _ := newSelectEntityTestCoordinator(t, db)
+	pc.artifactRoot = t.TempDir()
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	sourceEventID := "33333333-3333-3333-3333-333333333333"
+	payload := map[string]any{"artifact_key": "case-1", "request_id": "44444444-4444-4444-4444-444444444444", "namespace": "tenant-alpha", "partition_key": "project-42", "display_slug": "Demo Artifact", "mvp_yaml": "name: Demo\n"}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2, $3::uuid, 'source/case-1', 'entity', $4::jsonb, 'test', 'node', to_timestamp(1700000000))
+	`, sourceEventID, "spec_repo.commit_requested", "22222222-2222-2222-2222-222222222222", string(mustJSON(payload))); err != nil {
+		t.Fatalf("seed artifact event: %v", err)
+	}
+
+	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateArtifactRepoCommitHandler(), workflowTriggerContext{
+		Event: events.Event{
+			ID:        sourceEventID,
+			Type:      events.EventType("spec_repo.commit_requested"),
+			RunID:     testPipelineRunID,
+			Payload:   mustJSON(payload),
+			CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
+		},
+		State: WorkflowState{},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected artifact_repo_commit handler to run")
+	}
+
+	instance := loadSelectOrCreateBudgetByKey(t, pc.workflowStore, ctx, pc.SemanticSource(), "case-1")
+	entityID := FlowInstanceEntityID(instance.StorageRef)
+	if got := strings.TrimSpace(asString(instance.Metadata["repo_url"])); got != "swarm-artifact://repos/"+entityID {
+		t.Fatalf("repo_url = %q, want repo url derived from entity id %q", got, entityID)
+	}
+	if ref := strings.TrimSpace(asString(instance.Metadata["current_ref"])); len(ref) != 40 {
+		t.Fatalf("current_ref length = %d ref=%q", len(ref), ref)
 	}
 }
 
@@ -265,6 +502,44 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnAmbiguousMatch(t *te
 
 func newSelectEntityTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, semanticview.Source) {
 	t.Helper()
+	return newSelectEntityTestCoordinatorWithNodes(t, db, `
+treasury-orchestrator:
+  id: treasury-orchestrator
+  execution_type: system_node
+  subscribes_to: [opco.spend_recorded]
+  event_handlers:
+    opco.spend_recorded:
+      select_entity:
+        by:
+          vertical_id: payload.vertical_id
+      data_accumulation:
+        writes:
+          - source_field: amount_usd
+            target_field: spent_usd
+`)
+}
+
+func newSelectOrCreateEntityTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, semanticview.Source) {
+	t.Helper()
+	return newSelectEntityTestCoordinatorWithNodes(t, db, `
+treasury-orchestrator:
+  id: treasury-orchestrator
+  execution_type: system_node
+  subscribes_to: [opco.spend_recorded]
+  event_handlers:
+    opco.spend_recorded:
+      select_or_create_entity:
+        by:
+          vertical_id: payload.vertical_id
+      data_accumulation:
+        writes:
+          - source_field: amount_usd
+            target_field: spent_usd
+`)
+}
+
+func newSelectEntityTestCoordinatorWithNodes(t *testing.T, db *sql.DB, treasuryNodes string) (*PipelineCoordinator, semanticview.Source) {
+	t.Helper()
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": `
 name: runtime-test
@@ -298,22 +573,22 @@ opco_budget:
   spent_usd:
     type: number
     initial: 0
+  repo_url:
+    type: text
+  current_ref:
+    type: text
+  file_manifest:
+    type: text
+  status:
+    type: text
+  failure_reason:
+    type: text
+  last_request_id:
+    type: text
+  last_source_event_id:
+    type: text
 `,
-		"flows/treasury/nodes.yaml": `
-treasury-orchestrator:
-  id: treasury-orchestrator
-  execution_type: system_node
-  subscribes_to: [opco.spend_recorded]
-  event_handlers:
-    opco.spend_recorded:
-      select_entity:
-        by:
-          vertical_id: payload.vertical_id
-      data_accumulation:
-        writes:
-          - source_field: amount_usd
-            target_field: spent_usd
-`,
+		"flows/treasury/nodes.yaml": treasuryNodes,
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -369,6 +644,95 @@ func selectEntitySpendHandler() runtimecontracts.SystemNodeEventHandler {
 			}},
 		},
 	}
+}
+
+func selectOrCreateEntitySpendHandler() runtimecontracts.SystemNodeEventHandler {
+	return runtimecontracts.SystemNodeEventHandler{
+		SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{
+			By: map[string]string{"vertical_id": "payload.vertical_id"},
+			Bindings: []runtimecontracts.SelectEntityKeyBinding{{
+				Field:   "vertical_id",
+				Ref:     "payload.vertical_id",
+				RefPath: runtimecontracts.RefExpression("payload.vertical_id").RefPath,
+			}},
+		},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{{
+				SourceField: "amount_usd",
+				TargetField: "spent_usd",
+			}},
+		},
+	}
+}
+
+func selectOrCreateArtifactRepoCommitHandler() runtimecontracts.SystemNodeEventHandler {
+	return runtimecontracts.SystemNodeEventHandler{
+		SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{
+			By: map[string]string{"vertical_id": "payload.artifact_key"},
+			Bindings: []runtimecontracts.SelectEntityKeyBinding{{
+				Field:   "vertical_id",
+				Ref:     "payload.artifact_key",
+				RefPath: runtimecontracts.RefExpression("payload.artifact_key").RefPath,
+			}},
+		},
+		Action: runtimecontracts.ActionSpec{
+			ID: "artifact_repo_commit",
+			ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
+				Provider:     "local_git",
+				RepoID:       runtimecontracts.RefExpression("entity.entity_id"),
+				Namespace:    runtimecontracts.RefExpression("payload.namespace"),
+				PartitionKey: runtimecontracts.RefExpression("payload.partition_key"),
+				DisplaySlug:  runtimecontracts.RefExpression("payload.display_slug"),
+				RequestID:    runtimecontracts.RefExpression("payload.request_id"),
+				Author:       runtimecontracts.LiteralExpression("artifact-writer"),
+				Provenance: map[string]runtimecontracts.ExpressionValue{
+					"artifact_type": runtimecontracts.LiteralExpression("fixture"),
+				},
+				AllowedPaths: []string{"specs/mvp.yaml"},
+				Files: []runtimecontracts.ArtifactRepoFileSpec{{
+					Path:        runtimecontracts.LiteralExpression("specs/mvp.yaml"),
+					Content:     runtimecontracts.RefExpression("payload.mvp_yaml"),
+					ContentType: "yaml",
+					Schema: runtimecontracts.ArtifactRepoSchemaSpec{
+						Type:           "object",
+						RequiredFields: []string{"name"},
+					},
+					MaxBytes: 4096,
+				}},
+				Output: runtimecontracts.ArtifactRepoOutputSpec{
+					RepoURL:           "repo_url",
+					CurrentRef:        "current_ref",
+					FileManifest:      "file_manifest",
+					Status:            "status",
+					FailureReason:     "failure_reason",
+					LastRequestID:     "last_request_id",
+					LastSourceEventID: "last_source_event_id",
+				},
+				Limits: runtimecontracts.ArtifactRepoLimitsSpec{
+					MaxYAMLBytes: 4096,
+					MaxRepoBytes: 1048576,
+				},
+				FailureEvent: "artifact_repo.commit_failed",
+			},
+		},
+	}
+}
+
+func loadSelectOrCreateBudgetByKey(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, verticalID string) WorkflowInstance {
+	t.Helper()
+	instanceID, err := selectOrCreateEntityInstanceID(source, "treasury", map[string]any{"vertical_id": verticalID})
+	if err != nil {
+		t.Fatalf("selectOrCreateEntityInstanceID: %v", err)
+	}
+	identity := DeriveFlowInstanceIdentity(source, "treasury", instanceID)
+	instance, ok, err := store.Load(ctx, identity.EntityID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected select_or_create entity %s to exist", identity.EntityID)
+	}
+	return instance
 }
 
 func seedSelectEntitySpendEvent(t *testing.T, db *sql.DB, ctx context.Context, payload map[string]any) events.Event {

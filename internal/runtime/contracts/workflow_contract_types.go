@@ -102,32 +102,33 @@ type FlowInputAutoWireResolution struct {
 	ProducerFlows []string
 }
 type HandlerTransitionSemantic struct {
-	ID               string
-	NodeID           string
-	FlowID           string
-	EventType        string
-	Action           ActionSpec
-	SelectEntity     *SelectEntitySpec
-	Guard            *GuardSpec
-	AdvancesTo       string
-	SetsGate         *GateSpec
-	ClearGates       []string
-	DataAccumulation WorkflowDataAccumulation
-	Emit             EmitSpec
-	Condition        string
-	CompletionRule   string
-	OnComplete       []HandlerRuleEntry
-	Rules            []HandlerRuleEntry
-	Accumulate       *AccumulateSpec
-	Compute          *ComputeSpec
-	Query            *QuerySpec
-	FanOut           *FanOutSpec
-	GroupBy          *GroupBySpec
-	Filter           *FilterSpec
-	Reduce           *ReduceSpec
-	Count            *CountSpec
-	Clear            *ClearSpec
-	Branch           []BranchSpec
+	ID                   string
+	NodeID               string
+	FlowID               string
+	EventType            string
+	Action               ActionSpec
+	SelectEntity         *SelectEntitySpec
+	SelectOrCreateEntity *SelectOrCreateEntitySpec
+	Guard                *GuardSpec
+	AdvancesTo           string
+	SetsGate             *GateSpec
+	ClearGates           []string
+	DataAccumulation     WorkflowDataAccumulation
+	Emit                 EmitSpec
+	Condition            string
+	CompletionRule       string
+	OnComplete           []HandlerRuleEntry
+	Rules                []HandlerRuleEntry
+	Accumulate           *AccumulateSpec
+	Compute              *ComputeSpec
+	Query                *QuerySpec
+	FanOut               *FanOutSpec
+	GroupBy              *GroupBySpec
+	Filter               *FilterSpec
+	Reduce               *ReduceSpec
+	Count                *CountSpec
+	Clear                *ClearSpec
+	Branch               []BranchSpec
 }
 type HandlerRuleEntry struct {
 	ID               string                   `yaml:"id"`
@@ -247,6 +248,11 @@ type SelectEntitySpec struct {
 	Bindings []SelectEntityKeyBinding `yaml:"-"`
 }
 
+type SelectOrCreateEntitySpec struct {
+	By       map[string]string        `yaml:"by"`
+	Bindings []SelectEntityKeyBinding `yaml:"-"`
+}
+
 type SelectEntityKeyBinding struct {
 	Field   string
 	Ref     string
@@ -254,6 +260,10 @@ type SelectEntityKeyBinding struct {
 }
 
 func (s *SelectEntitySpec) Empty() bool {
+	return s == nil || len(s.Bindings) == 0
+}
+
+func (s *SelectOrCreateEntitySpec) Empty() bool {
 	return s == nil || len(s.Bindings) == 0
 }
 
@@ -892,33 +902,34 @@ type SystemNodeContract struct {
 	GateState        NodeGateStateSchema               `yaml:"gate_state"`
 }
 type SystemNodeEventHandler struct {
-	Action           ActionSpec               `yaml:"action"`
-	CreateEntity     bool                     `yaml:"create_entity"`
-	SelectEntity     *SelectEntitySpec        `yaml:"select_entity"`
-	Description      string                   `yaml:"description"`
-	EvidenceTarget   string                   `yaml:"evidence_target"`
-	Emit             EmitSpec                 `yaml:"emit"`
-	Guard            *GuardSpec               `yaml:"guard"`
-	AdvancesTo       string                   `yaml:"advances_to"`
-	SetsGate         *GateSpec                `yaml:"sets_gate"`
-	ClearGates       []string                 `yaml:"clear_gates"`
-	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
-	Condition        string                   `yaml:"condition"`
-	CompletionRule   string                   `yaml:"completion_rule"`
-	Logic            string                   `yaml:"logic"`
-	PolicyRef        string                   `yaml:"policy_ref"`
-	OnComplete       []HandlerRuleEntry       `yaml:"on_complete"`
-	Rules            []HandlerRuleEntry       `yaml:"rules"`
-	Accumulate       *AccumulateSpec          `yaml:"accumulate"`
-	Compute          *ComputeSpec             `yaml:"compute"`
-	Query            *QuerySpec               `yaml:"query"`
-	FanOut           *FanOutSpec              `yaml:"fan_out"`
-	GroupBy          *GroupBySpec             `yaml:"group_by"`
-	Filter           *FilterSpec              `yaml:"filter"`
-	Reduce           *ReduceSpec              `yaml:"reduce"`
-	Count            *CountSpec               `yaml:"count"`
-	Clear            *ClearSpec               `yaml:"clear"`
-	Branch           []BranchSpec             `yaml:"branch"`
+	Action               ActionSpec                `yaml:"action"`
+	CreateEntity         bool                      `yaml:"create_entity"`
+	SelectEntity         *SelectEntitySpec         `yaml:"select_entity"`
+	SelectOrCreateEntity *SelectOrCreateEntitySpec `yaml:"select_or_create_entity"`
+	Description          string                    `yaml:"description"`
+	EvidenceTarget       string                    `yaml:"evidence_target"`
+	Emit                 EmitSpec                  `yaml:"emit"`
+	Guard                *GuardSpec                `yaml:"guard"`
+	AdvancesTo           string                    `yaml:"advances_to"`
+	SetsGate             *GateSpec                 `yaml:"sets_gate"`
+	ClearGates           []string                  `yaml:"clear_gates"`
+	DataAccumulation     WorkflowDataAccumulation  `yaml:"data_accumulation"`
+	Condition            string                    `yaml:"condition"`
+	CompletionRule       string                    `yaml:"completion_rule"`
+	Logic                string                    `yaml:"logic"`
+	PolicyRef            string                    `yaml:"policy_ref"`
+	OnComplete           []HandlerRuleEntry        `yaml:"on_complete"`
+	Rules                []HandlerRuleEntry        `yaml:"rules"`
+	Accumulate           *AccumulateSpec           `yaml:"accumulate"`
+	Compute              *ComputeSpec              `yaml:"compute"`
+	Query                *QuerySpec                `yaml:"query"`
+	FanOut               *FanOutSpec               `yaml:"fan_out"`
+	GroupBy              *GroupBySpec              `yaml:"group_by"`
+	Filter               *FilterSpec               `yaml:"filter"`
+	Reduce               *ReduceSpec               `yaml:"reduce"`
+	Count                *CountSpec                `yaml:"count"`
+	Clear                *ClearSpec                `yaml:"clear"`
+	Branch               []BranchSpec              `yaml:"branch"`
 }
 type EventCatalogEntry struct {
 	Swarm             EventSwarmMetadata `yaml:"swarm"`

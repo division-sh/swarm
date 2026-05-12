@@ -478,6 +478,43 @@ select_entity:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_PreservesSelectOrCreateEntity(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+select_or_create_entity:
+  by:
+    repo_id: payload.repo_id
+emit: spec_repo.ready
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if handler.SelectOrCreateEntity == nil {
+		t.Fatal("expected select_or_create_entity to decode")
+	}
+	if got := len(handler.SelectOrCreateEntity.Bindings); got != 1 {
+		t.Fatalf("len(select_or_create_entity bindings) = %d, want 1", got)
+	}
+	binding := handler.SelectOrCreateEntity.Bindings[0]
+	if binding.Field != "repo_id" || binding.Ref != "payload.repo_id" {
+		t.Fatalf("binding = %+v, want repo_id -> payload.repo_id", binding)
+	}
+	if binding.RefPath.Root.String() != "payload" {
+		t.Fatalf("binding root = %q, want payload", binding.RefPath.Root.String())
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsUnknownSelectOrCreateEntityField(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+select_or_create_entity:
+  where:
+    repo_id: payload.repo_id
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}
+
 func TestHandlerRuleEntryDecode_RejectsEmitFieldsWithoutEvent(t *testing.T) {
 	var rule HandlerRuleEntry
 	err := yaml.Unmarshal([]byte(`
