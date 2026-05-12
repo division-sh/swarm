@@ -1057,13 +1057,20 @@ handler_specification:
             product_surface: Consumers receive `swarm-artifact://...` URLs and 40-character git commit SHAs, not raw host paths.
           artifact_repo_fields:
             provider: string — must be local_git.
-            repo_id: expression value resolving to the service-owned repository UUID. Required.
-            run_id: optional expression value resolving to the run UUID. Defaults to the triggering event run_id.
-            vertical_id: expression value resolving to the vertical UUID. Required for deterministic path partitioning.
-            business_slug: optional expression value used only as a sanitized local path hint. Not authoritative identity.
-            source_validation_case_id: expression value resolving to the source validation case UUID. Required for provenance.
+            repo_id: expression value resolving to the service-owned repository UUID. Required. This is the authoritative
+              opaque repository identity; product concepts must not be encoded as platform identity fields.
+            namespace: optional expression value resolving to a product-neutral isolation namespace. Defaults to the triggering
+              event run_id when omitted. Only letters, digits, dash, underscore, and dot are allowed; traversal markers fail
+              closed. The namespace partitions provider storage but is not semantic product identity.
+            partition_key: optional expression value resolving to a product-neutral grouping key copied into the manifest.
+              It may be used by consumers for indexing/debugging, but the runtime does not interpret it.
+            display_slug: optional expression value resolving to a cosmetic debug label. It is sanitized for any provider path
+              hint and is never authoritative identity. Path separators, traversal markers, and values with no letters/digits
+              fail closed.
             request_id: expression value resolving to the business idempotency UUID. Required.
             author: optional expression value used for git author display only.
+            provenance: optional mapping of product-owned provenance keys to expression values. Keys are copied under a
+              manifest/failure `provenance` object and are not interpreted by the platform. Invalid keys fail closed.
             allowed_paths: list of repository-relative paths allowed for this service action. Required. Absolute paths and
               traversal are prohibited.
             files: list of `{path, content, content_type, schema, max_bytes}` entries. path and content are explicit expression
@@ -1074,14 +1081,17 @@ handler_specification:
               last_request_id, and last_source_event_id.
             failure_event: optional event name emitted when runtime execution fails after request/source identity resolution.
             failure_payload: optional mapping of additional failure event payload fields to expression values. Runtime always
-              includes repo_id, run_id, vertical_id, source_validation_case_id, request_id, source_event_id, and failure_reason.
+              includes repo_id, namespace, request_id, source_event_id, failure_reason, provenance, and optional partition_key
+              and display_slug when declared/resolved.
           behavior: The runtime normalizes file content, validates yaml content against the declared file schema, writes only
             allowlisted paths under the service-owned repo root, verifies the projected git tree stays within max_repo_bytes,
             commits staged files atomically, verifies the resulting ref is a 40-character git SHA, and persists only the declared
             output fields on the selected/owned entity. Duplicate replay for the same source_event_id is a no-op only when the
             contract-visible committed output state is already present. Reusing a request_id with different content fails closed
             even when that request is not the latest operation. Content hashes are diagnostic and do not replace request/source
-            idempotency.
+            idempotency. The public artifact URL is product-neutral (`swarm-artifact://repos/<repo_id>`). The local-git provider
+            path is product-neutral, collision-safe by repo_id, scoped below the runtime artifact root, and must not encode
+            product-specific path segments.
           operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service
             contract must declare the output fields it wants persisted; status is committed or failed, failure_reason records
             runtime failure detail when available, and current_ref updates only after git commit/ref verification succeeds.

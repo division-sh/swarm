@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -822,19 +823,22 @@ action:
   artifact_repo:
     provider: local_git
     repo_id:
-      ref: entity.spec_repo_id
-    run_id:
+      ref: entity.repo_id
+    namespace:
       ref: event.run_id
-    vertical_id:
-      ref: entity.vertical_id
-    business_slug:
-      ref: entity.business_slug
-    source_validation_case_id:
-      ref: entity.source_validation_case_id
+    partition_key:
+      ref: entity.project_id
+    display_slug:
+      ref: entity.display_slug
     request_id:
       ref: payload.request_id
     author:
-      literal: validation-agent
+      literal: artifact-writer
+    provenance:
+      scope:
+        literal: fixture
+      source_record_id:
+        ref: entity.source_record_id
     allowed_paths:
       - specs/mvp.yaml
     files:
@@ -859,7 +863,7 @@ action:
     limits:
       max_yaml_bytes: 4096
       max_repo_bytes: 1048576
-    failure_event: spec_repo.commit_failed
+    failure_event: artifact_repo.commit_failed
     failure_payload:
       request_id:
         ref: payload.request_id
@@ -875,6 +879,15 @@ action:
 	if got := handler.Action.ArtifactRepo.Provider; got != "local_git" {
 		t.Fatalf("ArtifactRepo.Provider = %q", got)
 	}
+	if got := handler.Action.ArtifactRepo.Namespace.Ref; got != "event.run_id" {
+		t.Fatalf("ArtifactRepo.Namespace = %#v", handler.Action.ArtifactRepo.Namespace)
+	}
+	if got := handler.Action.ArtifactRepo.PartitionKey.Ref; got != "entity.project_id" {
+		t.Fatalf("ArtifactRepo.PartitionKey = %#v", handler.Action.ArtifactRepo.PartitionKey)
+	}
+	if got := handler.Action.ArtifactRepo.Provenance["scope"].Literal; got != "fixture" {
+		t.Fatalf("ArtifactRepo.Provenance[scope] = %#v", handler.Action.ArtifactRepo.Provenance["scope"])
+	}
 	if got := handler.Action.ArtifactRepo.Files[0].Path.Literal; got != "specs/mvp.yaml" {
 		t.Fatalf("ArtifactRepo.Files[0].Path = %#v", got)
 	}
@@ -884,7 +897,7 @@ action:
 	if got := handler.Action.ArtifactRepo.Output.CurrentRef; got != "current_ref" {
 		t.Fatalf("ArtifactRepo.Output.CurrentRef = %q", got)
 	}
-	if got := handler.Action.ArtifactRepo.FailureEvent; got != "spec_repo.commit_failed" {
+	if got := handler.Action.ArtifactRepo.FailureEvent; got != "artifact_repo.commit_failed" {
 		t.Fatalf("ArtifactRepo.FailureEvent = %q", got)
 	}
 }
@@ -900,6 +913,25 @@ action:
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
 		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsLegacyArtifactRepoProductFields(t *testing.T) {
+	for _, field := range []string{"vertical_id", "source_validation_case_id", "business_slug", "spec_repo", "spec-repos"} {
+		t.Run(field, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := yaml.Unmarshal([]byte(fmt.Sprintf(`
+action:
+  id: artifact_repo_commit
+  artifact_repo:
+    provider: local_git
+    %s:
+      literal: old
+`, field)), &handler)
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf(`artifact_repo field "%s"`, field)) {
+				t.Fatalf("yaml.Unmarshal error = %v, want legacy product field rejection", err)
+			}
+		})
 	}
 }
 

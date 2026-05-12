@@ -720,7 +720,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
-		WorkflowName:    "spec-repo",
+		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
@@ -741,7 +741,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	if err != nil || !ok {
 		t.Fatalf("load workflow instance ok=%v err=%v", ok, err)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["repo_url"])); got != "swarm-artifact://spec-repos/"+initial["spec_repo_id"].(string) {
+	if got := strings.TrimSpace(asString(instance.Metadata["repo_url"])); got != "swarm-artifact://repos/"+initial["repo_id"].(string) {
 		t.Fatalf("repo_url = %q", got)
 	}
 	ref := strings.TrimSpace(asString(instance.Metadata["current_ref"]))
@@ -755,11 +755,21 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	if got := strings.TrimSpace(asString(manifest["source_event_id"])); got != execCtx.Request.Event.ID {
 		t.Fatalf("manifest source_event_id = %q", got)
 	}
+	if _, exists := manifest["vertical_id"]; exists {
+		t.Fatalf("manifest contains product vertical_id: %#v", manifest)
+	}
+	provenance, ok := manifest["provenance"].(map[string]any)
+	if !ok {
+		t.Fatalf("manifest provenance = %#v", manifest["provenance"])
+	}
+	if got := strings.TrimSpace(asString(provenance["source_record_id"])); got != initial["source_record_id"].(string) {
+		t.Fatalf("manifest provenance source_record_id = %q", got)
+	}
 	files, ok := manifest["files"].([]any)
 	if !ok || len(files) != 1 {
 		t.Fatalf("manifest files = %#v", manifest["files"])
 	}
-	repoPath, err := artifactRepoPath(artifactRoot, testPipelineRunID, initial["vertical_id"].(string), initial["business_slug"].(string), initial["spec_repo_id"].(string))
+	repoPath, err := artifactRepoPath(artifactRoot, initial["namespace"].(string), initial["display_slug"].(string), initial["repo_id"].(string))
 	if err != nil {
 		t.Fatalf("artifactRepoPath: %v", err)
 	}
@@ -817,7 +827,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
-		WorkflowName:    "spec-repo",
+		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
@@ -850,8 +860,25 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("failure event count = %d, want 1", got)
 	}
-	if got := string(bus.publishedEvent(0).Type); got != "spec_repo.commit_failed" {
+	if got := string(bus.publishedEvent(0).Type); got != "artifact_repo.commit_failed" {
 		t.Fatalf("failure event type = %q", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
+		t.Fatalf("failure event payload: %v", err)
+	}
+	if got := strings.TrimSpace(asString(payload["namespace"])); got != initial["namespace"].(string) {
+		t.Fatalf("failure payload namespace = %q", got)
+	}
+	if _, exists := payload["vertical_id"]; exists {
+		t.Fatalf("failure payload contains product vertical_id: %#v", payload)
+	}
+	provenance, ok := payload["provenance"].(map[string]any)
+	if !ok {
+		t.Fatalf("failure payload provenance = %#v", payload["provenance"])
+	}
+	if got := strings.TrimSpace(asString(provenance["source_record_id"])); got != initial["source_record_id"].(string) {
+		t.Fatalf("failure payload provenance source_record_id = %q", got)
 	}
 }
 
@@ -866,7 +893,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
-		WorkflowName:    "spec-repo",
+		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
@@ -905,7 +932,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
-		WorkflowName:    "spec-repo",
+		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
@@ -951,7 +978,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
-		WorkflowName:    "spec-repo",
+		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
@@ -980,7 +1007,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	if sameRef == "" || sameRef == initialRef {
 		t.Fatalf("same-tree request current_ref = %q, initial ref = %q; want a durable operation commit", sameRef, initialRef)
 	}
-	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), testPipelineRunID, initial["vertical_id"].(string), initial["business_slug"].(string), initial["spec_repo_id"].(string))
+	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), initial["namespace"].(string), initial["display_slug"].(string), initial["repo_id"].(string))
 	if err != nil {
 		t.Fatalf("artifactRepoPath: %v", err)
 	}
@@ -1018,7 +1045,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
-		WorkflowName:    "spec-repo",
+		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
@@ -1037,7 +1064,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
-		WorkflowName:    "spec-repo",
+		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
@@ -1073,7 +1100,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
-		WorkflowName:    "spec-repo",
+		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		Metadata:        cloneStringAnyMap(initial),
@@ -1124,12 +1151,33 @@ func TestWriteArtifactRepoFilesRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestArtifactRepoPathRejectsUnsafeGenericSegments(t *testing.T) {
+	repoID := "11111111-1111-1111-1111-111111111111"
+	for _, tc := range []struct {
+		name        string
+		namespace   string
+		displaySlug string
+		want        string
+	}{
+		{name: "namespace traversal", namespace: "../escape", displaySlug: "safe", want: "namespace"},
+		{name: "display traversal", namespace: "tenant-alpha", displaySlug: "../escape", want: "display_slug"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := artifactRepoPath(t.TempDir(), tc.namespace, tc.displaySlug, repoID)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("artifactRepoPath error = %v, want %s", err, tc.want)
+			}
+		})
+	}
+}
+
 func testArtifactRepoEntityFields() map[string]any {
 	return map[string]any{
-		"spec_repo_id":              "11111111-1111-1111-1111-111111111111",
-		"vertical_id":               "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-		"source_validation_case_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-		"business_slug":             "Acme CRM",
+		"repo_id":          "11111111-1111-1111-1111-111111111111",
+		"namespace":        "tenant-alpha",
+		"partition_key":    "project-42",
+		"display_slug":     "Demo Artifact",
+		"source_record_id": "record-123",
 	}
 }
 
@@ -1141,7 +1189,7 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 	payloadBytes, _ := json.Marshal(payload)
 	evt := events.Event{
 		ID:        eventID,
-		Type:      "spec_file.commit_requested",
+		Type:      "artifact_repo.commit_requested",
 		RunID:     testPipelineRunID,
 		Payload:   payloadBytes,
 		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
@@ -1154,15 +1202,18 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 	return runtimecontracts.ActionSpec{
 			ID: "artifact_repo_commit",
 			ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
-				Provider:               "local_git",
-				RepoID:                 runtimecontracts.RefExpression("entity.spec_repo_id"),
-				RunID:                  runtimecontracts.RefExpression("event.run_id"),
-				VerticalID:             runtimecontracts.RefExpression("entity.vertical_id"),
-				BusinessSlug:           runtimecontracts.RefExpression("entity.business_slug"),
-				SourceValidationCaseID: runtimecontracts.RefExpression("entity.source_validation_case_id"),
-				RequestID:              runtimecontracts.RefExpression("payload.request_id"),
-				Author:                 runtimecontracts.LiteralExpression("validation-agent"),
-				AllowedPaths:           []string{"specs/mvp.yaml"},
+				Provider:     "local_git",
+				RepoID:       runtimecontracts.RefExpression("entity.repo_id"),
+				Namespace:    runtimecontracts.RefExpression("entity.namespace"),
+				PartitionKey: runtimecontracts.RefExpression("entity.partition_key"),
+				DisplaySlug:  runtimecontracts.RefExpression("entity.display_slug"),
+				RequestID:    runtimecontracts.RefExpression("payload.request_id"),
+				Author:       runtimecontracts.LiteralExpression("artifact-writer"),
+				Provenance: map[string]runtimecontracts.ExpressionValue{
+					"artifact_type":    runtimecontracts.LiteralExpression("fixture"),
+					"source_record_id": runtimecontracts.RefExpression("entity.source_record_id"),
+				},
+				AllowedPaths: []string{"specs/mvp.yaml"},
 				Files: []runtimecontracts.ArtifactRepoFileSpec{{
 					Path:        runtimecontracts.LiteralExpression("specs/mvp.yaml"),
 					Content:     runtimecontracts.RefExpression("payload.mvp_yaml"),
@@ -1186,7 +1237,7 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 					MaxYAMLBytes: 4096,
 					MaxRepoBytes: 1048576,
 				},
-				FailureEvent: "spec_repo.commit_failed",
+				FailureEvent: "artifact_repo.commit_failed",
 				FailurePayload: map[string]runtimecontracts.ExpressionValue{
 					"request_id": runtimecontracts.RefExpression("payload.request_id"),
 				},
@@ -1199,7 +1250,7 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 				Event:    evt,
 				State: runtimeengine.StateSnapshot{
 					EntityID:        identity.NormalizeEntityID(entityID),
-					WorkflowName:    "spec-repo",
+					WorkflowName:    "artifact-repo",
 					WorkflowVersion: "1.0.0",
 					CurrentState:    "ready",
 					StateCarrier:    runtimeengine.NewStateCarrier(stateMetadata, nil, nil),

@@ -24,7 +24,7 @@ import (
 
 const (
 	artifactRepoProviderLocalGit = "local_git"
-	artifactRepoPublicScheme     = "swarm-artifact://spec-repos/"
+	artifactRepoPublicScheme     = "swarm-artifact://repos/"
 	defaultArtifactRoot          = "/data/swarm/artifacts"
 	defaultYAMLMaxBytes          = 1 << 20
 	defaultMarkdownMaxBytes      = 5 << 20
@@ -62,15 +62,11 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if err != nil {
 		return err
 	}
-	runID, err := artifactRunID(execCtx, spec)
+	namespace, err := artifactNamespace(execCtx, spec)
 	if err != nil {
 		return err
 	}
-	verticalID, err := requiredArtifactUUID(execCtx.Base, spec.VerticalID, "artifact_repo.vertical_id")
-	if err != nil {
-		return err
-	}
-	sourceValidationCaseID, err := requiredArtifactUUID(execCtx.Base, spec.SourceValidationCaseID, "artifact_repo.source_validation_case_id")
+	partitionKey, err := optionalArtifactSegment(execCtx.Base, spec.PartitionKey, "artifact_repo.partition_key")
 	if err != nil {
 		return err
 	}
@@ -78,6 +74,8 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if err != nil {
 		return err
 	}
+	provenance := map[string]any{}
+	displaySlug := ""
 	fail := func(err error) error {
 		if err == nil {
 			return nil
@@ -89,9 +87,17 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 			spec.Output.LastSourceEventID: sourceEventID,
 		})
 		if failureEvent := strings.TrimSpace(spec.FailureEvent); failureEvent != "" {
-			_ = pc.publish(ctx, failureEvent, execCtx.Request.EntityID.String(), artifactRepoFailurePayload(execCtx.Base, spec, repoID, runID, verticalID, sourceValidationCaseID, requestID, sourceEventID, err))
+			_ = pc.publish(ctx, failureEvent, execCtx.Request.EntityID.String(), artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, err))
 		}
 		return err
+	}
+	displaySlug, err = optionalArtifactDisplaySlug(execCtx.Base, spec.DisplaySlug)
+	if err != nil {
+		return fail(err)
+	}
+	provenance, err = artifactRepoProvenance(execCtx.Base, spec)
+	if err != nil {
+		return fail(err)
 	}
 	if previous := strings.TrimSpace(asString(execCtx.Request.State.StateCarrier.Metadata[spec.Output.LastSourceEventID])); previous == sourceEventID && artifactRepoOutputsComplete(execCtx.Request.State.StateCarrier.Metadata, spec) {
 		return nil
@@ -107,8 +113,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 			}
 		}
 	}
-	businessSlug := optionalArtifactString(execCtx.Base, spec.BusinessSlug)
-	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), runID, verticalID, businessSlug, repoID)
+	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), namespace, displaySlug, repoID)
 	if err != nil {
 		return fail(err)
 	}
@@ -122,7 +127,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 			return fail(fmt.Errorf("artifact_repo_commit request_id %s conflicts with previously committed tree %s", requestID, previous.TreeHash))
 		}
 		repoURL := artifactRepoPublicScheme + repoID
-		manifest := artifactRepoManifest(repoID, runID, verticalID, sourceValidationCaseID, requestID, sourceEventID, repoURL, previous.Ref, treeHash, files)
+		manifest := artifactRepoManifest(repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, previous.Ref, treeHash, files)
 		return pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
 			spec.Output.RepoURL:           repoURL,
 			spec.Output.CurrentRef:        previous.Ref,
@@ -146,7 +151,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		return fail(err)
 	}
 	repoURL := artifactRepoPublicScheme + repoID
-	manifest := artifactRepoManifest(repoID, runID, verticalID, sourceValidationCaseID, requestID, sourceEventID, repoURL, ref, treeHash, files)
+	manifest := artifactRepoManifest(repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, ref, treeHash, files)
 	return pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
 		spec.Output.RepoURL:           repoURL,
 		spec.Output.CurrentRef:        ref,
@@ -191,20 +196,23 @@ func artifactRepoOutputsComplete(metadata map[string]any, spec *runtimecontracts
 	return true
 }
 
-func artifactRunID(execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec) (string, error) {
-	if spec != nil && !spec.RunID.IsZero() {
-		return requiredArtifactUUID(execCtx.Base, spec.RunID, "artifact_repo.run_id")
+func artifactNamespace(execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec) (string, error) {
+	if spec != nil && !spec.Namespace.IsZero() {
+		return requiredArtifactSegment(execCtx.Base, spec.Namespace, "artifact_repo.namespace")
 	}
-	runID := strings.TrimSpace(execCtx.Request.Event.RunID)
-	if runID == "" {
+	namespace := strings.TrimSpace(execCtx.Request.Event.RunID)
+	if namespace == "" {
 		if value, ok := execCtx.Base.Event.Lookup(paths.Parse("run_id")); ok {
-			runID = strings.TrimSpace(asString(value))
+			namespace = strings.TrimSpace(asString(value))
 		}
 	}
-	if _, err := uuid.Parse(runID); err != nil {
-		return "", fmt.Errorf("artifact_repo_commit requires UUID run_id: %w", err)
+	if namespace == "" {
+		return "", fmt.Errorf("artifact_repo_commit requires artifact_repo.namespace or event run_id")
 	}
-	return runID, nil
+	if err := validateArtifactRepoSegment(namespace); err != nil {
+		return "", fmt.Errorf("artifact_repo.namespace: %w", err)
+	}
+	return namespace, nil
 }
 
 func requiredArtifactUUID(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string) (string, error) {
@@ -233,6 +241,24 @@ func requiredArtifactString(base runtimeengine.BaseContext, expr runtimecontract
 	return out, nil
 }
 
+func requiredArtifactSegment(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string) (string, error) {
+	value, err := requiredArtifactString(base, expr, field)
+	if err != nil {
+		return "", err
+	}
+	if err := validateArtifactRepoSegment(value); err != nil {
+		return "", fmt.Errorf("%s: %w", field, err)
+	}
+	return value, nil
+}
+
+func optionalArtifactSegment(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string) (string, error) {
+	if expr.IsZero() {
+		return "", nil
+	}
+	return requiredArtifactSegment(base, expr, field)
+}
+
 func optionalArtifactString(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue) string {
 	if expr.IsZero() {
 		return ""
@@ -242,6 +268,46 @@ func optionalArtifactString(base runtimeengine.BaseContext, expr runtimecontract
 		return ""
 	}
 	return strings.TrimSpace(asString(value))
+}
+
+func optionalArtifactDisplaySlug(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue) (string, error) {
+	if expr.IsZero() {
+		return "", nil
+	}
+	value, ok, err := evalMailboxExpressionValue(base, expr)
+	if err != nil {
+		return "", fmt.Errorf("artifact_repo.display_slug: %w", err)
+	}
+	if !ok {
+		return "", nil
+	}
+	raw := strings.TrimSpace(asString(value))
+	if err := validateArtifactRepoDisplaySlug(raw); err != nil {
+		return "", fmt.Errorf("artifact_repo.display_slug: %w", err)
+	}
+	return raw, nil
+}
+
+func artifactRepoProvenance(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec) (map[string]any, error) {
+	out := map[string]any{}
+	if spec == nil {
+		return out, nil
+	}
+	for key, expr := range spec.Provenance {
+		key = strings.TrimSpace(key)
+		if err := validateArtifactRepoProvenanceKey(key); err != nil {
+			return nil, fmt.Errorf("artifact_repo.provenance key %q: %w", key, err)
+		}
+		value, ok, err := evalMailboxExpressionValue(base, expr)
+		if err != nil {
+			return nil, fmt.Errorf("artifact_repo.provenance.%s: %w", key, err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("artifact_repo.provenance.%s resolved empty", key)
+		}
+		out[key] = value
+	}
+	return out, nil
 }
 
 func prepareArtifactRepoFiles(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec) ([]artifactRepoPreparedFile, string, error) {
@@ -399,25 +465,74 @@ func artifactRepoCleanPath(raw string) (string, error) {
 	return cleaned, nil
 }
 
-func artifactRepoPath(root, runID, verticalID, businessSlug, repoID string) (string, error) {
+func validateArtifactRepoSegment(raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return fmt.Errorf("value is required")
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return fmt.Errorf("only letters, digits, dash, underscore, and dot are allowed")
+	}
+	if value == "." || value == ".." || strings.Contains(value, "..") {
+		return fmt.Errorf("path traversal markers are not allowed")
+	}
+	return nil
+}
+
+func validateArtifactRepoProvenanceKey(raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return fmt.Errorf("key is required")
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return fmt.Errorf("only letters, digits, dash, underscore, and dot are allowed")
+	}
+	return nil
+}
+
+func validateArtifactRepoDisplaySlug(raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil
+	}
+	if strings.Contains(value, "\x00") || strings.ContainsAny(value, `/\`) {
+		return fmt.Errorf("path separators are not allowed")
+	}
+	if value == "." || value == ".." || strings.Contains(value, "..") {
+		return fmt.Errorf("path traversal markers are not allowed")
+	}
+	if sanitizeArtifactSlug(value) == "" {
+		return fmt.Errorf("must contain at least one letter or digit")
+	}
+	return nil
+}
+
+func artifactRepoPath(root, namespace, displaySlug, repoID string) (string, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return "", fmt.Errorf("artifact root is required")
 	}
-	for label, value := range map[string]string{"run_id": runID, "vertical_id": verticalID, "repo_id": repoID} {
-		if _, err := uuid.Parse(value); err != nil {
-			return "", fmt.Errorf("%s must be UUID: %w", label, err)
-		}
+	if _, err := uuid.Parse(repoID); err != nil {
+		return "", fmt.Errorf("repo_id must be UUID: %w", err)
 	}
-	slug := sanitizeArtifactSlug(businessSlug)
-	if slug == "" {
-		slug = "artifact"
+	if err := validateArtifactRepoSegment(namespace); err != nil {
+		return "", fmt.Errorf("namespace: %w", err)
 	}
-	shortVertical := strings.ReplaceAll(verticalID, "-", "")
-	if len(shortVertical) > 8 {
-		shortVertical = shortVertical[:8]
+	if err := validateArtifactRepoDisplaySlug(displaySlug); err != nil {
+		return "", fmt.Errorf("display_slug: %w", err)
 	}
-	repoPath := filepath.Join(root, "spec-repos", runID, slug+"-"+shortVertical, repoID+".git")
+	parts := []string{root, "repos", namespace}
+	if slug := sanitizeArtifactSlug(displaySlug); slug != "" {
+		parts = append(parts, slug)
+	}
+	parts = append(parts, repoID+".git")
+	repoPath := filepath.Join(parts...)
 	if !artifactPathWithinRoot(repoPath, root) {
 		return "", fmt.Errorf("artifact_repo path escaped artifact root")
 	}
@@ -696,7 +811,7 @@ func artifactRepoRequestRecord(ctx context.Context, repoPath, requestID string) 
 	return artifactRepoHistoryRecord{}, false, nil
 }
 
-func artifactRepoManifest(repoID, runID, verticalID, sourceValidationCaseID, requestID, sourceEventID, repoURL, ref, treeHash string, files []artifactRepoPreparedFile) map[string]any {
+func artifactRepoManifest(repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID, repoURL, ref, treeHash string, files []artifactRepoPreparedFile) map[string]any {
 	fileItems := make([]map[string]any, 0, len(files))
 	for _, file := range files {
 		fileItems = append(fileItems, map[string]any{
@@ -706,22 +821,31 @@ func artifactRepoManifest(repoID, runID, verticalID, sourceValidationCaseID, req
 			"size_bytes":   file.Size,
 		})
 	}
-	return map[string]any{
-		"provider":                  artifactRepoProviderLocalGit,
-		"repo_id":                   repoID,
-		"run_id":                    runID,
-		"vertical_id":               verticalID,
-		"source_validation_case_id": sourceValidationCaseID,
-		"request_id":                requestID,
-		"source_event_id":           sourceEventID,
-		"repo_url":                  repoURL,
-		"ref":                       ref,
-		"tree_hash":                 treeHash,
-		"files":                     fileItems,
+	if provenance == nil {
+		provenance = map[string]any{}
 	}
+	out := map[string]any{
+		"provider":        artifactRepoProviderLocalGit,
+		"repo_id":         repoID,
+		"namespace":       namespace,
+		"request_id":      requestID,
+		"source_event_id": sourceEventID,
+		"repo_url":        repoURL,
+		"ref":             ref,
+		"tree_hash":       treeHash,
+		"files":           fileItems,
+		"provenance":      provenance,
+	}
+	if strings.TrimSpace(partitionKey) != "" {
+		out["partition_key"] = partitionKey
+	}
+	if strings.TrimSpace(displaySlug) != "" {
+		out["display_slug"] = displaySlug
+	}
+	return out
 }
 
-func artifactRepoFailurePayload(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, runID, verticalID, sourceValidationCaseID, requestID, sourceEventID string, cause error) map[string]any {
+func artifactRepoFailurePayload(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID string, cause error) map[string]any {
 	out := map[string]any{}
 	if spec != nil {
 		for target, expr := range spec.FailurePayload {
@@ -737,9 +861,17 @@ func artifactRepoFailurePayload(base runtimeengine.BaseContext, spec *runtimecon
 		}
 	}
 	out["repo_id"] = repoID
-	out["run_id"] = runID
-	out["vertical_id"] = verticalID
-	out["source_validation_case_id"] = sourceValidationCaseID
+	out["namespace"] = namespace
+	if strings.TrimSpace(partitionKey) != "" {
+		out["partition_key"] = partitionKey
+	}
+	if strings.TrimSpace(displaySlug) != "" {
+		out["display_slug"] = displaySlug
+	}
+	if provenance == nil {
+		provenance = map[string]any{}
+	}
+	out["provenance"] = provenance
 	out["request_id"] = requestID
 	out["source_event_id"] = sourceEventID
 	out["failure_reason"] = cause.Error()

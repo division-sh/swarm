@@ -239,20 +239,20 @@ func (s *ArtifactRepoSpec) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo must be a mapping")
 	}
 	allowed := map[string]struct{}{
-		"provider":                  {},
-		"repo_id":                   {},
-		"run_id":                    {},
-		"vertical_id":               {},
-		"business_slug":             {},
-		"source_validation_case_id": {},
-		"request_id":                {},
-		"author":                    {},
-		"allowed_paths":             {},
-		"files":                     {},
-		"output":                    {},
-		"limits":                    {},
-		"failure_event":             {},
-		"failure_payload":           {},
+		"provider":        {},
+		"repo_id":         {},
+		"namespace":       {},
+		"partition_key":   {},
+		"display_slug":    {},
+		"request_id":      {},
+		"author":          {},
+		"provenance":      {},
+		"allowed_paths":   {},
+		"files":           {},
+		"output":          {},
+		"limits":          {},
+		"failure_event":   {},
+		"failure_payload": {},
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
