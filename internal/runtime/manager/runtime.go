@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
@@ -31,14 +32,23 @@ type runCanceller interface {
 var errRuntimeShuttingDown = errors.New("runtime shutting down")
 
 func (am *AgentManager) RestartAgent(agentID string) error {
+	_, err := am.Restart(context.Background(), runtimeagentcontrol.RestartRequest{AgentID: agentID})
+	return legacyAgentControlError(err)
+}
+
+func (am *AgentManager) Restart(_ context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
 	if am.shutdownAdmissionClosed() {
-		return errRuntimeShuttingDown
+		return runtimeagentcontrol.RestartResult{}, agentControlNotRunning(req.AgentID, runtimeagentcontrol.StatusTerminated)
+	}
+	agentID := strings.TrimSpace(req.AgentID)
+	if agentID == "" {
+		return runtimeagentcontrol.RestartResult{}, errors.New("agent id is required")
 	}
 	am.mu.RLock()
 	agent, ok := am.agents[agentID]
 	am.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("agent not found: %s", agentID)
+		return runtimeagentcontrol.RestartResult{}, agentControlNotFound(agentID)
 	}
 
 	am.runMu.Lock()
@@ -53,7 +63,7 @@ func (am *AgentManager) RestartAgent(agentID string) error {
 	if running {
 		am.startAgentLoop(ctx, agent)
 	}
-	return nil
+	return runtimeagentcontrol.RestartResult{AgentID: agentID}, nil
 }
 
 func (am *AgentManager) Shutdown() error {
@@ -314,29 +324,45 @@ func (am *AgentManager) safeProcessEvent(ctx context.Context, agent Agent, evt e
 }
 
 func (am *AgentManager) ChatWithAgent(ctx context.Context, agentID, directive string, killPrevious bool) (string, error) {
-	if am.shutdownAdmissionClosed() {
-		return "", errRuntimeShuttingDown
+	result, err := am.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
+		AgentID:      agentID,
+		Directive:    directive,
+		KillPrevious: killPrevious,
+	})
+	if err != nil {
+		return "", legacyAgentControlError(err)
 	}
-	agentID = strings.TrimSpace(agentID)
+	return result.Response, nil
+}
+
+func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
+	if am.shutdownAdmissionClosed() {
+		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(req.AgentID, runtimeagentcontrol.StatusTerminated)
+	}
+	agentID := strings.TrimSpace(req.AgentID)
 	if agentID == "" {
-		return "", errors.New("agent id is required")
+		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("agent id is required")
 	}
 	am.mu.RLock()
 	agent, ok := am.agents[agentID]
 	am.mu.RUnlock()
 	if !ok {
-		return "", fmt.Errorf("agent not found: %s", agentID)
+		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotFound(agentID)
 	}
 	chatAgent, ok := agent.(BoardInteractiveAgent)
 	if !ok {
-		return "", fmt.Errorf("agent does not support board chat: %s", agentID)
+		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(agentID, runtimeagentcontrol.StatusIdle)
 	}
-	if killPrevious {
+	if req.KillPrevious {
 		if err := am.killPreviousRuns(ctx, agentID); err != nil {
-			return "", err
+			return runtimeagentcontrol.SendDirectiveResult{}, err
 		}
 	}
-	return chatAgent.BoardStep(ctx, directive)
+	response, err := chatAgent.BoardStep(ctx, req.Directive)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	return runtimeagentcontrol.SendDirectiveResult{AgentID: agentID, Response: response}, nil
 }
 
 func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string) error {
@@ -739,14 +765,25 @@ func (am *AgentManager) replayPendingEventsDetailed(ctx context.Context) (Startu
 }
 
 func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) error {
-	_, err := am.replayAgentBacklogDetailed(ctx, agentID)
-	return err
+	_, err := am.ReplayBacklog(ctx, runtimeagentcontrol.ReplayBacklogRequest{AgentID: agentID})
+	return legacyAgentControlError(err)
+}
+
+func (am *AgentManager) ReplayBacklog(ctx context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
+	summary, err := am.replayAgentBacklogDetailed(ctx, req.AgentID)
+	if err != nil {
+		return runtimeagentcontrol.ReplayBacklogResult{}, err
+	}
+	return runtimeagentcontrol.ReplayBacklogResult{
+		AgentID:       strings.TrimSpace(req.AgentID),
+		ReplayedCount: summary.ReplayedCount,
+	}, nil
 }
 
 func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID string) (StartupReplaySummary, error) {
 	summary := StartupReplaySummary{}
 	if am.shutdownAdmissionClosed() {
-		return summary, errRuntimeShuttingDown
+		return summary, agentControlNotRunning(agentID, runtimeagentcontrol.StatusTerminated)
 	}
 	if am.store == nil {
 		return summary, fmt.Errorf("manager store unavailable")
@@ -767,7 +804,7 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 	}
 	am.mu.RUnlock()
 	if !ok || agent == nil {
-		return summary, fmt.Errorf("agent not found: %s", agentID)
+		return summary, agentControlNotFound(agentID)
 	}
 	pending, err := am.pendingEventsForAgent(ctx, agentID, cfg, agent, since)
 	if err != nil {
@@ -789,8 +826,8 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 			return summary, nil
 		}
 		result := am.processEventDetailed(ctx, agent, evt)
+		summary.observe(result.record)
 		if startupManagerReplayDiagnosticsEnabled(ctx) {
-			summary.observe(result.record)
 			logStartupManagerReplayAftermath(ctx, am.bus, result.record)
 		}
 		if result.err != nil {
@@ -814,6 +851,41 @@ func (am *AgentManager) replayAgentBacklogDetailed(ctx context.Context, agentID 
 		}
 	}
 	return summary, nil
+}
+
+func agentControlNotFound(agentID string) error {
+	return &runtimeagentcontrol.StateError{
+		Err:     runtimeagentcontrol.ErrAgentNotFound,
+		AgentID: strings.TrimSpace(agentID),
+	}
+}
+
+func agentControlNotRunning(agentID, currentStatus string) error {
+	status := strings.TrimSpace(currentStatus)
+	if status == "" {
+		status = runtimeagentcontrol.StatusTerminated
+	}
+	return &runtimeagentcontrol.StateError{
+		Err:           runtimeagentcontrol.ErrAgentNotRunning,
+		AgentID:       strings.TrimSpace(agentID),
+		CurrentStatus: status,
+	}
+}
+
+func legacyAgentControlError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var stateErr *runtimeagentcontrol.StateError
+	if errors.As(err, &stateErr) && stateErr != nil {
+		switch {
+		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrAgentNotFound):
+			return fmt.Errorf("agent not found: %s", strings.TrimSpace(stateErr.AgentID))
+		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrAgentNotRunning) && strings.TrimSpace(stateErr.CurrentStatus) == runtimeagentcontrol.StatusTerminated:
+			return errRuntimeShuttingDown
+		}
+	}
+	return err
 }
 
 func (am *AgentManager) pendingEventsForAgent(

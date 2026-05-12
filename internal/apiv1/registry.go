@@ -18,6 +18,7 @@ const (
 	EventNotFoundCode                    = "EVENT_NOT_FOUND"
 	EntityNotFoundCode                   = "ENTITY_NOT_FOUND"
 	AgentNotFoundCode                    = "AGENT_NOT_FOUND"
+	AgentNotRunningCode                  = "AGENT_NOT_RUNNING"
 	SessionNotFoundCode                  = "SESSION_NOT_FOUND"
 	PayloadValidationFailedCode          = "PAYLOAD_VALIDATION_FAILED"
 	RunNotFoundCode                      = "RUN_NOT_FOUND"

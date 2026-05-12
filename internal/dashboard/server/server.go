@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimetools "swarm/internal/runtime/tools"
@@ -189,9 +190,7 @@ type RunTraceReader interface {
 }
 
 type AgentController interface {
-	RestartAgent(agentID string) error
-	ReplayAgentBacklog(ctx context.Context, agentID string) error
-	ChatWithAgent(ctx context.Context, agentID, directive string, killPrevious bool) (string, error)
+	runtimeagentcontrol.Controller
 }
 
 type RuntimeController interface {
@@ -484,12 +483,16 @@ func (h *Handler) handleAgentDirective(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, errors.New("message is required"))
 		return
 	}
-	resp, err := h.agentControl.ChatWithAgent(r.Context(), id, req.Message, req.KillPrevious)
+	resp, err := h.agentControl.SendDirective(r.Context(), runtimeagentcontrol.SendDirectiveRequest{
+		AgentID:      id,
+		Directive:    req.Message,
+		KillPrevious: req.KillPrevious,
+	})
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, controlResult{OK: true, Message: strings.TrimSpace(resp)})
+	writeJSON(w, http.StatusOK, controlResult{OK: true, Message: strings.TrimSpace(resp.Response)})
 }
 
 func (h *Handler) handleAgentRestart(w http.ResponseWriter, r *http.Request) {
@@ -502,7 +505,7 @@ func (h *Handler) handleAgentRestart(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
 		return
 	}
-	if err := h.agentControl.RestartAgent(id); err != nil {
+	if _, err := h.agentControl.Restart(r.Context(), runtimeagentcontrol.RestartRequest{AgentID: id}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -519,7 +522,7 @@ func (h *Handler) handleAgentReplay(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
 		return
 	}
-	if err := h.agentControl.ReplayAgentBacklog(r.Context(), id); err != nil {
+	if _, err := h.agentControl.ReplayBacklog(r.Context(), runtimeagentcontrol.ReplayBacklogRequest{AgentID: id}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return
 	}

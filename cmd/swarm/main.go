@@ -199,6 +199,7 @@ func main() {
 		Observability:         stores.Postgres,
 		Entities:              apiEntities,
 		AgentConversations:    apiAgentConversations,
+		AgentControl:          dashboardDynamicAgentControl{supervisor: supervisor},
 		Mailbox:               stores.Postgres,
 		Idempotency:           stores.Postgres,
 		Events:                rt.Bus,

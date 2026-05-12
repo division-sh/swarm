@@ -19,6 +19,7 @@ import (
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
+	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimeagents "swarm/internal/runtime/agents"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -813,13 +814,27 @@ func (s stubObservability) ListIncidents(context.Context, IncidentFilter) ([]inc
 	return s.incidents, nil
 }
 
-type stubAgentControl struct{ lastKillPrevious bool }
+type stubAgentControl struct {
+	lastDirective    runtimeagentcontrol.SendDirectiveRequest
+	restartCalls     int
+	replayCalls      int
+	lastKillPrevious bool
+}
 
-func (stubAgentControl) RestartAgent(string) error                        { return nil }
-func (stubAgentControl) ReplayAgentBacklog(context.Context, string) error { return nil }
-func (s *stubAgentControl) ChatWithAgent(_ context.Context, _, _ string, killPrevious bool) (string, error) {
-	s.lastKillPrevious = killPrevious
-	return "ok", nil
+func (s *stubAgentControl) Restart(_ context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
+	s.restartCalls++
+	return runtimeagentcontrol.RestartResult{AgentID: req.AgentID}, nil
+}
+
+func (s *stubAgentControl) ReplayBacklog(_ context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
+	s.replayCalls++
+	return runtimeagentcontrol.ReplayBacklogResult{AgentID: req.AgentID, ReplayedCount: 3}, nil
+}
+
+func (s *stubAgentControl) SendDirective(_ context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
+	s.lastDirective = req
+	s.lastKillPrevious = req.KillPrevious
+	return runtimeagentcontrol.SendDirectiveResult{AgentID: req.AgentID, Response: "ok"}, nil
 }
 
 type directiveSurfaceRuntime struct {
@@ -1178,6 +1193,9 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("agent restart status=%d body=%s", rec.Code, rec.Body.String())
 	}
+	if agentCtl.restartCalls != 1 {
+		t.Fatalf("restart calls = %d, want 1", agentCtl.restartCalls)
+	}
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/directive", strings.NewReader(`{"message":"hello","kill_previous":true}`))
@@ -1188,6 +1206,20 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	}
 	if !agentCtl.lastKillPrevious {
 		t.Fatal("expected kill_previous to be forwarded to agent control")
+	}
+	if agentCtl.lastDirective.AgentID != "agent-1" || agentCtl.lastDirective.Directive != "hello" {
+		t.Fatalf("directive request = %#v, want legacy payload adapted", agentCtl.lastDirective)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/replay", strings.NewReader(`{}`))
+	setOperatorAuth(req)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("agent replay status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if agentCtl.replayCalls != 1 {
+		t.Fatalf("replay calls = %d, want 1", agentCtl.replayCalls)
 	}
 
 	rec = httptest.NewRecorder()
