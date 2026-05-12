@@ -139,6 +139,46 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 	}
 }
 
+func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := &store.PostgresStore{DB: db}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Idempotency: pg,
+			AgentControl: &fakeAgentControlController{
+				errs: map[string]error{
+					"agent.restart": &runtimeagentcontrol.StateError{
+						Err:           runtimeagentcontrol.ErrAgentNotRunning,
+						AgentID:       "agent-1",
+						CurrentStatus: runtimeagentcontrol.StatusTerminated,
+					},
+					"agent.replay_backlog": &runtimeagentcontrol.StateError{
+						Err:           runtimeagentcontrol.ErrAgentNotRunning,
+						AgentID:       "agent-1",
+						CurrentStatus: runtimeagentcontrol.StatusTerminated,
+					},
+				},
+			},
+		}),
+	})
+
+	for _, method := range []string{"agent.restart", "agent.replay_backlog"} {
+		resp := rpcCall(t, handler, agentControlBody(method, "agent-1", ""))
+		if resp.Error == nil {
+			t.Fatalf("%s not-running error = nil", method)
+		}
+		if resp.Error.Code != codeInternalError {
+			t.Fatalf("%s error code = %d, want %d", method, resp.Error.Code, codeInternalError)
+		}
+		data := asMap(t, resp.Error.Data)
+		if data["code"] == AgentNotRunningCode {
+			t.Fatalf("%s returned undocumented application code %s", method, AgentNotRunningCode)
+		}
+	}
+}
+
 func TestOperatorAgentControlHandlersRequireOwner(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
