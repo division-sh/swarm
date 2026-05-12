@@ -82,7 +82,8 @@ count=$((count + 1))
 printf '%s' "$count" > "$count_file"
 captured="$capture_dir/$count.stdin"
 cat > "$captured"
-if grep -Fq '"name":"read_file"' "$captured" && grep -Fq '"ok":true' "$captured"; then
+first_nonspace="$(sed -n 's/^[[:space:]]*//; /^$/d; s/^\(.\).*$/\1/p; q' "$captured")"
+if [ "$first_nonspace" = "[" ] && grep -Fq '"name":"read_file"' "$captured" && grep -Fq '"ok":true' "$captured"; then
   printf '%s\n' '{"type":"result","result":"done"}'
 else
   printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
