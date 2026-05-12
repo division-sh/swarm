@@ -31,7 +31,7 @@ type SourceProvider func() semanticview.Source
 type RuntimeProvider func() *runtimepkg.Runtime
 
 type RunDebugReader interface {
-	LoadRunDebugTracePage(ctx context.Context, runID string, opts store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, string, error)
+	ListOperatorEvents(ctx context.Context, opts store.OperatorEventListOptions) (store.OperatorEventListResult, error)
 	ListOperatorRuntimeLogs(ctx context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error)
 	LoadRunLifecycleSnapshot(ctx context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error)
 }

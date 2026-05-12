@@ -648,6 +648,51 @@ func (s *stubBuilderRunStore) LoadRunDebugTracePage(_ context.Context, runID str
 	return append([]store.RunDebugTraceRow(nil), rows[:limit]...), "", nil
 }
 
+func (s *stubBuilderRunStore) ListOperatorEvents(_ context.Context, opts store.OperatorEventListOptions) (store.OperatorEventListResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	eventsOut := []store.OperatorEventFull{}
+	for _, evt := range s.events {
+		if strings.TrimSpace(evt.RunID) != strings.TrimSpace(opts.Filter.RunID) {
+			continue
+		}
+		if opts.ExcludeRuntimeLogs && evt.Type == events.EventType("platform.runtime_log") {
+			continue
+		}
+		if opts.Since != nil && !evt.CreatedAt.After(opts.Since.UTC()) {
+			continue
+		}
+		payload := map[string]any{}
+		_ = json.Unmarshal(evt.Payload, &payload)
+		eventsOut = append(eventsOut, store.OperatorEventFull{
+			EventID:   strings.TrimSpace(evt.ID),
+			EventName: strings.TrimSpace(string(evt.Type)),
+			EntityID:  strings.TrimSpace(evt.EntityID()),
+			RunID:     strings.TrimSpace(evt.RunID),
+			CreatedAt: evt.CreatedAt.UTC(),
+			Source:    strings.TrimSpace(firstNonEmpty(evt.SourceAgent, "unknown")),
+			Payload:   payload,
+		})
+	}
+	slices.SortFunc(eventsOut, func(a, b store.OperatorEventFull) int {
+		if cmp := a.CreatedAt.Compare(b.CreatedAt); cmp != 0 {
+			if opts.Order == "asc" {
+				return cmp
+			}
+			return -cmp
+		}
+		if opts.Order == "asc" {
+			return strings.Compare(a.EventID, b.EventID)
+		}
+		return strings.Compare(b.EventID, a.EventID)
+	})
+	limit := opts.Limit
+	if limit <= 0 || limit > len(eventsOut) {
+		limit = len(eventsOut)
+	}
+	return store.OperatorEventListResult{Events: append([]store.OperatorEventFull(nil), eventsOut[:limit]...)}, nil
+}
+
 func (s *stubBuilderRunStore) ListOperatorRuntimeLogs(_ context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -3565,6 +3610,11 @@ func TestHandler_RunEventReplayUsesCanonicalPersistedRunDebugOwner(t *testing.T)
 	}
 	if gotTypes["event.fired"]["timestamp"] != now.Format(time.RFC3339) {
 		t.Fatalf("event.fired timestamp = %#v, want %q", gotTypes["event.fired"]["timestamp"], now.Format(time.RFC3339))
+	}
+	eventPayload, _ := gotTypes["event.fired"]["payload"].(map[string]any)
+	rawEventPayload, _ := eventPayload["payload"].(map[string]any)
+	if rawEventPayload["topic"] != "sample" {
+		t.Fatalf("event.fired payload = %#v", eventPayload)
 	}
 	if gotTypes["runtime.log"]["timestamp"] != now.Add(2*time.Second).Format(time.RFC3339) {
 		t.Fatalf("runtime.log timestamp = %#v, want %q", gotTypes["runtime.log"]["timestamp"], now.Add(2*time.Second).Format(time.RFC3339))
