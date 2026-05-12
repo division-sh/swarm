@@ -2,6 +2,7 @@ package builder
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -106,6 +107,25 @@ func legacyBuilderEntityPayload(full store.OperatorEntityFull) map[string]any {
 		entity["entity_type"] = full.Entity.EntityType
 	}
 	return entity
+}
+
+func (h *handler) legacyBuilderListEntities(ctx context.Context) ([]store.OperatorEntitySummary, error) {
+	if h == nil || h.entities == nil {
+		return nil, fmt.Errorf("entity reader is not configured")
+	}
+	opts := store.OperatorEntityListOptions{Limit: 500}
+	out := []store.OperatorEntitySummary{}
+	for {
+		result, err := h.entities.ListOperatorEntities(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, result.Entities...)
+		if strings.TrimSpace(result.NextCursor) == "" {
+			return out, nil
+		}
+		opts.Cursor = result.NextCursor
+	}
 }
 
 func (h *handler) healthSnapshot(ctx context.Context) EngineHealth {
