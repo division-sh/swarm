@@ -20,6 +20,7 @@ const (
 	RunForkSelectedContractRecipientPlanningOwner                              = "runtime.run_fork.selected_contract_recipient_planning"
 	RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner      = RunForkSelectedContractExecutionOwner + ".authoritative_agent_delivery_materialization"
 	RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner      = RunForkSelectedContractExecutionOwner + ".fork_local_agent_runtime_materializer_executor"
+	RunForkSelectedContractForkLocalRuntimeContainerOwner                      = RunForkSelectedContractExecutionOwner + ".fork_local_runtime_container"
 	RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner     = RunForkSelectedContractExecutionOwner + ".fork_local_runtime_platform_event_lineage_policy"
 	RunForkContractSwapBootResumeAdmissionOwner                                = "runtime.run_fork.contract_swap_boot_resume_admission"
 	RunForkHistoricalReplayExecutionAdmissionOwner                             = "runtime.run_fork.historical_replay_execution_admission"

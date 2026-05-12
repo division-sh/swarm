@@ -7,11 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/runforkadmission"
 	"swarm/internal/store"
@@ -38,6 +35,7 @@ type SelectedContractExecutionResult struct {
 	Activation                         store.RunForkActivation                          `json:"activation"`
 	SelectedContractExecutionAdmission *store.RunForkSelectedContractExecutionAdmission `json:"selected_contract_execution_admission,omitempty"`
 	AgentRuntimeMaterialization        *SelectedContractAgentRuntimeMaterialization     `json:"selected_agent_runtime_materialization,omitempty"`
+	ForkLocalRuntimeContainer          *SelectedContractForkLocalRuntimeContainer       `json:"fork_local_runtime_container,omitempty"`
 	ExecutedEventCount                 int                                              `json:"executed_event_count"`
 	ForkEvents                         []SelectedContractExecutionForkEvent             `json:"fork_events,omitempty"`
 }
@@ -158,7 +156,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			AgentRuntimeMaterialization:        &agentRuntime.Proof,
 		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
 	}
-	published, err := publishSelectedContractForkEvents(ctx, publishSelectedContractForkEventsRequest{
+	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 		Store:             req.Store,
 		LoadedSource:      loadedSource,
 		RecipientPlanning: *model.RecipientPlanning,
@@ -176,6 +174,17 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			Materialization:                    materialization,
 			SelectedContractExecutionAdmission: &admission,
 			AgentRuntimeMaterialization:        &agentRuntime.Proof,
+		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+	}
+	containerProof := container.Proof()
+	published, err := container.Publish(ctx)
+	if err != nil {
+		return SelectedContractExecutionResult{
+			Owner:                              store.RunForkSelectedContractExecutionOwner,
+			Materialization:                    materialization,
+			SelectedContractExecutionAdmission: &admission,
+			AgentRuntimeMaterialization:        &agentRuntime.Proof,
+			ForkLocalRuntimeContainer:          &containerProof,
 			ExecutedEventCount:                 len(published),
 			ForkEvents:                         published,
 		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
@@ -191,6 +200,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			Activation:                         activation,
 			SelectedContractExecutionAdmission: &admission,
 			AgentRuntimeMaterialization:        &agentRuntime.Proof,
+			ForkLocalRuntimeContainer:          &containerProof,
 			ExecutedEventCount:                 len(published),
 			ForkEvents:                         published,
 		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
@@ -201,6 +211,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		Activation:                         activation,
 		SelectedContractExecutionAdmission: &admission,
 		AgentRuntimeMaterialization:        &agentRuntime.Proof,
+		ForkLocalRuntimeContainer:          &containerProof,
 		ExecutedEventCount:                 len(published),
 		ForkEvents:                         published,
 	}
@@ -247,83 +258,6 @@ type publishSelectedContractForkEventsRequest struct {
 	ForkTime          time.Time
 	SourceEvents      []string
 	ExecutionOwner    string
-}
-
-func publishSelectedContractForkEvents(ctx context.Context, req publishSelectedContractForkEventsRequest) ([]SelectedContractExecutionForkEvent, error) {
-	if err := req.Store.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.ForkEventID, req.ForkTime); err != nil {
-		return nil, err
-	}
-	sourceEvents, err := req.Store.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.SourceEvents)
-	if err != nil {
-		return nil, err
-	}
-	executionOwner := strings.TrimSpace(req.ExecutionOwner)
-	if executionOwner == "" {
-		executionOwner = store.RunForkSelectedContractExecutionOwner
-	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning, executionOwner)
-	if err != nil {
-		return nil, err
-	}
-	bus, err := runtimebus.NewEventBusWithOptions(req.Store, runtimebus.EventBusOptions{
-		ContractBundle:              req.LoadedSource.Source,
-		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
-		RecipientPlanGuard:          guard.Authorize,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create selected-contract execution bus: %w", err)
-	}
-	pipeline := newSelectedContractPipeline(bus, req.Store, req.LoadedSource)
-	bus.SetInterceptors(pipeline)
-
-	runCtx := runtimecorrelation.WithRunID(ctx, req.ForkRunID)
-	agentRuntime, err := startSelectedContractAgentRuntime(runCtx, req, bus)
-	if err != nil {
-		return nil, err
-	}
-	if agentRuntime != nil {
-		defer func() {
-			_ = agentRuntime.Shutdown()
-		}()
-	}
-	out := make([]SelectedContractExecutionForkEvent, 0, len(sourceEvents))
-	for _, sourceEvent := range sourceEvents {
-		forkEventID := uuid.NewString()
-		evt := selectedContractForkEvent(req.ForkRunID, forkEventID, sourceEvent, executionOwner)
-		guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
-		if err := bus.Publish(runCtx, evt); err != nil {
-			return out, fmt.Errorf("execute selected-contract fork event %s as %s: %w", sourceEvent.SourceEventID, forkEventID, err)
-		}
-		lineage := store.RunForkSelectedContractExecutionLineage{
-			Owner:         executionOwner,
-			ForkRunID:     req.ForkRunID,
-			SourceRunID:   req.SourceRunID,
-			SourceEventID: sourceEvent.SourceEventID,
-			ForkEventID:   forkEventID,
-			EventName:     sourceEvent.EventName,
-			CreatedAt:     time.Now().UTC(),
-		}
-		if err := req.Store.RecordRunForkSelectedContractExecutionLineage(ctx, lineage); err != nil {
-			return out, err
-		}
-		out = append(out, SelectedContractExecutionForkEvent{
-			SourceEventID: sourceEvent.SourceEventID,
-			ForkEventID:   forkEventID,
-			EventName:     sourceEvent.EventName,
-		})
-	}
-	if agentRuntime != nil {
-		timeout := req.AgentRuntime.Options.QuiescenceTimeout
-		if timeout <= 0 {
-			timeout = selectedContractAgentRuntimeDefaultQuiescenceTimeout
-		}
-		waitCtx, cancel := context.WithTimeout(runCtx, timeout)
-		defer cancel()
-		if err := agentRuntime.WaitForQuiescence(waitCtx, bus); err != nil {
-			return out, fmt.Errorf("%s wait for selected-fork agent runtime quiescence: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, err)
-		}
-	}
-	return out, nil
 }
 
 func selectedContractForkEvent(forkRunID, forkEventID string, sourceEvent store.RunForkSelectedContractSourceEvent, sourceAgent string) events.Event {

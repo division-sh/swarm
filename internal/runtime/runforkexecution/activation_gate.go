@@ -32,6 +32,7 @@ type SelectedContractActivationGateResult struct {
 	ContractSwapBootResumeAdmission    *store.RunForkContractSwapBootResumeAdmission        `json:"contract_swap_boot_resume_admission,omitempty"`
 	HistoricalReplayExecutionAdmission *store.RunForkHistoricalReplayExecutionAdmission     `json:"historical_replay_execution_admission,omitempty"`
 	ContractSwapBootResumeExecution    *store.RunForkHistoricalReplayContractSwapBootResume `json:"contract_swap_boot_resume_execution,omitempty"`
+	ForkLocalRuntimeContainer          *SelectedContractForkLocalRuntimeContainer           `json:"fork_local_runtime_container,omitempty"`
 	ExecutedEventCount                 int                                                  `json:"executed_event_count,omitempty"`
 	ForkEvents                         []SelectedContractExecutionForkEvent                 `json:"fork_events,omitempty"`
 }
@@ -214,7 +215,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		}
 		result.ContractSwapBootResumeExecution = &contractSwapExecution
 		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
-		published, err := publishSelectedContractForkEvents(ctx, publishSelectedContractForkEventsRequest{
+		container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 			Store:             pgStore,
 			LoadedSource:      loadedSource,
 			RecipientPlanning: *model.RecipientPlanning,
@@ -225,6 +226,12 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			SourceEvents:      sourceEventIDs,
 			ExecutionOwner:    store.RunForkHistoricalReplayContractSwapBootResumeOwner,
 		})
+		if err != nil {
+			return result, cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)
+		}
+		containerProof := container.Proof()
+		result.ForkLocalRuntimeContainer = &containerProof
+		published, err := container.Publish(ctx)
 		result.ExecutedEventCount = len(published)
 		result.ForkEvents = published
 		if err != nil {

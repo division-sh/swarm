@@ -83,6 +83,12 @@ func TestBuildSelectedContractReadinessClassifierEmitsCompleteOwnerMatrix(t *tes
 	if !executionBoundaryHas(readiness.InvalidPaths, "explain_output_authorizes_mutation", store.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("invalid paths = %#v, want explain output non-authoritative", readiness.InvalidPaths)
 	}
+	if !executionBoundaryHas(readiness.RequiredConsumers, "fork_local_runtime_container", store.RunForkSelectedContractDispositionPrerequisite) {
+		t.Fatalf("required consumers = %#v, want fork-local runtime container prerequisite", readiness.RequiredConsumers)
+	}
+	if executionBoundaryHas(readiness.BlockedSiblings, "fork_local_runtime_container", store.RunForkSelectedContractDispositionBlockedSibling) {
+		t.Fatalf("blocked siblings = %#v, fork-local runtime container should be an implemented required consumer", readiness.BlockedSiblings)
+	}
 }
 
 func TestBuildSelectedContractReadinessClassifierRejectsLocalExecutionModel(t *testing.T) {

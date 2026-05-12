@@ -161,8 +161,8 @@ func selectedContractRecipientPlanningRequiredConsumers() []store.RunForkSelecte
 		{
 			Concept:     "selected_execution_publish_path",
 			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
-			Owner:       store.RunForkSelectedContractExecutionOwner,
-			Reason:      "selected execution must consume recipient-plan evidence before EventBus.Publish can derive selected-fork recipients",
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			Reason:      "selected execution must consume recipient-plan evidence through the fork-local runtime container before EventBus.Publish can derive selected-fork recipients",
 		},
 		{
 			Concept:     "eventbus_publish_recipient_guard",
@@ -178,13 +178,13 @@ func selectedContractRecipientPlanningBlockedSiblings() []store.RunForkSelectedC
 		{
 			Concept:     "fork_local_event_delivery_writes",
 			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkSelectedContractExecutionOwner,
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 			Reason:      "recipient planning does not append events or create event_deliveries",
 		},
 		{
 			Concept:     "handler_execution",
 			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       "internal/runtime/pipeline",
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 			Reason:      "recipient planning evidence is computed before handler execution",
 		},
 		{

@@ -63,6 +63,14 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if result.Owner != store.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
 		t.Fatalf("result = %#v", result)
 	}
+	assertSelectedContractRuntimeContainerProof(t,
+		result.ForkLocalRuntimeContainer,
+		store.RunForkSelectedContractExecutionOwner,
+		sourceRunID,
+		result.Materialization.ForkRunID,
+		sourceEventID,
+		[]string{sourceEventID},
+	)
 	if result.SelectedContractExecutionAdmission.RecipientPlanning == nil ||
 		result.SelectedContractExecutionAdmission.RecipientPlanning.Owner != store.RunForkSelectedContractRecipientPlanningOwner ||
 		!result.SelectedContractExecutionAdmission.RecipientPlanning.RecipientPlanningSupported ||
@@ -305,6 +313,14 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 		len(result.ForkEvents) != 1 {
 		t.Fatalf("selected execution result = %#v", result)
 	}
+	assertSelectedContractRuntimeContainerProof(t,
+		result.ForkLocalRuntimeContainer,
+		store.RunForkSelectedContractExecutionOwner,
+		sourceRunID,
+		result.Materialization.ForkRunID,
+		sourceEventID,
+		[]string{sourceEventID},
+	)
 	if got := agent.SeenRunIDs(); len(got) != 1 || got[0] != result.Materialization.ForkRunID {
 		t.Fatalf("agent saw run ids = %#v, want fork run %s", got, result.Materialization.ForkRunID)
 	}
@@ -605,6 +621,14 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	if result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || !result.Activated {
 		t.Fatalf("activation result = %#v", result)
 	}
+	assertSelectedContractRuntimeContainerProof(t,
+		result.ForkLocalRuntimeContainer,
+		store.RunForkHistoricalReplayContractSwapBootResumeOwner,
+		sourceRunID,
+		materialized.ForkRunID,
+		sourceEventID,
+		[]string{sourceEventID},
+	)
 	forkEventID := result.ForkEvents[0].ForkEventID
 
 	var sourceSubscriberDeliveries, forkEventDeliveries int
@@ -1652,6 +1676,45 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 	})
 	if err == nil || !strings.Contains(err.Error(), "routed recipients do not match") {
 		t.Fatalf("Authorize wrong recipient error = %v, want recipient-plan mismatch", err)
+	}
+}
+
+func assertSelectedContractRuntimeContainerProof(t *testing.T, proof *SelectedContractForkLocalRuntimeContainer, executionOwner, sourceRunID, forkRunID, forkEventID string, sourceEventIDs []string) {
+	t.Helper()
+	if proof == nil {
+		t.Fatal("fork-local runtime container proof missing")
+	}
+	if proof.Owner != store.RunForkSelectedContractForkLocalRuntimeContainerOwner ||
+		proof.ExecutionOwner != executionOwner ||
+		proof.SourceRunID != sourceRunID ||
+		proof.ForkRunID != forkRunID ||
+		proof.ForkEventID != forkEventID {
+		t.Fatalf("runtime container identity = %#v", proof)
+	}
+	if proof.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
+		proof.AuthoritativeAgentDeliveryMaterializationOwner != store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner ||
+		proof.RuntimePlatformEventLineagePolicyOwner != store.RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner ||
+		proof.RouteRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner ||
+		proof.ActivationGateOwner != store.RunForkSelectedContractExecutionActivationGateOwner {
+		t.Fatalf("runtime container owner consumption = %#v", proof)
+	}
+	if !proof.EventBusRecipientPlanGuard ||
+		!proof.RuntimeActiveAgentDescriptorsEphemeral ||
+		!proof.EphemeralAgentRuntime ||
+		!proof.QuiescenceRequired ||
+		!proof.CleanupRequired {
+		t.Fatalf("runtime container lifecycle proof = %#v", proof)
+	}
+	for _, sourceEventID := range sourceEventIDs {
+		if !containsString(proof.SourceEventIDs, sourceEventID) {
+			t.Fatalf("runtime container source events = %#v, want %s", proof.SourceEventIDs, sourceEventID)
+		}
+	}
+	if !executionBoundaryHas(proof.InvalidPaths, "source_row_copy_as_execution_truth", store.RunForkSelectedContractDispositionInvalid) {
+		t.Fatalf("runtime container invalid paths = %#v, want source-row-copy invalid", proof.InvalidPaths)
+	}
+	if !executionBoundaryHas(proof.SplitSiblings, "typed_runtime_lineage", store.RunForkSelectedContractDispositionBlockedSibling) {
+		t.Fatalf("runtime container split siblings = %#v, want typed lineage sibling", proof.SplitSiblings)
 	}
 }
 
