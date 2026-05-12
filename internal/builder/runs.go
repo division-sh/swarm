@@ -36,7 +36,7 @@ type runSession struct {
 type runDebugStreamState struct {
 	startedKey    string
 	terminalKey   string
-	eventIDs      map[string]struct{}
+	traceRows     map[string]string
 	runtimeLogIDs map[string]struct{}
 }
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	runtimepkg "swarm/internal/runtime"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
@@ -30,7 +31,9 @@ type SourceProvider func() semanticview.Source
 type RuntimeProvider func() *runtimepkg.Runtime
 
 type RunDebugReader interface {
-	LoadRunDebugReport(ctx context.Context, runID string, opts store.RunDebugQueryOptions) (store.RunDebugReport, error)
+	LoadRunDebugTracePage(ctx context.Context, runID string, opts store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, string, error)
+	ListOperatorRuntimeLogs(ctx context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error)
+	LoadRunLifecycleSnapshot(ctx context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error)
 }
 
 type ProjectStatus struct {

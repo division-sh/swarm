@@ -2,7 +2,6 @@ package builder
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,8 +12,9 @@ import (
 
 type snapshotRunStore struct {
 	runtimebus.InMemoryEventStore
-	snapshot runtimebus.RunLifecycleSnapshot
-	report   store.RunDebugReport
+	snapshot    runtimebus.RunLifecycleSnapshot
+	traceRows   []store.RunDebugTraceRow
+	runtimeLogs []store.OperatorRuntimeLogEntry
 }
 
 func (s *snapshotRunStore) MarkRunTerminal(_ context.Context, runID, status, errorSummary string, endedAt time.Time) error {
@@ -30,23 +30,19 @@ func (s *snapshotRunStore) LoadRunLifecycleSnapshot(context.Context, string) (ru
 	return s.snapshot, nil
 }
 
-func (s *snapshotRunStore) LoadRunDebugReport(_ context.Context, runID string, _ store.RunDebugQueryOptions) (store.RunDebugReport, error) {
-	if strings.TrimSpace(s.report.RunID) != "" {
-		return s.report, nil
+func (s *snapshotRunStore) LoadRunDebugTracePage(context.Context, string, store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, string, error) {
+	return append([]store.RunDebugTraceRow(nil), s.traceRows...), "", nil
+}
+
+func (s *snapshotRunStore) ListOperatorRuntimeLogs(_ context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error) {
+	out := []store.OperatorRuntimeLogEntry{}
+	for _, entry := range s.runtimeLogs {
+		if opts.RunID != "" && entry.RunID != opts.RunID {
+			continue
+		}
+		out = append(out, entry)
 	}
-	report := store.RunDebugReport{
-		RunID:          runID,
-		RunTableStatus: s.snapshot.Status,
-		ErrorSummary:   s.snapshot.ErrorSummary,
-		StartedAt:      s.snapshot.StartedAt,
-		EventCount:     s.snapshot.EventCount,
-		EntityCount:    s.snapshot.EntityCount,
-	}
-	if s.snapshot.EndedAt != nil {
-		ended := s.snapshot.EndedAt.UTC()
-		report.EndedAt = &ended
-	}
-	return report, nil
+	return store.OperatorRuntimeLogListResult{Logs: out}, nil
 }
 
 type counterPause struct{ calls int }
@@ -151,7 +147,7 @@ func TestRunHubAwaitCompletion_EmitsAuthoritativeRunSummary(t *testing.T) {
 				},
 				controlEvents: []RunEventEnvelope{},
 				debug: runDebugStreamState{
-					eventIDs:      map[string]struct{}{},
+					traceRows:     map[string]string{},
 					runtimeLogIDs: map[string]struct{}{},
 				},
 			},
@@ -190,7 +186,7 @@ func TestRunHubHandleRuntimeLog_NoEntityDoesNotTriggerControlHooksAcrossRuns(t *
 				breakpoints: map[string]struct{}{"node-1": {}},
 				subs:        map[string]func(RunEventEnvelope){},
 				debug: runDebugStreamState{
-					eventIDs:      map[string]struct{}{},
+					traceRows:     map[string]string{},
 					runtimeLogIDs: map[string]struct{}{},
 				},
 			},
@@ -199,7 +195,7 @@ func TestRunHubHandleRuntimeLog_NoEntityDoesNotTriggerControlHooksAcrossRuns(t *
 				breakpoints: map[string]struct{}{"node-1": {}},
 				subs:        map[string]func(RunEventEnvelope){},
 				debug: runDebugStreamState{
-					eventIDs:      map[string]struct{}{},
+					traceRows:     map[string]string{},
 					runtimeLogIDs: map[string]struct{}{},
 				},
 			},
@@ -225,19 +221,18 @@ func TestRunHubHandleRuntimeLog_NoEntityDoesNotTriggerControlHooksAcrossRuns(t *
 func TestRunHubSubscribe_PrimesCanonicalReplayDedupeState(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	debugStore := &snapshotRunStore{
-		report: store.RunDebugReport{
-			RunID:      "run-123",
-			StartedAt:  now,
-			EventCount: 1,
-			Events: []store.RunDebugEvent{{
-				EventID:    "evt-1",
-				EventName:  "scan.requested",
-				EntityID:   "entity-1",
-				CreatedAt:  now.Add(1 * time.Second),
-				Source:     "builder",
-				SourceType: "agent",
-			}},
+		snapshot: runtimebus.RunLifecycleSnapshot{
+			RunID:     "run-123",
+			StartedAt: now,
 		},
+		traceRows: []store.RunDebugTraceRow{{
+			EventID:         "evt-1",
+			EventName:       "scan.requested",
+			EntityID:        "entity-1",
+			EventCreatedAt:  now.Add(1 * time.Second),
+			EventSource:     "builder",
+			EventSourceType: "agent",
+		}},
 	}
 	hub := &runHub{
 		runDebug: debugStore,
