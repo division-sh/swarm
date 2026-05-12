@@ -190,27 +190,29 @@ func main() {
 		apiEntities = stores.Postgres
 		apiAgentConversations = stores.Postgres
 	}
+	apiReadOptions := apiv1.OperatorReadOptions{
+		Ready: func() bool {
+			return ready.Load()
+		},
+		Database:              stores.Postgres,
+		Runs:                  stores.Postgres,
+		Observability:         stores.Postgres,
+		Entities:              apiEntities,
+		AgentConversations:    apiAgentConversations,
+		Mailbox:               stores.Postgres,
+		Idempotency:           stores.Postgres,
+		Events:                rt.Bus,
+		RunControl:            rt.RunControl,
+		RuntimeIngress:        rt.RuntimeIngress,
+		Source:                source,
+		MailboxApprovalRoutes: mailboxApprovalRoutes,
+		Bundle:                bootBundleIdentity,
+	}
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath: resolvedPlatformSpecPath,
 		AuthTokens:       apiv1.AuthTokensFromEnvironment(),
-		Handlers: apiv1.OperatorReadHandlers(apiv1.OperatorReadOptions{
-			Ready: func() bool {
-				return ready.Load()
-			},
-			Database:              stores.Postgres,
-			Runs:                  stores.Postgres,
-			Observability:         stores.Postgres,
-			Entities:              apiEntities,
-			AgentConversations:    apiAgentConversations,
-			Mailbox:               stores.Postgres,
-			Idempotency:           stores.Postgres,
-			Events:                rt.Bus,
-			RunControl:            rt.RunControl,
-			RuntimeIngress:        rt.RuntimeIngress,
-			Source:                source,
-			MailboxApprovalRoutes: mailboxApprovalRoutes,
-			Bundle:                bootBundleIdentity,
-		}),
+		Handlers:         apiv1.OperatorReadHandlers(apiReadOptions),
+		Subscriptions:    apiv1.OperatorSubscriptions(apiReadOptions),
 	})
 	if err != nil {
 		log.Fatalf("init v1 api: %v", err)

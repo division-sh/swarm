@@ -121,18 +121,7 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 			return healthPingResult{OK: true, TS: now().UTC().Format(time.RFC3339Nano)}, nil
 		},
 		"health.check": func(ctx context.Context, _ Request) (any, error) {
-			runtimeOK := ready()
-			dbOK := false
-			if opts.Database != nil {
-				dbOK = opts.Database.Ping(ctx) == nil
-			}
-			return healthCheckResult{
-				Alive:     true,
-				Ready:     runtimeOK && dbOK,
-				DBOK:      dbOK,
-				RuntimeOK: runtimeOK,
-				Bundle:    opts.Bundle,
-			}, nil
+			return operatorHealthSnapshot(ctx, ready, opts.Database, opts.Bundle), nil
 		},
 		"run.get": func(ctx context.Context, req Request) (any, error) {
 			runs, err := requireRunReadStore(opts.Runs)
