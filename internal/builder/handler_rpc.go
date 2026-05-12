@@ -203,11 +203,11 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 		if h.entities == nil {
 			return nil, methodUnavailable("entity reader is not configured")
 		}
-		result, err := h.entities.ListOperatorEntities(ctx, store.OperatorEntityListOptions{})
+		rows, err := h.legacyBuilderListEntities(ctx)
 		if err != nil {
 			return nil, internalError(err)
 		}
-		return map[string]any{"instances": result.Entities}, nil
+		return map[string]any{"instances": rows}, nil
 	case "state.get_entity":
 		if h.entities == nil {
 			return nil, methodUnavailable("entity reader is not configured")

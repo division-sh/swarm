@@ -48,6 +48,15 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	seedEntity(runA, entityB, "review/secondary", "mvp_spec", "done", `{"priority":"low"}`, `{}`, `{}`, base)
 	seedEntity(runA, sharedEntity, "triage", "ticket", "collecting", `{"priority":"high"}`, `{}`, `{}`, base.Add(-time.Minute))
 	seedEntity(runB, sharedEntity, "triage", "ticket", "done", `{"priority":"low"}`, `{}`, `{}`, base.Add(-2*time.Minute))
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES
+			('review/primary', 'review', 'template', '{"workflow_version":"v1"}'::jsonb, 'active', $1),
+			('review/secondary', 'review', 'template', '{"workflow_version":"v2"}'::jsonb, 'active', $1),
+			('triage', 'triage', 'static', '{"workflow_version":"v1"}'::jsonb, 'active', $1)
+	`, base); err != nil {
+		t.Fatalf("seed flow instances: %v", err)
+	}
 
 	page1, err := pg.ListOperatorEntities(ctx, OperatorEntityListOptions{
 		RunID: runA,
@@ -102,6 +111,20 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	}
 	if fieldAgg.Counts["high"] != 2 || fieldAgg.Counts["low"] != 1 {
 		t.Fatalf("field aggregate = %#v", fieldAgg.Counts)
+	}
+	versionAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "workflow_version"})
+	if err != nil {
+		t.Fatalf("AggregateOperatorEntities workflow_version: %v", err)
+	}
+	if versionAgg.Counts["v1"] != 2 || versionAgg.Counts["v2"] != 1 {
+		t.Fatalf("workflow version aggregate = %#v", versionAgg.Counts)
+	}
+	nameAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "workflow_name"})
+	if err != nil {
+		t.Fatalf("AggregateOperatorEntities workflow_name: %v", err)
+	}
+	if nameAgg.Counts["review"] != 2 || nameAgg.Counts["triage"] != 1 {
+		t.Fatalf("workflow name aggregate = %#v", nameAgg.Counts)
 	}
 	if _, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority->unsafe"}); !errors.Is(err, ErrInvalidEntityReadParam) {
 		t.Fatalf("AggregateOperatorEntities unsafe group = %v, want ErrInvalidEntityReadParam", err)

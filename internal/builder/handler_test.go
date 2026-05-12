@@ -12,9 +12,28 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/store"
 )
 
 const testBuilderAuthToken = "builder-test-token"
+
+type pagedEntityReader struct {
+	pages []store.OperatorEntityListResult
+	calls int
+}
+
+func (r *pagedEntityReader) ListOperatorEntities(_ context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error) {
+	if r.calls >= len(r.pages) {
+		return store.OperatorEntityListResult{Entities: []store.OperatorEntitySummary{}}, nil
+	}
+	page := r.pages[r.calls]
+	r.calls++
+	return page, nil
+}
+
+func (r *pagedEntityReader) LoadOperatorEntity(context.Context, string, string) (store.OperatorEntityFull, error) {
+	return store.OperatorEntityFull{}, store.ErrEntityNotFound
+}
 
 func TestHandler_CredentialsListSetDelete(t *testing.T) {
 	ctx := context.Background()
@@ -98,6 +117,33 @@ func TestHandler_CredentialsListSetDelete(t *testing.T) {
 	credential = extractSingleCredentialRecord(t, deleteResult["credential"])
 	if credential.Present {
 		t.Fatalf("expected credential to be deleted, got %+v", credential)
+	}
+}
+
+func TestHandler_StateListInstancesDrainsCanonicalEntityPages(t *testing.T) {
+	page1 := make([]store.OperatorEntitySummary, 50)
+	for i := range page1 {
+		page1[i] = store.OperatorEntitySummary{EntityID: "entity-page-1"}
+	}
+	reader := &pagedEntityReader{
+		pages: []store.OperatorEntityListResult{
+			{Entities: page1, NextCursor: "next"},
+			{Entities: []store.OperatorEntitySummary{{EntityID: "entity-page-2"}}},
+		},
+	}
+	handler := NewHandler(Options{
+		AuthToken: testBuilderAuthToken,
+		Entities:  reader,
+	})
+
+	resp := callBuilderRPC(t, handler, Request{JSONRPC: "2.0", ID: "1", Method: "state.list_instances"})
+	result, _ := resp.Result.(map[string]any)
+	rows, ok := result["instances"].([]any)
+	if !ok || len(rows) != 51 {
+		t.Fatalf("instances = %#v, want 51 rows", result["instances"])
+	}
+	if reader.calls != 2 {
+		t.Fatalf("ListOperatorEntities calls = %d, want 2", reader.calls)
 	}
 }
 

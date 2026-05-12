@@ -982,9 +982,9 @@ func dashboardEntityAggregateOptions(r *http.Request, groupBy string) (store.Ope
 func dashboardEntityAggregateGroupBy(groupBy string) string {
 	switch strings.TrimSpace(groupBy) {
 	case "workflow_name":
-		return "flow_instance"
+		return "workflow_name"
 	case "workflow_version":
-		return "fields.workflow_version"
+		return "workflow_version"
 	default:
 		return strings.TrimSpace(groupBy)
 	}

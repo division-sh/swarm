@@ -97,8 +97,9 @@ func (s stubMailbox) GetMailboxItem(_ context.Context, id string) (runtimetools.
 }
 
 type stubInstances struct {
-	rows []store.OperatorEntitySummary
-	byID map[string]store.OperatorEntityFull
+	rows          []store.OperatorEntitySummary
+	byID          map[string]store.OperatorEntityFull
+	lastAggregate *store.OperatorEntityAggregateOptions
 }
 
 func (s stubInstances) ListOperatorEntities(_ context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error) {
@@ -139,6 +140,9 @@ func (s stubInstances) LoadOperatorEntity(_ context.Context, entityID, runID str
 }
 
 func (s stubInstances) AggregateOperatorEntities(_ context.Context, opts store.OperatorEntityAggregateOptions) (store.OperatorEntityAggregateResult, error) {
+	if s.lastAggregate != nil {
+		*s.lastAggregate = opts
+	}
 	counts := map[string]int{}
 	for _, row := range s.rows {
 		if opts.RunID != "" && row.RunID != opts.RunID {
@@ -2851,6 +2855,7 @@ func TestSQLConversationReader_GetFailsClosedWhenCapabilityOwnerReportsUnavailab
 func TestHandler_BuilderRPC(t *testing.T) {
 	projectCtl := &stubProjectControl{}
 	entityID := runtimeflowidentity.EntityID("wf-1")
+	lastAggregate := &store.OperatorEntityAggregateOptions{}
 	instances := stubInstances{
 		rows: []store.OperatorEntitySummary{
 			{EntityID: entityID, FlowInstance: "order", CurrentState: "active"},
@@ -2868,6 +2873,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 				Accumulated: map[string]any{"accumulator": map[string]any{"count": 2}},
 			},
 		},
+		lastAggregate: lastAggregate,
 	}
 	health := func(context.Context) (map[string]any, error) {
 		return map[string]any{"runtime": map[string]any{"ready": true}}, nil
@@ -2926,6 +2932,17 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	}
 	if dashboardEntity.Entity.EntityID != entityID || dashboardEntity.Fields["score"] != float64(3.7) || !dashboardEntity.Gates["review_gate"] {
 		t.Fatalf("unexpected dashboard entity detail: %#v", dashboardEntity)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/instances/aggregate?group_by=workflow_version", nil)
+	setOperatorAuth(req)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dashboard workflow_version aggregate status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if lastAggregate.GroupBy != "workflow_version" {
+		t.Fatalf("dashboard workflow_version aggregate group_by = %q, want workflow_version", lastAggregate.GroupBy)
 	}
 
 	rec = httptest.NewRecorder()

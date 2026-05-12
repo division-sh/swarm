@@ -67,6 +67,7 @@ type entityPositionCursor struct {
 
 type entityAggregateGroup struct {
 	Expr string
+	Join string
 }
 
 var entityAggregateFieldPattern = regexp.MustCompile(`^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$`)
@@ -303,6 +304,7 @@ func (s *PostgresStore) AggregateOperatorEntities(ctx context.Context, opts Oper
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT COALESCE(`+group.Expr+`, 'unknown') AS bucket, COUNT(*)::int
 		FROM entity_state es
+		`+group.Join+`
 		WHERE `+strings.Join(where, " AND ")+`
 		GROUP BY bucket
 		ORDER BY COUNT(*) DESC, bucket ASC
@@ -439,6 +441,16 @@ func operatorEntityAggregateGroup(groupBy string, add func(any) int) (entityAggr
 		return entityAggregateGroup{Expr: "NULLIF(es.current_state, '')"}, nil
 	case "flow", "flow_instance":
 		return entityAggregateGroup{Expr: "NULLIF(es.flow_instance, '')"}, nil
+	case "workflow_name":
+		return entityAggregateGroup{
+			Expr: "NULLIF(fi.flow_template, '')",
+			Join: "LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance",
+		}, nil
+	case "workflow_version":
+		return entityAggregateGroup{
+			Expr: "NULLIF(fi.config->>'workflow_version', '')",
+			Join: "LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance",
+		}, nil
 	case "type", "entity_type":
 		return entityAggregateGroup{Expr: "NULLIF(es.entity_type, '')"}, nil
 	case "slug":
