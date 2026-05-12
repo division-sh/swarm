@@ -614,6 +614,56 @@ func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *test
 	if !runForkPlanHasBlocker(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractExecutionModelNonMutating) {
 		t.Fatalf("selected-contract execution blockers = %#v", model.UnsupportedBlockers)
 	}
+	readiness := plan.SelectedContractReadiness
+	if readiness == nil {
+		t.Fatalf("SelectedContractReadiness = nil; output=%s", buf.String())
+	}
+	if readiness.Owner != store.RunForkSelectedContractReadinessClassifierOwner ||
+		!readiness.NonMutating ||
+		readiness.PlannerOwner != store.RunForkPlanningOwner ||
+		readiness.ReplayResumeAdmissionOwner != store.RunForkReplayResumeAdmissionOwner ||
+		readiness.ContractFrontierAdmissionOwner != store.RunForkContractFrontierAdmissionOwner ||
+		readiness.RouteTopologyOwner != store.RunForkSelectedContractRouteTopologyOwner ||
+		readiness.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
+		readiness.SelectedExecutionModelOwner != store.RunForkSelectedContractExecutionModelOwner ||
+		readiness.FutureExecutionOwner != store.RunForkSelectedContractExecutionOwner {
+		t.Fatalf("selected-contract readiness = %#v", readiness)
+	}
+	if len(readiness.FactMatrix) != 20 {
+		t.Fatalf("readiness facts = %d, want complete matrix; facts=%#v", len(readiness.FactMatrix), readiness.FactMatrix)
+	}
+	for _, fact := range []string{
+		store.RunForkSelectedContractReadinessFactSourceEvents,
+		store.RunForkSelectedContractReadinessFactForkEvents,
+		store.RunForkSelectedContractReadinessFactSourceDeliveries,
+		store.RunForkSelectedContractReadinessFactForkDeliveries,
+		store.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes,
+		store.RunForkSelectedContractReadinessFactTimers,
+		store.RunForkSelectedContractReadinessFactSessions,
+		store.RunForkSelectedContractReadinessFactTurns,
+		store.RunForkSelectedContractReadinessFactAudits,
+		store.RunForkSelectedContractReadinessFactCommittedReplayScopeMarkers,
+		store.RunForkSelectedContractReadinessFactPlatformRuntimeDiagnostics,
+		store.RunForkSelectedContractReadinessFactReceipts,
+		store.RunForkSelectedContractReadinessFactDeadLetters,
+		store.RunForkSelectedContractReadinessFactRetryIdempotency,
+		store.RunForkSelectedContractReadinessFactEmittedFollowUps,
+		store.RunForkSelectedContractReadinessFactSourcePostTFacts,
+		store.RunForkSelectedContractReadinessFactCurrentStateSnapshots,
+		store.RunForkSelectedContractReadinessFactNonAgentNodeSystemWork,
+		store.RunForkSelectedContractReadinessFactRestartRecovery,
+		store.RunForkSelectedContractReadinessFactOperatorConsumers,
+	} {
+		if !runForkReadinessFactHas(readiness.FactMatrix, fact) {
+			t.Fatalf("readiness fact %q missing from %#v", fact, readiness.FactMatrix)
+		}
+	}
+	if !runForkReadinessFactHasDisposition(readiness.FactMatrix, store.RunForkSelectedContractReadinessFactSourceDeliveries, store.RunForkSelectedContractReadinessDispositionFailClosedBlocker) {
+		t.Fatalf("source delivery readiness = %#v, want fail-closed blocker for source node delivery", readiness.FactMatrix)
+	}
+	if !runForkReadinessFactHasDisposition(readiness.FactMatrix, store.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes, store.RunForkSelectedContractReadinessDispositionReconstructedForkState) {
+		t.Fatalf("route/recipient readiness = %#v, want reconstructed fork-local evidence", readiness.FactMatrix)
+	}
 }
 
 func TestRunForkCommand_ActivateWithContractsReachesSelectedActivationGate(t *testing.T) {
@@ -1244,6 +1294,24 @@ func runForkPlanHasString(values []string, want string) bool {
 func runForkPlanHasBoundary(values []store.RunForkSelectedContractExecutionBoundary, concept, disposition string) bool {
 	for _, value := range values {
 		if value.Concept == concept && value.Disposition == disposition {
+			return true
+		}
+	}
+	return false
+}
+
+func runForkReadinessFactHas(values []store.RunForkSelectedContractReadinessFact, fact string) bool {
+	for _, value := range values {
+		if value.Fact == fact {
+			return true
+		}
+	}
+	return false
+}
+
+func runForkReadinessFactHasDisposition(values []store.RunForkSelectedContractReadinessFact, fact, disposition string) bool {
+	for _, value := range values {
+		if value.Fact == fact && value.Disposition == disposition {
 			return true
 		}
 	}
