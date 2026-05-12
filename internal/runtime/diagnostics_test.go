@@ -351,24 +351,107 @@ func TestRuntimeLogger_Log_DoesNotInferRunOwnershipFromDetailPayload(t *testing.
 	assertRunRowExists(t, db, payloadRunID, false)
 }
 
+func TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	runID := uuid.NewString()
+	subjectEventID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	if err := ensureRuntimeLogRunRow(ctx, db, runID); err != nil {
+		t.Fatalf("ensure run row: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'validation/validation.package_ready', 'global', '{}'::jsonb,
+			'runtime.run_fork.selected_contract_execution', 'agent'
+		)
+	`, runID, subjectEventID); err != nil {
+		t.Fatalf("seed subject event: %v", err)
+	}
+
+	if err := logger.Log(ctx, RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "Persisted event replay skipped because committed replay scope is unavailable",
+		Component: "eventbus",
+		Action:    "outbox_replay_scope_unavailable",
+		EventID:   subjectEventID,
+		EventType: "validation/validation.package_ready",
+		Detail: map[string]any{
+			"reason": "missing_committed_replay_scope",
+		},
+	}); err != nil {
+		t.Fatalf("logger.Log() error = %v", err)
+	}
+
+	row := loadLatestRuntimeLogRow(t, db)
+	if row.RunID != runID {
+		t.Fatalf("persisted run_id = %q, want %q", row.RunID, runID)
+	}
+	if row.SourceEventID != subjectEventID {
+		t.Fatalf("persisted source_event_id = %q, want subject event %q", row.SourceEventID, subjectEventID)
+	}
+	if got := strings.TrimSpace(asString(row.Detail["parent_event_id"])); got != subjectEventID {
+		t.Fatalf("payload details.parent_event_id = %q, want subject event %q", got, subjectEventID)
+	}
+}
+
+func TestRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEvent(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+
+	missingSubjectEventID := uuid.NewString()
+	if err := logger.Log(ctx, RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "uncorrelated runtime diagnostic",
+		Component: "eventbus",
+		Action:    "outbox_replay_scope_unavailable",
+		EventID:   missingSubjectEventID,
+		EventType: "validation/validation.package_ready",
+	}); err != nil {
+		t.Fatalf("logger.Log() error = %v", err)
+	}
+
+	row := loadLatestRuntimeLogRow(t, db)
+	if row.RunID != runID {
+		t.Fatalf("persisted run_id = %q, want %q", row.RunID, runID)
+	}
+	if row.SourceEventID != "" {
+		t.Fatalf("persisted source_event_id = %q, want empty for unpersisted subject event", row.SourceEventID)
+	}
+	if got := strings.TrimSpace(asString(row.Detail["parent_event_id"])); got != "" {
+		t.Fatalf("payload details.parent_event_id = %q, want empty", got)
+	}
+}
+
 type persistedRuntimeLogRow struct {
-	RunID  string
-	Detail map[string]any
+	RunID         string
+	SourceEventID string
+	Detail        map[string]any
 }
 
 func loadLatestRuntimeLogRow(t *testing.T, db *sql.DB) persistedRuntimeLogRow {
 	t.Helper()
 	var (
-		runID      string
-		payloadRaw []byte
+		runID         string
+		sourceEventID string
+		payloadRaw    []byte
 	)
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT COALESCE(run_id::text, ''), payload
+		SELECT COALESCE(run_id::text, ''), COALESCE(source_event_id::text, ''), payload
 		FROM events
 		WHERE event_name = 'platform.runtime_log'
 		ORDER BY created_at DESC
 		LIMIT 1
-	`).Scan(&runID, &payloadRaw); err != nil {
+	`).Scan(&runID, &sourceEventID, &payloadRaw); err != nil {
 		t.Fatalf("load runtime log row: %v", err)
 	}
 	payload := map[string]any{}
@@ -380,8 +463,9 @@ func loadLatestRuntimeLogRow(t *testing.T, db *sql.DB) persistedRuntimeLogRow {
 		detail = map[string]any{}
 	}
 	return persistedRuntimeLogRow{
-		RunID:  strings.TrimSpace(runID),
-		Detail: detail,
+		RunID:         strings.TrimSpace(runID),
+		SourceEventID: strings.TrimSpace(sourceEventID),
+		Detail:        detail,
 	}
 }
 

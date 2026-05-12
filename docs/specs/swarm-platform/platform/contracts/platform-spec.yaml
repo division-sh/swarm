@@ -3709,10 +3709,13 @@ run_model:
       auth-required, runtime-ingress pause/resume, budget-threshold, event-quarantine, agent-panic, agent-failed,
       dead-letter-escalation, and runtime-log records. Such events are fork-local lineage/output evidence only when they
       are causally parented to selected-fork execution through the fork event parent/source_event_id chain and persisted
-      under the fork run_id. Unrelated platform events without selected-fork causal context, source-run platform facts,
-      source outcomes, source deliveries, source receipts, source dead letters, CLI/API/dashboard JSON, live EventBus
-      descriptors, or produced_by_type alone are not executable fork truth and must remain fail-closed or split. This
-      owner does not copy source rows, suppress fork-local execution with source outcomes, own current-state/entity
+      under the fork run_id. For platform.runtime_log diagnostics, the canonical persisted lineage is events.source_event_id;
+      the runtime logger may derive it only from an explicit diagnostic parent_event_id or a verified same-run persisted
+      subject EventID. Diagnostic action/reason strings, EventBus descriptors, and produced_by_type are not lineage proof.
+      Unrelated platform events without selected-fork causal context, source-run platform facts, source outcomes,
+      source deliveries, source receipts, source dead letters, CLI/API/dashboard JSON, live EventBus descriptors, or
+      produced_by_type alone are not executable fork truth and must remain fail-closed or split. This owner does not copy
+      source rows, suppress fork-local execution with source outcomes, own current-state/entity
       materialization, reconstruct sessions/turns/audits, replay timers/routes/non-agent work, or claim restart
       recovery.'
     selected_contract_supported_execution: 'The supported selected-contract timestamp-fork execution surface is
@@ -3937,10 +3940,13 @@ run_model:
         fresh fork-run runtime/platform control or diagnostic events emitted by the selected-fork runtime container while
         processing selected fork-local work. The owner may admit only events persisted under the fork run_id that are
         causally parented to selected-fork execution through the selected fork event parent/source_event_id chain.
-        Unrelated fork-run platform events without selected-fork causal context, source platform facts, source outcomes,
-        source deliveries, live EventBus descriptors, operator surfaces, and produced_by_type alone remain invalid
-        selected-fork lineage. This owner does not change the source diagnostic platform outcome policy for
-        platform.runtime_log/platform.inbound_recorded, does not treat platform.auth_required as source replay truth,
+        For platform.runtime_log diagnostics, the runtime logger must persist canonical lineage through events.source_event_id
+        derived from an explicit diagnostic parent_event_id or from a verified same-run persisted subject EventID; diagnostic
+        action/reason strings and local caller detail shape are not semantic owners. Unrelated fork-run platform events
+        without selected-fork causal context, source platform facts, source outcomes, source deliveries, live EventBus
+        descriptors, operator surfaces, and produced_by_type alone remain invalid selected-fork lineage. This owner does
+        not change the source diagnostic platform outcome policy for platform.runtime_log/platform.inbound_recorded,
+        does not treat platform.auth_required as source replay truth,
         and does not own restart recovery, current-state materialization, sessions, turns, audits, timers, routes,
         non-agent replay, retry/idempotency, or follow-up policy beyond normal selected-fork runtime output.'
       3h_selected_contract_supported_execution: 'For the supported swarm fork --contracts surface, selected-contract

@@ -222,7 +222,14 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 	detailMap := map[string]any{}
 	_ = json.Unmarshal(detail, &detailMap)
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	parentEventID := strings.TrimSpace(asString(detailMap["parent_event_id"]))
+	lineageRunID := runID
+	if !hasRunID {
+		lineageRunID = ""
+	}
+	parentEventID, err := runtimeLogLineageParentEventID(ctx, db, lineageRunID, asString(detailMap["parent_event_id"]), e.EventID)
+	if err != nil {
+		return err
+	}
 	handlerID := strings.TrimSpace(runtimecorrelation.HandlerIDFromContext(ctx))
 	if handlerID == "" {
 		handlerID = strings.TrimSpace(asString(detailMap["handler_id"]))
@@ -268,6 +275,39 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, hasRunID bool, level, 
 		return err
 	}
 	return nil
+}
+
+func runtimeLogLineageParentEventID(ctx context.Context, db *sql.DB, runID, explicitParentEventID, subjectEventID string) (string, error) {
+	explicitParentEventID = strings.TrimSpace(explicitParentEventID)
+	if explicitParentEventID != "" {
+		return explicitParentEventID, nil
+	}
+	runID = strings.TrimSpace(runID)
+	subjectEventID = strings.TrimSpace(subjectEventID)
+	if db == nil || runID == "" || subjectEventID == "" {
+		return "", nil
+	}
+	if _, err := uuid.Parse(runID); err != nil {
+		return "", err
+	}
+	if _, err := uuid.Parse(subjectEventID); err != nil {
+		return "", nil
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM events
+			WHERE run_id = $1::uuid
+			  AND event_id = $2::uuid
+		)
+	`, runID, subjectEventID).Scan(&exists); err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", nil
+	}
+	return subjectEventID, nil
 }
 
 func ensureRuntimeLogRunRow(ctx context.Context, db *sql.DB, runID string) error {
