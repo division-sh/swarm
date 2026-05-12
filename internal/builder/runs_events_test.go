@@ -83,6 +83,9 @@ func TestProjectCanonicalRunDebugReplay_PreservesCanonicalRuntimeLogDetailAndTim
 	if payload["level"] != "warn" || payload["component"] != "runtime" || payload["action"] != "retrying" {
 		t.Fatalf("payload = %#v", payload)
 	}
+	if payload["error"] != "boom" {
+		t.Fatalf("payload.error = %#v, want boom", payload["error"])
+	}
 	detail, _ := payload["detail"].(map[string]any)
 	if detail["error"] != "boom" {
 		t.Fatalf("detail = %#v", detail)

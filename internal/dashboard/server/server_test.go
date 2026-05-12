@@ -3623,6 +3623,9 @@ func TestHandler_RunEventReplayUsesCanonicalPersistedRunDebugOwner(t *testing.T)
 	if runtimePayload["component"] != "scheduler" || runtimePayload["action"] != "checkpoint" {
 		t.Fatalf("runtime.log payload = %#v", runtimePayload)
 	}
+	if runtimePayload["error"] != "boom" {
+		t.Fatalf("runtime.log payload.error = %#v, want boom", runtimePayload["error"])
+	}
 	donePayload, _ := gotTypes["run.completed"]["payload"].(map[string]any)
 	summary, _ := donePayload["summary"].(map[string]any)
 	if summary["entity_count"] != float64(1) && summary["entity_count"] != 1 {
