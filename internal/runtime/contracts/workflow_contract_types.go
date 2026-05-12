@@ -319,6 +319,7 @@ type ActionSpec struct {
 	InstanceIDPath paths.Path        `yaml:"-"`
 	ConfigFrom     *ConfigFromSpec   `yaml:"config_from"`
 	Mailbox        *MailboxWriteSpec `yaml:"mailbox"`
+	ArtifactRepo   *ArtifactRepoSpec `yaml:"artifact_repo"`
 }
 
 type MailboxWriteSpec struct {
@@ -329,6 +330,48 @@ type MailboxWriteSpec struct {
 	FlowInstance ExpressionValue            `yaml:"flow_instance"`
 	Payload      map[string]ExpressionValue `yaml:"payload"`
 }
+
+type ArtifactRepoSpec struct {
+	Provider               string                     `yaml:"provider"`
+	RepoID                 ExpressionValue            `yaml:"repo_id"`
+	RunID                  ExpressionValue            `yaml:"run_id"`
+	VerticalID             ExpressionValue            `yaml:"vertical_id"`
+	BusinessSlug           ExpressionValue            `yaml:"business_slug"`
+	SourceValidationCaseID ExpressionValue            `yaml:"source_validation_case_id"`
+	RequestID              ExpressionValue            `yaml:"request_id"`
+	Author                 ExpressionValue            `yaml:"author"`
+	AllowedPaths           []string                   `yaml:"allowed_paths"`
+	Files                  []ArtifactRepoFileSpec     `yaml:"files"`
+	Output                 ArtifactRepoOutputSpec     `yaml:"output"`
+	Limits                 ArtifactRepoLimitsSpec     `yaml:"limits"`
+	FailureEvent           string                     `yaml:"failure_event"`
+	FailurePayload         map[string]ExpressionValue `yaml:"failure_payload"`
+}
+
+type ArtifactRepoFileSpec struct {
+	Path        ExpressionValue `yaml:"path"`
+	Content     ExpressionValue `yaml:"content"`
+	ContentType string          `yaml:"content_type"`
+	MaxBytes    int             `yaml:"max_bytes"`
+}
+
+type ArtifactRepoOutputSpec struct {
+	RepoURL           string `yaml:"repo_url"`
+	CurrentRef        string `yaml:"current_ref"`
+	FileManifest      string `yaml:"file_manifest"`
+	Status            string `yaml:"status"`
+	FailureReason     string `yaml:"failure_reason"`
+	LastRequestID     string `yaml:"last_request_id"`
+	LastSourceEventID string `yaml:"last_source_event_id"`
+}
+
+type ArtifactRepoLimitsSpec struct {
+	MaxYAMLBytes     int `yaml:"max_yaml_bytes"`
+	MaxMarkdownBytes int `yaml:"max_markdown_bytes"`
+	MaxTextBytes     int `yaml:"max_text_bytes"`
+	MaxRepoBytes     int `yaml:"max_repo_bytes"`
+}
+
 type EntitySchema struct {
 	Groups []EntitySchemaGroup `yaml:"groups"`
 }

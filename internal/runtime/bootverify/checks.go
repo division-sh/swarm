@@ -1150,6 +1150,16 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 						Location: nodeID,
 					})
 				}
+				if normalizeWorkflowBuiltinActionID(actionID) == "artifact_repo_commit" {
+					c.handlerFindings = append(c.handlerFindings, validateArtifactRepoActionSpec(nodeID, eventType, handler.Action)...)
+				} else if handler.Action.ArtifactRepo != nil {
+					c.handlerFindings = append(c.handlerFindings, Finding{
+						CheckID:  "handler_field_compliance",
+						Severity: "error",
+						Message:  fmt.Sprintf("node %s handler %s artifact_repo declaration requires action artifact_repo_commit", nodeID, eventType),
+						Location: nodeID,
+					})
+				}
 				if !handlerActionExecutable(c.source, actionID) {
 					c.handlerFindings = append(c.handlerFindings, Finding{
 						CheckID:  "handler_field_compliance",
@@ -2269,6 +2279,141 @@ func handlerActionExecutable(source semanticview.Source, actionID string) bool {
 	}
 	entry, ok := source.ActionInstructionByID(actionID)
 	return ok && entry.Executable()
+}
+
+func validateArtifactRepoActionSpec(nodeID, eventType string, action runtimecontracts.ActionSpec) []Finding {
+	spec := action.ArtifactRepo
+	if spec == nil {
+		return []Finding{artifactRepoFinding(nodeID, eventType, "artifact_repo_commit is missing artifact_repo")}
+	}
+	findings := []Finding{}
+	provider := strings.TrimSpace(spec.Provider)
+	if provider == "" {
+		findings = append(findings, artifactRepoFinding(nodeID, eventType, "artifact_repo_commit is missing artifact_repo.provider"))
+	} else if provider != "local_git" {
+		findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo_commit provider %s is unsupported", provider)))
+	}
+	for label, expr := range map[string]runtimecontracts.ExpressionValue{
+		"repo_id":                   spec.RepoID,
+		"request_id":                spec.RequestID,
+		"vertical_id":               spec.VerticalID,
+		"source_validation_case_id": spec.SourceValidationCaseID,
+	} {
+		if expr.IsZero() {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo_commit is missing artifact_repo.%s", label)))
+		}
+	}
+	if len(spec.AllowedPaths) == 0 {
+		findings = append(findings, artifactRepoFinding(nodeID, eventType, "artifact_repo_commit requires at least one artifact_repo.allowed_paths entry"))
+	}
+	seenAllowed := map[string]struct{}{}
+	for _, raw := range spec.AllowedPaths {
+		cleaned, err := validateArtifactRepoDeclaredPath(raw)
+		if err != nil {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.allowed_paths %q is invalid: %v", raw, err)))
+			continue
+		}
+		if _, ok := seenAllowed[cleaned]; ok {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.allowed_paths contains duplicate canonical path %s", cleaned)))
+		}
+		seenAllowed[cleaned] = struct{}{}
+	}
+	if len(spec.Files) == 0 {
+		findings = append(findings, artifactRepoFinding(nodeID, eventType, "artifact_repo_commit requires at least one artifact_repo.files entry"))
+	}
+	seenFiles := map[string]struct{}{}
+	for i, file := range spec.Files {
+		if file.Path.IsZero() {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d] is missing path", i)))
+		} else if pathValue, ok := artifactRepoLiteralString(file.Path); ok {
+			cleaned, err := validateArtifactRepoDeclaredPath(pathValue)
+			if err != nil {
+				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].path %q is invalid: %v", i, pathValue, err)))
+			} else {
+				if _, allowed := seenAllowed[cleaned]; len(seenAllowed) > 0 && !allowed {
+					findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].path %s is not in artifact_repo.allowed_paths", i, cleaned)))
+				}
+				if _, exists := seenFiles[cleaned]; exists {
+					findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files contains duplicate canonical path %s", cleaned)))
+				}
+				seenFiles[cleaned] = struct{}{}
+			}
+		}
+		if file.Content.IsZero() {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d] is missing content", i)))
+		}
+		switch contentType := strings.TrimSpace(file.ContentType); contentType {
+		case "yaml", "markdown", "text":
+		default:
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].content_type %q is unsupported", i, contentType)))
+		}
+		if file.MaxBytes < 0 {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].max_bytes must be non-negative", i)))
+		}
+	}
+	for _, field := range []struct {
+		label string
+		value string
+	}{
+		{"output.repo_url", spec.Output.RepoURL},
+		{"output.current_ref", spec.Output.CurrentRef},
+		{"output.file_manifest", spec.Output.FileManifest},
+		{"output.status", spec.Output.Status},
+		{"output.failure_reason", spec.Output.FailureReason},
+		{"output.last_request_id", spec.Output.LastRequestID},
+		{"output.last_source_event_id", spec.Output.LastSourceEventID},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo_commit is missing artifact_repo.%s", field.label)))
+		}
+	}
+	if spec.Limits.MaxYAMLBytes < 0 || spec.Limits.MaxMarkdownBytes < 0 || spec.Limits.MaxTextBytes < 0 || spec.Limits.MaxRepoBytes < 0 {
+		findings = append(findings, artifactRepoFinding(nodeID, eventType, "artifact_repo.limits values must be non-negative"))
+	}
+	return findings
+}
+
+func artifactRepoFinding(nodeID, eventType, message string) Finding {
+	return Finding{
+		CheckID:  "handler_field_compliance",
+		Severity: "error",
+		Message:  fmt.Sprintf("node %s handler %s %s", nodeID, eventType, message),
+		Location: nodeID,
+	}
+}
+
+func artifactRepoLiteralString(expr runtimecontracts.ExpressionValue) (string, bool) {
+	if expr.Kind != runtimecontracts.ExpressionKindLiteral {
+		return "", false
+	}
+	value := strings.TrimSpace(fmt.Sprint(expr.Literal))
+	return value, value != ""
+}
+
+func validateArtifactRepoDeclaredPath(raw string) (string, error) {
+	value := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	if value == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if strings.HasPrefix(value, "/") {
+		return "", fmt.Errorf("absolute paths are not allowed")
+	}
+	parts := []string{}
+	for _, part := range strings.Split(value, "/") {
+		part = strings.TrimSpace(part)
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			return "", fmt.Errorf("path traversal is not allowed")
+		default:
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return "", fmt.Errorf("path is required")
+	}
+	return strings.Join(parts, "/"), nil
 }
 
 func workflowFindEventCyclesLocal(graph map[string]map[string]struct{}) [][]string {

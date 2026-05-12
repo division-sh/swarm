@@ -13,7 +13,7 @@ vocabulary:
     - escalate:{event}
   action:
     description: 'A platform-provided operation executed as the final step of a handler. Valid actions are create_flow_instance,
-      record_evidence, and mailbox_write. Product-specific actions are not supported.'
+      record_evidence, mailbox_write, and artifact_repo_commit. Product-specific actions are not supported.'
   timer:
     description: 'A time-based trigger attached to a stage. When the delay elapses, the platform emits the timer''s event,
       which can trigger a transition.
@@ -1011,8 +1011,8 @@ handler_specification:
     action:
       field: action
       type: string or object
-      purpose: 'Names a platform-provided action. Valid values: create_flow_instance, record_evidence, mailbox_write. The platform executes
-        the named action. NOT for platform actions — all behavior must be declarative.'
+      purpose: 'Names a platform-provided action. Valid values: create_flow_instance, record_evidence, mailbox_write, artifact_repo_commit. The
+        platform executes the named action. NOT for platform actions — all behavior must be declarative.'
       emit_interaction: If the resolved runtime action instruction emits a follow-up event, that event uses the action-originated
         emitted-event payload rules under observation_model.emitted_events.payload_rules. The action field itself does not
         declare authored payload fields; runtime-owned action instructions construct and validate any follow-up payload.
@@ -1046,6 +1046,46 @@ handler_specification:
           behavior: Inserts a pending public.mailbox row inside the system-node handler transaction. source_event_id is the
             triggering event id. from_agent is the deterministic system node identity. item_id is deterministic for source_event_id
             and materializer node so duplicate/replayed node delivery does not create duplicate mailbox rows.
+        artifact_repo_commit:
+          description: Deterministically materialize service-owned typed file artifacts into a local git repository and expose
+            an opaque artifact URL plus immutable git ref on the owning entity.
+          required_mapping:
+            action.id: artifact_repo_commit
+            action.artifact_repo: object — typed artifact repository commit declaration.
+          provider:
+            v1: local_git only. Unsupported providers fail closed at decode/verify/runtime.
+            product_surface: Consumers receive `swarm-artifact://...` URLs and 40-character git commit SHAs, not raw host paths.
+          artifact_repo_fields:
+            provider: string — must be local_git.
+            repo_id: expression value resolving to the service-owned repository UUID. Required.
+            run_id: optional expression value resolving to the run UUID. Defaults to the triggering event run_id.
+            vertical_id: expression value resolving to the vertical UUID. Required for deterministic path partitioning.
+            business_slug: optional expression value used only as a sanitized local path hint. Not authoritative identity.
+            source_validation_case_id: expression value resolving to the source validation case UUID. Required for provenance.
+            request_id: expression value resolving to the business idempotency UUID. Required.
+            author: optional expression value used for git author display only.
+            allowed_paths: list of repository-relative paths allowed for this service action. Required. Absolute paths and
+              traversal are prohibited.
+            files: list of `{path, content, content_type, max_bytes}` entries. path and content are explicit expression values;
+              content_type is yaml, markdown, or text. The resolved path must be allowlisted.
+            limits: optional max_yaml_bytes, max_markdown_bytes, max_text_bytes, and max_repo_bytes.
+            output: mapping of entity field names for repo_url, current_ref, file_manifest, status, failure_reason,
+              last_request_id, and last_source_event_id.
+            failure_event: optional event name emitted when runtime execution fails after request/source identity resolution.
+            failure_payload: optional mapping of additional failure event payload fields to expression values. Runtime always
+              includes repo_id, run_id, vertical_id, source_validation_case_id, request_id, source_event_id, and failure_reason.
+          behavior: The runtime normalizes file content, writes only allowlisted paths under the service-owned repo root,
+            commits staged files atomically, verifies the resulting ref is a 40-character git SHA, and persists only the declared
+            output fields on the selected/owned entity. Duplicate replay for the same source_event_id is a no-op. Reusing a
+            request_id with different content fails closed. Content hashes are diagnostic and do not replace request/source
+            idempotency.
+          operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service
+            contract must declare the output fields it wants persisted; status is committed or failed, failure_reason records
+            runtime failure detail when available, and current_ref updates only after git commit/ref verification succeeds.
+            If failure_event is declared, the runtime also emits that typed event after persisting failed status.
+          fail_closed: Invalid provider, missing or non-UUID identities, invalid root, traversal, symlink/root escape, allowlist
+            miss, unsupported content type, size-limit violation, git write/commit failure, invalid ref, and idempotency conflict
+            all fail closed. No agent prompt, native_tools, shell command, or product-local git syntax may bypass this action.
     retired_fields:
       description: Legacy declarative emit carriers retired by the structured emit grammar.
       rule: These fields are retired compatibility syntax, not alternate current-contract forms.
@@ -2214,6 +2254,8 @@ compliance:
     - Guards evaluated before state advancement — block if false
     - Events, including action-originated emits, validated against payload schema before publish
     - mailbox_write handler actions preserve source_event_id and are row-idempotent for the same source event and materializer
+    - artifact_repo_commit handler actions expose only opaque artifact URLs and immutable git refs, reject unsafe paths/providers,
+      and are idempotent by source_event_id plus request_id/content identity
     - Accumulation is idempotent — duplicate events do not double-count
     - Permission checks read from agent.permissions, not hardcoded policy functions
     - Product behavior read from policy configuration, not hardcoded
@@ -2228,6 +2270,8 @@ compliance:
     - Every state state_change follows declared advances_to paths
     - Every emitted event has a payload schema in events.yaml
     - mailbox_write materializes exactly one mailbox row per source event/materializer and rejects unsupported declarations
+    - artifact_repo_commit writes only allowlisted files, produces a pinned git ref, rejects unsupported declarations and unsafe
+      paths, and preserves replay/idempotency invariants
     - Every agent subscription resolves to an event some node or agent produces
     - Permission enforcement blocks unauthorized tool calls
     - Accumulation is idempotent under duplicate event delivery
@@ -2400,6 +2444,8 @@ tool_model:
         create_flow_instance: Create a new dynamic flow instance from a template.
         record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler.
         mailbox_write: Deterministically materialize authored mailbox request events into public.mailbox. Handler action only.
+        artifact_repo_commit: Deterministically commit allowlisted service-owned artifact files to a local git repository and
+          persist opaque artifact URL/ref metadata. Handler action only.
     planned_tools:
       description: Tools planned for future platform versions. Not yet implemented. The permission may exist (as an authorization
         gate) before the tool does.
