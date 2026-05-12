@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"swarm/internal/events"
+	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
@@ -560,6 +561,34 @@ func TestReplayAgentBacklog_DoesNotEmitStartupAftermathOutsideStartupRecovery(t 
 	}
 	if !foundLegacyFailure {
 		t.Fatalf("runtime logs = %#v, want legacy pending_replay_event_failed outside startup recovery", bus.runtimeLogs)
+	}
+}
+
+func TestReplayBacklogReportsDirectReplayCount(t *testing.T) {
+	now := time.Now().UTC()
+	store := &startupReplayTestStore{
+		pending: map[string][]events.Event{
+			"agent-a": {
+				{ID: "evt-1", Type: events.EventType("system.recover.ok"), CreatedAt: now.Add(-2 * time.Minute)},
+				{ID: "evt-2", Type: events.EventType("system.recover.ok"), CreatedAt: now.Add(-time.Minute)},
+			},
+		},
+	}
+	am := NewAgentManager(nil, func(cfg models.AgentConfig) (Agent, error) {
+		return startupReplayTestAgent{id: cfg.ID}, nil
+	}, store)
+	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+		Config: models.AgentConfig{ID: "agent-a"},
+	}, false); err != nil {
+		t.Fatalf("spawnAgentInternal: %v", err)
+	}
+
+	result, err := am.ReplayBacklog(context.Background(), runtimeagentcontrol.ReplayBacklogRequest{AgentID: "agent-a"})
+	if err != nil {
+		t.Fatalf("ReplayBacklog: %v", err)
+	}
+	if result.ReplayedCount != 2 {
+		t.Fatalf("ReplayBacklog replayed_count = %d, want 2", result.ReplayedCount)
 	}
 }
 

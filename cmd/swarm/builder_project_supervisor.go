@@ -12,6 +12,7 @@ import (
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/config"
 	"swarm/internal/runtime"
+	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeingress "swarm/internal/runtime/ingress"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -301,26 +302,26 @@ type dashboardDynamicAgentControl struct {
 	supervisor *runtimeProjectSupervisor
 }
 
-func (c dashboardDynamicAgentControl) RestartAgent(agentID string) error {
+func (c dashboardDynamicAgentControl) Restart(ctx context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
 	rt := c.supervisor.CurrentRuntime()
 	if rt == nil || rt.Manager == nil {
-		return fmt.Errorf("runtime manager unavailable")
+		return runtimeagentcontrol.RestartResult{}, fmt.Errorf("runtime manager unavailable")
 	}
-	return rt.Manager.RestartAgent(agentID)
+	return rt.Manager.Restart(ctx, req)
 }
 
-func (c dashboardDynamicAgentControl) ReplayAgentBacklog(ctx context.Context, agentID string) error {
+func (c dashboardDynamicAgentControl) ReplayBacklog(ctx context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
 	rt := c.supervisor.CurrentRuntime()
 	if rt == nil || rt.Manager == nil {
-		return fmt.Errorf("runtime manager unavailable")
+		return runtimeagentcontrol.ReplayBacklogResult{}, fmt.Errorf("runtime manager unavailable")
 	}
-	return rt.Manager.ReplayAgentBacklog(ctx, agentID)
+	return rt.Manager.ReplayBacklog(ctx, req)
 }
 
-func (c dashboardDynamicAgentControl) ChatWithAgent(ctx context.Context, agentID, directive string, killPrevious bool) (string, error) {
+func (c dashboardDynamicAgentControl) SendDirective(ctx context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
 	rt := c.supervisor.CurrentRuntime()
 	if rt == nil || rt.Manager == nil {
-		return "", fmt.Errorf("runtime manager unavailable")
+		return runtimeagentcontrol.SendDirectiveResult{}, fmt.Errorf("runtime manager unavailable")
 	}
-	return rt.Manager.ChatWithAgent(ctx, agentID, directive, killPrevious)
+	return rt.Manager.SendDirective(ctx, req)
 }

@@ -13,6 +13,7 @@ import (
 	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
+	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
@@ -269,13 +270,13 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 	}
 	control := dashboardDynamicAgentControl{supervisor: supervisor}
 
-	if err := control.RestartAgent(agent.id); err == nil || !strings.Contains(err.Error(), "runtime shutting down") {
-		t.Fatalf("RestartAgent err = %v, want runtime shutting down", err)
+	if _, err := control.Restart(context.Background(), runtimeagentcontrol.RestartRequest{AgentID: agent.id}); err == nil || !strings.Contains(err.Error(), "agent not running") {
+		t.Fatalf("Restart err = %v, want agent not running", err)
 	}
-	if err := control.ReplayAgentBacklog(context.Background(), agent.id); err == nil || !strings.Contains(err.Error(), "runtime shutting down") {
-		t.Fatalf("ReplayAgentBacklog err = %v, want runtime shutting down", err)
+	if _, err := control.ReplayBacklog(context.Background(), runtimeagentcontrol.ReplayBacklogRequest{AgentID: agent.id}); err == nil || !strings.Contains(err.Error(), "agent not running") {
+		t.Fatalf("ReplayBacklog err = %v, want agent not running", err)
 	}
-	if _, err := control.ChatWithAgent(context.Background(), agent.id, "run corpus", false); err == nil || !strings.Contains(err.Error(), "runtime shutting down") {
-		t.Fatalf("ChatWithAgent err = %v, want runtime shutting down", err)
+	if _, err := control.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "run corpus"}); err == nil || !strings.Contains(err.Error(), "agent not running") {
+		t.Fatalf("SendDirective err = %v, want agent not running", err)
 	}
 }
