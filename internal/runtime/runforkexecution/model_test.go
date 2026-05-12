@@ -473,8 +473,12 @@ func TestBuildSelectedContractExecutionModelConsumesRouteTopologyAsTruth(t *test
 	if !executionBoundaryHas(model.InvalidPaths, "copy_source_event_deliveries", store.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("invalid paths = %#v, want source delivery copying invalid", model.InvalidPaths)
 	}
-	if !executionBoundaryHas(model.RequiredConsumers, "handler_execution", store.RunForkSelectedContractDispositionFutureOwnerRequired) {
-		t.Fatalf("required consumers = %#v, want handler execution future owner", model.RequiredConsumers)
+	if !executionBoundaryHas(model.RequiredConsumers, "fork_local_runtime_container", store.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(model.RequiredConsumers, "fork_run_id_runtime_context", store.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(model.RequiredConsumers, "fork_local_event_delivery_writes", store.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(model.RequiredConsumers, "handler_execution", store.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(model.RequiredConsumers, "emitted_follow_up_events", store.RunForkSelectedContractDispositionPrerequisite) {
+		t.Fatalf("required consumers = %#v, want current runtime container prerequisites", model.RequiredConsumers)
 	}
 	if !executionBoundaryHas(model.RequiredConsumers, "safe_agent_delivery_event_replay", store.RunForkSelectedContractDispositionPrerequisite) {
 		t.Fatalf("required consumers = %#v, want safe-agent replay as prerequisite", model.RequiredConsumers)

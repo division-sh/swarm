@@ -509,27 +509,27 @@ func selectedContractExecutionRequiredConsumers() []store.RunForkSelectedContrac
 		},
 		{
 			Concept:     "fork_local_runtime_container",
-			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-			Reason:      "future selected execution must construct one fork-local runtime container that consumes recipient planning, handler materialization, EventBus guards, lineage policy, cleanup, and quiescence",
+			Reason:      "selected execution constructs the canonical fork-local runtime container that consumes recipient planning, handler materialization, EventBus guards, lineage policy, cleanup, and quiescence",
 		},
 		{
 			Concept:     "fork_run_id_runtime_context",
-			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-			Reason:      "future handlers must execute with the fork run_id, not the source run_id",
+			Reason:      "the fork-local runtime container binds EventBus, AgentManager, RuntimeLogger, and handler execution to the fork run_id rather than the source run_id",
 		},
 		{
 			Concept:     "fork_local_event_delivery_writes",
-			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-			Reason:      "future execution must create fresh fork-local IDs and lineage instead of copying source rows",
+			Reason:      "selected execution creates fresh fork-local event and delivery rows through the runtime container instead of copying source rows",
 		},
 		{
 			Concept:     "handler_execution",
-			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-			Reason:      "normal handler execution must run inside the selected-fork runtime container, not as an unowned runtime side effect",
+			Reason:      "normal selected-fork handler execution runs inside the fork-local runtime container, not as an unowned runtime side effect",
 		},
 		{
 			Concept:     "receipts_dead_letters_idempotency",
@@ -539,9 +539,9 @@ func selectedContractExecutionRequiredConsumers() []store.RunForkSelectedContrac
 		},
 		{
 			Concept:     "emitted_follow_up_events",
-			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-			Reason:      "future follow-up events must be regenerated under the fork run_id through the runtime container and bus",
+			Reason:      "normal selected-fork follow-up events are regenerated under the fork run_id through the runtime container and bus; retry/idempotency policy remains split",
 		},
 		{
 			Concept:     "safe_agent_delivery_event_replay",
