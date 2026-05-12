@@ -227,6 +227,159 @@ func decodeMailboxExpressionValueNode(node *yaml.Node) (ExpressionValue, error) 
 	return value, nil
 }
 
+func (s *ArtifactRepoSpec) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		*s = ArtifactRepoSpec{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo must be a mapping")
+	}
+	allowed := map[string]struct{}{
+		"provider":                  {},
+		"repo_id":                   {},
+		"run_id":                    {},
+		"vertical_id":               {},
+		"business_slug":             {},
+		"source_validation_case_id": {},
+		"request_id":                {},
+		"author":                    {},
+		"allowed_paths":             {},
+		"files":                     {},
+		"output":                    {},
+		"limits":                    {},
+		"failure_event":             {},
+		"failure_payload":           {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: artifact_repo field %q not in platform spec", key)
+		}
+	}
+	type alias ArtifactRepoSpec
+	var out alias
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*s = ArtifactRepoSpec(out)
+	return nil
+}
+
+func (f *ArtifactRepoFileSpec) UnmarshalYAML(node *yaml.Node) error {
+	if f == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		*f = ArtifactRepoFileSpec{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.files entries must be mappings")
+	}
+	allowed := map[string]struct{}{
+		"path":         {},
+		"content":      {},
+		"content_type": {},
+		"max_bytes":    {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: artifact_repo.files field %q not in platform spec", key)
+		}
+	}
+	type alias ArtifactRepoFileSpec
+	var out alias
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*f = ArtifactRepoFileSpec(out)
+	return nil
+}
+
+func (o *ArtifactRepoOutputSpec) UnmarshalYAML(node *yaml.Node) error {
+	if o == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		*o = ArtifactRepoOutputSpec{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.output must be a mapping")
+	}
+	allowed := map[string]struct{}{
+		"repo_url":             {},
+		"current_ref":          {},
+		"file_manifest":        {},
+		"status":               {},
+		"failure_reason":       {},
+		"last_request_id":      {},
+		"last_source_event_id": {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: artifact_repo.output field %q not in platform spec", key)
+		}
+	}
+	type alias ArtifactRepoOutputSpec
+	var out alias
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*o = ArtifactRepoOutputSpec(out)
+	return nil
+}
+
+func (l *ArtifactRepoLimitsSpec) UnmarshalYAML(node *yaml.Node) error {
+	if l == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		*l = ArtifactRepoLimitsSpec{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.limits must be a mapping")
+	}
+	allowed := map[string]struct{}{
+		"max_yaml_bytes":     {},
+		"max_markdown_bytes": {},
+		"max_text_bytes":     {},
+		"max_repo_bytes":     {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: artifact_repo.limits field %q not in platform spec", key)
+		}
+	}
+	type alias ArtifactRepoLimitsSpec
+	var out alias
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*l = ArtifactRepoLimitsSpec(out)
+	return nil
+}
+
 func decodeEmitFieldValueNode(node *yaml.Node) (ExpressionValue, error) {
 	if node == nil {
 		return ExpressionValue{}, nil
@@ -865,6 +1018,7 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 			"instance_id_from": {},
 			"config_from":      {},
 			"mailbox":          {},
+			"artifact_repo":    {},
 		}
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := strings.TrimSpace(node.Content[i].Value)
@@ -887,6 +1041,7 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 			InstanceIDFrom string            `yaml:"instance_id_from"`
 			ConfigFrom     yaml.Node         `yaml:"config_from"`
 			Mailbox        *MailboxWriteSpec `yaml:"mailbox"`
+			ArtifactRepo   *ArtifactRepoSpec `yaml:"artifact_repo"`
 		}
 		if err := node.Decode(&aux); err != nil {
 			return ActionSpec{}, err
@@ -909,6 +1064,7 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 			InstanceIDPath: paths.Parse(aux.InstanceIDFrom),
 			ConfigFrom:     configFrom,
 			Mailbox:        aux.Mailbox,
+			ArtifactRepo:   aux.ArtifactRepo,
 		}, nil
 	default:
 		return ActionSpec{}, fmt.Errorf("unsupported action yaml node kind %d", node.Kind)

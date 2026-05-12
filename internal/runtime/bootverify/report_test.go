@@ -763,6 +763,102 @@ func TestRun_ReportsMailboxDeclarationOnNonMailboxAction(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsArtifactRepoCommitMissingSpec(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"artifact-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"spec_file.commit_requested": {
+						Action: runtimecontracts.ActionSpec{ID: "artifact_repo_commit"},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo_commit is missing artifact_repo") {
+		t.Fatalf("expected handler_field_compliance missing artifact_repo error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsArtifactRepoCommitInvalidShape(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"artifact-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"spec_file.commit_requested": {
+						Action: runtimecontracts.ActionSpec{
+							ID: "artifact_repo_commit",
+							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
+								Provider:     "s3",
+								RepoID:       runtimecontracts.RefExpression("entity.spec_repo_id"),
+								RequestID:    runtimecontracts.RefExpression("payload.request_id"),
+								VerticalID:   runtimecontracts.RefExpression("entity.vertical_id"),
+								AllowedPaths: []string{"../escape.yaml"},
+								Files: []runtimecontracts.ArtifactRepoFileSpec{{
+									Path:        runtimecontracts.LiteralExpression("specs/mvp.yaml"),
+									Content:     runtimecontracts.RefExpression("payload.mvp_yaml"),
+									ContentType: "json",
+								}},
+								Output: runtimecontracts.ArtifactRepoOutputSpec{
+									RepoURL: "repo_url",
+									Status:  "status",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "provider s3 is unsupported") {
+		t.Fatalf("expected unsupported provider error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "missing artifact_repo.source_validation_case_id") {
+		t.Fatalf("expected missing source_validation_case_id error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "path traversal is not allowed") {
+		t.Fatalf("expected traversal allowlist error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "content_type \"json\" is unsupported") {
+		t.Fatalf("expected unsupported content_type error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "missing artifact_repo.output.current_ref") {
+		t.Fatalf("expected missing current_ref output error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsArtifactRepoDeclarationOnNonArtifactAction(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"artifact-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"spec_file.commit_requested": {
+						Action: runtimecontracts.ActionSpec{
+							ID: "record_evidence",
+							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
+								Provider: "local_git",
+							},
+						},
+						EvidenceTarget: "evidence",
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo declaration requires action artifact_repo_commit") {
+		t.Fatalf("expected handler_field_compliance artifact/action mismatch error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsPromptStubToPromptExistsWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-prompt-stub")
 

@@ -760,6 +760,11 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 			return true, err
 		}
 		return true, nil
+	case "artifact_repo_commit":
+		if err := pc.commitArtifactRepo(ctx, action, execCtx); err != nil {
+			return true, err
+		}
+		return true, nil
 	default:
 		return false, nil
 	}

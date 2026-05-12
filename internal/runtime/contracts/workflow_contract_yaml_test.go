@@ -814,6 +814,88 @@ action: increment_revision_count
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_PreservesArtifactRepoCommitAction(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+action:
+  id: artifact_repo_commit
+  artifact_repo:
+    provider: local_git
+    repo_id:
+      ref: entity.spec_repo_id
+    run_id:
+      ref: event.run_id
+    vertical_id:
+      ref: entity.vertical_id
+    business_slug:
+      ref: entity.business_slug
+    source_validation_case_id:
+      ref: entity.source_validation_case_id
+    request_id:
+      ref: payload.request_id
+    author:
+      literal: validation-agent
+    allowed_paths:
+      - specs/mvp.yaml
+    files:
+      - path:
+          literal: specs/mvp.yaml
+        content:
+          ref: payload.mvp_yaml
+        content_type: yaml
+        max_bytes: 4096
+    output:
+      repo_url: repo_url
+      current_ref: current_ref
+      file_manifest: file_manifest
+      status: status
+      failure_reason: failure_reason
+      last_request_id: last_request_id
+      last_source_event_id: last_source_event_id
+    limits:
+      max_yaml_bytes: 4096
+      max_repo_bytes: 1048576
+    failure_event: spec_repo.commit_failed
+    failure_payload:
+      request_id:
+        ref: payload.request_id
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := handler.Action.ID; got != "artifact_repo_commit" {
+		t.Fatalf("Action.ID = %q", got)
+	}
+	if handler.Action.ArtifactRepo == nil {
+		t.Fatal("expected ArtifactRepo")
+	}
+	if got := handler.Action.ArtifactRepo.Provider; got != "local_git" {
+		t.Fatalf("ArtifactRepo.Provider = %q", got)
+	}
+	if got := handler.Action.ArtifactRepo.Files[0].Path.Literal; got != "specs/mvp.yaml" {
+		t.Fatalf("ArtifactRepo.Files[0].Path = %#v", got)
+	}
+	if got := handler.Action.ArtifactRepo.Output.CurrentRef; got != "current_ref" {
+		t.Fatalf("ArtifactRepo.Output.CurrentRef = %q", got)
+	}
+	if got := handler.Action.ArtifactRepo.FailureEvent; got != "spec_repo.commit_failed" {
+		t.Fatalf("ArtifactRepo.FailureEvent = %q", got)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsUnknownArtifactRepoField(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+action:
+  id: artifact_repo_commit
+  artifact_repo:
+    provider: local_git
+    shell: git commit
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}
+
 func TestEntityFieldDeclDecode_PreservesMaterializeFromProjection(t *testing.T) {
 	var field EntityFieldDecl
 	if err := yaml.Unmarshal([]byte(`
