@@ -1077,11 +1077,13 @@ handler_specification:
           behavior: The runtime normalizes file content, writes only allowlisted paths under the service-owned repo root,
             commits staged files atomically, verifies the resulting ref is a 40-character git SHA, and persists only the declared
             output fields on the selected/owned entity. Duplicate replay for the same source_event_id is a no-op. Reusing a
-            request_id with different content fails closed. Content hashes are diagnostic and do not replace request/source
-            idempotency.
+            request_id with different content fails closed even when that request is not the latest operation. Content hashes
+            are diagnostic and do not replace request/source idempotency.
           operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service
             contract must declare the output fields it wants persisted; status is committed or failed, failure_reason records
             runtime failure detail when available, and current_ref updates only after git commit/ref verification succeeds.
+            Provider history must record request_id and content/tree identity durably enough to reject historical request-id
+            conflicts after intervening commits.
             If failure_event is declared, the runtime also emits that typed event after persisting failed status.
           fail_closed: Invalid provider, missing or non-UUID identities, invalid root, traversal, symlink/root escape, allowlist
             miss, unsupported content type, size-limit violation, git write/commit failure, invalid ref, and idempotency conflict
