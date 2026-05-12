@@ -83,7 +83,7 @@ printf '%s' "$count" > "$count_file"
 captured="$capture_dir/$count.stdin"
 cat > "$captured"
 first_nonspace="$(sed -n 's/^[[:space:]]*//; /^$/d; s/^\(.\).*$/\1/p; q' "$captured")"
-if [ "$first_nonspace" = "[" ] && grep -Fq '"name":"read_file"' "$captured" && grep -Fq '"ok":true' "$captured"; then
+if [ "$first_nonspace" = "[" ] && grep -Fq '"name":"read_file"' "$captured" && grep -Fq '"ok":true' "$captured" && grep -Fq '"size_bytes":' "$captured"; then
   printf '%s\n' '{"type":"result","result":"done"}'
 else
   printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
@@ -238,7 +238,7 @@ func capturedToolResultInput(captureDir string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if bytes.Contains(data, []byte(`"name":"read_file"`)) && bytes.Contains(data, []byte(`"ok":true`)) {
+		if bytes.Contains(data, []byte(`"name":"read_file"`)) && bytes.Contains(data, []byte(`"ok":true`)) && bytes.Contains(data, []byte(`"size_bytes":`)) {
 			return data, nil
 		}
 	}

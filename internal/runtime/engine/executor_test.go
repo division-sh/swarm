@@ -65,6 +65,9 @@ func sourceWithKilledState() semanticview.Source {
 }
 
 type stubStateRepo struct{}
+type actionMergeStateRepo struct {
+	snapshot StateSnapshot
+}
 type stubRunner struct{}
 type stubLocker struct{}
 type stubOutbox struct{}
@@ -104,7 +107,13 @@ func (stubStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapsho
 	return StateSnapshot{}, false, nil
 }
 func (stubStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error { return nil }
-func (stubRunner) Run(ctx context.Context, fn func(Tx) error) error                     { return fn(stubTx{ctx: ctx}) }
+func (r actionMergeStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
+	return r.snapshot, true, nil
+}
+func (actionMergeStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error {
+	return nil
+}
+func (stubRunner) Run(ctx context.Context, fn func(Tx) error) error { return fn(stubTx{ctx: ctx}) }
 func (stubLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn func(context.Context) error) error {
 	return fn(ctx)
 }
@@ -2330,6 +2339,49 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	}
 	if shaper.lastSurface != EmitSurfaceAction {
 		t.Fatalf("action emit surface = %q, want %q", shaper.lastSurface, EmitSurfaceAction)
+	}
+}
+
+func TestExecutor_MergePersistedActionStatePreservesInMemoryWrites(t *testing.T) {
+	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
+	baseline := testStateSnapshot("ready", map[string]any{
+		"same":           "unchanged",
+		"in_memory_only": "frame-write",
+	}, map[string]bool{
+		"g_frame": true,
+	}, map[string]map[string]any{
+		"bucket": {"in_memory_only": "frame-write"},
+	})
+	persisted := testStateSnapshot("ready", map[string]any{
+		"same":          "unchanged",
+		"action_output": "persisted-output",
+	}, nil, map[string]map[string]any{
+		"bucket": {"action_output": "persisted-output"},
+	})
+	exec := &Executor{deps: RuntimeDependencies{StateRepo: actionMergeStateRepo{snapshot: persisted}}}
+	frame := &executionFrame{
+		tx:  stubTx{ctx: context.Background()},
+		req: ExecutionRequest{EntityID: entityID},
+		state: ExecutionState{
+			State: baseline,
+		},
+	}
+
+	if err := exec.mergePersistedActionState(frame, baseline); err != nil {
+		t.Fatalf("mergePersistedActionState: %v", err)
+	}
+
+	if got := frame.state.State.StateCarrier.Metadata["in_memory_only"]; got != "frame-write" {
+		t.Fatalf("in_memory_only = %#v, want preserved frame-write", got)
+	}
+	if got := frame.state.State.StateCarrier.Metadata["action_output"]; got != "persisted-output" {
+		t.Fatalf("action_output = %#v, want persisted-output", got)
+	}
+	if got := frame.state.State.StateCarrier.StateBuckets["bucket"]["in_memory_only"]; got != "frame-write" {
+		t.Fatalf("bucket in_memory_only = %#v, want preserved frame-write", got)
+	}
+	if got := frame.state.State.StateCarrier.StateBuckets["bucket"]["action_output"]; got != "persisted-output" {
+		t.Fatalf("bucket action_output = %#v, want persisted-output", got)
 	}
 }
 
