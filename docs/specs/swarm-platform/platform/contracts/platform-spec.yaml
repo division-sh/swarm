@@ -1064,9 +1064,9 @@ handler_specification:
               closed. The namespace partitions provider storage but is not semantic product identity.
             partition_key: optional expression value resolving to a product-neutral grouping key copied into the manifest.
               It may be used by consumers for indexing/debugging, but the runtime does not interpret it.
-            display_slug: optional expression value resolving to a cosmetic debug label. It is sanitized for any provider path
-              hint and is never authoritative identity. Path separators, traversal markers, and values with no letters/digits
-              fail closed.
+            display_slug: optional expression value resolving to a cosmetic debug label copied into the manifest/failure
+              payload. It is never authoritative identity and must not affect provider storage paths. Path separators, traversal
+              markers, and values with no letters/digits fail closed.
             request_id: expression value resolving to the business idempotency UUID. Required.
             author: optional expression value used for git author display only.
             provenance: optional mapping of product-owned provenance keys to expression values. Keys are copied under a
