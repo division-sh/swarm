@@ -432,6 +432,70 @@ func TestRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEvent(t *te
 	}
 }
 
+func TestRuntimeLogger_Log_PersistsTypedRuntimeLineage(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	logger := NewRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true, hasRunID: true})
+	runID := uuid.NewString()
+	subjectEventID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
+		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
+		RunID:               runID,
+		SubjectEventID:      subjectEventID,
+		SubjectEventType:    "validation/validation.package_ready",
+		ParentEventID:       subjectEventID,
+		RowCategory:         runtimecorrelation.RuntimeLineageRowCategoryDiagnostic,
+		SelectedForkOwner:   "runtime.run_fork.selected_contract_execution.fork_local_runtime_container",
+		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
+		SelectedForkContext: true,
+	})
+	if err := ensureRuntimeLogRunRow(ctx, db, runID); err != nil {
+		t.Fatalf("ensure run row: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'validation/validation.package_ready', 'global', '{}'::jsonb,
+			'runtime.run_fork.selected_contract_execution', 'agent'
+		)
+	`, runID, subjectEventID); err != nil {
+		t.Fatalf("seed subject event: %v", err)
+	}
+
+	if err := logger.Log(ctx, RuntimeLogEntry{
+		Level:     "warn",
+		Message:   "typed runtime diagnostic",
+		Component: "eventbus",
+		Action:    "outbox_replay_scope_unavailable",
+	}); err != nil {
+		t.Fatalf("logger.Log() error = %v", err)
+	}
+
+	row := loadLatestRuntimeLogRow(t, db)
+	if row.RunID != runID {
+		t.Fatalf("persisted run_id = %q, want %q", row.RunID, runID)
+	}
+	if row.SourceEventID != subjectEventID {
+		t.Fatalf("persisted source_event_id = %q, want typed parent %q", row.SourceEventID, subjectEventID)
+	}
+	if got := strings.TrimSpace(asString(row.Detail["parent_event_id"])); got != subjectEventID {
+		t.Fatalf("payload details.parent_event_id = %q, want typed parent %q", got, subjectEventID)
+	}
+	if got := strings.TrimSpace(asString(row.Detail["runtime_lineage_owner"])); got != "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage" {
+		t.Fatalf("runtime_lineage_owner = %q", got)
+	}
+	if got := strings.TrimSpace(asString(row.Detail["runtime_lineage_row_category"])); got != "diagnostic" {
+		t.Fatalf("runtime_lineage_row_category = %q, want diagnostic", got)
+	}
+	if got := strings.TrimSpace(asString(row.Detail["runtime_lineage_classification"])); got != "fork_local" {
+		t.Fatalf("runtime_lineage_classification = %q, want fork_local", got)
+	}
+}
+
 type persistedRuntimeLogRow struct {
 	RunID         string
 	SourceEventID string

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"swarm/internal/events"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/diaglog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
@@ -378,6 +379,7 @@ func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message
 	if logger == nil {
 		return nil
 	}
+	ctx = runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, eventID, eventType)
 	if err := logger.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, errText, durationUS); err != nil {
 		diaglog.ProcessLog("error", "diagnostics", "runtime log persistence failed",
 			"component", strings.TrimSpace(component),

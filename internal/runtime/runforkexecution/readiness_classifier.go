@@ -373,6 +373,12 @@ func selectedContractReadinessRequiredConsumers() []store.RunForkSelectedContrac
 			Reason:      "mutating selected execution must construct the canonical fork-local runtime container before EventBus, AgentManager, RuntimeLogger, activation, cleanup, or quiescence can be authoritative",
 		},
 		{
+			Concept:     "fork_local_runtime_typed_lineage",
+			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       store.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner,
+			Reason:      "runtime diagnostics and platform-control outputs emitted by selected execution must consume typed lineage before persistence writes canonical source_event_id lineage",
+		},
+		{
 			Concept:     "cli_dry_run_explain_json",
 			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       store.RunForkSelectedContractReadinessClassifierOwner,
@@ -388,14 +394,7 @@ func selectedContractReadinessRequiredConsumers() []store.RunForkSelectedContrac
 }
 
 func selectedContractReadinessBlockedSiblings(model store.RunForkSelectedContractExecution) []store.RunForkSelectedContractExecutionBoundary {
-	out := []store.RunForkSelectedContractExecutionBoundary{
-		{
-			Concept:     "typed_runtime_lineage",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner,
-			Reason:      "#708 remains the typed-lineage architecture sibling; readiness explains current owner output without requiring that refactor",
-		},
-	}
+	out := []store.RunForkSelectedContractExecutionBoundary{}
 	out = append(out, model.BlockedSiblings...)
 	return out
 }

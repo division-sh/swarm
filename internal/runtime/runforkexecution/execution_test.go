@@ -401,6 +401,23 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	if agentFollowUps != 1 || finalizedEvents != 1 {
 		t.Fatalf("fork-local follow-ups task.completed=%d task.finalized=%d, want 1/1", agentFollowUps, finalizedEvents)
 	}
+
+	var typedRuntimeDiagnostics int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		  AND event_name = 'platform.runtime_log'
+		  AND source_event_id = $2::uuid
+		  AND payload->'details'->>'runtime_lineage_owner' = $3
+		  AND payload->'details'->>'runtime_lineage_row_category' = 'diagnostic'
+		  AND payload->'details'->>'runtime_lineage_classification' = 'fork_local'
+	`, result.Materialization.ForkRunID, forkEventID, store.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner).Scan(&typedRuntimeDiagnostics); err != nil {
+		t.Fatalf("count typed runtime diagnostics: %v", err)
+	}
+	if typedRuntimeDiagnostics == 0 {
+		t.Fatalf("typed runtime diagnostics parented to fork event = %d, want > 0", typedRuntimeDiagnostics)
+	}
 }
 
 func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *testing.T) {
@@ -520,7 +537,6 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 		  AND (
 			event_id = $2::uuid
 			OR COALESCE(source_event_id::text, '') = $2::text
-			OR event_name = 'platform.runtime_log'
 		  )
 	`, result.Materialization.ForkRunID, diagnosticEventID).Scan(&diagnosticCopies); err != nil {
 		t.Fatalf("count copied diagnostic events: %v", err)
@@ -1694,6 +1710,7 @@ func assertSelectedContractRuntimeContainerProof(t *testing.T, proof *SelectedCo
 	if proof.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
 		proof.AuthoritativeAgentDeliveryMaterializationOwner != store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner ||
 		proof.RuntimePlatformEventLineagePolicyOwner != store.RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner ||
+		proof.TypedRuntimeLineageOwner != store.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner ||
 		proof.RouteRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner ||
 		proof.ActivationGateOwner != store.RunForkSelectedContractExecutionActivationGateOwner {
 		t.Fatalf("runtime container owner consumption = %#v", proof)
@@ -1713,8 +1730,8 @@ func assertSelectedContractRuntimeContainerProof(t *testing.T, proof *SelectedCo
 	if !executionBoundaryHas(proof.InvalidPaths, "source_row_copy_as_execution_truth", store.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("runtime container invalid paths = %#v, want source-row-copy invalid", proof.InvalidPaths)
 	}
-	if !executionBoundaryHas(proof.SplitSiblings, "typed_runtime_lineage", store.RunForkSelectedContractDispositionBlockedSibling) {
-		t.Fatalf("runtime container split siblings = %#v, want typed lineage sibling", proof.SplitSiblings)
+	if executionBoundaryHas(proof.SplitSiblings, "typed_runtime_lineage", store.RunForkSelectedContractDispositionBlockedSibling) {
+		t.Fatalf("runtime container split siblings = %#v, typed lineage should be implemented by #708", proof.SplitSiblings)
 	}
 }
 

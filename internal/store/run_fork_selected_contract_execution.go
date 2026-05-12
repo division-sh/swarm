@@ -22,6 +22,7 @@ const (
 	RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner      = RunForkSelectedContractExecutionOwner + ".fork_local_agent_runtime_materializer_executor"
 	RunForkSelectedContractForkLocalRuntimeContainerOwner                      = RunForkSelectedContractExecutionOwner + ".fork_local_runtime_container"
 	RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner     = RunForkSelectedContractExecutionOwner + ".fork_local_runtime_platform_event_lineage_policy"
+	RunForkSelectedContractForkLocalRuntimeTypedLineageOwner                   = RunForkSelectedContractExecutionOwner + ".fork_local_runtime_typed_lineage"
 	RunForkContractSwapBootResumeAdmissionOwner                                = "runtime.run_fork.contract_swap_boot_resume_admission"
 	RunForkHistoricalReplayExecutionAdmissionOwner                             = "runtime.run_fork.historical_replay_execution_admission"
 	RunForkHistoricalReplayExecutionOwner                                      = "runtime.run_fork.historical_replay_execution"

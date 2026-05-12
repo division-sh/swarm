@@ -195,12 +195,15 @@ type recordingLoggerHook struct {
 }
 
 type recordedLogEntry struct {
-	Action string
-	Detail any
+	Action     string
+	Detail     any
+	Lineage    runtimecorrelation.RuntimeLineage
+	HasLineage bool
 }
 
-func (h *recordingLoggerHook) Log(_ context.Context, _ diaglog.Level, _, _, action, _, _, _, _, _ string, _ map[string]string, detail any, _ string, _ int) error {
-	h.entries = append(h.entries, recordedLogEntry{Action: action, Detail: detail})
+func (h *recordingLoggerHook) Log(ctx context.Context, _ diaglog.Level, _, _, action, _, _, _, _, _ string, _ map[string]string, detail any, _ string, _ int) error {
+	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
+	h.entries = append(h.entries, recordedLogEntry{Action: action, Detail: detail, Lineage: lineage, HasLineage: ok})
 	return nil
 }
 
@@ -417,6 +420,53 @@ func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("queued delivery lifecycle transition not found in logs: %#v", logger.entries)
+	}
+}
+
+func TestEventBusPublish_AttachesTypedRuntimeDiagnosticLineage(t *testing.T) {
+	logger := &recordingLoggerHook{}
+	bus, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{Logger: logger})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	eventID := uuid.NewString()
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRuntimeLineage(context.Background(), runtimecorrelation.RuntimeLineage{
+		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
+		RunID:               runID,
+		RowCategory:         runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer,
+		SelectedForkOwner:   "runtime.run_fork.selected_contract_execution.fork_local_runtime_container",
+		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
+		SelectedForkContext: true,
+	})
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+
+	if err := bus.Publish(ctx, events.Event{
+		ID:        eventID,
+		Type:      events.EventType("task.requested"),
+		RunID:     runID,
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
+		CreatedAt: time.Now().UTC(),
+	}.WithEntityID("ent-1")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	var published recordedLogEntry
+	for _, entry := range logger.entries {
+		if entry.Action == "published" {
+			published = entry
+			break
+		}
+	}
+	if !published.HasLineage {
+		t.Fatalf("logger entries = %#v, want typed lineage on published diagnostic", logger.entries)
+	}
+	if published.Lineage.Owner != "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage" ||
+		published.Lineage.RowCategory != runtimecorrelation.RuntimeLineageRowCategoryDiagnostic ||
+		published.Lineage.SubjectEventID != eventID ||
+		published.Lineage.ParentEventID != eventID ||
+		published.Lineage.Classification != runtimecorrelation.RuntimeLineageClassificationForkLocal {
+		t.Fatalf("published diagnostic lineage = %#v", published.Lineage)
 	}
 }
 

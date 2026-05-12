@@ -8,8 +8,10 @@ import (
 
 	"github.com/google/uuid"
 
+	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	"swarm/internal/runtime/diaglog"
 	"swarm/internal/store"
 )
 
@@ -27,6 +29,7 @@ type SelectedContractForkLocalRuntimeContainer struct {
 	AuthoritativeAgentDeliveryMaterializationOwner string                                           `json:"authoritative_agent_delivery_materialization_owner"`
 	AgentRuntimeMaterializationOwner               string                                           `json:"agent_runtime_materialization_owner,omitempty"`
 	RuntimePlatformEventLineagePolicyOwner         string                                           `json:"runtime_platform_event_lineage_policy_owner"`
+	TypedRuntimeLineageOwner                       string                                           `json:"typed_runtime_lineage_owner"`
 	RouteRecoveryOwner                             string                                           `json:"route_recovery_owner"`
 	ActivationGateOwner                            string                                           `json:"activation_gate_owner"`
 	EventBusRecipientPlanGuard                     bool                                             `json:"eventbus_recipient_plan_guard"`
@@ -108,6 +111,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		AuthoritativeAgentDeliveryMaterializationOwner: deliveryMaterialization.Owner,
 		AgentRuntimeMaterializationOwner:               agentRuntimeOwner,
 		RuntimePlatformEventLineagePolicyOwner:         store.RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner,
+		TypedRuntimeLineageOwner:                       store.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner,
 		RouteRecoveryOwner:                             store.RunForkSelectedContractRouteRecoveryOwner,
 		ActivationGateOwner:                            store.RunForkSelectedContractExecutionActivationGateOwner,
 		EventBusRecipientPlanGuard:                     true,
@@ -140,6 +144,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(req.Store, runtimebus.EventBusOptions{
 		ContractBundle:              req.LoadedSource.Source,
+		Logger:                      selectedContractRuntimeContainerLogger(req.Store),
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
 		RecipientPlanGuard:          guard.Authorize,
 	})
@@ -149,7 +154,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	pipeline := newSelectedContractPipeline(bus, req.Store, req.LoadedSource)
 	bus.SetInterceptors(pipeline)
 
-	runCtx := runtimecorrelation.WithRunID(ctx, req.ForkRunID)
+	runCtx := selectedContractRuntimeContainerLineageContext(ctx, c.proof)
 	agentRuntime, err := startSelectedContractAgentRuntime(runCtx, req, bus)
 	if err != nil {
 		return nil, err
@@ -164,7 +169,8 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		forkEventID := uuid.NewString()
 		evt := selectedContractForkEvent(req.ForkRunID, forkEventID, sourceEvent, c.proof.ExecutionOwner)
 		guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
-		if err := bus.Publish(runCtx, evt); err != nil {
+		eventCtx := runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName)
+		if err := bus.Publish(eventCtx, evt); err != nil {
 			return out, fmt.Errorf("%s execute selected-contract fork event %s as %s: %w",
 				store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 				sourceEvent.SourceEventID,
@@ -202,6 +208,50 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		}
 	}
 	return out, nil
+}
+
+type selectedContractRuntimeContainerLoggerHook struct {
+	logger *runtimepkg.RuntimeLogger
+}
+
+func selectedContractRuntimeContainerLogger(pg *store.PostgresStore) runtimebus.LoggerHook {
+	if pg == nil || pg.DB == nil {
+		return nil
+	}
+	return selectedContractRuntimeContainerLoggerHook{logger: runtimepkg.NewRuntimeLogger(pg.DB, pg)}
+}
+
+func (h selectedContractRuntimeContainerLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
+	if h.logger == nil {
+		return nil
+	}
+	return h.logger.Log(ctx, runtimepkg.RuntimeLogEntry{
+		Level:       level,
+		Message:     message,
+		Component:   component,
+		Action:      action,
+		EventID:     eventID,
+		EventType:   eventType,
+		AgentID:     agentID,
+		EntityID:    strings.TrimSpace(entityID),
+		SessionID:   sessionID,
+		Correlation: correlation,
+		Detail:      detail,
+		Error:       errText,
+		DurationUS:  durationUS,
+	})
+}
+
+func selectedContractRuntimeContainerLineageContext(ctx context.Context, proof SelectedContractForkLocalRuntimeContainer) context.Context {
+	ctx = runtimecorrelation.WithRunID(ctx, proof.ForkRunID)
+	return runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
+		Owner:               proof.TypedRuntimeLineageOwner,
+		RunID:               proof.ForkRunID,
+		RowCategory:         runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer,
+		SelectedForkOwner:   proof.Owner,
+		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
+		SelectedForkContext: true,
+	})
 }
 
 func selectedContractRuntimeContainerExecutionOwner(owner string) string {
@@ -276,12 +326,6 @@ func selectedContractRuntimeContainerInvalidPaths() []store.RunForkSelectedContr
 
 func selectedContractRuntimeContainerSplitSiblings() []store.RunForkSelectedContractExecutionBoundary {
 	return []store.RunForkSelectedContractExecutionBoundary{
-		{
-			Concept:     "typed_runtime_lineage",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner,
-			Reason:      "#708 remains a later typed-lineage sibling; this container consumes the current lineage policy without replacing it",
-		},
 		{
 			Concept:     "restart_recovery",
 			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
