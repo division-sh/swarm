@@ -291,6 +291,9 @@ func canonicalRuntimeLogCandidate(item store.OperatorRuntimeLogEntry, key string
 	if errorCode := strings.TrimSpace(item.ErrorCode); errorCode != "" {
 		payload["error_code"] = errorCode
 	}
+	if errorText := stringMapValue(item.Details, "error"); errorText != "" {
+		payload["error"] = errorText
+	}
 	if message := strings.TrimSpace(item.Message); message != "" {
 		payload["message"] = message
 	}
