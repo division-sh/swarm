@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -1336,7 +1337,7 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 				return fmt.Errorf("action %q is not executable", actionKey.String())
 			}
 			if handled {
-				if err := e.mergePersistedActionState(frame); err != nil {
+				if err := e.mergePersistedActionState(frame, execCtx.Request.State); err != nil {
 					return err
 				}
 			}
@@ -1346,7 +1347,7 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 	return nil
 }
 
-func (e *Executor) mergePersistedActionState(frame *executionFrame) error {
+func (e *Executor) mergePersistedActionState(frame *executionFrame, baseline StateSnapshot) error {
 	if e == nil || e.deps.StateRepo == nil || frame == nil || frame.req.EntityID.IsZero() {
 		return nil
 	}
@@ -1356,18 +1357,28 @@ func (e *Executor) mergePersistedActionState(frame *executionFrame) error {
 	}
 	metadata := cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	for key, value := range persisted.StateCarrier.Metadata {
-		metadata[key] = value
+		if baselineValue, ok := baseline.StateCarrier.Metadata[key]; !ok || !reflect.DeepEqual(baselineValue, value) {
+			metadata[key] = value
+		}
 	}
-	gates := make(map[string]bool, len(frame.state.State.StateCarrier.Gates)+len(persisted.StateCarrier.Gates))
-	for key, value := range frame.state.State.StateCarrier.Gates {
-		gates[key] = value
-	}
+	gates := mapsClone(frame.state.State.StateCarrier.Gates)
 	for key, value := range persisted.StateCarrier.Gates {
-		gates[key] = value
+		if baselineValue, ok := baseline.StateCarrier.Gates[key]; !ok || baselineValue != value {
+			gates[key] = value
+		}
 	}
 	buckets := cloneStateBucketSet(frame.state.State.StateCarrier.StateBuckets)
 	for key, bucket := range persisted.StateCarrier.StateBuckets {
-		buckets[key] = cloneStringAnyMap(bucket)
+		currentBucket := cloneStringAnyMap(buckets[key])
+		baselineBucket := baseline.StateCarrier.StateBuckets[key]
+		for bucketKey, value := range bucket {
+			if baselineValue, ok := baselineBucket[bucketKey]; !ok || !reflect.DeepEqual(baselineValue, value) {
+				currentBucket[bucketKey] = value
+			}
+		}
+		if len(currentBucket) > 0 {
+			buckets[key] = currentBucket
+		}
 	}
 	frame.state.State.StateCarrier.Metadata = metadata
 	frame.state.State.StateCarrier.Gates = gates
@@ -1715,8 +1726,10 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 }
 
 func (e *Executor) executionContext(frame *executionFrame, step Step) ExecutionContext {
+	req := frame.req
+	req.State = frame.state.State
 	return ExecutionContext{
-		Request:   frame.req,
+		Request:   req,
 		Base:      e.currentContext(frame),
 		Step:      step,
 		Completed: append([]Step(nil), frame.result.ExecutedSteps...),
