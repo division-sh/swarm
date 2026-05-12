@@ -66,14 +66,11 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if err != nil {
 		return err
 	}
-	partitionKey, err := optionalArtifactSegment(execCtx.Base, spec.PartitionKey, "artifact_repo.partition_key")
-	if err != nil {
-		return err
-	}
 	requestID, err := requiredArtifactUUID(execCtx.Base, spec.RequestID, "artifact_repo.request_id")
 	if err != nil {
 		return err
 	}
+	partitionKey := ""
 	provenance := map[string]any{}
 	displaySlug := ""
 	fail := func(err error) error {
@@ -90,6 +87,10 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 			_ = pc.publish(ctx, failureEvent, execCtx.Request.EntityID.String(), artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, err))
 		}
 		return err
+	}
+	partitionKey, err = optionalArtifactSegment(execCtx.Base, spec.PartitionKey, "artifact_repo.partition_key")
+	if err != nil {
+		return fail(err)
 	}
 	displaySlug, err = optionalArtifactDisplaySlug(execCtx.Base, spec.DisplaySlug)
 	if err != nil {
@@ -113,7 +114,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 			}
 		}
 	}
-	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), namespace, displaySlug, repoID)
+	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), namespace, repoID)
 	if err != nil {
 		return fail(err)
 	}
@@ -513,7 +514,7 @@ func validateArtifactRepoDisplaySlug(raw string) error {
 	return nil
 }
 
-func artifactRepoPath(root, namespace, displaySlug, repoID string) (string, error) {
+func artifactRepoPath(root, namespace, repoID string) (string, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return "", fmt.Errorf("artifact root is required")
@@ -524,13 +525,7 @@ func artifactRepoPath(root, namespace, displaySlug, repoID string) (string, erro
 	if err := validateArtifactRepoSegment(namespace); err != nil {
 		return "", fmt.Errorf("namespace: %w", err)
 	}
-	if err := validateArtifactRepoDisplaySlug(displaySlug); err != nil {
-		return "", fmt.Errorf("display_slug: %w", err)
-	}
 	parts := []string{root, "repos", namespace}
-	if slug := sanitizeArtifactSlug(displaySlug); slug != "" {
-		parts = append(parts, slug)
-	}
 	parts = append(parts, repoID+".git")
 	repoPath := filepath.Join(parts...)
 	if !artifactPathWithinRoot(repoPath, root) {

@@ -769,7 +769,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	if !ok || len(files) != 1 {
 		t.Fatalf("manifest files = %#v", manifest["files"])
 	}
-	repoPath, err := artifactRepoPath(artifactRoot, initial["namespace"].(string), initial["display_slug"].(string), initial["repo_id"].(string))
+	repoPath, err := artifactRepoPath(artifactRoot, initial["namespace"].(string), initial["repo_id"].(string))
 	if err != nil {
 		t.Fatalf("artifactRepoPath: %v", err)
 	}
@@ -956,6 +956,8 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 	if err != nil {
 		t.Fatalf("load workflow instance after next request: %v", err)
 	}
+	// Display labels are cosmetic; request history must remain keyed by repo identity.
+	afterNext.Metadata["display_slug"] = "Renamed Artifact"
 
 	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Metadata, "77777777-7777-7777-7777-777777777777", "44444444-4444-4444-4444-444444444444", "name: Changed\n")
 	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
@@ -1007,7 +1009,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	if sameRef == "" || sameRef == initialRef {
 		t.Fatalf("same-tree request current_ref = %q, initial ref = %q; want a durable operation commit", sameRef, initialRef)
 	}
-	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), initial["namespace"].(string), initial["display_slug"].(string), initial["repo_id"].(string))
+	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), initial["namespace"].(string), initial["repo_id"].(string))
 	if err != nil {
 		t.Fatalf("artifactRepoPath: %v", err)
 	}
@@ -1153,21 +1155,9 @@ func TestWriteArtifactRepoFilesRejectsSymlinkEscape(t *testing.T) {
 
 func TestArtifactRepoPathRejectsUnsafeGenericSegments(t *testing.T) {
 	repoID := "11111111-1111-1111-1111-111111111111"
-	for _, tc := range []struct {
-		name        string
-		namespace   string
-		displaySlug string
-		want        string
-	}{
-		{name: "namespace traversal", namespace: "../escape", displaySlug: "safe", want: "namespace"},
-		{name: "display traversal", namespace: "tenant-alpha", displaySlug: "../escape", want: "display_slug"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := artifactRepoPath(t.TempDir(), tc.namespace, tc.displaySlug, repoID)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("artifactRepoPath error = %v, want %s", err, tc.want)
-			}
-		})
+	_, err := artifactRepoPath(t.TempDir(), "../escape", repoID)
+	if err == nil || !strings.Contains(err.Error(), "namespace") {
+		t.Fatalf("artifactRepoPath error = %v, want namespace", err)
 	}
 }
 
