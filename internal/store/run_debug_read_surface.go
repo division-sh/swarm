@@ -130,6 +130,7 @@ type RunDebugReport struct {
 type RunDebugTraceQueryOptions struct {
 	Limit  int
 	Cursor string
+	Since  *time.Time
 }
 
 type RunDebugTraceRow struct {
@@ -649,6 +650,11 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			2, 3, 4, 5, 6, 7,
 		)
 	}
+	sinceWhere := ""
+	if opts.Since != nil {
+		args = append(args, opts.Since.UTC())
+		sinceWhere = fmt.Sprintf(" AND e.created_at > $%d::timestamptz", len(args))
+	}
 	args = append(args, opts.Limit+1)
 	limitArg := len(args)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
@@ -710,6 +716,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 		   )
 		WHERE e.run_id = $1::uuid
 		%s
+		%s
 		ORDER BY
 			e.created_at ASC,
 			e.event_id ASC,
@@ -718,7 +725,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			t.created_at ASC NULLS FIRST,
 			t.turn_id ASC NULLS FIRST
 		LIMIT $%d
-	`, sessionSources, cursorWhere, limitArg), args...)
+	`, sessionSources, cursorWhere, sinceWhere, limitArg), args...)
 	if err != nil {
 		return nil, "", fmt.Errorf("load run debug trace: %w", err)
 	}

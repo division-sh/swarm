@@ -33,6 +33,7 @@ type OperatorEventListOptions struct {
 	Until              *time.Time
 	Limit              int
 	Cursor             string
+	Order              string
 	ExcludeRuntimeLogs bool
 }
 
@@ -257,22 +258,33 @@ func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEve
 		if err != nil {
 			return OperatorEventListResult{}, err
 		}
+		if cursor.Order != "" && cursor.Order != opts.Order {
+			return OperatorEventListResult{}, ErrInvalidObservabilityCursor
+		}
 		createdAt, err := time.Parse(time.RFC3339Nano, cursor.CreatedAt)
 		if err != nil || strings.TrimSpace(cursor.ID) == "" {
 			return OperatorEventListResult{}, ErrInvalidObservabilityCursor
 		}
 		nTime := add(createdAt.UTC())
 		nID := add(cursor.ID)
-		where = append(where, fmt.Sprintf("(e.created_at < $%d OR (e.created_at = $%d AND e.event_id::text < $%d))", nTime, nTime, nID))
+		if opts.Order == "asc" {
+			where = append(where, fmt.Sprintf("(e.created_at > $%d OR (e.created_at = $%d AND e.event_id::text > $%d))", nTime, nTime, nID))
+		} else {
+			where = append(where, fmt.Sprintf("(e.created_at < $%d OR (e.created_at = $%d AND e.event_id::text < $%d))", nTime, nTime, nID))
+		}
 	}
 	limitArg := add(opts.Limit + 1)
+	orderSQL := "DESC"
+	if opts.Order == "asc" {
+		orderSQL = "ASC"
+	}
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT e.event_id::text
 		FROM events e
 		WHERE `+strings.Join(where, " AND ")+fmt.Sprintf(`
-		ORDER BY e.created_at DESC, e.event_id::text DESC
+		ORDER BY e.created_at %s, e.event_id::text %s
 		LIMIT $%d
-	`, limitArg), args...)
+	`, orderSQL, orderSQL, limitArg), args...)
 	if err != nil {
 		return OperatorEventListResult{}, fmt.Errorf("list operator events: %w", err)
 	}
@@ -304,6 +316,7 @@ func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts OperatorEve
 			Kind:      "event.list",
 			CreatedAt: last.CreatedAt.UTC().Format(time.RFC3339Nano),
 			ID:        last.EventID,
+			Order:     opts.Order,
 		})
 	}
 	if events == nil {
@@ -716,6 +729,13 @@ func defaultOperatorEventListOptions(opts OperatorEventListOptions) OperatorEven
 	opts.Filter.ReasonCode = strings.TrimSpace(opts.Filter.ReasonCode)
 	opts.Source = strings.TrimSpace(opts.Source)
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
+	opts.Order = strings.ToLower(strings.TrimSpace(opts.Order))
+	if opts.Order == "" {
+		opts.Order = "desc"
+	}
+	if opts.Order != "asc" && opts.Order != "desc" {
+		opts.Order = "desc"
+	}
 	if opts.Limit <= 0 {
 		opts.Limit = 100
 	}

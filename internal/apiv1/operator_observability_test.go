@@ -162,15 +162,24 @@ type fakeObservabilityReadStore struct {
 	incidents []store.OperatorRuntimeIncident
 
 	lastEventList   store.OperatorEventListOptions
+	lastTrace       store.RunDebugTraceQueryOptions
 	lastRuntimeLogs store.OperatorRuntimeLogListOptions
 	lastIncidents   store.OperatorRuntimeIncidentListOptions
 }
 
-func (s *fakeObservabilityReadStore) LoadRunDebugTracePage(_ context.Context, runID string, _ store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, string, error) {
+func (s *fakeObservabilityReadStore) LoadRunDebugTracePage(_ context.Context, runID string, opts store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, string, error) {
+	s.lastTrace = opts
 	if s.traceErr != nil {
 		return nil, "", s.traceErr
 	}
-	return s.traceRows[runID], "", nil
+	rows := []store.RunDebugTraceRow{}
+	for _, row := range s.traceRows[runID] {
+		if opts.Since != nil && !row.EventCreatedAt.After(opts.Since.UTC()) {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows, "", nil
 }
 
 func (s *fakeObservabilityReadStore) ListOperatorEvents(_ context.Context, opts store.OperatorEventListOptions) (store.OperatorEventListResult, error) {
@@ -180,6 +189,18 @@ func (s *fakeObservabilityReadStore) ListOperatorEvents(_ context.Context, opts 
 	}
 	out := make([]store.OperatorEventFull, 0, len(s.events))
 	for _, event := range s.events {
+		if opts.Since != nil && !event.CreatedAt.After(opts.Since.UTC()) {
+			continue
+		}
+		if opts.Filter.RunID != "" && event.RunID != opts.Filter.RunID {
+			continue
+		}
+		if opts.Filter.EntityID != "" && event.EntityID != opts.Filter.EntityID {
+			continue
+		}
+		if opts.Filter.EventName != "" && event.EventName != opts.Filter.EventName {
+			continue
+		}
 		out = append(out, event)
 	}
 	return store.OperatorEventListResult{Events: out}, nil

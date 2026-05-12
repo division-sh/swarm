@@ -84,6 +84,20 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	if len(page2.Events) != 1 || page2.Events[0].EventID != olderEventID {
 		t.Fatalf("page2 = %#v", page2)
 	}
+	ascPage1, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{Filter: OperatorEventListFilter{RunID: runID}, Limit: 1, Order: "asc"})
+	if err != nil {
+		t.Fatalf("ListOperatorEvents asc page1: %v", err)
+	}
+	if len(ascPage1.Events) != 1 || ascPage1.Events[0].EventID != olderEventID || ascPage1.NextCursor == "" {
+		t.Fatalf("asc page1 = %#v", ascPage1)
+	}
+	ascPage2, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{Filter: OperatorEventListFilter{RunID: runID}, Limit: 1, Order: "asc", Cursor: ascPage1.NextCursor})
+	if err != nil {
+		t.Fatalf("ListOperatorEvents asc page2: %v", err)
+	}
+	if len(ascPage2.Events) != 1 || ascPage2.Events[0].EventID != newerEventID {
+		t.Fatalf("asc page2 = %#v", ascPage2)
+	}
 	sinceBase := base
 	afterBase, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{
 		Filter: OperatorEventListFilter{RunID: runID},
@@ -269,6 +283,13 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	}
 	if len(page2) != 1 || page2[0].EventID != secondEvent {
 		t.Fatalf("trace page2 = %#v", page2)
+	}
+	sinceRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &base})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage since: %v", err)
+	}
+	if len(sinceRows) != 1 || sinceRows[0].EventID != secondEvent {
+		t.Fatalf("trace since rows = %#v, want only second event", sinceRows)
 	}
 	if _, _, err := pg.LoadRunDebugTracePage(ctx, uuid.NewString(), RunDebugTraceQueryOptions{}); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("missing run error = %v, want ErrRunNotFound", err)

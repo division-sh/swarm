@@ -13,6 +13,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -34,6 +35,7 @@ type Handler struct {
 	tokens   map[string]struct{}
 	handlers map[string]MethodHandler
 	upgrader websocket.Upgrader
+	subs     *SubscriptionRuntime
 }
 
 type MethodHandler func(context.Context, Request) (any, error)
@@ -43,6 +45,7 @@ type Options struct {
 	Registry         *Registry
 	AuthTokens       []string
 	Handlers         map[string]MethodHandler
+	Subscriptions    *SubscriptionRuntime
 }
 
 type Request struct {
@@ -119,6 +122,7 @@ func NewHandler(opts Options) (*Handler, error) {
 		tokens:   tokenSet(opts.AuthTokens),
 		handlers: handlers,
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
+		subs:     opts.Subscriptions.withDefaults(),
 	}, nil
 }
 
@@ -182,38 +186,41 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
-	for {
-		_, raw, err := conn.ReadMessage()
-		if err != nil {
-			return
-		}
-		resp := h.dispatch(r.Context(), raw, "websocket", requestCorrelationID(r, nil), actorTokenID(token))
-		if err := conn.WriteJSON(resp); err != nil {
-			return
-		}
-	}
+	session := newWebSocketSession(h, conn, r.Context(), requestCorrelationID(r, nil), actorTokenID(token))
+	session.run()
 }
 
 func (h *Handler) dispatch(ctx context.Context, raw []byte, transport, fallbackCorrelationID, actorTokenID string) rpcResponse {
+	req, failure := h.prepareRequest(raw, transport, fallbackCorrelationID, actorTokenID)
+	if failure != nil {
+		return *failure
+	}
+	return h.dispatchPrepared(ctx, req)
+}
+
+func (h *Handler) prepareRequest(raw []byte, transport, fallbackCorrelationID, actorTokenID string) (Request, *rpcResponse) {
 	req, id, correlationID, rpcErr := h.parseRequest(raw, fallbackCorrelationID)
 	if rpcErr != nil {
-		return rpcResponse{JSONRPC: jsonRPCVersion, ID: id, Error: rpcErr}
+		return Request{}, &rpcResponse{JSONRPC: jsonRPCVersion, ID: id, Error: rpcErr}
 	}
 	req.Transport = transport
 	req.ActorTokenID = strings.TrimSpace(actorTokenID)
 	req.RequestHash = requestBodyHash(req.Method, req.Params)
 	if method, ok := h.registry.Method(req.Method); ok {
 		if rpcErr := validateParams(method, req.Params, req.CorrelationID); rpcErr != nil {
-			return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr}
+			return Request{}, &rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr}
 		}
 	} else {
-		return rpcResponse{
+		return Request{}, &rpcResponse{
 			JSONRPC: jsonRPCVersion,
 			ID:      req.ID,
 			Error:   h.standardError(codeMethodNotFound, "method not found", correlationID, map[string]any{"method": req.Method}),
 		}
 	}
+	return req, nil
+}
+
+func (h *Handler) dispatchPrepared(ctx context.Context, req Request) rpcResponse {
 	handler := h.handlers[req.Method]
 	if handler == nil {
 		return rpcResponse{
@@ -225,6 +232,10 @@ func (h *Handler) dispatch(ctx context.Context, raw []byte, transport, fallbackC
 		}
 	}
 	result, err := handler(ctx, req)
+	return h.responseFromResult(req, result, err)
+}
+
+func (h *Handler) responseFromResult(req Request, result any, err error) rpcResponse {
 	if err != nil {
 		var appErr *ApplicationError
 		if errors.As(err, &appErr) && appErr != nil {
@@ -237,6 +248,167 @@ func (h *Handler) dispatch(ctx context.Context, raw []byte, transport, fallbackC
 		return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: h.standardError(codeInternalError, "internal error", req.CorrelationID, map[string]any{"error": err.Error()})}
 	}
 	return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result}
+}
+
+type webSocketSession struct {
+	handler               *Handler
+	conn                  *websocket.Conn
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	out                   chan any
+	fallbackCorrelationID string
+	actorTokenID          string
+	mu                    sync.Mutex
+	subs                  map[string]context.CancelFunc
+}
+
+func newWebSocketSession(handler *Handler, conn *websocket.Conn, parent context.Context, fallbackCorrelationID, actorTokenID string) *webSocketSession {
+	ctx, cancel := context.WithCancel(parent)
+	queueSize := defaultSubscriptionQueueSize
+	if handler != nil && handler.subs != nil && handler.subs.queueSize > 0 {
+		queueSize = handler.subs.queueSize
+	}
+	return &webSocketSession{
+		handler:               handler,
+		conn:                  conn,
+		ctx:                   ctx,
+		cancel:                cancel,
+		out:                   make(chan any, queueSize),
+		fallbackCorrelationID: strings.TrimSpace(fallbackCorrelationID),
+		actorTokenID:          strings.TrimSpace(actorTokenID),
+		subs:                  map[string]context.CancelFunc{},
+	}
+}
+
+func (s *webSocketSession) run() {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.writeLoop()
+	}()
+	defer func() {
+		s.cancel()
+		s.cancelAllSubscriptions()
+		_ = s.conn.Close()
+		wg.Wait()
+	}()
+	for {
+		_, raw, err := s.conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		if !s.handleRaw(raw) {
+			return
+		}
+	}
+}
+
+func (s *webSocketSession) writeLoop() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case msg := <-s.out:
+			if err := s.conn.WriteJSON(msg); err != nil {
+				s.cancel()
+				_ = s.conn.Close()
+				return
+			}
+		}
+	}
+}
+
+func (s *webSocketSession) handleRaw(raw []byte) bool {
+	req, failure := s.handler.prepareRequest(raw, "websocket", s.fallbackCorrelationID, s.actorTokenID)
+	if failure != nil {
+		return s.enqueue(*failure)
+	}
+	switch req.Method {
+	case "health.subscribe", "event.subscribe", "run.subscribe_trace":
+		if s.handler.subs == nil {
+			return s.enqueue(s.handler.dispatchPrepared(s.ctx, req))
+		}
+		plan, err := s.handler.subs.prepare(s, req)
+		resp := s.handler.responseFromResult(req, plan.Result, err)
+		if !s.enqueue(resp) {
+			if plan.Cancel != nil {
+				plan.Cancel()
+			}
+			return false
+		}
+		if err == nil && plan.Start != nil {
+			plan.Start()
+		}
+		return true
+	case "rpc.unsubscribe":
+		subscriptionID := stringParam(req.Params, "subscription_id")
+		s.cancelSubscription(subscriptionID)
+		return s.enqueue(rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: map[string]any{"ok": true}})
+	default:
+		return s.enqueue(s.handler.dispatchPrepared(s.ctx, req))
+	}
+}
+
+func (s *webSocketSession) enqueue(msg any) bool {
+	select {
+	case <-s.ctx.Done():
+		return false
+	case s.out <- msg:
+		return true
+	default:
+		s.cancel()
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+		return false
+	}
+}
+
+func (s *webSocketSession) notify(subscriptionID string, result any) bool {
+	return s.enqueue(rpcSubscriptionNotification{
+		JSONRPC: jsonRPCVersion,
+		Method:  "rpc.subscription",
+		Params: rpcSubscriptionParams{
+			Subscription: subscriptionID,
+			Result:       result,
+		},
+	})
+}
+
+func (s *webSocketSession) registerSubscription(subscriptionID string, cancel context.CancelFunc) {
+	if s == nil || cancel == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.subs[subscriptionID] = cancel
+}
+
+func (s *webSocketSession) cancelSubscription(subscriptionID string) {
+	subscriptionID = strings.TrimSpace(subscriptionID)
+	s.mu.Lock()
+	cancel := s.subs[subscriptionID]
+	delete(s.subs, subscriptionID)
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *webSocketSession) cancelAllSubscriptions() {
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.subs))
+	for subscriptionID, cancel := range s.subs {
+		delete(s.subs, subscriptionID)
+		cancels = append(cancels, cancel)
+	}
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		if cancel != nil {
+			cancel()
+		}
+	}
 }
 
 func (h *Handler) parseRequest(raw []byte, fallbackCorrelationID string) (Request, any, string, *rpcError) {
