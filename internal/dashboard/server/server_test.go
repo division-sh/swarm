@@ -23,11 +23,11 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/toolcapabilities"
 	"swarm/internal/runtime/flowmodel"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
-	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimeruncontrol "swarm/internal/runtime/runcontrol"
 	"swarm/internal/runtime/semanticview"
 	runtimesessions "swarm/internal/runtime/sessions"
@@ -97,17 +97,73 @@ func (s stubMailbox) GetMailboxItem(_ context.Context, id string) (runtimetools.
 }
 
 type stubInstances struct {
-	rows []runtimepipeline.WorkflowInstance
-	byID map[string]runtimepipeline.WorkflowInstance
+	rows []store.OperatorEntitySummary
+	byID map[string]store.OperatorEntityFull
 }
 
-func (s stubInstances) List(context.Context) ([]runtimepipeline.WorkflowInstance, error) {
-	return s.rows, nil
+func (s stubInstances) ListOperatorEntities(_ context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error) {
+	rows := make([]store.OperatorEntitySummary, 0, len(s.rows))
+	for _, row := range s.rows {
+		if opts.RunID != "" && row.RunID != opts.RunID {
+			continue
+		}
+		if opts.EntityID != "" && row.EntityID != opts.EntityID {
+			continue
+		}
+		if opts.Flow != "" && row.FlowInstance != opts.Flow && !strings.HasPrefix(row.FlowInstance, opts.Flow+"/") {
+			continue
+		}
+		if opts.Type != "" && row.EntityType != opts.Type {
+			continue
+		}
+		if opts.CurrentState != "" && row.CurrentState != opts.CurrentState {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	if opts.Limit > 0 && len(rows) > opts.Limit {
+		rows = rows[:opts.Limit]
+	}
+	return store.OperatorEntityListResult{Entities: rows}, nil
 }
 
-func (s stubInstances) Load(_ context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error) {
-	item, ok := s.byID[instanceID]
-	return item, ok, nil
+func (s stubInstances) LoadOperatorEntity(_ context.Context, entityID, runID string) (store.OperatorEntityFull, error) {
+	item, ok := s.byID[entityID]
+	if !ok {
+		return store.OperatorEntityFull{}, store.ErrEntityNotFound
+	}
+	if runID != "" && item.Entity.RunID != runID {
+		return store.OperatorEntityFull{}, store.ErrEntityNotFound
+	}
+	return item, nil
+}
+
+func (s stubInstances) AggregateOperatorEntities(_ context.Context, opts store.OperatorEntityAggregateOptions) (store.OperatorEntityAggregateResult, error) {
+	counts := map[string]int{}
+	for _, row := range s.rows {
+		if opts.RunID != "" && row.RunID != opts.RunID {
+			continue
+		}
+		if opts.Type != "" && row.EntityType != opts.Type {
+			continue
+		}
+		key := row.CurrentState
+		switch opts.GroupBy {
+		case "flow", "flow_instance":
+			key = row.FlowInstance
+		case "type", "entity_type":
+			key = row.EntityType
+		case "slug":
+			key = row.Slug
+		case "name":
+			key = row.Name
+		}
+		if strings.TrimSpace(key) == "" {
+			key = "unknown"
+		}
+		counts[key]++
+	}
+	return store.OperatorEntityAggregateResult{Counts: counts}, nil
 }
 
 type stubConversations struct {
@@ -619,7 +675,7 @@ func (s *stubProjectControl) CurrentProject() builderpkg.ProjectStatus {
 
 func newBuilderHandlerForTest(
 	health HealthChecker,
-	instances InstanceReader,
+	entities EntityReader,
 	version string,
 	runtimeCtl RuntimeController,
 	rt *runtimepkg.Runtime,
@@ -638,7 +694,7 @@ func newBuilderHandlerForTest(
 	}
 	return builderpkg.NewHandler(builderpkg.Options{
 		Health:         builderpkg.HealthChecker(health),
-		Instances:      instances,
+		Entities:       entities,
 		Runtime:        runtimeCtl,
 		AuthToken:      testBuilderAuthToken,
 		Version:        version,
@@ -735,13 +791,13 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 				Count: 1,
 			}},
 		},
-		Instances: stubInstances{
-			rows: []runtimepipeline.WorkflowInstance{
-				{InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
-				{InstanceID: "wf-2", WorkflowName: "order", CurrentState: "done", UpdatedAt: now.Add(-time.Minute)},
+		Entities: stubInstances{
+			rows: []store.OperatorEntitySummary{
+				{EntityID: "wf-1", FlowInstance: "order", CurrentState: "active", UpdatedAt: now},
+				{EntityID: "wf-2", FlowInstance: "order", CurrentState: "done", UpdatedAt: now.Add(-time.Minute)},
 			},
-			byID: map[string]runtimepipeline.WorkflowInstance{
-				"wf-1": {InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
+			byID: map[string]store.OperatorEntityFull{
+				"wf-1": {Entity: store.OperatorEntitySummary{EntityID: "wf-1", FlowInstance: "order", CurrentState: "active", UpdatedAt: now}},
 			},
 		},
 		Runtime: &stubRuntimeControl{},
@@ -2794,23 +2850,22 @@ func TestSQLConversationReader_GetFailsClosedWhenCapabilityOwnerReportsUnavailab
 
 func TestHandler_BuilderRPC(t *testing.T) {
 	projectCtl := &stubProjectControl{}
+	entityID := runtimeflowidentity.EntityID("wf-1")
 	instances := stubInstances{
-		rows: []runtimepipeline.WorkflowInstance{
-			{InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active"},
+		rows: []store.OperatorEntitySummary{
+			{EntityID: entityID, FlowInstance: "order", CurrentState: "active"},
 		},
-		byID: map[string]runtimepipeline.WorkflowInstance{
-			"wf-1": {
-				InstanceID:   "wf-1",
-				WorkflowName: "order",
-				CurrentState: "active",
-				Metadata: map[string]any{
-					"score": 3.7,
-					"gates": map[string]any{"review_gate": true},
-					"slug":  "order-1",
+		byID: map[string]store.OperatorEntityFull{
+			entityID: {
+				Entity: store.OperatorEntitySummary{
+					EntityID:     entityID,
+					FlowInstance: "order",
+					CurrentState: "active",
+					Slug:         "order-1",
 				},
-				StateBuckets: map[string]any{
-					"accumulator": map[string]any{"count": 2},
-				},
+				Fields:      map[string]any{"score": 3.7},
+				Gates:       map[string]bool{"review_gate": true},
+				Accumulated: map[string]any{"accumulator": map[string]any{"count": 2}},
 			},
 		},
 	}
@@ -2819,7 +2874,8 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	}
 	handler := NewHandler(Options{
 		Health:    health,
-		Instances: instances,
+		Entities:  instances,
+		AuthToken: testOperatorAuthToken,
 		Version:   "swarm-test",
 		Builder:   newBuilderHandlerForTest(health, instances, "swarm-test", nil, nil, projectCtl),
 	})
@@ -2840,6 +2896,36 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	}
 	if result["status"] != "ok" || result["version"] != "swarm-test" {
 		t.Fatalf("unexpected ping result: %#v", result)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/instances?workflow_name=order&current_state=active&limit=1", nil)
+	setOperatorAuth(req)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dashboard instances status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var dashboardInstances map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &dashboardInstances); err != nil {
+		t.Fatalf("unmarshal dashboard instances: %v", err)
+	}
+	if rows, ok := dashboardInstances["instances"].([]any); !ok || len(rows) != 1 {
+		t.Fatalf("unexpected dashboard instances payload: %#v", dashboardInstances)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/instances/wf-1", nil)
+	setOperatorAuth(req)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dashboard entity detail status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var dashboardEntity store.OperatorEntityFull
+	if err := json.Unmarshal(rec.Body.Bytes(), &dashboardEntity); err != nil {
+		t.Fatalf("unmarshal dashboard entity detail: %v", err)
+	}
+	if dashboardEntity.Entity.EntityID != entityID || dashboardEntity.Fields["score"] != float64(3.7) || !dashboardEntity.Gates["review_gate"] {
+		t.Fatalf("unexpected dashboard entity detail: %#v", dashboardEntity)
 	}
 
 	rec = httptest.NewRecorder()

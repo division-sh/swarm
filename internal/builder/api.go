@@ -8,16 +8,15 @@ import (
 
 	runtimepkg "swarm/internal/runtime"
 	runtimecredentials "swarm/internal/runtime/credentials"
-	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 )
 
 type HealthChecker func(ctx context.Context) (map[string]any, error)
 
-type InstanceReader interface {
-	List(ctx context.Context) ([]runtimepipeline.WorkflowInstance, error)
-	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
+type EntityReader interface {
+	ListOperatorEntities(ctx context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error)
+	LoadOperatorEntity(ctx context.Context, entityID, runID string) (store.OperatorEntityFull, error)
 }
 
 type RuntimeController interface {
@@ -50,7 +49,7 @@ type ProjectController interface {
 
 type Options struct {
 	Health         HealthChecker
-	Instances      InstanceReader
+	Entities       EntityReader
 	Runtime        RuntimeController
 	Credentials    runtimecredentials.Store
 	AuthToken      string
@@ -151,7 +150,7 @@ type EngineHealth struct {
 func NewHandler(opts Options) http.Handler {
 	h := &handler{
 		health:         opts.Health,
-		instances:      opts.Instances,
+		entities:       opts.Entities,
 		runtime:        opts.Runtime,
 		credentials:    opts.Credentials,
 		authToken:      strings.TrimSpace(opts.AuthToken),

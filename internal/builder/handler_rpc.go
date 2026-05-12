@@ -3,11 +3,14 @@ package builder
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimerunstart "swarm/internal/runtime/runstart"
+	"swarm/internal/store"
 )
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -197,33 +200,36 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 		}
 		return map[string]any{"run_id": runID, "status": "running"}, nil
 	case "state.list_instances", "state.get_instances":
-		if h.instances == nil {
-			return nil, methodUnavailable("instance reader is not configured")
+		if h.entities == nil {
+			return nil, methodUnavailable("entity reader is not configured")
 		}
-		rows, err := h.instances.List(ctx)
+		result, err := h.entities.ListOperatorEntities(ctx, store.OperatorEntityListOptions{})
 		if err != nil {
 			return nil, internalError(err)
 		}
-		return map[string]any{"instances": rows}, nil
+		return map[string]any{"instances": result.Entities}, nil
 	case "state.get_entity":
-		if h.instances == nil {
-			return nil, methodUnavailable("instance reader is not configured")
+		if h.entities == nil {
+			return nil, methodUnavailable("entity reader is not configured")
 		}
 		instanceID := strings.TrimSpace(asString(params["instance_id"]))
 		if instanceID == "" {
 			return nil, &RPCError{Code: -32602, Message: "instance_id is required"}
 		}
-		instance, ok, err := h.instances.Load(ctx, instanceID)
+		entity, err := h.entities.LoadOperatorEntity(ctx, runtimeflowidentity.EntityID(instanceID), strings.TrimSpace(asString(params["run_id"])))
+		if errors.Is(err, store.ErrEntityNotFound) {
+			return nil, &RPCError{Code: -32004, Message: "instance not found", Data: map[string]any{"instance_id": instanceID}}
+		}
+		if errors.Is(err, store.ErrAmbiguousEntityRunID) || errors.Is(err, store.ErrInvalidEntityReadParam) {
+			return nil, &RPCError{Code: -32602, Message: err.Error()}
+		}
 		if err != nil {
 			return nil, internalError(err)
 		}
-		if !ok {
-			return nil, &RPCError{Code: -32004, Message: "instance not found", Data: map[string]any{"instance_id": instanceID}}
-		}
 		return map[string]any{
-			"entity":      entityPayload(instance),
-			"gates":       entityGates(instance),
-			"accumulated": entityAccumulated(instance),
+			"entity":      legacyBuilderEntityPayload(entity),
+			"gates":       entity.Gates,
+			"accumulated": entity.Accumulated,
 		}, nil
 	case "credentials.list":
 		if h.credentials == nil {

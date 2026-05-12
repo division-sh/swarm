@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimemanager "swarm/internal/runtime/manager"
-	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
 )
@@ -28,9 +28,10 @@ type MailboxReader interface {
 	GetMailboxItem(ctx context.Context, id string) (runtimetools.MailboxItem, error)
 }
 
-type InstanceReader interface {
-	List(ctx context.Context) ([]runtimepipeline.WorkflowInstance, error)
-	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
+type EntityReader interface {
+	ListOperatorEntities(ctx context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error)
+	LoadOperatorEntity(ctx context.Context, entityID, runID string) (store.OperatorEntityFull, error)
+	AggregateOperatorEntities(ctx context.Context, opts store.OperatorEntityAggregateOptions) (store.OperatorEntityAggregateResult, error)
 }
 
 type ConversationSummary struct {
@@ -194,7 +195,7 @@ type Options struct {
 	Agents        AgentReader
 	AgentControl  AgentController
 	Mailbox       MailboxReader
-	Instances     InstanceReader
+	Entities      EntityReader
 	Conversations ConversationReader
 	Observability ObservabilityReader
 	RunTrace      RunTraceReader
@@ -209,7 +210,7 @@ type Handler struct {
 	agents        AgentReader
 	agentControl  AgentController
 	mailbox       MailboxReader
-	instances     InstanceReader
+	entities      EntityReader
 	conversations ConversationReader
 	observability ObservabilityReader
 	runTrace      RunTraceReader
@@ -226,7 +227,7 @@ func NewHandler(opts Options) http.Handler {
 		agents:        opts.Agents,
 		agentControl:  opts.AgentControl,
 		mailbox:       opts.Mailbox,
-		instances:     opts.Instances,
+		entities:      opts.Entities,
 		conversations: opts.Conversations,
 		observability: opts.Observability,
 		runTrace:      opts.RunTrace,
@@ -848,22 +849,28 @@ func (h *Handler) handleMailboxDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleInstances(w http.ResponseWriter, r *http.Request) {
-	if h.instances == nil {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("instance reader is not configured"))
+	if h.entities == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("entity reader is not configured"))
 		return
 	}
-	rows, err := h.instances.List(r.Context())
+	opts, err := dashboardEntityListOptions(r)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err)
+		writeJSONError(w, http.StatusBadRequest, err)
 		return
 	}
-	rows = filterInstances(rows, r)
-	writeJSON(w, http.StatusOK, map[string]any{"instances": rows})
+	result, err := h.entities.ListOperatorEntities(r.Context(), opts)
+	if handleDashboardEntityReadError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"instances":   result.Entities,
+		"next_cursor": result.NextCursor,
+	})
 }
 
 func (h *Handler) handleInstanceDetail(w http.ResponseWriter, r *http.Request) {
-	if h.instances == nil {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("instance reader is not configured"))
+	if h.entities == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("entity reader is not configured"))
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
@@ -871,40 +878,33 @@ func (h *Handler) handleInstanceDetail(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, errors.New("instance id is required"))
 		return
 	}
-	row, ok, err := h.instances.Load(r.Context(), id)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if !ok {
-		writeJSONError(w, http.StatusNotFound, errors.New("instance not found"))
+	row, err := h.entities.LoadOperatorEntity(r.Context(), runtimeflowidentity.EntityID(id), strings.TrimSpace(r.URL.Query().Get("run_id")))
+	if handleDashboardEntityReadError(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, row)
 }
 
 func (h *Handler) handleInstanceAggregate(w http.ResponseWriter, r *http.Request) {
-	if h.instances == nil {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("instance reader is not configured"))
+	if h.entities == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("entity reader is not configured"))
 		return
 	}
 	groupBy := strings.TrimSpace(r.URL.Query().Get("group_by"))
 	if groupBy == "" {
 		groupBy = "current_state"
 	}
-	rows, err := h.instances.List(r.Context())
+	opts, err := dashboardEntityAggregateOptions(r, groupBy)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err)
+		writeJSONError(w, http.StatusBadRequest, err)
 		return
 	}
-	rows = filterInstances(rows, r)
-	counts := map[string]int{}
-	for _, row := range rows {
-		key := aggregateKey(row, groupBy)
-		counts[key]++
+	result, err := h.entities.AggregateOperatorEntities(r.Context(), opts)
+	if handleDashboardEntityReadError(w, err) {
+		return
 	}
-	out := make([]instanceAggregateGroup, 0, len(counts))
-	for key, count := range counts {
+	out := make([]instanceAggregateGroup, 0, len(result.Counts))
+	for key, count := range result.Counts {
 		out = append(out, instanceAggregateGroup{Key: key, Count: count})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -953,56 +953,58 @@ func (h *Handler) handleRuntimeAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func filterInstances(rows []runtimepipeline.WorkflowInstance, r *http.Request) []runtimepipeline.WorkflowInstance {
-	workflowName := strings.TrimSpace(r.URL.Query().Get("workflow_name"))
-	currentState := strings.TrimSpace(r.URL.Query().Get("current_state"))
-	entityID := strings.TrimSpace(r.URL.Query().Get("entity_id"))
-	limit := intQuery(r, "limit", 0)
-	out := make([]runtimepipeline.WorkflowInstance, 0, len(rows))
-	for _, row := range rows {
-		if workflowName != "" && row.WorkflowName != workflowName {
-			continue
-		}
-		if currentState != "" && row.CurrentState != currentState {
-			continue
-		}
-		if entityID != "" && row.InstanceID != entityID {
-			continue
-		}
-		out = append(out, row)
+func dashboardEntityListOptions(r *http.Request) (store.OperatorEntityListOptions, error) {
+	opts := store.OperatorEntityListOptions{
+		RunID:        strings.TrimSpace(r.URL.Query().Get("run_id")),
+		Flow:         strings.TrimSpace(r.URL.Query().Get("flow")),
+		Type:         strings.TrimSpace(r.URL.Query().Get("type")),
+		CurrentState: strings.TrimSpace(r.URL.Query().Get("current_state")),
+		Cursor:       strings.TrimSpace(r.URL.Query().Get("cursor")),
+		Limit:        intQuery(r, "limit", 0),
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
-			return out[i].InstanceID < out[j].InstanceID
-		}
-		return out[i].UpdatedAt.After(out[j].UpdatedAt)
-	})
-	if limit > 0 && len(out) > limit {
-		return out[:limit]
+	if opts.Flow == "" {
+		opts.Flow = strings.TrimSpace(r.URL.Query().Get("workflow_name"))
 	}
-	return out
+	if entityID := strings.TrimSpace(r.URL.Query().Get("entity_id")); entityID != "" {
+		opts.EntityID = runtimeflowidentity.EntityID(entityID)
+	}
+	return opts, nil
 }
 
-func aggregateKey(row runtimepipeline.WorkflowInstance, groupBy string) string {
-	switch groupBy {
+func dashboardEntityAggregateOptions(r *http.Request, groupBy string) (store.OperatorEntityAggregateOptions, error) {
+	return store.OperatorEntityAggregateOptions{
+		RunID:   strings.TrimSpace(r.URL.Query().Get("run_id")),
+		GroupBy: dashboardEntityAggregateGroupBy(groupBy),
+		Type:    strings.TrimSpace(r.URL.Query().Get("type")),
+	}, nil
+}
+
+func dashboardEntityAggregateGroupBy(groupBy string) string {
+	switch strings.TrimSpace(groupBy) {
 	case "workflow_name":
-		if strings.TrimSpace(row.WorkflowName) == "" {
-			return "unknown"
-		}
-		return row.WorkflowName
+		return "flow_instance"
 	case "workflow_version":
-		if strings.TrimSpace(row.WorkflowVersion) == "" {
-			return "unknown"
-		}
-		return row.WorkflowVersion
-	case "current_state":
-		fallthrough
+		return "fields.workflow_version"
 	default:
-		if strings.TrimSpace(row.CurrentState) == "" {
-			return "unknown"
-		}
-		return row.CurrentState
+		return strings.TrimSpace(groupBy)
 	}
+}
+
+func handleDashboardEntityReadError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, store.ErrEntityNotFound):
+		writeJSONError(w, http.StatusNotFound, errors.New("entity not found"))
+	case errors.Is(err, store.ErrAmbiguousEntityRunID):
+		writeJSONError(w, http.StatusBadRequest, errors.New("run_id is required when entity_id exists in multiple runs"))
+	case errors.Is(err, store.ErrInvalidEntityCursor), errors.Is(err, store.ErrInvalidEntityReadParam):
+		writeJSONError(w, http.StatusBadRequest, err)
+	default:
+		writeJSONError(w, http.StatusInternalServerError, err)
+	}
+	return true
 }
 
 func intQuery(r *http.Request, key string, fallback int) int {

@@ -11,7 +11,7 @@ import (
 
 type handler struct {
 	health         HealthChecker
-	instances      InstanceReader
+	entities       EntityReader
 	runtime        RuntimeController
 	credentials    runtimecredentials.Store
 	authToken      string

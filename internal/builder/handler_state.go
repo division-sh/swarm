@@ -6,8 +6,8 @@ import (
 	"time"
 
 	runtimebootverify "swarm/internal/runtime/bootverify"
-	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/store"
 )
 
 func (h *handler) builderVersion() string {
@@ -87,43 +87,25 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 	return result
 }
 
-func entityPayload(instance runtimepipeline.WorkflowInstance) map[string]any {
-	entity := map[string]any{"state": strings.TrimSpace(instance.CurrentState)}
-	for key, value := range instance.Metadata {
+func legacyBuilderEntityPayload(full store.OperatorEntityFull) map[string]any {
+	entity := map[string]any{"state": strings.TrimSpace(full.Entity.CurrentState)}
+	for key, value := range full.Fields {
 		key = strings.TrimSpace(key)
 		if key == "" || key == "gates" {
 			continue
 		}
-		switch key {
-		case "slug", "name", "entity_type", "storage_ref", "instance_id", "flow_path", "instance_kind", "template_version", "last_source_event", "status", "transition_history":
-			continue
-		}
 		entity[key] = value
 	}
+	if full.Entity.Slug != "" {
+		entity["slug"] = full.Entity.Slug
+	}
+	if full.Entity.Name != "" {
+		entity["name"] = full.Entity.Name
+	}
+	if full.Entity.EntityType != "" {
+		entity["entity_type"] = full.Entity.EntityType
+	}
 	return entity
-}
-
-func entityGates(instance runtimepipeline.WorkflowInstance) map[string]any {
-	gates, _ := instance.Metadata["gates"].(map[string]any)
-	if len(gates) == 0 {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(gates))
-	for key, value := range gates {
-		out[key] = value
-	}
-	return out
-}
-
-func entityAccumulated(instance runtimepipeline.WorkflowInstance) map[string]any {
-	if len(instance.StateBuckets) == 0 {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(instance.StateBuckets))
-	for key, value := range instance.StateBuckets {
-		out[key] = value
-	}
-	return out
 }
 
 func (h *handler) healthSnapshot(ctx context.Context) EngineHealth {
