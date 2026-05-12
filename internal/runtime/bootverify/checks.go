@@ -2294,13 +2294,34 @@ func validateArtifactRepoActionSpec(nodeID, eventType string, action runtimecont
 		findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo_commit provider %s is unsupported", provider)))
 	}
 	for label, expr := range map[string]runtimecontracts.ExpressionValue{
-		"repo_id":                   spec.RepoID,
-		"request_id":                spec.RequestID,
-		"vertical_id":               spec.VerticalID,
-		"source_validation_case_id": spec.SourceValidationCaseID,
+		"repo_id":    spec.RepoID,
+		"request_id": spec.RequestID,
 	} {
 		if expr.IsZero() {
 			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo_commit is missing artifact_repo.%s", label)))
+		}
+	}
+	for label, expr := range map[string]runtimecontracts.ExpressionValue{
+		"namespace":     spec.Namespace,
+		"partition_key": spec.PartitionKey,
+	} {
+		if value, ok := artifactRepoLiteralString(expr); ok {
+			if err := validateArtifactRepoSegment(value); err != nil {
+				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s %q is invalid: %v", label, value, err)))
+			}
+		}
+	}
+	if value, ok := artifactRepoLiteralString(spec.DisplaySlug); ok {
+		if err := validateArtifactRepoDisplaySlug(value); err != nil {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.display_slug %q is invalid: %v", value, err)))
+		}
+	}
+	for key, expr := range spec.Provenance {
+		if err := validateArtifactRepoProvenanceKey(key); err != nil {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.provenance key %q is invalid: %v", key, err)))
+		}
+		if expr.IsZero() {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.provenance.%s is missing value", strings.TrimSpace(key))))
 		}
 	}
 	if len(spec.AllowedPaths) == 0 {
@@ -2410,6 +2431,61 @@ func artifactRepoLiteralString(expr runtimecontracts.ExpressionValue) (string, b
 	}
 	value := strings.TrimSpace(fmt.Sprint(expr.Literal))
 	return value, value != ""
+}
+
+func validateArtifactRepoSegment(raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return fmt.Errorf("value is required")
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return fmt.Errorf("only letters, digits, dash, underscore, and dot are allowed")
+	}
+	if value == "." || value == ".." || strings.Contains(value, "..") {
+		return fmt.Errorf("path traversal markers are not allowed")
+	}
+	return nil
+}
+
+func validateArtifactRepoProvenanceKey(raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return fmt.Errorf("key is required")
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return fmt.Errorf("only letters, digits, dash, underscore, and dot are allowed")
+	}
+	return nil
+}
+
+func validateArtifactRepoDisplaySlug(raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil
+	}
+	if strings.Contains(value, "\x00") || strings.ContainsAny(value, `/\`) {
+		return fmt.Errorf("path separators are not allowed")
+	}
+	if value == "." || value == ".." || strings.Contains(value, "..") {
+		return fmt.Errorf("path traversal markers are not allowed")
+	}
+	hasAlphaNumeric := false
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			hasAlphaNumeric = true
+			break
+		}
+	}
+	if !hasAlphaNumeric {
+		return fmt.Errorf("must contain at least one letter or digit")
+	}
+	return nil
 }
 
 func validateArtifactRepoDeclaredPath(raw string) (string, error) {

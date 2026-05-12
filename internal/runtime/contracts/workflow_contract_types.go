@@ -332,20 +332,20 @@ type MailboxWriteSpec struct {
 }
 
 type ArtifactRepoSpec struct {
-	Provider               string                     `yaml:"provider"`
-	RepoID                 ExpressionValue            `yaml:"repo_id"`
-	RunID                  ExpressionValue            `yaml:"run_id"`
-	VerticalID             ExpressionValue            `yaml:"vertical_id"`
-	BusinessSlug           ExpressionValue            `yaml:"business_slug"`
-	SourceValidationCaseID ExpressionValue            `yaml:"source_validation_case_id"`
-	RequestID              ExpressionValue            `yaml:"request_id"`
-	Author                 ExpressionValue            `yaml:"author"`
-	AllowedPaths           []string                   `yaml:"allowed_paths"`
-	Files                  []ArtifactRepoFileSpec     `yaml:"files"`
-	Output                 ArtifactRepoOutputSpec     `yaml:"output"`
-	Limits                 ArtifactRepoLimitsSpec     `yaml:"limits"`
-	FailureEvent           string                     `yaml:"failure_event"`
-	FailurePayload         map[string]ExpressionValue `yaml:"failure_payload"`
+	Provider       string                     `yaml:"provider"`
+	RepoID         ExpressionValue            `yaml:"repo_id"`
+	Namespace      ExpressionValue            `yaml:"namespace"`
+	PartitionKey   ExpressionValue            `yaml:"partition_key"`
+	DisplaySlug    ExpressionValue            `yaml:"display_slug"`
+	RequestID      ExpressionValue            `yaml:"request_id"`
+	Author         ExpressionValue            `yaml:"author"`
+	Provenance     map[string]ExpressionValue `yaml:"provenance"`
+	AllowedPaths   []string                   `yaml:"allowed_paths"`
+	Files          []ArtifactRepoFileSpec     `yaml:"files"`
+	Output         ArtifactRepoOutputSpec     `yaml:"output"`
+	Limits         ArtifactRepoLimitsSpec     `yaml:"limits"`
+	FailureEvent   string                     `yaml:"failure_event"`
+	FailurePayload map[string]ExpressionValue `yaml:"failure_payload"`
 }
 
 type ArtifactRepoFileSpec struct {

@@ -768,7 +768,7 @@ func TestRun_ReportsArtifactRepoCommitMissingSpec(t *testing.T) {
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"artifact-node": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"spec_file.commit_requested": {
+					"artifact.commit_requested": {
 						Action: runtimecontracts.ActionSpec{ID: "artifact_repo_commit"},
 					},
 				},
@@ -788,14 +788,18 @@ func TestRun_ReportsArtifactRepoCommitInvalidShape(t *testing.T) {
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"artifact-node": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"spec_file.commit_requested": {
+					"artifact.commit_requested": {
 						Action: runtimecontracts.ActionSpec{
 							ID: "artifact_repo_commit",
 							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
-								Provider:     "s3",
-								RepoID:       runtimecontracts.RefExpression("entity.spec_repo_id"),
-								RequestID:    runtimecontracts.RefExpression("payload.request_id"),
-								VerticalID:   runtimecontracts.RefExpression("entity.vertical_id"),
+								Provider:    "s3",
+								RepoID:      runtimecontracts.RefExpression("entity.repo_id"),
+								RequestID:   runtimecontracts.RefExpression("payload.request_id"),
+								Namespace:   runtimecontracts.LiteralExpression("../escape"),
+								DisplaySlug: runtimecontracts.LiteralExpression("../escape"),
+								Provenance: map[string]runtimecontracts.ExpressionValue{
+									"bad/key": {},
+								},
 								AllowedPaths: []string{"../escape.yaml"},
 								Files: []runtimecontracts.ArtifactRepoFileSpec{{
 									Path:        runtimecontracts.LiteralExpression("specs/mvp.yaml"),
@@ -819,8 +823,17 @@ func TestRun_ReportsArtifactRepoCommitInvalidShape(t *testing.T) {
 	if !reportContains(report.Errors(), "handler_field_compliance", "provider s3 is unsupported") {
 		t.Fatalf("expected unsupported provider error, got %#v", report.Errors())
 	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "missing artifact_repo.source_validation_case_id") {
-		t.Fatalf("expected missing source_validation_case_id error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo.namespace") {
+		t.Fatalf("expected invalid namespace error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo.display_slug") {
+		t.Fatalf("expected invalid display_slug error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo.provenance key") {
+		t.Fatalf("expected invalid provenance key error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo.provenance.bad/key is missing value") {
+		t.Fatalf("expected missing provenance value error, got %#v", report.Errors())
 	}
 	if !reportContains(report.Errors(), "handler_field_compliance", "path traversal is not allowed") {
 		t.Fatalf("expected traversal allowlist error, got %#v", report.Errors())
@@ -838,16 +851,15 @@ func TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema(t *testing.T) {
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"artifact-node": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"spec_file.commit_requested": {
+					"artifact.commit_requested": {
 						Action: runtimecontracts.ActionSpec{
 							ID: "artifact_repo_commit",
 							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
-								Provider:               "local_git",
-								RepoID:                 runtimecontracts.RefExpression("entity.spec_repo_id"),
-								RequestID:              runtimecontracts.RefExpression("payload.request_id"),
-								VerticalID:             runtimecontracts.RefExpression("entity.vertical_id"),
-								SourceValidationCaseID: runtimecontracts.RefExpression("entity.source_validation_case_id"),
-								AllowedPaths:           []string{"specs/mvp.yaml"},
+								Provider:     "local_git",
+								RepoID:       runtimecontracts.RefExpression("entity.repo_id"),
+								Namespace:    runtimecontracts.LiteralExpression("tenant.alpha"),
+								RequestID:    runtimecontracts.RefExpression("payload.request_id"),
+								AllowedPaths: []string{"specs/mvp.yaml"},
 								Files: []runtimecontracts.ArtifactRepoFileSpec{{
 									Path:        runtimecontracts.LiteralExpression("specs/mvp.yaml"),
 									Content:     runtimecontracts.RefExpression("payload.mvp_yaml"),
@@ -882,7 +894,7 @@ func TestRun_ReportsArtifactRepoDeclarationOnNonArtifactAction(t *testing.T) {
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"artifact-node": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"spec_file.commit_requested": {
+					"artifact.commit_requested": {
 						Action: runtimecontracts.ActionSpec{
 							ID: "record_evidence",
 							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
