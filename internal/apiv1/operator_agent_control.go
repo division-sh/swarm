@@ -80,7 +80,7 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 			KillPrevious: killPrevious,
 		})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, agentControlError(agentID, err)
+			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
 		}
 		response, err := json.Marshal(agentDirectiveResult{OK: true, Response: result.Response})
 		if err != nil {
@@ -89,7 +89,7 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 		return store.APIIdempotencyCompletion{ResourceID: result.AgentID, Response: response}, nil
 	})
 	if err != nil {
-		return nil, agentControlError(agentID, err)
+		return nil, agentControlError(req.Method, agentID, err)
 	}
 	var stored agentDirectiveResult
 	if err := json.Unmarshal(completion.Response, &stored); err != nil {
@@ -121,7 +121,7 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
 		result, err := opts.AgentControl.Restart(ctx, runtimeagentcontrol.RestartRequest{AgentID: agentID})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, agentControlError(agentID, err)
+			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
 		}
 		response, err := json.Marshal(okResult{OK: true})
 		if err != nil {
@@ -130,7 +130,7 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 		return store.APIIdempotencyCompletion{ResourceID: result.AgentID, Response: response}, nil
 	})
 	if err != nil {
-		return nil, agentControlError(agentID, err)
+		return nil, agentControlError(req.Method, agentID, err)
 	}
 	var stored okResult
 	if err := json.Unmarshal(completion.Response, &stored); err != nil {
@@ -162,7 +162,7 @@ func executeAgentReplayBacklog(ctx context.Context, req Request, opts OperatorRe
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
 		result, err := opts.AgentControl.ReplayBacklog(ctx, runtimeagentcontrol.ReplayBacklogRequest{AgentID: agentID})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, agentControlError(agentID, err)
+			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
 		}
 		response, err := json.Marshal(agentReplayBacklogResult{OK: true, ReplayedCount: result.ReplayedCount})
 		if err != nil {
@@ -171,7 +171,7 @@ func executeAgentReplayBacklog(ctx context.Context, req Request, opts OperatorRe
 		return store.APIIdempotencyCompletion{ResourceID: result.AgentID, Response: response}, nil
 	})
 	if err != nil {
-		return nil, agentControlError(agentID, err)
+		return nil, agentControlError(req.Method, agentID, err)
 	}
 	var stored agentReplayBacklogResult
 	if err := json.Unmarshal(completion.Response, &stored); err != nil {
@@ -195,7 +195,7 @@ func optionalBoolParam(params map[string]any, name string) (bool, error) {
 	return value, nil
 }
 
-func agentControlError(agentID string, err error) error {
+func agentControlError(method, agentID string, err error) error {
 	var conflict *store.APIIdempotencyConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
@@ -215,7 +215,7 @@ func agentControlError(agentID string, err error) error {
 		switch {
 		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrAgentNotFound):
 			return NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
-		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrAgentNotRunning):
+		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrAgentNotRunning) && method == "agent.send_directive":
 			return NewApplicationError(AgentNotRunningCode, false, map[string]any{
 				"agent_id":       agentID,
 				"current_status": stateErr.CurrentStatus,
@@ -225,7 +225,7 @@ func agentControlError(agentID string, err error) error {
 	switch {
 	case errors.Is(err, runtimeagentcontrol.ErrAgentNotFound):
 		return NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
-	case errors.Is(err, runtimeagentcontrol.ErrAgentNotRunning):
+	case errors.Is(err, runtimeagentcontrol.ErrAgentNotRunning) && method == "agent.send_directive":
 		return NewApplicationError(AgentNotRunningCode, false, map[string]any{
 			"agent_id":       agentID,
 			"current_status": runtimeagentcontrol.StatusTerminated,
