@@ -8,22 +8,23 @@ import (
 	"swarm/internal/store"
 )
 
-func TestProjectCanonicalRunDebugReplay_UsesCanonicalTraceRows(t *testing.T) {
+func TestProjectCanonicalRunDebugReplay_UsesCanonicalEventOwnerPayload(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	snapshot := runtimebus.RunLifecycleSnapshot{
 		RunID:     "run-123",
 		StartedAt: now,
 	}
-	traceRows := []store.RunDebugTraceRow{{
-		EventID:         "evt-1",
-		EventName:       "workflow.started",
-		EntityID:        "entity-1",
-		EventCreatedAt:  now,
-		EventSource:     "builder",
-		EventSourceType: "agent",
+	events := []store.OperatorEventFull{{
+		EventID:   "evt-1",
+		EventName: "workflow.started",
+		RunID:     "run-123",
+		EntityID:  "entity-1",
+		CreatedAt: now,
+		Source:    "builder",
+		Payload:   map[string]any{"topic": "sample"},
 	}}
 
-	replay, _ := projectCanonicalRunDebugReplay(snapshot, traceRows, nil)
+	replay, _ := projectCanonicalRunDebugReplay(snapshot, events, nil)
 	if len(replay) != 2 {
 		t.Fatalf("replay len = %d, want 2", len(replay))
 	}
@@ -42,6 +43,10 @@ func TestProjectCanonicalRunDebugReplay_UsesCanonicalTraceRows(t *testing.T) {
 	}
 	if payload["source"] != "builder" {
 		t.Fatalf("payload.source = %#v", payload["source"])
+	}
+	rawPayload, _ := payload["payload"].(map[string]any)
+	if rawPayload["topic"] != "sample" {
+		t.Fatalf("payload.payload = %#v", rawPayload)
 	}
 }
 

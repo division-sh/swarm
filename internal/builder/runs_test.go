@@ -2,6 +2,9 @@ package builder
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +16,7 @@ import (
 type snapshotRunStore struct {
 	runtimebus.InMemoryEventStore
 	snapshot    runtimebus.RunLifecycleSnapshot
-	traceRows   []store.RunDebugTraceRow
+	events      []store.OperatorEventFull
 	runtimeLogs []store.OperatorRuntimeLogEntry
 }
 
@@ -30,8 +33,33 @@ func (s *snapshotRunStore) LoadRunLifecycleSnapshot(context.Context, string) (ru
 	return s.snapshot, nil
 }
 
-func (s *snapshotRunStore) LoadRunDebugTracePage(context.Context, string, store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, string, error) {
-	return append([]store.RunDebugTraceRow(nil), s.traceRows...), "", nil
+func (s *snapshotRunStore) ListOperatorEvents(_ context.Context, opts store.OperatorEventListOptions) (store.OperatorEventListResult, error) {
+	out := []store.OperatorEventFull{}
+	for _, event := range s.events {
+		if opts.Filter.RunID != "" && event.RunID != opts.Filter.RunID {
+			continue
+		}
+		if opts.ExcludeRuntimeLogs && strings.TrimSpace(event.EventName) == "platform.runtime_log" {
+			continue
+		}
+		out = append(out, event)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			if opts.Order == "asc" {
+				return out[i].EventID < out[j].EventID
+			}
+			return out[i].EventID > out[j].EventID
+		}
+		if opts.Order == "asc" {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if opts.Limit > 0 && len(out) > opts.Limit {
+		out = out[:opts.Limit]
+	}
+	return store.OperatorEventListResult{Events: out}, nil
 }
 
 func (s *snapshotRunStore) ListOperatorRuntimeLogs(_ context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error) {
@@ -147,7 +175,7 @@ func TestRunHubAwaitCompletion_EmitsAuthoritativeRunSummary(t *testing.T) {
 				},
 				controlEvents: []RunEventEnvelope{},
 				debug: runDebugStreamState{
-					traceRows:     map[string]string{},
+					eventIDs:      map[string]struct{}{},
 					runtimeLogIDs: map[string]struct{}{},
 				},
 			},
@@ -186,7 +214,7 @@ func TestRunHubHandleRuntimeLog_NoEntityDoesNotTriggerControlHooksAcrossRuns(t *
 				breakpoints: map[string]struct{}{"node-1": {}},
 				subs:        map[string]func(RunEventEnvelope){},
 				debug: runDebugStreamState{
-					traceRows:     map[string]string{},
+					eventIDs:      map[string]struct{}{},
 					runtimeLogIDs: map[string]struct{}{},
 				},
 			},
@@ -195,7 +223,7 @@ func TestRunHubHandleRuntimeLog_NoEntityDoesNotTriggerControlHooksAcrossRuns(t *
 				breakpoints: map[string]struct{}{"node-1": {}},
 				subs:        map[string]func(RunEventEnvelope){},
 				debug: runDebugStreamState{
-					traceRows:     map[string]string{},
+					eventIDs:      map[string]struct{}{},
 					runtimeLogIDs: map[string]struct{}{},
 				},
 			},
@@ -225,13 +253,14 @@ func TestRunHubSubscribe_PrimesCanonicalReplayDedupeState(t *testing.T) {
 			RunID:     "run-123",
 			StartedAt: now,
 		},
-		traceRows: []store.RunDebugTraceRow{{
-			EventID:         "evt-1",
-			EventName:       "scan.requested",
-			EntityID:        "entity-1",
-			EventCreatedAt:  now.Add(1 * time.Second),
-			EventSource:     "builder",
-			EventSourceType: "agent",
+		events: []store.OperatorEventFull{{
+			EventID:   "evt-1",
+			EventName: "scan.requested",
+			RunID:     "run-123",
+			EntityID:  "entity-1",
+			CreatedAt: now.Add(1 * time.Second),
+			Source:    "builder",
+			Payload:   map[string]any{"topic": "sample"},
 		}},
 	}
 	hub := &runHub{
@@ -252,5 +281,57 @@ func TestRunHubSubscribe_PrimesCanonicalReplayDedupeState(t *testing.T) {
 
 	if len(seen) != 2 {
 		t.Fatalf("post-sync len = %d, want 2", len(seen))
+	}
+}
+
+func TestRunHubSyncCanonical_UsesLatestCanonicalEventWindow(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	events := make([]store.OperatorEventFull, 0, builderRunDebugReplayLimit+2)
+	for i := 0; i < builderRunDebugReplayLimit+2; i++ {
+		events = append(events, store.OperatorEventFull{
+			EventID:   fmt.Sprintf("evt-%03d", i),
+			EventName: "scan.requested",
+			RunID:     "run-123",
+			EntityID:  "entity-1",
+			CreatedAt: now.Add(time.Duration(i) * time.Second),
+			Source:    "builder",
+			Payload:   map[string]any{"index": i},
+		})
+	}
+	events[len(events)-1].EventID = "evt-latest"
+	debugStore := &snapshotRunStore{
+		snapshot: runtimebus.RunLifecycleSnapshot{RunID: "run-123", StartedAt: now},
+		events:   events,
+	}
+	hub := &runHub{
+		runDebug: debugStore,
+		sessions: map[string]*runSession{
+			"run-123": {
+				runID:         "run-123",
+				subs:          map[string]func(RunEventEnvelope){},
+				controlEvents: []RunEventEnvelope{},
+				debug: runDebugStreamState{
+					eventIDs:      map[string]struct{}{},
+					runtimeLogIDs: map[string]struct{}{},
+				},
+			},
+		},
+	}
+	var seen []RunEventEnvelope
+	hub.sessions["run-123"].subs["test"] = func(event RunEventEnvelope) {
+		seen = append(seen, cloneRunEvent(event))
+	}
+
+	hub.syncCanonical(context.Background(), "run-123")
+
+	gotLatest := false
+	for _, event := range seen {
+		if event["id"] == "evt-latest" {
+			gotLatest = true
+			break
+		}
+	}
+	if !gotLatest {
+		t.Fatalf("latest event was not emitted from bounded canonical event window; got %#v", seen)
 	}
 }

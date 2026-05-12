@@ -24,11 +24,11 @@ func (s runDebugStreamState) clone() runDebugStreamState {
 	out := runDebugStreamState{
 		startedKey:    s.startedKey,
 		terminalKey:   s.terminalKey,
-		traceRows:     map[string]string{},
+		eventIDs:      map[string]struct{}{},
 		runtimeLogIDs: map[string]struct{}{},
 	}
-	for key, fingerprint := range s.traceRows {
-		out.traceRows[key] = fingerprint
+	for key := range s.eventIDs {
+		out.eventIDs[key] = struct{}{}
 	}
 	for key := range s.runtimeLogIDs {
 		out.runtimeLogIDs[key] = struct{}{}
@@ -78,16 +78,16 @@ func (h *runHub) correlatedRunIDsForRuntimeEntry(entry interface{ EffectiveEntit
 
 func (h *runHub) canonicalReplay(ctx context.Context, runID string) ([]RunEventEnvelope, runDebugStreamState) {
 	snapshot, _ := h.loadRunLifecycleSnapshot(ctx, runID)
-	traceRows, _ := h.loadRunDebugTraceRows(ctx, runID)
+	events, _ := h.loadOperatorEvents(ctx, runID)
 	runtimeLogs, _ := h.loadOperatorRuntimeLogs(ctx, runID)
-	return projectCanonicalRunDebugReplay(snapshot, traceRows, runtimeLogs)
+	return projectCanonicalRunDebugReplay(snapshot, events, runtimeLogs)
 }
 
 func (h *runHub) syncCanonical(ctx context.Context, runID string) {
 	snapshot, snapshotOK := h.loadRunLifecycleSnapshot(ctx, runID)
-	traceRows, traceOK := h.loadRunDebugTraceRows(ctx, runID)
+	events, eventsOK := h.loadOperatorEvents(ctx, runID)
 	runtimeLogs, logsOK := h.loadOperatorRuntimeLogs(ctx, runID)
-	if !snapshotOK && !traceOK && !logsOK {
+	if !snapshotOK && !eventsOK && !logsOK {
 		return
 	}
 	h.mu.Lock()
@@ -96,7 +96,7 @@ func (h *runHub) syncCanonical(ctx context.Context, runID string) {
 		h.mu.Unlock()
 		return
 	}
-	delta := projectCanonicalRunDebugDelta(snapshot, traceRows, runtimeLogs, &session.debug)
+	delta := projectCanonicalRunDebugDelta(snapshot, events, runtimeLogs, &session.debug)
 	listeners := make([]func(RunEventEnvelope), 0, len(session.subs))
 	for _, listener := range session.subs {
 		listeners = append(listeners, listener)
@@ -120,7 +120,7 @@ func (h *runHub) loadRunLifecycleSnapshot(ctx context.Context, runID string) (ru
 	return snapshot, true
 }
 
-func (h *runHub) loadRunDebugTraceRows(ctx context.Context, runID string) ([]store.RunDebugTraceRow, bool) {
+func (h *runHub) loadOperatorEvents(ctx context.Context, runID string) ([]store.OperatorEventFull, bool) {
 	if h == nil || h.runDebug == nil {
 		return nil, false
 	}
@@ -128,13 +128,16 @@ func (h *runHub) loadRunDebugTraceRows(ctx context.Context, runID string) ([]sto
 	if runID == "" {
 		return nil, false
 	}
-	rows, _, err := h.runDebug.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{
-		Limit: builderRunDebugReplayLimit,
+	result, err := h.runDebug.ListOperatorEvents(ctx, store.OperatorEventListOptions{
+		Filter:             store.OperatorEventListFilter{RunID: runID},
+		Limit:              builderRunDebugReplayLimit,
+		Order:              "desc",
+		ExcludeRuntimeLogs: true,
 	})
 	if err != nil {
 		return nil, false
 	}
-	return rows, true
+	return result.Events, true
 }
 
 func (h *runHub) loadOperatorRuntimeLogs(ctx context.Context, runID string) ([]store.OperatorRuntimeLogEntry, bool) {
@@ -156,43 +159,42 @@ func (h *runHub) loadOperatorRuntimeLogs(ctx context.Context, runID string) ([]s
 	return result.Logs, true
 }
 
-func projectCanonicalRunDebugReplay(snapshot runtimebus.RunLifecycleSnapshot, traceRows []store.RunDebugTraceRow, runtimeLogs []store.OperatorRuntimeLogEntry) ([]RunEventEnvelope, runDebugStreamState) {
+func projectCanonicalRunDebugReplay(snapshot runtimebus.RunLifecycleSnapshot, events []store.OperatorEventFull, runtimeLogs []store.OperatorRuntimeLogEntry) ([]RunEventEnvelope, runDebugStreamState) {
 	state := runDebugStreamState{
-		traceRows:     map[string]string{},
+		eventIDs:      map[string]struct{}{},
 		runtimeLogIDs: map[string]struct{}{},
 	}
-	return projectCanonicalRunDebugDelta(snapshot, traceRows, runtimeLogs, &state), state
+	return projectCanonicalRunDebugDelta(snapshot, events, runtimeLogs, &state), state
 }
 
-func projectCanonicalRunDebugDelta(snapshot runtimebus.RunLifecycleSnapshot, traceRows []store.RunDebugTraceRow, runtimeLogs []store.OperatorRuntimeLogEntry, state *runDebugStreamState) []RunEventEnvelope {
+func projectCanonicalRunDebugDelta(snapshot runtimebus.RunLifecycleSnapshot, events []store.OperatorEventFull, runtimeLogs []store.OperatorRuntimeLogEntry, state *runDebugStreamState) []RunEventEnvelope {
 	if state == nil {
-		state = &runDebugStreamState{traceRows: map[string]string{}, runtimeLogIDs: map[string]struct{}{}}
+		state = &runDebugStreamState{eventIDs: map[string]struct{}{}, runtimeLogIDs: map[string]struct{}{}}
 	}
-	if state.traceRows == nil {
-		state.traceRows = map[string]string{}
+	if state.eventIDs == nil {
+		state.eventIDs = map[string]struct{}{}
 	}
 	if state.runtimeLogIDs == nil {
 		state.runtimeLogIDs = map[string]struct{}{}
 	}
-	candidates := make([]runDebugCandidate, 0, 2+len(traceRows)+len(runtimeLogs))
+	candidates := make([]runDebugCandidate, 0, 2+len(events)+len(runtimeLogs))
 	if started := canonicalRunStartedCandidate(snapshot); started.key != "" && started.key != state.startedKey {
 		candidates = append(candidates, started)
 		state.startedKey = started.key
 	}
-	for _, item := range traceRows {
+	for _, item := range events {
 		if strings.TrimSpace(item.EventName) == "platform.runtime_log" {
 			continue
 		}
-		key := runTraceRowKey(item)
+		key := strings.TrimSpace(item.EventID)
 		if key == "" {
 			continue
 		}
-		fingerprint := runDebugPayloadFingerprint(item)
-		if seenFingerprint, seen := state.traceRows[key]; seen && seenFingerprint == fingerprint {
+		if _, seen := state.eventIDs[key]; seen {
 			continue
 		}
-		state.traceRows[key] = fingerprint
-		candidates = append(candidates, canonicalTraceRowCandidate(item, key))
+		state.eventIDs[key] = struct{}{}
+		candidates = append(candidates, canonicalEventFiredCandidate(item, key))
 	}
 	for _, item := range runtimeLogs {
 		key := strings.TrimSpace(item.LogID)
@@ -245,56 +247,20 @@ func canonicalRunStartedCandidate(snapshot runtimebus.RunLifecycleSnapshot) runD
 	}
 }
 
-func canonicalTraceRowCandidate(item store.RunDebugTraceRow, key string) runDebugCandidate {
+func canonicalEventFiredCandidate(item store.OperatorEventFull, key string) runDebugCandidate {
 	payload := map[string]any{
 		"event_name": strings.TrimSpace(item.EventName),
 	}
-	if source := firstNonEmpty(strings.TrimSpace(item.EventSource), strings.TrimSpace(item.EventSourceType)); source != "" {
+	if source := strings.TrimSpace(item.Source); source != "" {
 		payload["source"] = source
 	}
-	if value := strings.TrimSpace(item.SourceEventID); value != "" {
-		payload["source_event_id"] = value
-	}
-	if value := strings.TrimSpace(item.DeliveryID); value != "" {
-		payload["delivery_id"] = value
-	}
-	if value := strings.TrimSpace(item.DeliveryStatus); value != "" {
-		payload["delivery_status"] = value
-	}
-	if value := strings.TrimSpace(item.DeliveryReasonCode); value != "" {
-		payload["delivery_reason_code"] = value
-	}
-	if value := strings.TrimSpace(item.SubscriberType); value != "" {
-		payload["subscriber_type"] = value
-	}
-	if value := strings.TrimSpace(item.SubscriberID); value != "" {
-		payload["subscriber_id"] = value
-	}
-	if value := strings.TrimSpace(item.SessionID); value != "" {
-		payload["session_id"] = value
-	}
-	if value := strings.TrimSpace(item.SessionStatus); value != "" {
-		payload["session_status"] = value
-	}
-	if value := strings.TrimSpace(item.SessionRuntimeMode); value != "" {
-		payload["runtime_mode"] = value
-	}
-	if value := strings.TrimSpace(item.TurnID); value != "" {
-		payload["turn_id"] = value
-	}
-	if value := strings.TrimSpace(item.TurnScopeKey); value != "" {
-		payload["turn_scope_key"] = value
-	}
-	if value := strings.TrimSpace(item.TurnTaskID); value != "" {
-		payload["turn_task_id"] = value
-	}
-	if item.TurnRetryCount > 0 {
-		payload["turn_retry_count"] = item.TurnRetryCount
+	if len(item.Payload) > 0 {
+		payload["payload"] = cloneStringMap(item.Payload)
 	}
 	event := RunEventEnvelope{
-		"id":        firstNonEmpty(strings.TrimSpace(item.EventID), key),
+		"id":        key,
 		"type":      "event.fired",
-		"timestamp": item.EventCreatedAt.UTC().Format(time.RFC3339),
+		"timestamp": item.CreatedAt.UTC().Format(time.RFC3339),
 		"payload":   payload,
 	}
 	if entityID := strings.TrimSpace(item.EntityID); entityID != "" {
@@ -302,7 +268,7 @@ func canonicalTraceRowCandidate(item store.RunDebugTraceRow, key string) runDebu
 	}
 	return runDebugCandidate{
 		key:   key,
-		at:    runTraceRowMaterializedAt(item),
+		at:    item.CreatedAt.UTC(),
 		order: 1,
 		event: event,
 	}
@@ -399,50 +365,6 @@ func canonicalRunTerminalCandidate(snapshot runtimebus.RunLifecycleSnapshot) run
 	default:
 		return runDebugCandidate{}
 	}
-}
-
-func runTraceRowKey(row store.RunDebugTraceRow) string {
-	parts := []string{
-		strings.TrimSpace(row.EventID),
-		strings.TrimSpace(row.DeliveryID),
-		strings.TrimSpace(row.TurnID),
-	}
-	key := strings.Join(parts, "\x00")
-	if strings.Trim(key, "\x00") != "" {
-		return key
-	}
-	return runDebugPayloadFingerprint(row)
-}
-
-func runTraceRowMaterializedAt(row store.RunDebugTraceRow) time.Time {
-	out := row.EventCreatedAt.UTC()
-	for _, candidate := range []time.Time{
-		nullableTime(row.DeliveryCreatedAt),
-		nullableTime(row.DeliveryStartedAt),
-		nullableTime(row.DeliveryDeliveredAt),
-		nullableTime(row.SessionUpdatedAt),
-		nullableTime(row.TurnCreatedAt),
-	} {
-		if !candidate.IsZero() && candidate.After(out) {
-			out = candidate.UTC()
-		}
-	}
-	return out
-}
-
-func nullableTime(value *time.Time) time.Time {
-	if value == nil {
-		return time.Time{}
-	}
-	return value.UTC()
-}
-
-func runDebugPayloadFingerprint(value any) string {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return ""
-	}
-	return string(raw)
 }
 
 func stringMapValue(values map[string]any, key string) string {
