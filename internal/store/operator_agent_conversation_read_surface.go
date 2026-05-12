@@ -694,18 +694,7 @@ func (r *OperatorAgentConversationReadSurface) LoadCurrentOperatorConversationFo
 	if _, err := r.LoadOperatorAgent(ctx, agentID); err != nil {
 		return nil, err
 	}
-	result, err := r.ListOperatorConversations(ctx, OperatorConversationListOptions{AgentID: agentID, Limit: 1})
-	if err != nil {
-		return nil, err
-	}
-	if len(result.Conversations) == 0 {
-		return nil, nil
-	}
-	detail, err := r.LoadOperatorConversation(ctx, result.Conversations[0].SessionID)
-	if err != nil {
-		return nil, err
-	}
-	return &detail, nil
+	return r.loadCurrentActiveOperatorConversationForAgent(ctx, agentID)
 }
 
 func (r *OperatorAgentConversationReadSurface) requireAgentCapabilities(ctx context.Context) error {
@@ -742,6 +731,62 @@ func (r *OperatorAgentConversationReadSurface) requireConversationCapabilities(c
 	return nil
 }
 
+func (r *OperatorAgentConversationReadSurface) loadCurrentActiveOperatorConversationForAgent(ctx context.Context, agentID string) (*OperatorConversationDetail, error) {
+	caps, err := r.resolveConversationCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if caps.Conversations.Sessions != SchemaFlavorCanonical {
+		return nil, unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
+	}
+	if caps.Conversations.Turns != SchemaFlavorCanonical {
+		return nil, unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
+	}
+	sessionRunID := "''"
+	if caps.Conversations.SessionRunID {
+		sessionRunID = "COALESCE(run_id::text, '')"
+	}
+	row := r.db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT
+			session_id::text,
+			agent_id,
+			%s AS run_id,
+			'live_session' AS kind,
+			COALESCE(scope_key, ''),
+			COALESCE(scope, ''),
+			COALESCE(runtime_mode, ''),
+			COALESCE(status, ''),
+			COALESCE(turn_count, 0),
+			jsonb_array_length(COALESCE(conversation, '[]'::jsonb)) AS message_count,
+			COALESCE(runtime_state, '{}'::jsonb),
+			COALESCE(conversation, '[]'::jsonb),
+			created_at AS started_at,
+			NULL::timestamptz AS ended_at,
+			updated_at
+		FROM agent_sessions
+		WHERE agent_id = $1
+		  AND status = 'active'
+		  AND runtime_mode IN ($2, $3)
+		ORDER BY updated_at DESC, created_at DESC, session_id ASC
+		LIMIT 1
+	`, sessionRunID), agentID, runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
+	item, err := scanOperatorConversationDetail(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load current operator conversation: %w", err)
+	}
+	item.Turns, err = r.loadConversationTurns(ctx, item.Conversation.AgentID, item.Conversation.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load current operator conversation turns: %w", err)
+	}
+	if item.Turns == nil {
+		item.Turns = []OperatorConversationTurn{}
+	}
+	return &item, nil
+}
+
 func (r *OperatorAgentConversationReadSurface) resolveConversationCapabilities(ctx context.Context) (StoreSchemaCapabilities, error) {
 	if r == nil || r.capSource == nil {
 		return StoreSchemaCapabilities{}, fmt.Errorf("operator conversation read surface requires schema capabilities")
@@ -763,6 +808,7 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			a.agent_id,
 			COALESCE(a.status, 'active'),
 			COALESCE(sess.session_id::text, ''),
+			sess.created_at,
 			COALESCE(sess.turn_count, 0),
 			COALESCE(sess.lease_holder, ''),
 			sess.lease_expires_at,
@@ -775,11 +821,14 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			COALESCE(latest_turn.turn_id, ''),
 			COALESCE(latest_turn.task_id, ''),
 			COALESCE(latest_turn.parse_ok, false),
+			COALESCE(latest_turn.error, ''),
+			latest_turn.created_at,
 			COALESCE(latest_turn.turn_blocks, '[]'::jsonb)
 		FROM agents a
 		LEFT JOIN LATERAL (
 			SELECT
 				session_id,
+				created_at,
 				turn_count,
 				lease_holder,
 				lease_expires_at,
@@ -796,6 +845,8 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 				turn_id::text AS turn_id,
 				COALESCE(task_id, '') AS task_id,
 				parse_ok,
+				COALESCE(error, '') AS error,
+				created_at,
 				%s AS turn_blocks
 			FROM agent_turns
 			WHERE agent_id = a.agent_id
@@ -825,19 +876,23 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 	agentIDs := make([]string, 0)
 	for rows.Next() {
 		var (
-			id              string
-			projection      operatorAgentProjection
-			lockExpiresAt   sql.NullTime
-			runtimeStateRaw []byte
-			latestTurnID    string
-			latestTaskID    string
-			latestParseOK   bool
-			latestTurnRaw   []byte
+			id               string
+			projection       operatorAgentProjection
+			lockExpiresAt    sql.NullTime
+			sessionStartedAt sql.NullTime
+			runtimeStateRaw  []byte
+			latestTurnID     string
+			latestTaskID     string
+			latestParseOK    bool
+			latestError      string
+			latestCompleted  sql.NullTime
+			latestTurnRaw    []byte
 		)
 		if err := rows.Scan(
 			&id,
 			&projection.Status,
 			&projection.SessionID,
+			&sessionStartedAt,
 			&projection.TurnCount,
 			&projection.LockOwner,
 			&lockExpiresAt,
@@ -850,14 +905,27 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 			&latestTurnID,
 			&latestTaskID,
 			&latestParseOK,
+			&latestError,
+			&latestCompleted,
 			&latestTurnRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent operator projection: %w", err)
+		}
+		if sessionStartedAt.Valid {
+			projection.SessionStartedAt = sessionStartedAt.Time
 		}
 		if lockExpiresAt.Valid {
 			projection.LockExpiresAt = lockExpiresAt.Time
 			if lockExpiresAt.Time.After(time.Now()) && strings.TrimSpace(projection.LockOwner) != "" {
 				projection.InFlightTurn = true
+			}
+		}
+		if latestCompleted.Valid && strings.TrimSpace(latestTurnID) != "" {
+			projection.LastTurnRef = &OperatorTurnRef{
+				TurnID:      strings.TrimSpace(latestTurnID),
+				CompletedAt: latestCompleted.Time,
+				ParseOK:     latestParseOK,
+				Error:       strings.TrimSpace(latestError),
 			}
 		}
 		if err := enrichOperatorAgentProjectionFromLatestTurn(&projection, runtimeStateRaw, latestTurnID, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
