@@ -1704,6 +1704,56 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 	}
 }
 
+func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700003631, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, source_event_id, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'platform.runtime_log', NULL, NULL, 'global',
+			'{"log_level":"warn","message":"selected-fork diagnostic","details":{"component":"eventbus","action":"outbox_replay_scope_unavailable"}}'::jsonb,
+			'runtime', 'platform', $3::uuid, $4
+		)
+	`, materialized.ForkRunID, uuid.NewString(), forkEventID, at.Add(3*time.Second)); err != nil {
+		t.Fatalf("seed causal fork-local runtime log diagnostic: %v", err)
+	}
+
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+		ForkRunID:             materialized.ForkRunID,
+		AllowedSourceEventIDs: []string{eventID},
+	})
+	if err != nil {
+		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
+	}
+	if !activation.Activated {
+		t.Fatalf("activation = %#v, want activated", activation)
+	}
+}
+
 func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformControlEvent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -1739,6 +1789,56 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 		)
 	`, materialized.ForkRunID, uuid.NewString(), entityID, at.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed uncaused fork-local runtime platform control event: %v", err)
+	}
+
+	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
+		ForkRunID:             materialized.ForkRunID,
+		AllowedSourceEventIDs: []string{eventID},
+	})
+	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
+		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
+	}
+	if activation.Activated {
+		t.Fatalf("activation = %#v, want blocked", activation)
+	}
+}
+
+func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700003633, 0).UTC()
+	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'platform.runtime_log', NULL, NULL, 'global',
+			'{"log_level":"warn","message":"uncorrelated diagnostic","details":{"component":"eventbus","action":"outbox_replay_scope_unavailable"}}'::jsonb,
+			'runtime', 'platform', $3
+		)
+	`, materialized.ForkRunID, uuid.NewString(), at.Add(3*time.Second)); err != nil {
+		t.Fatalf("seed uncaused fork-local runtime log diagnostic: %v", err)
 	}
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, RunForkSelectedContractExecutionActivateRequest{
