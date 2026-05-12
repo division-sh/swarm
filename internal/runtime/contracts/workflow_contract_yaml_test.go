@@ -843,6 +843,10 @@ action:
         content:
           ref: payload.mvp_yaml
         content_type: yaml
+        schema:
+          type: object
+          required_fields:
+            - name
         max_bytes: 4096
     output:
       repo_url: repo_url
@@ -873,6 +877,9 @@ action:
 	}
 	if got := handler.Action.ArtifactRepo.Files[0].Path.Literal; got != "specs/mvp.yaml" {
 		t.Fatalf("ArtifactRepo.Files[0].Path = %#v", got)
+	}
+	if got := handler.Action.ArtifactRepo.Files[0].Schema.Type; got != "object" {
+		t.Fatalf("ArtifactRepo.Files[0].Schema.Type = %q", got)
 	}
 	if got := handler.Action.ArtifactRepo.Output.CurrentRef; got != "current_ref" {
 		t.Fatalf("ArtifactRepo.Output.CurrentRef = %q", got)

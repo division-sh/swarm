@@ -1066,28 +1066,34 @@ handler_specification:
             author: optional expression value used for git author display only.
             allowed_paths: list of repository-relative paths allowed for this service action. Required. Absolute paths and
               traversal are prohibited.
-            files: list of `{path, content, content_type, max_bytes}` entries. path and content are explicit expression values;
-              content_type is yaml, markdown, or text. The resolved path must be allowlisted.
+            files: list of `{path, content, content_type, schema, max_bytes}` entries. path and content are explicit expression
+              values; content_type is yaml, markdown, or text. The resolved path must be allowlisted. yaml files must declare
+              schema.type must be object; schema.required_fields names top-level keys that must be present before commit.
             limits: optional max_yaml_bytes, max_markdown_bytes, max_text_bytes, and max_repo_bytes.
             output: mapping of entity field names for repo_url, current_ref, file_manifest, status, failure_reason,
               last_request_id, and last_source_event_id.
             failure_event: optional event name emitted when runtime execution fails after request/source identity resolution.
             failure_payload: optional mapping of additional failure event payload fields to expression values. Runtime always
               includes repo_id, run_id, vertical_id, source_validation_case_id, request_id, source_event_id, and failure_reason.
-          behavior: The runtime normalizes file content, writes only allowlisted paths under the service-owned repo root,
+          behavior: The runtime normalizes file content, validates yaml content against the declared file schema, writes only
+            allowlisted paths under the service-owned repo root, verifies the projected git tree stays within max_repo_bytes,
             commits staged files atomically, verifies the resulting ref is a 40-character git SHA, and persists only the declared
-            output fields on the selected/owned entity. Duplicate replay for the same source_event_id is a no-op. Reusing a
-            request_id with different content fails closed even when that request is not the latest operation. Content hashes
-            are diagnostic and do not replace request/source idempotency.
+            output fields on the selected/owned entity. Duplicate replay for the same source_event_id is a no-op only when the
+            contract-visible committed output state is already present. Reusing a request_id with different content fails closed
+            even when that request is not the latest operation. Content hashes are diagnostic and do not replace request/source
+            idempotency.
           operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service
             contract must declare the output fields it wants persisted; status is committed or failed, failure_reason records
             runtime failure detail when available, and current_ref updates only after git commit/ref verification succeeds.
-            Provider history must record request_id and content/tree identity durably enough to reject historical request-id
-            conflicts after intervening commits.
+            Provider history must record every accepted request_id and content/tree identity durably enough to reject historical
+            request-id conflicts after intervening commits, including accepted same-tree/no-op requests. If git history contains
+            the accepted request but entity output persistence is missing or stale, retry reconstructs and persists the
+            contract-visible repo_url, current_ref, file_manifest, status, and last_source_event_id from durable provider history.
             If failure_event is declared, the runtime also emits that typed event after persisting failed status.
           fail_closed: Invalid provider, missing or non-UUID identities, invalid root, traversal, symlink/root escape, allowlist
-            miss, unsupported content type, size-limit violation, git write/commit failure, invalid ref, and idempotency conflict
-            all fail closed. No agent prompt, native_tools, shell command, or product-local git syntax may bypass this action.
+            miss, unsupported content type, missing/failed yaml schema validation, size-limit violation, git write/commit failure,
+            invalid ref, and idempotency conflict all fail closed. No agent prompt, native_tools, shell command, or product-local
+            git syntax may bypass this action.
     retired_fields:
       description: Legacy declarative emit carriers retired by the structured emit grammar.
       rule: These fields are retired compatibility syntax, not alternate current-contract forms.

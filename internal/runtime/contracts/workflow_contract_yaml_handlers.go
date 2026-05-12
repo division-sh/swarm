@@ -287,6 +287,7 @@ func (f *ArtifactRepoFileSpec) UnmarshalYAML(node *yaml.Node) error {
 		"path":         {},
 		"content":      {},
 		"content_type": {},
+		"schema":       {},
 		"max_bytes":    {},
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -304,6 +305,39 @@ func (f *ArtifactRepoFileSpec) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*f = ArtifactRepoFileSpec(out)
+	return nil
+}
+
+func (s *ArtifactRepoSchemaSpec) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		*s = ArtifactRepoSchemaSpec{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.files.schema must be a mapping")
+	}
+	allowed := map[string]struct{}{
+		"type":            {},
+		"required_fields": {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: artifact_repo.files.schema field %q not in platform spec", key)
+		}
+	}
+	type alias ArtifactRepoSchemaSpec
+	var out alias
+	if err := node.Decode(&out); err != nil {
+		return err
+	}
+	*s = ArtifactRepoSchemaSpec(out)
 	return nil
 }
 
