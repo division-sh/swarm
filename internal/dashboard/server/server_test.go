@@ -55,6 +55,11 @@ func asString(v any) string {
 
 func ptrTime(v time.Time) *time.Time { return &v }
 
+func parseTestTime(raw string) time.Time {
+	ts, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw))
+	return ts
+}
+
 func canonicalEventAndConversationCaps() store.StoreSchemaCapabilities {
 	return store.StoreSchemaCapabilities{
 		Events: store.EventSchemaCapabilities{
@@ -81,6 +86,51 @@ type stubAgents struct {
 
 func (s stubAgents) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
 	return s.rows, nil
+}
+
+func (s stubAgents) ListOperatorAgents(_ context.Context, opts store.OperatorAgentListOptions) (store.OperatorAgentListResult, error) {
+	out := store.OperatorAgentListResult{Agents: []store.OperatorAgentSummary{}}
+	for _, row := range s.rows {
+		if opts.Role != "" && row.Config.Role != opts.Role {
+			continue
+		}
+		item := store.OperatorAgentSummary{
+			AgentID:          row.Config.ID,
+			Role:             row.Config.Role,
+			Type:             row.Config.Type,
+			ModelTier:        row.Config.ModelTier,
+			ConversationMode: row.Config.ConversationMode,
+			SessionScope:     row.Config.SessionScope,
+			Status:           row.Status,
+			Mode:             row.Config.Mode,
+			EntityID:         row.Config.EffectiveEntityID(),
+			ParentAgentID:    row.ParentAgentID,
+			CoordinatorID:    row.CoordinatorID,
+			HiredBy:          row.HiredBy,
+			TemplateVersion:  row.TemplateVersion,
+			BudgetEnvelope:   row.Config.BudgetEnvelope,
+			Subscriptions:    append([]string(nil), row.Config.Subscriptions...),
+			Permissions:      append([]string(nil), row.Config.Permissions...),
+			StartedAt:        row.StartedAt,
+			DashboardStatus:  row.Status,
+			DashboardState:   row.Status,
+		}
+		out.Agents = append(out.Agents, item)
+	}
+	return out, nil
+}
+
+func (s stubAgents) LoadOperatorAgent(ctx context.Context, agentID string) (store.OperatorAgentDetail, error) {
+	result, err := s.ListOperatorAgents(ctx, store.OperatorAgentListOptions{})
+	if err != nil {
+		return store.OperatorAgentDetail{}, err
+	}
+	for _, row := range result.Agents {
+		if row.AgentID == agentID {
+			return store.OperatorAgentDetail{Agent: row}, nil
+		}
+	}
+	return store.OperatorAgentDetail{}, store.ErrAgentNotFound
 }
 
 type stubMailbox struct {
@@ -182,6 +232,86 @@ func (s stubConversations) List(context.Context, int) ([]ConversationSummary, er
 func (s stubConversations) Get(_ context.Context, sessionID string) (ConversationDetail, bool, error) {
 	item, ok := s.bySession[sessionID]
 	return item, ok, nil
+}
+
+func (s stubConversations) ListOperatorConversations(_ context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error) {
+	limit := opts.Limit
+	if limit <= 0 || limit > len(s.list) {
+		limit = len(s.list)
+	}
+	out := store.OperatorConversationListResult{Conversations: []store.OperatorConversationSummary{}}
+	for _, row := range s.list[:limit] {
+		out.Conversations = append(out.Conversations, store.OperatorConversationSummary{
+			SessionID:   row.SessionID,
+			AgentID:     row.AgentID,
+			Kind:        row.Kind,
+			ScopeKey:    row.ScopeKey,
+			Scope:       row.Scope,
+			RuntimeMode: row.RuntimeMode,
+			Status:      row.Status,
+			TurnCount:   row.TurnCount,
+			Summary:     row.Summary,
+			UpdatedAt:   parseTestTime(row.UpdatedAt),
+			Metadata: store.OperatorConversationSummaryMetadata{
+				ProviderSessionID:    row.Metadata.ProviderSessionID,
+				RetryReason:          row.Metadata.RetryReason,
+				RetriesFromSessionID: row.Metadata.RetriesFromSessionID,
+			},
+		})
+	}
+	return out, nil
+}
+
+func (s stubConversations) LoadOperatorConversation(_ context.Context, sessionID string) (store.OperatorConversationDetail, error) {
+	item, ok := s.bySession[sessionID]
+	if !ok {
+		return store.OperatorConversationDetail{}, store.ErrSessionNotFound
+	}
+	out := store.OperatorConversationDetail{
+		Conversation: store.OperatorConversationSummary{
+			SessionID:   item.SessionID,
+			AgentID:     item.AgentID,
+			Kind:        item.Kind,
+			ScopeKey:    item.ScopeKey,
+			Scope:       item.Scope,
+			RuntimeMode: item.RuntimeMode,
+			Status:      item.Status,
+			TurnCount:   item.TurnCount,
+			Summary:     item.Summary,
+			UpdatedAt:   parseTestTime(item.UpdatedAt),
+		},
+		Messages: []store.OperatorConversationMessage{},
+		Turns:    []store.OperatorConversationTurn{},
+		RuntimeState: store.OperatorConversationState{
+			Summary: item.RuntimeState.Summary,
+		},
+	}
+	for _, msg := range item.Messages {
+		out.Messages = append(out.Messages, store.OperatorConversationMessage{Role: msg.Role, Content: msg.Content})
+	}
+	for _, turn := range item.Turns {
+		out.Turns = append(out.Turns, store.OperatorConversationTurn{
+			TurnID:                 turn.TurnID,
+			AgentID:                turn.AgentID,
+			SessionID:              turn.SessionID,
+			AssistantVisibleOutput: turn.AssistantVisibleOutput,
+			ParseOK:                turn.ParseOK,
+		})
+	}
+	if item.RuntimeState.LastTurn != nil {
+		out.RuntimeState.LastTurn = &store.OperatorConversationLastTurn{TaskID: item.RuntimeState.LastTurn.TaskID, ParseOK: item.RuntimeState.LastTurn.ParseOK}
+	}
+	if item.RuntimeState.Watchdog != nil {
+		out.RuntimeState.Watchdog = &store.OperatorConversationWatchdog{
+			State:         item.RuntimeState.Watchdog.State,
+			BlockingLayer: item.RuntimeState.Watchdog.BlockingLayer,
+			Action:        item.RuntimeState.Watchdog.Action,
+			Outcome:       item.RuntimeState.Watchdog.Outcome,
+			LastOutputAt:  item.RuntimeState.Watchdog.LastOutputAt,
+			RecordedAt:    item.RuntimeState.Watchdog.RecordedAt,
+		}
+	}
+	return out, nil
 }
 
 type stubObservability struct {

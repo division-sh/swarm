@@ -3,103 +3,78 @@ package server
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
 	"strings"
 	"time"
 
 	runtimemanager "swarm/internal/runtime/manager"
-	runtimesessions "swarm/internal/runtime/sessions"
 	"swarm/internal/store"
 )
 
 type SQLAgentReader struct {
-	db        *sql.DB
-	base      AgentReader
-	turnLimit int
+	source *dashboardAgentReadSource
+	owner  *store.OperatorAgentConversationReadSurface
 }
 
-func NewSQLAgentReader(db *sql.DB, base AgentReader, turnLimit int) *SQLAgentReader {
-	if db == nil && base == nil {
+func NewSQLAgentReader(db *sql.DB, source any, turnLimit int) *SQLAgentReader {
+	adapter := &dashboardAgentReadSource{source: source}
+	owner := store.NewOperatorAgentConversationReadSurface(db, adapter, turnLimit)
+	if owner == nil {
 		return nil
 	}
-	return &SQLAgentReader{
-		db:        db,
-		base:      base,
-		turnLimit: turnLimit,
-	}
+	return &SQLAgentReader{source: adapter, owner: owner}
 }
 
 func (r *SQLAgentReader) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	if r == nil || r.base == nil {
+	if r == nil || r.source == nil {
 		return nil, nil
 	}
-	return r.base.LoadAgents(ctx)
+	return r.source.LoadAgents(ctx)
+}
+
+func (r *SQLAgentReader) ListOperatorAgents(ctx context.Context, opts store.OperatorAgentListOptions) (store.OperatorAgentListResult, error) {
+	if r == nil || r.owner == nil {
+		return store.OperatorAgentListResult{}, nil
+	}
+	return r.owner.ListOperatorAgents(ctx, opts)
+}
+
+func (r *SQLAgentReader) LoadOperatorAgent(ctx context.Context, agentID string) (store.OperatorAgentDetail, error) {
+	if r == nil || r.owner == nil {
+		return store.OperatorAgentDetail{}, store.ErrAgentNotFound
+	}
+	return r.owner.LoadOperatorAgent(ctx, agentID)
 }
 
 func (r *SQLAgentReader) ListGenericAgents(ctx context.Context) ([]genericAgent, error) {
-	baseRows, err := r.LoadAgents(ctx)
+	result, err := r.ListOperatorAgents(ctx, store.OperatorAgentListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	items := make([]genericAgent, 0, len(baseRows))
-	for _, row := range baseRows {
-		items = append(items, toGenericAgent(row))
-	}
-	if r == nil || r.db == nil || len(items) == 0 {
-		return items, nil
-	}
-	projections, err := r.loadOperatorProjections(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]genericAgent, 0, len(items))
-	for _, item := range items {
-		projection, ok := projections[item.ID]
-		if !ok {
-			return nil, fmt.Errorf("missing agent operator projection: %s", strings.TrimSpace(item.ID))
-		}
-		applyOperatorProjection(&item, projection, r.turnLimit)
-		out = append(out, item)
+	out := make([]genericAgent, 0, len(result.Agents))
+	for _, item := range result.Agents {
+		out = append(out, genericAgentFromOperatorSummary(item))
 	}
 	return out, nil
 }
 
 func (r *SQLAgentReader) GetGenericAgent(ctx context.Context, id string) (genericAgent, bool, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
+	item, err := r.LoadOperatorAgent(ctx, strings.TrimSpace(id))
+	if errors.Is(err, store.ErrAgentNotFound) {
 		return genericAgent{}, false, nil
 	}
-	rows, err := r.ListGenericAgents(ctx)
 	if err != nil {
 		return genericAgent{}, false, err
 	}
-	for _, row := range rows {
-		if row.ID == id {
-			return row, true, nil
-		}
-	}
-	return genericAgent{}, false, nil
+	return genericAgentFromOperatorSummary(item.Agent), true, nil
 }
 
-type agentOperatorProjection struct {
-	Status              string
-	LifecycleState      string
-	BlockingLayer       string
-	PendingEvents       int
-	OldestPendingAgeSec int
-	LockOwner           string
-	LockExpiresAt       time.Time
-	InFlightTurn        bool
-	InFlightSeconds     int
-	Failures24h         int
-	DeadLetters24h      int
-	TurnCount           int
-	Turns24h            int
-	SessionID           string
-	ProviderSessionID   string
-	CurrentTaskID       string
-	LastTool            *AgentLastTool
-	LiveTurn            *OperatorLiveTurn
+type dashboardAgentReadSource struct {
+	source any
+}
+
+type dashboardLoadAgentsSource interface {
+	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
 }
 
 type pendingAgentDeliveryFactSource interface {
@@ -110,247 +85,34 @@ type agentLifecycleFactSource interface {
 	ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentLifecycleFacts, error)
 }
 
-func (r *SQLAgentReader) loadOperatorProjections(ctx context.Context) (map[string]agentOperatorProjection, error) {
-	caps, err := r.resolveCapabilities(ctx)
-	if err != nil {
-		return nil, err
+func (s *dashboardAgentReadSource) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
+	source, ok := s.source.(dashboardLoadAgentsSource)
+	if !ok || source == nil {
+		return nil, nil
 	}
-	if err := requireAgentOperatorProjectionCapabilities(caps); err != nil {
-		return nil, err
-	}
-	latestTurnBlocksExpr := `'[]'::jsonb`
-	if caps.Conversations.TurnBlocks {
-		latestTurnBlocksExpr = `COALESCE(turn_blocks, '[]'::jsonb)`
-	}
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT
-			a.agent_id,
-			COALESCE(a.status, 'active'),
-			COALESCE(sess.session_id::text, ''),
-			COALESCE(sess.turn_count, 0),
-			COALESCE(sess.lease_holder, ''),
-			sess.lease_expires_at,
-			COALESCE(sess.runtime_state, '{}'::jsonb),
-			0,
-			0,
-			COALESCE(f.failures_24h, 0),
-			COALESCE(f.dead_letters_24h, 0),
-			0,
-			COALESCE(latest_turn.turn_id, ''),
-			COALESCE(latest_turn.task_id, ''),
-			COALESCE(latest_turn.parse_ok, false),
-			COALESCE(latest_turn.turn_blocks, '[]'::jsonb)
-		FROM agents a
-		LEFT JOIN LATERAL (
-			SELECT
-				session_id,
-				turn_count,
-				lease_holder,
-				lease_expires_at,
-				runtime_state
-			FROM agent_sessions
-			WHERE agent_id = a.agent_id
-			  AND status = 'active'
-			  AND runtime_mode IN ($1, $2)
-			ORDER BY updated_at DESC, created_at DESC
-			LIMIT 1
-		) sess ON true
-		LEFT JOIN LATERAL (
-			SELECT
-				turn_id::text AS turn_id,
-				COALESCE(task_id, '') AS task_id,
-				parse_ok,
-				%s AS turn_blocks
-			FROM agent_turns
-			WHERE agent_id = a.agent_id
-			  AND sess.session_id IS NOT NULL
-			  AND session_id = sess.session_id
-			ORDER BY created_at DESC, turn_id DESC
-			LIMIT 1
-		) latest_turn ON true
-		LEFT JOIN LATERAL (
-			SELECT
-				COUNT(*) FILTER (WHERE status = 'failed')::int AS failures_24h,
-				COUNT(*) FILTER (WHERE status = 'dead_letter')::int AS dead_letters_24h
-			FROM event_deliveries
-			WHERE subscriber_type = 'agent'
-			  AND subscriber_id = a.agent_id
-			  AND COALESCE(delivered_at, created_at) >= now() - interval '24 hours'
-		) f ON true
-		WHERE a.status NOT IN ('terminated', 'ephemeral')
-		ORDER BY a.created_at ASC, a.agent_id ASC
-	`, latestTurnBlocksExpr), runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
-	if err != nil {
-		return nil, fmt.Errorf("query agent operator projections: %w", err)
-	}
-	defer rows.Close()
-
-	out := map[string]agentOperatorProjection{}
-	agentIDs := make([]string, 0)
-	for rows.Next() {
-		var (
-			id              string
-			projection      agentOperatorProjection
-			lockExpiresAt   sql.NullTime
-			runtimeStateRaw []byte
-			latestTurnID    string
-			latestTaskID    string
-			latestParseOK   bool
-			latestTurnRaw   []byte
-		)
-		if err := rows.Scan(
-			&id,
-			&projection.Status,
-			&projection.SessionID,
-			&projection.TurnCount,
-			&projection.LockOwner,
-			&lockExpiresAt,
-			&runtimeStateRaw,
-			&projection.PendingEvents,
-			&projection.OldestPendingAgeSec,
-			&projection.Failures24h,
-			&projection.DeadLetters24h,
-			&projection.Turns24h,
-			&latestTurnID,
-			&latestTaskID,
-			&latestParseOK,
-			&latestTurnRaw,
-		); err != nil {
-			return nil, fmt.Errorf("scan agent operator projection: %w", err)
-		}
-		if lockExpiresAt.Valid {
-			projection.LockExpiresAt = lockExpiresAt.Time
-			if lockExpiresAt.Time.After(time.Now()) && strings.TrimSpace(projection.LockOwner) != "" {
-				projection.InFlightTurn = true
-			}
-		}
-		if err := enrichAgentOperatorProjectionFromLatestTurn(&projection, runtimeStateRaw, latestTurnID, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
-			return nil, err
-		}
-		id = strings.TrimSpace(id)
-		out[id] = projection
-		agentIDs = append(agentIDs, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read agent operator projection rows: %w", err)
-	}
-	factSource, ok := r.base.(pendingAgentDeliveryFactSource)
-	if !ok || factSource == nil {
-		return nil, fmt.Errorf("missing pending agent delivery fact source")
-	}
-	factsByAgent, err := factSource.ListPendingAgentDeliveryFacts(ctx, agentIDs, time.Time{})
-	if err != nil {
-		return nil, err
-	}
-	lifecycleSource, ok := r.base.(agentLifecycleFactSource)
-	if !ok || lifecycleSource == nil {
-		return nil, fmt.Errorf("missing agent lifecycle fact source")
-	}
-	lifecycleByAgent, err := lifecycleSource.ListAgentLifecycleFacts(ctx, agentIDs)
-	if err != nil {
-		return nil, err
-	}
-	for agentID, facts := range factsByAgent {
-		projection := out[strings.TrimSpace(agentID)]
-		projection.PendingEvents = facts.PendingCount
-		projection.OldestPendingAgeSec = facts.OldestPendingAgeSec
-		out[strings.TrimSpace(agentID)] = projection
-	}
-	for agentID, facts := range lifecycleByAgent {
-		projection := out[strings.TrimSpace(agentID)]
-		projection.LifecycleState = strings.TrimSpace(facts.CurrentState)
-		projection.BlockingLayer = strings.TrimSpace(facts.BlockingLayer)
-		out[strings.TrimSpace(agentID)] = projection
-	}
-	return out, nil
+	return source.LoadAgents(ctx)
 }
 
-func (r *SQLAgentReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
-	if r != nil {
-		if source, ok := r.base.(schemaCapabilitySource); ok && source != nil {
-			return source.ResolveSchemaCapabilities(ctx)
-		}
+func (s *dashboardAgentReadSource) ResolveSchemaCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
+	source, ok := s.source.(schemaCapabilitySource)
+	if !ok || source == nil {
+		return store.StoreSchemaCapabilities{}, missingDashboardCapabilityOwner("agent reader")
 	}
-	return store.StoreSchemaCapabilities{}, missingDashboardCapabilityOwner("agent reader")
+	return source.ResolveSchemaCapabilities(ctx)
 }
 
-func applyOperatorProjection(agent *genericAgent, projection agentOperatorProjection, turnLimit int) {
-	if agent == nil {
-		return
+func (s *dashboardAgentReadSource) ListPendingAgentDeliveryFacts(ctx context.Context, agentIDs []string, since time.Time) (map[string]store.PendingAgentDeliveryFacts, error) {
+	source, ok := s.source.(pendingAgentDeliveryFactSource)
+	if !ok || source == nil {
+		return nil, errors.New("missing pending agent delivery fact source")
 	}
-	agent.Status = strings.TrimSpace(projection.Status)
-	agent.BlockingLayer = projection.blockingLayer()
-	agent.PendingEvents = projection.PendingEvents
-	agent.OldestPendingAgeSec = projection.OldestPendingAgeSec
-	agent.LockOwner = strings.TrimSpace(projection.LockOwner)
-	agent.LockExpiresAt = formatTime(projection.LockExpiresAt)
-	agent.InFlightTurn = projection.InFlightTurn
-	agent.InFlightSeconds = projection.InFlightSeconds
-	agent.Failures24h = projection.Failures24h
-	agent.DeadLetters24h = projection.DeadLetters24h
-	agent.TurnCount = projection.TurnCount
-	agent.TurnLimit = maxInt(turnLimit, 0)
-	agent.Turns24h = maxInt(projection.Turns24h, 0)
-	agent.SessionID = strings.TrimSpace(projection.SessionID)
-	agent.ProviderSessionID = strings.TrimSpace(projection.ProviderSessionID)
-	agent.CurrentTaskID = strings.TrimSpace(projection.CurrentTaskID)
-	agent.LastTool = projection.LastTool
-	agent.LiveTurn = projection.LiveTurn
-	if agent.TurnLimit > 0 {
-		agent.NearBreaker = agent.TurnCount*100 >= agent.TurnLimit*85
-	}
-	agent.State = projection.state()
+	return source.ListPendingAgentDeliveryFacts(ctx, agentIDs, since)
 }
 
-func (p agentOperatorProjection) state() string {
-	status := strings.ToLower(strings.TrimSpace(p.Status))
-	if status == "terminated" {
-		return "terminated"
+func (s *dashboardAgentReadSource) ListAgentLifecycleFacts(ctx context.Context, agentIDs []string) (map[string]store.AgentLifecycleFacts, error) {
+	source, ok := s.source.(agentLifecycleFactSource)
+	if !ok || source == nil {
+		return nil, errors.New("missing agent lifecycle fact source")
 	}
-	if state := strings.TrimSpace(p.LifecycleState); state != "" {
-		return state
-	}
-	if p.InFlightTurn {
-		return "active"
-	}
-	return "idle"
-}
-
-func (p agentOperatorProjection) blockingLayer() string {
-	if layer := strings.TrimSpace(p.BlockingLayer); layer != "" {
-		return layer
-	}
-	if p.InFlightTurn {
-		return "session_execution"
-	}
-	return ""
-}
-
-func enrichAgentOperatorProjectionFromLatestTurn(projection *agentOperatorProjection, runtimeStateRaw []byte, turnID, taskID string, parseOK bool, turnBlocksRaw []byte) error {
-	if projection == nil {
-		return nil
-	}
-	runtimeState, err := store.DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
-	if err != nil {
-		return fmt.Errorf("decode latest agent session runtime_state: %w", err)
-	}
-	projection.ProviderSessionID = strings.TrimSpace(runtimeState.ProviderSessionID)
-	projection.LiveTurn, err = projectLatestTurn(taskID, parseOK, turnID, turnBlocksRaw)
-	if err != nil {
-		return fmt.Errorf("decode latest agent turn live_turn: %w", err)
-	}
-	if projection.LiveTurn != nil {
-		projection.CurrentTaskID = strings.TrimSpace(projection.LiveTurn.TaskID)
-		projection.LastTool = projection.LiveTurn.LastTool
-		return nil
-	}
-	projection.CurrentTaskID = strings.TrimSpace(taskID)
-	return nil
-}
-
-func maxInt(v, floor int) int {
-	if v < floor {
-		return floor
-	}
-	return v
+	return source.ListAgentLifecycleFacts(ctx, agentIDs)
 }
