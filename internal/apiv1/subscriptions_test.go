@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -148,6 +149,107 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 	}
 	if observability.lastEventList.Order != "asc" {
 		t.Fatalf("event.subscribe order = %q, want asc", observability.lastEventList.Order)
+	}
+}
+
+func TestEventListFilterValidationCoversListAndSubscribe(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Observability: &fakeObservabilityReadStore{},
+		}),
+		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+			Observability: &fakeObservabilityReadStore{},
+		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
+	})
+
+	listUnknown := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list-unknown","method":"event.list","params":{"filter":{"event_nmae":"typo"}}}`)
+	if listUnknown.Error == nil || listUnknown.Error.Code != codeInvalidParams {
+		t.Fatalf("event.list unknown filter error = %#v, want invalid params", listUnknown.Error)
+	}
+	if details := asMap(t, asMap(t, listUnknown.Error.Data)["details"]); details["field"] != "filter.event_nmae" {
+		t.Fatalf("event.list unknown filter details = %#v", details)
+	}
+
+	listEnum := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list-enum","method":"event.list","params":{"filter":{"delivery_status":"done"}}}`)
+	if listEnum.Error == nil || listEnum.Error.Code != codeInvalidParams {
+		t.Fatalf("event.list enum error = %#v, want invalid params", listEnum.Error)
+	}
+	if details := asMap(t, asMap(t, listEnum.Error.Data)["details"]); details["field"] != "filter.delivery_status" {
+		t.Fatalf("event.list enum details = %#v", details)
+	}
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	conn := dialTestWS(t, server.URL)
+	defer conn.Close()
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "sub-unknown",
+		"method":  "event.subscribe",
+		"params": map[string]any{
+			"filter": map[string]any{"event_nmae": "typo"},
+		},
+	})
+	subUnknown := readWSResponse(t, conn)
+	if subUnknown.Error == nil || subUnknown.Error.Code != codeInvalidParams {
+		t.Fatalf("event.subscribe unknown filter error = %#v, want invalid params", subUnknown.Error)
+	}
+	if details := asMap(t, asMap(t, subUnknown.Error.Data)["details"]); details["field"] != "filter.event_nmae" {
+		t.Fatalf("event.subscribe unknown filter details = %#v", details)
+	}
+
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "sub-enum",
+		"method":  "event.subscribe",
+		"params": map[string]any{
+			"filter": map[string]any{"subscriber_type": "system"},
+		},
+	})
+	subEnum := readWSResponse(t, conn)
+	if subEnum.Error == nil || subEnum.Error.Code != codeInvalidParams {
+		t.Fatalf("event.subscribe enum error = %#v, want invalid params", subEnum.Error)
+	}
+	if details := asMap(t, asMap(t, subEnum.Error.Data)["details"]); details["field"] != "filter.subscriber_type" {
+		t.Fatalf("event.subscribe enum details = %#v", details)
+	}
+}
+
+func TestHandlerWebSocketSubscriptionOwnerErrorClosesConnection(t *testing.T) {
+	observability := &fakeObservabilityReadStore{listErr: errors.New("store unavailable")}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+			Observability: observability,
+		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	conn := dialTestWS(t, server.URL)
+	defer conn.Close()
+
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "sub-events",
+		"method":  "event.subscribe",
+		"params":  map[string]any{},
+	})
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	defer conn.SetReadDeadline(time.Time{})
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		return
+	}
+	var subscribe rpcResponse
+	if err := json.Unmarshal(raw, &subscribe); err != nil {
+		t.Fatalf("decode event.subscribe response before close: %v raw=%s", err, raw)
+	}
+	if subscribe.Error != nil {
+		t.Fatalf("event.subscribe response error = %#v", subscribe.Error)
+	}
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("websocket stayed open after owner read error, want fail-closed disconnect")
 	}
 }
 

@@ -653,7 +653,15 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 	sinceWhere := ""
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())
-		sinceWhere = fmt.Sprintf(" AND e.created_at > $%d::timestamptz", len(args))
+		sinceWhere = fmt.Sprintf(`
+		  AND GREATEST(
+			e.created_at,
+			COALESCE(d.created_at, '-infinity'::timestamptz),
+			COALESCE(d.started_at, '-infinity'::timestamptz),
+			COALESCE(d.delivered_at, '-infinity'::timestamptz),
+			COALESCE(sess.updated_at, '-infinity'::timestamptz),
+			COALESCE(t.created_at, '-infinity'::timestamptz)
+		  ) > $%d::timestamptz`, len(args))
 	}
 	args = append(args, opts.Limit+1)
 	limitArg := len(args)

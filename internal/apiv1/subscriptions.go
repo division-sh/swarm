@@ -241,7 +241,7 @@ func (r *SubscriptionRuntime) emitEventNotifications(ctx context.Context, sessio
 			Order:  "asc",
 		})
 		if err != nil {
-			session.cancel()
+			session.close()
 			return false
 		}
 		for _, event := range result.Events {
@@ -263,7 +263,7 @@ func (r *SubscriptionRuntime) emitEventNotifications(ctx context.Context, sessio
 			return true
 		}
 	}
-	session.cancel()
+	session.close()
 	return false
 }
 
@@ -295,7 +295,7 @@ func (r *SubscriptionRuntime) emitTraceNotifications(ctx context.Context, sessio
 			Since:  since,
 		})
 		if err != nil {
-			session.cancel()
+			session.close()
 			return false
 		}
 		for _, row := range rows {
@@ -314,7 +314,7 @@ func (r *SubscriptionRuntime) emitTraceNotifications(ctx context.Context, sessio
 			return true
 		}
 	}
-	session.cancel()
+	session.close()
 	return false
 }
 
