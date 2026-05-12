@@ -76,8 +76,12 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	if !executionBoundaryHas(admission.InvalidPaths, "copy_source_event_deliveries", store.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("invalid paths = %#v, want source delivery copy invalid", admission.InvalidPaths)
 	}
-	if !executionBoundaryHas(admission.RequiredConsumers, "handler_execution", store.RunForkSelectedContractDispositionFutureOwnerRequired) {
-		t.Fatalf("required consumers = %#v, want handler execution future owner", admission.RequiredConsumers)
+	if !executionBoundaryHas(admission.RequiredConsumers, "fork_local_runtime_container", store.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(admission.RequiredConsumers, "fork_run_id_runtime_context", store.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(admission.RequiredConsumers, "fork_local_event_delivery_writes", store.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(admission.RequiredConsumers, "handler_execution", store.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(admission.RequiredConsumers, "emitted_follow_up_events", store.RunForkSelectedContractDispositionPrerequisite) {
+		t.Fatalf("required consumers = %#v, want current runtime container prerequisites", admission.RequiredConsumers)
 	}
 	if !executionBoundaryHas(admission.BlockedSiblings, "sessions_turns_audits", store.RunForkSelectedContractDispositionBlockedSibling) {
 		t.Fatalf("blocked siblings = %#v, want sessions/turns blocked", admission.BlockedSiblings)
