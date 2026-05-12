@@ -340,6 +340,58 @@ func TestExecutor_ValidateRequestRejectsCreateEntityWithSelectEntity(t *testing.
 	}
 }
 
+func TestExecutor_ValidateRequestRejectsCreateEntityWithSelectOrCreateEntity(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	err = exec.ValidateRequest(ExecutionRequest{
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			CreateEntity: true,
+			SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{
+				Bindings: []runtimecontracts.SelectEntityKeyBinding{{Field: "repo_id", Ref: "payload.repo_id"}},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and select_or_create_entity") {
+		t.Fatalf("ValidateRequest error = %v, want create_entity/select_or_create_entity error", err)
+	}
+}
+
+func TestExecutor_ValidateRequestRejectsSelectEntityWithSelectOrCreateEntity(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	err = exec.ValidateRequest(ExecutionRequest{
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			SelectEntity: &runtimecontracts.SelectEntitySpec{
+				Bindings: []runtimecontracts.SelectEntityKeyBinding{{Field: "repo_id", Ref: "payload.repo_id"}},
+			},
+			SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{
+				Bindings: []runtimecontracts.SelectEntityKeyBinding{{Field: "repo_id", Ref: "payload.repo_id"}},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "declares both select_entity and select_or_create_entity") {
+		t.Fatalf("ValidateRequest error = %v, want select_entity/select_or_create_entity error", err)
+	}
+}
+
 func TestExecutor_ValidateRequestRejectsTieredWeightedAverageWithoutDimensionKey(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),
