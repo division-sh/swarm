@@ -198,7 +198,7 @@ func enforceEntityWriteOwnership(ctx context.Context, db *sql.DB, source semanti
 		return nil
 	}
 	if logger != nil {
-		logger.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+		logger.LogRuntime(toolExecutorRuntimeLogContext(ctx), runtimepipeline.RuntimeLogEntry{
 			Level:     "warn",
 			Message:   "Entity write was denied because the target entity belongs to a different flow",
 			Component: "tool-executor",

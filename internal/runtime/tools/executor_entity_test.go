@@ -27,6 +27,75 @@ import (
 	"swarm/internal/testutil"
 )
 
+type entityToolRuntimeLogBus struct {
+	logs       []runtimepipeline.RuntimeLogEntry
+	lineages   []runtimecorrelation.RuntimeLineage
+	hasLineage []bool
+	published  []events.Event
+}
+
+func (b *entityToolRuntimeLogBus) Publish(_ context.Context, evt events.Event) error {
+	b.published = append(b.published, evt)
+	return nil
+}
+
+func (*entityToolRuntimeLogBus) PublishDirect(context.Context, events.Event, []string) error {
+	return nil
+}
+
+func (b *entityToolRuntimeLogBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
+	b.lineages = append(b.lineages, lineage)
+	b.hasLineage = append(b.hasLineage, ok)
+	b.logs = append(b.logs, entry)
+	return nil
+}
+
+func selectedForkEntityToolRuntimeContext(actor models.AgentConfig) context.Context {
+	const eventID = "f6d20e7c-123d-4a37-9f9b-137421a24bdb"
+	ctx := runtimetools.WithActor(context.Background(), actor)
+	ctx = runtimecorrelation.WithRunID(ctx, entityToolTestRunID)
+	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
+		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
+		RunID:               entityToolTestRunID,
+		SubjectEventID:      eventID,
+		SubjectEventType:    "validation/validation.package_ready",
+		ParentEventID:       eventID,
+		RowCategory:         runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer,
+		SelectedForkOwner:   "runtime.run_fork.selected_contract_execution.fork_local_runtime_container",
+		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
+		SelectedForkContext: true,
+	})
+	return runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:        eventID,
+		Type:      events.EventType("validation/validation.package_ready"),
+		RunID:     entityToolTestRunID,
+		Payload:   []byte(`{"entity_id":"entity-typed-lineage"}`),
+		CreatedAt: time.Unix(1700000000, 0).UTC(),
+	}.WithEntityID("entity-typed-lineage"))
+}
+
+func assertEntityToolDiagnosticLineage(t *testing.T, bus *entityToolRuntimeLogBus, index int) {
+	t.Helper()
+	if index >= len(bus.logs) || index >= len(bus.lineages) || index >= len(bus.hasLineage) {
+		t.Fatalf("lineage index %d outside logs=%d lineages=%d hasLineage=%d", index, len(bus.logs), len(bus.lineages), len(bus.hasLineage))
+	}
+	if !bus.hasLineage[index] {
+		t.Fatalf("runtime lineage missing for log %#v", bus.logs[index])
+	}
+	lineage := bus.lineages[index]
+	if lineage.Owner != "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage" ||
+		lineage.RunID != entityToolTestRunID ||
+		lineage.SubjectEventID != "f6d20e7c-123d-4a37-9f9b-137421a24bdb" ||
+		lineage.ParentEventID != "f6d20e7c-123d-4a37-9f9b-137421a24bdb" ||
+		lineage.RowCategory != runtimecorrelation.RuntimeLineageRowCategoryDiagnostic ||
+		lineage.SelectedForkOwner != "runtime.run_fork.selected_contract_execution.fork_local_runtime_container" ||
+		lineage.Classification != runtimecorrelation.RuntimeLineageClassificationForkLocal ||
+		!lineage.SelectedForkContext {
+		t.Fatalf("runtime lineage = %#v", lineage)
+	}
+}
+
 func TestEntityTools_HappyPath(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
@@ -2002,6 +2071,56 @@ foreign:
 	if err == nil || !ok || re.Code != "cross_flow_write_forbidden" {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
 	}
+}
+
+func TestEntityTools_SaveEntityFieldCrossFlowDenialPreservesSelectedForkRuntimeLineage(t *testing.T) {
+	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
+		"analyzer-flow": {
+			EntitiesYAML: `
+analysis:
+  status: text
+`,
+			AgentsYAML: entityToolAgentYAML(models.AgentConfig{ID: "analyzer", Role: "analyzer", Tools: []string{"save_entity_field", "get_entity"}}),
+		},
+		"other-flow": {
+			EntitiesYAML: `
+foreign:
+  status: text
+  name: text
+  composite_score: numeric
+`,
+		},
+	})
+	actor := models.AgentConfig{
+		ID:    "analyzer",
+		Role:  "analyzer",
+		Tools: []string{"save_entity_field", "get_entity"},
+	}
+	_, db, _ := testutil.StartPostgres(t)
+	ensureEntityToolTestRun(t, db)
+	bus := &entityToolRuntimeLogBus{}
+	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
+		SQLDB:                          db,
+		WorkflowSource:                 semanticview.Wrap(bundle),
+		AllowInternalLegacyEntityTools: true,
+	})
+	entityID := uuid.NewString()
+	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "queued", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+
+	_, err := exec.Execute(selectedForkEntityToolRuntimeContext(actor), "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "status",
+		"value":     "closed",
+	})
+	re, ok := runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "cross_flow_write_forbidden" {
+		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
+	}
+	if len(bus.logs) != 2 || bus.logs[0].Action != "entity_write_denied" || bus.logs[1].Action != "tool_execution_failed" {
+		t.Fatalf("logs = %#v, want entity_write_denied then tool_execution_failed", bus.logs)
+	}
+	assertEntityToolDiagnosticLineage(t, bus, 0)
+	assertEntityToolDiagnosticLineage(t, bus, 1)
 }
 
 func TestEntityTools_SaveEntityFieldAllowsSameFlowWrite(t *testing.T) {

@@ -11,19 +11,22 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolidentity"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 type actorResolverFn func(context.Context) (models.AgentConfig, bool)
 
 type TurnContext struct {
-	Actor      models.AgentConfig
-	Inbound    events.Event
-	HasInbound bool
-	Allowed    map[string]struct{}
-	Recorder   *runtimebus.EmittedEventsRecorder
-	Emitted    map[string]struct{}
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
+	Actor             models.AgentConfig
+	Inbound           events.Event
+	HasInbound        bool
+	RuntimeLineage    runtimecorrelation.RuntimeLineage
+	HasRuntimeLineage bool
+	Allowed           map[string]struct{}
+	Recorder          *runtimebus.EmittedEventsRecorder
+	Emitted           map[string]struct{}
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
 }
 
 type TurnContextRegistry struct {
@@ -68,14 +71,17 @@ func (r *TurnContextRegistry) RegisterTurnContextWithAllowedTools(ctx context.Co
 	token := uuid.NewString()
 	recorder, _ := runtimebus.EmittedEventsRecorderFromContext(ctx)
 	inbound, hasInbound := runtimebus.InboundEventFromContext(ctx)
+	lineage, hasLineage := runtimecorrelation.RuntimeLineageFromContext(ctx)
 	r.put(token, TurnContext{
-		Actor:      actor,
-		Inbound:    inbound,
-		HasInbound: hasInbound,
-		Allowed:    normalizeAllowedTools(allowedTools),
-		Recorder:   recorder,
-		CreatedAt:  now,
-		ExpiresAt:  now.Add(ttl),
+		Actor:             actor,
+		Inbound:           inbound,
+		HasInbound:        hasInbound,
+		RuntimeLineage:    lineage,
+		HasRuntimeLineage: hasLineage,
+		Allowed:           normalizeAllowedTools(allowedTools),
+		Recorder:          recorder,
+		CreatedAt:         now,
+		ExpiresAt:         now.Add(ttl),
 	})
 	return token
 }

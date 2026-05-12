@@ -15,12 +15,15 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
 
 type telemetryBusStub struct {
 	logs       []runtimepipeline.RuntimeLogEntry
+	lineages   []runtimecorrelation.RuntimeLineage
+	hasLineage []bool
 	publishErr error
 	published  []events.Event
 }
@@ -32,9 +35,59 @@ func (b *telemetryBusStub) Publish(_ context.Context, evt events.Event) error {
 
 func (*telemetryBusStub) PublishDirect(context.Context, events.Event, []string) error { return nil }
 
-func (b *telemetryBusStub) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+func (b *telemetryBusStub) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error {
+	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
+	b.lineages = append(b.lineages, lineage)
+	b.hasLineage = append(b.hasLineage, ok)
 	b.logs = append(b.logs, entry)
 	return nil
+}
+
+func selectedForkToolContext(actor models.AgentConfig) context.Context {
+	const (
+		runID   = "1ebadcb5-66a3-4536-8c7a-06988d82b402"
+		eventID = "a6a7390c-9eed-42aa-b01a-98465051f686"
+	)
+	ctx := models.WithActor(context.Background(), actor)
+	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
+		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
+		RunID:               runID,
+		SubjectEventID:      eventID,
+		SubjectEventType:    "validation/validation.package_ready",
+		ParentEventID:       eventID,
+		RowCategory:         runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer,
+		SelectedForkOwner:   "runtime.run_fork.selected_contract_execution.fork_local_runtime_container",
+		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
+		SelectedForkContext: true,
+	})
+	return runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:        eventID,
+		Type:      events.EventType("validation/validation.package_ready"),
+		RunID:     runID,
+		Payload:   []byte(`{"entity_id":"entity-typed-lineage"}`),
+		CreatedAt: testTime(),
+	}.WithEntityID("entity-typed-lineage"))
+}
+
+func assertToolExecutorDiagnosticLineage(t *testing.T, bus *telemetryBusStub, index int) {
+	t.Helper()
+	if index >= len(bus.logs) || index >= len(bus.lineages) || index >= len(bus.hasLineage) {
+		t.Fatalf("lineage index %d outside logs=%d lineages=%d hasLineage=%d", index, len(bus.logs), len(bus.lineages), len(bus.hasLineage))
+	}
+	if !bus.hasLineage[index] {
+		t.Fatalf("runtime lineage missing for log %#v", bus.logs[index])
+	}
+	lineage := bus.lineages[index]
+	if lineage.Owner != "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage" ||
+		lineage.RunID != "1ebadcb5-66a3-4536-8c7a-06988d82b402" ||
+		lineage.SubjectEventID != "a6a7390c-9eed-42aa-b01a-98465051f686" ||
+		lineage.ParentEventID != "a6a7390c-9eed-42aa-b01a-98465051f686" ||
+		lineage.RowCategory != runtimecorrelation.RuntimeLineageRowCategoryDiagnostic ||
+		lineage.SelectedForkOwner != "runtime.run_fork.selected_contract_execution.fork_local_runtime_container" ||
+		lineage.Classification != runtimecorrelation.RuntimeLineageClassificationForkLocal ||
+		!lineage.SelectedForkContext {
+		t.Fatalf("runtime lineage = %#v", lineage)
+	}
 }
 
 func TestExecutorTelemetry_LogsSuccess(t *testing.T) {
@@ -193,6 +246,99 @@ func TestExecutorTelemetry_LogsExecutionFailure(t *testing.T) {
 	}
 }
 
+func TestExecutorTelemetry_PreservesTypedLineageForToolDiagnostics(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"available": true})
+		}))
+		defer server.Close()
+
+		bus := &telemetryBusStub{}
+		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			Tools: map[string]runtimecontracts.ToolSchemaEntry{
+				"check_domain": {
+					Description: "Check domain availability",
+					HandlerType: "http",
+					InputSchema: runtimecontracts.ToolInputSchema{
+						Type:     "object",
+						Required: []string{"domain"},
+						Properties: map[string]runtimecontracts.ToolInputSchema{
+							"domain": {Type: "string"},
+						},
+					},
+					HTTP: &runtimecontracts.HTTPToolSpec{
+						Method: "GET",
+						URL:    server.URL + "?domain={{input.domain}}",
+					},
+				},
+			},
+		})
+		actor := models.AgentConfig{ID: "selected-agent", EntityID: "entity-typed-lineage", Tools: []string{"check_domain"}}
+		exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
+
+		if _, err := exec.Execute(selectedForkToolContext(actor), "check_domain", map[string]any{"domain": "example.com"}); err != nil {
+			t.Fatalf("Execute(check_domain): %v", err)
+		}
+		if len(bus.logs) != 1 || bus.logs[0].Action != "tool_execution_succeeded" {
+			t.Fatalf("logs = %#v, want tool_execution_succeeded", bus.logs)
+		}
+		assertToolExecutorDiagnosticLineage(t, bus, 0)
+	})
+
+	t.Run("denied", func(t *testing.T) {
+		bus := &telemetryBusStub{}
+		actor := models.AgentConfig{ID: "selected-agent"}
+		exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{})
+
+		if _, err := exec.Execute(selectedForkToolContext(actor), "workflow_custom_tool", map[string]any{"x": 1}); err == nil {
+			t.Fatal("expected authorization denial")
+		}
+		if len(bus.logs) != 1 || bus.logs[0].Action != "tool_execution_denied" {
+			t.Fatalf("logs = %#v, want tool_execution_denied", bus.logs)
+		}
+		assertToolExecutorDiagnosticLineage(t, bus, 0)
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "boom", http.StatusBadGateway)
+		}))
+		defer server.Close()
+
+		bus := &telemetryBusStub{}
+		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			Tools: map[string]runtimecontracts.ToolSchemaEntry{
+				"check_domain": {
+					Description: "Check domain availability",
+					HandlerType: "http",
+					InputSchema: runtimecontracts.ToolInputSchema{
+						Type:     "object",
+						Required: []string{"domain"},
+						Properties: map[string]runtimecontracts.ToolInputSchema{
+							"domain": {Type: "string"},
+						},
+					},
+					HTTP: &runtimecontracts.HTTPToolSpec{
+						Method: "GET",
+						URL:    server.URL + "?domain={{input.domain}}",
+					},
+				},
+			},
+		})
+		actor := models.AgentConfig{ID: "selected-agent", EntityID: "entity-typed-lineage", Tools: []string{"check_domain"}}
+		exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
+
+		if _, err := exec.Execute(selectedForkToolContext(actor), "check_domain", map[string]any{"domain": "example.com"}); err == nil {
+			t.Fatal("expected execution failure")
+		}
+		if len(bus.logs) != 1 || bus.logs[0].Action != "tool_execution_failed" {
+			t.Fatalf("logs = %#v, want tool_execution_failed", bus.logs)
+		}
+		assertToolExecutorDiagnosticLineage(t, bus, 0)
+	})
+}
+
 func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) {
 	bus := &telemetryBusStub{}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -267,6 +413,37 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 	if got := bus.published[0].TaskID; got != "task-inbound" {
 		t.Fatalf("published event task_id = %q, want task-inbound", got)
 	}
+}
+
+func TestExecutorTelemetry_PreservesTypedLineageForEmitToolOutcome(t *testing.T) {
+	bus := &telemetryBusStub{}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"category.assessed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Type: "object",
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"category": {Type: "string"},
+					},
+				},
+				Required: []string{"category"},
+			},
+		},
+	})
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
+	actor := models.AgentConfig{
+		ID:         "selected-agent",
+		EntityID:   "entity-typed-lineage",
+		EmitEvents: []string{"category.assessed"},
+	}
+
+	if _, err := exec.Execute(selectedForkToolContext(actor), "emit_category_assessed", map[string]any{"category": "AP automation"}); err != nil {
+		t.Fatalf("Execute(emit): %v", err)
+	}
+	if len(bus.logs) != 1 || bus.logs[0].Action != emitToolOutcomeAction {
+		t.Fatalf("logs = %#v, want %s", bus.logs, emitToolOutcomeAction)
+	}
+	assertToolExecutorDiagnosticLineage(t, bus, 0)
 }
 
 func TestExecutorTelemetry_EmitToolLogsSchemaValidationFailureSeparatelyFromPublishFailure(t *testing.T) {

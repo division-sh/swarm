@@ -3854,8 +3854,9 @@ run_model:
       runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage under
       runtime.run_fork.selected_contract_execution.fork_local_runtime_container and the fork-local runtime/platform
       lineage policy. This owner is the runtime-internal typed model carried by selected-fork EventBus, AgentManager,
-      RuntimeLogger, and LLM/runtime diagnostic producers for fresh fork-run platform diagnostics and platform-control
-      outputs. The model carries the fork run ID, subject event ID/type, causal parent event ID, row category,
+      RuntimeLogger, LLM/runtime diagnostic producers, and selected-execution tool-executor diagnostics, including
+      MCP turn-context bridges only as selected-fork context carriers, for fresh fork-run platform diagnostics and
+      platform-control outputs. The model carries the fork run ID, subject event ID/type, causal parent event ID, row category,
       selected-fork ownership context, and source/fork/operator classification; the authoritative persisted truth remains
       the existing event ParentEventID/events.source_event_id lineage written by the store/runtime logger. Activation and
       selected-tree validation must continue to consume only persisted fork-run lineage, not in-memory descriptors,
@@ -4125,7 +4126,8 @@ run_model:
         split siblings.'
       3g1b_selected_contract_fork_local_runtime_typed_lineage: 'For selected-contract mutating fork execution,
         runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage owns the in-memory typed lineage
-        model used by selected-fork runtime diagnostics and platform-control producers. It carries fork run ID, subject
+        model used by selected-fork runtime diagnostics, selected-execution tool-executor diagnostics, MCP turn-context
+        bridges that preserve selected-fork context, and platform-control producers. It carries fork run ID, subject
         event ID/type, causal parent event ID, row category, selected-fork owner context, and source/fork/operator
         classification, then compiles that model to the existing persisted ParentEventID/events.source_event_id truth.
         Activation and selected-tree validation must continue to consume persisted lineage only, and unrelated/source

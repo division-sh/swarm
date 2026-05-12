@@ -462,7 +462,7 @@ func (e *Executor) emitToolExecutionEvent(
 	if strings.TrimSpace(actor.Role) != "" {
 		detail["actor_role"] = strings.TrimSpace(actor.Role)
 	}
-	logger.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+	logger.LogRuntime(toolExecutorRuntimeLogContext(ctx), runtimepipeline.RuntimeLogEntry{
 		Level:      diaglog.NormalizeLevel(level),
 		Message:    toolExecutionMessage(toolName, execErr),
 		Component:  "tool-executor",
