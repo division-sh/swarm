@@ -16,6 +16,7 @@ import (
 	"swarm/internal/runtime/core/toolcapabilities"
 	"swarm/internal/runtime/core/toolidentity"
 	"swarm/internal/runtime/core/toolresultpolicy"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	llm "swarm/internal/runtime/llm"
 	runtimerterr "swarm/internal/runtime/rterrors"
 )
@@ -1785,6 +1786,56 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 		t.Fatalf("mcpExecutionContext: %v", err)
 	}
 	_ = ctx
+}
+
+func TestGatewayExecutionContext_RestoresTypedRuntimeLineageOnResolvedTurn(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	g := NewGateway(nil, "", GatewayHooks{
+		ResolveTurnContext: registry.ResolveTurnContext,
+		WithActor:          models.WithActor,
+		WithInboundEvent:   runtimebus.WithInboundEvent,
+	})
+	putTestTurnContext(t, registry, "ctx-lineage", TurnContext{
+		Actor: models.AgentConfig{ID: "validation-coordinator", Role: "validation"},
+		Inbound: events.Event{
+			ID:    "3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
+			Type:  events.EventType("validation/validation.package_ready"),
+			RunID: "a6f6861a-d154-4d38-a2d6-1388f5bb6daf",
+		},
+		HasInbound: true,
+		RuntimeLineage: runtimecorrelation.RuntimeLineage{
+			Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
+			RunID:               "a6f6861a-d154-4d38-a2d6-1388f5bb6daf",
+			SubjectEventID:      "3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
+			SubjectEventType:    "validation/validation.package_ready",
+			ParentEventID:       "3134bdf0-2ce0-4260-93bd-f0a45371b7d7",
+			RowCategory:         runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer,
+			SelectedForkOwner:   "runtime.run_fork.selected_contract_execution.fork_local_runtime_container",
+			Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
+			SelectedForkContext: true,
+		},
+		HasRuntimeLineage: true,
+		CreatedAt:         time.Now().UTC(),
+		ExpiresAt:         time.Now().UTC().Add(time.Hour),
+	})
+
+	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-lineage")
+	ctx, err := g.mcpExecutionContext(req, "get_entity")
+	if err != nil {
+		t.Fatalf("mcpExecutionContext: %v", err)
+	}
+	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
+	if !ok {
+		t.Fatal("runtime lineage missing from gateway execution context")
+	}
+	if lineage.Owner != "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage" ||
+		lineage.SubjectEventID != "3134bdf0-2ce0-4260-93bd-f0a45371b7d7" ||
+		lineage.ParentEventID != "3134bdf0-2ce0-4260-93bd-f0a45371b7d7" ||
+		lineage.RowCategory != runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer ||
+		lineage.Classification != runtimecorrelation.RuntimeLineageClassificationForkLocal ||
+		!lineage.SelectedForkContext {
+		t.Fatalf("runtime lineage = %#v", lineage)
+	}
 }
 
 func TestGatewayMCPExecutionContext_KeepsOtherRegistryTokensValidAfterGlobalEpochBump(t *testing.T) {

@@ -86,7 +86,7 @@ func (e *Executor) logEmitToolOutcome(
 		}
 		detail["retryable"] = runtimeErr.Retryable
 	}
-	logger.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+	logger.LogRuntime(toolExecutorRuntimeLogContext(ctx), runtimepipeline.RuntimeLogEntry{
 		Level:     diaglog.NormalizeLevel(level),
 		Message:   emitToolOutcomeMessage(toolName, outcome, execErr),
 		Component: "tool-executor",

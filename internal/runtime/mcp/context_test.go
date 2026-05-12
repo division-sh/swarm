@@ -1,10 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	models "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 func TestTurnContextRegistry_ResetIsScopedToRegistry(t *testing.T) {
@@ -33,5 +37,48 @@ func TestTurnContextRegistry_ResetIsScopedToRegistry(t *testing.T) {
 	}
 	if turn.Actor.ID != "agent-b" {
 		t.Fatalf("registryB actor id = %q, want agent-b", turn.Actor.ID)
+	}
+}
+
+func TestTurnContextRegistry_PreservesTypedRuntimeLineage(t *testing.T) {
+	registry := NewTurnContextRegistry(models.ActorFromContext)
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "selected-agent"})
+	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
+		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
+		RunID:               "9b06692c-353c-4479-8e92-70927f5e4937",
+		SubjectEventID:      "4078d35c-3a8a-40ea-a5f5-01b35a9ff59a",
+		SubjectEventType:    "validation/validation.package_ready",
+		ParentEventID:       "4078d35c-3a8a-40ea-a5f5-01b35a9ff59a",
+		RowCategory:         runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer,
+		SelectedForkOwner:   "runtime.run_fork.selected_contract_execution.fork_local_runtime_container",
+		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
+		SelectedForkContext: true,
+	})
+	ctx = runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:    "4078d35c-3a8a-40ea-a5f5-01b35a9ff59a",
+		Type:  events.EventType("validation/validation.package_ready"),
+		RunID: "9b06692c-353c-4479-8e92-70927f5e4937",
+	})
+
+	token := registry.RegisterTurnContext(ctx)
+	if token == "" {
+		t.Fatal("RegisterTurnContext returned empty token")
+	}
+
+	turn, ok := registry.ResolveTurnContext(token)
+	if !ok {
+		t.Fatal("ResolveTurnContext returned false")
+	}
+	if !turn.HasRuntimeLineage {
+		t.Fatal("turn context did not preserve runtime lineage")
+	}
+	if got := turn.RuntimeLineage.Owner; got != "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage" {
+		t.Fatalf("owner = %q", got)
+	}
+	if got := turn.RuntimeLineage.ParentEventID; got != "4078d35c-3a8a-40ea-a5f5-01b35a9ff59a" {
+		t.Fatalf("parent event = %q", got)
+	}
+	if got := turn.RuntimeLineage.RowCategory; got != runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer {
+		t.Fatalf("row category = %q", got)
 	}
 }
