@@ -115,10 +115,18 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if err := ensureArtifactRepoInitialized(ctx, repoPath, commitTime(execCtx.Request.Event.CreatedAt)); err != nil {
 		return fail(err)
 	}
+	if previousTree, found, err := artifactRepoRequestTreeHash(ctx, repoPath, requestID); err != nil {
+		return fail(err)
+	} else if found {
+		if previousTree != treeHash {
+			return fail(fmt.Errorf("artifact_repo_commit request_id %s conflicts with previously committed tree %s", requestID, previousTree))
+		}
+		return nil
+	}
 	if err := writeArtifactRepoFiles(repoPath, files); err != nil {
 		return fail(err)
 	}
-	ref, err := commitArtifactRepoFiles(ctx, repoPath, files, sourceEventID, requestID, optionalArtifactString(execCtx.Base, spec.Author), commitTime(execCtx.Request.Event.CreatedAt))
+	ref, err := commitArtifactRepoFiles(ctx, repoPath, files, sourceEventID, requestID, treeHash, optionalArtifactString(execCtx.Base, spec.Author), commitTime(execCtx.Request.Event.CreatedAt))
 	if err != nil {
 		return fail(err)
 	}
@@ -415,14 +423,24 @@ func writeArtifactRepoFiles(repoPath string, files []artifactRepoPreparedFile) e
 	return nil
 }
 
-func commitArtifactRepoFiles(ctx context.Context, repoPath string, files []artifactRepoPreparedFile, sourceEventID, requestID, author string, when time.Time) (string, error) {
-	if _, err := runArtifactGit(ctx, repoPath, nil, "add", "--all"); err != nil {
+func commitArtifactRepoFiles(ctx context.Context, repoPath string, files []artifactRepoPreparedFile, sourceEventID, requestID, treeHash, author string, when time.Time) (string, error) {
+	if _, err := runArtifactGit(ctx, repoPath, nil, "reset", "--"); err != nil {
+		return "", err
+	}
+	args := []string{"add", "--"}
+	for _, file := range files {
+		args = append(args, file.Path)
+	}
+	if _, err := runArtifactGit(ctx, repoPath, nil, args...); err != nil {
 		return "", err
 	}
 	if _, err := runArtifactGit(ctx, repoPath, nil, "diff", "--cached", "--quiet"); err == nil {
 		return artifactRepoHead(ctx, repoPath)
 	}
-	msg := fmt.Sprintf("artifact: commit request %s", requestID)
+	if err := verifyArtifactRepoStagedPaths(ctx, repoPath, files); err != nil {
+		return "", err
+	}
+	msg := fmt.Sprintf("artifact: commit request %s\n\nSwarm-Request-Id: %s\nSwarm-Source-Event-Id: %s\nSwarm-Tree-Hash: %s", requestID, requestID, sourceEventID, treeHash)
 	env := gitCommitEnv(when)
 	if author = strings.TrimSpace(author); author != "" {
 		env = append(env, "GIT_AUTHOR_NAME="+author, "GIT_AUTHOR_EMAIL=artifact-author@localhost")
@@ -431,6 +449,27 @@ func commitArtifactRepoFiles(ctx context.Context, repoPath string, files []artif
 		return "", err
 	}
 	return artifactRepoHead(ctx, repoPath)
+}
+
+func verifyArtifactRepoStagedPaths(ctx context.Context, repoPath string, files []artifactRepoPreparedFile) error {
+	out, err := runArtifactGit(ctx, repoPath, nil, "diff", "--cached", "--name-only")
+	if err != nil {
+		return err
+	}
+	allowed := map[string]struct{}{}
+	for _, file := range files {
+		allowed[file.Path] = struct{}{}
+	}
+	for _, raw := range strings.Split(out, "\n") {
+		staged := strings.TrimSpace(raw)
+		if staged == "" {
+			continue
+		}
+		if _, ok := allowed[staged]; !ok {
+			return fmt.Errorf("artifact_repo staged non-allowlisted path %s", staged)
+		}
+	}
+	return nil
 }
 
 func artifactRepoHead(ctx context.Context, repoPath string) (string, error) {
@@ -496,6 +535,41 @@ func (pc *PipelineCoordinator) persistArtifactRepoResult(ctx context.Context, ex
 	}
 	repo := pipelineEngineStateRepo{coordinator: pc}
 	return repo.SaveState(ctx, identity.NormalizeEntityID(execCtx.Request.EntityID.String()), mutation)
+}
+
+func artifactRepoRequestTreeHash(ctx context.Context, repoPath, requestID string) (string, bool, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return "", false, nil
+	}
+	out, err := runArtifactGit(ctx, repoPath, nil, "log", "--format=%B%x00")
+	if err != nil {
+		return "", false, err
+	}
+	for _, message := range strings.Split(out, "\x00") {
+		foundRequest := ""
+		foundTree := ""
+		for _, line := range strings.Split(message, "\n") {
+			key, value, ok := strings.Cut(line, ":")
+			if !ok {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "swarm-request-id":
+				foundRequest = strings.TrimSpace(value)
+			case "swarm-tree-hash":
+				foundTree = strings.TrimSpace(value)
+			}
+		}
+		if foundRequest != requestID {
+			continue
+		}
+		if foundTree == "" {
+			return "", true, fmt.Errorf("artifact_repo_commit request_id %s has no recorded tree hash", requestID)
+		}
+		return foundTree, true, nil
+	}
+	return "", false, nil
 }
 
 func artifactRepoManifest(repoID, runID, verticalID, sourceValidationCaseID, requestID, sourceEventID, repoURL, ref, treeHash string, files []artifactRepoPreparedFile) map[string]any {

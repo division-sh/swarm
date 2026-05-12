@@ -784,6 +784,25 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	if got := strings.TrimSpace(asString(replayed.Metadata["current_ref"])); got != ref {
 		t.Fatalf("replay current_ref = %q, want %q", got, ref)
 	}
+
+	if err := os.MkdirAll(filepath.Join(repoPath, "notes"), 0o755); err != nil {
+		t.Fatalf("create extra dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "notes", "extra.txt"), []byte("should not be committed\n"), 0o644); err != nil {
+		t.Fatalf("write extra file: %v", err)
+	}
+	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, replayed.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Demo\nrank: 3\n")
+	ok, err = pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx)
+	if !ok || err != nil {
+		t.Fatalf("next ExecuteAction ok=%v err=%v", ok, err)
+	}
+	tree, err := runArtifactGit(ctx, repoPath, nil, "ls-tree", "-r", "--name-only", "HEAD")
+	if err != nil {
+		t.Fatalf("git ls-tree: %v", err)
+	}
+	if strings.Contains(tree, "notes/extra.txt") {
+		t.Fatalf("non-allowlisted file was committed:\n%s", tree)
+	}
 }
 
 func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAllowlist(t *testing.T) {
@@ -863,7 +882,16 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 		t.Fatalf("load workflow instance: %v", err)
 	}
 
-	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, instance.Metadata, "55555555-5555-5555-5555-555555555555", "44444444-4444-4444-4444-444444444444", "name: Changed\n")
+	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, instance.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Next\n")
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx); err != nil {
+		t.Fatalf("next ExecuteAction: %v", err)
+	}
+	afterNext, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance after next request: %v", err)
+	}
+
+	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Metadata, "77777777-7777-7777-7777-777777777777", "44444444-4444-4444-4444-444444444444", "name: Changed\n")
 	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
 	if !ok {
 		t.Fatal("expected artifact_repo_commit action to be claimed")
