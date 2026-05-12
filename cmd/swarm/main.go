@@ -185,8 +185,10 @@ func main() {
 		log.Fatalf("load v1 api mailbox approval routes: %v", err)
 	}
 	var apiEntities apiv1.EntityReadStore
+	var apiAgentConversations apiv1.AgentConversationReadStore
 	if stores.Postgres != nil {
 		apiEntities = stores.Postgres
+		apiAgentConversations = stores.Postgres
 	}
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath: resolvedPlatformSpecPath,
@@ -199,6 +201,7 @@ func main() {
 			Runs:                  stores.Postgres,
 			Observability:         stores.Postgres,
 			Entities:              apiEntities,
+			AgentConversations:    apiAgentConversations,
 			Mailbox:               stores.Postgres,
 			Idempotency:           stores.Postgres,
 			Events:                rt.Bus,

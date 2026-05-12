@@ -94,6 +94,22 @@ func projectedTurnSummaryConversationFields(p runtimellm.TurnSummaryTurnBlockDat
 	return p.AssistantVisibleOutput, p.Outcome, cloneStringSlice(p.ReasoningBlocks), cloneStringSlice(p.ProgressUpdates), projectedTurnSummaryToolResultsTransport(p)
 }
 
+func summarizeConversationTurnBlocks(blocks []ConversationTurnBlock) (string, string, []string, []string, []ConversationToolResult, error) {
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		return "", "", nil, nil, nil, err
+	}
+	summary, ok, err := decodeTurnSummaryProjection(raw)
+	if err != nil {
+		return "", "", nil, nil, nil, err
+	}
+	if !ok {
+		return "", "", nil, nil, nil, nil
+	}
+	assistant, outcome, reasoning, progress, toolResults := projectedTurnSummaryConversationFields(summary)
+	return assistant, outcome, reasoning, progress, toolResults, nil
+}
+
 func projectedTurnSummaryToolResultsTransport(p runtimellm.TurnSummaryTurnBlockData) []ConversationToolResult {
 	if len(p.ToolResults) == 0 {
 		return nil

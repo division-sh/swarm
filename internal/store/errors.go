@@ -14,9 +14,15 @@ var ErrInvalidObservabilityCursor = errors.New("store: invalid observability cur
 
 var ErrEntityNotFound = errors.New("store: entity not found")
 
+var ErrAgentNotFound = errors.New("store: agent not found")
+
+var ErrSessionNotFound = errors.New("store: session not found")
+
 var ErrAmbiguousEntityRunID = errors.New("store: ambiguous entity run_id")
 
 var ErrInvalidEntityCursor = errors.New("store: invalid entity cursor")
+
+var ErrInvalidConversationCursor = errors.New("store: invalid conversation cursor")
 
 var ErrInvalidEntityReadParam = errors.New("store: invalid entity read parameter")
 

@@ -23,6 +23,11 @@ type AgentReader interface {
 	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
 }
 
+type canonicalAgentReader interface {
+	ListOperatorAgents(ctx context.Context, opts store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
+	LoadOperatorAgent(ctx context.Context, agentID string) (store.OperatorAgentDetail, error)
+}
+
 type MailboxReader interface {
 	ListMailboxItems(ctx context.Context, status string, limit int) ([]runtimetools.MailboxItem, error)
 	GetMailboxItem(ctx context.Context, id string) (runtimetools.MailboxItem, error)
@@ -165,6 +170,11 @@ type ConversationTurnBlock struct {
 type ConversationReader interface {
 	List(ctx context.Context, limit int) ([]ConversationSummary, error)
 	Get(ctx context.Context, sessionID string) (ConversationDetail, bool, error)
+}
+
+type canonicalConversationReader interface {
+	ListOperatorConversations(ctx context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
+	LoadOperatorConversation(ctx context.Context, sessionID string) (store.OperatorConversationDetail, error)
 }
 
 type ObservabilityReader interface {
@@ -411,33 +421,29 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
-	if h.agents == nil {
+	reader, ok := h.agents.(canonicalAgentReader)
+	if h.agents == nil || !ok {
 		writeJSONError(w, http.StatusNotImplemented, errors.New("agents reader is not configured"))
 		return
 	}
-	if richer, ok := h.agents.(genericAgentProvider); ok {
-		rows, err := richer.ListGenericAgents(r.Context())
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"agents": rows})
-		return
-	}
-	rows, err := h.agents.LoadAgents(r.Context())
+	result, err := reader.ListOperatorAgents(r.Context(), store.OperatorAgentListOptions{
+		Flow: strings.TrimSpace(r.URL.Query().Get("flow")),
+		Role: strings.TrimSpace(r.URL.Query().Get("role")),
+	})
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return
 	}
-	out := make([]genericAgent, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, toGenericAgent(row))
+	out := make([]genericAgent, 0, len(result.Agents))
+	for _, row := range result.Agents {
+		out = append(out, genericAgentFromOperatorSummary(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"agents": out})
 }
 
 func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
-	if h.agents == nil {
+	reader, ok := h.agents.(canonicalAgentReader)
+	if h.agents == nil || !ok {
 		writeJSONError(w, http.StatusNotImplemented, errors.New("agents reader is not configured"))
 		return
 	}
@@ -446,32 +452,16 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
 		return
 	}
-	if richer, ok := h.agents.(genericAgentProvider); ok {
-		row, ok, err := richer.GetGenericAgent(r.Context(), id)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err)
-			return
-		}
-		if !ok {
+	row, err := reader.LoadOperatorAgent(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrAgentNotFound) {
 			writeJSONError(w, http.StatusNotFound, errors.New("agent not found"))
 			return
 		}
-		writeJSON(w, http.StatusOK, row)
-		return
-	}
-	rows, err := h.agents.LoadAgents(r.Context())
-	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return
 	}
-	for _, row := range rows {
-		if strings.TrimSpace(row.Config.ID) != id {
-			continue
-		}
-		writeJSON(w, http.StatusOK, toGenericAgent(row))
-		return
-	}
-	writeJSONError(w, http.StatusNotFound, errors.New("agent not found"))
+	writeJSON(w, http.StatusOK, genericAgentFromOperatorSummary(row.Agent))
 }
 
 func (h *Handler) handleAgentDirective(w http.ResponseWriter, r *http.Request) {
@@ -537,21 +527,31 @@ func (h *Handler) handleAgentReplay(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleConversations(w http.ResponseWriter, r *http.Request) {
-	if h.conversations == nil {
+	reader, ok := h.conversations.(canonicalConversationReader)
+	if h.conversations == nil || !ok {
 		writeJSONError(w, http.StatusNotImplemented, errors.New("conversation reader is not configured"))
 		return
 	}
-	limit := intQuery(r, "limit", 100)
-	rows, err := h.conversations.List(r.Context(), limit)
+	result, err := reader.ListOperatorConversations(r.Context(), store.OperatorConversationListOptions{
+		AgentID: strings.TrimSpace(r.URL.Query().Get("agent_id")),
+		RunID:   strings.TrimSpace(r.URL.Query().Get("run_id")),
+		Cursor:  strings.TrimSpace(r.URL.Query().Get("cursor")),
+		Limit:   intQuery(r, "limit", 100),
+	})
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return
+	}
+	rows := make([]ConversationSummary, 0, len(result.Conversations))
+	for _, item := range result.Conversations {
+		rows = append(rows, conversationSummaryFromOperator(item))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"conversations": rows})
 }
 
 func (h *Handler) handleConversationDetail(w http.ResponseWriter, r *http.Request) {
-	if h.conversations == nil {
+	reader, ok := h.conversations.(canonicalConversationReader)
+	if h.conversations == nil || !ok {
 		writeJSONError(w, http.StatusNotImplemented, errors.New("conversation reader is not configured"))
 		return
 	}
@@ -560,16 +560,20 @@ func (h *Handler) handleConversationDetail(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusBadRequest, errors.New("session id is required"))
 		return
 	}
-	row, ok, err := h.conversations.Get(r.Context(), sessionID)
+	row, err := reader.LoadOperatorConversation(r.Context(), sessionID)
 	if err != nil {
+		if errors.Is(err, store.ErrSessionNotFound) {
+			writeJSONError(w, http.StatusNotFound, errors.New("conversation not found"))
+			return
+		}
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if !ok {
+	if strings.TrimSpace(row.Conversation.SessionID) == "" {
 		writeJSONError(w, http.StatusNotFound, errors.New("conversation not found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, row)
+	writeJSON(w, http.StatusOK, conversationDetailFromOperator(row))
 }
 
 func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -1045,6 +1049,71 @@ func toGenericAgent(row runtimemanager.PersistedAgent) genericAgent {
 		Subscriptions:   append([]string(nil), row.Config.Subscriptions...),
 		Permissions:     append([]string(nil), row.Config.Permissions...),
 		StartedAt:       formatTime(row.StartedAt),
+	}
+}
+
+func genericAgentFromOperatorSummary(row store.OperatorAgentSummary) genericAgent {
+	return genericAgent{
+		ID:                  strings.TrimSpace(row.AgentID),
+		Type:                strings.TrimSpace(row.Type),
+		Role:                strings.TrimSpace(row.Role),
+		Mode:                strings.TrimSpace(row.Mode),
+		Status:              firstString(strings.TrimSpace(row.DashboardStatus), strings.TrimSpace(row.Status)),
+		State:               strings.TrimSpace(row.DashboardState),
+		BlockingLayer:       strings.TrimSpace(row.BlockingLayer),
+		EntityID:            strings.TrimSpace(row.EntityID),
+		ParentAgentID:       strings.TrimSpace(row.ParentAgentID),
+		CoordinatorID:       strings.TrimSpace(row.CoordinatorID),
+		HiredBy:             strings.TrimSpace(row.HiredBy),
+		TemplateVersion:     strings.TrimSpace(row.TemplateVersion),
+		BudgetEnvelope:      row.BudgetEnvelope,
+		Subscriptions:       append([]string(nil), row.Subscriptions...),
+		Permissions:         append([]string(nil), row.Permissions...),
+		PendingEvents:       row.PendingEvents,
+		OldestPendingAgeSec: row.OldestPendingAgeSec,
+		InFlightTurn:        row.InFlightTurn,
+		InFlightSeconds:     row.InFlightSeconds,
+		LockOwner:           strings.TrimSpace(row.LockOwner),
+		LockExpiresAt:       formatTime(row.LockExpiresAt),
+		Failures24h:         row.Failures24h,
+		DeadLetters24h:      row.DeadLetters24h,
+		TurnCount:           row.TurnCount,
+		TurnLimit:           row.TurnLimit,
+		Turns24h:            row.Turns24h,
+		NearBreaker:         row.NearBreaker,
+		SessionID:           strings.TrimSpace(row.SessionID),
+		ProviderSessionID:   strings.TrimSpace(row.ProviderSessionID),
+		CurrentTaskID:       strings.TrimSpace(row.CurrentTaskID),
+		LastTool:            dashboardAgentLastTool(row.LastTool),
+		LiveTurn:            dashboardLiveTurn(row.LiveTurn),
+		StartedAt:           formatTime(row.StartedAt),
+	}
+}
+
+func dashboardAgentLastTool(item *store.OperatorAgentTool) *AgentLastTool {
+	if item == nil {
+		return nil
+	}
+	return &AgentLastTool{
+		Name:      strings.TrimSpace(item.Name),
+		ToolUseID: strings.TrimSpace(item.ToolUseID),
+		OK:        item.OK,
+		Result:    append(json.RawMessage(nil), item.Result...),
+	}
+}
+
+func dashboardLiveTurn(item *store.OperatorLiveTurn) *OperatorLiveTurn {
+	if item == nil {
+		return nil
+	}
+	return &OperatorLiveTurn{
+		TurnID:                 strings.TrimSpace(item.TurnID),
+		TaskID:                 strings.TrimSpace(item.TaskID),
+		ParseOK:                item.ParseOK,
+		AssistantVisibleOutput: strings.TrimSpace(item.AssistantVisibleOutput),
+		Outcome:                strings.TrimSpace(item.Outcome),
+		ProgressUpdates:        append([]string(nil), item.ProgressUpdates...),
+		LastTool:               dashboardAgentLastTool(item.LastTool),
 	}
 }
 

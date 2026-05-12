@@ -3,12 +3,9 @@ package server
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
-	"time"
 
-	runtimellm "swarm/internal/runtime/llm"
 	"swarm/internal/store"
 )
 
@@ -20,13 +17,38 @@ const (
 type SQLConversationReader struct {
 	db        *sql.DB
 	capSource schemaCapabilitySource
+	owner     *store.OperatorAgentConversationReadSurface
 }
 
 func NewSQLConversationReader(db *sql.DB, capSource schemaCapabilitySource) *SQLConversationReader {
 	if db == nil {
 		return nil
 	}
-	return &SQLConversationReader{db: db, capSource: capSource}
+	return &SQLConversationReader{
+		db:        db,
+		capSource: capSource,
+		owner:     store.NewOperatorConversationReadSurface(db, capSource),
+	}
+}
+
+func (r *SQLConversationReader) ListOperatorConversations(ctx context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error) {
+	if r == nil || r.owner == nil {
+		if _, err := r.resolveCapabilities(ctx); err != nil {
+			return store.OperatorConversationListResult{}, err
+		}
+		return store.OperatorConversationListResult{}, errors.New("conversation reader is not configured")
+	}
+	return r.owner.ListOperatorConversations(ctx, opts)
+}
+
+func (r *SQLConversationReader) LoadOperatorConversation(ctx context.Context, sessionID string) (store.OperatorConversationDetail, error) {
+	if r == nil || r.owner == nil {
+		if _, err := r.resolveCapabilities(ctx); err != nil {
+			return store.OperatorConversationDetail{}, err
+		}
+		return store.OperatorConversationDetail{}, store.ErrSessionNotFound
+	}
+	return r.owner.LoadOperatorConversation(ctx, sessionID)
 }
 
 func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]ConversationSummary, error) {
@@ -46,60 +68,13 @@ func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]Conversa
 	if err := requireConversationTurnCapabilities(caps); err != nil {
 		return nil, err
 	}
-	sources := conversationQuerySources(caps)
-	latestTurnBlocksExpr := `'[]'::jsonb`
-	if caps.Conversations.TurnBlocks {
-		latestTurnBlocksExpr = `COALESCE(turn_blocks, '[]'::jsonb)`
-	}
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT
-			conversations.session_id,
-			conversations.agent_id,
-			conversations.kind,
-			COALESCE(conversations.scope_key, ''),
-			COALESCE(conversations.scope, ''),
-			COALESCE(conversations.runtime_mode, ''),
-			COALESCE(conversations.status, ''),
-			COALESCE(conversations.turn_count, 0),
-			COALESCE(conversations.runtime_state, '{}'::jsonb),
-			COALESCE(latest_turn.turn_id, ''),
-			COALESCE(latest_turn.task_id, ''),
-			COALESCE(latest_turn.parse_ok, false),
-			COALESCE(latest_turn.turn_blocks, '[]'::jsonb),
-			conversations.updated_at
-		FROM (
-			%s
-		) conversations
-		LEFT JOIN LATERAL (
-			SELECT
-				turn_id::text AS turn_id,
-				COALESCE(task_id, '') AS task_id,
-				parse_ok,
-				%s AS turn_blocks
-			FROM agent_turns
-			WHERE agent_id = conversations.agent_id
-			  AND session_id::text = conversations.session_id
-			ORDER BY created_at DESC, turn_id DESC
-			LIMIT 1
-		) latest_turn ON true
-		ORDER BY updated_at DESC, agent_id ASC
-		LIMIT $1
-	`, strings.Join(sources, "\nUNION ALL\n"), latestTurnBlocksExpr), limit)
+	rows, err := r.owner.ListDashboardOperatorConversations(ctx, limit)
 	if err != nil {
-		return nil, fmt.Errorf("list conversations: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-
-	out := []ConversationSummary{}
-	for rows.Next() {
-		item, err := scanConversationSummary(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list conversations rows: %w", err)
+	out := make([]ConversationSummary, 0, len(rows))
+	for _, item := range rows {
+		out = append(out, conversationSummaryFromOperator(item))
 	}
 	return out, nil
 }
@@ -119,272 +94,14 @@ func (r *SQLConversationReader) Get(ctx context.Context, sessionID string) (Conv
 	if err := requireConversationSurfaceCapabilities(caps); err != nil {
 		return ConversationDetail{}, false, err
 	}
-	sources := conversationQuerySources(caps)
-
-	row := r.db.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT
-			session_id,
-			agent_id,
-			kind,
-			COALESCE(scope_key, ''),
-			COALESCE(scope, ''),
-			COALESCE(runtime_mode, ''),
-			COALESCE(status, ''),
-			COALESCE(turn_count, 0),
-			COALESCE(runtime_state, '{}'::jsonb),
-			COALESCE(conversation, '[]'::jsonb),
-			updated_at
-		FROM (
-			%s
-		) conversations
-		WHERE session_id = $1
-		LIMIT 1
-	`, strings.Join(sources, "\nUNION ALL\n")), sessionID)
-
-	item, err := scanConversationDetail(row)
-	if err == sql.ErrNoRows {
-		return ConversationDetail{}, false, nil
-	}
+	item, ok, err := r.owner.LoadDashboardOperatorConversation(ctx, sessionID)
 	if err != nil {
-		return ConversationDetail{}, false, fmt.Errorf("get conversation: %w", err)
-	}
-	item.Turns, err = r.loadConversationTurns(ctx, item.AgentID, item.SessionID)
-	if err != nil {
-		return ConversationDetail{}, false, fmt.Errorf("load conversation turns: %w", err)
-	}
-	return item, true, nil
-}
-
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanConversationSummary(scanner rowScanner) (ConversationSummary, error) {
-	var (
-		item            ConversationSummary
-		runtimeStateRaw []byte
-		turnID          string
-		taskID          string
-		parseOK         bool
-		turnBlocksRaw   []byte
-	)
-	if err := scanner.Scan(
-		&item.SessionID,
-		&item.AgentID,
-		&item.Kind,
-		&item.ScopeKey,
-		&item.Scope,
-		&item.RuntimeMode,
-		&item.Status,
-		&item.TurnCount,
-		&runtimeStateRaw,
-		&turnID,
-		&taskID,
-		&parseOK,
-		&turnBlocksRaw,
-		&item.UpdatedAt,
-	); err != nil {
-		return ConversationSummary{}, err
-	}
-	runtimeState, err := store.DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
-	if err != nil {
-		return ConversationSummary{}, fmt.Errorf("decode conversation runtime_state: %w", err)
-	}
-	item.Summary = runtimeState.Summary
-	item.Metadata = projectConversationSummaryMetadata(runtimeState)
-	item.Metadata.LiveTurn, err = projectLatestTurn(taskID, parseOK, turnID, turnBlocksRaw)
-	if err != nil {
-		return ConversationSummary{}, fmt.Errorf("decode conversation live_turn: %w", err)
-	}
-	return item, nil
-}
-
-func scanConversationDetail(scanner rowScanner) (ConversationDetail, error) {
-	var (
-		item            ConversationDetail
-		runtimeStateRaw []byte
-		messagesRaw     []byte
-	)
-	if err := scanner.Scan(
-		&item.SessionID,
-		&item.AgentID,
-		&item.Kind,
-		&item.ScopeKey,
-		&item.Scope,
-		&item.RuntimeMode,
-		&item.Status,
-		&item.TurnCount,
-		&runtimeStateRaw,
-		&messagesRaw,
-		&item.UpdatedAt,
-	); err != nil {
-		return ConversationDetail{}, err
-	}
-	runtimeState, err := store.DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
-	if err != nil {
-		return ConversationDetail{}, fmt.Errorf("decode conversation runtime_state: %w", err)
-	}
-	item.Summary = runtimeState.Summary
-	item.RuntimeState = projectConversationRuntimeState(runtimeState)
-	item.Messages, err = decodeJSONArray[ConversationMessage](messagesRaw)
-	if err != nil {
-		return ConversationDetail{}, fmt.Errorf("decode conversation messages: %w", err)
-	}
-	if item.Messages == nil {
-		item.Messages = []ConversationMessage{}
-	}
-	return item, nil
-}
-
-func decodeJSONObjectRaw(raw []byte) (json.RawMessage, error) {
-	if len(raw) == 0 {
-		return json.RawMessage(`{}`), nil
-	}
-	var out map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return append(json.RawMessage(nil), raw...), nil
-}
-
-func decodeJSONMap(raw []byte) (map[string]any, error) {
-	if len(raw) == 0 {
-		return map[string]any{}, nil
-	}
-	out := map[string]any{}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func decodeJSONArray[T any](raw []byte) ([]T, error) {
-	if len(raw) == 0 {
-		return []T{}, nil
-	}
-	out := []T{}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func decodeJSONStringMap(raw []byte) (map[string]string, error) {
-	if len(raw) == 0 {
-		return map[string]string{}, nil
-	}
-	out := map[string]string{}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agentID, sessionID string) ([]ConversationTurn, error) {
-	if r == nil || r.db == nil {
-		return nil, nil
-	}
-	agentID = strings.TrimSpace(agentID)
-	sessionID = strings.TrimSpace(sessionID)
-	if agentID == "" || sessionID == "" {
-		return []ConversationTurn{}, nil
-	}
-	caps, err := r.resolveCapabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := requireConversationTurnCapabilities(caps); err != nil {
-		return nil, err
-	}
-	query := `
-		SELECT
-			turn_id::text,
-			agent_id,
-			session_id::text,
-			COALESCE(runtime_mode, ''),
-			COALESCE(scope_key, ''),
-			COALESCE(entity_id::text, ''),
-			COALESCE(trigger_event_id::text, ''),
-			COALESCE(trigger_event_type, ''),
-			COALESCE(task_id, ''),
-			COALESCE(available_tools, '[]'::jsonb),
-			COALESCE(tool_calls, '[]'::jsonb),
-			COALESCE(emitted_events, '[]'::jsonb),
-			COALESCE(mcp_servers, '{}'::jsonb),
-			COALESCE(mcp_tools_listed, '[]'::jsonb),
-			COALESCE(mcp_tools_visible, '[]'::jsonb),
-			COALESCE(request_payload, '{}'::jsonb),
-			COALESCE(response_payload, '{}'::jsonb),
-			COALESCE(turn_blocks, '[]'::jsonb),
-			parse_ok,
-			COALESCE(latency_ms, 0),
-			COALESCE(retry_count, 0),
-			COALESCE(error, ''),
-			created_at
-		FROM agent_turns
-		WHERE agent_id = $1
-		  AND session_id = $2::uuid
-		ORDER BY created_at ASC, turn_id ASC
-	`
-	if !caps.Conversations.TurnBlocks {
-		query = `
-		SELECT
-			turn_id::text,
-			agent_id,
-			session_id::text,
-			COALESCE(runtime_mode, ''),
-			COALESCE(scope_key, ''),
-			COALESCE(entity_id::text, ''),
-			COALESCE(trigger_event_id::text, ''),
-			COALESCE(trigger_event_type, ''),
-			COALESCE(task_id, ''),
-			COALESCE(available_tools, '[]'::jsonb),
-			COALESCE(tool_calls, '[]'::jsonb),
-			COALESCE(emitted_events, '[]'::jsonb),
-			COALESCE(mcp_servers, '{}'::jsonb),
-			COALESCE(mcp_tools_listed, '[]'::jsonb),
-			COALESCE(mcp_tools_visible, '[]'::jsonb),
-			COALESCE(request_payload, '{}'::jsonb),
-			COALESCE(response_payload, '{}'::jsonb),
-			'[]'::jsonb AS turn_blocks,
-			parse_ok,
-			COALESCE(latency_ms, 0),
-			COALESCE(retry_count, 0),
-			COALESCE(error, ''),
-			created_at
-		FROM agent_turns
-		WHERE agent_id = $1
-		  AND session_id = $2::uuid
-		ORDER BY created_at ASC, turn_id ASC
-		`
-	}
-	rows, err := r.db.QueryContext(ctx, query, agentID, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := []ConversationTurn{}
-	for rows.Next() {
-		item, err := scanConversationTurn(rows)
-		if err != nil {
-			return nil, err
+		if turnErr := requireConversationTurnCapabilities(caps); turnErr != nil {
+			return ConversationDetail{}, false, turnErr
 		}
-		assistantText, outcome, reasoning, progress, toolResults, err := summarizeConversationTurnBlocks(item.TurnBlocks)
-		if err != nil {
-			return nil, fmt.Errorf("summarize conversation turn blocks: %w", err)
-		}
-		item.AssistantVisibleOutput = assistantText
-		item.Outcome = outcome
-		item.ReasoningBlocks = reasoning
-		item.ProgressUpdates = progress
-		item.ToolResults = toolResults
-		out = append(out, item)
+		return ConversationDetail{}, false, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return conversationDetailFromOperator(item), ok, nil
 }
 
 func (r *SQLConversationReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
@@ -394,146 +111,193 @@ func (r *SQLConversationReader) resolveCapabilities(ctx context.Context) (store.
 	return r.capSource.ResolveSchemaCapabilities(ctx)
 }
 
-func conversationQuerySources(caps store.StoreSchemaCapabilities) []string {
-	sources := []string{}
-	if caps.Conversations.Sessions == store.SchemaFlavorCanonical {
-		sources = append(sources, `
-			SELECT
-				session_id::text AS session_id,
-				agent_id,
-				'live_session' AS kind,
-				scope_key,
-				scope,
-				runtime_mode,
-				status,
-				turn_count,
-				runtime_state,
-				conversation,
-				updated_at,
-				created_at
-			FROM agent_sessions
-			WHERE status = 'active'
-			  AND runtime_mode IN ('session', 'session_per_entity')
-		`)
+func conversationSummaryFromOperator(item store.OperatorConversationSummary) ConversationSummary {
+	return ConversationSummary{
+		SessionID:   strings.TrimSpace(item.SessionID),
+		AgentID:     strings.TrimSpace(item.AgentID),
+		Kind:        strings.TrimSpace(item.Kind),
+		ScopeKey:    strings.TrimSpace(item.ScopeKey),
+		Scope:       strings.TrimSpace(item.Scope),
+		RuntimeMode: strings.TrimSpace(item.RuntimeMode),
+		Status:      strings.TrimSpace(item.Status),
+		TurnCount:   item.TurnCount,
+		Summary:     strings.TrimSpace(item.Summary),
+		UpdatedAt:   formatTime(item.UpdatedAt),
+		Metadata:    conversationMetadataFromOperator(item.Metadata),
 	}
-	if taskSource := store.CanonicalTaskConversationVisibilitySourceSQL(caps.Conversations); taskSource != "" {
-		sources = append(sources, fmt.Sprintf(`
-			SELECT
-				session_id,
-				agent_id,
-				'turn_audit' AS kind,
-				scope_key,
-				scope,
-				runtime_mode,
-				status,
-				turn_count,
-				runtime_state,
-				conversation,
-				updated_at,
-				created_at
-			FROM (
-				%s
-			) task_conversations
-		`, taskSource))
-	}
-	return sources
 }
 
-func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {
-	var (
-		item                                  ConversationTurn
-		availableToolsRaw, toolCallsRaw       []byte
-		emittedEventsRaw, mcpServersRaw       []byte
-		mcpToolsListedRaw, mcpToolsVisibleRaw []byte
-		requestPayloadRaw, responsePayloadRaw []byte
-		turnBlocksRaw                         []byte
-		createdAt                             time.Time
-	)
-	if err := scanner.Scan(
-		&item.TurnID,
-		&item.AgentID,
-		&item.SessionID,
-		&item.RuntimeMode,
-		&item.ScopeKey,
-		&item.EntityID,
-		&item.TriggerEventID,
-		&item.TriggerEventType,
-		&item.TaskID,
-		&availableToolsRaw,
-		&toolCallsRaw,
-		&emittedEventsRaw,
-		&mcpServersRaw,
-		&mcpToolsListedRaw,
-		&mcpToolsVisibleRaw,
-		&requestPayloadRaw,
-		&responsePayloadRaw,
-		&turnBlocksRaw,
-		&item.ParseOK,
-		&item.LatencyMS,
-		&item.RetryCount,
-		&item.Error,
-		&createdAt,
-	); err != nil {
-		return ConversationTurn{}, err
+func conversationDetailFromOperator(item store.OperatorConversationDetail) ConversationDetail {
+	out := ConversationDetail{
+		AgentID:      strings.TrimSpace(item.Conversation.AgentID),
+		SessionID:    strings.TrimSpace(item.Conversation.SessionID),
+		Kind:         strings.TrimSpace(item.Conversation.Kind),
+		ScopeKey:     strings.TrimSpace(item.Conversation.ScopeKey),
+		Scope:        strings.TrimSpace(item.Conversation.Scope),
+		RuntimeMode:  strings.TrimSpace(item.Conversation.RuntimeMode),
+		Status:       strings.TrimSpace(item.Conversation.Status),
+		TurnCount:    item.Conversation.TurnCount,
+		Summary:      strings.TrimSpace(item.Conversation.Summary),
+		UpdatedAt:    formatTime(item.Conversation.UpdatedAt),
+		Messages:     conversationMessagesFromOperator(item.Messages),
+		RuntimeState: conversationStateFromOperator(item.RuntimeState),
 	}
-	item.CreatedAt = createdAt.Format(time.RFC3339Nano)
-	var err error
-	summary, hasSummary, err := decodeTurnSummaryProjection(turnBlocksRaw)
-	if err != nil {
-		return ConversationTurn{}, err
+	out.Turns = make([]ConversationTurn, 0, len(item.Turns))
+	for _, turn := range item.Turns {
+		out.Turns = append(out.Turns, conversationTurnFromOperator(turn))
 	}
-	if item.AvailableTools, err = decodeJSONArray[string](availableToolsRaw); err != nil {
-		return ConversationTurn{}, fmt.Errorf("decode turn available_tools: %w", err)
+	if out.Messages == nil {
+		out.Messages = []ConversationMessage{}
 	}
-	if item.ToolCalls, err = decodeJSONArray[ConversationToolCall](toolCallsRaw); err != nil {
-		return ConversationTurn{}, fmt.Errorf("decode turn tool_calls: %w", err)
-	}
-	if item.EmittedEvents, err = decodeJSONArray[string](emittedEventsRaw); err != nil {
-		return ConversationTurn{}, fmt.Errorf("decode turn emitted_events: %w", err)
-	}
-	if item.MCPToolsListed, err = decodeJSONArray[string](mcpToolsListedRaw); err != nil {
-		return ConversationTurn{}, fmt.Errorf("decode turn mcp_tools_listed: %w", err)
-	}
-	if item.MCPToolsVisible, err = decodeJSONArray[string](mcpToolsVisibleRaw); err != nil {
-		return ConversationTurn{}, fmt.Errorf("decode turn mcp_tools_visible: %w", err)
-	}
-	if item.MCPServers, err = decodeJSONStringMap(mcpServersRaw); err != nil {
-		return ConversationTurn{}, fmt.Errorf("decode turn mcp_servers: %w", err)
-	}
-	if item.RequestPayload, err = decodeJSONObjectRaw(requestPayloadRaw); err != nil {
-		return ConversationTurn{}, fmt.Errorf("decode turn request_payload: %w", err)
-	}
-	if item.ResponsePayload, err = decodeJSONObjectRaw(responsePayloadRaw); err != nil {
-		return ConversationTurn{}, fmt.Errorf("decode turn response_payload: %w", err)
-	}
-	if len(turnBlocksRaw) > 0 {
-		if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocksJSON(turnBlocksRaw); err != nil {
-			return ConversationTurn{}, fmt.Errorf("decode canonical runtime_log turn_blocks: %w", err)
-		}
-		if item.TurnBlocks, err = decodeJSONArray[ConversationTurnBlock](turnBlocksRaw); err != nil {
-			return ConversationTurn{}, fmt.Errorf("decode turn turn_blocks: %w", err)
-		}
-	}
-	if hasSummary {
-		item.AssistantVisibleOutput, item.Outcome, item.ReasoningBlocks, item.ProgressUpdates, item.ToolResults = projectedTurnSummaryConversationFields(summary)
-	}
-	return item, nil
+	return out
 }
 
-func summarizeConversationTurnBlocks(blocks []ConversationTurnBlock) (string, string, []string, []string, []ConversationToolResult, error) {
-	raw, err := json.Marshal(blocks)
-	if err != nil {
-		return "", "", nil, nil, nil, err
+func conversationMetadataFromOperator(item store.OperatorConversationSummaryMetadata) ConversationSummaryMetadata {
+	return ConversationSummaryMetadata{
+		ProviderSessionID:    strings.TrimSpace(item.ProviderSessionID),
+		RetryReason:          strings.TrimSpace(item.RetryReason),
+		RetriesFromSessionID: strings.TrimSpace(item.RetriesFromSessionID),
+		Watchdog:             conversationWatchdogFromOperator(item.Watchdog),
+		LiveTurn:             dashboardLiveTurn(item.LiveTurn),
 	}
-	summary, ok, err := decodeTurnSummaryProjection(raw)
-	if err != nil {
-		return "", "", nil, nil, nil, err
+}
+
+func conversationStateFromOperator(item store.OperatorConversationState) ConversationRuntimeState {
+	out := ConversationRuntimeState{
+		Summary:              strings.TrimSpace(item.Summary),
+		ProviderSessionID:    strings.TrimSpace(item.ProviderSessionID),
+		RetryReason:          strings.TrimSpace(item.RetryReason),
+		RetriesFromSessionID: strings.TrimSpace(item.RetriesFromSessionID),
+		Watchdog:             conversationWatchdogFromOperator(item.Watchdog),
 	}
-	if !ok {
-		return "", "", nil, nil, nil, nil
+	if item.LastTurn != nil {
+		out.LastTurn = &ConversationRuntimeLastTurn{
+			TaskID:  strings.TrimSpace(item.LastTurn.TaskID),
+			ParseOK: item.LastTurn.ParseOK,
+		}
 	}
-	assistant, outcome, reasoning, progress, toolResults := projectedTurnSummaryConversationFields(summary)
-	return assistant, outcome, reasoning, progress, toolResults, nil
+	return out
+}
+
+func conversationWatchdogFromOperator(item *store.OperatorConversationWatchdog) *ConversationRuntimeWatchdog {
+	if item == nil {
+		return nil
+	}
+	return &ConversationRuntimeWatchdog{
+		State:         strings.TrimSpace(item.State),
+		BlockingLayer: strings.TrimSpace(item.BlockingLayer),
+		Action:        strings.TrimSpace(item.Action),
+		Outcome:       strings.TrimSpace(item.Outcome),
+		LastOutputAt:  strings.TrimSpace(item.LastOutputAt),
+		RecordedAt:    strings.TrimSpace(item.RecordedAt),
+	}
+}
+
+func conversationMessagesFromOperator(items []store.OperatorConversationMessage) []ConversationMessage {
+	if len(items) == 0 {
+		return []ConversationMessage{}
+	}
+	out := make([]ConversationMessage, 0, len(items))
+	for _, item := range items {
+		out = append(out, ConversationMessage{Role: strings.TrimSpace(item.Role), Content: item.Content})
+	}
+	return out
+}
+
+func conversationTurnFromOperator(item store.OperatorConversationTurn) ConversationTurn {
+	return ConversationTurn{
+		TurnID:                 strings.TrimSpace(item.TurnID),
+		AgentID:                strings.TrimSpace(item.AgentID),
+		SessionID:              strings.TrimSpace(item.SessionID),
+		RuntimeMode:            strings.TrimSpace(item.RuntimeMode),
+		ScopeKey:               strings.TrimSpace(item.ScopeKey),
+		EntityID:               strings.TrimSpace(item.EntityID),
+		TriggerEventID:         strings.TrimSpace(item.TriggerEventID),
+		TriggerEventType:       strings.TrimSpace(item.TriggerEventType),
+		TaskID:                 strings.TrimSpace(item.TaskID),
+		AvailableTools:         append([]string(nil), item.AvailableTools...),
+		ToolCalls:              conversationToolCallsFromOperator(item.ToolCalls),
+		ToolResults:            conversationToolResultsFromOperator(item.ToolResults),
+		TurnBlocks:             conversationTurnBlocksFromOperator(item.TurnBlocks),
+		EmittedEvents:          append([]string(nil), item.EmittedEvents...),
+		MCPServers:             cloneStringMap(item.MCPServers),
+		MCPToolsListed:         append([]string(nil), item.MCPToolsListed...),
+		MCPToolsVisible:        append([]string(nil), item.MCPToolsVisible...),
+		RequestPayload:         appendJSONRaw(item.RequestPayload),
+		ResponsePayload:        appendJSONRaw(item.ResponsePayload),
+		AssistantVisibleOutput: strings.TrimSpace(item.AssistantVisibleOutput),
+		ReasoningBlocks:        append([]string(nil), item.ReasoningBlocks...),
+		ProgressUpdates:        append([]string(nil), item.ProgressUpdates...),
+		Outcome:                strings.TrimSpace(item.Outcome),
+		ParseOK:                item.ParseOK,
+		LatencyMS:              item.LatencyMS,
+		RetryCount:             item.RetryCount,
+		Error:                  strings.TrimSpace(item.Error),
+		CreatedAt:              formatTime(item.CreatedAt),
+	}
+}
+
+func conversationToolCallsFromOperator(items []store.OperatorConversationToolCall) []ConversationToolCall {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]ConversationToolCall, 0, len(items))
+	for _, item := range items {
+		out = append(out, ConversationToolCall{Name: strings.TrimSpace(item.Name), Arguments: appendJSONRaw(item.Arguments)})
+	}
+	return out
+}
+
+func conversationToolResultsFromOperator(items []store.OperatorConversationToolResult) []ConversationToolResult {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]ConversationToolResult, 0, len(items))
+	for _, item := range items {
+		out = append(out, ConversationToolResult{
+			ToolName:  strings.TrimSpace(item.ToolName),
+			ToolUseID: strings.TrimSpace(item.ToolUseID),
+			Output:    appendJSONRaw(item.Output),
+		})
+	}
+	return out
+}
+
+func conversationTurnBlocksFromOperator(items []store.OperatorConversationTurnBlock) []ConversationTurnBlock {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]ConversationTurnBlock, 0, len(items))
+	for _, item := range items {
+		out = append(out, ConversationTurnBlock{
+			Kind:     strings.TrimSpace(item.Kind),
+			Title:    strings.TrimSpace(item.Title),
+			Text:     item.Text,
+			ToolName: strings.TrimSpace(item.ToolName),
+			Input:    appendJSONRaw(item.Input),
+			Output:   appendJSONRaw(item.Output),
+			Data:     appendJSONRaw(item.Data),
+		})
+	}
+	return out
+}
+
+func appendJSONRaw(in []byte) []byte {
+	if len(in) == 0 {
+		return nil
+	}
+	return append([]byte(nil), in...)
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func readString(value any) string {

@@ -37,6 +37,14 @@ type EntityReadStore interface {
 	AggregateOperatorEntities(context.Context, store.OperatorEntityAggregateOptions) (store.OperatorEntityAggregateResult, error)
 }
 
+type AgentConversationReadStore interface {
+	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
+	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
+	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
+	LoadOperatorConversation(context.Context, string) (store.OperatorConversationDetail, error)
+	LoadCurrentOperatorConversationForAgent(context.Context, string) (*store.OperatorConversationDetail, error)
+}
+
 type OperatorReadOptions struct {
 	Now                   func() time.Time
 	Ready                 func() bool
@@ -44,6 +52,7 @@ type OperatorReadOptions struct {
 	Runs                  RunReadStore
 	Observability         ObservabilityReadStore
 	Entities              EntityReadStore
+	AgentConversations    AgentConversationReadStore
 	Mailbox               MailboxAPIStore
 	Idempotency           APIIdempotencyStore
 	Events                EventPublisher
@@ -209,6 +218,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	for name, handler := range OperatorEntityHandlers(opts) {
 		handlers[name] = handler
 	}
+	for name, handler := range OperatorAgentConversationHandlers(opts) {
+		handlers[name] = handler
+	}
 	return handlers
 }
 
@@ -231,6 +243,111 @@ func requireEntityReadStore(reads EntityReadStore) (EntityReadStore, error) {
 		return nil, fmt.Errorf("entity read store is required")
 	}
 	return reads, nil
+}
+
+func requireAgentConversationReadStore(reads AgentConversationReadStore) (AgentConversationReadStore, error) {
+	if reads == nil {
+		return nil, fmt.Errorf("agent/conversation read store is required")
+	}
+	return reads, nil
+}
+
+func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+	if opts.AgentConversations == nil {
+		return nil
+	}
+	return map[string]MethodHandler{
+		"agent.list": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+			if err != nil {
+				return nil, err
+			}
+			listOpts, err := operatorAgentListOptionsFromParams(req.Params)
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.ListOperatorAgents(ctx, listOpts)
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
+		"agent.get": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+			if err != nil {
+				return nil, err
+			}
+			agentID, err := requiredStringParam(req.Params, "agent_id")
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.LoadOperatorAgent(ctx, agentID)
+			if errors.Is(err, store.ErrAgentNotFound) {
+				return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+			}
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
+		"conversation.list": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+			if err != nil {
+				return nil, err
+			}
+			listOpts, err := operatorConversationListOptionsFromParams(req.Params)
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.ListOperatorConversations(ctx, listOpts)
+			if errors.Is(err, store.ErrInvalidConversationCursor) {
+				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid conversation list cursor"})
+			}
+			if paramErr := entityReadParamError(err); paramErr != nil {
+				return nil, NewInvalidParamsError(map[string]any{"field": paramErr.Field, "reason": paramErr.Reason})
+			}
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
+		"conversation.get": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+			if err != nil {
+				return nil, err
+			}
+			sessionID, err := requiredStringParam(req.Params, "session_id")
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.LoadOperatorConversation(ctx, sessionID)
+			if errors.Is(err, store.ErrSessionNotFound) {
+				return nil, NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": sessionID})
+			}
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
+		"conversation.current_for_agent": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+			if err != nil {
+				return nil, err
+			}
+			agentID, err := requiredStringParam(req.Params, "agent_id")
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.LoadCurrentOperatorConversationForAgent(ctx, agentID)
+			if errors.Is(err, store.ErrAgentNotFound) {
+				return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
+			}
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		},
+	}
 }
 
 func OperatorEntityHandlers(opts OperatorReadOptions) map[string]MethodHandler {
@@ -454,6 +571,40 @@ func operatorEntityAggregateOptionsFromParams(params map[string]any) (store.Oper
 	return out, nil
 }
 
+func operatorAgentListOptionsFromParams(params map[string]any) (store.OperatorAgentListOptions, error) {
+	out := store.OperatorAgentListOptions{}
+	var err error
+	if out.Flow, _, err = optionalStringParam(params, "flow"); err != nil {
+		return store.OperatorAgentListOptions{}, err
+	}
+	if out.Role, _, err = optionalStringParam(params, "role"); err != nil {
+		return store.OperatorAgentListOptions{}, err
+	}
+	return out, nil
+}
+
+func operatorConversationListOptionsFromParams(params map[string]any) (store.OperatorConversationListOptions, error) {
+	out := store.OperatorConversationListOptions{}
+	var err error
+	if out.AgentID, _, err = optionalStringParam(params, "agent_id"); err != nil {
+		return store.OperatorConversationListOptions{}, err
+	}
+	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
+		return store.OperatorConversationListOptions{}, err
+	}
+	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
+		return store.OperatorConversationListOptions{}, err
+	}
+	if raw, ok := params["limit"]; ok && !isEmptyParam(raw) {
+		limit, ok := integerParam(raw)
+		if !ok || limit < 1 || limit > 500 {
+			return store.OperatorConversationListOptions{}, NewInvalidParamsError(map[string]any{"field": "limit", "reason": "must be an integer from 1 to 500"})
+		}
+		out.Limit = limit
+	}
+	return out, nil
+}
+
 func entityReadParamError(err error) *store.EntityReadParamError {
 	if err == nil {
 		return nil
@@ -657,6 +808,17 @@ func optionalStringParam(params map[string]any, name string) (string, bool, erro
 		return "", true, NewInvalidParamsError(map[string]any{"field": name, "reason": "must be a string"})
 	}
 	return strings.TrimSpace(text), true, nil
+}
+
+func requiredStringParam(params map[string]any, name string) (string, error) {
+	value, present, err := optionalStringParam(params, name)
+	if err != nil {
+		return "", err
+	}
+	if !present || value == "" {
+		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "is required"})
+	}
+	return value, nil
 }
 
 func stringParam(params map[string]any, name string) string {
