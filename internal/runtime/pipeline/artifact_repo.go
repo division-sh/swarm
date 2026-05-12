@@ -93,7 +93,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		}
 		return err
 	}
-	if previous := strings.TrimSpace(asString(execCtx.Request.State.StateCarrier.Metadata[spec.Output.LastSourceEventID])); previous == sourceEventID {
+	if previous := strings.TrimSpace(asString(execCtx.Request.State.StateCarrier.Metadata[spec.Output.LastSourceEventID])); previous == sourceEventID && artifactRepoOutputsComplete(execCtx.Request.State.StateCarrier.Metadata, spec) {
 		return nil
 	}
 	files, treeHash, err := prepareArtifactRepoFiles(execCtx.Base, spec)
@@ -115,16 +115,31 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if err := ensureArtifactRepoInitialized(ctx, repoPath, commitTime(execCtx.Request.Event.CreatedAt)); err != nil {
 		return fail(err)
 	}
-	if previousTree, found, err := artifactRepoRequestTreeHash(ctx, repoPath, requestID); err != nil {
+	if previous, found, err := artifactRepoRequestRecord(ctx, repoPath, requestID); err != nil {
 		return fail(err)
 	} else if found {
-		if previousTree != treeHash {
-			return fail(fmt.Errorf("artifact_repo_commit request_id %s conflicts with previously committed tree %s", requestID, previousTree))
+		if previous.TreeHash != treeHash {
+			return fail(fmt.Errorf("artifact_repo_commit request_id %s conflicts with previously committed tree %s", requestID, previous.TreeHash))
 		}
-		return nil
+		repoURL := artifactRepoPublicScheme + repoID
+		manifest := artifactRepoManifest(repoID, runID, verticalID, sourceValidationCaseID, requestID, sourceEventID, repoURL, previous.Ref, treeHash, files)
+		return pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
+			spec.Output.RepoURL:           repoURL,
+			spec.Output.CurrentRef:        previous.Ref,
+			spec.Output.FileManifest:      manifest,
+			spec.Output.Status:            "committed",
+			spec.Output.LastRequestID:     requestID,
+			spec.Output.LastSourceEventID: sourceEventID,
+			spec.Output.FailureReason:     "",
+		})
 	}
 	if err := writeArtifactRepoFiles(repoPath, files); err != nil {
 		return fail(err)
+	}
+	if size, err := artifactRepoProjectedTreeSize(ctx, repoPath, files); err != nil {
+		return fail(err)
+	} else if maxRepo := artifactRepoMaxBytes(spec.Limits); maxRepo > 0 && size > maxRepo {
+		return fail(fmt.Errorf("artifact_repo repository tree exceeds max repo bytes %d", maxRepo))
 	}
 	ref, err := commitArtifactRepoFiles(ctx, repoPath, files, sourceEventID, requestID, treeHash, optionalArtifactString(execCtx.Base, spec.Author), commitTime(execCtx.Request.Event.CreatedAt))
 	if err != nil {
@@ -151,6 +166,29 @@ func (pc *PipelineCoordinator) artifactRepoRoot() string {
 		return env
 	}
 	return defaultArtifactRoot
+}
+
+func artifactRepoOutputsComplete(metadata map[string]any, spec *runtimecontracts.ArtifactRepoSpec) bool {
+	if metadata == nil || spec == nil {
+		return false
+	}
+	if got := strings.TrimSpace(asString(metadata[spec.Output.Status])); got != "committed" {
+		return false
+	}
+	if strings.TrimSpace(asString(metadata[spec.Output.RepoURL])) == "" {
+		return false
+	}
+	if ref := strings.TrimSpace(asString(metadata[spec.Output.CurrentRef])); len(ref) != 40 {
+		return false
+	}
+	manifest, ok := metadata[spec.Output.FileManifest].(map[string]any)
+	if !ok || manifest == nil {
+		return false
+	}
+	if strings.TrimSpace(asString(manifest["tree_hash"])) == "" {
+		return false
+	}
+	return true
 }
 
 func artifactRunID(execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec) (string, error) {
@@ -248,7 +286,7 @@ func prepareArtifactRepoFiles(base runtimeengine.BaseContext, spec *runtimecontr
 			return nil, "", err
 		}
 		contentType := strings.TrimSpace(file.ContentType)
-		normalized, err := normalizeArtifactContent(contentType, rawContent)
+		normalized, err := normalizeArtifactContent(contentType, rawContent, file.Schema)
 		if err != nil {
 			return nil, "", fmt.Errorf("artifact_repo.files[%d].content: %w", i, err)
 		}
@@ -265,15 +303,18 @@ func prepareArtifactRepoFiles(base runtimeengine.BaseContext, spec *runtimecontr
 			Size:        len(normalized),
 		})
 	}
-	maxRepo := spec.Limits.MaxRepoBytes
-	if maxRepo == 0 {
-		maxRepo = defaultRepoMaxBytes
-	}
-	if maxRepo > 0 && total > maxRepo {
+	if maxRepo := artifactRepoMaxBytes(spec.Limits); maxRepo > 0 && total > maxRepo {
 		return nil, "", fmt.Errorf("artifact_repo files exceed max repo bytes %d", maxRepo)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, artifactTreeHash(files), nil
+}
+
+func artifactRepoMaxBytes(limits runtimecontracts.ArtifactRepoLimitsSpec) int {
+	if limits.MaxRepoBytes > 0 {
+		return limits.MaxRepoBytes
+	}
+	return defaultRepoMaxBytes
 }
 
 func artifactFileLimit(contentType string, limits runtimecontracts.ArtifactRepoLimitsSpec, fileLimit int) int {
@@ -299,11 +340,14 @@ func artifactFileLimit(contentType string, limits runtimecontracts.ArtifactRepoL
 	}
 }
 
-func normalizeArtifactContent(contentType, raw string) ([]byte, error) {
+func normalizeArtifactContent(contentType, raw string, schema runtimecontracts.ArtifactRepoSchemaSpec) ([]byte, error) {
 	switch strings.TrimSpace(contentType) {
 	case "yaml":
-		var value any
+		var value map[string]any
 		if err := yaml.Unmarshal([]byte(raw), &value); err != nil {
+			return nil, err
+		}
+		if err := validateArtifactYAMLSchema(value, schema); err != nil {
 			return nil, err
 		}
 		out, err := yaml.Marshal(value)
@@ -316,6 +360,25 @@ func normalizeArtifactContent(contentType, raw string) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported content_type %q", contentType)
 	}
+}
+
+func validateArtifactYAMLSchema(value map[string]any, schema runtimecontracts.ArtifactRepoSchemaSpec) error {
+	if strings.TrimSpace(schema.Type) != "object" {
+		return fmt.Errorf("yaml schema.type must be object")
+	}
+	if value == nil {
+		return fmt.Errorf("yaml content must be an object")
+	}
+	for _, field := range schema.RequiredFields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			return fmt.Errorf("yaml schema.required_fields contains an empty field")
+		}
+		if _, ok := value[field]; !ok {
+			return fmt.Errorf("yaml content missing required field %s", field)
+		}
+	}
+	return nil
 }
 
 func artifactRepoCleanPath(raw string) (string, error) {
@@ -434,8 +497,9 @@ func commitArtifactRepoFiles(ctx context.Context, repoPath string, files []artif
 	if _, err := runArtifactGit(ctx, repoPath, nil, args...); err != nil {
 		return "", err
 	}
+	hasStagedDiff := true
 	if _, err := runArtifactGit(ctx, repoPath, nil, "diff", "--cached", "--quiet"); err == nil {
-		return artifactRepoHead(ctx, repoPath)
+		hasStagedDiff = false
 	}
 	if err := verifyArtifactRepoStagedPaths(ctx, repoPath, files); err != nil {
 		return "", err
@@ -445,7 +509,11 @@ func commitArtifactRepoFiles(ctx context.Context, repoPath string, files []artif
 	if author = strings.TrimSpace(author); author != "" {
 		env = append(env, "GIT_AUTHOR_NAME="+author, "GIT_AUTHOR_EMAIL=artifact-author@localhost")
 	}
-	if _, err := runArtifactGit(ctx, repoPath, env, "commit", "-m", msg, "--no-gpg-sign"); err != nil {
+	commitArgs := []string{"commit", "-m", msg, "--no-gpg-sign"}
+	if !hasStagedDiff {
+		commitArgs = append(commitArgs, "--allow-empty")
+	}
+	if _, err := runArtifactGit(ctx, repoPath, env, commitArgs...); err != nil {
 		return "", err
 	}
 	return artifactRepoHead(ctx, repoPath)
@@ -537,16 +605,72 @@ func (pc *PipelineCoordinator) persistArtifactRepoResult(ctx context.Context, ex
 	return repo.SaveState(ctx, identity.NormalizeEntityID(execCtx.Request.EntityID.String()), mutation)
 }
 
-func artifactRepoRequestTreeHash(ctx context.Context, repoPath, requestID string) (string, bool, error) {
+type artifactRepoHistoryRecord struct {
+	Ref      string
+	TreeHash string
+}
+
+func artifactRepoProjectedTreeSize(ctx context.Context, repoPath string, files []artifactRepoPreparedFile) (int, error) {
+	sizes := map[string]int{}
+	out, err := runArtifactGit(ctx, repoPath, nil, "ls-tree", "-r", "-l", "HEAD")
+	if err != nil {
+		return 0, err
+	}
+	for _, raw := range strings.Split(out, "\n") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		parts := strings.Fields(raw)
+		if len(parts) < 5 {
+			return 0, fmt.Errorf("artifact_repo cannot parse git tree entry %q", raw)
+		}
+		sizeValue := parts[3]
+		if sizeValue == "-" {
+			continue
+		}
+		var size int
+		if _, err := fmt.Sscanf(sizeValue, "%d", &size); err != nil {
+			return 0, fmt.Errorf("artifact_repo cannot parse git tree size %q: %w", sizeValue, err)
+		}
+		pathStart := strings.Index(raw, "\t")
+		if pathStart < 0 || pathStart+1 >= len(raw) {
+			return 0, fmt.Errorf("artifact_repo cannot parse git tree path %q", raw)
+		}
+		sizes[strings.TrimSpace(raw[pathStart+1:])] = size
+	}
+	for _, file := range files {
+		sizes[file.Path] = file.Size
+	}
+	total := 0
+	for _, size := range sizes {
+		total += size
+	}
+	return total, nil
+}
+
+func artifactRepoRequestRecord(ctx context.Context, repoPath, requestID string) (artifactRepoHistoryRecord, bool, error) {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
-		return "", false, nil
+		return artifactRepoHistoryRecord{}, false, nil
 	}
-	out, err := runArtifactGit(ctx, repoPath, nil, "log", "--format=%B%x00")
+	out, err := runArtifactGit(ctx, repoPath, nil, "log", "--format=%H%x1f%B%x00")
 	if err != nil {
-		return "", false, err
+		return artifactRepoHistoryRecord{}, false, err
 	}
-	for _, message := range strings.Split(out, "\x00") {
+	for _, record := range strings.Split(out, "\x00") {
+		record = strings.Trim(record, "\n")
+		if strings.TrimSpace(record) == "" {
+			continue
+		}
+		ref, message, ok := strings.Cut(record, "\x1f")
+		if !ok {
+			return artifactRepoHistoryRecord{}, false, fmt.Errorf("artifact_repo cannot parse git history record")
+		}
+		ref = strings.TrimSpace(ref)
+		if len(ref) != 40 {
+			return artifactRepoHistoryRecord{}, false, fmt.Errorf("artifact_repo history ref %q is not a 40-character git SHA", ref)
+		}
 		foundRequest := ""
 		foundTree := ""
 		for _, line := range strings.Split(message, "\n") {
@@ -565,11 +689,11 @@ func artifactRepoRequestTreeHash(ctx context.Context, repoPath, requestID string
 			continue
 		}
 		if foundTree == "" {
-			return "", true, fmt.Errorf("artifact_repo_commit request_id %s has no recorded tree hash", requestID)
+			return artifactRepoHistoryRecord{}, true, fmt.Errorf("artifact_repo_commit request_id %s has no recorded tree hash", requestID)
 		}
-		return foundTree, true, nil
+		return artifactRepoHistoryRecord{Ref: ref, TreeHash: foundTree}, true, nil
 	}
-	return "", false, nil
+	return artifactRepoHistoryRecord{}, false, nil
 }
 
 func artifactRepoManifest(repoID, runID, verticalID, sourceValidationCaseID, requestID, sourceEventID, repoURL, ref, treeHash string, files []artifactRepoPreparedFile) map[string]any {

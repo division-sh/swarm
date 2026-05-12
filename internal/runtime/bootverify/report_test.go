@@ -833,6 +833,50 @@ func TestRun_ReportsArtifactRepoCommitInvalidShape(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"artifact-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"spec_file.commit_requested": {
+						Action: runtimecontracts.ActionSpec{
+							ID: "artifact_repo_commit",
+							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
+								Provider:               "local_git",
+								RepoID:                 runtimecontracts.RefExpression("entity.spec_repo_id"),
+								RequestID:              runtimecontracts.RefExpression("payload.request_id"),
+								VerticalID:             runtimecontracts.RefExpression("entity.vertical_id"),
+								SourceValidationCaseID: runtimecontracts.RefExpression("entity.source_validation_case_id"),
+								AllowedPaths:           []string{"specs/mvp.yaml"},
+								Files: []runtimecontracts.ArtifactRepoFileSpec{{
+									Path:        runtimecontracts.LiteralExpression("specs/mvp.yaml"),
+									Content:     runtimecontracts.RefExpression("payload.mvp_yaml"),
+									ContentType: "yaml",
+								}},
+								Output: runtimecontracts.ArtifactRepoOutputSpec{
+									RepoURL:           "repo_url",
+									CurrentRef:        "current_ref",
+									FileManifest:      "file_manifest",
+									Status:            "status",
+									FailureReason:     "failure_reason",
+									LastRequestID:     "last_request_id",
+									LastSourceEventID: "last_source_event_id",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "schema.type is required for yaml content") {
+		t.Fatalf("expected yaml schema requirement error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ReportsArtifactRepoDeclarationOnNonArtifactAction(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{

@@ -349,10 +349,16 @@ type ArtifactRepoSpec struct {
 }
 
 type ArtifactRepoFileSpec struct {
-	Path        ExpressionValue `yaml:"path"`
-	Content     ExpressionValue `yaml:"content"`
-	ContentType string          `yaml:"content_type"`
-	MaxBytes    int             `yaml:"max_bytes"`
+	Path        ExpressionValue        `yaml:"path"`
+	Content     ExpressionValue        `yaml:"content"`
+	ContentType string                 `yaml:"content_type"`
+	Schema      ArtifactRepoSchemaSpec `yaml:"schema"`
+	MaxBytes    int                    `yaml:"max_bytes"`
+}
+
+type ArtifactRepoSchemaSpec struct {
+	Type           string   `yaml:"type"`
+	RequiredFields []string `yaml:"required_fields"`
 }
 
 type ArtifactRepoOutputSpec struct {

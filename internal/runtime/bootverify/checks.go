@@ -2344,8 +2344,30 @@ func validateArtifactRepoActionSpec(nodeID, eventType string, action runtimecont
 		}
 		switch contentType := strings.TrimSpace(file.ContentType); contentType {
 		case "yaml", "markdown", "text":
+			schemaType := strings.TrimSpace(file.Schema.Type)
+			if contentType == "yaml" {
+				if schemaType == "" {
+					findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].schema.type is required for yaml content", i)))
+				} else if schemaType != "object" {
+					findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].schema.type %q is unsupported", i, schemaType)))
+				}
+			} else if schemaType != "" || len(file.Schema.RequiredFields) > 0 {
+				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].schema is only supported for yaml content", i)))
+			}
 		default:
 			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].content_type %q is unsupported", i, contentType)))
+		}
+		seenRequired := map[string]struct{}{}
+		for _, field := range file.Schema.RequiredFields {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].schema.required_fields contains an empty field", i)))
+				continue
+			}
+			if _, exists := seenRequired[field]; exists {
+				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].schema.required_fields contains duplicate field %s", i, field)))
+			}
+			seenRequired[field] = struct{}{}
 		}
 		if file.MaxBytes < 0 {
 			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].max_bytes must be non-negative", i)))

@@ -855,6 +855,45 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	}
 }
 
+func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMismatch(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	store := NewWorkflowInstanceStore(db)
+	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
+	ctx := testWorkflowStoreRunContext(t, store)
+	entityID := "22222222-2222-2222-2222-222222222222"
+	initial := testArtifactRepoEntityFields()
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "spec-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "rank: 2\n")
+
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	if !ok {
+		t.Fatal("expected artifact_repo_commit action to be claimed")
+	}
+	if err == nil || !strings.Contains(err.Error(), "missing required field name") {
+		t.Fatalf("ExecuteAction error = %v, want schema mismatch", err)
+	}
+	instance, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	if _, exists := instance.Metadata["current_ref"]; exists {
+		t.Fatalf("current_ref should not be persisted on failed commit: %#v", instance.Metadata["current_ref"])
+	}
+}
+
 func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentConflict(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
@@ -898,6 +937,173 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 	}
 	if err == nil || !strings.Contains(err.Error(), "conflicts with previously committed tree") {
 		t.Fatalf("ExecuteAction error = %v, want request conflict", err)
+	}
+}
+
+func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistory(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	store := NewWorkflowInstanceStore(db)
+	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
+	ctx := testWorkflowStoreRunContext(t, store)
+	entityID := "22222222-2222-2222-2222-222222222222"
+	initial := testArtifactRepoEntityFields()
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "spec-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
+		t.Fatalf("initial ExecuteAction: %v", err)
+	}
+	instance, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	initialRef := strings.TrimSpace(asString(instance.Metadata["current_ref"]))
+
+	sameAction, sameCtx := testArtifactRepoActionAndContext(entityID, instance.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Demo\n")
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, sameAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, sameCtx); err != nil {
+		t.Fatalf("same-tree ExecuteAction: %v", err)
+	}
+	afterSame, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance after same-tree request: %v", err)
+	}
+	sameRef := strings.TrimSpace(asString(afterSame.Metadata["current_ref"]))
+	if sameRef == "" || sameRef == initialRef {
+		t.Fatalf("same-tree request current_ref = %q, initial ref = %q; want a durable operation commit", sameRef, initialRef)
+	}
+	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), testPipelineRunID, initial["vertical_id"].(string), initial["business_slug"].(string), initial["spec_repo_id"].(string))
+	if err != nil {
+		t.Fatalf("artifactRepoPath: %v", err)
+	}
+	if _, found, err := artifactRepoRequestRecord(ctx, repoPath, "66666666-6666-6666-6666-666666666666"); err != nil || !found {
+		t.Fatalf("artifactRepoRequestRecord found=%v err=%v, want recorded same-tree request", found, err)
+	}
+
+	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, afterSame.Metadata, "77777777-7777-7777-7777-777777777777", "88888888-8888-8888-8888-888888888888", "name: Next\n")
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx); err != nil {
+		t.Fatalf("next ExecuteAction: %v", err)
+	}
+	afterNext, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance after next request: %v", err)
+	}
+
+	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Metadata, "99999999-9999-9999-9999-999999999999", "66666666-6666-6666-6666-666666666666", "name: Changed\n")
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
+	if !ok {
+		t.Fatal("expected artifact_repo_commit action to be claimed")
+	}
+	if err == nil || !strings.Contains(err.Error(), "conflicts with previously committed tree") {
+		t.Fatalf("ExecuteAction error = %v, want same-tree request history conflict", err)
+	}
+}
+
+func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHistory(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	store := NewWorkflowInstanceStore(db)
+	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
+	ctx := testWorkflowStoreRunContext(t, store)
+	entityID := "22222222-2222-2222-2222-222222222222"
+	initial := testArtifactRepoEntityFields()
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "spec-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
+		t.Fatalf("initial ExecuteAction: %v", err)
+	}
+	committed, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load committed workflow instance: %v", err)
+	}
+	ref := strings.TrimSpace(asString(committed.Metadata["current_ref"]))
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "spec-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("reset workflow instance to simulate DB/git split: %v", err)
+	}
+
+	repairAction, repairCtx := testArtifactRepoActionAndContext(entityID, initial, "55555555-5555-5555-5555-555555555555", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, repairAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, repairCtx)
+	if !ok || err != nil {
+		t.Fatalf("repair ExecuteAction ok=%v err=%v", ok, err)
+	}
+	repaired, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load repaired workflow instance: %v", err)
+	}
+	if got := strings.TrimSpace(asString(repaired.Metadata["current_ref"])); got != ref {
+		t.Fatalf("repaired current_ref = %q, want %q", got, ref)
+	}
+	if got := strings.TrimSpace(asString(repaired.Metadata["status"])); got != "committed" {
+		t.Fatalf("repaired status = %q, want committed", got)
+	}
+}
+
+func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	store := NewWorkflowInstanceStore(db)
+	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
+	ctx := testWorkflowStoreRunContext(t, store)
+	entityID := "22222222-2222-2222-2222-222222222222"
+	initial := testArtifactRepoEntityFields()
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "spec-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+	action.ArtifactRepo.Limits.MaxRepoBytes = 1024
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
+		t.Fatalf("initial ExecuteAction: %v", err)
+	}
+	instance, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+
+	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, instance.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: unused\n")
+	nextAction.ArtifactRepo.AllowedPaths = append(nextAction.ArtifactRepo.AllowedPaths, "docs/extra.txt")
+	nextAction.ArtifactRepo.Files = []runtimecontracts.ArtifactRepoFileSpec{{
+		Path:        runtimecontracts.LiteralExpression("docs/extra.txt"),
+		Content:     runtimecontracts.LiteralExpression("xxxxxxxxxxxxxxxxxxxxxxxxx"),
+		ContentType: "text",
+	}}
+	nextAction.ArtifactRepo.Limits.MaxRepoBytes = 30
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx)
+	if !ok {
+		t.Fatal("expected artifact_repo_commit action to be claimed")
+	}
+	if err == nil || !strings.Contains(err.Error(), "repository tree exceeds max repo bytes") {
+		t.Fatalf("ExecuteAction error = %v, want projected repo size failure", err)
 	}
 }
 
@@ -961,7 +1167,11 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 					Path:        runtimecontracts.LiteralExpression("specs/mvp.yaml"),
 					Content:     runtimecontracts.RefExpression("payload.mvp_yaml"),
 					ContentType: "yaml",
-					MaxBytes:    4096,
+					Schema: runtimecontracts.ArtifactRepoSchemaSpec{
+						Type:           "object",
+						RequiredFields: []string{"name"},
+					},
+					MaxBytes: 4096,
 				}},
 				Output: runtimecontracts.ArtifactRepoOutputSpec{
 					RepoURL:           "repo_url",
