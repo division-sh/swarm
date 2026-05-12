@@ -582,6 +582,14 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 		return 1
 	}
 	if contracts := strings.TrimSpace(*contractsPath); contracts != "" {
+		replayAdmission := store.RunForkSelectedContractReplayResumeAdmission(plan)
+		if len(plan.ReplayResumeAdmission.Dispositions) > 0 || len(plan.ReplayResumeAdmission.UnsupportedBlockers) > 0 {
+			plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
+			plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
+		}
+		plan.ReplayResumeAdmission = replayAdmission
+		plan.ExecutionReady = replayAdmission.StateOnlyExecutionReady || replayAdmission.DeliveryEventReplayReady
+
 		contractsRoot, err := normalizeContractsRoot(resolveContractsPath(repo, contracts))
 		if err != nil {
 			if out != nil {
@@ -641,8 +649,20 @@ func runForkCommand(ctx context.Context, repo string, args []string, out io.Writ
 			}
 			return 1
 		}
+		readiness, err := runtimerunforkexecution.BuildSelectedContractReadinessClassifier(runtimerunforkexecution.SelectedContractReadinessClassifierRequest{
+			Plan:                      plan,
+			ContractFrontierAdmission: admission,
+			SelectedContractExecution: executionModel,
+		})
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: classify selected contract readiness: %v\n", err)
+			}
+			return 1
+		}
 		plan.ContractFrontierAdmission = &admission
 		plan.SelectedContractExecution = &executionModel
+		plan.SelectedContractReadiness = &readiness
 	}
 	if *asJSON {
 		enc := json.NewEncoder(out)
@@ -791,6 +811,15 @@ func printRunForkPlan(w io.Writer, plan store.RunForkPlan) {
 			model.NonMutating,
 			model.ExecutionSupported,
 			model.FutureExecutionOwner,
+		)
+	}
+	if plan.SelectedContractReadiness != nil {
+		readiness := plan.SelectedContractReadiness
+		fmt.Fprintf(w, "Selected Contract Readiness: owner=%s non_mutating=%t facts=%d future_owner=%s\n",
+			readiness.Owner,
+			readiness.NonMutating,
+			len(readiness.FactMatrix),
+			readiness.FutureExecutionOwner,
 		)
 	}
 }

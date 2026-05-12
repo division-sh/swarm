@@ -3566,6 +3566,21 @@ run_model:
       receipt-only redelivery, session/turn/timer/route reconstruction, contract swap execution, or full runtime replay
       mutation. Full historical resume remains separately gated even when state-only activation or delivery/event replay
       is ready.'
+    selected_contract_readiness_classifier: 'Selected-contract timestamp-fork readiness explanation is owned by
+      runtime.run_fork.selected_contract_readiness_classifier. This owner is non-mutating and consumes the canonical
+      store planner, store.run_fork.replay_resume_admission, runtime.run_fork.contract_frontier_admission, selected
+      route admission/topology/dynamic topology, runtime.run_fork.selected_contract_recipient_planning, selected
+      execution model/admission evidence when present, current-state/materialization metadata, contract-swap admission,
+      historical replay admission, and fork-local runtime/platform lineage owners. It emits a complete read-only fact
+      matrix for selected-contract fork readiness with exactly one disposition for every source/fork fact family:
+      executable fork work, reconstructed fork-local state, lineage/no-action, branch-divergence evidence,
+      fail-closed blocker, or unsupported/split sibling. The classifier MUST NOT run handlers, create fork runs, write
+      fork-local events, event_deliveries, entity_state, sessions, turns, timers, audits, route recovery, replay rows,
+      receipts, dead letters, idempotency state, emitted follow-ups, or API/UI state. It MUST NOT copy source rows, use
+      source outcomes as fork suppressors, recompute historical fact-family semantics owned by historical replay
+      admission, recompute contract-swap readiness, or weaken materialization, execution, activation, or recovery
+      fail-closed gates. CLI, API, dashboard, and Builder are consumers only and may display the classifier output, but
+      they are not readiness owners.'
     selected_contract_execution_model: 'Selected-contract fork execution ownership is a non-mutating model until
       separately approved for runtime mutation. The canonical owner consumes contract_frontier_admission output only as
       prerequisite evidence, names the durable selected-contract binding owner that future execution must consume,
@@ -3925,6 +3940,16 @@ run_model:
         does not authorize replay directly from replay_resume_admission or RunForkPlan pending rows. Future runtime work uses the fork
         run_id, fork-local entity_state rows, and fork-local pending delivery rows; full historical replay remains
         unsupported outside the gated delivery/event primitive.'
+      3b1_selected_contract_readiness_classifier: 'For selected-contract timestamp-fork dry-run/explain, the
+        runtime.run_fork.selected_contract_readiness_classifier owner consumes existing planner, replay taxonomy,
+        contract-frontier, route/topology, recipient-planning, selected-execution, current-state/materialization,
+        contract-swap, historical-replay, and fork-local runtime lineage owners to emit one read-only readiness matrix
+        before mutation. Every source/fork fact family must appear exactly once with owner, disposition, proof source,
+        and blocker or split tracker when applicable. The classifier is an explanation/read model only: it does not
+        authorize materialization, activation, selected execution, route recovery, historical replay, contract-swap
+        execution, restart recovery, or API/UI behavior. Mutation owners and activation gates must continue to consume
+        their own canonical owners and fail closed. CLI/API/dashboard/Builder surfaces may consume the matrix but MUST
+        NOT compute readiness semantics independently.'
       3c_selected_contract_source_advanced_branch: 'For selected-contract mutating fork execution, source advancement
         after the fork point is explicit branch divergence evidence when the selected execution owner can regenerate
         fork-local work under the fork run_id. The source run remains in its current status and is not frozen or rewound.

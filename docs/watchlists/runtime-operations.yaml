@@ -353,6 +353,7 @@ nodes:
       - canonical timestamp-fork replay/resume owner must define which historical source-run facts are replayed, copied, reconstructed, lineage-only, or permanently blocked before execution starts
       - existing fork planner/materializer/activation owners are prerequisites and consumers, not the historical replay/resume owner
       - delivery, session/turn, timer, route, replay-scope, current-state, and mutation-log owners must either consume that owner or remain explicit blockers
+      - runtime.run_fork.selected_contract_readiness_classifier is the non-mutating selected-contract dry-run/explain matrix owner; it consumes existing planner/admission/execution owners and keeps CLI/API/dashboard/Builder as consumers only
     why_this_node_exists: activation-only forks can start a state-only fork context, but historical replay/resume is split across delivery rows, committed replay scope, sessions, turns, timers, routes, source-advanced checks, and planner blockers; local delivery redelivery or event-copy helpers would preserve semantic drift
     known_manifestations:
       - activation-only timestamp forks deliberately block historical replay and set historical replay as unsupported
@@ -395,6 +396,7 @@ nodes:
       - fork materialization needs runtime.run_fork.materialized_entity_snapshot_metadata to classify reconstructed entity_mutations candidates with source-at-T flow_instance/entity_type metadata before generic or selected-contract materializers write fork-local entity_state rows
       - selected-contract fork-local agent runtime materializer/executor needs runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor to consume selected recipient planning, construct ephemeral fork-local handlers through factored static contract-agent semantics, and execute planned selected agent recipients under the fork run_id without persisting ordinary current-runtime agents or using source deliveries/outcomes/live subscriptions as execution truth
       - selected-contract fork-local runtime/platform control event lineage needs runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy to classify fresh fork-run platform control outputs and platform.runtime_log diagnostics emitted by selected-fork runtime execution as lineage only through the selected fork event parent/source_event_id chain, with runtime-log diagnostics deriving persisted lineage from explicit parent_event_id or verified same-run subject event, while preserving fail-closed behavior for uncaused fork platform events, source platform.auth_required rows, current-state materialization, restart recovery, non-agent replay, and operator surfaces
+      - selected-contract fork readiness explanation needs runtime.run_fork.selected_contract_readiness_classifier to emit one owner-backed non-mutating matrix over source/fork events and deliveries, route/recipient evidence, timers, sessions/turns/audits, replay-scope markers, platform/runtime diagnostics, receipts/dead letters, retry/idempotency/follow-ups, source/post-T facts, current-state snapshots, non-agent work, restart/recovery, and operator consumers before mutation; it must consume existing owners rather than recompute them
     representative_issues:
       - 564
       - 565
@@ -432,6 +434,7 @@ nodes:
       - 681
       - 686
       - 690
+      - 707
     common_framing_mistakes:
       too_broad:
         - implement full fork replay, timers, sessions, routes, contract swap, and UI in one undifferentiated PR
