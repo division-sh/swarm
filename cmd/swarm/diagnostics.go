@@ -41,9 +41,9 @@ type diagnosticRunGetResult struct {
 
 type diagnosticRunDiagnosisResult struct {
 	Run              diagnosticRunHeader `json:"run"`
-	OperationalState string              `json:"operational_state"`
-	BlockingLayer    string              `json:"blocking_layer"`
-	BlockingReason   string              `json:"blocking_reason"`
+	OperationalState *string             `json:"operational_state"`
+	BlockingLayer    *string             `json:"blocking_layer"`
+	BlockingReason   *string             `json:"blocking_reason"`
 	Heuristics       []string            `json:"heuristics"`
 }
 
@@ -61,9 +61,9 @@ type diagnosticHealthCheckResult struct {
 }
 
 type diagnosticBundleIdentity struct {
-	WorkflowName    string `json:"workflow_name"`
-	WorkflowVersion string `json:"workflow_version"`
-	Fingerprint     string `json:"fingerprint"`
+	WorkflowName    *string `json:"workflow_name"`
+	WorkflowVersion *string `json:"workflow_version"`
+	Fingerprint     string  `json:"fingerprint"`
 }
 
 type diagnosticRunHeader struct {
@@ -386,8 +386,17 @@ func validateDiagnosticRunDiagnosis(result diagnosticRunDiagnosisResult) error {
 	if err := validateDiagnosticRunHeader("run", result.Run); err != nil {
 		return err
 	}
-	if strings.TrimSpace(result.OperationalState) == "" {
+	if result.OperationalState == nil || strings.TrimSpace(*result.OperationalState) == "" {
 		return fmt.Errorf("malformed run.diagnose result: operational_state is required")
+	}
+	if result.BlockingLayer == nil {
+		return fmt.Errorf("malformed run.diagnose result: blocking_layer is required")
+	}
+	if result.BlockingReason == nil {
+		return fmt.Errorf("malformed run.diagnose result: blocking_reason is required")
+	}
+	if result.Heuristics == nil {
+		return fmt.Errorf("malformed run.diagnose result: heuristics is required")
 	}
 	return nil
 }
@@ -425,6 +434,12 @@ func validateDiagnosticHealthCheck(result diagnosticHealthCheckResult) error {
 	}
 	if strings.TrimSpace(result.Bundle.Fingerprint) == "" {
 		return fmt.Errorf("malformed health.check result: bundle.fingerprint is required")
+	}
+	if result.Bundle.WorkflowName == nil {
+		return fmt.Errorf("malformed health.check result: bundle.workflow_name is required")
+	}
+	if result.Bundle.WorkflowVersion == nil {
+		return fmt.Errorf("malformed health.check result: bundle.workflow_version is required")
 	}
 	return nil
 }
@@ -530,9 +545,9 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result diagnosticRunDiagnosisRes
 	}
 	writeDiagnosticRunHeader(out, result.Run)
 	fmt.Fprintf(out, "operational_state=%s blocking_layer=%s blocking_reason=%s\n",
-		result.OperationalState,
-		result.BlockingLayer,
-		result.BlockingReason,
+		stringPointerValue(result.OperationalState),
+		stringPointerValue(result.BlockingLayer),
+		stringPointerValue(result.BlockingReason),
 	)
 	if len(result.Heuristics) == 0 {
 		fmt.Fprintln(out, "heuristics=none")
@@ -578,8 +593,8 @@ func writeDiagnosticHealth(out io.Writer, result diagnosticHealthCheckResult) {
 	fmt.Fprintf(out, "alive=%t ready=%t db_ok=%t runtime_ok=%t\n", boolPointerValue(result.Alive), boolPointerValue(result.Ready), boolPointerValue(result.DBOK), boolPointerValue(result.RuntimeOK))
 	fmt.Fprintf(out, "bundle fingerprint=%s workflow_name=%s workflow_version=%s\n",
 		result.Bundle.Fingerprint,
-		emptyDash(result.Bundle.WorkflowName),
-		emptyDash(result.Bundle.WorkflowVersion),
+		emptyDash(stringPointerValue(result.Bundle.WorkflowName)),
+		emptyDash(stringPointerValue(result.Bundle.WorkflowVersion)),
 	)
 }
 
@@ -592,6 +607,13 @@ func intPointerValue(value *int) int {
 
 func boolPointerValue(value *bool) bool {
 	return value != nil && *value
+}
+
+func stringPointerValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func emptyDash(value string) string {
