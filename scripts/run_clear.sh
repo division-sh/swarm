@@ -35,6 +35,7 @@ RUN_CLEAR_INPUT_EVENT="${RUN_CLEAR_INPUT_EVENT:-scan.corpus_file_requested}"
 RUN_CLEAR_INPUT_PAYLOAD_JSON="${RUN_CLEAR_INPUT_PAYLOAD_JSON:-}"
 SWARM_OPERATOR_AUTH_TOKEN="${SWARM_OPERATOR_AUTH_TOKEN:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
 SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
+SWARM_API_TOKEN="${SWARM_API_TOKEN:-${SWARM_OPERATOR_AUTH_TOKEN}}"
 if [[ -n "${SWARM_TOOL_GATEWAY_URL:-}" && -n "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" ]]; then
   SWARM_TOOL_GATEWAY_URL="${SWARM_TOOL_GATEWAY_URL}"
   SWARM_TOOL_GATEWAY_CONTAINER_URL="${SWARM_TOOL_GATEWAY_CONTAINER_URL}"
@@ -45,6 +46,7 @@ fi
 
 export SWARM_OPERATOR_AUTH_TOKEN
 export SWARM_BUILDER_AUTH_TOKEN
+export SWARM_API_TOKEN
 export SWARM_TOOL_GATEWAY_URL
 export SWARM_TOOL_GATEWAY_CONTAINER_URL
 
@@ -116,7 +118,7 @@ go build -o "${BINARY_PATH}" ./cmd/swarm
 echo "Starting Swarm with contracts ${CONTRACTS_ROOT}..."
 : > "${LOG_FILE}"
 launcher_pid="$(
-  LOG_FILE="${LOG_FILE}" BINARY_PATH="${BINARY_PATH}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" SWARM_OPERATOR_AUTH_TOKEN="${SWARM_OPERATOR_AUTH_TOKEN}" SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN}" python3 - <<'PY'
+  LOG_FILE="${LOG_FILE}" BINARY_PATH="${BINARY_PATH}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" SWARM_API_TOKEN="${SWARM_API_TOKEN}" SWARM_OPERATOR_AUTH_TOKEN="${SWARM_OPERATOR_AUTH_TOKEN}" SWARM_BUILDER_AUTH_TOKEN="${SWARM_BUILDER_AUTH_TOKEN}" python3 - <<'PY'
 import os
 import subprocess
 import sys
@@ -239,10 +241,10 @@ fi
 
 if [[ -n "${DIRECTIVE_AGENT}" && -n "${DIRECTIVE_MESSAGE}" ]]; then
   echo "Sending directive to ${DIRECTIVE_AGENT}..."
-  ruby -rjson -e 'print JSON.generate({message: ARGV[0], kill_previous: true})' "${DIRECTIVE_MESSAGE}" | \
-    curl -sS "http://${HOST_HTTP_ADDR}/api/agents/${DIRECTIVE_AGENT}/actions/directive" \
-      -H 'content-type: application/json' \
-      -H "Authorization: Bearer ${SWARM_OPERATOR_AUTH_TOKEN}" \
-      --data-binary @-
+  directive_body="$(ruby -rjson -e 'print JSON.generate({jsonrpc: "2.0", id: "run-clear-directive", method: "agent.send_directive", params: {agent_id: ARGV[0], directive: ARGV[1], kill_previous: true}})' "${DIRECTIVE_AGENT}" "${DIRECTIVE_MESSAGE}")"
+  curl -sS "http://${HOST_HTTP_ADDR}/v1/rpc" \
+    -H 'content-type: application/json' \
+    -H "Authorization: Bearer ${SWARM_API_TOKEN}" \
+    --data-binary "${directive_body}"
   echo
 fi

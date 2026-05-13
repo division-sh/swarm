@@ -107,16 +107,19 @@ Use these for lightweight runtime inspection without attaching to the database f
 Common surfaces:
 - `/healthz`
 - `/readyz`
-- `/api/agents`
+- `/v1/rpc` `agent.list` / `agent.get`
 - `/api/runs`
 - `/api/rpc`
-- `POST /api/agents/{id}/actions/directive`
+- `/v1/rpc` `agent.send_directive`
 
 Best for:
 - readiness confirmation
 - active agent discovery
-- live directive-path reproduction
+- live directive-path reproduction through the canonical v1 owner
 - builder/operator surface mismatches
+
+Legacy dashboard `/api/agents*` routes are adapter surfaces for historical
+investigation only; they are not the canonical agent-control API.
 
 ### 6. Runtime Process Log
 
