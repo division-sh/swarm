@@ -97,6 +97,29 @@ func TestExecutorReadFlowDataNotVisibleWithoutDeclaration(t *testing.T) {
 	}
 }
 
+func TestExecutorReadFlowDataRejectsRoleModeImpersonation(t *testing.T) {
+	source, _ := loadFlowDataToolSource(t)
+	actor := models.AgentConfig{
+		ID:       "impostor",
+		Role:     "factory_cto",
+		Mode:     "static",
+		FlowPath: "support",
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+
+	if containsToolName(toolDefinitionNames(exec.ToolDefinitionsForActor(actor)), "read_flow_data") {
+		t.Fatal("read_flow_data visible through role/mode fallback impersonation")
+	}
+	caps := exec.ToolCapabilitiesForActor(actor, []string{"read_flow_data"}, nil)
+	cap, ok := caps.Capability("read_flow_data")
+	if !ok || cap.Visible || cap.Callable || cap.AuthorizationClass != "flow_data_access" {
+		t.Fatalf("capability = %#v, want denied flow_data_access for role/mode impersonation", cap)
+	}
+	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err == nil {
+		t.Fatal("Execute(read_flow_data) succeeded through role/mode fallback impersonation")
+	}
+}
+
 func TestExecutorReadFlowDataIgnoresMutableActorFlowDataAccess(t *testing.T) {
 	source, root := loadFlowDataToolSource(t)
 	actor := flowDataActor()
