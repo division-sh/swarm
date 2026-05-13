@@ -26,6 +26,9 @@ type runClearConfig struct {
 	psMode           string
 	readyCode        string
 	apiHealthCode    string
+	apiHealthReady   string
+	apiHealthDBOK    string
+	apiHealthRuntime string
 	startTimeout     string
 	inputEvent       string
 	inputPayloadJSON string
@@ -155,6 +158,28 @@ func TestRunClear_MapsConfiguredInputEventAndPayloadToV1RunStart(t *testing.T) {
 	}
 	if payload["count"] != float64(2) {
 		t.Fatalf("payload = %#v, want configured count", payload)
+	}
+}
+
+func TestRunClear_DoesNotStartRunWhenHealthCheckIsNotReady(t *testing.T) {
+	result, err := runRunClearResult(t, runClearConfig{
+		apiHealthReady:   "false",
+		apiHealthDBOK:    "false",
+		apiHealthRuntime: "true",
+		startTimeout:     "1",
+	})
+
+	if err == nil {
+		t.Fatal("expected helper to fail readiness when health.check is not ready")
+	}
+	if got := strings.TrimSpace(result.rpcBody); got != "" {
+		t.Fatalf("run.start body = %q, want no run.start when health.check is not ready", got)
+	}
+	if got := strings.TrimSpace(result.rpcURL); got != "" {
+		t.Fatalf("run.start url = %q, want no run.start when health.check is not ready", got)
+	}
+	if !strings.Contains(result.stdout, "Swarm failed to become ready. Current log:") {
+		t.Fatalf("stdout = %q, want readiness failure", result.stdout)
 	}
 }
 
@@ -554,7 +579,7 @@ if [[ "$url" == *"/v1/rpc" ]]; then
     for header in "${headers[@]}"; do
       if [[ "$header" == "$want" ]]; then
         if [[ -n "$out" ]]; then
-          printf '{"jsonrpc":"2.0","id":"run-clear-health","result":{"alive":true,"ready":true,"db_ok":true,"runtime_ok":true,"bundle":{"workflow_name":"empire","workflow_version":"test","fingerprint":"%s"}}}' "${RUN_CLEAR_TEST_BUNDLE_FINGERPRINT}" > "$out"
+          printf '{"jsonrpc":"2.0","id":"run-clear-health","result":{"alive":true,"ready":%s,"db_ok":%s,"runtime_ok":%s,"bundle":{"workflow_name":"empire","workflow_version":"test","fingerprint":"%s"}}}' "${RUN_CLEAR_TEST_HEALTH_READY}" "${RUN_CLEAR_TEST_HEALTH_DB_OK}" "${RUN_CLEAR_TEST_HEALTH_RUNTIME_OK}" "${RUN_CLEAR_TEST_BUNDLE_FINGERPRINT}" > "$out"
         fi
         printf '%s' "${CURL_API_HEALTH_CODE:-200}"
         exit 0
@@ -633,6 +658,9 @@ printf '{}'
 		"CURL_HEALTHZ_CODE=200",
 		"CURL_READYZ_CODE=" + defaultString(cfg.readyCode, "200"),
 		"CURL_API_HEALTH_CODE=" + defaultString(cfg.apiHealthCode, "200"),
+		"RUN_CLEAR_TEST_HEALTH_READY=" + defaultString(cfg.apiHealthReady, "true"),
+		"RUN_CLEAR_TEST_HEALTH_DB_OK=" + defaultString(cfg.apiHealthDBOK, "true"),
+		"RUN_CLEAR_TEST_HEALTH_RUNTIME_OK=" + defaultString(cfg.apiHealthRuntime, "true"),
 		"RUN_CLEAR_TEST_BUNDLE_FINGERPRINT=" + runClearTestBundleFingerprint,
 		"CURL_HEADERS_SINK=" + rpcHeadersSink,
 		"CURL_BODY_SINK=" + bodySink,
