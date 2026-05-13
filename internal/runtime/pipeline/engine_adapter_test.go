@@ -915,6 +915,84 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitPublishesSuccessResultEven
 	}
 }
 
+func TestPipelineEngineActionRunner_ArtifactRepoCommitRetriesSuccessEventAfterPublishFailure(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	store := NewWorkflowInstanceStore(db)
+	bus := &recordingPipelineBus{publishErr: errors.New("transient publish failure")}
+	source := testArtifactRepoResultEventSource(t)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	pc := &PipelineCoordinator{
+		db:            db,
+		workflowStore: store,
+		artifactRoot:  t.TempDir(),
+		bus:           bus,
+		module:        &previewWorkflowModule{bundle: bundle},
+	}
+	ctx := testWorkflowStoreRunContext(t, store)
+	entityID := "22222222-2222-2222-2222-222222222222"
+	initial := testArtifactRepoEntityFields()
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "artifact-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+	action.ArtifactRepo.SuccessEvent = "artifact_repo.commit_completed"
+	action.ArtifactRepo.SuccessPayload = map[string]runtimecontracts.ExpressionValue{
+		"result_kind": runtimecontracts.LiteralExpression("ready"),
+	}
+
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	if !ok {
+		t.Fatal("expected artifact_repo_commit action to be claimed")
+	}
+	if err == nil || !strings.Contains(err.Error(), "transient publish failure") {
+		t.Fatalf("ExecuteAction error = %v, want transient publish failure", err)
+	}
+	partiallyCommitted, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load partially committed workflow instance: %v", err)
+	}
+	if got := strings.TrimSpace(asString(partiallyCommitted.Metadata["status"])); got != "committed" {
+		t.Fatalf("status = %q, want committed", got)
+	}
+	if got := strings.TrimSpace(asString(partiallyCommitted.Metadata["current_ref"])); len(got) != 40 {
+		t.Fatalf("current_ref = %q, want committed ref", got)
+	}
+	if got := strings.TrimSpace(asString(partiallyCommitted.Metadata["last_source_event_id"])); got == execCtx.Request.Event.ID {
+		t.Fatalf("last_source_event_id = %q; publish failure must not mark replay complete", got)
+	}
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("success event count after failed publish = %d, want 0", got)
+	}
+
+	bus.publishErr = nil
+	retryCtx := execCtx
+	retryCtx.Request.State.StateCarrier.Metadata = cloneStringAnyMap(partiallyCommitted.Metadata)
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, retryCtx); err != nil {
+		t.Fatalf("retry ExecuteAction: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("success event count after retry = %d, want 1", got)
+	}
+	completed, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load completed workflow instance: %v", err)
+	}
+	if got := strings.TrimSpace(asString(completed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID {
+		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID)
+	}
+}
+
 func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSuccessResultEvent(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
