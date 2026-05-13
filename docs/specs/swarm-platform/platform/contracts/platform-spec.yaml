@@ -865,7 +865,7 @@ handler_specification:
         read_model:
           declared_fields: Every declared entity field is readable with either an explicit initial value or the field's type default.
           undeclared_fields: Referencing an undeclared entity field is a contract error.
-          presence_checks: has(entity.X) and == null / != null comparisons remain available, but they are not required for declared fields.
+          presence_checks: has(entity.X) and == null / != null comparisons are valid, but they are not required for declared fields.
         does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
           collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
           only in the accumulator. To reference them in post-accumulation conditions, use the accumulated namespace.
@@ -5338,8 +5338,8 @@ api_specification:
         ownership.'
       consumers:
         v1_runtime_methods: runtime.pause and runtime.resume consume this owner and API idempotency.
-        dashboard_runtime_actions: 'POST /api/runtime/actions {pause,resume} is an adapter to this owner, not an independent
-          pause flag writer.'
+        dashboard_runtime_actions: 'Historical POST /api/runtime/actions {pause,resume} mapped to this owner during migration,
+          but it is retired as a production operator API surface; consumers MUST use /v1/rpc runtime.pause/runtime.resume.'
         inbound_webhook: Inbound webhook admission consumes this owner for queueable event-producing ingress.
         mcp_tool_gateway: MCP/tool ingress consumes this owner for fail-closed paused-state rejection unless a later async queue
           contract is approved.
@@ -7945,7 +7945,7 @@ api_specification:
       auth_boundary_bug_fix: "The current bug where /api/rpc and /api/ws bypass operator auth is moot under v1 \u2014 one\
         \ auth surface, one token."
     cli_consumer_migration:
-      make_run_clear: 'Migrates from `curl /api/rpc {method: run.start}` (legacy /api/rpc with builder token) to `curl /v1/rpc
+      make_run_clear: 'Migrates from legacy `/api/rpc` run.start payloads with builder-token auth to `curl /v1/rpc
         {method: run.start, params: {bundle_ref?, event_name, payload, idempotency_key?}}` with the unified token.'
       swarm_investigate: "First-slice subcommands map to v1 methods:\n  swarm investigate runs   \u2192 run.list\n  swarm\
         \ investigate run    \u2192 run.diagnose (default), run.get (--no-diagnose)\n  swarm investigate trace  \u2192 run.trace\n\

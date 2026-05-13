@@ -291,4 +291,4 @@ Date: {CURRENT_DATE}
 - Re-run audits periodically. These are not one-time activities.
 - Multiple auditors may comment on the same audit issue in different runs.
 - Different auditors can legitimately disagree on severity or score. That is useful signal, not a problem.
-- Audit issues are part of the regression-control system and should remain available for future passes.
+- Audit issues are part of the regression-control system and should be retained for future passes.
