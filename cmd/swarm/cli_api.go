@@ -92,9 +92,10 @@ func applicationErrorCode(raw json.RawMessage) string {
 }
 
 func (c *cliAPIClient) call(ctx context.Context, method string, params map[string]any, result any) error {
+	requestID := "swarm-cli:" + method
 	body, err := json.Marshal(jsonRPCRequest{
 		JSONRPC: "2.0",
-		ID:      "swarm-cli:" + method,
+		ID:      requestID,
 		Method:  method,
 		Params:  params,
 	})
@@ -133,6 +134,10 @@ func (c *cliAPIClient) call(ctx context.Context, method string, params map[strin
 	if envelope.JSONRPC != "2.0" {
 		return fmt.Errorf("malformed JSON-RPC response: jsonrpc=%q", envelope.JSONRPC)
 	}
+	responseID, ok := envelope.ID.(string)
+	if !ok || responseID != requestID {
+		return fmt.Errorf("malformed JSON-RPC response: id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)
+	}
 	if envelope.Error != nil {
 		return envelope.Error
 	}
@@ -146,4 +151,14 @@ func (c *cliAPIClient) call(ctx context.Context, method string, params map[strin
 		return fmt.Errorf("decode JSON-RPC result: %w", err)
 	}
 	return nil
+}
+
+func formatJSONRPCID(id any) string {
+	if id == nil {
+		return "<missing>"
+	}
+	if value, ok := id.(string); ok {
+		return fmt.Sprintf("%q", value)
+	}
+	return fmt.Sprintf("%v", id)
 }
