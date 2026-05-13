@@ -14,7 +14,7 @@ fi
 HOST_HTTP_ADDR="${HEALTH_HOST}:${HEALTH_PORT}"
 HEALTH_URL="http://${HOST_HTTP_ADDR}/healthz"
 READY_URL="http://${HOST_HTTP_ADDR}/readyz"
-API_HEALTH_URL="http://${HOST_HTTP_ADDR}/api/health"
+API_RPC_URL="http://${HOST_HTTP_ADDR}/v1/rpc"
 
 SWARM_DB_HOST="${SWARM_DB_HOST:-127.0.0.1}"
 SWARM_DB_PORT="${SWARM_DB_PORT:-5432}"
@@ -188,6 +188,8 @@ launcher_exited_before_ready() {
 }
 
 ready=0
+bundle_fingerprint=""
+api_health_body='{"jsonrpc":"2.0","id":"run-clear-health","method":"health.check","params":{}}'
 for _ in $(seq 1 "${START_TIMEOUT}"); do
   if launcher_exited_before_ready "${launcher_pid}" "${launcher_identity}"; then
     echo "Swarm exited before becoming ready. Current log:"
@@ -196,11 +198,16 @@ for _ in $(seq 1 "${START_TIMEOUT}"); do
   fi
   health_code="$(curl -s -o /tmp/swarm-healthz.json -w '%{http_code}' "${HEALTH_URL}" || true)"
   ready_code="$(curl -s -o /tmp/swarm-readyz.json -w '%{http_code}' "${READY_URL}" || true)"
-  api_code="$(curl -s -o /tmp/swarm-api-health.json -w '%{http_code}' "${API_HEALTH_URL}" \
-    -H "Authorization: Bearer ${SWARM_OPERATOR_AUTH_TOKEN}" || true)"
+  api_code="$(curl -s -o /tmp/swarm-api-health.json -w '%{http_code}' "${API_RPC_URL}" \
+    -H 'content-type: application/json' \
+    -H "Authorization: Bearer ${SWARM_API_TOKEN}" \
+    --data-binary "${api_health_body}" || true)"
   if [[ "${health_code}" == "200" && "${ready_code}" == "200" && "${api_code}" == "200" ]]; then
-    ready=1
-    break
+    bundle_fingerprint="$(ruby -rjson -e 'doc = JSON.parse(File.read(ARGV[0])); abort("health.check returned error") if doc["error"]; fingerprint = doc.dig("result", "bundle", "fingerprint").to_s; abort("health.check missing bundle fingerprint") if fingerprint.empty?; print fingerprint' /tmp/swarm-api-health.json 2>/dev/null || true)"
+    if [[ -n "${bundle_fingerprint}" ]]; then
+      ready=1
+      break
+    fi
   fi
   sleep 1
 done
@@ -227,13 +234,13 @@ if [[ -z "${RUN_CLEAR_INPUT_PAYLOAD_JSON}" ]]; then
   fi
   RUN_CLEAR_INPUT_PAYLOAD_JSON="$(ruby -rjson -e 'print JSON.generate({request: {geography: ARGV[0]}, corpus_path: ARGV[1]})' "${CORPUS_GEOGRAPHY}" "${CORPUS_PATH}")"
 fi
-run_start_body="$(ruby -rjson -e 'print JSON.generate({jsonrpc: "2.0", id: "run-clear", method: "run.start", params: {run_id: ARGV[0], inputs: {ARGV[1] => JSON.parse(ARGV[2])}}})' "${run_id}" "${RUN_CLEAR_INPUT_EVENT}" "${RUN_CLEAR_INPUT_PAYLOAD_JSON}")"
-run_response="$(curl -sS "http://${HOST_HTTP_ADDR}/api/rpc" \
+run_start_body="$(ruby -rjson -e 'print JSON.generate({jsonrpc: "2.0", id: "run-clear", method: "run.start", params: {run_id: ARGV[0], event_name: ARGV[1], payload: JSON.parse(ARGV[2]), bundle_ref: {fingerprint: ARGV[3]}, idempotency_key: "run-clear:#{ARGV[0]}"}})' "${run_id}" "${RUN_CLEAR_INPUT_EVENT}" "${RUN_CLEAR_INPUT_PAYLOAD_JSON}" "${bundle_fingerprint}")"
+run_response="$(curl -sS "${API_RPC_URL}" \
   -H 'content-type: application/json' \
-  -H "Authorization: Bearer ${SWARM_BUILDER_AUTH_TOKEN}" \
+  -H "Authorization: Bearer ${SWARM_API_TOKEN}" \
   --data-binary "${run_start_body}")"
 echo "${run_response}"
-if ! grep -q '"status":"started"' <<<"${run_response}"; then
+if ! ruby -rjson -e 'doc = JSON.parse(STDIN.read); exit 1 if doc["error"]; result = doc["result"] || {}; exit(result["run_id"].to_s == ARGV[0] && result["status"].to_s == "running" ? 0 : 1)' "${run_id}" <<<"${run_response}"; then
   echo "Corpus run failed to start. Current log:"
   tail -n 200 "${LOG_FILE}"
   exit 1
