@@ -45,6 +45,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertSourcePendingAgentDelivery(t, h.db, sourceRunID, sourceEventID, "test-agent")
 	forkAt := sourceEventID
 	sourceBefore := selectedContractForkRunCounts(t, h.db, sourceRunID)
+	sourceRowsBefore := selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID)
 
 	loader, selection := selectedContractForkFixtureSelection(t, h.ctx, repoRoot, fixtureRoot)
 	materialized, err := h.pg.MaterializeRunForkForSelectedContractExecution(h.ctx, store.RunForkSelectedContractExecutionMaterializeRequest{
@@ -63,6 +64,8 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	}
 	assertNoForkArtifacts(t, h.db, materialized.ForkRunID)
 	assertRunCountsUnchanged(t, sourceBefore, selectedContractForkRunCounts(t, h.db, sourceRunID), "source run after cleanup probe")
+	assertSourceRowsFrozen(t, sourceRowsBefore, selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID), "source rows after cleanup probe")
+	assertSourceRunLifecycle(t, h.db, sourceRunID, "paused", false)
 
 	cfg := testRuntimeConfig()
 	cfg.LLM.RuntimeMode = "api"
@@ -118,6 +121,8 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertSelectedContractForkRuntimeRows(t, h.db, forkRunID, forkEventID)
 	assertSelectedContractForkSourceIsolation(t, h.db, sourceRunID, forkRunID, sourceEventID, forkEventID)
 	assertRunCountsUnchanged(t, sourceBefore, selectedContractForkRunCounts(t, h.db, sourceRunID), "source run after selected execution")
+	assertSourceRowsFrozen(t, sourceRowsBefore, selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID), "source rows after selected execution")
+	assertSourceRunLifecycle(t, h.db, sourceRunID, "forked", true)
 	negativeFixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-non-agent-replay-fail-closed")
 	assertUnsupportedNonAgentHistoricalReplayFailsClosed(t, negativeFixtureRoot)
 }
@@ -294,6 +299,92 @@ func assertSelectedContractForkSourceIsolation(t testing.TB, db *sql.DB, sourceR
 	if copiedSourceEvents != 0 || sourceIDReuse != 0 || sourceRunForkRows != 0 {
 		t.Fatalf("source/fork isolation copied_source_events=%d source_id_reuse=%d source_run_fork_rows=%d, want 0/0/0",
 			copiedSourceEvents, sourceIDReuse, sourceRunForkRows)
+	}
+}
+
+func selectedContractSourceRowSnapshot(t testing.TB, db *sql.DB, sourceRunID, sourceEventID string) map[string]string {
+	t.Helper()
+	ctx := context.Background()
+	queries := map[string]string{
+		"source_event": `
+			SELECT COALESCE(jsonb_agg(to_jsonb(e) ORDER BY e.event_id), '[]'::jsonb)::text
+			FROM events e
+			WHERE e.run_id = $1::uuid
+			  AND e.event_id = $2::uuid
+		`,
+		"source_delivery": `
+			SELECT COALESCE(jsonb_agg(to_jsonb(d) ORDER BY d.delivery_id), '[]'::jsonb)::text
+			FROM event_deliveries d
+			WHERE d.run_id = $1::uuid
+			  AND d.event_id = $2::uuid
+		`,
+		"source_event_receipts": `
+			SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.receipt_id), '[]'::jsonb)::text
+			FROM event_receipts r
+			WHERE r.event_id = $2::uuid
+			  AND EXISTS (
+			    SELECT 1 FROM events e
+			    WHERE e.run_id = $1::uuid
+			      AND e.event_id = r.event_id
+			  )
+		`,
+		"source_entity_state": `
+			SELECT COALESCE(jsonb_agg(to_jsonb(es) ORDER BY es.entity_id), '[]'::jsonb)::text
+			FROM entity_state es
+			WHERE es.run_id = $1::uuid
+		`,
+		"source_agent_sessions": `
+			SELECT COALESCE(jsonb_agg(to_jsonb(s) ORDER BY s.session_id), '[]'::jsonb)::text
+			FROM agent_sessions s
+			WHERE s.run_id = $1::uuid
+		`,
+		"source_agent_turns": `
+			SELECT COALESCE(jsonb_agg(to_jsonb(trn) ORDER BY trn.turn_id), '[]'::jsonb)::text
+			FROM agent_turns trn
+			WHERE trn.run_id = $1::uuid
+		`,
+		"source_agent_conversation_audits": `
+			SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY a.session_id), '[]'::jsonb)::text
+			FROM agent_conversation_audits a
+			WHERE a.run_id = $1::uuid
+		`,
+	}
+	out := make(map[string]string, len(queries))
+	for key, query := range queries {
+		var value string
+		args := []any{sourceRunID}
+		if strings.Contains(query, "$2") {
+			args = append(args, sourceEventID)
+		}
+		if err := db.QueryRowContext(ctx, query, args...).Scan(&value); err != nil {
+			t.Fatalf("snapshot %s: %v", key, err)
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func assertSourceRowsFrozen(t testing.TB, before, after map[string]string, label string) {
+	t.Helper()
+	if reflect.DeepEqual(before, after) {
+		return
+	}
+	t.Fatalf("%s changed source row content:\nbefore=%#v\nafter=%#v", label, before, after)
+}
+
+func assertSourceRunLifecycle(t testing.TB, db *sql.DB, runID, wantStatus string, wantEnded bool) {
+	t.Helper()
+	var status string
+	var ended bool
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT status, ended_at IS NOT NULL
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&status, &ended); err != nil {
+		t.Fatalf("load source run lifecycle: %v", err)
+	}
+	if strings.TrimSpace(status) != wantStatus || ended != wantEnded {
+		t.Fatalf("source run lifecycle = status:%q ended:%v, want status:%q ended:%v", status, ended, wantStatus, wantEnded)
 	}
 }
 
