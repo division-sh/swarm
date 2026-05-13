@@ -435,6 +435,51 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 			wantStderr: "run.run_id is required",
 		},
 		{
+			name: "run diagnose missing blocking layer",
+			args: []string{"investigate", "run", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"run":               validDiagnosticRunHeader("run-1"),
+					"operational_state": "running",
+					"blocking_reason":   "",
+					"heuristics":        []any{},
+				})
+			},
+			wantStderr: "blocking_layer is required",
+		},
+		{
+			name: "run diagnose missing blocking reason",
+			args: []string{"investigate", "run", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"run":               validDiagnosticRunHeader("run-1"),
+					"operational_state": "running",
+					"blocking_layer":    "",
+					"heuristics":        []any{},
+				})
+			},
+			wantStderr: "blocking_reason is required",
+		},
+		{
+			name: "run diagnose missing heuristics",
+			args: []string{"investigate", "run", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"run":               validDiagnosticRunHeader("run-1"),
+					"operational_state": "running",
+					"blocking_layer":    "",
+					"blocking_reason":   "",
+				})
+			},
+			wantStderr: "heuristics is required",
+		},
+		{
 			name: "trace missing trace",
 			args: []string{"investigate", "trace", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -459,6 +504,44 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 				})
 			},
 			wantStderr: "bundle.fingerprint is required",
+		},
+		{
+			name: "health missing workflow name",
+			args: []string{"investigate", "health"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"alive":      true,
+					"ready":      true,
+					"db_ok":      true,
+					"runtime_ok": true,
+					"bundle": map[string]any{
+						"fingerprint":      "sha256:abc",
+						"workflow_version": "v1",
+					},
+				})
+			},
+			wantStderr: "bundle.workflow_name is required",
+		},
+		{
+			name: "health missing workflow version",
+			args: []string{"investigate", "health"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"alive":      true,
+					"ready":      true,
+					"db_ok":      true,
+					"runtime_ok": true,
+					"bundle": map[string]any{
+						"fingerprint":   "sha256:abc",
+						"workflow_name": "workflow",
+					},
+				})
+			},
+			wantStderr: "bundle.workflow_version is required",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
