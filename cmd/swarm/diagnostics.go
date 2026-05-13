@@ -92,6 +92,25 @@ type diagnosticRunTraceRow struct {
 	TurnTriggerEventType string `json:"turn_trigger_event_type,omitempty"`
 }
 
+var diagnosticValidRunStatuses = map[string]struct{}{
+	"running":   {},
+	"paused":    {},
+	"completed": {},
+	"failed":    {},
+	"cancelled": {},
+	"forked":    {},
+}
+
+var diagnosticValidOperationalStates = map[string]struct{}{
+	"running":   {},
+	"stalled":   {},
+	"paused":    {},
+	"completed": {},
+	"failed":    {},
+	"cancelled": {},
+	"forked":    {},
+}
+
 func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 	runOpts := diagnosticRunListOptions{apiOptions: opts}
 	cmd := &cobra.Command{
@@ -386,8 +405,15 @@ func validateDiagnosticRunDiagnosis(result diagnosticRunDiagnosisResult) error {
 	if err := validateDiagnosticRunHeader("run", result.Run); err != nil {
 		return err
 	}
-	if result.OperationalState == nil || strings.TrimSpace(*result.OperationalState) == "" {
+	if result.OperationalState == nil {
 		return fmt.Errorf("malformed run.diagnose result: operational_state is required")
+	}
+	operationalState := strings.TrimSpace(*result.OperationalState)
+	if operationalState == "" {
+		return fmt.Errorf("malformed run.diagnose result: operational_state is required")
+	}
+	if _, ok := diagnosticValidOperationalStates[operationalState]; !ok {
+		return fmt.Errorf("malformed run.diagnose result: operational_state=%q is not a valid OperationalState", operationalState)
 	}
 	if result.BlockingLayer == nil {
 		return fmt.Errorf("malformed run.diagnose result: blocking_layer is required")
@@ -448,8 +474,12 @@ func validateDiagnosticRunHeader(prefix string, run diagnosticRunHeader) error {
 	if strings.TrimSpace(run.RunID) == "" {
 		return fmt.Errorf("malformed run header: %s.run_id is required", prefix)
 	}
-	if strings.TrimSpace(run.Status) == "" {
+	status := strings.TrimSpace(run.Status)
+	if status == "" {
 		return fmt.Errorf("malformed run header: %s.status is required", prefix)
+	}
+	if _, ok := diagnosticValidRunStatuses[status]; !ok {
+		return fmt.Errorf("malformed run header: %s.status=%q is not a valid RunStatus", prefix, status)
 	}
 	if strings.TrimSpace(run.TriggerEventType) == "" {
 		return fmt.Errorf("malformed run header: %s.trigger_event_type is required", prefix)

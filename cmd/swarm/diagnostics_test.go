@@ -435,6 +435,30 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 			wantStderr: "run.run_id is required",
 		},
 		{
+			name: "run list invalid run status",
+			args: []string{"runs"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				run := validDiagnosticRunHeader("run-1")
+				run["status"] = "waiting"
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []any{run}})
+			},
+			wantStderr: `runs[0].status="waiting" is not a valid RunStatus`,
+		},
+		{
+			name: "run get invalid run status",
+			args: []string{"investigate", "run", "run-1", "--no-diagnose"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				run := validDiagnosticRunHeader("run-1")
+				run["status"] = "waiting"
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"run": run})
+			},
+			wantStderr: `run.status="waiting" is not a valid RunStatus`,
+		},
+		{
 			name: "run diagnose missing blocking layer",
 			args: []string{"investigate", "run", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -448,6 +472,22 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 				})
 			},
 			wantStderr: "blocking_layer is required",
+		},
+		{
+			name: "run diagnose invalid operational state",
+			args: []string{"investigate", "run", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"run":               validDiagnosticRunHeader("run-1"),
+					"operational_state": "blocked",
+					"blocking_layer":    "",
+					"blocking_reason":   "",
+					"heuristics":        []any{},
+				})
+			},
+			wantStderr: `operational_state="blocked" is not a valid OperationalState`,
 		},
 		{
 			name: "run diagnose missing blocking reason",
