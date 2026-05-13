@@ -10,6 +10,8 @@ import (
 	"testing"
 )
 
+const runClearTestBundleFingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
 type runClearConfig struct {
 	apiToken         string
 	operatorToken    string
@@ -25,72 +27,134 @@ type runClearConfig struct {
 	readyCode        string
 	apiHealthCode    string
 	startTimeout     string
+	inputEvent       string
+	inputPayloadJSON string
 }
 
-func TestRunClear_ProvisionsBuilderAuthTokenAndUsesBearerForRPC(t *testing.T) {
+func TestRunClear_UsesV1RPCHealthCheckAndRunStart(t *testing.T) {
 	result := runRunClear(t, runClearConfig{})
 
 	if strings.TrimSpace(result.operatorToken) == "" {
 		t.Fatal("expected helper to provision SWARM_OPERATOR_AUTH_TOKEN")
 	}
+	if got, want := strings.TrimSpace(result.apiToken), strings.TrimSpace(result.operatorToken); got != want {
+		t.Fatalf("api token = %q, want operator fallback %q", got, want)
+	}
 	if strings.TrimSpace(result.builderToken) == "" {
 		t.Fatal("expected helper to provision SWARM_BUILDER_AUTH_TOKEN")
 	}
-	wantOperatorHeader := "Authorization: Bearer " + result.operatorToken
-	if !strings.Contains(result.healthHeaders, wantOperatorHeader) {
-		t.Fatalf("api health headers = %q, want %q", result.healthHeaders, wantOperatorHeader)
+	wantAPIHeader := "Authorization: Bearer " + result.apiToken
+	if !strings.Contains(result.healthHeaders, wantAPIHeader) {
+		t.Fatalf("health.check headers = %q, want %q", result.healthHeaders, wantAPIHeader)
 	}
-	if got := strings.TrimSpace(result.healthURL); got != "http://127.0.0.1:8081/api/health" {
-		t.Fatalf("api health url = %q, want helper /api/health readiness gate", got)
+	if got := strings.TrimSpace(result.healthURL); got != "http://127.0.0.1:8081/v1/rpc" {
+		t.Fatalf("health.check url = %q, want v1 rpc endpoint", got)
 	}
-	wantHeader := "Authorization: Bearer " + result.builderToken
-	if !strings.Contains(result.rpcHeaders, wantHeader) {
-		t.Fatalf("rpc headers = %q, want %q", result.rpcHeaders, wantHeader)
+	health := decodeJSONRPCBody(t, result.healthBody)
+	if health.Method != "health.check" {
+		t.Fatalf("health body = %#v, want health.check", health)
 	}
-	if got := strings.TrimSpace(result.rpcURL); got != "http://127.0.0.1:8081/api/rpc" {
-		t.Fatalf("rpc url = %q, want helper /api/rpc alias", got)
+	if !strings.Contains(result.rpcHeaders, wantAPIHeader) {
+		t.Fatalf("run.start headers = %q, want %q", result.rpcHeaders, wantAPIHeader)
 	}
-	if !strings.Contains(result.rpcBody, `"method":"run.start"`) {
-		t.Fatalf("rpc body = %q, want run.start request", result.rpcBody)
+	if strings.Contains(result.rpcHeaders, result.builderToken) && result.builderToken != result.apiToken {
+		t.Fatalf("run.start headers = %q, want no builder-token auth", result.rpcHeaders)
 	}
-	if !strings.Contains(result.rpcBody, `"scan.corpus_file_requested"`) {
-		t.Fatalf("rpc body = %q, want typed corpus root input", result.rpcBody)
+	if got := strings.TrimSpace(result.rpcURL); got != "http://127.0.0.1:8081/v1/rpc" {
+		t.Fatalf("run.start url = %q, want v1 rpc endpoint", got)
+	}
+	start := decodeJSONRPCBody(t, result.rpcBody)
+	if start.JSONRPC != "2.0" || start.ID != "run-clear" || start.Method != "run.start" {
+		t.Fatalf("run.start body = %#v, want JSON-RPC run.start envelope", start)
+	}
+	if start.Params["run_id"] != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("run.start params = %#v, want run_id", start.Params)
+	}
+	if start.Params["event_name"] != "scan.corpus_file_requested" {
+		t.Fatalf("run.start params = %#v, want typed corpus root input", start.Params)
+	}
+	if _, ok := start.Params["inputs"]; ok {
+		t.Fatalf("run.start params = %#v, want no legacy inputs envelope", start.Params)
+	}
+	bundleRef := mapParam(t, start.Params, "bundle_ref")
+	if bundleRef["fingerprint"] != runClearTestBundleFingerprint {
+		t.Fatalf("bundle_ref = %#v, want health.check fingerprint", bundleRef)
+	}
+	if start.Params["idempotency_key"] != "run-clear:11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("run.start params = %#v, want per-run idempotency key", start.Params)
+	}
+	payload := mapParam(t, start.Params, "payload")
+	request := mapParam(t, payload, "request")
+	if request["geography"] != "US" {
+		t.Fatalf("payload = %#v, want typed request geography", payload)
+	}
+	if payload["corpus_path"] != "/data/test-signals-25.jsonl" {
+		t.Fatalf("payload = %#v, want corpus_path", payload)
 	}
 	if strings.Contains(result.rpcBody, `"scan.requested"`) {
-		t.Fatalf("rpc body = %q, want no retired scan.requested input", result.rpcBody)
+		t.Fatalf("run.start body = %q, want no retired scan.requested input", result.rpcBody)
 	}
-	if !strings.Contains(result.rpcBody, `"request":{"geography":"US"}`) {
-		t.Fatalf("rpc body = %q, want typed request geography", result.rpcBody)
+	if !strings.Contains(result.stdout, `"status":"running"`) {
+		t.Fatalf("stdout = %q, want v1 running response", result.stdout)
 	}
-	if !strings.Contains(result.rpcBody, `"corpus_path":"/data/test-signals-25.jsonl"`) {
-		t.Fatalf("rpc body = %q, want corpus_path payload", result.rpcBody)
-	}
-	if !strings.Contains(result.stdout, `"status":"started"`) {
-		t.Fatalf("stdout = %q, want started response", result.stdout)
+	if strings.Contains(result.stdout, `"status":"started"`) {
+		t.Fatalf("stdout = %q, want no legacy started response", result.stdout)
 	}
 }
 
-func TestRunClear_UsesConfiguredBuilderAuthTokenForRPC(t *testing.T) {
+func TestRunClear_UsesConfiguredAPITokenForHealthCheckAndRunStart(t *testing.T) {
+	const explicitAPIToken = "api-explicit-token"
 	const explicitOperatorToken = "operator-explicit-token"
 	const explicitBuilderToken = "builder-explicit-token"
 	result := runRunClear(t, runClearConfig{
+		apiToken:      explicitAPIToken,
 		operatorToken: explicitOperatorToken,
 		builderToken:  explicitBuilderToken,
 	})
 
+	if got := strings.TrimSpace(result.apiToken); got != explicitAPIToken {
+		t.Fatalf("api token = %q, want %q", got, explicitAPIToken)
+	}
 	if got := strings.TrimSpace(result.operatorToken); got != explicitOperatorToken {
 		t.Fatalf("operator token = %q, want %q", got, explicitOperatorToken)
 	}
 	if got := strings.TrimSpace(result.builderToken); got != explicitBuilderToken {
 		t.Fatalf("builder token = %q, want %q", got, explicitBuilderToken)
 	}
-	wantOperatorHeader := "Authorization: Bearer " + explicitOperatorToken
-	if !strings.Contains(result.healthHeaders, wantOperatorHeader) {
-		t.Fatalf("api health headers = %q, want %q", result.healthHeaders, wantOperatorHeader)
+	wantAPIHeader := "Authorization: Bearer " + explicitAPIToken
+	if !strings.Contains(result.healthHeaders, wantAPIHeader) {
+		t.Fatalf("health.check headers = %q, want %q", result.healthHeaders, wantAPIHeader)
 	}
-	wantBuilderHeader := "Authorization: Bearer " + explicitBuilderToken
-	if !strings.Contains(result.rpcHeaders, wantBuilderHeader) {
-		t.Fatalf("rpc headers = %q, want %q", result.rpcHeaders, wantBuilderHeader)
+	if !strings.Contains(result.rpcHeaders, wantAPIHeader) {
+		t.Fatalf("run.start headers = %q, want %q", result.rpcHeaders, wantAPIHeader)
+	}
+	if strings.Contains(result.rpcHeaders, explicitBuilderToken) || strings.Contains(result.healthHeaders, explicitBuilderToken) {
+		t.Fatalf("headers used builder token: health=%q run=%q", result.healthHeaders, result.rpcHeaders)
+	}
+}
+
+func TestRunClear_MapsConfiguredInputEventAndPayloadToV1RunStart(t *testing.T) {
+	result := runRunClear(t, runClearConfig{
+		inputEvent:       "scan.signals_requested",
+		inputPayloadJSON: `{"source":"manual","count":2}`,
+	})
+
+	start := decodeJSONRPCBody(t, result.rpcBody)
+	if start.Method != "run.start" {
+		t.Fatalf("run.start body = %#v, want run.start", start)
+	}
+	if start.Params["event_name"] != "scan.signals_requested" {
+		t.Fatalf("run.start params = %#v, want configured event_name", start.Params)
+	}
+	if _, ok := start.Params["inputs"]; ok {
+		t.Fatalf("run.start params = %#v, want no legacy inputs envelope", start.Params)
+	}
+	payload := mapParam(t, start.Params, "payload")
+	if payload["source"] != "manual" {
+		t.Fatalf("payload = %#v, want configured source", payload)
+	}
+	if payload["count"] != float64(2) {
+		t.Fatalf("payload = %#v, want configured count", payload)
 	}
 }
 
@@ -120,7 +184,7 @@ func TestRunClear_DoesNotTreatLauncherStateChangeAsStartupFailure(t *testing.T) 
 	if !strings.Contains(result.stdout, "Swarm ready at http://127.0.0.1:8081") {
 		t.Fatalf("stdout = %q, want readiness success", result.stdout)
 	}
-	if !strings.Contains(result.stdout, `"status":"started"`) {
+	if !strings.Contains(result.stdout, `"status":"running"`) {
 		t.Fatalf("stdout = %q, want run.start request after readiness", result.stdout)
 	}
 }
@@ -243,6 +307,7 @@ type runClearResult struct {
 	launchedBinaryPath  string
 	launchedHealthAddr  string
 	healthHeaders       string
+	healthBody          string
 	healthURL           string
 	rpcHeaders          string
 	rpcBody             string
@@ -278,6 +343,7 @@ func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error)
 	pythonHealthAddrSink := filepath.Join(t.TempDir(), "python-health-addr.txt")
 	psStateCountSink := filepath.Join(t.TempDir(), "ps-state-count.txt")
 	healthHeadersSink := filepath.Join(t.TempDir(), "api-health-headers.txt")
+	healthBodySink := filepath.Join(t.TempDir(), "api-health-body.txt")
 	healthURLSink := filepath.Join(t.TempDir(), "api-health-url.txt")
 	rpcHeadersSink := filepath.Join(t.TempDir(), "rpc-headers.txt")
 	bodySink := filepath.Join(t.TempDir(), "rpc-body.txt")
@@ -458,20 +524,10 @@ if [[ "$url" == *"/api/health" ]]; then
   else
     : > "${CURL_API_HEALTH_HEADERS_SINK}"
   fi
-  want="Authorization: Bearer ${SWARM_OPERATOR_AUTH_TOKEN}"
-  for header in "${headers[@]}"; do
-    if [[ "$header" == "$want" ]]; then
-      if [[ -n "$out" ]]; then
-        printf '{}' > "$out"
-      fi
-      printf '%s' "${CURL_API_HEALTH_CODE:-200}"
-      exit 0
-    fi
-  done
   if [[ -n "$out" ]]; then
-    printf '{"error":"operator authentication is not configured"}' > "$out"
+    printf '{"error":"legacy api health is not canonical"}' > "$out"
   fi
-  printf '401'
+  printf '500'
   exit 0
 fi
 if [[ "$url" == *"/api/rpc" ]]; then
@@ -482,17 +538,52 @@ if [[ "$url" == *"/api/rpc" ]]; then
     : > "${CURL_HEADERS_SINK}"
   fi
   printf '%s' "$body" > "${CURL_BODY_SINK}"
-  want="Authorization: Bearer ${SWARM_BUILDER_AUTH_TOKEN}"
-  for header in "${headers[@]}"; do
-    if [[ "$header" == "$want" ]]; then
-      printf '{"jsonrpc":"2.0","id":"run-clear","result":{"status":"started"}}'
-      exit 0
-    fi
-  done
-  printf '{"jsonrpc":"2.0","id":"run-clear","error":{"message":"missing authorization bearer token"}}'
+  printf '{"jsonrpc":"2.0","id":"run-clear","error":{"message":"legacy /api/rpc run.start is not canonical"}}'
   exit 0
 fi
 if [[ "$url" == *"/v1/rpc" ]]; then
+  if [[ "$body" == *'"method":"health.check"'* ]]; then
+    printf '%s' "$url" > "${CURL_API_HEALTH_URL_SINK}"
+    printf '%s' "$body" > "${CURL_API_HEALTH_BODY_SINK}"
+    if ((${#headers[@]})); then
+      printf '%s\n' "${headers[@]}" > "${CURL_API_HEALTH_HEADERS_SINK}"
+    else
+      : > "${CURL_API_HEALTH_HEADERS_SINK}"
+    fi
+    want="Authorization: Bearer ${SWARM_API_TOKEN}"
+    for header in "${headers[@]}"; do
+      if [[ "$header" == "$want" ]]; then
+        if [[ -n "$out" ]]; then
+          printf '{"jsonrpc":"2.0","id":"run-clear-health","result":{"alive":true,"ready":true,"db_ok":true,"runtime_ok":true,"bundle":{"workflow_name":"empire","workflow_version":"test","fingerprint":"%s"}}}' "${RUN_CLEAR_TEST_BUNDLE_FINGERPRINT}" > "$out"
+        fi
+        printf '%s' "${CURL_API_HEALTH_CODE:-200}"
+        exit 0
+      fi
+    done
+    if [[ -n "$out" ]]; then
+      printf '{"jsonrpc":"2.0","id":"run-clear-health","error":{"code":-32000,"message":"missing authorization bearer token","data":{"code":"UNAUTHORIZED"}}}' > "$out"
+    fi
+    printf '401'
+    exit 0
+  fi
+  if [[ "$body" == *'"method":"run.start"'* ]]; then
+    printf '%s' "$url" > "${CURL_URL_SINK}"
+    if ((${#headers[@]})); then
+      printf '%s\n' "${headers[@]}" > "${CURL_HEADERS_SINK}"
+    else
+      : > "${CURL_HEADERS_SINK}"
+    fi
+    printf '%s' "$body" > "${CURL_BODY_SINK}"
+    want="Authorization: Bearer ${SWARM_API_TOKEN}"
+    for header in "${headers[@]}"; do
+      if [[ "$header" == "$want" ]]; then
+        printf '{"jsonrpc":"2.0","id":"run-clear","result":{"run_id":"11111111-1111-1111-1111-111111111111","status":"running"}}'
+        exit 0
+      fi
+    done
+    printf '{"jsonrpc":"2.0","id":"run-clear","error":{"code":-32000,"message":"missing authorization bearer token","data":{"code":"UNAUTHORIZED"}}}'
+    exit 0
+  fi
   printf '%s' "$url" > "${CURL_DIRECTIVE_URL_SINK}"
   if ((${#headers[@]})); then
     printf '%s\n' "${headers[@]}" > "${CURL_DIRECTIVE_HEADERS_SINK}"
@@ -537,10 +628,12 @@ printf '{}'
 		"PS_MODE=" + defaultString(cfg.psMode, "real"),
 		"PS_STATE_COUNT_SINK=" + psStateCountSink,
 		"CURL_API_HEALTH_HEADERS_SINK=" + healthHeadersSink,
+		"CURL_API_HEALTH_BODY_SINK=" + healthBodySink,
 		"CURL_API_HEALTH_URL_SINK=" + healthURLSink,
 		"CURL_HEALTHZ_CODE=200",
 		"CURL_READYZ_CODE=" + defaultString(cfg.readyCode, "200"),
 		"CURL_API_HEALTH_CODE=" + defaultString(cfg.apiHealthCode, "200"),
+		"RUN_CLEAR_TEST_BUNDLE_FINGERPRINT=" + runClearTestBundleFingerprint,
 		"CURL_HEADERS_SINK=" + rpcHeadersSink,
 		"CURL_BODY_SINK=" + bodySink,
 		"CURL_URL_SINK=" + urlSink,
@@ -569,6 +662,12 @@ printf '{}'
 	if cfg.directiveMessage != "" {
 		cmd.Env = append(cmd.Env, "DIRECTIVE_MESSAGE="+cfg.directiveMessage)
 	}
+	if cfg.inputEvent != "" {
+		cmd.Env = append(cmd.Env, "RUN_CLEAR_INPUT_EVENT="+cfg.inputEvent)
+	}
+	if cfg.inputPayloadJSON != "" {
+		cmd.Env = append(cmd.Env, "RUN_CLEAR_INPUT_PAYLOAD_JSON="+cfg.inputPayloadJSON)
+	}
 	if cfg.hostGatewayURL != "" {
 		cmd.Env = append(cmd.Env, "SWARM_TOOL_GATEWAY_URL="+cfg.hostGatewayURL)
 	}
@@ -592,6 +691,7 @@ printf '{}'
 		launchedBinaryPath:  readFileTrimmed(t, pythonBinaryPathSink),
 		launchedHealthAddr:  readFileTrimmed(t, pythonHealthAddrSink),
 		healthHeaders:       readFileTrimmedOptional(t, healthHeadersSink),
+		healthBody:          readFileTrimmedOptional(t, healthBodySink),
 		healthURL:           readFileTrimmedOptional(t, healthURLSink),
 		rpcHeaders:          readFileTrimmedOptional(t, rpcHeadersSink),
 		rpcBody:             readFileTrimmedOptional(t, bodySink),
@@ -600,6 +700,38 @@ printf '{}'
 		directiveBody:       readFileTrimmedOptional(t, directiveBodySink),
 		directiveURL:        readFileTrimmedOptional(t, directiveURLSink),
 	}, err
+}
+
+type jsonRPCRequestBody struct {
+	JSONRPC string         `json:"jsonrpc"`
+	ID      string         `json:"id"`
+	Method  string         `json:"method"`
+	Params  map[string]any `json:"params"`
+}
+
+func decodeJSONRPCBody(t *testing.T, raw string) jsonRPCRequestBody {
+	t.Helper()
+	var body jsonRPCRequestBody
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatalf("decode JSON-RPC body %q: %v", raw, err)
+	}
+	if body.Params == nil {
+		body.Params = map[string]any{}
+	}
+	return body
+}
+
+func mapParam(t *testing.T, values map[string]any, name string) map[string]any {
+	t.Helper()
+	value, ok := values[name]
+	if !ok {
+		t.Fatalf("missing %s in %#v", name, values)
+	}
+	mapped, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("%s = %#v, want object", name, value)
+	}
+	return mapped
 }
 
 func filteredEnv(removeKeys ...string) []string {
