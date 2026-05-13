@@ -5102,7 +5102,7 @@ static_analyzer:
     rule: Emit hard invalidity when a parseable structural prompt reference drifts from the declared event or entity contract.
 
 cli_specification:
-  description: 'Authoritative v1 Swarm CLI UX contract. The detailed review source is docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux.yaml; this section promotes the v1 command topology, migration boundary, and local/runtime-state ownership rules into the merge artifact.'
+  description: 'Authoritative v1 Swarm CLI UX contract. This section is the merge artifact for v1 command topology, migration boundary, and local/runtime-state ownership rules.'
   foundations:
     command_router:
       canonical_owner: cmd/swarm Cobra command tree
