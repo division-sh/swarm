@@ -28,6 +28,13 @@ type Finding struct {
 	Message    string
 }
 
+type agentFlowDataDeclaration struct {
+	LogicalID string
+	Entry     runtimecontracts.AgentRegistryEntry
+	FlowID    string
+	Scope     semanticview.FlowScope
+}
+
 func NormalizeAccessList(values []string) []string {
 	if len(values) == 0 {
 		return nil
@@ -90,13 +97,8 @@ func ContentType(filename string) string {
 }
 
 func AllowedFilenames(source semanticview.Source, actor models.AgentConfig) []string {
-	if source == nil {
-		return nil
-	}
-	if logicalID, entry, ok := semanticview.ResolveAgentRegistryEntry(source, actor); ok {
-		if contractSource, sourceOK := source.AgentContractSource(logicalID); sourceOK && strings.TrimSpace(contractSource.FlowID) != "" {
-			return FlowDataAccessFromEntry(entry)
-		}
+	if decl, ok := resolveAgentFlowDataDeclaration(source, actor); ok {
+		return FlowDataAccessFromEntry(decl.Entry)
 	}
 	return nil
 }
@@ -154,14 +156,14 @@ func Resolve(source semanticview.Source, actor models.AgentConfig, rawFilename s
 	if err != nil {
 		return ResolvedFile{}, err
 	}
-	if !filenameAllowed(filename, AllowedFilenames(source, actor)) {
+	decl, ok := resolveAgentFlowDataDeclaration(source, actor)
+	if !ok {
+		return ResolvedFile{}, fmt.Errorf("agent %s has no flow-scoped contract declaration for flow data", strings.TrimSpace(actor.ID))
+	}
+	if !filenameAllowed(filename, FlowDataAccessFromEntry(decl.Entry)) {
 		return ResolvedFile{}, fmt.Errorf("flow data file %q is not declared for agent %s", filename, strings.TrimSpace(actor.ID))
 	}
-	scope, err := actorFlowScope(source, actor)
-	if err != nil {
-		return ResolvedFile{}, err
-	}
-	resolvedPath, err := resolveUnderDataRoot(scope.DataDir, filename)
+	resolvedPath, err := resolveUnderDataRoot(decl.Scope.DataDir, filename)
 	if err != nil {
 		return ResolvedFile{}, err
 	}
@@ -177,31 +179,32 @@ func Resolve(source semanticview.Source, actor models.AgentConfig, rawFilename s
 	}, nil
 }
 
-func actorFlowScope(source semanticview.Source, actor models.AgentConfig) (semanticview.FlowScope, error) {
-	flowID := strings.TrimSpace(actor.Mode)
-	if flowID != "" {
-		if scope, ok := source.FlowScopeByID(flowID); ok {
-			return scope, nil
-		}
+func resolveAgentFlowDataDeclaration(source semanticview.Source, actor models.AgentConfig) (agentFlowDataDeclaration, bool) {
+	if source == nil {
+		return agentFlowDataDeclaration{}, false
 	}
-	if contractSource, ok := source.AgentContractSource(strings.TrimSpace(actor.ID)); ok {
-		flowID = strings.TrimSpace(contractSource.FlowID)
+	logicalID, entry, ok := semanticview.ResolveAgentRegistryEntry(source, actor)
+	if !ok {
+		return agentFlowDataDeclaration{}, false
 	}
+	contractSource, ok := source.AgentContractSource(logicalID)
+	if !ok {
+		return agentFlowDataDeclaration{}, false
+	}
+	flowID := strings.TrimSpace(contractSource.FlowID)
 	if flowID == "" {
-		if logicalID, _, ok := semanticview.ResolveAgentRegistryEntry(source, actor); ok {
-			if contractSource, ok := source.AgentContractSource(logicalID); ok {
-				flowID = strings.TrimSpace(contractSource.FlowID)
-			}
-		}
-	}
-	if flowID == "" {
-		return semanticview.FlowScope{}, fmt.Errorf("agent %s has no owning flow for flow data", strings.TrimSpace(actor.ID))
+		return agentFlowDataDeclaration{}, false
 	}
 	scope, ok := source.FlowScopeByID(flowID)
 	if !ok {
-		return semanticview.FlowScope{}, fmt.Errorf("owning flow %s for agent %s was not found", flowID, strings.TrimSpace(actor.ID))
+		return agentFlowDataDeclaration{}, false
 	}
-	return scope, nil
+	return agentFlowDataDeclaration{
+		LogicalID: strings.TrimSpace(logicalID),
+		Entry:     entry,
+		FlowID:    flowID,
+		Scope:     scope,
+	}, true
 }
 
 func resolveUnderDataRoot(dataDir, filename string) (string, error) {

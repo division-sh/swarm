@@ -111,6 +111,53 @@ func TestExecutorReadFlowDataIgnoresMutableActorFlowDataAccess(t *testing.T) {
 	}
 }
 
+func TestExecutorReadFlowDataUsesContractOwnedFlowRoot(t *testing.T) {
+	source, root := loadFlowDataToolSource(t)
+	if err := os.MkdirAll(filepath.Join(root, "flows", "other", "data"), 0o755); err != nil {
+		t.Fatalf("mkdir other data: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "flows", "other", "data", "exclusions.yaml"), []byte("blocked: other-flow\n"), 0o644); err != nil {
+		t.Fatalf("write other exclusions: %v", err)
+	}
+	actor := flowDataActor()
+	actor.Mode = "other"
+	actor.FlowPath = "other"
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+
+	out, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"})
+	if err != nil {
+		t.Fatalf("Execute(read_flow_data): %v", err)
+	}
+	result, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", out)
+	}
+	if got := strings.TrimSpace(asString(result["content"])); got != "blocked: true" {
+		t.Fatalf("content = %q, want support-flow contract-owned data root", got)
+	}
+}
+
+func TestExecutorReadFlowDataDiagnosticsUseFlowDataAuthorization(t *testing.T) {
+	source, _ := loadFlowDataToolSource(t)
+	actor := flowDataActor()
+	bus := &telemetryBusStub{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
+
+	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err != nil {
+		t.Fatalf("Execute(read_flow_data): %v", err)
+	}
+	if len(bus.logs) != 1 {
+		t.Fatalf("runtime log count = %d, want 1", len(bus.logs))
+	}
+	detail, _ := bus.logs[0].Detail.(map[string]any)
+	if got := strings.TrimSpace(asString(detail["authorization_class"])); got != "flow_data_access" {
+		t.Fatalf("authorization_class = %q, want flow_data_access (detail=%#v)", got, detail)
+	}
+	if got := strings.TrimSpace(asString(detail["context_requirement"])); got != "actor_context" {
+		t.Fatalf("context_requirement = %q, want actor_context", got)
+	}
+}
+
 func TestExecutorReadFlowDataRequiresWorkflowSource(t *testing.T) {
 	actor := flowDataActor()
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
