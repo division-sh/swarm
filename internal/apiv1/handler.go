@@ -127,21 +127,11 @@ func NewHandler(opts Options) (*Handler, error) {
 }
 
 func AuthTokensFromEnvironment() []string {
-	keys := []string{"SWARM_API_TOKEN", "SWARM_BUILDER_AUTH_TOKEN", "SWARM_OPERATOR_AUTH_TOKEN"}
-	out := make([]string, 0, len(keys))
-	seen := map[string]struct{}{}
-	for _, key := range keys {
-		value := strings.TrimSpace(os.Getenv(key))
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
+	value := strings.TrimSpace(os.Getenv("SWARM_API_TOKEN"))
+	if value == "" {
+		return nil
 	}
-	return out
+	return []string{value}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

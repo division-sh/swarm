@@ -18,8 +18,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	builderpkg "swarm/internal/builder"
-	dashboardserver "swarm/internal/dashboard/server"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
 	runtimebootverify "swarm/internal/runtime/bootverify"
@@ -69,6 +67,53 @@ func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([
 	return []events.Event{out}, nil
 }
 
+func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) {
+	t.Helper()
+	if err := bus.Publish(context.Background(), (events.Event{
+		ID:          uuid.NewString(),
+		RunID:       runID,
+		Type:        events.EventType("scan.requested"),
+		SourceAgent: "api.v1",
+		Payload:     []byte(`{"topic":"sample"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(entityID)); err != nil {
+		t.Fatalf("publish root event: %v", err)
+	}
+}
+
+func markRunStatusCompleted(t *testing.T, db *sql.DB, runID string) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		UPDATE runs
+		SET status = 'completed',
+		    ended_at = now()
+		WHERE run_id = $1::uuid
+	`, runID); err != nil {
+		t.Fatalf("mark run completed: %v", err)
+	}
+}
+
+func waitRunStatusEventCount(t *testing.T, db *sql.DB, runID string, want int) {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var count int
+		err := db.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM events
+			WHERE run_id = $1::uuid
+		`, runID).Scan(&count)
+		if err == nil && count >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %s event count did not reach %d: last err=%v count=%d", runID, want, err, count)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestNewHealthServerPreservesProcessProbesAndMountsV1API(t *testing.T) {
 	var ready atomic.Bool
 	var apiHit atomic.Bool
@@ -80,7 +125,7 @@ func TestNewHealthServerPreservesProcessProbesAndMountsV1API(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"test","result":{"ok":true}}`))
 	})
-	server := newHealthServer(":0", &ready, nil, apiHandler, dashboardserver.Options{})
+	server := newHealthServer(":0", &ready, nil, apiHandler)
 	handler := server.Handler
 
 	rec := httptest.NewRecorder()
@@ -108,6 +153,14 @@ func TestNewHealthServerPreservesProcessProbesAndMountsV1API(t *testing.T) {
 	}
 	if !apiHit.Load() {
 		t.Fatal("/v1/rpc did not route to v1 API handler")
+	}
+
+	for _, path := range []string{"/api", "/api/healthz", "/api/rpc", "/rpc", "/api/ws", "/ws"} {
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404", path, rec.Code)
+		}
 	}
 }
 
@@ -1402,38 +1455,10 @@ func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	rt := &runtimepkg.Runtime{Bus: eb}
-	handler := builderpkg.NewHandler(builderpkg.Options{
-		CurrentRuntime: func() *runtimepkg.Runtime { return rt },
-		AuthToken:      "builder-test-token",
-	})
-
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	reqBody, err := json.Marshal(builderpkg.Request{
-		JSONRPC: "2.0",
-		ID:      "run-start-1",
-		Method:  "run.start",
-		Params: map[string]any{
-			"run_id": runID,
-			"inputs": map[string]any{
-				"scan.requested": map[string]any{
-					"entity_id": entityID,
-					"topic":     "sample",
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal run.start request: %v", err)
-	}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(reqBody))
-	req.Header.Set("Authorization", "Bearer builder-test-token")
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
-	}
+	publishRunStatusRootEvent(t, eb, runID, entityID)
+	markRunStatusCompleted(t, db, runID)
 
 	ctx := context.Background()
 	deadline := time.Now().Add(2 * time.Second)
@@ -1498,38 +1523,9 @@ func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *
 	am.Run(context.Background())
 	defer func() { _ = am.Shutdown() }()
 
-	rt := &runtimepkg.Runtime{Bus: eb, Manager: am}
-	handler := builderpkg.NewHandler(builderpkg.Options{
-		CurrentRuntime: func() *runtimepkg.Runtime { return rt },
-		AuthToken:      "builder-test-token",
-	})
-
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	reqBody, err := json.Marshal(builderpkg.Request{
-		JSONRPC: "2.0",
-		ID:      "run-start-1",
-		Method:  "run.start",
-		Params: map[string]any{
-			"run_id": runID,
-			"inputs": map[string]any{
-				"scan.requested": map[string]any{
-					"entity_id": entityID,
-					"topic":     "sample",
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal run.start request: %v", err)
-	}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(reqBody))
-	req.Header.Set("Authorization", "Bearer builder-test-token")
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
-	}
+	publishRunStatusRootEvent(t, eb, runID, entityID)
 
 	select {
 	case <-agentStarted:
@@ -1573,6 +1569,8 @@ func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *
 	}
 
 	close(releaseAgent)
+	waitRunStatusEventCount(t, db, runID, 2)
+	markRunStatusCompleted(t, db, runID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -1617,10 +1615,7 @@ func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *
 	}
 }
 
-func TestLoadRunStatusReport_PreservesRunningTruthAcrossBuilderQuiescenceTimeout(t *testing.T) {
-	restore := builderpkg.SetRunCompletionTimeoutForTest(25 * time.Millisecond)
-	defer restore()
-
+func TestLoadRunStatusReport_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	eb, err := runtimebus.NewEventBus(pg)
@@ -1648,38 +1643,9 @@ func TestLoadRunStatusReport_PreservesRunningTruthAcrossBuilderQuiescenceTimeout
 	am.Run(context.Background())
 	defer func() { _ = am.Shutdown() }()
 
-	rt := &runtimepkg.Runtime{Bus: eb, Manager: am}
-	handler := builderpkg.NewHandler(builderpkg.Options{
-		CurrentRuntime: func() *runtimepkg.Runtime { return rt },
-		AuthToken:      "builder-test-token",
-	})
-
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	reqBody, err := json.Marshal(builderpkg.Request{
-		JSONRPC: "2.0",
-		ID:      "run-start-timeout-1",
-		Method:  "run.start",
-		Params: map[string]any{
-			"run_id": runID,
-			"inputs": map[string]any{
-				"scan.requested": map[string]any{
-					"entity_id": entityID,
-					"topic":     "sample",
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal run.start request: %v", err)
-	}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(reqBody))
-	req.Header.Set("Authorization", "Bearer builder-test-token")
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
-	}
+	publishRunStatusRootEvent(t, eb, runID, entityID)
 
 	select {
 	case <-agentStarted:
@@ -1745,6 +1711,8 @@ func TestLoadRunStatusReport_PreservesRunningTruthAcrossBuilderQuiescenceTimeout
 	}
 
 	close(releaseAgent)
+	waitRunStatusEventCount(t, db, runID, 2)
+	markRunStatusCompleted(t, db, runID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {

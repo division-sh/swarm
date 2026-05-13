@@ -245,36 +245,7 @@ func NewHandler(opts Options) http.Handler {
 		version:       strings.TrimSpace(opts.Version),
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", h.handleHealth)
 	mux.HandleFunc("GET /healthz", h.handleHealth)
-	mux.HandleFunc("GET /api/healthz", h.handleHealth)
-	mux.HandleFunc("GET /api/agents", h.handleAgents)
-	mux.HandleFunc("GET /api/agents/{id}", h.handleAgentDetail)
-	mux.HandleFunc("POST /api/agents/{id}/actions/directive", h.handleAgentDirective)
-	mux.HandleFunc("POST /api/agents/{id}/actions/restart", h.handleAgentRestart)
-	mux.HandleFunc("POST /api/agents/{id}/actions/replay", h.handleAgentReplay)
-	mux.HandleFunc("GET /api/conversations", h.handleConversations)
-	mux.HandleFunc("GET /api/conversations/{sessionID}", h.handleConversationDetail)
-	mux.HandleFunc("GET /api/events", h.handleEvents)
-	mux.HandleFunc("GET /api/events/flow", h.handleFlowEvents)
-	mux.HandleFunc("GET /api/events/{id}", h.handleEventDetail)
-	mux.HandleFunc("GET /api/mailbox", h.handleMailbox)
-	mux.HandleFunc("GET /api/mailbox/{id}", h.handleMailboxDetail)
-	mux.HandleFunc("GET /api/instances/aggregate", h.handleInstanceAggregate)
-	mux.HandleFunc("GET /api/instances/{id}", h.handleInstanceDetail)
-	mux.HandleFunc("GET /api/instances", h.handleInstances)
-	mux.HandleFunc("GET /api/runtime/logs", h.handleRuntimeLogs)
-	mux.HandleFunc("GET /api/runtime/incidents", h.handleRuntimeIncidents)
-	mux.HandleFunc("POST /api/runtime/actions", h.handleRuntimeAction)
-	mux.HandleFunc("GET /api/runs/{runID}/trace", h.handleRunTrace)
-	builderHandler := opts.Builder
-	if builderHandler != nil {
-		h.builder = builderHandler
-		mux.Handle("POST /rpc", builderHandler)
-		mux.Handle("POST /api/rpc", builderHandler)
-		mux.Handle("GET /ws", builderHandler)
-		mux.Handle("GET /api/ws", builderHandler)
-	}
 	h.mux = mux
 	return h
 }
@@ -301,15 +272,7 @@ var (
 )
 
 func (h *Handler) requiresAuthentication(r *http.Request) bool {
-	if r == nil || r.URL == nil {
-		return false
-	}
-	path := strings.TrimSpace(r.URL.Path)
-	switch path {
-	case "/api/rpc", "/api/ws":
-		return false
-	}
-	return path == "/api" || strings.HasPrefix(path, "/api/")
+	return false
 }
 
 func (h *Handler) authorize(r *http.Request) error {

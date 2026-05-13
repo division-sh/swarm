@@ -1,11 +1,8 @@
 package builder
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"swarm/internal/events"
@@ -146,24 +143,14 @@ func TestHandlerRunStartAcceptsDeclaredRoutableInput(t *testing.T) {
 	}
 }
 
-func callBuilderRPCRaw(t *testing.T, handler http.Handler, req Request) RPCResponse {
+func callBuilderRPCRaw(t *testing.T, httpHandler http.Handler, req Request) RPCResponse {
 	t.Helper()
-	raw, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
+	h, ok := httpHandler.(*handler)
+	if !ok {
+		t.Fatalf("handler type = %T, want *handler", httpHandler)
 	}
-	rec := httptest.NewRecorder()
-	httpReq := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(raw))
-	httpReq.Header.Set("Authorization", "Bearer "+testBuilderAuthToken)
-	handler.ServeHTTP(rec, httpReq)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("unexpected status %d body=%s", rec.Code, rec.Body.String())
-	}
-	var resp RPCResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	return resp
+	result, rpcErr := h.dispatchRPC(context.Background(), req.Method, req.Params)
+	return RPCResponse{JSONRPC: "2.0", ID: req.ID, Result: result, Error: rpcErr}
 }
 
 func runStartInputBundle(eventName string) *runtimecontracts.WorkflowContractBundle {

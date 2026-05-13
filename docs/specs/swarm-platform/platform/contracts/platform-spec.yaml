@@ -7893,26 +7893,29 @@ api_specification:
       rationale: health.check covers bundle identity in v1. Break out as runtime.identity if Phase 2/3 grows non-bundle identity
         dimensions (region, deployment, version).
   migration:
-    description: How the existing dual-API surface deprecates to v1.
+    description: How the previous dual-API surface is retired in favor of v1.
     builder_api_disposition:
-      transport: "JSON-RPC at /rpc and /api/rpc \u2014 kept as a deprecated alias for v1 endpoint /v1/rpc during a transition\
-        \ window."
+      transport: "JSON-RPC at /rpc and /api/rpc, plus Builder WebSocket at /ws and /api/ws, are retired operator-facing\
+        \ compatibility surfaces. They MUST NOT remain reachable in production; v1 /v1/rpc and /v1/ws are the only user-facing\
+        \ operator API transports."
       methods:
-      - "project.open / project.reload / project.close \u2192 deferred bundle_lifecycle namespace. Existing methods kept as\
-        \ deprecated aliases."
+      - "project.open / project.reload / project.close \u2192 retired with the legacy Builder transport. A future bundle_lifecycle\
+        \ namespace requires a new product owner and spec."
       - "run.start / run.stop / run.pause / run.continue \u2192 renamed to v1 run.* methods (same semantics, new request envelope\
         \ under /v1/rpc, bundle_ref nesting)."
-      - "run.step / run.retry / run.skip \u2192 debug.* deferred namespace."
+      - "run.step / run.retry / run.skip \u2192 retired with the legacy Builder transport. A future debug.* namespace requires\
+        \ a new product owner and spec."
       - "state.list_instances \u2192 entity.list (consolidated with /api/instances)."
       - "state.get_entity \u2192 entity.get (consolidated with /api/instances/{id})."
-      - "credentials.list / set / delete \u2192 kept as-is in deferred credentials.* namespace."
+      - "credentials.list / set / delete \u2192 retired with the legacy Builder transport. A future credentials.* namespace\
+        \ requires a new product owner and spec."
       - "validate.full \u2192 DEPRECATED. No JSON-RPC equivalent in v1; verify.* namespace is deferred (see deferred_namespaces.verify).\
         \ Use `swarm verify` CLI for static contract validation in v1."
       - "[PROPOSED] methods that were never implemented \u2192 either v1 method on the equivalent namespace, deferred namespace,\
         \ or removed from spec entirely. None remain as [PROPOSED] in v1."
     operator_api_disposition:
-      transport: "REST at /api/* \u2014 kept as a deprecated alias surface for one minor revision; consumers redirected to\
-        \ /v1/rpc equivalents."
+      transport: "REST at /api/* is retired as an operator-facing compatibility surface. It MUST NOT remain reachable in\
+        \ production; consumers use /v1/rpc or /v1/ws."
       methods:
       - "GET /api/health \u2192 health.check"
       - "GET /api/agents \u2192 agent.list"
@@ -7937,8 +7940,8 @@ api_specification:
       - "POST /api/runtime/actions {reset_state} \u2192 deferred to runtime_admin.runtime.reset_state"
       - "GET /api/runs/{runID}/trace \u2192 run.trace (also adds run.subscribe_trace as the live variant)"
     auth_token_disposition:
-      v1_model: SWARM_BUILDER_AUTH_TOKEN and SWARM_OPERATOR_AUTH_TOKEN are merged into a single SWARM_API_TOKEN env var. Legacy
-        env vars kept as fallbacks during the deprecation window. Phase 2 removes legacy env vars.
+      v1_model: SWARM_API_TOKEN is the only user-facing API bearer-token source. SWARM_BUILDER_AUTH_TOKEN and SWARM_OPERATOR_AUTH_TOKEN
+        are retired and MUST NOT authorize /v1/rpc or /v1/ws.
       auth_boundary_bug_fix: "The current bug where /api/rpc and /api/ws bypass operator auth is moot under v1 \u2014 one\
         \ auth surface, one token."
     cli_consumer_migration:
@@ -7965,7 +7968,8 @@ api_specification:
     - BUILDER-API.md is marked DEPRECATED with a top-line note pointing to this spec.
     - 'CHANGELOG entry references Empire #57 (mailbox approval API gap closed) and the dual-API consolidation.'
     runtime:
-    - /v1/rpc HTTP endpoint and /v1/ws WebSocket endpoint exist alongside the legacy /api/* and /rpc endpoints.
+    - /v1/rpc HTTP endpoint and /v1/ws WebSocket endpoint exist as the only user-facing operator API transports. Legacy /api/*,
+      /rpc, /api/rpc, /ws, and /api/ws endpoints are not reachable in production.
     - Every must_have method in the catalog is implemented and reachable via /v1/rpc with the documented params, returns,
       scopes, and errors.
     - "Idempotency replay-store implementation: (method, actor, idempotency_key) \u2192 response; 24h TTL; IDEMPOTENCY_CONFLICT\
@@ -7983,10 +7987,8 @@ api_specification:
       `swarm verify` carve-out).'
     - '`make run-clear` migrated to /v1/rpc and unified token.'
     deprecation:
-    - 'Legacy /rpc and /api/* endpoints respond with X-Deprecated-Endpoint: true; X-Replacement: /v1/rpc and continue to function
-      for one minor spec revision, then removed.'
-    - Legacy SWARM_BUILDER_AUTH_TOKEN / SWARM_OPERATOR_AUTH_TOKEN env vars accepted as fallbacks alongside SWARM_API_TOKEN;
-      legacy vars removed in Phase 2.
+    - 'Legacy /rpc, /api/rpc, /ws, /api/ws, and dashboard /api/* endpoints are removed or fail closed. They are not aliases.'
+    - SWARM_BUILDER_AUTH_TOKEN and SWARM_OPERATOR_AUTH_TOKEN are not accepted as API auth fallbacks. SWARM_API_TOKEN is required.
     openrpc_artifact:
     - A generator (verify-pipeline tool) reads this YAML and emits openrpc.json from method_catalog + components. Drift between
       the two is hard_invalidity at boot verify.

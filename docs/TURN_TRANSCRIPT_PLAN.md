@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make `/api/conversations/:agent_id` return a canonical execution transcript built
+Make the v1 `conversation.get` API return a canonical execution transcript built
 from persisted agent turns, not a provider transcript blob scraped out of
 `agent_sessions.conversation`.
 
@@ -40,7 +40,7 @@ from persisted agent turns, not a provider transcript blob scraped out of
    - `outcome`: final assistant-visible summary.
    - `reasoning`: only explicit provider thinking blocks.
 
-5. Expose the canonical transcript through the conversation API.
+5. Expose the canonical transcript through the v1 conversation API.
    - Keep `messages[]` from `agent_sessions` for chat continuity.
    - Add `turns[]` with `turn_blocks`.
    - Frontend should render execution from `turns[]`, not scrape `messages[]`.
@@ -61,6 +61,6 @@ from persisted agent turns, not a provider transcript blob scraped out of
 ## Definition of Done
 
 - New turns persist ordered normalized blocks.
-- `/api/conversations/:agent_id` returns those blocks directly.
+- v1 `conversation.get` returns those blocks directly.
 - Frontend no longer depends on scraping provider transcript blobs for normal
   execution rendering.
