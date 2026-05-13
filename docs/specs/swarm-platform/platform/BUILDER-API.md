@@ -1,20 +1,20 @@
 # Swarm Builder API Reference
 
 **Version:** 0.1.0
-**Status:** Deprecated adapter reference — existing legacy builder methods documented from source, proposed methods retained only as historical notes.
-**Transport:** JSON-RPC 2.0 over HTTP and WebSocket
-**Authority:** Not authoritative. The canonical user-facing API contract is `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml` under `api_specification`, with `docs/specs/swarm-platform/platform/contracts/openrpc.json` generated from that section. Legacy builder endpoints are adapter surfaces until migrated or removed by later #665 slices.
+**Status:** Historical reference only. The Builder JSON-RPC/WebSocket transport has been retired as an operator-facing API surface.
+**Transport:** Retired; use v1 `/v1/rpc` and `/v1/ws`.
+**Authority:** Not authoritative. The canonical user-facing API contract is `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml` under `api_specification`, with `docs/specs/swarm-platform/platform/contracts/openrpc.json` generated from that section. The endpoints below document historical behavior only and must not be treated as supported surfaces.
 
 ---
 
-## Endpoints
+## Historical Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/rpc` | POST | JSON-RPC 2.0 |
-| `/api/rpc` | POST | Alias |
-| `/ws` | GET | WebSocket (RPC + channel subscriptions) |
-| `/api/ws` | GET | Alias |
+| `/rpc` | POST | Retired historical JSON-RPC 2.0 endpoint |
+| `/api/rpc` | POST | Retired historical alias |
+| `/ws` | GET | Retired historical WebSocket endpoint |
+| `/api/ws` | GET | Retired historical alias |
 
 ## JSON-RPC 2.0 Envelope
 

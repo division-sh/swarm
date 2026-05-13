@@ -1,0 +1,10 @@
+name: test-non-agent-replay-fail-closed
+namespace: test-non-agent-replay-fail-closed
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [task.assigned]
+  outputs:
+    events: [task.done]

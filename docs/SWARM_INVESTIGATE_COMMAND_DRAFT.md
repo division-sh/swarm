@@ -1,8 +1,8 @@
 # Swarm Investigate Command Draft
 
-API authority note: current `/api/*`, `/rpc`, and `/api/rpc` references in this
-document describe existing legacy adapter/helper surfaces. They are not
-competing API specs. The canonical user-facing API contract is
+API authority note: retired `/api/*`, `/rpc`, and `/api/rpc` references in this
+document are historical only. They are not supported operator API surfaces and
+are not competing API specs. The canonical user-facing API contract is
 `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
 `api_specification`, with OpenRPC generated from that section. Future
 `swarm investigate` implementation must consume that API except for the
@@ -18,7 +18,7 @@ owners and supported helper surfaces that already exist:
 - `make run-clear`
 - `go run ./cmd/swarm status`
 - health/readiness endpoints
-- dashboard/API read surfaces
+- v1 API read surfaces
 - canonical store-backed run-debug readers
 
 The command should reduce direct SQL usage by making the supported diagnostic surfaces
@@ -88,45 +88,51 @@ discoverable, consistent, and scriptable from one place.
 
 ### Joined Trace
 
-- `GET /api/runs/{runID}/trace`
+- `/v1/rpc` `run.trace`
   - Gives one joined run trace across:
     - event
     - delivery
     - active session / audit session
     - turn
-  - API owner: [server.go](/Users/youmew/dev/swarm/internal/dashboard/server/server.go#L742)
+  - Historical mapping only: retired `GET /api/runs/{runID}/trace` maps to `run.trace`.
+  - v1 API owner: [operator_read.go](/Users/youmew/dev/swarm/internal/apiv1/operator_read.go)
   - Canonical read owner: [run_debug_read_surface.go](/Users/youmew/dev/swarm/internal/store/run_debug_read_surface.go#L578)
 
 ### Health And Readiness
 
 - `GET /healthz`
 - `GET /readyz`
-- `GET /api/health`
-- `GET /api/healthz`
+- `/v1/rpc` `health.check`
   - Best for startup truth and lightweight runtime confirmation.
   - Important split today:
     - outer runtime health server owns the simple probe surfaces:
       - `/healthz`
       - `/readyz`
-    - dashboard/API handler owns the structured JSON health surfaces:
-      - `/api/health`
-      - `/api/healthz`
+    - v1 API handler owns the structured JSON health surface:
+      - `health.check`
+    - Historical dashboard aliases retired by #731:
+      - `GET /api/health`
+      - `GET /api/healthz`
   - Current outer probe owner: [main.go](/Users/youmew/dev/swarm/cmd/swarm/main.go#L1072)
-  - Current dashboard/API owner: [server.go](/Users/youmew/dev/swarm/internal/dashboard/server/server.go#L238)
+  - Current v1 API owner: [operator_read.go](/Users/youmew/dev/swarm/internal/apiv1/operator_read.go)
 
 ### Event And Runtime Diagnostic Surfaces
 
-- `GET /api/events`
-- `GET /api/events/{id}`
-- `GET /api/events/flow`
+- `/v1/rpc` `event.list`
+- `/v1/rpc` `event.get`
+- `/v1/ws` `event.subscribe`
   - Canonical event/delivery inspection without direct SQL.
   - Existing live-diagnosis capability:
-    - flow-event streaming through `/api/events/flow`
+    - event streaming through `event.subscribe`
+  - Historical dashboard aliases retired by #731:
+    - `GET /api/events`
+    - `GET /api/events/{id}`
+    - `GET /api/events/flow`
   - Owners:
-    - [server.go](/Users/youmew/dev/swarm/internal/dashboard/server/server.go#L600)
+    - [subscriptions.go](/Users/youmew/dev/swarm/internal/apiv1/subscriptions.go)
     - [observability_sql.go](/Users/youmew/dev/swarm/internal/dashboard/server/observability_sql.go#L163)
 
-- `GET /api/runtime/logs`
+- `/v1/rpc` `runtime.logs`
   - Structured runtime log surface with filters:
     - `type`
     - `source`
@@ -135,14 +141,16 @@ discoverable, consistent, and scriptable from one place.
     - `level`
     - `error_code`
     - `order`
+  - Historical dashboard alias retired by #731: `GET /api/runtime/logs`.
   - Owners:
-    - [server.go](/Users/youmew/dev/swarm/internal/dashboard/server/server.go#L700)
+    - [operator_read.go](/Users/youmew/dev/swarm/internal/apiv1/operator_read.go)
     - [observability_sql.go](/Users/youmew/dev/swarm/internal/dashboard/server/observability_sql.go#L353)
 
-- `GET /api/runtime/incidents`
+- `/v1/rpc` `runtime.incidents`
   - Aggregated incident surface over canonical runtime logs.
+  - Historical dashboard alias retired by #731: `GET /api/runtime/incidents`.
   - Owners:
-    - [server.go](/Users/youmew/dev/swarm/internal/dashboard/server/server.go#L722)
+    - [operator_read.go](/Users/youmew/dev/swarm/internal/apiv1/operator_read.go)
     - [observability_sql.go](/Users/youmew/dev/swarm/internal/dashboard/server/observability_sql.go#L417)
 
 These are already credible current-head operator surfaces:
@@ -162,7 +170,8 @@ Canonical v1 agent-control/read methods:
 - `agent.restart`
 - `agent.replay_backlog`
 
-Legacy dashboard REST aliases remain available only as adapter surfaces:
+Retired dashboard REST aliases are historical mapping references only, not current
+operator surfaces:
 
 - `GET /api/agents` -> `agent.list`
 - `GET /api/agents/{id}` -> `agent.get`
@@ -173,12 +182,12 @@ Legacy dashboard REST aliases remain available only as adapter surfaces:
 - `GET /api/conversations`
 - `GET /api/conversations/{sessionID}`
 
-- `GET /api/mailbox`
-- `GET /api/mailbox/{id}`
+- `GET /api/mailbox` -> `mailbox.list`
+- `GET /api/mailbox/{id}` -> `mailbox.get`
 
-- `GET /api/instances`
-- `GET /api/instances/{id}`
-- `GET /api/instances/aggregate`
+- `GET /api/instances` -> `entity.list`
+- `GET /api/instances/{id}` -> `entity.get`
+- `GET /api/instances/aggregate` -> `entity.aggregate`
 
 These already provide operator-visible drill-down without querying:
 
@@ -191,13 +200,13 @@ These already provide operator-visible drill-down without querying:
 
 Primary API owner: `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
 `api_specification`, implemented by the v1 `/v1/rpc` handlers and shared
-operator read/control owners. Dashboard `server.go` routes are deprecated
-adapter surfaces, not semantic owners.
+operator read/control owners. Dashboard `server.go` routes are retired
+historical aliases, not semantic owners.
 
-Entity-oriented diagnosis is already stronger than a typical “future follow-on” category, even though the current APIs are still instance-shaped:
+Entity-oriented diagnosis is already stronger than a typical “future follow-on” category:
 
-- `/api/instances/{id}`
-- `/api/instances/aggregate`
+- `/v1/rpc` `entity.get`
+- `/v1/rpc` `entity.aggregate`
 
 These are real current-head no-SQL diagnosis surfaces, not just placeholders.
 
@@ -241,11 +250,11 @@ An operator currently has to remember some combination of:
 - `swarm status`
 - `curl /healthz`
 - `curl /readyz`
-- `curl /api/runtime/logs`
-- `curl /api/runtime/incidents`
-- `curl /api/runs/{runID}/trace`
-- `curl /api/events/...`
-- conversation/agent/entity-instance endpoints
+- `curl /v1/rpc` with `runtime.logs`
+- `curl /v1/rpc` with `runtime.incidents`
+- `curl /v1/rpc` with `run.trace`
+- a WebSocket client for `/v1/ws` `event.subscribe`
+- v1 conversation/agent/entity methods
 
 That is workable for expert users, but not a good default operator workflow.
 
@@ -440,7 +449,7 @@ Behavior:
 - for now, call:
   - `/healthz`
   - `/readyz`
-  - `/api/health`
+  - `/v1/rpc` `health.check`
 - print a compact diagnosis:
   - healthy / not healthy
   - ready / not ready
@@ -581,10 +590,10 @@ Possible flags:
 - `--limit <n>`
 - `--json`
 
-Current backing surfaces:
-- `/api/instances`
-- `/api/instances/{id}`
-- `/api/instances/aggregate`
+Current v1 backing methods:
+- `/v1/rpc` `entity.list`
+- `/v1/rpc` `entity.get`
+- `/v1/rpc` `entity.aggregate`
 
 Intended behavior:
 - when `--run-id` is provided, list the entities associated with that run if the backing owner can do so honestly
@@ -605,9 +614,9 @@ Purpose:
 Possible flags:
 - `--json`
 
-Current backing surfaces:
-- `/api/instances/{id}`
-- `/api/instances/aggregate`
+Current v1 backing methods:
+- `/v1/rpc` `entity.get`
+- `/v1/rpc` `entity.aggregate`
 
 Intended behavior:
 - show the current known state for the chosen entity

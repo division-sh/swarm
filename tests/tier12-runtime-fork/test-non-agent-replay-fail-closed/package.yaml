@@ -1,0 +1,7 @@
+name: test-non-agent-replay-fail-closed
+version: 1.0.0
+description: >
+  Negative runtime-fork fixture proving unsupported node/system historical
+  replay remains fail-closed when a source event has pending non-agent work.
+platform_version: ">=1.6.0"
+flows: []

@@ -1,0 +1,7 @@
+test-agent:
+  id: test-agent
+  model_tier: tier2
+  conversation_mode: stateless
+  subscriptions:
+    - task.ready
+  emit_events: []

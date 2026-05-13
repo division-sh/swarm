@@ -157,6 +157,7 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 }
 
 func TestHandler_EventDetailIncludesDeliveryLifecycle(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	handler := NewHandler(Options{
 		AuthToken: testOperatorAuthToken,
 		Observability: stubObservability{

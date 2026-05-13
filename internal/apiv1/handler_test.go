@@ -52,15 +52,41 @@ func TestNewHandlerRejectsHandlersOutsideCanonicalCatalog(t *testing.T) {
 	}
 }
 
-func TestAuthTokensFromEnvironmentPrefersUnifiedTokenAndDeduplicatesLegacyFallbacks(t *testing.T) {
+func TestAuthTokensFromEnvironmentUsesOnlyUnifiedToken(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "api")
 	t.Setenv("SWARM_BUILDER_AUTH_TOKEN", "legacy")
-	t.Setenv("SWARM_OPERATOR_AUTH_TOKEN", "legacy")
+	t.Setenv("SWARM_OPERATOR_AUTH_TOKEN", "operator")
 
 	got := AuthTokensFromEnvironment()
-	want := []string{"api", "legacy"}
+	want := []string{"api"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("AuthTokensFromEnvironment() = %v, want %v", got, want)
+	}
+}
+
+func TestLegacyEnvironmentTokensDoNotAuthorizeV1Transports(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "")
+	t.Setenv("SWARM_BUILDER_AUTH_TOKEN", "legacy-builder")
+	t.Setenv("SWARM_OPERATOR_AUTH_TOKEN", "legacy-operator")
+
+	handler := testHandler(t, Options{AuthTokens: AuthTokensFromEnvironment()})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"auth","method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`))
+	req.Header.Set("Authorization", "Bearer legacy-builder")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("/v1/rpc status = %d, want 503 with no canonical token configured body=%s", rec.Code, rec.Body.String())
+	}
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/ws"
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": []string{"Bearer legacy-operator"}})
+	if err == nil {
+		t.Fatal("expected websocket auth failure")
+	}
+	if resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("/v1/ws response = %#v, want 503 with no canonical token configured", resp)
 	}
 }
 
