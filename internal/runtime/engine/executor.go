@@ -88,6 +88,15 @@ type executionFrame struct {
 	accumulatorProjectionEligible bool
 }
 
+type contextTx struct {
+	Tx
+	ctx context.Context
+}
+
+func (tx contextTx) Context() context.Context {
+	return tx.ctx
+}
+
 func NewExecutor(deps RuntimeDependencies, evaluator Evaluator) (*Executor, error) {
 	if deps.Source == nil {
 		return nil, ErrMissingSemanticSource
@@ -408,15 +417,20 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		}
 		req.State = loaded
 		return e.deps.TxRunner.Run(lockCtx, func(tx Tx) error {
-			frame := e.newExecutionFrame(tx, req)
+			actionIntents := []EmitIntent{}
+			txCtx := WithActionEmitIntentCollector(tx.Context(), &actionIntents)
+			frame := e.newExecutionFrame(contextTx{Tx: tx, ctx: txCtx}, req)
 			if err := e.runSteps(&frame); err != nil {
 				result = frame.result
 				result.FailureClass = ClassifyFailure(err)
 				return err
 			}
+			if len(actionIntents) > 0 {
+				frame.result.EmitIntents = append(frame.result.EmitIntents, actionIntents...)
+			}
 			result = frame.result
 			intents = append([]EmitIntent(nil), frame.result.EmitIntents...)
-			return e.persist(tx.Context(), frame)
+			return e.persist(frame.tx.Context(), frame)
 		})
 	})
 	if err != nil {

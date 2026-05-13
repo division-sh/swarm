@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 
+	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
 	"swarm/internal/runtime/core/paths"
@@ -193,6 +194,12 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(ctx context.
 		fields[spec.Output.LastSourceEventID] = sourceEventID
 		return pc.persistArtifactRepoResult(ctx, execCtx, spec, fields)
 	}
+	if queued, err := pc.queueArtifactRepoResultEvent(ctx, execCtx, successEvent, successPayload); err != nil {
+		return err
+	} else if queued {
+		fields[spec.Output.LastSourceEventID] = sourceEventID
+		return pc.persistArtifactRepoResult(ctx, execCtx, spec, fields)
+	}
 	if err := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); err != nil {
 		return err
 	}
@@ -201,6 +208,56 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(ctx context.
 	}
 	fields[spec.Output.LastSourceEventID] = sourceEventID
 	return pc.persistArtifactRepoResult(ctx, execCtx, spec, fields)
+}
+
+func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context, execCtx runtimeengine.ExecutionContext, eventType string, payload map[string]any) (bool, error) {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return false, nil
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	sourceAgent := pipelineSourceAgent(ctx)
+	if sourceAgent == "" {
+		sourceAgent = runtimeWorkflowID
+	}
+	chainDepth := execCtx.Request.ChainDepth + 1
+	if chainDepth <= 0 {
+		chainDepth = execCtx.Request.Event.ChainDepth + 1
+	}
+	if chainDepth <= 0 {
+		chainDepth = 1
+	}
+	evt := events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType(eventType),
+		SourceAgent: sourceAgent,
+		Payload:     mustJSON(payload),
+		ChainDepth:  chainDepth,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if entityID := strings.TrimSpace(execCtx.Request.EntityID.String()); entityID != "" {
+		evt = evt.WithEntityID(entityID)
+	}
+	flowInstance := firstNonEmptyString(
+		normalizedArtifactRepoFlowInstance(asString(execCtx.Request.State.StateCarrier.Metadata["flow_path"])),
+		normalizedArtifactRepoFlowInstance(execCtx.Request.Event.FlowInstance()),
+	)
+	if flowInstance != "" {
+		evt = evt.WithFlowInstance(flowInstance)
+	}
+	evt.ParentEventID = strings.TrimSpace(execCtx.Request.Event.ID)
+	evt.TaskID = strings.TrimSpace(execCtx.Request.Event.TaskID)
+	return runtimeengine.QueueActionEmitIntent(ctx, runtimeengine.EmitIntent{
+		Event:         evt,
+		ChainDepth:    chainDepth,
+		ParentEventID: evt.ParentEventID,
+	}), nil
+}
+
+func normalizedArtifactRepoFlowInstance(value string) string {
+	return strings.Trim(strings.TrimSpace(value), "/")
 }
 
 func (pc *PipelineCoordinator) artifactRepoRoot() string {

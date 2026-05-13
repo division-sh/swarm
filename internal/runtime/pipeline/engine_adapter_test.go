@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -722,7 +723,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 		StorageRef:      entityID,
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
-		CurrentState:    "ready",
+		CurrentState:    "working",
 		Metadata:        cloneStringAnyMap(initial),
 	}); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
@@ -831,6 +832,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitPublishesSuccessResultEven
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
 		module:        &previewWorkflowModule{bundle: bundle},
+		entityLocks:   map[string]*sync.Mutex{},
 	}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
@@ -912,6 +914,84 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitPublishesSuccessResultEven
 	}
 	if got := bus.publishedCount(); got != 2 {
 		t.Fatalf("history repair success event count = %d, want 2", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughOutbox(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	workflowStore := NewWorkflowInstanceStore(db)
+	bus := &recordingPipelineBus{}
+	source := testArtifactRepoResultEventSource(t)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	pc := &PipelineCoordinator{
+		db:            db,
+		workflowStore: workflowStore,
+		artifactRoot:  t.TempDir(),
+		bus:           bus,
+		module:        &previewWorkflowModule{bundle: bundle},
+		entityLocks:   map[string]*sync.Mutex{},
+	}
+	ctx := testWorkflowStoreRunContext(t, workflowStore)
+	entityID := "22222222-2222-2222-2222-222222222222"
+	initial := testArtifactRepoEntityFields()
+	if err := workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "artifact-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+	action.ArtifactRepo.SuccessEvent = "artifact_repo.commit_completed"
+	action.ArtifactRepo.SuccessPayload = map[string]runtimecontracts.ExpressionValue{
+		"result_kind": runtimecontracts.LiteralExpression("ready"),
+	}
+	sourceEvent := execCtx.Request.Event
+	sourceEvent.SourceAgent = "test"
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+			produced_by, produced_by_type, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, '', 'entity', $5::jsonb, $6, 'agent', $7)
+	`, testPipelineRunID, sourceEvent.ID, string(sourceEvent.Type), entityID, string(sourceEvent.Payload), sourceEvent.SourceAgent, sourceEvent.CreatedAt); err != nil {
+		t.Fatalf("seed source event: %v", err)
+	}
+
+	result, err := pc.executeNodeContractHandler(ctx, "artifact-node", runtimecontracts.SystemNodeEventHandler{
+		Action: action,
+	}, workflowTriggerContext{
+		Event: execCtx.Request.Event,
+		State: WorkflowState{Stage: "working", Metadata: cloneStringAnyMap(initial)},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.outboxCount(); got != 1 {
+		t.Fatalf("outbox result event count = %d, want 1 (published=%d actions=%v)", got, bus.publishedCount(), result.Outcome.ActionsExecuted)
+	}
+	if got := string(bus.outboxIntent(0).Event.Type); got != "artifact_repo.commit_completed" {
+		t.Fatalf("outbox result event type = %q", got)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("post-commit published result event count = %d, want 1", got)
+	}
+	committed, _, err := workflowStore.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load committed workflow instance: %v", err)
+	}
+	if got := strings.TrimSpace(asString(committed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID {
+		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID)
 	}
 }
 
