@@ -23,6 +23,7 @@ type recordingPipelineBus struct {
 	runtimeLogs   []RuntimeLogEntry
 	outboxIntents []runtimeengine.EmitIntent
 	publishErr    error
+	outboxErr     error
 }
 
 type recordingPipelineDispatcher struct {
@@ -65,6 +66,9 @@ func (b *recordingPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispat
 func (o recordingPipelineOutbox) WriteOutbox(_ context.Context, intents []runtimeengine.EmitIntent) error {
 	if o.bus == nil {
 		return nil
+	}
+	if o.bus.outboxErr != nil {
+		return o.bus.outboxErr
 	}
 	o.bus.mu.Lock()
 	defer o.bus.mu.Unlock()
