@@ -44,7 +44,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	sourceRunID := catalogRuntimeRunID
 	assertSourcePendingAgentDelivery(t, h.db, sourceRunID, sourceEventID, "test-agent")
 	forkAt := sourceEventID
-	sourceBefore := selectedContractForkRunCounts(t, h.db, sourceRunID)
+	sourceBefore := selectedContractSourceRunCounts(t, h.db, sourceRunID)
 	sourceRowsBefore := selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID)
 
 	loader, selection := selectedContractForkFixtureSelection(t, h.ctx, repoRoot, fixtureRoot)
@@ -63,7 +63,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 		t.Fatalf("DiscardMaterializedSelectedContractExecutionFork: %v", err)
 	}
 	assertNoForkArtifacts(t, h.db, materialized.ForkRunID)
-	assertRunCountsUnchanged(t, sourceBefore, selectedContractForkRunCounts(t, h.db, sourceRunID), "source run after cleanup probe")
+	assertRunCountsUnchanged(t, sourceBefore, selectedContractSourceRunCounts(t, h.db, sourceRunID), "source run after cleanup probe")
 	assertSourceRowsFrozen(t, sourceRowsBefore, selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID), "source rows after cleanup probe")
 	assertSourceRunLifecycle(t, h.db, sourceRunID, "paused", false)
 
@@ -120,7 +120,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertSelectedContractForkExecutionRows(t, h.db, sourceRunID, forkRunID, sourceEventID, forkEventID)
 	assertSelectedContractForkRuntimeRows(t, h.db, forkRunID, forkEventID)
 	assertSelectedContractForkSourceIsolation(t, h.db, sourceRunID, forkRunID, sourceEventID, forkEventID)
-	assertRunCountsUnchanged(t, sourceBefore, selectedContractForkRunCounts(t, h.db, sourceRunID), "source run after selected execution")
+	assertRunCountsUnchanged(t, sourceBefore, selectedContractSourceRunCounts(t, h.db, sourceRunID), "source run after selected execution")
 	assertSourceRowsFrozen(t, sourceRowsBefore, selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID), "source rows after selected execution")
 	assertSourceRunLifecycle(t, h.db, sourceRunID, "forked", true)
 	negativeFixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-non-agent-replay-fail-closed")
@@ -457,12 +457,26 @@ func pauseCatalogRun(t testing.TB, h *runtimeHarness) {
 
 func selectedContractForkRunCounts(t testing.TB, db *sql.DB, runID string) map[string]int {
 	t.Helper()
+	return selectedContractRunCounts(t, db, runID, false)
+}
+
+func selectedContractSourceRunCounts(t testing.TB, db *sql.DB, runID string) map[string]int {
+	t.Helper()
+	return selectedContractRunCounts(t, db, runID, true)
+}
+
+func selectedContractRunCounts(t testing.TB, db *sql.DB, runID string, ignoreRuntimeLogEvents bool) map[string]int {
+	t.Helper()
 	ctx := context.Background()
+	eventFilter := ""
+	if ignoreRuntimeLogEvents {
+		eventFilter = " AND event_name <> 'platform.runtime_log'"
+	}
 	queries := map[string]string{
 		"runs":                                 `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`,
-		"events":                               `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`,
+		"events":                               `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid` + eventFilter,
 		"event_deliveries":                     `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`,
-		"event_receipts":                       `SELECT COUNT(*) FROM event_receipts WHERE event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)`,
+		"event_receipts":                       `SELECT COUNT(*) FROM event_receipts WHERE event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid` + eventFilter + `)`,
 		"entity_state":                         `SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid`,
 		"entity_mutations":                     `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`,
 		"agent_sessions":                       `SELECT COUNT(*) FROM agent_sessions WHERE run_id = $1::uuid`,
