@@ -1,0 +1,8 @@
+name: test-flow-data-access
+version: 1.0.0
+description: Runtime e2e fixture for flow-scoped static reference-data access.
+platform_version: ">=1.6.0"
+flows:
+  - id: support
+    flow: support
+    mode: static

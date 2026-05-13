@@ -1,0 +1,3 @@
+blocked:
+  - unmanaged-host-file-reads
+  - cross-flow-data-access
