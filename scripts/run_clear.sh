@@ -126,7 +126,7 @@ health_addr = os.environ["HEALTH_ADDR"]
 
 with open(os.devnull, "rb", buffering=0) as devnull, open(log_file, "ab", buffering=0) as out:
     proc = subprocess.Popen(
-        [binary_path, "-contracts", contracts_root, "-health-addr", health_addr],
+        [binary_path, "serve", "--contracts", contracts_root, "--health-addr", health_addr],
         stdin=devnull,
         stdout=out,
         stderr=subprocess.STDOUT,

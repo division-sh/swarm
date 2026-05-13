@@ -83,14 +83,14 @@ Best for:
 - operator/helper path failures
 - real run initialization problems
 
-### 4. Runtime Status Surface
+### 4. Runtime Diagnosis Surface
 
 Use this to distinguish active progress from a stalled or incoherent run lifecycle.
 
 Command:
 
 ```bash
-go run ./cmd/swarm status
+curl /v1/rpc with run.diagnose or run.trace
 ```
 
 Best for:
@@ -99,6 +99,9 @@ Best for:
 - blocking reason
 - agent state snapshot
 - whether a run is truly progressing or only marked `running`
+
+Top-level `swarm status` is retired in v1. Future CLI diagnosis must use
+`swarm investigate run` over the same v1 API owners.
 
 ### 5. Health And Control Plane APIs
 

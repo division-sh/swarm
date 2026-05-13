@@ -93,6 +93,113 @@ func markRunStatusCompleted(t *testing.T, db *sql.DB, runID string) {
 	}
 }
 
+func TestCLI_RootNoArgsPrintsHelpAndDoesNotStartRuntime(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommand(context.Background(), t.TempDir(), nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("root code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"Run and inspect Swarm workflows.", "serve", "verify", "completion", "version"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("root help missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("root stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestCLI_HelpCommandPrintsRootHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommand(context.Background(), t.TempDir(), []string{"help"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Run and inspect Swarm workflows.") || !strings.Contains(stdout.String(), "serve") {
+		t.Fatalf("help output missing root command help:\n%s", stdout.String())
+	}
+}
+
+func TestCLI_CompletionCommandSupportsCobraShells(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		t.Run(shell, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommand(context.Background(), t.TempDir(), []string{"completion", shell}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("completion %s code = %d stderr=%s", shell, code, stderr.String())
+			}
+			if got := stdout.String(); !strings.Contains(got, "swarm") {
+				t.Fatalf("completion %s output missing swarm command:\n%s", shell, got)
+			}
+		})
+	}
+}
+
+func TestCLI_VersionPrintsLocalBinaryIdentity(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommand(context.Background(), t.TempDir(), []string{"version"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("version code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"Swarm dev", "Commit: unknown", "Built: unknown", "Go:"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("version output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommand(context.Background(), t.TempDir(), []string{"serve", "--help"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestCLI_VerifyPreservesLocalContractCarveOut(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	missingContracts := filepath.Join(t.TempDir(), "missing")
+	code := executeRootCommand(context.Background(), t.TempDir(), []string{"verify", "--contracts", missingContracts}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("verify code = %d, want 1 stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "verify failed: resolve contracts") {
+		t.Fatalf("verify output = %q, want local contract resolution failure", stdout.String())
+	}
+}
+
+func TestCLI_StatusAndForkAreHardRetired(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "status", args: []string{"status"}, want: "ERROR: `swarm status` was removed in v1."},
+		{name: "status-help", args: []string{"status", "--help"}, want: "ERROR: `swarm status` was removed in v1."},
+		{name: "fork", args: []string{"fork"}, want: "ERROR: `swarm fork` was removed in v1."},
+		{name: "fork-help", args: []string{"fork", "--help"}, want: "ERROR: `swarm fork` was removed in v1."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommand(context.Background(), t.TempDir(), tc.args, &stdout, &stderr)
+			if code != 2 {
+				t.Fatalf("%s code = %d, want 2 stdout=%s stderr=%s", tc.name, code, stdout.String(), stderr.String())
+			}
+			if strings.TrimSpace(stdout.String()) != "" {
+				t.Fatalf("%s stdout = %q, want empty", tc.name, stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("%s stderr = %q, want %q", tc.name, stderr.String(), tc.want)
+			}
+		})
+	}
+}
+
 func waitRunStatusEventCount(t *testing.T, db *sql.DB, runID string, want int) {
 	t.Helper()
 	ctx := context.Background()
@@ -448,7 +555,7 @@ func TestLoadRunStatusReport_UsesCanonicalPersistedRunIDForRuntimeLogsAndMutatio
 	}
 }
 
-func TestRunForkCommand_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
@@ -470,14 +577,14 @@ func TestRunForkCommand_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
 		t.Fatalf("seed event: %v", err)
 	}
 	var buf bytes.Buffer
-	code := runForkCommand(ctx, t.TempDir(), []string{
+	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
 		"--dry-run",
 		"--run", runID,
 		"--at", eventID,
 		"--json",
 	}, &buf)
 	if code != 0 {
-		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
 	var plan store.RunForkPlan
 	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
@@ -503,7 +610,7 @@ func TestRunForkCommand_DryRunUsesCanonicalPlannerJSON(t *testing.T) {
 	}
 }
 
-func TestRunForkCommand_DryRunJSONReportsDeliveryEventReplayReady(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
@@ -534,14 +641,14 @@ func TestRunForkCommand_DryRunJSONReportsDeliveryEventReplayReady(t *testing.T) 
 	}
 
 	var buf bytes.Buffer
-	code := runForkCommand(ctx, t.TempDir(), []string{
+	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
 		"--dry-run",
 		"--run", runID,
 		"--at", eventID,
 		"--json",
 	}, &buf)
 	if code != 0 {
-		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
 	var plan store.RunForkPlan
 	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
@@ -555,7 +662,7 @@ func TestRunForkCommand_DryRunJSONReportsDeliveryEventReplayReady(t *testing.T) 
 	}
 }
 
-func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmissionJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
@@ -587,7 +694,7 @@ func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *test
 
 	repo := repoRoot()
 	var buf bytes.Buffer
-	code := runForkCommand(ctx, repo, []string{
+	code := runForkRuntimeOwnerHarness(ctx, repo, []string{
 		"--dry-run",
 		"--run", runID,
 		"--at", eventID,
@@ -595,7 +702,7 @@ func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *test
 		"--json",
 	}, &buf)
 	if code != 0 {
-		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
 	var plan store.RunForkPlan
 	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
@@ -723,22 +830,22 @@ func TestRunForkCommand_DryRunContractsAddsContractFrontierAdmissionJSON(t *test
 	}
 }
 
-func TestRunForkCommand_ActivateWithContractsReachesSelectedActivationGate(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_ActivateWithContractsReachesSelectedActivationGate(t *testing.T) {
 	var buf bytes.Buffer
-	code := runForkCommand(context.Background(), t.TempDir(), []string{
+	code := runForkRuntimeOwnerHarness(context.Background(), t.TempDir(), []string{
 		"--activate",
 		"--contracts", t.TempDir(),
 		"--run", uuid.NewString(),
 	}, &buf)
 	if code != 1 {
-		t.Fatalf("runForkCommand code=%d, want runtime failure after parsing; output=%s", code, buf.String())
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d, want runtime failure after parsing; output=%s", code, buf.String())
 	}
 	if strings.Contains(buf.String(), "--contracts is only supported") {
 		t.Fatalf("output = %q, want --activate to consume canonical selected activation gate rather than parse-level contract rejection", buf.String())
 	}
 }
 
-func TestRunForkCommand_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRoot()
@@ -752,14 +859,14 @@ func TestRunForkCommand_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *tes
 	seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
 
 	var buf bytes.Buffer
-	code := runForkCommand(context.Background(), repo, []string{
+	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
 		"--contracts", contractsRoot,
 		"--run", sourceRunID,
 		"--at", sourceEventID,
 		"--json",
 	}, &buf)
 	if code != 0 {
-		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
 	var result runtimerunforkexecution.SelectedContractExecutionResult
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
@@ -829,7 +936,7 @@ func TestRunForkCommand_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *tes
 	}
 }
 
-func TestRunForkCommand_SelectedContractsExecuteReportsSourceAdvancedBranchJSON(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRoot()
@@ -850,14 +957,14 @@ func TestRunForkCommand_SelectedContractsExecuteReportsSourceAdvancedBranchJSON(
 	}
 
 	var buf bytes.Buffer
-	code := runForkCommand(context.Background(), repo, []string{
+	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
 		"--contracts", contractsRoot,
 		"--run", sourceRunID,
 		"--at", sourceEventID,
 		"--json",
 	}, &buf)
 	if code != 0 {
-		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
 	var result runtimerunforkexecution.SelectedContractExecutionResult
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
@@ -879,7 +986,7 @@ func TestRunForkCommand_SelectedContractsExecuteReportsSourceAdvancedBranchJSON(
 	}
 }
 
-func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
@@ -928,7 +1035,7 @@ func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T)
 	repo := repoRoot()
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 	var buf bytes.Buffer
-	code := runForkCommand(ctx, repo, []string{
+	code := runForkRuntimeOwnerHarness(ctx, repo, []string{
 		"--materialize-only",
 		"--run", runID,
 		"--at", eventID,
@@ -936,7 +1043,7 @@ func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T)
 		"--json",
 	}, &buf)
 	if code != 0 {
-		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
 	var result store.RunForkMaterialization
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
@@ -984,7 +1091,7 @@ func TestRunForkCommand_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t *testing.T)
 	}
 }
 
-func TestRunForkCommand_ActivateUsesCanonicalStoreOwnerJSON(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	pg := &store.PostgresStore{DB: db}
@@ -1000,13 +1107,13 @@ func TestRunForkCommand_ActivateUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	code := runForkCommand(ctx, t.TempDir(), []string{
+	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
 		"--activate",
 		"--run", materialized.ForkRunID,
 		"--json",
 	}, &buf)
 	if code != 0 {
-		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
 	var result store.RunForkActivation
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
@@ -1033,7 +1140,7 @@ func TestRunForkCommand_ActivateUsesCanonicalStoreOwnerJSON(t *testing.T) {
 	}
 }
 
-func TestRunForkCommand_ActivateNonSelectedDoesNotRequireSelectedBindingSchema(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedDoesNotRequireSelectedBindingSchema(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	pg := &store.PostgresStore{DB: db}
@@ -1052,13 +1159,13 @@ func TestRunForkCommand_ActivateNonSelectedDoesNotRequireSelectedBindingSchema(t
 	}
 
 	var buf bytes.Buffer
-	code := runForkCommand(ctx, t.TempDir(), []string{
+	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
 		"--activate",
 		"--run", materialized.ForkRunID,
 		"--json",
 	}, &buf)
 	if code != 0 {
-		t.Fatalf("runForkCommand code=%d output=%s", code, buf.String())
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
 	var result store.RunForkActivation
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
@@ -1069,7 +1176,7 @@ func TestRunForkCommand_ActivateNonSelectedDoesNotRequireSelectedBindingSchema(t
 	}
 }
 
-func TestRunForkCommand_ActivateSelectedBindingConsumesRuntimeAdmission(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmission(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
@@ -1082,7 +1189,7 @@ func TestRunForkCommand_ActivateSelectedBindingConsumesRuntimeAdmission(t *testi
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 
 	var materializeOut bytes.Buffer
-	materializeCode := runForkCommand(ctx, repo, []string{
+	materializeCode := runForkRuntimeOwnerHarness(ctx, repo, []string{
 		"--materialize-only",
 		"--run", runID,
 		"--at", eventID,
@@ -1098,7 +1205,7 @@ func TestRunForkCommand_ActivateSelectedBindingConsumesRuntimeAdmission(t *testi
 	}
 
 	var activateOut bytes.Buffer
-	activateCode := runForkCommand(ctx, repo, []string{
+	activateCode := runForkRuntimeOwnerHarness(ctx, repo, []string{
 		"--activate",
 		"--run", materialized.ForkRunID,
 		"--json",
@@ -1128,7 +1235,7 @@ func TestRunForkCommand_ActivateSelectedBindingConsumesRuntimeAdmission(t *testi
 	}
 }
 
-func TestRunForkCommand_ActivateSelectedBindingBlocksReplayWithoutSelectedRecipientPlan(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingBlocksReplayWithoutSelectedRecipientPlan(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
 	runID := uuid.NewString()
@@ -1149,7 +1256,7 @@ func TestRunForkCommand_ActivateSelectedBindingBlocksReplayWithoutSelectedRecipi
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 
 	var materializeOut bytes.Buffer
-	materializeCode := runForkCommand(ctx, repo, []string{
+	materializeCode := runForkRuntimeOwnerHarness(ctx, repo, []string{
 		"--materialize-only",
 		"--run", runID,
 		"--at", eventID,
@@ -1165,7 +1272,7 @@ func TestRunForkCommand_ActivateSelectedBindingBlocksReplayWithoutSelectedRecipi
 	}
 
 	var activateOut bytes.Buffer
-	activateCode := runForkCommand(ctx, repo, []string{
+	activateCode := runForkRuntimeOwnerHarness(ctx, repo, []string{
 		"--activate",
 		"--run", materialized.ForkRunID,
 		"--json",
@@ -1201,14 +1308,14 @@ func TestRunForkCommand_ActivateSelectedBindingBlocksReplayWithoutSelectedRecipi
 	}
 }
 
-func TestRunForkCommand_NonDryRunWithoutMaterializeOnlyStaysFailClosed(t *testing.T) {
+func TestRunForkRuntimeOwnerHarness_NonDryRunWithoutMaterializeOnlyStaysFailClosed(t *testing.T) {
 	var buf bytes.Buffer
-	code := runForkCommand(context.Background(), t.TempDir(), []string{
+	code := runForkRuntimeOwnerHarness(context.Background(), t.TempDir(), []string{
 		"--run", uuid.NewString(),
 		"--at", uuid.NewString(),
 	}, &buf)
 	if code != 2 {
-		t.Fatalf("runForkCommand code=%d, want 2; output=%s", code, buf.String())
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d, want 2; output=%s", code, buf.String())
 	}
 	if !strings.Contains(buf.String(), "mutating fork execution without --contracts is not implemented") {
 		t.Fatalf("output = %q, want fail-closed fork execution message", buf.String())

@@ -1,4 +1,10 @@
-# Swarm Investigate Command Draft
+# Swarm Investigate Command Draft (SUPERSEDED)
+
+Supersession note: this draft is historical design input. The authoritative v1
+CLI contract now lives in
+`docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+`cli_specification`. Runtime-state CLI commands must consume the v1 API, and
+top-level `swarm status` / `swarm fork` are retired.
 
 API authority note: retired `/api/*`, `/rpc`, and `/api/rpc` references in this
 document are historical only. They are not supported operator API surfaces and
@@ -16,7 +22,7 @@ It should not introduce a new diagnostics subsystem. It should compose the canon
 owners and supported helper surfaces that already exist:
 
 - `make run-clear`
-- `go run ./cmd/swarm status`
+- `/v1/rpc` run diagnostics and future `swarm investigate run`
 - health/readiness endpoints
 - v1 API read surfaces
 - canonical store-backed run-debug readers
@@ -48,25 +54,9 @@ discoverable, consistent, and scriptable from one place.
 
 ### Run Diagnosis
 
-- `go run ./cmd/swarm status`
-  - Already provides:
-    - latest-run resolution
-    - run table status
-    - operational state
-    - blocking layer
-    - blocking reason
-    - event counts
-    - delivery counts
-    - recent events
-    - recent mutations
-    - dead letters
-    - runtime warning/error summary
-    - agent turn summary
-  - Supports:
-    - `--run-id`
-    - `--json`
-    - `--logs`
-    - `--logs-all`
+- Future `swarm investigate run`
+  - Must consume `/v1/rpc` run.get / run.diagnose / run.trace owners.
+  - Top-level `swarm status` is retired in v1 and must not remain a fallback runtime-state reader.
     - `--component`
   - Important split today:
     - shared run data comes from the canonical run-debug read surface
@@ -247,7 +237,7 @@ The capability exists, but it is fragmented.
 An operator currently has to remember some combination of:
 
 - `make run-clear`
-- `swarm status`
+- future `swarm investigate run`
 - `curl /healthz`
 - `curl /readyz`
 - `curl /v1/rpc` with `runtime.logs`
@@ -258,15 +248,15 @@ An operator currently has to remember some combination of:
 
 That is workable for expert users, but not a good default operator workflow.
 
-There is also unnecessary command duplication today:
+There was also unnecessary command duplication in the historical draft:
 
-- `swarm status` already covers the main run-diagnosis path
-- `swarm investigate run` would overlap with it unless `investigate run` becomes the replacement
+- retired `swarm status` covered the main run-diagnosis path
+- `swarm investigate run` is the v1 replacement and must consume the v1 API
 
 This draft assumes:
 
 - `swarm investigate run` replaces `swarm status`
-- `swarm status` is deprecated rather than kept as a parallel long-term surface
+- `swarm status` is retired rather than kept as a parallel long-term surface
 
 ## Proposed Command Shape
 
