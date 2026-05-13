@@ -942,6 +942,93 @@ func TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"artifact-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"artifact.commit_requested": {
+						Action: runtimecontracts.ActionSpec{
+							ID: "artifact_repo_commit",
+							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
+								Provider:     "local_git",
+								RepoID:       runtimecontracts.RefExpression("entity.repo_id"),
+								RequestID:    runtimecontracts.RefExpression("payload.request_id"),
+								Namespace:    runtimecontracts.RefExpression("payload.namespace"),
+								AllowedPaths: []string{"readme.md"},
+								Files: []runtimecontracts.ArtifactRepoFileSpec{{
+									Path:        runtimecontracts.LiteralExpression("readme.md"),
+									Content:     runtimecontracts.RefExpression("payload.readme"),
+									ContentType: "markdown",
+								}},
+								Output: runtimecontracts.ArtifactRepoOutputSpec{
+									RepoURL:           "repo_url",
+									CurrentRef:        "current_ref",
+									FileManifest:      "file_manifest",
+									Status:            "status",
+									FailureReason:     "failure_reason",
+									LastRequestID:     "last_request_id",
+									LastSourceEventID: "last_source_event_id",
+								},
+								SuccessEvent: "artifact_repo.commit_completed",
+								SuccessPayload: map[string]runtimecontracts.ExpressionValue{
+									"result_kind": runtimecontracts.LiteralExpression("success"),
+								},
+								FailureEvent: "artifact_repo.commit_failed",
+								FailurePayload: map[string]runtimecontracts.ExpressionValue{
+									"request_copy": runtimecontracts.RefExpression("payload.request_id"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"artifact.commit_requested": {},
+			"artifact_repo.commit_completed": {
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+					"repo_id":         {Type: "string"},
+					"namespace":       {Type: "string"},
+					"request_id":      {Type: "string"},
+					"source_event_id": {Type: "string"},
+					"repo_url":        {Type: "string"},
+					"current_ref":     {Type: "object"},
+					"file_manifest":   {Type: "string"},
+					"provenance":      {Type: "object"},
+					"result_kind":     {Type: "string"},
+				}},
+				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "repo_url", "current_ref", "file_manifest", "provenance", "result_kind"},
+			},
+			"artifact_repo.commit_failed": {
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+					"repo_id":         {Type: "string"},
+					"namespace":       {Type: "string"},
+					"request_id":      {Type: "string"},
+					"source_event_id": {Type: "string"},
+					"failure_reason":  {Type: "object"},
+					"provenance":      {Type: "string"},
+					"request_copy":    {Type: "string"},
+				}},
+				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure_reason", "provenance", "request_copy"},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	for _, want := range []string{
+		"success_event artifact_repo.commit_completed runtime-owned field current_ref must be string-compatible, got object",
+		"success_event artifact_repo.commit_completed runtime-owned field file_manifest must be object-compatible, got string",
+		"failure_event artifact_repo.commit_failed runtime-owned field failure_reason must be string-compatible, got object",
+		"failure_event artifact_repo.commit_failed runtime-owned field provenance must be object-compatible, got string",
+	} {
+		if !reportContains(report.Errors(), "handler_field_compliance", want) {
+			t.Fatalf("expected handler_field_compliance error containing %q, got %#v", want, report.Errors())
+		}
+	}
+}
+
 func TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{

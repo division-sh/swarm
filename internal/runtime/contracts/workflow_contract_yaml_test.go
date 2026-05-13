@@ -903,7 +903,7 @@ action:
     success_event: artifact_repo.commit_completed
     success_payload:
       producer:
-        literal: spec-repo
+        literal: artifact-writer
     failure_event: artifact_repo.commit_failed
     failure_payload:
       producer:
@@ -944,7 +944,7 @@ action:
 	if got := handler.Action.ArtifactRepo.SuccessEvent; got != "artifact_repo.commit_completed" {
 		t.Fatalf("ArtifactRepo.SuccessEvent = %q", got)
 	}
-	if got := handler.Action.ArtifactRepo.SuccessPayload["producer"].Literal; got != "spec-repo" {
+	if got := handler.Action.ArtifactRepo.SuccessPayload["producer"].Literal; got != "artifact-writer" {
 		t.Fatalf("ArtifactRepo.SuccessPayload[producer] = %#v", handler.Action.ArtifactRepo.SuccessPayload["producer"])
 	}
 }

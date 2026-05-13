@@ -2461,6 +2461,7 @@ func validateArtifactRepoResultEventSpec(source semanticview.Source, flowID, nod
 				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s schema is missing runtime-owned field %s", label, resultEvent, field)))
 			}
 		}
+		findings = append(findings, validateArtifactRepoResultRuntimePayloadFieldTypes(source, flowID, nodeID, eventType, label, resultEvent, runtimeKeys)...)
 		for target := range payload {
 			target = strings.TrimSpace(target)
 			if target == "" {
@@ -2481,6 +2482,106 @@ func validateArtifactRepoResultEventSpec(source semanticview.Source, flowID, nod
 		}
 	}
 	return findings
+}
+
+func validateArtifactRepoResultRuntimePayloadFieldTypes(source semanticview.Source, flowID, nodeID, eventType, label, resultEvent string, runtimeKeys map[string]struct{}) []Finding {
+	resolution := semanticview.ResolveEventSchema(source, flowID, resultEvent)
+	if !resolution.HasSchema {
+		return nil
+	}
+	if err := resolution.UnresolvedTypeError(); err != nil {
+		return []Finding{artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s payload schema is not fully resolvable: %v", label, resultEvent, err))}
+	}
+	properties := artifactRepoJSONSchemaProperties(resolution.Schema.Schema)
+	if len(properties) == 0 {
+		return nil
+	}
+	findings := []Finding{}
+	for field := range runtimeKeys {
+		expected := artifactRepoResultRuntimePayloadFieldKind(field)
+		if expected == "" {
+			continue
+		}
+		prop, ok := properties[field]
+		if !ok {
+			continue
+		}
+		if !artifactRepoJSONSchemaAllowsKind(prop, expected) {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s runtime-owned field %s must be %s-compatible, got %s", label, resultEvent, field, expected, artifactRepoJSONSchemaKindSummary(prop))))
+		}
+	}
+	return findings
+}
+
+func artifactRepoResultRuntimePayloadFieldKind(field string) string {
+	switch strings.TrimSpace(field) {
+	case "file_manifest", "provenance":
+		return "object"
+	case "repo_id", "namespace", "partition_key", "display_slug", "request_id", "source_event_id", "repo_url", "current_ref", "failure_reason":
+		return "string"
+	default:
+		return ""
+	}
+}
+
+func artifactRepoJSONSchemaProperties(schema map[string]any) map[string]any {
+	properties, _ := schema["properties"].(map[string]any)
+	return properties
+}
+
+func artifactRepoJSONSchemaAllowsKind(raw any, expected string) bool {
+	schema, ok := raw.(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, typ := range artifactRepoJSONSchemaTypes(schema["type"]) {
+		if typ == expected {
+			return true
+		}
+	}
+	if expected == "object" {
+		if _, ok := schema["properties"].(map[string]any); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func artifactRepoJSONSchemaKindSummary(raw any) string {
+	schema, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Sprintf("%T", raw)
+	}
+	types := artifactRepoJSONSchemaTypes(schema["type"])
+	if len(types) > 0 {
+		return strings.Join(types, "|")
+	}
+	if _, ok := schema["properties"].(map[string]any); ok {
+		return "object"
+	}
+	return "unknown"
+}
+
+func artifactRepoJSONSchemaTypes(raw any) []string {
+	switch typed := raw.(type) {
+	case string:
+		typ := strings.TrimSpace(typed)
+		if typ == "" {
+			return nil
+		}
+		return []string{typ}
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			typ := strings.TrimSpace(fmt.Sprint(item))
+			if typ != "" {
+				out = append(out, typ)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func artifactRepoResultEventEntry(source semanticview.Source, flowID, resultEvent string) (runtimecontracts.EventCatalogEntry, bool) {
