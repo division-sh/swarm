@@ -465,12 +465,12 @@ func selectedContractSourceRunCounts(t testing.TB, db *sql.DB, runID string) map
 	return selectedContractRunCounts(t, db, runID, true)
 }
 
-func selectedContractRunCounts(t testing.TB, db *sql.DB, runID string, ignoreRuntimeLogEvents bool) map[string]int {
+func selectedContractRunCounts(t testing.TB, db *sql.DB, runID string, ignoreRuntimeDiagnosticEvents bool) map[string]int {
 	t.Helper()
 	ctx := context.Background()
 	eventFilter := ""
-	if ignoreRuntimeLogEvents {
-		eventFilter = " AND event_name <> 'platform.runtime_log'"
+	if ignoreRuntimeDiagnosticEvents {
+		eventFilter = " AND event_name NOT IN ('platform.runtime_log', 'platform.agent_started')"
 	}
 	queries := map[string]string{
 		"runs":                                 `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`,
