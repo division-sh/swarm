@@ -203,7 +203,7 @@ for _ in $(seq 1 "${START_TIMEOUT}"); do
     -H "Authorization: Bearer ${SWARM_API_TOKEN}" \
     --data-binary "${api_health_body}" || true)"
   if [[ "${health_code}" == "200" && "${ready_code}" == "200" && "${api_code}" == "200" ]]; then
-    bundle_fingerprint="$(ruby -rjson -e 'doc = JSON.parse(File.read(ARGV[0])); abort("health.check returned error") if doc["error"]; fingerprint = doc.dig("result", "bundle", "fingerprint").to_s; abort("health.check missing bundle fingerprint") if fingerprint.empty?; print fingerprint' /tmp/swarm-api-health.json 2>/dev/null || true)"
+    bundle_fingerprint="$(ruby -rjson -e 'doc = JSON.parse(File.read(ARGV[0])); abort("health.check returned error") if doc["error"]; result = doc["result"] || {}; abort("health.check not ready") unless result["ready"] == true && result["db_ok"] == true && result["runtime_ok"] == true; fingerprint = result.dig("bundle", "fingerprint").to_s; abort("health.check missing bundle fingerprint") if fingerprint.empty?; print fingerprint' /tmp/swarm-api-health.json 2>/dev/null || true)"
     if [[ -n "${bundle_fingerprint}" ]]; then
       ready=1
       break
