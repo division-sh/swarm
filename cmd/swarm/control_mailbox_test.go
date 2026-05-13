@@ -273,6 +273,60 @@ func TestControlMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 	}
 }
 
+func TestControlMailboxRejectsMalformedStatusByAction(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		status string
+		want   string
+	}{
+		{
+			name:   "approve invalid enum status",
+			args:   []string{"control", "mailbox", "approve", "mailbox-1"},
+			status: "garbage",
+			want:   `status="garbage", want "decided" for mailbox approve`,
+		},
+		{
+			name:   "reject wrong action status",
+			args:   []string{"control", "mailbox", "reject", "mailbox-1", "--reason", "not enough evidence"},
+			status: "deferred",
+			want:   `status="deferred", want "decided" for mailbox reject`,
+		},
+		{
+			name:   "defer wrong action status",
+			args:   []string{"control", "mailbox", "defer", "mailbox-1", "--until", "2026-05-13T12:30:00Z"},
+			status: "decided",
+			want:   `status="decided", want "deferred" for mailbox defer`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SWARM_API_TOKEN", "test-token")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"ok":                  true,
+					"mailbox_decision_id": "decision-1",
+					"status":              tc.status,
+				})
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 2 {
+				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if strings.TrimSpace(stdout.String()) != "" {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.want)
+			}
+		})
+	}
+}
+
 func testRootCommandOptions(server *httptest.Server) rootCommandOptions {
 	opts := defaultRootCommandOptions()
 	opts.apiEndpoint = server.URL + "/v1/rpc"
