@@ -251,6 +251,8 @@ func (s *ArtifactRepoSpec) UnmarshalYAML(node *yaml.Node) error {
 		"files":           {},
 		"output":          {},
 		"limits":          {},
+		"success_event":   {},
+		"success_payload": {},
 		"failure_event":   {},
 		"failure_payload": {},
 	}

@@ -1126,19 +1126,29 @@ handler_specification:
             limits: optional max_yaml_bytes, max_markdown_bytes, max_text_bytes, and max_repo_bytes.
             output: mapping of entity field names for repo_url, current_ref, file_manifest, status, failure_reason,
               last_request_id, and last_source_event_id.
+            success_event: optional event name emitted after runtime has produced a verified git ref and persisted the declared
+              committed output fields. The event is action-owned readiness publication for the committed artifact result.
+            success_payload: optional mapping of additional success event payload fields to expression values. Runtime always
+              includes repo_id, namespace, request_id, source_event_id, repo_url, current_ref, file_manifest, provenance,
+              and optional partition_key and display_slug when declared/resolved.
             failure_event: optional event name emitted when runtime execution fails after request/source identity resolution.
             failure_payload: optional mapping of additional failure event payload fields to expression values. Runtime always
               includes repo_id, namespace, request_id, source_event_id, failure_reason, provenance, and optional partition_key
               and display_slug when declared/resolved.
+            result_payload_rules: 'success_payload and failure_payload are strict. Declared fields must resolve, must validate
+              against the target event payload schema, and must not override runtime-owned result fields: repo_id, namespace,
+              partition_key, display_slug, request_id, source_event_id, repo_url, current_ref, file_manifest, failure_reason,
+              or provenance. Unsupported result-event declarations fail closed at verify/runtime.'
           behavior: The runtime normalizes file content, validates yaml content against the declared file schema, writes only
             allowlisted paths under the service-owned repo root, verifies the projected git tree stays within max_repo_bytes,
-            commits staged files atomically, verifies the resulting ref is a 40-character git SHA, and persists only the declared
-            output fields on the selected/owned entity. Duplicate replay for the same source_event_id is a no-op only when the
-            contract-visible committed output state is already present. Reusing a request_id with different content fails closed
-            even when that request is not the latest operation. Content hashes are diagnostic and do not replace request/source
-            idempotency. The public artifact URL is product-neutral (`swarm-artifact://repos/<repo_id>`). The local-git provider
-            path is product-neutral, collision-safe by repo_id, scoped below the runtime artifact root, and must not encode
-            product-specific path segments.
+            commits staged files atomically, verifies the resulting ref is a 40-character git SHA, persists only the declared
+            output fields on the selected/owned entity, then publishes success_event when declared. Duplicate replay for the
+            same source_event_id is a no-op only when the contract-visible committed output state is already present. Reusing
+            a request_id with the same content/tree may repair committed output state and publish the same success readiness
+            event; reusing a request_id with different content fails closed and may publish failure_event when declared. Content
+            hashes are diagnostic and do not replace request/source idempotency. The public artifact URL is product-neutral
+            (`swarm-artifact://repos/<repo_id>`). The local-git provider path is product-neutral, collision-safe by repo_id,
+            scoped below the runtime artifact root, and must not encode product-specific path segments.
           operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service
             contract must declare the output fields it wants persisted; status is committed or failed, failure_reason records
             runtime failure detail when available, and current_ref updates only after git commit/ref verification succeeds.
@@ -2335,8 +2345,9 @@ compliance:
     - Every state state_change follows declared advances_to paths
     - Every emitted event has a payload schema in events.yaml
     - mailbox_write materializes exactly one mailbox row per source event/materializer and rejects unsupported declarations
-    - artifact_repo_commit writes only allowlisted files, produces a pinned git ref, rejects unsupported declarations and unsafe
-      paths, and preserves replay/idempotency invariants
+    - artifact_repo_commit writes only allowlisted files, produces a pinned git ref, publishes declared success/failure result
+      events with schema-validated runtime-owned payload fields, rejects unsupported declarations and unsafe paths, and preserves
+      replay/idempotency invariants
     - Every agent subscription resolves to an event some node or agent produces
     - Permission enforcement blocks unauthorized tool calls
     - Accumulation is idempotent under duplicate event delivery
@@ -2509,8 +2520,8 @@ tool_model:
         create_flow_instance: Create a new dynamic flow instance from a template.
         record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler.
         mailbox_write: Deterministically materialize authored mailbox request events into public.mailbox. Handler action only.
-        artifact_repo_commit: Deterministically commit allowlisted service-owned artifact files to a local git repository and
-          persist opaque artifact URL/ref metadata. Handler action only.
+        artifact_repo_commit: Deterministically commit allowlisted service-owned artifact files to a local git repository,
+          persist opaque artifact URL/ref metadata, and publish declared result events. Handler action only.
     planned_tools:
       description: Tools planned for future platform versions. Not yet implemented. The permission may exist (as an authorization
         gate) before the tool does.

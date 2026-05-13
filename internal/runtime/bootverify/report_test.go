@@ -810,6 +810,13 @@ func TestRun_ReportsArtifactRepoCommitInvalidShape(t *testing.T) {
 									RepoURL: "repo_url",
 									Status:  "status",
 								},
+								SuccessEvent: "artifact_repo.commit_completed",
+								SuccessPayload: map[string]runtimecontracts.ExpressionValue{
+									"repo_id": runtimecontracts.RefExpression("entity.repo_id"),
+								},
+								FailurePayload: map[string]runtimecontracts.ExpressionValue{
+									"producer": {},
+								},
 							},
 						},
 					},
@@ -843,6 +850,18 @@ func TestRun_ReportsArtifactRepoCommitInvalidShape(t *testing.T) {
 	}
 	if !reportContains(report.Errors(), "handler_field_compliance", "missing artifact_repo.output.current_ref") {
 		t.Fatalf("expected missing current_ref output error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "success_event artifact_repo.commit_completed does not resolve") {
+		t.Fatalf("expected unresolved success_event error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "success_payload must not override runtime-owned field repo_id") {
+		t.Fatalf("expected reserved success_payload field error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "failure_payload requires artifact_repo.failure_event") {
+		t.Fatalf("expected failure_payload without failure_event error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "failure_payload.producer is missing value") {
+		t.Fatalf("expected missing failure_payload value error, got %#v", report.Errors())
 	}
 }
 

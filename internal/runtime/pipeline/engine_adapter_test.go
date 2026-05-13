@@ -815,6 +815,164 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	}
 }
 
+func TestPipelineEngineActionRunner_ArtifactRepoCommitPublishesSuccessResultEvent(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	store := NewWorkflowInstanceStore(db)
+	bus := &recordingPipelineBus{}
+	source := testArtifactRepoResultEventSource(t)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	pc := &PipelineCoordinator{
+		db:            db,
+		workflowStore: store,
+		artifactRoot:  t.TempDir(),
+		bus:           bus,
+		module:        &previewWorkflowModule{bundle: bundle},
+	}
+	ctx := testWorkflowStoreRunContext(t, store)
+	entityID := "22222222-2222-2222-2222-222222222222"
+	initial := testArtifactRepoEntityFields()
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "artifact-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+	action.ArtifactRepo.SuccessEvent = "artifact_repo.commit_completed"
+	action.ArtifactRepo.SuccessPayload = map[string]runtimecontracts.ExpressionValue{
+		"result_kind": runtimecontracts.LiteralExpression("ready"),
+	}
+
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	if !ok || err != nil {
+		t.Fatalf("ExecuteAction ok=%v err=%v", ok, err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("success event count = %d, want 1", got)
+	}
+	if got := string(bus.publishedEvent(0).Type); got != "artifact_repo.commit_completed" {
+		t.Fatalf("success event type = %q", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload, &payload); err != nil {
+		t.Fatalf("success event payload: %v", err)
+	}
+	if got := strings.TrimSpace(asString(payload["repo_id"])); got != initial["repo_id"].(string) {
+		t.Fatalf("success payload repo_id = %q", got)
+	}
+	if got := strings.TrimSpace(asString(payload["result_kind"])); got != "ready" {
+		t.Fatalf("success payload result_kind = %q", got)
+	}
+	if got := strings.TrimSpace(asString(payload["current_ref"])); len(got) != 40 {
+		t.Fatalf("success payload current_ref = %q", got)
+	}
+	if _, ok := payload["file_manifest"].(map[string]any); !ok {
+		t.Fatalf("success payload file_manifest = %#v", payload["file_manifest"])
+	}
+	if _, exists := payload["vertical_id"]; exists {
+		t.Fatalf("success payload contains product vertical_id: %#v", payload)
+	}
+	committed, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load committed workflow instance: %v", err)
+	}
+
+	replayCtx := execCtx
+	replayCtx.Request.State.StateCarrier.Metadata = cloneStringAnyMap(committed.Metadata)
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, replayCtx); err != nil {
+		t.Fatalf("same-source replay ExecuteAction: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("same-source replay success event count = %d, want 1", got)
+	}
+
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "artifact-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("reset workflow instance to simulate DB/git split: %v", err)
+	}
+	repairAction, repairCtx := testArtifactRepoActionAndContext(entityID, initial, "55555555-5555-5555-5555-555555555555", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+	repairAction.ArtifactRepo.SuccessEvent = action.ArtifactRepo.SuccessEvent
+	repairAction.ArtifactRepo.SuccessPayload = action.ArtifactRepo.SuccessPayload
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, repairAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, repairCtx); err != nil {
+		t.Fatalf("history repair ExecuteAction: %v", err)
+	}
+	if got := bus.publishedCount(); got != 2 {
+		t.Fatalf("history repair success event count = %d, want 2", got)
+	}
+}
+
+func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSuccessResultEvent(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	store := NewWorkflowInstanceStore(db)
+	bus := &recordingPipelineBus{}
+	source := testArtifactRepoResultEventSource(t)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	pc := &PipelineCoordinator{
+		db:            db,
+		workflowStore: store,
+		artifactRoot:  t.TempDir(),
+		bus:           bus,
+		module:        &previewWorkflowModule{bundle: bundle},
+	}
+	ctx := testWorkflowStoreRunContext(t, store)
+	entityID := "22222222-2222-2222-2222-222222222222"
+	initial := testArtifactRepoEntityFields()
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "artifact-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+	action.ArtifactRepo.SuccessEvent = "artifact_repo.commit_completed"
+
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	if !ok {
+		t.Fatal("expected artifact_repo_commit action to be claimed")
+	}
+	if err == nil || !strings.Contains(err.Error(), "payload violates schema") {
+		t.Fatalf("ExecuteAction error = %v, want success schema violation", err)
+	}
+	instance, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if _, exists := instance.Metadata["current_ref"]; exists {
+		t.Fatalf("current_ref should not be persisted on invalid success event: %#v", instance.Metadata["current_ref"])
+	}
+	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("failure event count = %d, want 1", got)
+	}
+	if got := string(bus.publishedEvent(0).Type); got != "artifact_repo.commit_failed" {
+		t.Fatalf("published event type = %q, want failure event", got)
+	}
+}
+
 func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAllowlist(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
@@ -886,7 +1044,8 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
@@ -973,7 +1132,8 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := NewWorkflowInstanceStore(db)
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
@@ -1033,6 +1193,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	}
 	if err == nil || !strings.Contains(err.Error(), "conflicts with previously committed tree") {
 		t.Fatalf("ExecuteAction error = %v, want same-tree request history conflict", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("conflict failure event count = %d, want 1", got)
+	}
+	if got := string(bus.publishedEvent(0).Type); got != "artifact_repo.commit_failed" {
+		t.Fatalf("conflict published event type = %q, want failure event", got)
 	}
 }
 
@@ -1161,6 +1327,65 @@ func TestArtifactRepoPathRejectsUnsafeGenericSegments(t *testing.T) {
 	}
 }
 
+func testArtifactRepoResultEventSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	return loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": "name: artifact-result-events\nversion: 1.0.0\ndescription: artifact result event fixture\nplatform_version: \">=1.1.0\"\nflows: []\n",
+		"schema.yaml":  "initial_state: ready\nterminal_states: [ready]\nstates: [ready]\n",
+		"types.yaml": `types:
+  ArtifactProvenance:
+    artifact_type: text
+    source_record_id: text
+  ArtifactManifestFile:
+    path: text
+    content_type: text
+    sha256: text
+    size_bytes: integer
+  ArtifactManifest:
+    provider: text
+    repo_id: text
+    namespace: text
+    partition_key: text
+    display_slug: text
+    request_id: text
+    source_event_id: text
+    repo_url: text
+    ref: text
+    tree_hash: text
+    files: [ArtifactManifestFile]
+    provenance: ArtifactProvenance
+`,
+		"events.yaml": `artifact_repo.commit_requested:
+  request_id: string
+  mvp_yaml: string
+artifact_repo.commit_completed:
+  repo_id: string
+  namespace: string
+  partition_key: string
+  display_slug: string
+  request_id: string
+  source_event_id: string
+  repo_url: string
+  current_ref: string
+  file_manifest: ArtifactManifest
+  provenance: ArtifactProvenance
+  result_kind: string
+  required: [repo_id, namespace, request_id, source_event_id, repo_url, current_ref, file_manifest, provenance, result_kind]
+artifact_repo.commit_failed:
+  repo_id: string
+  namespace: string
+  partition_key: string
+  display_slug: string
+  request_id: string
+  source_event_id: string
+  failure_reason: string
+  provenance: ArtifactProvenance
+  request_copy: string
+  required: [repo_id, namespace, request_id, source_event_id, failure_reason, provenance]
+`,
+	})
+}
+
 func testArtifactRepoEntityFields() map[string]any {
 	return map[string]any{
 		"repo_id":          "11111111-1111-1111-1111-111111111111",
@@ -1229,13 +1454,14 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 				},
 				FailureEvent: "artifact_repo.commit_failed",
 				FailurePayload: map[string]runtimecontracts.ExpressionValue{
-					"request_id": runtimecontracts.RefExpression("payload.request_id"),
+					"request_copy": runtimecontracts.RefExpression("payload.request_id"),
 				},
 			},
 		}, runtimeengine.ExecutionContext{
 			Base: base,
 			Request: runtimeengine.ExecutionRequest{
 				EntityID: identity.NormalizeEntityID(entityID),
+				FlowID:   identity.NormalizeFlowID("artifact-repo"),
 				NodeID:   identity.NormalizeNodeID("artifact-node"),
 				Event:    evt,
 				State: runtimeengine.StateSnapshot{

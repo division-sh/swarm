@@ -900,9 +900,13 @@ action:
     limits:
       max_yaml_bytes: 4096
       max_repo_bytes: 1048576
+    success_event: artifact_repo.commit_completed
+    success_payload:
+      producer:
+        literal: spec-repo
     failure_event: artifact_repo.commit_failed
     failure_payload:
-      request_id:
+      producer:
         ref: payload.request_id
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -936,6 +940,12 @@ action:
 	}
 	if got := handler.Action.ArtifactRepo.FailureEvent; got != "artifact_repo.commit_failed" {
 		t.Fatalf("ArtifactRepo.FailureEvent = %q", got)
+	}
+	if got := handler.Action.ArtifactRepo.SuccessEvent; got != "artifact_repo.commit_completed" {
+		t.Fatalf("ArtifactRepo.SuccessEvent = %q", got)
+	}
+	if got := handler.Action.ArtifactRepo.SuccessPayload["producer"].Literal; got != "spec-repo" {
+		t.Fatalf("ArtifactRepo.SuccessPayload[producer] = %#v", handler.Action.ArtifactRepo.SuccessPayload["producer"])
 	}
 }
 
