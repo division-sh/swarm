@@ -1,0 +1,10 @@
+reference-agent:
+  id: reference-agent
+  role: reference_reader
+  model_tier: tier2
+  conversation_mode: stateless
+  subscriptions:
+    - support.requested
+  emit_events: []
+  flow_data_access:
+    - exclusions.yaml
