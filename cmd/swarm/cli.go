@@ -70,6 +70,7 @@ func newServeCommand(ctx context.Context, repo string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the Swarm runtime, API, health, and MCP surfaces.",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			code := runServeRuntime(ctx, repo, opts)
 			if code != 0 {
@@ -106,6 +107,7 @@ func newVersionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print local Swarm binary version information.",
+		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(cmd.OutOrStdout(), "Swarm %s\n", binaryVersion)
 			fmt.Fprintf(cmd.OutOrStdout(), "Commit: %s\n", binaryCommit)

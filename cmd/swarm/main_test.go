@@ -161,6 +161,30 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	}
 }
 
+func TestCLI_NoArgCommandsRejectUnexpectedArgs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "serve", args: []string{"serve", "unexpected"}},
+		{name: "version", args: []string{"version", "unexpected"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommand(context.Background(), t.TempDir(), tc.args, &stdout, &stderr)
+			if code != 2 {
+				t.Fatalf("%s code = %d, want 2 stdout=%s stderr=%s", tc.name, code, stdout.String(), stderr.String())
+			}
+			if strings.TrimSpace(stdout.String()) != "" {
+				t.Fatalf("%s stdout = %q, want empty", tc.name, stdout.String())
+			}
+			if !strings.Contains(stderr.String(), "unknown command") {
+				t.Fatalf("%s stderr = %q, want Cobra arg validation error", tc.name, stderr.String())
+			}
+		})
+	}
+}
+
 func TestCLI_VerifyPreservesLocalContractCarveOut(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	missingContracts := filepath.Join(t.TempDir(), "missing")
