@@ -23,9 +23,7 @@ import (
 	"time"
 
 	apiv1 "swarm/internal/apiv1"
-	builderpkg "swarm/internal/builder"
 	"swarm/internal/config"
-	dashboardserver "swarm/internal/dashboard/server"
 	"swarm/internal/runtime"
 	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
@@ -218,7 +216,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("init v1 api: %v", err)
 	}
-	healthServer := newHealthServer(*healthAddr, &ready, rt.ToolGateway, apiV1Handler, dashboardServerOptions(supervisor, stores, &ready, cfg.LLM.Session.RotateAfterTurns, credentialStore))
+	healthServer := newHealthServer(*healthAddr, &ready, rt.ToolGateway, apiV1Handler)
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
@@ -1539,9 +1537,8 @@ func templateFlowCount(source semanticview.Source) int {
 	return count
 }
 
-func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Gateway, apiV1Handler http.Handler, dashboardOpts dashboardserver.Options) *http.Server {
+func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Gateway, apiV1Handler http.Handler) *http.Server {
 	mux := http.NewServeMux()
-	dashboardHandler := dashboardserver.NewHandler(dashboardOpts)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
@@ -1563,8 +1560,6 @@ func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Ga
 		mux.Handle("/v1/rpc", apiV1Handler)
 		mux.Handle("/v1/ws", apiV1Handler)
 	}
-	mux.Handle("/api/", dashboardHandler)
-	mux.Handle("/api", dashboardHandler)
 	return &http.Server{
 		Addr:              strings.TrimSpace(addr),
 		Handler:           mux,
@@ -1596,97 +1591,6 @@ func logReadySummary(source semanticview.Source, contractsRoot, healthAddr strin
 		len(source.ResolvedEventCatalog()),
 		healthAddr,
 	)
-}
-
-func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBundle, ready *atomic.Bool, rotateAfterTurns int, credentialStore runtimecredentials.Store) dashboardserver.Options {
-	var (
-		agents        dashboardserver.AgentReader
-		mailbox       dashboardserver.MailboxReader
-		conversations dashboardserver.ConversationReader
-		observability dashboardserver.ObservabilityReader
-		agentControl  dashboardserver.AgentController
-		runtimeCtl    dashboardserver.RuntimeController
-	)
-	if stores.Postgres != nil {
-		agents = dashboardserver.NewSQLAgentReader(stores.Postgres.DB, stores.Postgres, rotateAfterTurns)
-		mailbox = stores.Postgres
-		conversations = dashboardserver.NewSQLConversationReader(stores.Postgres.DB, stores.Postgres)
-		observability = dashboardserver.NewSQLObservabilityReader(stores.Postgres.DB, stores.Postgres)
-	}
-	if supervisor != nil {
-		agentControl = dashboardDynamicAgentControl{supervisor: supervisor}
-		runtimeCtl = dashboardDynamicRuntimeControl{supervisor: supervisor}
-	}
-	healthFn := func(ctx context.Context) (map[string]any, error) {
-		source := semanticview.Source(nil)
-		if supervisor != nil {
-			source = supervisor.CurrentSource()
-		}
-		checks := map[string]any{
-			"runtime": map[string]any{
-				"ready": ready != nil && ready.Load(),
-			},
-		}
-		if source != nil {
-			checks["runtime"] = map[string]any{
-				"ready":  ready != nil && ready.Load(),
-				"flows":  len(source.FlowSchemaEntries()),
-				"nodes":  len(source.NodeEntries()),
-				"agents": len(source.AgentEntries()),
-				"events": len(source.ResolvedEventCatalog()),
-			}
-		}
-		if stores.Postgres != nil {
-			dbErr := stores.Postgres.Ping(ctx)
-			checks["database"] = map[string]any{
-				"ok": dbErr == nil,
-			}
-			if dbErr != nil {
-				checks["database_error"] = dbErr.Error()
-			}
-		}
-		return checks, nil
-	}
-	var sourceProvider builderpkg.SourceProvider
-	var runtimeProvider builderpkg.RuntimeProvider
-	var projectControl builderpkg.ProjectController
-	if supervisor != nil {
-		sourceProvider = supervisor.CurrentSource
-		runtimeProvider = supervisor.CurrentRuntime
-		projectControl = supervisor
-	}
-	var builderEntities builderpkg.EntityReader
-	var dashboardEntities dashboardserver.EntityReader
-	if stores.Postgres != nil {
-		builderEntities = stores.Postgres
-		dashboardEntities = stores.Postgres
-	}
-	builderHandler := builderpkg.NewHandler(builderpkg.Options{
-		Health:         healthFn,
-		Entities:       builderEntities,
-		Runtime:        runtimeCtl,
-		Credentials:    credentialStore,
-		AuthToken:      strings.TrimSpace(os.Getenv("SWARM_BUILDER_AUTH_TOKEN")),
-		Version:        "swarm-dev",
-		CurrentSource:  sourceProvider,
-		CurrentRuntime: runtimeProvider,
-		ProjectControl: projectControl,
-		RunDebug:       stores.Postgres,
-	})
-	return dashboardserver.Options{
-		Health:        healthFn,
-		Agents:        agents,
-		AgentControl:  agentControl,
-		Mailbox:       mailbox,
-		Entities:      dashboardEntities,
-		Conversations: conversations,
-		Observability: observability,
-		RunTrace:      stores.Postgres,
-		Runtime:       runtimeCtl,
-		AuthToken:     strings.TrimSpace(os.Getenv("SWARM_OPERATOR_AUTH_TOKEN")),
-		Version:       "swarm-dev",
-		Builder:       builderHandler,
-	}
 }
 
 func buildCredentialStore() (runtimecredentials.Store, error) {

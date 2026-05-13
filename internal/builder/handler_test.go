@@ -1,11 +1,9 @@
 package builder
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
@@ -138,7 +136,7 @@ func TestHandler_StateListInstancesDrainsCanonicalEntityPages(t *testing.T) {
 
 	resp := callBuilderRPC(t, handler, Request{JSONRPC: "2.0", ID: "1", Method: "state.list_instances"})
 	result, _ := resp.Result.(map[string]any)
-	rows, ok := result["instances"].([]any)
+	rows, ok := result["instances"].([]store.OperatorEntitySummary)
 	if !ok || len(rows) != 51 {
 		t.Fatalf("instances = %#v, want 51 rows", result["instances"])
 	}
@@ -147,25 +145,16 @@ func TestHandler_StateListInstancesDrainsCanonicalEntityPages(t *testing.T) {
 	}
 }
 
-func callBuilderRPC(t *testing.T, handler http.Handler, req Request) RPCResponse {
+func callBuilderRPC(t *testing.T, httpHandler http.Handler, req Request) RPCResponse {
 	t.Helper()
-	raw, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
+	h, ok := httpHandler.(*handler)
+	if !ok {
+		t.Fatalf("handler type = %T, want *handler", httpHandler)
 	}
-	rec := httptest.NewRecorder()
-	httpReq := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(raw))
-	httpReq.Header.Set("Authorization", "Bearer "+testBuilderAuthToken)
-	handler.ServeHTTP(rec, httpReq)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("unexpected status %d body=%s", rec.Code, rec.Body.String())
-	}
-	var resp RPCResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Error != nil {
-		t.Fatalf("unexpected rpc error %+v", resp.Error)
+	result, rpcErr := h.dispatchRPC(context.Background(), req.Method, req.Params)
+	resp := RPCResponse{JSONRPC: "2.0", ID: req.ID, Result: result, Error: rpcErr}
+	if rpcErr != nil {
+		t.Fatalf("unexpected rpc error %+v", rpcErr)
 	}
 	return resp
 }

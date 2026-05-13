@@ -1,8 +1,8 @@
 # Swarm Investigate Command Draft
 
-API authority note: current `/api/*`, `/rpc`, and `/api/rpc` references in this
-document describe existing legacy adapter/helper surfaces. They are not
-competing API specs. The canonical user-facing API contract is
+API authority note: retired `/api/*`, `/rpc`, and `/api/rpc` references in this
+document are historical only. They are not supported operator API surfaces and
+are not competing API specs. The canonical user-facing API contract is
 `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
 `api_specification`, with OpenRPC generated from that section. Future
 `swarm investigate` implementation must consume that API except for the
@@ -18,7 +18,7 @@ owners and supported helper surfaces that already exist:
 - `make run-clear`
 - `go run ./cmd/swarm status`
 - health/readiness endpoints
-- dashboard/API read surfaces
+- v1 API read surfaces
 - canonical store-backed run-debug readers
 
 The command should reduce direct SQL usage by making the supported diagnostic surfaces
@@ -177,8 +177,8 @@ Legacy dashboard REST aliases remain available only as adapter surfaces:
 - `GET /api/mailbox/{id}`
 
 - `GET /api/instances`
-- `GET /api/instances/{id}`
-- `GET /api/instances/aggregate`
+- `/v1/rpc` `entity.get`
+- `/v1/rpc` `entity.aggregate`
 
 These already provide operator-visible drill-down without querying:
 
@@ -191,13 +191,13 @@ These already provide operator-visible drill-down without querying:
 
 Primary API owner: `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
 `api_specification`, implemented by the v1 `/v1/rpc` handlers and shared
-operator read/control owners. Dashboard `server.go` routes are deprecated
-adapter surfaces, not semantic owners.
+operator read/control owners. Dashboard `server.go` routes are retired
+historical aliases, not semantic owners.
 
-Entity-oriented diagnosis is already stronger than a typical “future follow-on” category, even though the current APIs are still instance-shaped:
+Entity-oriented diagnosis is already stronger than a typical “future follow-on” category:
 
-- `/api/instances/{id}`
-- `/api/instances/aggregate`
+- `/v1/rpc` `entity.get`
+- `/v1/rpc` `entity.aggregate`
 
 These are real current-head no-SQL diagnosis surfaces, not just placeholders.
 

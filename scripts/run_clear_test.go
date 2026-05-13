@@ -14,8 +14,6 @@ const runClearTestBundleFingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 type runClearConfig struct {
 	apiToken         string
-	operatorToken    string
-	builderToken     string
 	directiveAgent   string
 	directiveMessage string
 	healthAddr       string
@@ -37,14 +35,11 @@ type runClearConfig struct {
 func TestRunClear_UsesV1RPCHealthCheckAndRunStart(t *testing.T) {
 	result := runRunClear(t, runClearConfig{})
 
-	if strings.TrimSpace(result.operatorToken) == "" {
-		t.Fatal("expected helper to provision SWARM_OPERATOR_AUTH_TOKEN")
+	if strings.TrimSpace(result.apiToken) == "" {
+		t.Fatal("expected helper to provision SWARM_API_TOKEN")
 	}
-	if got, want := strings.TrimSpace(result.apiToken), strings.TrimSpace(result.operatorToken); got != want {
-		t.Fatalf("api token = %q, want operator fallback %q", got, want)
-	}
-	if strings.TrimSpace(result.builderToken) == "" {
-		t.Fatal("expected helper to provision SWARM_BUILDER_AUTH_TOKEN")
+	if strings.TrimSpace(result.operatorToken) != "" || strings.TrimSpace(result.builderToken) != "" {
+		t.Fatalf("legacy tokens should not be provisioned: operator=%q builder=%q", result.operatorToken, result.builderToken)
 	}
 	wantAPIHeader := "Authorization: Bearer " + result.apiToken
 	if !strings.Contains(result.healthHeaders, wantAPIHeader) {
@@ -59,9 +54,6 @@ func TestRunClear_UsesV1RPCHealthCheckAndRunStart(t *testing.T) {
 	}
 	if !strings.Contains(result.rpcHeaders, wantAPIHeader) {
 		t.Fatalf("run.start headers = %q, want %q", result.rpcHeaders, wantAPIHeader)
-	}
-	if strings.Contains(result.rpcHeaders, result.builderToken) && result.builderToken != result.apiToken {
-		t.Fatalf("run.start headers = %q, want no builder-token auth", result.rpcHeaders)
 	}
 	if got := strings.TrimSpace(result.rpcURL); got != "http://127.0.0.1:8081/v1/rpc" {
 		t.Fatalf("run.start url = %q, want v1 rpc endpoint", got)
@@ -107,22 +99,15 @@ func TestRunClear_UsesV1RPCHealthCheckAndRunStart(t *testing.T) {
 
 func TestRunClear_UsesConfiguredAPITokenForHealthCheckAndRunStart(t *testing.T) {
 	const explicitAPIToken = "api-explicit-token"
-	const explicitOperatorToken = "operator-explicit-token"
-	const explicitBuilderToken = "builder-explicit-token"
 	result := runRunClear(t, runClearConfig{
-		apiToken:      explicitAPIToken,
-		operatorToken: explicitOperatorToken,
-		builderToken:  explicitBuilderToken,
+		apiToken: explicitAPIToken,
 	})
 
 	if got := strings.TrimSpace(result.apiToken); got != explicitAPIToken {
 		t.Fatalf("api token = %q, want %q", got, explicitAPIToken)
 	}
-	if got := strings.TrimSpace(result.operatorToken); got != explicitOperatorToken {
-		t.Fatalf("operator token = %q, want %q", got, explicitOperatorToken)
-	}
-	if got := strings.TrimSpace(result.builderToken); got != explicitBuilderToken {
-		t.Fatalf("builder token = %q, want %q", got, explicitBuilderToken)
+	if strings.TrimSpace(result.operatorToken) != "" || strings.TrimSpace(result.builderToken) != "" {
+		t.Fatalf("legacy tokens should not be forwarded: operator=%q builder=%q", result.operatorToken, result.builderToken)
 	}
 	wantAPIHeader := "Authorization: Bearer " + explicitAPIToken
 	if !strings.Contains(result.healthHeaders, wantAPIHeader) {
@@ -130,9 +115,6 @@ func TestRunClear_UsesConfiguredAPITokenForHealthCheckAndRunStart(t *testing.T) 
 	}
 	if !strings.Contains(result.rpcHeaders, wantAPIHeader) {
 		t.Fatalf("run.start headers = %q, want %q", result.rpcHeaders, wantAPIHeader)
-	}
-	if strings.Contains(result.rpcHeaders, explicitBuilderToken) || strings.Contains(result.healthHeaders, explicitBuilderToken) {
-		t.Fatalf("headers used builder token: health=%q run=%q", result.healthHeaders, result.rpcHeaders)
 	}
 }
 
@@ -216,10 +198,8 @@ func TestRunClear_DoesNotTreatLauncherStateChangeAsStartupFailure(t *testing.T) 
 
 func TestRunClear_UsesV1RPCForAgentDirective(t *testing.T) {
 	const explicitAPIToken = "api-explicit-token"
-	const explicitOperatorToken = "operator-explicit-token"
 	result := runRunClear(t, runClearConfig{
 		apiToken:         explicitAPIToken,
-		operatorToken:    explicitOperatorToken,
 		directiveAgent:   "agent-7",
 		directiveMessage: "hello from test",
 	})
@@ -675,14 +655,8 @@ printf '{}'
 		"PID_FILE=" + pidFile,
 		"START_TIMEOUT=" + defaultString(cfg.startTimeout, "1"),
 	}...)
-	if cfg.operatorToken != "" {
-		cmd.Env = append(cmd.Env, "SWARM_OPERATOR_AUTH_TOKEN="+cfg.operatorToken)
-	}
 	if cfg.apiToken != "" {
 		cmd.Env = append(cmd.Env, "SWARM_API_TOKEN="+cfg.apiToken)
-	}
-	if cfg.builderToken != "" {
-		cmd.Env = append(cmd.Env, "SWARM_BUILDER_AUTH_TOKEN="+cfg.builderToken)
 	}
 	if cfg.directiveAgent != "" {
 		cmd.Env = append(cmd.Env, "DIRECTIVE_AGENT="+cfg.directiveAgent)

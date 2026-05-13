@@ -14,23 +14,7 @@ import (
 )
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h == nil {
-		http.NotFound(w, r)
-		return
-	}
-	if failure := h.authorizeControlPlane(r); failure != nil {
-		h.writeAuthFailure(w, r, failure)
-		return
-	}
-	if h.mux == nil {
-		mux := http.NewServeMux()
-		mux.HandleFunc("POST /rpc", h.handleRPC)
-		mux.HandleFunc("POST /api/rpc", h.handleRPC)
-		mux.HandleFunc("GET /ws", h.handleWS)
-		mux.HandleFunc("GET /api/ws", h.handleWS)
-		h.mux = mux
-	}
-	h.mux.ServeHTTP(w, r)
+	http.NotFound(w, r)
 }
 
 func (h *handler) handleRPC(w http.ResponseWriter, r *http.Request) {

@@ -1011,6 +1011,7 @@ func builderAuthHeader() http.Header {
 }
 
 func TestHandler_ConversationsAndAggregates(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	now := time.Date(2026, 3, 17, 12, 0, 0, 0, time.UTC)
 	agentCtl := &stubAgentControl{}
 	handler := NewHandler(Options{
@@ -1232,6 +1233,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 }
 
 func TestHandler_ConversationDetail_PreservesParseOKFalse(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	now := time.Date(2026, 3, 17, 12, 0, 0, 0, time.UTC)
 	handler := NewHandler(Options{
 		AuthToken: testOperatorAuthToken,
@@ -1277,6 +1279,7 @@ func TestHandler_ConversationDetail_PreservesParseOKFalse(t *testing.T) {
 }
 
 func TestHandler_AgentDirective_UsesLiveFactoryCreatedEmitToolSurface(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	reviewFlow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
 			ID:   "review",
@@ -1347,7 +1350,7 @@ func TestHandler_AgentDirective_UsesLiveFactoryCreatedEmitToolSurface(t *testing
 	}
 }
 
-func TestHandler_DashboardRoutesRequireAuthentication(t *testing.T) {
+func TestHandler_LegacyDashboardRoutesFailClosedWithoutAuthBoundary(t *testing.T) {
 	handler := NewHandler(Options{
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
@@ -1360,57 +1363,63 @@ func TestHandler_DashboardRoutesRequireAuthentication(t *testing.T) {
 	})
 
 	for _, tc := range []struct {
-		name       string
-		method     string
-		path       string
-		body       string
-		authHeader string
-		wantStatus int
-		wantError  string
+		name   string
+		method string
+		path   string
+		body   string
 	}{
 		{
-			name:       "dashboard get missing bearer",
-			method:     http.MethodGet,
-			path:       "/api/agents",
-			wantStatus: http.StatusUnauthorized,
-			wantError:  errDashboardAuthMissingBearer.Error(),
+			name:   "dashboard agents",
+			method: http.MethodGet,
+			path:   "/api/agents",
 		},
 		{
-			name:       "dashboard get invalid bearer",
-			method:     http.MethodGet,
-			path:       "/api/runtime/logs",
-			authHeader: "Bearer wrong-token",
-			wantStatus: http.StatusUnauthorized,
-			wantError:  errDashboardAuthInvalidToken.Error(),
+			name:   "dashboard runtime logs",
+			method: http.MethodGet,
+			path:   "/api/runtime/logs",
 		},
 		{
-			name:       "runtime control missing bearer",
-			method:     http.MethodPost,
-			path:       "/api/runtime/actions",
-			body:       `{"action":"pause"}`,
-			wantStatus: http.StatusUnauthorized,
-			wantError:  errDashboardAuthMissingBearer.Error(),
+			name:   "runtime control",
+			method: http.MethodPost,
+			path:   "/api/runtime/actions",
+			body:   `{"action":"pause"}`,
+		},
+		{
+			name:   "run trace",
+			method: http.MethodGet,
+			path:   "/api/runs/run-1/trace",
+		},
+		{
+			name:   "builder rpc",
+			method: http.MethodPost,
+			path:   "/rpc",
+			body:   `{"jsonrpc":"2.0","id":"1","method":"engine.ping"}`,
+		},
+		{
+			name:   "builder rpc api alias",
+			method: http.MethodPost,
+			path:   "/api/rpc",
+			body:   `{"jsonrpc":"2.0","id":"1","method":"engine.ping"}`,
+		},
+		{
+			name:   "builder ws",
+			method: http.MethodGet,
+			path:   "/ws",
+		},
+		{
+			name:   "builder ws api alias",
+			method: http.MethodGet,
+			path:   "/api/ws",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
-			if tc.authHeader != "" {
-				req.Header.Set("Authorization", tc.authHeader)
-			}
+			setOperatorAuth(req)
+			req.Header.Set("Authorization", "Bearer "+testBuilderAuthToken)
 			handler.ServeHTTP(rec, req)
-			if rec.Code != tc.wantStatus {
+			if rec.Code != http.StatusNotFound {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-			}
-			if got := rec.Header().Get("WWW-Authenticate"); got != `Bearer realm="swarm-operator"` {
-				t.Fatalf("WWW-Authenticate=%q", got)
-			}
-			var payload map[string]any
-			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-				t.Fatalf("unmarshal denial payload: %v", err)
-			}
-			if payload["error"] != tc.wantError {
-				t.Fatalf("error=%#v, want %q", payload["error"], tc.wantError)
 			}
 		})
 	}
@@ -1426,15 +1435,8 @@ func TestHandler_DashboardRoutesFailClosedWhenAuthIsNotConfigured(t *testing.T) 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
+	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("unmarshal denial payload: %v", err)
-	}
-	if payload["error"] != errDashboardAuthNotConfigured.Error() {
-		t.Fatalf("error=%#v, want %q", payload["error"], errDashboardAuthNotConfigured.Error())
 	}
 }
 
@@ -2782,6 +2784,7 @@ func TestSQLConversationReader_ListProjectsCanonicalSessionWatchdogState(t *test
 }
 
 func TestHandler_ConversationDetail_ProjectsSessionWatchdogState(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	now := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
 	handler := NewHandler(Options{
 		AuthToken: testOperatorAuthToken,
@@ -3143,6 +3146,7 @@ func TestSQLConversationReader_GetFailsClosedWhenCapabilityOwnerReportsUnavailab
 }
 
 func TestHandler_BuilderRPC(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	projectCtl := &stubProjectControl{}
 	entityID := runtimeflowidentity.EntityID("wf-1")
 	lastAggregate := &store.OperatorEntityAggregateOptions{}
@@ -3327,6 +3331,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 }
 
 func TestHandler_BuilderWSHealthHeartbeat(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	restore := builderpkg.SetHealthHeartbeatIntervalForTest(20 * time.Millisecond)
 	defer restore()
 	health := func(context.Context) (map[string]any, error) {
@@ -3367,6 +3372,7 @@ func TestHandler_BuilderWSHealthHeartbeat(t *testing.T) {
 }
 
 func TestHandler_BuilderWSHealthHeartbeat_APIAlias(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	restore := builderpkg.SetHealthHeartbeatIntervalForTest(20 * time.Millisecond)
 	defer restore()
 	health := func(context.Context) (map[string]any, error) {
@@ -3409,7 +3415,7 @@ func TestHandler_BuilderWSHealthHeartbeat_APIAlias(t *testing.T) {
 	}
 }
 
-func TestHandler_HealthzAliases(t *testing.T) {
+func TestHandler_HealthzOnlyKeepsProcessProbeAndRetiresAliases(t *testing.T) {
 	handler := NewHandler(Options{
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
@@ -3437,20 +3443,14 @@ func TestHandler_HealthzAliases(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		setOperatorAuth(req)
 		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s status=%d body=%s", path, rec.Code, rec.Body.String())
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("unmarshal %s: %v", path, err)
-		}
-		if payload["ok"] != true {
-			t.Fatalf("unexpected %s payload: %#v", path, payload)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s status=%d body=%s, want 404", path, rec.Code, rec.Body.String())
 		}
 	}
 }
 
 func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
@@ -3545,6 +3545,7 @@ func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
 }
 
 func TestHandler_RunEventReplayUsesCanonicalPersistedRunDebugOwner(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	now := time.Unix(1700000000, 0).UTC()
 	runID := "run_replay_001"
 	rootEvent := (events.Event{
@@ -3666,6 +3667,7 @@ func TestHandler_RunEventReplayUsesCanonicalPersistedRunDebugOwner(t *testing.T)
 }
 
 func TestHandler_RunTraceUsesCanonicalPersistedRunDebugOwner(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	now := time.Unix(1700000200, 0).UTC()
 	runID := "run_trace_001"
 	handler := NewHandler(Options{
@@ -3726,6 +3728,7 @@ func TestHandler_RunTraceUsesCanonicalPersistedRunDebugOwner(t *testing.T) {
 }
 
 func TestHandler_RunEventStreamPreservesCanonicalRuntimeLogWithoutEntityID(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	now := time.Unix(1700000100, 0).UTC()
 	runID := "run_live_001"
 	storeStub := &stubBuilderRunStore{}
@@ -3842,6 +3845,7 @@ func TestHandler_RunEventStreamPreservesCanonicalRuntimeLogWithoutEntityID(t *te
 }
 
 func TestHandler_RunStopUsesRunControlOwnerAndStreamsStopped(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
@@ -3925,6 +3929,7 @@ func TestHandler_RunStopUsesRunControlOwnerAndStreamsStopped(t *testing.T) {
 }
 
 func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
@@ -4025,6 +4030,7 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 }
 
 func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
@@ -4134,6 +4140,7 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 }
 
 func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
@@ -4231,6 +4238,7 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 }
 
 func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
@@ -4345,6 +4353,7 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 }
 
 func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
@@ -4455,6 +4464,7 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 }
 
 func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	bus, err := runtimebus.NewEventBus(&stubBuilderRunStore{})
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)
@@ -4548,6 +4558,7 @@ func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
 }
 
 func TestHandler_RunSkipEmitsSkippedAndResumed(t *testing.T) {
+	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	bus, err := runtimebus.NewEventBus(nil)
 	if err != nil {
 		t.Fatalf("new event bus: %v", err)

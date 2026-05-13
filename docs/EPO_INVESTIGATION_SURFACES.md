@@ -1,8 +1,8 @@
 # EPO Investigation Surfaces
 
-API authority note: current `/api/*`, `/rpc`, and `/api/rpc` surfaces listed
-here are supported legacy adapter/helper surfaces for investigation. They are
-not competing API specs. The canonical user-facing API contract lives in
+API authority note: retired `/api/*`, `/rpc`, and `/api/rpc` references in this
+document are historical only. They are not supported operator API surfaces and
+are not competing API specs. The canonical user-facing API contract lives in
 `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
 `api_specification`, and `openrpc.json` is generated from that section.
 
@@ -108,8 +108,6 @@ Common surfaces:
 - `/healthz`
 - `/readyz`
 - `/v1/rpc` `agent.list` / `agent.get`
-- `/api/runs`
-- `/api/rpc`
 - `/v1/rpc` `agent.send_directive`
 
 Best for:
@@ -118,8 +116,8 @@ Best for:
 - live directive-path reproduction through the canonical v1 owner
 - builder/operator surface mismatches
 
-Legacy dashboard `/api/agents*` routes are adapter surfaces for historical
-investigation only; they are not the canonical agent-control API.
+Retired dashboard `/api/agents*` and Builder `/api/rpc` routes are historical
+references only; they are not supported investigation surfaces.
 
 ### 6. Runtime Process Log
 
