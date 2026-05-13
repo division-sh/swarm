@@ -132,14 +132,14 @@ func runMailboxDecisionCommand(ctx context.Context, out io.Writer, opts mailboxD
 	if err := client.call(ctx, opts.method, params, &result); err != nil {
 		return err
 	}
-	if err := validateMailboxDecisionResult(result); err != nil {
+	if err := validateMailboxDecisionResult(opts.action, result); err != nil {
 		return err
 	}
 	writeMailboxDecisionResult(out, opts.action, mailboxID, result)
 	return nil
 }
 
-func validateMailboxDecisionResult(result mailboxDecisionResult) error {
+func validateMailboxDecisionResult(action string, result mailboxDecisionResult) error {
 	if !result.OK {
 		return fmt.Errorf("malformed mailbox decision result: ok must be true")
 	}
@@ -149,7 +149,25 @@ func validateMailboxDecisionResult(result mailboxDecisionResult) error {
 	if strings.TrimSpace(result.Status) == "" {
 		return fmt.Errorf("malformed mailbox decision result: status is required")
 	}
+	expectedStatus, err := expectedMailboxDecisionStatus(action)
+	if err != nil {
+		return err
+	}
+	if result.Status != expectedStatus {
+		return fmt.Errorf("malformed mailbox decision result: status=%q, want %q for mailbox %s", result.Status, expectedStatus, action)
+	}
 	return nil
+}
+
+func expectedMailboxDecisionStatus(action string) (string, error) {
+	switch action {
+	case "approve", "reject":
+		return "decided", nil
+	case "defer":
+		return "deferred", nil
+	default:
+		return "", fmt.Errorf("unsupported mailbox action %q", action)
+	}
 }
 
 func (o mailboxDecisionCommandOptions) params(mailboxID string) (map[string]any, error) {
