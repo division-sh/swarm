@@ -89,16 +89,9 @@ func ContentType(filename string) string {
 	}
 }
 
-func AgentAllowedFilenames(actor models.AgentConfig) []string {
-	return NormalizeAccessList(actor.FlowDataAccess)
-}
-
 func AllowedFilenames(source semanticview.Source, actor models.AgentConfig) []string {
 	if source == nil {
 		return nil
-	}
-	if filenames := AgentAllowedFilenames(actor); len(filenames) > 0 {
-		return filenames
 	}
 	if logicalID, entry, ok := semanticview.ResolveAgentRegistryEntry(source, actor); ok {
 		if contractSource, sourceOK := source.AgentContractSource(logicalID); sourceOK && strings.TrimSpace(contractSource.FlowID) != "" {

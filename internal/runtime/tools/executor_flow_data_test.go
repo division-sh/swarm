@@ -52,7 +52,7 @@ func TestExecutorReadFlowDataReadsDeclaredFlowFile(t *testing.T) {
 }
 
 func TestExecutorReadFlowDataFailsClosedForUndeclaredAndEscapingFiles(t *testing.T) {
-	source, root := loadFlowDataToolSource(t)
+	source, root := loadFlowDataToolSourceWithAccess(t, []string{"exclusions.yaml", "escape.md"})
 	actor := flowDataActor()
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 
@@ -73,10 +73,7 @@ func TestExecutorReadFlowDataFailsClosedForUndeclaredAndEscapingFiles(t *testing
 	if err := os.Symlink(filepath.Join(root, "flows", "other", "data", "secret.md"), linkPath); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	escapingActor := actor
-	escapingActor.FlowDataAccess = []string{"escape.md"}
-	escapingExec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
-	if _, err := escapingExec.Execute(models.WithActor(context.Background(), escapingActor), "read_flow_data", map[string]any{"filename": "escape.md"}); err == nil {
+	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "escape.md"}); err == nil {
 		t.Fatal("Execute(read_flow_data symlink escape) succeeded, want failure")
 	}
 }
@@ -84,10 +81,11 @@ func TestExecutorReadFlowDataFailsClosedForUndeclaredAndEscapingFiles(t *testing
 func TestExecutorReadFlowDataNotVisibleWithoutDeclaration(t *testing.T) {
 	source, _ := loadFlowDataToolSource(t)
 	actor := models.AgentConfig{
-		ID:       "other-agent",
-		Role:     "other",
-		Mode:     "support",
-		FlowPath: "support",
+		ID:             "other-agent",
+		Role:           "other",
+		Mode:           "support",
+		FlowPath:       "support",
+		FlowDataAccess: []string{"exclusions.yaml"},
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 
@@ -96,6 +94,20 @@ func TestExecutorReadFlowDataNotVisibleWithoutDeclaration(t *testing.T) {
 	}
 	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err == nil {
 		t.Fatal("Execute(read_flow_data) succeeded without declaration")
+	}
+}
+
+func TestExecutorReadFlowDataIgnoresMutableActorFlowDataAccess(t *testing.T) {
+	source, root := loadFlowDataToolSource(t)
+	actor := flowDataActor()
+	actor.FlowDataAccess = []string{"escape.md"}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+
+	if err := os.WriteFile(filepath.Join(root, "flows", "support", "data", "escape.md"), []byte("mutable grant\n"), 0o644); err != nil {
+		t.Fatalf("write escape.md: %v", err)
+	}
+	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "escape.md"}); err == nil || !strings.Contains(err.Error(), "invalid enum value") {
+		t.Fatalf("Execute(read_flow_data escape.md) error = %v, want contract enum rejection", err)
 	}
 }
 
@@ -128,6 +140,11 @@ func flowDataActor() models.AgentConfig {
 
 func loadFlowDataToolSource(t *testing.T) (semanticview.Source, string) {
 	t.Helper()
+	return loadFlowDataToolSourceWithAccess(t, []string{"exclusions.yaml"})
+}
+
+func loadFlowDataToolSourceWithAccess(t *testing.T, access []string) (semanticview.Source, string) {
+	t.Helper()
 	root := t.TempDir()
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: flow-data-test
@@ -151,9 +168,7 @@ flows:
 factory-cto:
   id: factory-cto
   role: factory_cto
-  flow_data_access:
-    - exclusions.yaml
-`)
+`+toolFlowDataAccessYAML(access))
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "data", "exclusions.yaml"), "blocked: true\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "schema.yaml"), "name: other\nmode: static\n")
@@ -166,6 +181,20 @@ factory-cto:
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", root, err)
 	}
 	return semanticview.Wrap(bundle), root
+}
+
+func toolFlowDataAccessYAML(access []string) string {
+	if len(access) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("  flow_data_access:\n")
+	for _, item := range access {
+		b.WriteString("    - ")
+		b.WriteString(item)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func writeToolFlowDataFixtureFile(t *testing.T, path string, contents string) {
