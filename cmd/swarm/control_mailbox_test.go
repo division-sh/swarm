@@ -205,6 +205,32 @@ func TestControlMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 			wantStderr: "mailbox_decision_id is required",
 		},
 		{
+			name: "mismatched json rpc id",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				writeJSONRPCResult(t, w, "swarm-cli:mailbox.reject", map[string]any{
+					"ok":                  true,
+					"mailbox_decision_id": "decision-1",
+					"status":              "decided",
+				})
+			},
+			wantStderr: "malformed JSON-RPC response: id",
+		},
+		{
+			name: "missing json rpc id",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("content-type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"result": map[string]any{
+						"ok":                  true,
+						"mailbox_decision_id": "decision-1",
+						"status":              "decided",
+					},
+				})
+			},
+			wantStderr: "malformed JSON-RPC response: id=<missing>",
+		},
+		{
 			name: "json rpc application error",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
