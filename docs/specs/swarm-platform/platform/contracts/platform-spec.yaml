@@ -5138,6 +5138,51 @@ cli_specification:
       command: swarm verify
       status: must_have
       behavior: local contract-file validation carve-out
+    runs:
+      command: swarm runs
+      status: must_have
+      owner: /v1/rpc run.list
+      behavior: List runs through the canonical v1 run.list read owner; no direct DB/store/runtime-state reads.
+    investigate:
+      command: swarm investigate
+      status: must_have
+      behavior: Runtime diagnosis command group. Subcommands consume v1 API read owners only.
+    investigate_runs:
+      command: swarm investigate runs
+      status: must_have
+      owner: /v1/rpc run.list
+      behavior: Same client and renderer path as `swarm runs`.
+    investigate_run:
+      command: swarm investigate run [run-id]
+      status: must_have
+      owner: /v1/rpc run.diagnose by default; /v1/rpc run.get when --no-diagnose is set
+      behavior: If run-id is omitted, resolve the latest run through run.list({limit:1}); do not call local run-debug/store helpers.
+    investigate_trace:
+      command: swarm investigate trace [run-id]
+      status: must_have
+      owner: /v1/rpc run.trace
+      behavior: Snapshot trace only. If run-id is omitted, resolve the latest run through run.list({limit:1}).
+      split_tail: Live follow mode is not part of this command; it requires run.subscribe_trace over /v1/ws.
+    investigate_health:
+      command: swarm investigate health
+      status: must_have
+      owner: /v1/rpc health.check
+      behavior: Structured authenticated operator health; do not consume /healthz, /readyz, or retired dashboard aliases.
+    control_mailbox_approve:
+      command: swarm control mailbox approve <mailbox-item-id>
+      status: must_have
+      owner: /v1/rpc mailbox.approve
+      behavior: Mailbox approval action through canonical v1 API owner; no direct DB/store/mailbox writes.
+    control_mailbox_reject:
+      command: swarm control mailbox reject <mailbox-item-id>
+      status: must_have
+      owner: /v1/rpc mailbox.reject
+      behavior: Mailbox rejection action through canonical v1 API owner; no direct DB/store/mailbox writes.
+    control_mailbox_defer:
+      command: swarm control mailbox defer <mailbox-item-id>
+      status: must_have
+      owner: /v1/rpc mailbox.defer
+      behavior: Mailbox defer action through canonical v1 API owner; no direct DB/store/mailbox writes.
     status:
       command: swarm status
       status: retired
@@ -5149,18 +5194,19 @@ cli_specification:
       exit_code: 2
       message: "ERROR: `swarm fork` was removed in v1. Forking is a mutating control action; use `swarm control run fork <run-id>` once that command ships. For v1, manual run forking goes through the API owner and the API spec."
   parent_tail:
-    not_implemented_in_first_slice:
-    - swarm run
+    implemented_after_first_slice:
+    - swarm control mailbox approve
+    - swarm control mailbox reject
+    - swarm control mailbox defer
     - swarm runs
     - swarm investigate runs
     - swarm investigate run
     - swarm investigate trace
     - swarm investigate health
-    - swarm control mailbox approve
-    - swarm control mailbox reject
-    - swarm control mailbox defer
+    remaining_not_implemented:
+    - swarm run
     - swarm control run/runtime/agent
-    rule: 'These commands require separate gates and must consume v1 API owners; they MUST NOT resurrect local DB/store/runtime-state readers.'
+    rule: 'Remaining commands require separate gates and must consume v1 API owners; they MUST NOT resurrect local DB/store/runtime-state readers.'
 
 api_specification:
   description: "Single canonical user-facing API for the Swarm platform. JSON-RPC 2.0 over\nHTTP for request/response, JSON-RPC\
