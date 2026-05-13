@@ -1151,7 +1151,7 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 					})
 				}
 				if normalizeWorkflowBuiltinActionID(actionID) == "artifact_repo_commit" {
-					c.handlerFindings = append(c.handlerFindings, validateArtifactRepoActionSpec(c.source, nodeID, eventType, handler.Action)...)
+					c.handlerFindings = append(c.handlerFindings, validateArtifactRepoActionSpec(c.source, nodeFlowID(c.source, nodeID), nodeID, eventType, handler.Action)...)
 				} else if handler.Action.ArtifactRepo != nil {
 					c.handlerFindings = append(c.handlerFindings, Finding{
 						CheckID:  "handler_field_compliance",
@@ -2281,7 +2281,7 @@ func handlerActionExecutable(source semanticview.Source, actionID string) bool {
 	return ok && entry.Executable()
 }
 
-func validateArtifactRepoActionSpec(source semanticview.Source, nodeID, eventType string, action runtimecontracts.ActionSpec) []Finding {
+func validateArtifactRepoActionSpec(source semanticview.Source, flowID, nodeID, eventType string, action runtimecontracts.ActionSpec) []Finding {
 	spec := action.ArtifactRepo
 	if spec == nil {
 		return []Finding{artifactRepoFinding(nodeID, eventType, "artifact_repo_commit is missing artifact_repo")}
@@ -2413,19 +2413,31 @@ func validateArtifactRepoActionSpec(source semanticview.Source, nodeID, eventTyp
 	if spec.Limits.MaxYAMLBytes < 0 || spec.Limits.MaxMarkdownBytes < 0 || spec.Limits.MaxTextBytes < 0 || spec.Limits.MaxRepoBytes < 0 {
 		findings = append(findings, artifactRepoFinding(nodeID, eventType, "artifact_repo.limits values must be non-negative"))
 	}
-	findings = append(findings, validateArtifactRepoResultEventSpec(source, nodeID, eventType, "success", spec.SuccessEvent, spec.SuccessPayload)...)
-	findings = append(findings, validateArtifactRepoResultEventSpec(source, nodeID, eventType, "failure", spec.FailureEvent, spec.FailurePayload)...)
+	findings = append(findings, validateArtifactRepoResultEventSpec(source, flowID, nodeID, eventType, "success", spec.SuccessEvent, spec.SuccessPayload, spec)...)
+	findings = append(findings, validateArtifactRepoResultEventSpec(source, flowID, nodeID, eventType, "failure", spec.FailureEvent, spec.FailurePayload, spec)...)
 	return findings
 }
 
-func validateArtifactRepoResultEventSpec(source semanticview.Source, nodeID, eventType, label, resultEvent string, payload map[string]runtimecontracts.ExpressionValue) []Finding {
+func validateArtifactRepoResultEventSpec(source semanticview.Source, flowID, nodeID, eventType, label, resultEvent string, payload map[string]runtimecontracts.ExpressionValue, spec *runtimecontracts.ArtifactRepoSpec) []Finding {
 	findings := []Finding{}
 	resultEvent = strings.TrimSpace(resultEvent)
 	if resultEvent == "" && len(payload) > 0 {
 		findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_payload requires artifact_repo.%s_event", label, label)))
 	}
-	if resultEvent != "" && !eventExists(source, resultEvent) {
-		findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s does not resolve to a declared event", label, resultEvent)))
+	var (
+		entry       runtimecontracts.EventCatalogEntry
+		entryFound  bool
+		covered     = artifactRepoResultCoveredPayloadFields(label, payload, spec)
+		runtimeKeys = artifactRepoResultRuntimePayloadFields(label, spec)
+	)
+	if resultEvent != "" {
+		if strings.Contains(resultEvent, "*") {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event must be a concrete event, got %s", label, resultEvent)))
+		}
+		entry, entryFound = artifactRepoResultEventEntry(source, flowID, resultEvent)
+		if !entryFound {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s does not resolve to a declared event", label, resultEvent)))
+		}
 	}
 	for target, expr := range payload {
 		target = strings.TrimSpace(target)
@@ -2440,7 +2452,91 @@ func validateArtifactRepoResultEventSpec(source semanticview.Source, nodeID, eve
 			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_payload.%s is missing value", label, target)))
 		}
 	}
+	if resultEvent != "" && entryFound {
+		if len(entry.Payload.Properties) == 0 {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s must declare a payload schema for artifact_repo result fields", label, resultEvent)))
+		}
+		for field := range runtimeKeys {
+			if _, ok := entry.Payload.Properties[field]; !ok {
+				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s schema is missing runtime-owned field %s", label, resultEvent, field)))
+			}
+		}
+		for target := range payload {
+			target = strings.TrimSpace(target)
+			if target == "" {
+				continue
+			}
+			if _, ok := entry.Payload.Properties[target]; !ok {
+				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_payload.%s is not declared by %s payload schema", label, target, resultEvent)))
+			}
+		}
+		for _, field := range entry.Required {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			if _, ok := covered[field]; !ok {
+				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_event %s requires payload field %s not provided by runtime-owned fields or artifact_repo.%s_payload", label, resultEvent, field, label)))
+			}
+		}
+	}
 	return findings
+}
+
+func artifactRepoResultEventEntry(source semanticview.Source, flowID, resultEvent string) (runtimecontracts.EventCatalogEntry, bool) {
+	if source == nil {
+		return runtimecontracts.EventCatalogEntry{}, false
+	}
+	resultEvent = strings.TrimSpace(resultEvent)
+	if resultEvent == "" {
+		return runtimecontracts.EventCatalogEntry{}, false
+	}
+	if entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, resultEvent); ok {
+		return entry, true
+	}
+	if entry, ok := source.EventEntry(resultEvent); ok {
+		return entry, true
+	}
+	if entry, ok := source.ResolvedEventCatalog()[resultEvent]; ok {
+		return entry, true
+	}
+	return runtimecontracts.EventCatalogEntry{}, false
+}
+
+func artifactRepoResultCoveredPayloadFields(label string, payload map[string]runtimecontracts.ExpressionValue, spec *runtimecontracts.ArtifactRepoSpec) map[string]struct{} {
+	covered := artifactRepoResultRuntimePayloadFields(label, spec)
+	for target := range payload {
+		target = strings.TrimSpace(target)
+		if target != "" {
+			covered[target] = struct{}{}
+		}
+	}
+	return covered
+}
+
+func artifactRepoResultRuntimePayloadFields(label string, spec *runtimecontracts.ArtifactRepoSpec) map[string]struct{} {
+	fields := map[string]struct{}{
+		"repo_id":         {},
+		"namespace":       {},
+		"request_id":      {},
+		"source_event_id": {},
+		"provenance":      {},
+	}
+	if spec != nil && !spec.PartitionKey.IsZero() {
+		fields["partition_key"] = struct{}{}
+	}
+	if spec != nil && !spec.DisplaySlug.IsZero() {
+		fields["display_slug"] = struct{}{}
+	}
+	switch strings.TrimSpace(label) {
+	case "success":
+		fields["repo_url"] = struct{}{}
+		fields["current_ref"] = struct{}{}
+		fields["file_manifest"] = struct{}{}
+	case "failure":
+		fields["failure_reason"] = struct{}{}
+	}
+	return fields
 }
 
 func artifactRepoResultPayloadFieldReserved(field string) bool {

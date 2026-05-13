@@ -18,13 +18,18 @@ import (
 )
 
 type recordingPipelineBus struct {
-	mu          sync.Mutex
-	publishes   []events.Event
-	runtimeLogs []RuntimeLogEntry
-	publishErr  error
+	mu            sync.Mutex
+	publishes     []events.Event
+	runtimeLogs   []RuntimeLogEntry
+	outboxIntents []runtimeengine.EmitIntent
+	publishErr    error
 }
 
 type recordingPipelineDispatcher struct {
+	bus *recordingPipelineBus
+}
+
+type recordingPipelineOutbox struct {
 	bus *recordingPipelineBus
 }
 
@@ -50,9 +55,21 @@ func (b *recordingPipelineBus) LogRuntime(_ context.Context, entry RuntimeLogEnt
 	b.runtimeLogs = append(b.runtimeLogs, entry)
 	return nil
 }
-func (*recordingPipelineBus) EngineOutbox() runtimeengine.OutboxWriter { return noOpEngineOutbox{} }
+func (b *recordingPipelineBus) EngineOutbox() runtimeengine.OutboxWriter {
+	return recordingPipelineOutbox{bus: b}
+}
 func (b *recordingPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return recordingPipelineDispatcher{bus: b}
+}
+
+func (o recordingPipelineOutbox) WriteOutbox(_ context.Context, intents []runtimeengine.EmitIntent) error {
+	if o.bus == nil {
+		return nil
+	}
+	o.bus.mu.Lock()
+	defer o.bus.mu.Unlock()
+	o.bus.outboxIntents = append(o.bus.outboxIntents, cloneEmitIntents(intents)...)
+	return nil
 }
 
 func (d recordingPipelineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
@@ -83,6 +100,18 @@ func (b *recordingPipelineBus) publishedEvent(i int) events.Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.publishes[i]
+}
+
+func (b *recordingPipelineBus) outboxCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.outboxIntents)
+}
+
+func (b *recordingPipelineBus) outboxIntent(i int) runtimeengine.EmitIntent {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.outboxIntents[i]
 }
 
 func (b *recordingPipelineBus) runtimeLogEntries() []RuntimeLogEntry {

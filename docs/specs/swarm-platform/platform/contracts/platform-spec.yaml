@@ -1138,17 +1138,21 @@ handler_specification:
             result_payload_rules: 'success_payload and failure_payload are strict. Declared fields must resolve, must validate
               against the target event payload schema, and must not override runtime-owned result fields: repo_id, namespace,
               partition_key, display_slug, request_id, source_event_id, repo_url, current_ref, file_manifest, failure_reason,
-              or provenance. Unsupported result-event declarations fail closed at verify/runtime.'
+              or provenance. The target result-event schema must allow every runtime-owned field the action will emit and
+              every required target field must be supplied by runtime-owned fields or declared result payload fields.
+              Unsupported result-event declarations fail closed at verify/runtime.'
           behavior: The runtime normalizes file content, validates yaml content against the declared file schema, writes only
             allowlisted paths under the service-owned repo root, verifies the projected git tree stays within max_repo_bytes,
             commits staged files atomically, verifies the resulting ref is a 40-character git SHA, persists only the declared
-            output fields on the selected/owned entity, then publishes success_event when declared. Duplicate replay for the
-            same source_event_id is a no-op only when the contract-visible committed output state is already present and any
-            declared success_event has already published successfully. last_source_event_id is advanced only after declared
-            success_event publication succeeds, so a transient publish failure can be retried from git/request history. Reusing
-            a request_id with the same content/tree may repair committed output state and publish the same success readiness
-            event; reusing a request_id with different content fails closed and may publish failure_event when declared. Content
-            hashes are diagnostic and do not replace request/source idempotency. The public artifact URL is product-neutral
+            output fields on the selected/owned entity, and when success_event is declared writes the success result event to
+            the runtime outbox in the same handler transaction as the committed output state. The success event is dispatched
+            only after that transaction commits. Duplicate replay for the same source_event_id is a no-op only when the
+            contract-visible committed output state is already present and any declared success_event has been transactionally
+            enqueued with that state; post-commit delivery failures are recovered through outbox replay rather than by
+            re-mutating the artifact output fields. Reusing a request_id with the same content/tree may repair committed output
+            state and publish the same success readiness event; reusing a request_id with different content fails closed and
+            may publish failure_event when declared. Content hashes are diagnostic and do not replace request/source idempotency.
+            The public artifact URL is product-neutral
             (`swarm-artifact://repos/<repo_id>`). The local-git provider path is product-neutral, collision-safe by repo_id,
             scoped below the runtime artifact root, and must not encode product-specific path segments.
           operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service

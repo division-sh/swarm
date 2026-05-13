@@ -865,6 +865,83 @@ func TestRun_ReportsArtifactRepoCommitInvalidShape(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"artifact-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"artifact.commit_requested": {
+						Action: runtimecontracts.ActionSpec{
+							ID: "artifact_repo_commit",
+							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
+								Provider:     "local_git",
+								RepoID:       runtimecontracts.RefExpression("entity.repo_id"),
+								RequestID:    runtimecontracts.RefExpression("payload.request_id"),
+								Namespace:    runtimecontracts.RefExpression("payload.namespace"),
+								AllowedPaths: []string{"readme.md"},
+								Files: []runtimecontracts.ArtifactRepoFileSpec{{
+									Path:        runtimecontracts.LiteralExpression("readme.md"),
+									Content:     runtimecontracts.RefExpression("payload.readme"),
+									ContentType: "markdown",
+								}},
+								Output: runtimecontracts.ArtifactRepoOutputSpec{
+									RepoURL:           "repo_url",
+									CurrentRef:        "current_ref",
+									FileManifest:      "file_manifest",
+									Status:            "status",
+									FailureReason:     "failure_reason",
+									LastRequestID:     "last_request_id",
+									LastSourceEventID: "last_source_event_id",
+								},
+								SuccessEvent: "artifact_repo.commit_completed",
+								FailureEvent: "artifact_repo.commit_failed",
+							},
+						},
+					},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"artifact.commit_requested": {},
+			"artifact_repo.commit_completed": {
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+					"repo_id":         {Type: "string"},
+					"namespace":       {Type: "string"},
+					"request_id":      {Type: "string"},
+					"source_event_id": {Type: "string"},
+					"repo_url":        {Type: "string"},
+					"current_ref":     {Type: "string"},
+					"file_manifest":   {Type: "object"},
+					"provenance":      {Type: "object"},
+					"result_kind":     {Type: "string"},
+				}},
+				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "repo_url", "current_ref", "file_manifest", "provenance", "result_kind"},
+			},
+			"artifact_repo.commit_failed": {
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+					"repo_id":         {Type: "string"},
+					"namespace":       {Type: "string"},
+					"request_id":      {Type: "string"},
+					"source_event_id": {Type: "string"},
+					"failure_reason":  {Type: "string"},
+					"provenance":      {Type: "object"},
+					"request_copy":    {Type: "string"},
+				}},
+				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure_reason", "provenance", "request_copy"},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "success_event artifact_repo.commit_completed requires payload field result_kind") {
+		t.Fatalf("expected missing success result required payload field error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "handler_field_compliance", "failure_event artifact_repo.commit_failed requires payload field request_copy") {
+		t.Fatalf("expected missing failure result required payload field error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
