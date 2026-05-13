@@ -1,0 +1,3 @@
+task.assigned:
+  entity_id: string
+task.done: {}
