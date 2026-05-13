@@ -466,7 +466,7 @@ func (e *Executor) emitToolExecutionEvent(
 			action = "tool_execution_failed"
 		}
 	}
-	detail := toolExecutionDiagnosticDetail(ctx, actor, toolName, input, result, execErr, phase, e.authority, e.emitRegistry)
+	detail := toolExecutionDiagnosticDetail(ctx, toolName, input, result, execErr, phase, e.toolAuthorizationDecision(actor, toolName))
 	if strings.TrimSpace(actor.Role) != "" {
 		detail["actor_role"] = strings.TrimSpace(actor.Role)
 	}
@@ -504,7 +504,7 @@ func toolExecutionMessage(toolName string, execErr error) string {
 	}
 }
 
-func toolExecutionDiagnosticDetail(ctx context.Context, actor models.AgentConfig, toolName string, input any, result any, execErr error, phase string, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) map[string]any {
+func toolExecutionDiagnosticDetail(ctx context.Context, toolName string, input any, result any, execErr error, phase string, fallbackDecision toolAuthorizationDecision) map[string]any {
 	detail := map[string]any{
 		"tool_name":     toolName,
 		"phase":         strings.TrimSpace(phase),
@@ -534,7 +534,7 @@ func toolExecutionDiagnosticDetail(ctx context.Context, actor models.AgentConfig
 				detail["denial_layer"] = "executor"
 			}
 		} else {
-			decision := classifyToolAuthorization(actor, toolName, provider, emitRegistry)
+			decision := fallbackDecision
 			detail["tool_kind"] = string(toolKindPolicy(toolName))
 			detail["context_requirement"] = string(toolContextRequirementPolicy(toolName))
 			if v := strings.TrimSpace(string(decision.class)); v != "" {
@@ -546,7 +546,7 @@ func toolExecutionDiagnosticDetail(ctx context.Context, actor models.AgentConfig
 			}
 		}
 	} else {
-		decision := classifyToolAuthorization(actor, toolName, provider, emitRegistry)
+		decision := fallbackDecision
 		detail["tool_kind"] = string(toolKindPolicy(toolName))
 		detail["context_requirement"] = string(toolContextRequirementPolicy(toolName))
 		if v := strings.TrimSpace(string(decision.class)); v != "" {
