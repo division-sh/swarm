@@ -223,7 +223,7 @@ Improvement items:
 
 - derive run liveness from active deliveries and recent event activity
 - introduce a first-class `stalled` run state
-- surface stalled-run detection in `swarm status`
+- surface stalled-run detection through future `swarm investigate run` over the v1 diagnostics API
 
 ### Delivery lifecycle is unclear or misleading
 
@@ -965,7 +965,7 @@ Improvement items:
 
 Symptoms:
 
-- `swarm status` says little beyond counts
+- historical `swarm status` said little beyond counts
 - the actual failing layer has to be inferred from logs
 
 Likely causes:

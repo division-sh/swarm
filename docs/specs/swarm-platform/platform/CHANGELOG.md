@@ -50,7 +50,7 @@ Platform-level execution context. Every event, delivery, session, turn, and enti
 
 **Run lifecycle:** creation (system.started, external event, fork), causal chain propagation, completion detection, pause/resume.
 
-**Fork:** timestamp-based system fork with optional contract swap. `swarm fork --run <id> --at <event_id|timestamp> [--contracts <path>]`. System auto-detects pending work at fork point. Reconstructs all entity states via mutation log reverse-apply.
+**Fork:** timestamp-based system fork with optional contract swap. Historical drafts used `swarm fork --run <id> --at <event_id|timestamp> [--contracts <path>]`; v1 retires top-level `swarm fork` in favor of a future separately gated control/API owner. System auto-detects pending work at fork point. Reconstructs all entity states via mutation log reverse-apply.
 
 **Flight recorder:** query pattern over events + entity_mutations + agent_turns + event_deliveries. Run reconstruction, entity timeline, drift detection.
 
@@ -63,7 +63,7 @@ Platform-level execution context. Every event, delivery, session, turn, and enti
 - [ ] run_id propagation in bus publish path (child inherits from parent)
 - [ ] Mutation logging in save_entity_field tool executor
 - [ ] Mutation logging in system node handler executor (data_accumulation, compute, sets_gate, advances_to, clear)
-- [ ] `swarm fork` CLI command
+- [ ] Future separately gated fork control/API surface (top-level `swarm fork` is retired in v1)
 
 ### New: Lineage Model (replaces trace_id)
 

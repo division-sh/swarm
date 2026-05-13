@@ -3562,8 +3562,9 @@ run_model:
       extend the parent run''s event tree.'
   lifecycle:
     creation: 'A run is created when: (1) system.started fires (cold start), (2) an external event arrives with
-      no active run (warm start), or (3) swarm fork creates a forked run. The platform inserts a row in the runs
-      table with status=running and returns the run_id.'
+      no active run (warm start), or (3) the runtime fork owner creates a forked run. The platform inserts a row
+      in the runs table with status=running and returns the run_id. Top-level `swarm fork` is retired by cli_specification
+      and is not a supported v1 command.'
     propagation: 'run_id propagates through the causal chain. When a handler or agent emits an event, the child
       event inherits run_id from the parent. This is set at event creation time in the bus publish path — no
       handler or agent code needs to pass run_id explicitly.'
@@ -3581,10 +3582,10 @@ run_model:
     description: 'Fork creates a new run by reconstructing full system state at a point in time, optionally
       loading new contracts, and resuming execution. The system automatically determines which events need
       to be re-delivered. The original run is frozen. The forked run gets independent execution.'
-    command: 'swarm fork --run <run_id> --at <event_id|timestamp> [--contracts <path>]'
-    dry_run_command: 'swarm fork --run <run_id> --at <event_id|timestamp> --dry-run [--contracts <path>] [--json]'
-    materialize_only_command: 'swarm fork --run <run_id> --at <event_id|timestamp> --materialize-only [--json]'
-    activation_command: 'swarm fork --run <fork_run_id> --activate [--json]'
+    command: 'retired in v1 CLI; future run-fork control surface requires its own gated `swarm control run fork` / API owner'
+    dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
+    materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
+    activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
     planning_admission: 'The dry-run form is a read-only planning/admission surface. It resolves the fork
       point, reconstructs provable state, classifies replay candidates, optionally loads selected contracts
       for non-mutating contract/frontier/route admission, and returns execution_ready=false
@@ -3899,8 +3900,9 @@ run_model:
       source rows, suppress fork-local execution with source outcomes, own current-state/entity
       materialization, reconstruct sessions/turns/audits, replay timers/routes/non-agent work, or claim restart
       recovery.'
-    selected_contract_supported_execution: 'The supported selected-contract timestamp-fork execution surface is
-      swarm fork --contracts. It is owned by runtime.run_fork.selected_contract_execution, not by CLI, route helpers,
+    selected_contract_supported_execution: 'The historical selected-contract timestamp-fork execution surface was
+      swarm fork --contracts; top-level swarm fork is now retired by cli_specification and any future operator command
+      requires a separate gated control/API surface. The runtime behavior is owned by runtime.run_fork.selected_contract_execution, not by CLI, route helpers,
       delivery-row helpers, or source-row replay. The owner consumes store.run_fork.selected_contract_binding,
       selected_contract_execution_admission, selected_contract_route_topology, selected_contract_dynamic_route_topology,
       runtime.run_fork.selected_contract_recipient_planning, and
@@ -4166,7 +4168,7 @@ run_model:
         does not treat platform.auth_required as source replay truth,
         and does not own restart recovery, current-state materialization, sessions, turns, audits, timers, routes,
         non-agent replay, retry/idempotency, or follow-up policy beyond normal selected-fork runtime output.'
-      3h_selected_contract_supported_execution: 'For the supported swarm fork --contracts surface, selected-contract
+      3h_selected_contract_supported_execution: 'For the runtime-owned selected-contract fork execution surface, selected-contract
         execution is a runtime-owned mutating path after selected binding, execution admission, route topology, dynamic
         topology proof or fail-closed classification, recipient planning, authoritative agent delivery materialization,
         and fork-local selected agent runtime materializer/executor proof when selected agent recipients exist. It mints
@@ -5098,6 +5100,67 @@ static_analyzer:
       - audit/lint confidence bands
       - delivery/session-primer derivation
     rule: Emit hard invalidity when a parseable structural prompt reference drifts from the declared event or entity contract.
+
+cli_specification:
+  description: 'Authoritative v1 Swarm CLI UX contract. The detailed review source is docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux.yaml; this section promotes the v1 command topology, migration boundary, and local/runtime-state ownership rules into the merge artifact.'
+  foundations:
+    command_router:
+      canonical_owner: cmd/swarm Cobra command tree
+      implementation_framework: github.com/spf13/cobra
+      rule: 'Cobra is the only semantic command router. Bare os.Args routing or parallel flag dispatch for operator commands is not authoritative.'
+    no_args_behavior: '`swarm` with no arguments prints root help and exits 0. Bare `swarm` MUST NOT start the runtime.'
+    daemon_startup: '`swarm serve` owns runtime/API/health/MCP startup. Existing runtime startup flags and behavior move behind this subcommand.'
+    cli_consumes_api_rule: 'All CLI commands that read or mutate runtime state consume the canonical v1 API at /v1/rpc or /v1/ws. The only v1 local carve-out is `swarm verify`, which validates contract files on disk and does not require runtime DB/API state.'
+    local_version: '`swarm version` prints local binary identity without contacting runtime. Server-version querying is split until the API-consuming CLI slice.'
+    completion: '`swarm completion <bash|zsh|fish|powershell>` emits Cobra-generated shell completion scripts.'
+  command_catalog:
+    root:
+      command: swarm
+      status: must_have
+      behavior: print root help on no args, exit 0
+    help:
+      command: swarm help [command]
+      status: must_have
+      owner: Cobra help command
+    completion:
+      command: swarm completion <bash|zsh|fish|powershell>
+      status: must_have
+      owner: Cobra completion generation
+    version:
+      command: swarm version
+      status: must_have
+      behavior: local binary identity only in the first v1 CLI slice
+    serve:
+      command: swarm serve
+      status: must_have
+      behavior: starts current runtime, process probes, /v1/rpc, /v1/ws, and MCP surfaces
+    verify:
+      command: swarm verify
+      status: must_have
+      behavior: local contract-file validation carve-out
+    status:
+      command: swarm status
+      status: retired
+      exit_code: 2
+      message: "ERROR: `swarm status` was removed in v1. Replaced by `swarm investigate run` (interpreted) or `swarm investigate run --no-diagnose` (header only). See `swarm investigate run --help`."
+    fork:
+      command: swarm fork
+      status: retired
+      exit_code: 2
+      message: "ERROR: `swarm fork` was removed in v1. Forking is a mutating control action; use `swarm control run fork <run-id>` once that command ships. For v1, manual run forking goes through the API owner and the API spec."
+  parent_tail:
+    not_implemented_in_first_slice:
+    - swarm run
+    - swarm runs
+    - swarm investigate runs
+    - swarm investigate run
+    - swarm investigate trace
+    - swarm investigate health
+    - swarm control mailbox approve
+    - swarm control mailbox reject
+    - swarm control mailbox defer
+    - swarm control run/runtime/agent
+    rule: 'These commands require separate gates and must consume v1 API owners; they MUST NOT resurrect local DB/store/runtime-state readers.'
 
 api_specification:
   description: "Single canonical user-facing API for the Swarm platform. JSON-RPC 2.0 over\nHTTP for request/response, JSON-RPC\

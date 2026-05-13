@@ -33,7 +33,7 @@ This document tracks the removal stream so the runtime, tools, and specs converg
 
 ### 2. Operator tooling
 
-- Make `swarm status` purely `run_id`-first.
+- Make future `swarm investigate run` purely `run_id`-first over the v1 diagnostics API.
 - Keep trace fallback only for legacy logs produced before the run-scoped logging tranche.
 - Add causal/event-subtree tooling based on `event_id` rather than trace traversal.
 

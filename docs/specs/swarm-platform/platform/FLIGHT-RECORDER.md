@@ -21,6 +21,12 @@ reverse-engineering it from the current state.
 
 ## Fork Semantics — Approach Comparison
 
+> Historical note: this document predates the v1 CLI contract. Top-level
+> `swarm fork` examples below are historical design records, not supported v1
+> CLI commands. `platform-spec.yaml` `cli_specification` retires top-level
+> `swarm fork`; any future fork control surface requires a separate gated
+> `swarm control run fork` / API owner.
+
 We evaluated three approaches to fork. This comparison captures the
 trade-offs that led to the chosen design.
 

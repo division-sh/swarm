@@ -26,7 +26,7 @@ Expected fields when available:
 
 Run-bound diagnostics are the canonical source for:
 
-- `swarm status`
+- future `swarm investigate run` over v1 run diagnostics
 - postmortem debugging
 - correlation across events, deliveries, sessions, and turns
 

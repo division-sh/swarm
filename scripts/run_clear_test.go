@@ -180,6 +180,13 @@ func TestRunClear_BuildsAndLaunchesBinaryDirectly(t *testing.T) {
 	if got := strings.TrimSpace(result.launchedHealthAddr); got != "0.0.0.0:8081" {
 		t.Fatalf("launched health addr = %q, want WLAN-reachable default bind", got)
 	}
+	wantCommand := strings.TrimSpace(result.builtBinaryPath) + " serve --contracts /tmp/contracts --health-addr 0.0.0.0:8081"
+	if got := strings.TrimSpace(result.launchedCommand); got != wantCommand {
+		t.Fatalf("launched command = %q, want %q", got, wantCommand)
+	}
+	if strings.Contains(result.launchedCommand, " -contracts ") || strings.Contains(result.launchedCommand, " -health-addr ") {
+		t.Fatalf("launched command = %q, want Cobra serve command with long flags", result.launchedCommand)
+	}
 }
 
 func TestRunClear_DoesNotTreatLauncherStateChangeAsStartupFailure(t *testing.T) {
@@ -311,6 +318,7 @@ type runClearResult struct {
 	builtBinaryPath     string
 	launchedBinaryPath  string
 	launchedHealthAddr  string
+	launchedCommand     string
 	healthHeaders       string
 	healthBody          string
 	healthURL           string
@@ -346,6 +354,7 @@ func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error)
 	goBuildOutputSink := filepath.Join(t.TempDir(), "go-build-output.txt")
 	pythonBinaryPathSink := filepath.Join(t.TempDir(), "python-binary-path.txt")
 	pythonHealthAddrSink := filepath.Join(t.TempDir(), "python-health-addr.txt")
+	pythonCommandSink := filepath.Join(t.TempDir(), "python-command.txt")
 	psStateCountSink := filepath.Join(t.TempDir(), "ps-state-count.txt")
 	healthHeadersSink := filepath.Join(t.TempDir(), "api-health-headers.txt")
 	healthBodySink := filepath.Join(t.TempDir(), "api-health-body.txt")
@@ -399,7 +408,7 @@ case "${PS_MODE:-}" in
         printf 'Wed Apr 15 23:54:13 2026\n'
         ;;
       command=)
-        printf '%s -contracts %s -health-addr %s\n' "${BINARY_PATH}" "${CONTRACTS_ROOT}" "${HEALTH_ADDR}"
+		printf '%s serve --contracts %s --health-addr %s\n' "${BINARY_PATH}" "${CONTRACTS_ROOT}" "${HEALTH_ADDR}"
         ;;
       *)
         exit 1
@@ -465,8 +474,9 @@ printf '%s' "${SWARM_TOOL_GATEWAY_URL:-}" > "${PYTHON_HOST_GATEWAY_URL_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" > "${PYTHON_CONTAINER_GATEWAY_URL_SINK}"
 printf '%s' "${BINARY_PATH:-}" > "${PYTHON_BINARY_PATH_SINK}"
 printf '%s' "${HEALTH_ADDR:-}" > "${PYTHON_HEALTH_ADDR_SINK}"
+printf '%s serve --contracts %s --health-addr %s' "${BINARY_PATH:-}" "${CONTRACTS_ROOT:-}" "${HEALTH_ADDR:-}" > "${PYTHON_COMMAND_SINK}"
 (
-  exec "${BINARY_PATH}" -contracts "${CONTRACTS_ROOT}" -health-addr "${HEALTH_ADDR}" >> "${LOG_FILE}" 2>&1 < /dev/null
+  exec "${BINARY_PATH}" serve --contracts "${CONTRACTS_ROOT}" --health-addr "${HEALTH_ADDR}" >> "${LOG_FILE}" 2>&1 < /dev/null
 ) &
 printf '%s\n' "$!"
 `)
@@ -627,6 +637,7 @@ printf '{}'
 		"PYTHON_CONTAINER_GATEWAY_URL_SINK=" + containerGatewayURLSink,
 		"PYTHON_BINARY_PATH_SINK=" + pythonBinaryPathSink,
 		"PYTHON_HEALTH_ADDR_SINK=" + pythonHealthAddrSink,
+		"PYTHON_COMMAND_SINK=" + pythonCommandSink,
 		"GO_BUILD_OUTPUT_SINK=" + goBuildOutputSink,
 		"GO_BUILD_LAUNCHER_MODE=" + defaultString(cfg.launcherMode, "steady"),
 		"GO_BUILD_LAUNCHER_LOG_TEXT=" + cfg.launcherLogText,
@@ -692,6 +703,7 @@ printf '{}'
 		builtBinaryPath:     readFileTrimmed(t, goBuildOutputSink),
 		launchedBinaryPath:  readFileTrimmed(t, pythonBinaryPathSink),
 		launchedHealthAddr:  readFileTrimmed(t, pythonHealthAddrSink),
+		launchedCommand:     readFileTrimmed(t, pythonCommandSink),
 		healthHeaders:       readFileTrimmedOptional(t, healthHeadersSink),
 		healthBody:          readFileTrimmedOptional(t, healthBodySink),
 		healthURL:           readFileTrimmedOptional(t, healthURLSink),

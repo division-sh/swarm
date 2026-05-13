@@ -73,78 +73,88 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 }
 
 func main() {
-	repo := repoRoot()
-	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) == "verify" {
-		os.Exit(runVerifyCommand(context.Background(), repo, os.Args[2:], os.Stdout))
-	}
-	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) == "status" {
-		os.Exit(runStatusCommand(context.Background(), repo, os.Args[2:], os.Stdout))
-	}
-	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) == "fork" {
-		os.Exit(runForkCommand(context.Background(), repo, os.Args[2:], os.Stdout))
-	}
-	configPath := flag.String("config", "", "Optional path to Swarm runtime config")
-	contractsPath := flag.String("contracts", "", "Path to Swarm contract bundle root")
-	platformSpecPath := flag.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
-	storeMode := flag.String("store", "postgres", "Store mode: postgres")
-	healthAddr := flag.String("health-addr", defaultHealthAddr, "HTTP bind address for health checks")
-	selfCheck := flag.Bool("self-check", true, "Run runtime self-check during boot")
-	flag.Parse()
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	resolvedConfigPath := resolvePath(repo, *configPath)
-	resolvedContractsPath := resolveContractsPath(repo, *contractsPath)
-	resolvedPlatformSpecPath := resolvePath(repo, *platformSpecPath)
+	os.Exit(executeRootCommand(ctx, repoRoot(), os.Args[1:], os.Stdout, os.Stderr))
+}
+
+type serveOptions struct {
+	ConfigPath       string
+	ContractsPath    string
+	PlatformSpecPath string
+	StoreMode        string
+	HealthAddr       string
+	SelfCheck        bool
+}
+
+func defaultServeOptions() serveOptions {
+	return serveOptions{
+		PlatformSpecPath: defaultPlatformSpecPath,
+		StoreMode:        "postgres",
+		HealthAddr:       defaultHealthAddr,
+		SelfCheck:        true,
+	}
+}
+
+func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
+	resolvedConfigPath := resolvePath(repo, opts.ConfigPath)
+	resolvedContractsPath := resolveContractsPath(repo, opts.ContractsPath)
+	resolvedPlatformSpecPath := resolvePath(repo, opts.PlatformSpecPath)
 	if err := loadRepoDotEnv(repo); err != nil {
-		log.Fatalf("load .env: %v", err)
+		log.Printf("load .env: %v", err)
+		return 1
 	}
 
 	cfg, err := loadRuntimeConfig(resolvedConfigPath)
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		log.Printf("load config: %v", err)
+		return 1
 	}
-	stores, err := buildStores(ctx, *storeMode, cfg)
+	stores, err := buildStores(ctx, opts.StoreMode, cfg)
 	if err != nil {
-		log.Fatalf("init stores: %v", err)
+		log.Printf("init stores: %v", err)
+		return 1
 	}
 	defer closeDB(stores.SQLDB)
 	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
 	if err != nil {
-		log.Fatalf("resolve contracts: %v", err)
+		log.Printf("resolve contracts: %v", err)
+		return 1
 	}
 	module, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPlatformSpecPath)
 	if err != nil {
-		log.Fatalf("load Swarm contracts: %v", err)
+		log.Printf("load Swarm contracts: %v", err)
+		return 1
 	}
 	bootBundleIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
-		log.Fatalf("compute boot bundle identity: %v", err)
+		log.Printf("compute boot bundle identity: %v", err)
+		return 1
 	}
 	source := semanticview.Wrap(bundle)
 	stateStoreSummary, err := initializeStateStores(ctx, stores, bundle)
 	if err != nil {
 		slog.Error("initialize state stores", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	workspaces := configuredWorkspaceLifecycle(stores.SQLDB, repo, contractsRoot, source)
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		slog.Error("validate workspaces", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	if err := workspaces.EnsurePrereqs(ctx); err != nil {
 		slog.Error("prepare workspaces", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	if err := workspaces.EnsureSystemWorkspaces(ctx); err != nil {
 		slog.Error("ensure system workspaces", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
 		slog.Error("configure credentials", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	validation, err := runtime.ValidateWorkflowContractSurface(ctx, source, runtime.DefaultWorkflowContractValidationOptions(credentialStore))
 	bootReport := validation.BootReport
@@ -156,11 +166,11 @@ func main() {
 		} else {
 			slog.Error("workflow contract validation failed", "error", err)
 		}
-		os.Exit(1)
+		return 1
 	}
 
 	rt, err := runtime.NewRuntime(ctx, cfg, stores.runtimeStores(), runtime.RuntimeOptions{
-		SelfCheck:          *selfCheck,
+		SelfCheck:          opts.SelfCheck,
 		WorkflowModule:     module,
 		WorkspaceLifecycle: workspaces,
 		EnableToolGateway:  true,
@@ -168,7 +178,8 @@ func main() {
 		Credentials:        credentialStore,
 	})
 	if err != nil {
-		log.Fatalf("init runtime: %v", err)
+		log.Printf("init runtime: %v", err)
+		return 1
 	}
 
 	var ready atomic.Bool
@@ -180,7 +191,8 @@ func main() {
 	}()
 	mailboxApprovalRoutes, err := apiv1.MailboxApprovalRoutesFromSpec(resolvedPlatformSpecPath)
 	if err != nil {
-		log.Fatalf("load v1 api mailbox approval routes: %v", err)
+		log.Printf("load v1 api mailbox approval routes: %v", err)
+		return 1
 	}
 	var apiEntities apiv1.EntityReadStore
 	var apiAgentConversations apiv1.AgentConversationReadStore
@@ -214,21 +226,24 @@ func main() {
 		Subscriptions:    apiv1.OperatorSubscriptions(apiReadOptions),
 	})
 	if err != nil {
-		log.Fatalf("init v1 api: %v", err)
+		log.Printf("init v1 api: %v", err)
+		return 1
 	}
-	healthServer := newHealthServer(*healthAddr, &ready, rt.ToolGateway, apiV1Handler)
+	healthServer := newHealthServer(opts.HealthAddr, &ready, rt.ToolGateway, apiV1Handler)
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
 	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath, bootReport, stateStoreSummary)
 	if err := rt.Start(ctx); err != nil {
-		log.Fatalf("start runtime: %v", err)
+		log.Printf("start runtime: %v", err)
+		return 1
 	}
 	ready.Store(true)
-	logReadySummary(source, contractsRoot, *healthAddr)
+	logReadySummary(source, contractsRoot, opts.HealthAddr)
 
 	<-ctx.Done()
 	ready.Store(false)
+	return 0
 }
 
 func runVerifyCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
@@ -370,7 +385,10 @@ type runStatusOptions struct {
 	Component     string
 }
 
-func runForkCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
+// runForkRuntimeOwnerHarness preserves runtime/store fork owner coverage without
+// exposing or routing a top-level CLI command. v1 top-level `swarm fork` is
+// retired by the Cobra command tree in cli.go.
+func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", "", "Optional path to Swarm runtime config")
@@ -826,79 +844,6 @@ func printRunForkPlan(w io.Writer, plan store.RunForkPlan) {
 			readiness.FutureExecutionOwner,
 		)
 	}
-}
-
-func runStatusCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
-	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	configPath := fs.String("config", "", "Optional path to Swarm runtime config")
-	storeMode := fs.String("store", "postgres", "Store mode: postgres")
-	runID := fs.String("run-id", "", "Run ID to inspect; defaults to latest persisted run")
-	asJSON := fs.Bool("json", false, "Emit JSON")
-	logsOnly := fs.Bool("logs", false, "Show runtime log-focused status output")
-	logsAll := fs.Bool("logs-all", false, "Include info-level runtime logs in status output")
-	component := fs.String("component", "", "Filter runtime logs to a specific component")
-	if err := fs.Parse(args); err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "status failed: %v\n", err)
-		}
-		return 2
-	}
-	if err := loadRepoDotEnv(repo); err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "status failed: load .env: %v\n", err)
-		}
-		return 1
-	}
-	cfg, err := loadRuntimeConfig(resolvePath(repo, *configPath))
-	if err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "status failed: load config: %v\n", err)
-		}
-		return 1
-	}
-	stores, err := buildStores(ctx, *storeMode, cfg)
-	if err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "status failed: init stores: %v\n", err)
-		}
-		return 1
-	}
-	defer closeDB(stores.SQLDB)
-	if stores.SQLDB == nil {
-		if out != nil {
-			fmt.Fprintln(out, "status failed: postgres store required")
-		}
-		return 1
-	}
-	if stores.Postgres == nil {
-		if out != nil {
-			fmt.Fprintln(out, "status failed: postgres store required")
-		}
-		return 1
-	}
-	report, err := loadRunStatusReport(ctx, stores.Postgres, strings.TrimSpace(*runID), runStatusOptions{
-		LogsOnly:      *logsOnly,
-		LogsAllLevels: *logsAll,
-		Component:     strings.TrimSpace(*component),
-	})
-	if err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "status failed: %v\n", err)
-		}
-		return 1
-	}
-	if *asJSON {
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(out, "status failed: encode json: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-	printRunStatusReport(out, report)
-	return 0
 }
 
 func loadRunStatusReport(ctx context.Context, pg *store.PostgresStore, runID string, opts runStatusOptions) (runStatusReport, error) {
