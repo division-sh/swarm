@@ -67,6 +67,8 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newVerifyCommand(ctx, repo),
 		newVersionCommand(),
 		newCompletionCommand(),
+		newRunsCommand(opts),
+		newInvestigateCommand(opts),
 		newControlCommand(opts),
 		newRetiredStatusCommand(),
 		newRetiredForkCommand(),
