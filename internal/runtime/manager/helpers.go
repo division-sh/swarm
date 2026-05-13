@@ -183,9 +183,6 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if len(patch.Permissions) > 0 {
 		out.Permissions = patch.Permissions
 	}
-	if len(patch.FlowDataAccess) > 0 {
-		out.FlowDataAccess = patch.FlowDataAccess
-	}
 	if patch.NativeTools.Any() {
 		out.NativeTools = patch.NativeTools
 	}
