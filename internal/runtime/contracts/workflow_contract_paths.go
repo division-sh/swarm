@@ -238,6 +238,7 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 				PackageKey:   pkg.Key,
 				PackageDir:   packageDir,
 				Dir:          dir,
+				DataDir:      existingDir(filepath.Join(dir, "data")),
 				SchemaFile:   existingFile(filepath.Join(dir, "schema.yaml")),
 				TypesFile:    existingFile(filepath.Join(dir, "types.yaml")),
 				EntitiesFile: existingFile(filepath.Join(dir, "entities.yaml")),

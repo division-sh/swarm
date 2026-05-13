@@ -18,6 +18,7 @@ import (
 	"swarm/internal/runtime/core/toolcapabilities"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	"swarm/internal/runtime/diaglog"
+	"swarm/internal/runtime/flowdata"
 	llm "swarm/internal/runtime/llm"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -299,6 +300,13 @@ func (e *Executor) toolAuthorizationDecision(actor models.AgentConfig, toolName 
 			ownership: toolOwnershipPlatformBuiltin,
 			class:     toolAuthorizationDenied,
 			allowed:   false,
+		}
+	}
+	if toolName == flowdata.ToolName {
+		return toolAuthorizationDecision{
+			ownership: toolOwnershipPlatformBuiltin,
+			class:     toolAuthorizationFlowData,
+			allowed:   len(flowdata.AllowedFilenames(source, actor)) > 0,
 		}
 	}
 	if roleScopedEntityToolsEnabledForActor(source, actor) {

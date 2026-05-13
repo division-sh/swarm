@@ -558,6 +558,7 @@ type FlowContractPaths struct {
 	PackageKey   string
 	PackageDir   string
 	Dir          string
+	DataDir      string
 	SchemaFile   string
 	TypesFile    string
 	EntitiesFile string
@@ -1001,6 +1002,7 @@ type AgentRegistryEntry struct {
 	Tools                  []string                        `yaml:"tools"`
 	ToolsTier2             []string                        `yaml:"tools_tier2"`
 	NativeTools            map[string]any                  `yaml:"native_tools"`
+	FlowDataAccess         []string                        `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
 	EmitEvents             []string                        `yaml:"emit_events"`
 	Implementation         string                          `yaml:"implementation"`
 }

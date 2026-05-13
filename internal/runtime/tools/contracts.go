@@ -32,6 +32,7 @@ var supportedRuntimeToolNames = map[string]struct{}{
 	"mailbox_send":       {},
 	"human_task_request": {},
 	"human_task_decide":  {},
+	"read_flow_data":     {},
 }
 
 func LoadContractSchemasForSource(source semanticview.Source) (map[string]ContractSchemaEntry, error) {

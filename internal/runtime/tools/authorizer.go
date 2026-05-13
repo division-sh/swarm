@@ -31,6 +31,7 @@ const (
 	toolAuthorizationEmitAllowed toolAuthorizationClass = "emit_allowed"
 	toolAuthorizationNativeTool  toolAuthorizationClass = "native_tool"
 	toolAuthorizationRoleScoped  toolAuthorizationClass = toolresultpolicy.RoleScopedEntityToolAuthorizationClass
+	toolAuthorizationFlowData    toolAuthorizationClass = "flow_data_access"
 	toolAuthorizationActorConfig toolAuthorizationClass = "actor_config"
 	toolAuthorizationDenied      toolAuthorizationClass = "denied"
 )

@@ -6,6 +6,7 @@ import (
 
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/entityruntime"
+	"swarm/internal/runtime/flowdata"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -29,11 +30,13 @@ func builtinRegisteredTools(source semanticview.Source, actor *models.AgentConfi
 
 func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.AgentConfig) map[string]ContractSchemaEntry {
 	if actor != nil {
-		contract, ok := resolveEntityToolContract(source, actor)
-		if !ok {
-			return map[string]ContractSchemaEntry{}
+		out := flowDataToolSchemaEntriesForActor(source, *actor)
+		if contract, ok := resolveEntityToolContract(source, actor); ok {
+			for name, entry := range roleScopedEntityToolSchemaEntriesForActor(source, *actor, contract) {
+				out[name] = entry
+			}
 		}
-		return roleScopedEntityToolSchemaEntriesForActor(source, *actor, contract)
+		return out
 	}
 	readContracts := actorOwnedReadTargetContracts(source, actor)
 	readTargetSchema := entityReadTargetInputSchemaForContracts(readContracts)
@@ -47,6 +50,35 @@ func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.Age
 		}
 	}
 	return out
+}
+
+func flowDataToolSchemaEntriesForActor(source semanticview.Source, actor models.AgentConfig) map[string]ContractSchemaEntry {
+	filenames := flowdata.AllowedFilenames(source, actor)
+	if len(filenames) == 0 {
+		return map[string]ContractSchemaEntry{}
+	}
+	enum := make([]any, 0, len(filenames))
+	for _, filename := range filenames {
+		enum = append(enum, filename)
+	}
+	return map[string]ContractSchemaEntry{
+		flowdata.ToolName: {
+			Category:        "flow_data",
+			Description:     "Read a declared static reference-data file from the agent's owning flow data root.",
+			GeneratedSchema: true,
+			InputSchema: ObjectSchema(map[string]any{
+				"filename": map[string]any{
+					"type": "string",
+					"enum": enum,
+				},
+			}, "filename"),
+			OutputSchema: ObjectSchema(map[string]any{
+				"content":      map[string]any{"type": "string"},
+				"content_type": map[string]any{"type": "string", "enum": []any{"yaml", "json", "markdown", "text"}},
+				"size_bytes":   map[string]any{"type": "integer", "minimum": 0},
+			}, "content", "content_type", "size_bytes"),
+		},
+	}
 }
 
 func resolveEntityToolContract(source semanticview.Source, actor *models.AgentConfig) (entityruntime.Contract, bool) {
