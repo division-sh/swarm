@@ -14,6 +14,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/eventidentity"
 	runtimecredentials "swarm/internal/runtime/credentials"
+	"swarm/internal/runtime/flowdata"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -240,6 +241,7 @@ var bootCheckRegistry = []Check{
 	{ID: "cross_flow_pin_ambiguity_validation", Severity: "error", Run: checkCrossFlowPinAmbiguityValidation},
 	{ID: "select_entity_validation", Severity: "error", Run: checkSelectEntityValidation},
 	{ID: "flow_boundary_create_entity_validation", Severity: "error", Run: checkFlowBoundaryCreateEntityValidation},
+	{ID: "flow_data_access_validation", Severity: "error", Run: checkFlowDataAccessValidation},
 }
 
 var supplementalChecks = []Check{
@@ -273,6 +275,7 @@ func checkInvalidFieldDetection(c *checkerContext) []Finding      { return c.inv
 func checkPolicyConflictDetection(c *checkerContext) []Finding    { return c.policyConflicts() }
 func checkDialectCompliance(c *checkerContext) []Finding          { return c.dialectCompliance() }
 func checkNativeToolsValid(c *checkerContext) []Finding           { return c.nativeTools() }
+func checkFlowDataAccessValidation(c *checkerContext) []Finding   { return c.flowDataAccess() }
 func checkPlatformNamespaceViolation(c *checkerContext) []Finding { return c.platformNamespace() }
 func checkWorkspaceClassExists(c *checkerContext) []Finding       { return c.workspace() }
 func checkCredentialKeyExists(c *checkerContext) []Finding        { return c.credentials() }
@@ -1404,6 +1407,28 @@ func (c *checkerContext) nativeTools() []Finding {
 		addNativeFindings(agentID, agent)
 	}
 	return uniqueFindings(c.nativeFindings)
+}
+
+func (c *checkerContext) flowDataAccess() []Finding {
+	var findings []Finding
+	for _, item := range flowdata.ValidateSource(c.source) {
+		location := strings.TrimSpace(item.AgentLabel)
+		if location == "" {
+			location = "flow_data_access"
+		}
+		filename := strings.TrimSpace(item.Filename)
+		message := strings.TrimSpace(item.Message)
+		if filename != "" {
+			message = fmt.Sprintf("%s (%s)", message, filename)
+		}
+		findings = append(findings, Finding{
+			CheckID:  "flow_data_access_validation",
+			Severity: SeverityHardInvalidity,
+			Message:  message,
+			Location: location,
+		})
+	}
+	return uniqueFindings(findings)
 }
 
 func (c *checkerContext) platformNamespace() []Finding {

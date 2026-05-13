@@ -62,6 +62,7 @@ type AgentConfig struct {
 	Tools            []string         `json:"tools,omitempty"`
 	Permissions      []string         `json:"permissions,omitempty"`
 	NativeTools      NativeToolConfig `json:"native_tools,omitempty"`
+	FlowDataAccess   []string         `json:"flow_data_access,omitempty"`
 	WorkspaceClass   string           `json:"workspace_class,omitempty"`
 	ManagerFallback  string           `json:"manager_fallback,omitempty"`
 	FlowPath         string           `json:"flow_path,omitempty"`
@@ -107,6 +108,7 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	cfg.EmitEvents = normalizeStringList(cfg.EmitEvents)
 	cfg.Tools = normalizeStringList(cfg.Tools)
 	cfg.Permissions = normalizeStringList(cfg.Permissions)
+	cfg.FlowDataAccess = normalizeStringList(cfg.FlowDataAccess)
 }
 
 func normalizeStringList(values []string) []string {

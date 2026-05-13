@@ -135,6 +135,9 @@ func bundleIdentityEntries(bundle *WorkflowContractBundle) ([]bundleIdentityEntr
 		}
 		for _, flow := range pkg.Flows {
 			addFlowIdentityFiles(flow, addFile)
+			if err := addDir(flow.DataDir); err != nil {
+				return nil, err
+			}
 			if err := addDir(flow.PromptsDir); err != nil {
 				return nil, err
 			}
@@ -142,6 +145,9 @@ func bundleIdentityEntries(bundle *WorkflowContractBundle) ([]bundleIdentityEntr
 	}
 	for _, flow := range paths.Flows {
 		addFlowIdentityFiles(flow, addFile)
+		if err := addDir(flow.DataDir); err != nil {
+			return nil, err
+		}
 		if err := addDir(flow.PromptsDir); err != nil {
 			return nil, err
 		}

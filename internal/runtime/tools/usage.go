@@ -28,6 +28,7 @@ var builtinToolUsageHints = map[string]string{
 	"query_metrics":      "Aggregate entity_state rows. metric must be one of the delivered enum values. field and group_by must use delivered scalar or enum selector names. filter is CEL, so equality is == and strings are quoted.",
 	"human_task_request": "Create a human task only when human input is required. Provide a clear summary/context and deadline fields in supported shapes.",
 	"human_task_decide":  "Record a decision on an existing human task. Use only supported decision values such as approved, rejected, or deferred and include the target task reference.",
+	"read_flow_data":     "Read only declared deploy-time reference files from your owning flow data root. Provide one filename from the delivered enum; do not use host paths or this tool for mutable artifacts.",
 }
 
 var nativeFallbackUsageHints = map[string]string{

@@ -130,7 +130,7 @@ contract_formats:
       \    policy.yaml\n  flows/\n    {child_flow}/                    # Child flow (same structure, recursive)\n      package.yaml\n\
       \      schema.yaml\n      nodes.yaml\n      events.yaml\n      entities.yaml                  # Flow-owned entity contract\
       (optional)\n      types.yaml                     # Flow-local types (optional)\n      agents.yaml\n      tools.yaml\
-      \                    # Optional\n      policy.yaml                   # Optional\n      prompts/\n      flows/      \
+      \                    # Optional\n      policy.yaml                   # Optional\n      prompts/\n      data/                      # Flow-scoped static reference data (optional)\n      flows/      \
       \                   # Grandchild flows (if any)\n        {grandchild}/\n          package.yaml\n          ...\n\n\
       platform/                            # Platform contracts (separate from any flow)\n  package.yaml\n  platform-spec.yaml\n"
   minimum_flow_package:
@@ -1837,6 +1837,46 @@ engine:
         global: scope_key = "global"
         flow: scope_key = flow_instance path of the agent
         entity: scope_key = entity_id from the triggering event within the agent's flow instance
+    flow_data_access:
+      description: Optional flow-scoped agent contract field. Declares immutable deploy-time reference files under the
+        owning flow package's data/ subtree that the agent may read with the generated read_flow_data tool. This is static
+        contract data, not entity state, policy scalar config, native file I/O, or a mutable artifact surface.
+      contract_field:
+        field: flow_data_access
+        type: array of strings
+        location: Flow-scoped agent declaration in agents.yaml. Root/project-scoped agents cannot declare this field unless
+          a future spec adds project-scoped data semantics.
+        default: omitted or empty means no flow-data read surface and no read_flow_data tool.
+        example: "flow_data_access:\n  - exclusions.yaml\n  - templates/review.md"
+      data_root:
+        convention: contracts/flows/<flow>/data/
+        scope: The filename is resolved relative to the declaring agent's owning authored flow data root, not a runtime
+          flow-instance path and not another flow's data root.
+        deploy_time: data/ is read-only contract data. Changes ship as contract changes and participate in workflow bundle
+          identity. Runtime hot reload is out of scope.
+      generated_tool:
+        name: read_flow_data
+        generated_for: Only agents with at least one valid flow_data_access declaration.
+        input:
+          filename: One of the exact normalized filenames declared for that agent.
+        output:
+          content: string
+          content_type: yaml | json | markdown | text
+          size_bytes: integer
+        authorization: flow_data_access is the authorization. The tool is not universal, does not require permissions, is
+          not granted by tools:, and is independent of native_tools.file_io.
+      fail_closed_rules:
+        - Empty filenames are invalid.
+        - Absolute paths are invalid.
+        - Traversal segments, dot segments, doubled separators, backslashes, drive-letter/UNC-style paths, and home-relative
+          paths are invalid.
+        - Missing data roots, missing files, symlink escapes, non-regular files, undeclared files, and cross-flow paths are
+          invalid.
+        - The tool never returns host paths to agents.
+      validation:
+        shared_owner: Verify, boot, runtime tool generation, runtime execution, MCP/tool visibility, and diagnostics must
+          consume the same flow-data path/scoping resolver.
+        boot_check: flow_data_access_validation
     native_tools:
       description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
         (omitted = no native capabilities). The native_tools field is the sole authorization gate — no separate permission
@@ -2219,6 +2259,12 @@ engine:
         non-boolean value. This check validates declaration shape only; it does not treat policy.web_search_provider or any
         other fallback path as satisfying a native tool.
       when: boot-only
+    - id: flow_data_access_validation
+      severity: error
+      scope: per-agent
+      trigger: A flow-scoped agent's flow_data_access declaration references an invalid, missing, non-regular, escaping, or
+        outside-flow data file; or a root/project-scoped agent declares flow_data_access.
+      when: boot-only
     - id: mcp_server_reachable
       severity: warning
       scope: global
@@ -2510,6 +2556,8 @@ tool_model:
       human_task_decide: Record a human decision on a pending task. Requires human_task_decide permission.
       human_task_request: Create a task for human execution. Requires human_task_request permission.
       mailbox_send: Send an item to the human mailbox for decision. Auto-granted to all agents (universal tool).
+      read_flow_data: Read a declared immutable reference-data file from the current agent's owning flow data root. Generated
+        only from flow_data_access declarations; not universal, not tools:-granted, and not native file I/O.
       query_entities: Query entities by state, fields, or aggregation. Legacy trusted runtime-internal compatibility surface;
         not provider-visible or callable for normal agents.
       query_metrics: Read aggregated metrics (counts, sums, averages) across entities. Legacy trusted runtime-internal

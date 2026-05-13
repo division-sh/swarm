@@ -7,6 +7,7 @@ import (
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
 	"swarm/internal/runtime/core/toolidentity"
+	"swarm/internal/runtime/flowdata"
 )
 
 type toolAuthorizationDecision struct {
@@ -70,7 +71,7 @@ func toolKindPolicy(toolName string) toolcapabilities.ToolKind {
 
 func toolContextRequirementPolicy(toolName string) toolcapabilities.ContextRequirement {
 	switch normalizeNativeToolName(toolName) {
-	case "get_entity", "query_entities", "search_entities", "query_metrics", "read_file", "web_search":
+	case "get_entity", "query_entities", "search_entities", "query_metrics", "read_file", "web_search", flowdata.ToolName:
 		return toolcapabilities.ContextRequirementActorContext
 	default:
 		return toolcapabilities.ContextRequirementTurnContext

@@ -677,6 +677,54 @@ func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.
 	}
 }
 
+func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *testing.T) {
+	registry := newTestTurnContextRegistry()
+	putTestTurnContext(t, registry, "ctx-flow-data", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	req := withContextToken(httptest.NewRequest("POST", "/mcp", nil), "ctx-flow-data")
+
+	declaredGateway := NewGateway(actorScopedToolExecutorStub{
+		defs: []llm.ToolDefinition{
+			{Name: "read_flow_data", Description: "runtime-wide fallback must not leak"},
+		},
+		actorDefs: []llm.ToolDefinition{
+			{Name: "read_flow_data", Description: "actor declared flow data", GeneratedSchema: true},
+		},
+	}, "", GatewayHooks{
+		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+			return models.AgentConfig{ID: agentID, Role: "analysis"}, true
+		},
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	tools := mustMCPToolsForRequest(t, declaredGateway, req)
+	if len(tools) != 1 {
+		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
+	}
+	if tools[0].Name != "read_flow_data" || !strings.Contains(tools[0].Description, "actor declared flow data") {
+		t.Fatalf("flow data tool = %#v, want actor-scoped read_flow_data definition", tools[0])
+	}
+
+	undeclaredGateway := NewGateway(actorScopedToolExecutorStub{
+		defs: []llm.ToolDefinition{
+			{Name: "read_flow_data", Description: "runtime-wide fallback must not leak"},
+		},
+		actorDefs: nil,
+	}, "", GatewayHooks{
+		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+			return models.AgentConfig{ID: agentID, Role: "analysis"}, true
+		},
+		ResolveTurnContext: registry.ResolveTurnContext,
+	})
+
+	if tools := mustMCPToolsForRequest(t, undeclaredGateway, req); len(tools) != 0 {
+		t.Fatalf("undeclared actor saw runtime-wide read_flow_data fallback: %#v", tools)
+	}
+}
+
 func TestGatewayMCPToolsForRequest_DoesNotFallbackToRuntimeWideToolsForEmptyActorCatalog(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	g := NewGateway(actorScopedToolExecutorStub{
