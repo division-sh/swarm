@@ -1,6 +1,7 @@
 package scripts
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 )
 
 type runClearConfig struct {
+	apiToken         string
 	operatorToken    string
 	builderToken     string
 	directiveAgent   string
@@ -123,26 +125,50 @@ func TestRunClear_DoesNotTreatLauncherStateChangeAsStartupFailure(t *testing.T) 
 	}
 }
 
-func TestRunClear_UsesOperatorBearerForDirective(t *testing.T) {
+func TestRunClear_UsesV1RPCForAgentDirective(t *testing.T) {
+	const explicitAPIToken = "api-explicit-token"
 	const explicitOperatorToken = "operator-explicit-token"
 	result := runRunClear(t, runClearConfig{
+		apiToken:         explicitAPIToken,
 		operatorToken:    explicitOperatorToken,
 		directiveAgent:   "agent-7",
 		directiveMessage: "hello from test",
 	})
 
-	wantHeader := "Authorization: Bearer " + explicitOperatorToken
+	if got := strings.TrimSpace(result.apiToken); got != explicitAPIToken {
+		t.Fatalf("api token = %q, want %q", got, explicitAPIToken)
+	}
+	wantHeader := "Authorization: Bearer " + explicitAPIToken
 	if !strings.Contains(result.directiveHeaders, wantHeader) {
 		t.Fatalf("directive headers = %q, want %q", result.directiveHeaders, wantHeader)
 	}
-	if got := strings.TrimSpace(result.directiveURL); got != "http://127.0.0.1:8081/api/agents/agent-7/actions/directive" {
-		t.Fatalf("directive url = %q, want helper directive endpoint", got)
+	if got := strings.TrimSpace(result.directiveURL); got != "http://127.0.0.1:8081/v1/rpc" {
+		t.Fatalf("directive url = %q, want v1 rpc endpoint", got)
 	}
-	if !strings.Contains(result.directiveBody, `"message":"hello from test"`) {
-		t.Fatalf("directive body = %q, want directive message payload", result.directiveBody)
+
+	var body struct {
+		JSONRPC string         `json:"jsonrpc"`
+		ID      string         `json:"id"`
+		Method  string         `json:"method"`
+		Params  map[string]any `json:"params"`
 	}
-	if !strings.Contains(result.directiveBody, `"kill_previous":true`) {
-		t.Fatalf("directive body = %q, want kill_previous payload", result.directiveBody)
+	if err := json.Unmarshal([]byte(result.directiveBody), &body); err != nil {
+		t.Fatalf("decode directive body %q: %v", result.directiveBody, err)
+	}
+	if body.JSONRPC != "2.0" || body.ID != "run-clear-directive" || body.Method != "agent.send_directive" {
+		t.Fatalf("directive body = %#v, want JSON-RPC agent.send_directive envelope", body)
+	}
+	if body.Params["agent_id"] != "agent-7" {
+		t.Fatalf("directive params = %#v, want agent_id", body.Params)
+	}
+	if body.Params["directive"] != "hello from test" {
+		t.Fatalf("directive params = %#v, want directive message", body.Params)
+	}
+	if body.Params["kill_previous"] != true {
+		t.Fatalf("directive params = %#v, want kill_previous true", body.Params)
+	}
+	if _, ok := body.Params["message"]; ok {
+		t.Fatalf("directive params = %#v, want no legacy message field", body.Params)
 	}
 }
 
@@ -208,6 +234,7 @@ func TestRunClear_FailsFastWhenSwarmExitsBeforeReady(t *testing.T) {
 
 type runClearResult struct {
 	stdout              string
+	apiToken            string
 	operatorToken       string
 	builderToken        string
 	hostGatewayURL      string
@@ -242,6 +269,7 @@ func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error)
 	logFile := filepath.Join(t.TempDir(), "swarm.log")
 	pidFile := filepath.Join(t.TempDir(), "swarm.pid")
 	operatorTokenSink := filepath.Join(t.TempDir(), "operator-token.txt")
+	apiTokenSink := filepath.Join(t.TempDir(), "api-token.txt")
 	builderTokenSink := filepath.Join(t.TempDir(), "builder-token.txt")
 	hostGatewayURLSink := filepath.Join(t.TempDir(), "host-gateway-url.txt")
 	containerGatewayURLSink := filepath.Join(t.TempDir(), "container-gateway-url.txt")
@@ -360,6 +388,7 @@ chmod +x "$out"
 	writeExecutable(t, binDir, "python3", `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s' "${SWARM_OPERATOR_AUTH_TOKEN:-}" > "${PYTHON_OPERATOR_TOKEN_SINK}"
+printf '%s' "${SWARM_API_TOKEN:-}" > "${PYTHON_API_TOKEN_SINK}"
 printf '%s' "${SWARM_BUILDER_AUTH_TOKEN:-}" > "${PYTHON_ENV_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_URL:-}" > "${PYTHON_HOST_GATEWAY_URL_SINK}"
 printf '%s' "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" > "${PYTHON_CONTAINER_GATEWAY_URL_SINK}"
@@ -463,7 +492,7 @@ if [[ "$url" == *"/api/rpc" ]]; then
   printf '{"jsonrpc":"2.0","id":"run-clear","error":{"message":"missing authorization bearer token"}}'
   exit 0
 fi
-if [[ "$url" == *"/api/agents/"*"/actions/directive" ]]; then
+if [[ "$url" == *"/v1/rpc" ]]; then
   printf '%s' "$url" > "${CURL_DIRECTIVE_URL_SINK}"
   if ((${#headers[@]})); then
     printf '%s\n' "${headers[@]}" > "${CURL_DIRECTIVE_HEADERS_SINK}"
@@ -471,14 +500,14 @@ if [[ "$url" == *"/api/agents/"*"/actions/directive" ]]; then
     : > "${CURL_DIRECTIVE_HEADERS_SINK}"
   fi
   printf '%s' "$body" > "${CURL_DIRECTIVE_BODY_SINK}"
-  want="Authorization: Bearer ${SWARM_OPERATOR_AUTH_TOKEN}"
+  want="Authorization: Bearer ${SWARM_API_TOKEN}"
   for header in "${headers[@]}"; do
     if [[ "$header" == "$want" ]]; then
-      printf '{"status":"accepted"}'
+      printf '{"jsonrpc":"2.0","id":"run-clear-directive","result":{"ok":true,"response":"accepted"}}'
       exit 0
     fi
   done
-  printf '{"error":"missing authorization bearer token"}'
+  printf '{"jsonrpc":"2.0","id":"run-clear-directive","error":{"code":-32000,"message":"missing authorization bearer token","data":{"code":"UNAUTHORIZED"}}}'
   exit 0
 fi
 printf '{}'
@@ -487,6 +516,7 @@ printf '{}'
 	cmd := exec.Command("bash", filepath.Join(scriptDir, "run_clear.sh"))
 	cmd.Env = append(filteredEnv(
 		"SWARM_OPERATOR_AUTH_TOKEN",
+		"SWARM_API_TOKEN",
 		"SWARM_BUILDER_AUTH_TOKEN",
 		"SWARM_TOOL_GATEWAY_URL",
 		"SWARM_TOOL_GATEWAY_CONTAINER_URL",
@@ -495,6 +525,7 @@ printf '{}'
 	), []string{
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"PYTHON_OPERATOR_TOKEN_SINK=" + operatorTokenSink,
+		"PYTHON_API_TOKEN_SINK=" + apiTokenSink,
 		"PYTHON_ENV_SINK=" + builderTokenSink,
 		"PYTHON_HOST_GATEWAY_URL_SINK=" + hostGatewayURLSink,
 		"PYTHON_CONTAINER_GATEWAY_URL_SINK=" + containerGatewayURLSink,
@@ -526,6 +557,9 @@ printf '{}'
 	if cfg.operatorToken != "" {
 		cmd.Env = append(cmd.Env, "SWARM_OPERATOR_AUTH_TOKEN="+cfg.operatorToken)
 	}
+	if cfg.apiToken != "" {
+		cmd.Env = append(cmd.Env, "SWARM_API_TOKEN="+cfg.apiToken)
+	}
 	if cfg.builderToken != "" {
 		cmd.Env = append(cmd.Env, "SWARM_BUILDER_AUTH_TOKEN="+cfg.builderToken)
 	}
@@ -549,6 +583,7 @@ printf '{}'
 
 	return runClearResult{
 		stdout:              string(out),
+		apiToken:            readFileTrimmed(t, apiTokenSink),
 		operatorToken:       readFileTrimmed(t, operatorTokenSink),
 		builderToken:        readFileTrimmed(t, builderTokenSink),
 		hostGatewayURL:      readFileTrimmed(t, hostGatewayURLSink),

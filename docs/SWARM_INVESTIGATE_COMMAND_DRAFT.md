@@ -154,11 +154,21 @@ They are real follow-on candidates for `swarm investigate`, not speculative futu
 
 ### Agent / Conversation / Entity / Instance Surfaces
 
-- `GET /api/agents`
-- `GET /api/agents/{id}`
-- `POST /api/agents/{id}/actions/directive`
-- `POST /api/agents/{id}/actions/restart`
-- `POST /api/agents/{id}/actions/replay`
+Canonical v1 agent-control/read methods:
+
+- `agent.list`
+- `agent.get`
+- `agent.send_directive`
+- `agent.restart`
+- `agent.replay_backlog`
+
+Legacy dashboard REST aliases remain available only as adapter surfaces:
+
+- `GET /api/agents` -> `agent.list`
+- `GET /api/agents/{id}` -> `agent.get`
+- `POST /api/agents/{id}/actions/directive` -> `agent.send_directive`
+- `POST /api/agents/{id}/actions/restart` -> `agent.restart`
+- `POST /api/agents/{id}/actions/replay` -> `agent.replay_backlog`
 
 - `GET /api/conversations`
 - `GET /api/conversations/{sessionID}`
@@ -179,7 +189,10 @@ These already provide operator-visible drill-down without querying:
 - `flow_instances`
 - `entity_state`
 
-Primary API owner: [server.go](/Users/youmew/dev/swarm/internal/dashboard/server/server.go#L241)
+Primary API owner: `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+`api_specification`, implemented by the v1 `/v1/rpc` handlers and shared
+operator read/control owners. Dashboard `server.go` routes are deprecated
+adapter surfaces, not semantic owners.
 
 Entity-oriented diagnosis is already stronger than a typical “future follow-on” category, even though the current APIs are still instance-shaped:
 
