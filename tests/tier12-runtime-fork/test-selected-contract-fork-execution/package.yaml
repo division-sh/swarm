@@ -1,0 +1,9 @@
+name: test-selected-contract-fork-execution
+version: 1.0.0
+description: >
+  Canonical deterministic selected-contract fork fixture. A supported source
+  run reaches a contract-agent event; selected-contract fork execution must
+  materialize the agent under the fork run and re-execute that selected event
+  without copying source rows.
+platform_version: ">=1.6.0"
+flows: []

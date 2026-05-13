@@ -1,0 +1,4 @@
+agent_fixtures:
+  test-agent:
+    - on: task.ready
+      emits: []

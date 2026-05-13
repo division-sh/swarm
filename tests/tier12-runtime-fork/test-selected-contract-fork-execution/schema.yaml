@@ -1,0 +1,8 @@
+name: test-selected-contract-fork-execution
+namespace: test-selected-contract-fork-execution
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [task.ready]
