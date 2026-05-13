@@ -1131,7 +1131,8 @@ handler_specification:
             success_payload: optional mapping of additional success event payload fields to expression values. Runtime always
               includes repo_id, namespace, request_id, source_event_id, repo_url, current_ref, file_manifest, provenance,
               and optional partition_key and display_slug when declared/resolved.
-            failure_event: optional event name emitted when runtime execution fails after request/source identity resolution.
+            failure_event: optional event name emitted transactionally with failed output state when runtime execution fails
+              after request/source identity resolution.
             failure_payload: optional mapping of additional failure event payload fields to expression values. Runtime always
               includes repo_id, namespace, request_id, source_event_id, failure_reason, provenance, and optional partition_key
               and display_slug when declared/resolved.
@@ -1144,9 +1145,9 @@ handler_specification:
           behavior: The runtime normalizes file content, validates yaml content against the declared file schema, writes only
             allowlisted paths under the service-owned repo root, verifies the projected git tree stays within max_repo_bytes,
             commits staged files atomically, verifies the resulting ref is a 40-character git SHA, persists only the declared
-            output fields on the selected/owned entity, and when success_event is declared writes the success result event to
-            the runtime outbox in the same handler transaction as the committed output state. The success event is dispatched
-            only after that transaction commits. Duplicate replay for the same source_event_id is a no-op only when the
+            output fields on the selected/owned entity, and when success_event or failure_event is declared writes the result
+            event to the runtime outbox in the same handler transaction as the corresponding output state. Result events are
+            dispatched only after that transaction commits. Duplicate replay for the same source_event_id is a no-op only when the
             contract-visible committed output state is already present and any declared success_event has been transactionally
             enqueued with that state; post-commit delivery failures are recovered through outbox replay rather than by
             re-mutating the artifact output fields. Reusing a request_id with the same content/tree may repair committed output
@@ -1162,7 +1163,7 @@ handler_specification:
             request-id conflicts after intervening commits, including accepted same-tree/no-op requests. If git history contains
             the accepted request but entity output persistence is missing or stale, retry reconstructs and persists the
             contract-visible repo_url, current_ref, file_manifest, status, and last_source_event_id from durable provider history.
-            If failure_event is declared, the runtime also emits that typed event after persisting failed status.
+            If failure_event is declared, the runtime also enqueues that typed event in the same transaction as failed status.
           fail_closed: Invalid provider, missing or non-UUID identities, invalid root, traversal, symlink/root escape, allowlist
             miss, unsupported content type, missing/failed yaml schema validation, size-limit violation, git write/commit failure,
             invalid ref, and idempotency conflict all fail closed. No agent prompt, native_tools, shell command, or product-local

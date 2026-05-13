@@ -79,28 +79,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		if err == nil {
 			return nil
 		}
-		persistErr := pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
-			spec.Output.Status:            "failed",
-			spec.Output.FailureReason:     err.Error(),
-			spec.Output.LastRequestID:     requestID,
-			spec.Output.LastSourceEventID: sourceEventID,
-		})
-		if persistErr != nil {
-			return errors.Join(err, fmt.Errorf("artifact_repo_commit failed to persist failure state: %w", persistErr))
-		}
-		if failureEvent := strings.TrimSpace(spec.FailureEvent); failureEvent != "" {
-			payload, payloadErr := artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, err)
-			if payloadErr != nil {
-				return errors.Join(err, payloadErr)
-			}
-			if validateErr := pc.validateArtifactRepoResultPayload(execCtx, failureEvent, payload); validateErr != nil {
-				return errors.Join(err, validateErr)
-			}
-			if publishErr := pc.publish(ctx, failureEvent, execCtx.Request.EntityID.String(), payload); publishErr != nil {
-				return errors.Join(err, publishErr)
-			}
-		}
-		return err
+		return pc.persistAndPublishArtifactRepoFailure(ctx, execCtx, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, err)
 	}
 	partitionKey, err = optionalArtifactSegment(execCtx.Base, spec.PartitionKey, "artifact_repo.partition_key")
 	if err != nil {
@@ -178,6 +157,44 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		}
 	}
 	return pc.persistAndPublishArtifactRepoSuccess(ctx, execCtx, spec, repoURL, ref, manifest, requestID, sourceEventID, successPayload)
+}
+
+func (pc *PipelineCoordinator) persistAndPublishArtifactRepoFailure(ctx context.Context, execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID string, cause error) error {
+	fields := map[string]any{
+		spec.Output.Status:            "failed",
+		spec.Output.FailureReason:     cause.Error(),
+		spec.Output.LastRequestID:     requestID,
+		spec.Output.LastSourceEventID: sourceEventID,
+	}
+	failureEvent := strings.TrimSpace(spec.FailureEvent)
+	if failureEvent == "" {
+		if persistErr := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); persistErr != nil {
+			return errors.Join(cause, fmt.Errorf("artifact_repo_commit failed to persist failure state: %w", persistErr))
+		}
+		return cause
+	}
+	payload, payloadErr := artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, cause)
+	if payloadErr != nil {
+		return errors.Join(cause, payloadErr)
+	}
+	if validateErr := pc.validateArtifactRepoResultPayload(execCtx, failureEvent, payload); validateErr != nil {
+		return errors.Join(cause, validateErr)
+	}
+	if queued, queueErr := pc.queueArtifactRepoResultEvent(ctx, execCtx, failureEvent, payload); queueErr != nil {
+		return errors.Join(cause, queueErr)
+	} else if queued {
+		if persistErr := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); persistErr != nil {
+			return errors.Join(cause, fmt.Errorf("artifact_repo_commit failed to persist failure state: %w", persistErr))
+		}
+		return nil
+	}
+	if persistErr := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); persistErr != nil {
+		return errors.Join(cause, fmt.Errorf("artifact_repo_commit failed to persist failure state: %w", persistErr))
+	}
+	if publishErr := pc.publish(ctx, failureEvent, execCtx.Request.EntityID.String(), payload); publishErr != nil {
+		return errors.Join(cause, publishErr)
+	}
+	return cause
 }
 
 func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(ctx context.Context, execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec, repoURL, ref string, manifest map[string]any, requestID, sourceEventID string, successPayload map[string]any) error {
