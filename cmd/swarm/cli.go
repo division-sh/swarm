@@ -25,7 +25,11 @@ func (e commandExitError) Error() string {
 }
 
 func executeRootCommand(ctx context.Context, repo string, args []string, out, errOut io.Writer) int {
-	cmd := newRootCommand(ctx, repo, out, errOut)
+	return executeRootCommandWithOptions(ctx, repo, args, out, errOut, defaultRootCommandOptions())
+}
+
+func executeRootCommandWithOptions(ctx context.Context, repo string, args []string, out, errOut io.Writer, opts rootCommandOptions) int {
+	cmd := newRootCommandWithOptions(ctx, repo, out, errOut, opts)
 	cmd.SetArgs(args)
 	if err := cmd.ExecuteContext(ctx); err != nil {
 		if exit, ok := err.(commandExitError); ok {
@@ -40,6 +44,10 @@ func executeRootCommand(ctx context.Context, repo string, args []string, out, er
 }
 
 func newRootCommand(ctx context.Context, repo string, out, errOut io.Writer) *cobra.Command {
+	return newRootCommandWithOptions(ctx, repo, out, errOut, defaultRootCommandOptions())
+}
+
+func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.Writer, opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "swarm",
 		Short:         "Run and inspect Swarm workflows.",
@@ -59,6 +67,7 @@ func newRootCommand(ctx context.Context, repo string, out, errOut io.Writer) *co
 		newVerifyCommand(ctx, repo),
 		newVersionCommand(),
 		newCompletionCommand(),
+		newControlCommand(opts),
 		newRetiredStatusCommand(),
 		newRetiredForkCommand(),
 	)
