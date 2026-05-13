@@ -354,6 +354,8 @@ type ArtifactRepoSpec struct {
 	Files          []ArtifactRepoFileSpec     `yaml:"files"`
 	Output         ArtifactRepoOutputSpec     `yaml:"output"`
 	Limits         ArtifactRepoLimitsSpec     `yaml:"limits"`
+	SuccessEvent   string                     `yaml:"success_event"`
+	SuccessPayload map[string]ExpressionValue `yaml:"success_payload"`
 	FailureEvent   string                     `yaml:"failure_event"`
 	FailurePayload map[string]ExpressionValue `yaml:"failure_payload"`
 }

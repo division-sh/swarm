@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -77,14 +78,26 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		if err == nil {
 			return nil
 		}
-		_ = pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
+		persistErr := pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
 			spec.Output.Status:            "failed",
 			spec.Output.FailureReason:     err.Error(),
 			spec.Output.LastRequestID:     requestID,
 			spec.Output.LastSourceEventID: sourceEventID,
 		})
+		if persistErr != nil {
+			return errors.Join(err, fmt.Errorf("artifact_repo_commit failed to persist failure state: %w", persistErr))
+		}
 		if failureEvent := strings.TrimSpace(spec.FailureEvent); failureEvent != "" {
-			_ = pc.publish(ctx, failureEvent, execCtx.Request.EntityID.String(), artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, err))
+			payload, payloadErr := artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, err)
+			if payloadErr != nil {
+				return errors.Join(err, payloadErr)
+			}
+			if validateErr := pc.validateArtifactRepoResultPayload(execCtx, failureEvent, payload); validateErr != nil {
+				return errors.Join(err, validateErr)
+			}
+			if publishErr := pc.publish(ctx, failureEvent, execCtx.Request.EntityID.String(), payload); publishErr != nil {
+				return errors.Join(err, publishErr)
+			}
 		}
 		return err
 	}
@@ -129,7 +142,16 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		}
 		repoURL := artifactRepoPublicScheme + repoID
 		manifest := artifactRepoManifest(repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, previous.Ref, treeHash, files)
-		return pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
+		successPayload, err := artifactRepoSuccessPayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, previous.Ref, manifest)
+		if err != nil {
+			return fail(err)
+		}
+		if successEvent := strings.TrimSpace(spec.SuccessEvent); successEvent != "" {
+			if err := pc.validateArtifactRepoResultPayload(execCtx, successEvent, successPayload); err != nil {
+				return fail(err)
+			}
+		}
+		if err := pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
 			spec.Output.RepoURL:           repoURL,
 			spec.Output.CurrentRef:        previous.Ref,
 			spec.Output.FileManifest:      manifest,
@@ -137,7 +159,13 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 			spec.Output.LastRequestID:     requestID,
 			spec.Output.LastSourceEventID: sourceEventID,
 			spec.Output.FailureReason:     "",
-		})
+		}); err != nil {
+			return err
+		}
+		if successEvent := strings.TrimSpace(spec.SuccessEvent); successEvent != "" {
+			return pc.publish(ctx, successEvent, execCtx.Request.EntityID.String(), successPayload)
+		}
+		return nil
 	}
 	if err := writeArtifactRepoFiles(repoPath, files); err != nil {
 		return fail(err)
@@ -153,7 +181,16 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	}
 	repoURL := artifactRepoPublicScheme + repoID
 	manifest := artifactRepoManifest(repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, ref, treeHash, files)
-	return pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
+	successPayload, err := artifactRepoSuccessPayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, ref, manifest)
+	if err != nil {
+		return fail(err)
+	}
+	if successEvent := strings.TrimSpace(spec.SuccessEvent); successEvent != "" {
+		if err := pc.validateArtifactRepoResultPayload(execCtx, successEvent, successPayload); err != nil {
+			return fail(err)
+		}
+	}
+	if err := pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
 		spec.Output.RepoURL:           repoURL,
 		spec.Output.CurrentRef:        ref,
 		spec.Output.FileManifest:      manifest,
@@ -161,7 +198,13 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		spec.Output.LastRequestID:     requestID,
 		spec.Output.LastSourceEventID: sourceEventID,
 		spec.Output.FailureReason:     "",
-	})
+	}); err != nil {
+		return err
+	}
+	if successEvent := strings.TrimSpace(spec.SuccessEvent); successEvent != "" {
+		return pc.publish(ctx, successEvent, execCtx.Request.EntityID.String(), successPayload)
+	}
+	return nil
 }
 
 func (pc *PipelineCoordinator) artifactRepoRoot() string {
@@ -807,7 +850,7 @@ func artifactRepoRequestRecord(ctx context.Context, repoPath, requestID string) 
 }
 
 func artifactRepoManifest(repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID, repoURL, ref, treeHash string, files []artifactRepoPreparedFile) map[string]any {
-	fileItems := make([]map[string]any, 0, len(files))
+	fileItems := make([]any, 0, len(files))
 	for _, file := range files {
 		fileItems = append(fileItems, map[string]any{
 			"path":         file.Path,
@@ -840,20 +883,49 @@ func artifactRepoManifest(repoID, namespace, partitionKey, displaySlug string, p
 	return out
 }
 
-func artifactRepoFailurePayload(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID string, cause error) map[string]any {
-	out := map[string]any{}
-	if spec != nil {
-		for target, expr := range spec.FailurePayload {
-			target = strings.TrimSpace(target)
-			if target == "" {
-				continue
-			}
-			value, ok, err := evalMailboxExpressionValue(base, expr)
-			if err != nil || !ok {
-				continue
-			}
-			out[target] = value
-		}
+var artifactRepoResultReservedPayloadFields = map[string]struct{}{
+	"repo_id":         {},
+	"namespace":       {},
+	"partition_key":   {},
+	"display_slug":    {},
+	"request_id":      {},
+	"source_event_id": {},
+	"repo_url":        {},
+	"current_ref":     {},
+	"file_manifest":   {},
+	"failure_reason":  {},
+	"provenance":      {},
+}
+
+func artifactRepoSuccessPayload(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID, repoURL, currentRef string, manifest map[string]any) (map[string]any, error) {
+	out, err := artifactRepoDeclaredResultPayload(base, "success_payload", specSuccessPayload(spec))
+	if err != nil {
+		return nil, err
+	}
+	out["repo_id"] = repoID
+	out["namespace"] = namespace
+	if strings.TrimSpace(partitionKey) != "" {
+		out["partition_key"] = partitionKey
+	}
+	if strings.TrimSpace(displaySlug) != "" {
+		out["display_slug"] = displaySlug
+	}
+	if provenance == nil {
+		provenance = map[string]any{}
+	}
+	out["provenance"] = provenance
+	out["request_id"] = requestID
+	out["source_event_id"] = sourceEventID
+	out["repo_url"] = repoURL
+	out["current_ref"] = currentRef
+	out["file_manifest"] = manifest
+	return out, nil
+}
+
+func artifactRepoFailurePayload(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID string, cause error) (map[string]any, error) {
+	out, err := artifactRepoDeclaredResultPayload(base, "failure_payload", specFailurePayload(spec))
+	if err != nil {
+		return nil, err
 	}
 	out["repo_id"] = repoID
 	out["namespace"] = namespace
@@ -870,7 +942,54 @@ func artifactRepoFailurePayload(base runtimeengine.BaseContext, spec *runtimecon
 	out["request_id"] = requestID
 	out["source_event_id"] = sourceEventID
 	out["failure_reason"] = cause.Error()
-	return out
+	return out, nil
+}
+
+func specSuccessPayload(spec *runtimecontracts.ArtifactRepoSpec) map[string]runtimecontracts.ExpressionValue {
+	if spec == nil {
+		return nil
+	}
+	return spec.SuccessPayload
+}
+
+func specFailurePayload(spec *runtimecontracts.ArtifactRepoSpec) map[string]runtimecontracts.ExpressionValue {
+	if spec == nil {
+		return nil
+	}
+	return spec.FailurePayload
+}
+
+func artifactRepoDeclaredResultPayload(base runtimeengine.BaseContext, label string, declared map[string]runtimecontracts.ExpressionValue) (map[string]any, error) {
+	out := map[string]any{}
+	for target, expr := range declared {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			return nil, fmt.Errorf("artifact_repo_commit %s contains an empty target field", label)
+		}
+		if _, reserved := artifactRepoResultReservedPayloadFields[target]; reserved {
+			return nil, fmt.Errorf("artifact_repo_commit %s must not override runtime-owned field %s", label, target)
+		}
+		value, ok, err := evalMailboxExpressionValue(base, expr)
+		if err != nil {
+			return nil, fmt.Errorf("artifact_repo_commit %s.%s evaluation failed: %w", label, target, err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("artifact_repo_commit %s.%s did not resolve", label, target)
+		}
+		out[target] = value
+	}
+	return out, nil
+}
+
+func (pc *PipelineCoordinator) validateArtifactRepoResultPayload(execCtx runtimeengine.ExecutionContext, eventType string, payload map[string]any) error {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return nil
+	}
+	if err := validatePipelineEmitPayload(pc.SemanticSource(), execCtx.Request.FlowID.String(), eventType, payload, nil, runtimeengine.EmitSurfaceAction); err != nil {
+		return fmt.Errorf("artifact_repo_commit result event %s is invalid: %w", eventType, err)
+	}
+	return nil
 }
 
 func artifactTreeHash(files []artifactRepoPreparedFile) string {
