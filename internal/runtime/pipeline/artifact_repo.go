@@ -151,21 +151,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 				return fail(err)
 			}
 		}
-		if err := pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
-			spec.Output.RepoURL:           repoURL,
-			spec.Output.CurrentRef:        previous.Ref,
-			spec.Output.FileManifest:      manifest,
-			spec.Output.Status:            "committed",
-			spec.Output.LastRequestID:     requestID,
-			spec.Output.LastSourceEventID: sourceEventID,
-			spec.Output.FailureReason:     "",
-		}); err != nil {
-			return err
-		}
-		if successEvent := strings.TrimSpace(spec.SuccessEvent); successEvent != "" {
-			return pc.publish(ctx, successEvent, execCtx.Request.EntityID.String(), successPayload)
-		}
-		return nil
+		return pc.persistAndPublishArtifactRepoSuccess(ctx, execCtx, spec, repoURL, previous.Ref, manifest, requestID, sourceEventID, successPayload)
 	}
 	if err := writeArtifactRepoFiles(repoPath, files); err != nil {
 		return fail(err)
@@ -190,21 +176,31 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 			return fail(err)
 		}
 	}
-	if err := pc.persistArtifactRepoResult(ctx, execCtx, spec, map[string]any{
-		spec.Output.RepoURL:           repoURL,
-		spec.Output.CurrentRef:        ref,
-		spec.Output.FileManifest:      manifest,
-		spec.Output.Status:            "committed",
-		spec.Output.LastRequestID:     requestID,
-		spec.Output.LastSourceEventID: sourceEventID,
-		spec.Output.FailureReason:     "",
-	}); err != nil {
+	return pc.persistAndPublishArtifactRepoSuccess(ctx, execCtx, spec, repoURL, ref, manifest, requestID, sourceEventID, successPayload)
+}
+
+func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(ctx context.Context, execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec, repoURL, ref string, manifest map[string]any, requestID, sourceEventID string, successPayload map[string]any) error {
+	fields := map[string]any{
+		spec.Output.RepoURL:       repoURL,
+		spec.Output.CurrentRef:    ref,
+		spec.Output.FileManifest:  manifest,
+		spec.Output.Status:        "committed",
+		spec.Output.LastRequestID: requestID,
+		spec.Output.FailureReason: "",
+	}
+	successEvent := strings.TrimSpace(spec.SuccessEvent)
+	if successEvent == "" {
+		fields[spec.Output.LastSourceEventID] = sourceEventID
+		return pc.persistArtifactRepoResult(ctx, execCtx, spec, fields)
+	}
+	if err := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); err != nil {
 		return err
 	}
-	if successEvent := strings.TrimSpace(spec.SuccessEvent); successEvent != "" {
-		return pc.publish(ctx, successEvent, execCtx.Request.EntityID.String(), successPayload)
+	if err := pc.publish(ctx, successEvent, execCtx.Request.EntityID.String(), successPayload); err != nil {
+		return err
 	}
-	return nil
+	fields[spec.Output.LastSourceEventID] = sourceEventID
+	return pc.persistArtifactRepoResult(ctx, execCtx, spec, fields)
 }
 
 func (pc *PipelineCoordinator) artifactRepoRoot() string {

@@ -1143,7 +1143,9 @@ handler_specification:
             allowlisted paths under the service-owned repo root, verifies the projected git tree stays within max_repo_bytes,
             commits staged files atomically, verifies the resulting ref is a 40-character git SHA, persists only the declared
             output fields on the selected/owned entity, then publishes success_event when declared. Duplicate replay for the
-            same source_event_id is a no-op only when the contract-visible committed output state is already present. Reusing
+            same source_event_id is a no-op only when the contract-visible committed output state is already present and any
+            declared success_event has already published successfully. last_source_event_id is advanced only after declared
+            success_event publication succeeds, so a transient publish failure can be retried from git/request history. Reusing
             a request_id with the same content/tree may repair committed output state and publish the same success readiness
             event; reusing a request_id with different content fails closed and may publish failure_event when declared. Content
             hashes are diagnostic and do not replace request/source idempotency. The public artifact URL is product-neutral
