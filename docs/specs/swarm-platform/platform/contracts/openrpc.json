@@ -192,7 +192,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -318,7 +318,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -380,7 +380,7 @@
     },
     {
       "name": "agent.send_directive",
-      "description": "Send a directive (free-form instruction) to a running agent. Optionally kills the previous turn first.",
+      "description": "Send a directive (free-form instruction) to a running agent. The runtime resolves the target run before execution: explicit run_id targets an existing nonterminal run; with no run_id, zero active sessions allocate a new run_id, one active session uses that session's run_id, and multiple active sessions fail closed with AMBIGUOUS_RUN_TARGET. The runtime persists platform.agent_directive before BoardStep and all child emissions inherit the resolved run_id.",
       "params": [
         {
           "name": "agent_id",
@@ -398,8 +398,17 @@
           }
         },
         {
+          "name": "run_id",
+          "required": false,
+          "description": "Optional explicit nonterminal run target. If omitted, the runtime resolves from active sessions or allocates a new run_id.",
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
           "name": "kill_previous",
           "required": false,
+          "description": "Legacy turn-cancellation flag. It is evaluated only after run target validation succeeds; explicit run_id plus kill_previous is fail-closed if it would create dual target semantics.",
           "schema": {
             "default": false,
             "type": "boolean"
@@ -419,6 +428,13 @@
         "schema": {
           "additionalProperties": false,
           "properties": {
+            "directive_event_id": {
+              "$ref": "#/components/schemas/OpaqueId"
+            },
+            "directive_event_type": {
+              "const": "platform.agent_directive",
+              "type": "string"
+            },
             "ok": {
               "const": true,
               "type": "boolean"
@@ -426,10 +442,25 @@
             "response": {
               "description": "Optional acknowledgement or error from the agent.",
               "type": "string"
+            },
+            "run_id": {
+              "$ref": "#/components/schemas/OpaqueId"
+            },
+            "run_id_resolution": {
+              "enum": [
+                "specified",
+                "inferred_from_active_session",
+                "new_run_allocated"
+              ],
+              "type": "string"
             }
           },
           "required": [
-            "ok"
+            "ok",
+            "run_id",
+            "run_id_resolution",
+            "directive_event_id",
+            "directive_event_type"
           ],
           "type": "object"
         }
@@ -516,7 +547,148 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32018,
+          "message": "Application error: RUN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32017,
+          "message": "Application error: RUN_ALREADY_TERMINAL",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_ALREADY_TERMINAL",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "current_status": {
+                    "$ref": "#/components/schemas/RunStatus"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "current_status"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32002,
+          "message": "Application error: AMBIGUOUS_RUN_TARGET",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AMBIGUOUS_RUN_TARGET",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "active_sessions": {
+                    "description": "Active sessions that prevent implicit target resolution. A session without run_id is reported without a run_id field and still fail-closes implicit resolution.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "run_id": {
+                          "$ref": "#/components/schemas/OpaqueId"
+                        },
+                        "session_id": {
+                          "$ref": "#/components/schemas/OpaqueId"
+                        }
+                      },
+                      "required": [
+                        "session_id"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId",
+                    "description": "Present when ambiguity was caused by an explicit run target combined with incompatible legacy targeting flags."
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -665,7 +837,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32020,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -828,7 +1000,7 @@
       },
       "errors": [
         {
-          "code": -32003,
+          "code": -32004,
           "message": "Application error: ENTITY_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -961,7 +1133,7 @@
       },
       "errors": [
         {
-          "code": -32005,
+          "code": -32006,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1181,7 +1353,7 @@
       },
       "errors": [
         {
-          "code": -32010,
+          "code": -32011,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1219,7 +1391,7 @@
           }
         },
         {
-          "code": -32008,
+          "code": -32009,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -1271,7 +1443,7 @@
           }
         },
         {
-          "code": -32009,
+          "code": -32010,
           "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
           "data": {
             "additionalProperties": false,
@@ -1313,7 +1485,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1408,7 +1580,7 @@
       },
       "errors": [
         {
-          "code": -32010,
+          "code": -32011,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1446,7 +1618,7 @@
           }
         },
         {
-          "code": -32008,
+          "code": -32009,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -1498,7 +1670,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32008,
           "message": "Application error: INVALID_DEFER_UNTIL",
           "data": {
             "additionalProperties": false,
@@ -1543,7 +1715,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1624,7 +1796,7 @@
       },
       "errors": [
         {
-          "code": -32010,
+          "code": -32011,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1779,7 +1951,7 @@
       },
       "errors": [
         {
-          "code": -32010,
+          "code": -32011,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1817,7 +1989,7 @@
           }
         },
         {
-          "code": -32008,
+          "code": -32009,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -1869,7 +2041,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1977,7 +2149,7 @@
       },
       "errors": [
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2015,7 +2187,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32019,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -2057,7 +2229,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2138,7 +2310,7 @@
       },
       "errors": [
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2207,7 +2379,7 @@
       },
       "errors": [
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2340,7 +2512,7 @@
       },
       "errors": [
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2378,7 +2550,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2420,7 +2592,7 @@
           }
         },
         {
-          "code": -32015,
+          "code": -32016,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -2458,7 +2630,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2582,7 +2754,7 @@
       },
       "errors": [
         {
-          "code": -32002,
+          "code": -32003,
           "message": "Application error: BUNDLE_MISMATCH",
           "data": {
             "additionalProperties": false,
@@ -2624,7 +2796,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32021,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -2659,7 +2831,7 @@
           }
         },
         {
-          "code": -32004,
+          "code": -32005,
           "message": "Application error: EVENT_NOT_DECLARED",
           "data": {
             "additionalProperties": false,
@@ -2703,7 +2875,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32013,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -2761,7 +2933,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2849,7 +3021,7 @@
       },
       "errors": [
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2887,7 +3059,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32017,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2929,7 +3101,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3018,7 +3190,7 @@
       },
       "errors": [
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3095,7 +3267,7 @@
       },
       "errors": [
         {
-          "code": -32017,
+          "code": -32018,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3330,7 +3502,7 @@
       },
       "errors": [
         {
-          "code": -32013,
+          "code": -32014,
           "message": "Application error: RUNTIME_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -3361,7 +3533,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3442,7 +3614,7 @@
       },
       "errors": [
         {
-          "code": -32014,
+          "code": -32015,
           "message": "Application error: RUNTIME_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -3473,7 +3645,7 @@
           }
         },
         {
-          "code": -32006,
+          "code": -32007,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4871,8 +5043,69 @@
           "type": "object"
         }
       },
-      "BUNDLE_MISMATCH": {
+      "AMBIGUOUS_RUN_TARGET": {
         "code": -32002,
+        "message": "Application error: AMBIGUOUS_RUN_TARGET",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "AMBIGUOUS_RUN_TARGET",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "active_sessions": {
+                  "description": "Active sessions that prevent implicit target resolution. A session without run_id is reported without a run_id field and still fail-closes implicit resolution.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "run_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      },
+                      "session_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "session_id"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "agent_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId",
+                  "description": "Present when ambiguity was caused by an explicit run target combined with incompatible legacy targeting flags."
+                }
+              },
+              "required": [
+                "agent_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "BUNDLE_MISMATCH": {
+        "code": -32003,
         "message": "Application error: BUNDLE_MISMATCH",
         "data": {
           "additionalProperties": false,
@@ -4914,7 +5147,7 @@
         }
       },
       "ENTITY_NOT_FOUND": {
-        "code": -32003,
+        "code": -32004,
         "message": "Application error: ENTITY_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -4952,7 +5185,7 @@
         }
       },
       "EVENT_NOT_DECLARED": {
-        "code": -32004,
+        "code": -32005,
         "message": "Application error: EVENT_NOT_DECLARED",
         "data": {
           "additionalProperties": false,
@@ -4996,7 +5229,7 @@
         }
       },
       "EVENT_NOT_FOUND": {
-        "code": -32005,
+        "code": -32006,
         "message": "Application error: EVENT_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -5034,7 +5267,7 @@
         }
       },
       "IDEMPOTENCY_CONFLICT": {
-        "code": -32006,
+        "code": -32007,
         "message": "Application error: IDEMPOTENCY_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -5093,7 +5326,7 @@
         }
       },
       "INVALID_DEFER_UNTIL": {
-        "code": -32007,
+        "code": -32008,
         "message": "Application error: INVALID_DEFER_UNTIL",
         "data": {
           "additionalProperties": false,
@@ -5138,7 +5371,7 @@
         }
       },
       "MAILBOX_ALREADY_DECIDED": {
-        "code": -32008,
+        "code": -32009,
         "message": "Application error: MAILBOX_ALREADY_DECIDED",
         "data": {
           "additionalProperties": false,
@@ -5190,7 +5423,7 @@
         }
       },
       "MAILBOX_APPROVAL_EVENT_UNCONFIGURED": {
-        "code": -32009,
+        "code": -32010,
         "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
         "data": {
           "additionalProperties": false,
@@ -5232,7 +5465,7 @@
         }
       },
       "MAILBOX_NOT_FOUND": {
-        "code": -32010,
+        "code": -32011,
         "message": "Application error: MAILBOX_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -5270,7 +5503,7 @@
         }
       },
       "METHOD_UNAVAILABLE": {
-        "code": -32011,
+        "code": -32012,
         "message": "Application error: METHOD_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -5308,7 +5541,7 @@
         }
       },
       "PAYLOAD_VALIDATION_FAILED": {
-        "code": -32012,
+        "code": -32013,
         "message": "Application error: PAYLOAD_VALIDATION_FAILED",
         "data": {
           "additionalProperties": false,
@@ -5366,7 +5599,7 @@
         }
       },
       "RUNTIME_ALREADY_PAUSED": {
-        "code": -32013,
+        "code": -32014,
         "message": "Application error: RUNTIME_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5397,7 +5630,7 @@
         }
       },
       "RUNTIME_NOT_PAUSED": {
-        "code": -32014,
+        "code": -32015,
         "message": "Application error: RUNTIME_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5428,7 +5661,7 @@
         }
       },
       "RUN_ALREADY_PAUSED": {
-        "code": -32015,
+        "code": -32016,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5466,7 +5699,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32016,
+        "code": -32017,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -5508,7 +5741,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32017,
+        "code": -32018,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -5546,7 +5779,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32018,
+        "code": -32019,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -5588,7 +5821,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32019,
+        "code": -32020,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -5626,7 +5859,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_REF": {
-        "code": -32020,
+        "code": -32021,
         "message": "Application error: UNSUPPORTED_BUNDLE_REF",
         "data": {
           "additionalProperties": false,

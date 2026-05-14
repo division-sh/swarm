@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"swarm/internal/events"
+	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
@@ -24,7 +25,7 @@ type Agent interface {
 }
 
 type BoardInteractiveAgent interface {
-	BoardStep(ctx context.Context, directive string) (string, error)
+	BoardStep(ctx context.Context, directive runtimeagentcontrol.BoardDirective) (string, error)
 }
 
 type AgentFactory func(cfg models.AgentConfig) (Agent, error)

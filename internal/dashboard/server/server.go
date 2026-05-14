@@ -450,6 +450,7 @@ func (h *Handler) handleAgentDirective(w http.ResponseWriter, r *http.Request) {
 		AgentID:      id,
 		Directive:    req.Message,
 		KillPrevious: req.KillPrevious,
+		Source:       runtimeagentcontrol.DirectiveSourceDashboardLegacy,
 	})
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err)

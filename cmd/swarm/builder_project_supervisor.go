@@ -328,5 +328,8 @@ func (c dashboardDynamicAgentControl) SendDirective(ctx context.Context, req run
 	if rt == nil || rt.Manager == nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, fmt.Errorf("runtime manager unavailable")
 	}
+	if req.Source == "" {
+		req.Source = runtimeagentcontrol.DirectiveSourceBuilderRuntime
+	}
 	return rt.Manager.SendDirective(ctx, req)
 }

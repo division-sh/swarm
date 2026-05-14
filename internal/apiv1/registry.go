@@ -23,6 +23,7 @@ const (
 	PayloadValidationFailedCode          = "PAYLOAD_VALIDATION_FAILED"
 	RunNotFoundCode                      = "RUN_NOT_FOUND"
 	RunAlreadyTerminalCode               = "RUN_ALREADY_TERMINAL"
+	AmbiguousRunTargetCode               = "AMBIGUOUS_RUN_TARGET"
 	RunNotPausedCode                     = "RUN_NOT_PAUSED"
 	RunAlreadyPausedCode                 = "RUN_ALREADY_PAUSED"
 	MailboxNotFoundCode                  = "MAILBOX_NOT_FOUND"

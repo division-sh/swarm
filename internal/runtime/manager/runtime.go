@@ -29,6 +29,10 @@ type runCanceller interface {
 	CancelActiveRunWorkByProducer(ctx context.Context, producerID string) ([]runtimedelivery.Transition, error)
 }
 
+type agentDirectiveRunTargetResolver interface {
+	ResolveAgentDirectiveRunTarget(ctx context.Context, agentID, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error)
+}
+
 var errRuntimeShuttingDown = errors.New("runtime shutting down")
 
 func (am *AgentManager) RestartAgent(agentID string) error {
@@ -336,12 +340,21 @@ func (am *AgentManager) ChatWithAgent(ctx context.Context, agentID, directive st
 }
 
 func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if am.shutdownAdmissionClosed() {
 		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(req.AgentID, runtimeagentcontrol.StatusTerminated)
 	}
 	agentID := strings.TrimSpace(req.AgentID)
+	req.AgentID = agentID
+	req.Directive = strings.TrimSpace(req.Directive)
+	req.RunID = strings.TrimSpace(req.RunID)
 	if agentID == "" {
 		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("agent id is required")
+	}
+	if req.Directive == "" {
+		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("directive is required")
 	}
 	am.mu.RLock()
 	agent, ok := am.agents[agentID]
@@ -353,16 +366,108 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if !ok {
 		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(agentID, runtimeagentcontrol.StatusIdle)
 	}
+	target, err := am.resolveAgentDirectiveRunTarget(ctx, agentID, req.RunID)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	if req.KillPrevious && req.RunID != "" {
+		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.StateError{
+			Err:     runtimeagentcontrol.ErrAmbiguousRunTarget,
+			AgentID: agentID,
+			RunID:   target.RunID,
+		}
+	}
 	if req.KillPrevious {
 		if err := am.killPreviousRuns(ctx, agentID); err != nil {
 			return runtimeagentcontrol.SendDirectiveResult{}, err
 		}
 	}
-	response, err := chatAgent.BoardStep(ctx, req.Directive)
+	directiveEvent, err := runtimeagentcontrol.NewDirectiveEvent(req, target, time.Now().UTC())
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	return runtimeagentcontrol.SendDirectiveResult{AgentID: agentID, Response: response}, nil
+	if err := am.publishAgentDirectiveEvent(ctx, directiveEvent); err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	directiveCtx := runtimecorrelation.WithRunID(ctx, strings.TrimSpace(directiveEvent.RunID))
+	directiveCtx = runtimebus.WithInboundEvent(directiveCtx, directiveEvent)
+	response, err := chatAgent.BoardStep(directiveCtx, runtimeagentcontrol.BoardDirective{
+		Directive:       req.Directive,
+		Event:           directiveEvent,
+		RunIDResolution: target.Mode,
+		OperatorID:      strings.TrimSpace(req.OperatorID),
+		Source:          strings.TrimSpace(req.Source),
+	})
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	return runtimeagentcontrol.SendDirectiveResult{
+		AgentID:            agentID,
+		Response:           response,
+		RunID:              strings.TrimSpace(directiveEvent.RunID),
+		RunIDResolution:    target.Mode,
+		DirectiveEventID:   strings.TrimSpace(directiveEvent.ID),
+		DirectiveEventType: string(directiveEvent.Type),
+	}, nil
+}
+
+func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, agentID, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error) {
+	agentID = strings.TrimSpace(agentID)
+	explicitRunID = strings.TrimSpace(explicitRunID)
+	if resolver, ok := am.store.(agentDirectiveRunTargetResolver); ok && resolver != nil {
+		target, err := resolver.ResolveAgentDirectiveRunTarget(ctx, agentID, explicitRunID)
+		if err != nil {
+			return runtimeagentcontrol.RunTargetResolution{}, err
+		}
+		return target.Normalized(), nil
+	}
+	if explicitRunID != "" {
+		return runtimeagentcontrol.RunTargetResolution{}, &runtimeagentcontrol.StateError{
+			Err:     runtimeagentcontrol.ErrRunNotFound,
+			AgentID: agentID,
+			RunID:   explicitRunID,
+		}
+	}
+	return runtimeagentcontrol.RunTargetResolution{
+		RunID: uuid.NewString(),
+		Mode:  runtimeagentcontrol.RunResolutionNewRunAllocated,
+	}, nil
+}
+
+func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt events.Event) error {
+	if strings.TrimSpace(evt.RunID) == "" {
+		return errors.New("directive event run_id is required")
+	}
+	if am.bus == nil {
+		if am.store != nil {
+			return errors.New("event bus is required for agent directive persistence")
+		}
+		return nil
+	}
+	eventCtx := runtimecorrelation.WithRunID(am.runtimePlatformControlEventContext(ctx), strings.TrimSpace(evt.RunID))
+	eventStore := am.bus.Store()
+	if eventStore == nil {
+		return errors.New("event store is required for agent directive persistence")
+	}
+	if atomicStore, ok := eventStore.(runtimebus.AtomicEventReplayScopePersistence); ok && atomicStore != nil {
+		return atomicStore.PersistEventWithDeliveriesAndScope(eventCtx, evt, nil, runtimereplayclaim.CommittedReplayScopeDirect)
+	}
+	if atomicStore, ok := eventStore.(runtimebus.AtomicEventPersistence); ok && atomicStore != nil {
+		if err := atomicStore.PersistEventWithDeliveries(eventCtx, evt, nil); err != nil {
+			return err
+		}
+		if scopeWriter, ok := eventStore.(runtimebus.EventReplayScopePersistence); ok && scopeWriter != nil {
+			return scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID, runtimereplayclaim.CommittedReplayScopeDirect)
+		}
+		return nil
+	}
+	if err := eventStore.AppendEvent(eventCtx, evt); err != nil {
+		return err
+	}
+	if scopeWriter, ok := eventStore.(runtimebus.EventReplayScopePersistence); ok && scopeWriter != nil {
+		return scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID, runtimereplayclaim.CommittedReplayScopeDirect)
+	}
+	return nil
 }
 
 func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string) error {
