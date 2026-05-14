@@ -192,7 +192,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -318,7 +318,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -538,7 +538,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -576,7 +576,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32021,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -679,7 +679,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -828,7 +828,7 @@
       },
       "errors": [
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1331,7 +1331,7 @@
           }
         },
         {
-          "code": -32021,
+          "code": -32025,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -1410,7 +1410,7 @@
           }
         },
         {
-          "code": -32013,
+          "code": -32017,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -1468,7 +1468,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1506,7 +1506,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32021,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -1548,7 +1548,409 @@
           }
         },
         {
+          "code": -32011,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "event.replay",
+      "description": "Canonical operator-facing event redelivery primitive.\n\nRedelivers one existing persisted event to all original agent subscribers, or to a caller-supplied subset of those original agent subscribers. The target set is owned by the original event_deliveries agent rows; current live subscriptions, route tables, and bundle declarations must not add recipients. Requested subscribers outside the original agent delivery set fail closed with EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL.\n\nPublic replay creates fresh replay execution evidence. Implementations MUST preserve the original event, delivery, receipt, and session inspection surface, and MUST create a distinct replay event identity whose source_event_id/parent lineage points at the original event. The fresh replay event creates fresh event_deliveries rows, and the result reports source_delivery_id lineage back to the original delivery rows.\n\nOnly terminal original delivery rows are replayable in v1: delivered, failed, and dead_letter. Pending or in_progress originals fail closed with EVENT_REPLAY_NOT_ELIGIBLE. If the original event has no replayable original agent delivery history, the method fails with EVENT_REPLAY_NO_DELIVERY_HISTORY.\n\nThe server also persists a synthetic event.replayed audit event with original event identity, replay event identity, selected subscribers, actor token identity, and original delivery summary. event.list, event.get, run.trace, and event.subscribe observe this audit event through the normal event read/stream owners.\n\nRuntime pause and run-dispatch blocking follow the queueable event-producing ingress rule: replay/audit events and delivery rows may be persisted, but subscriber work must not dispatch until resume/unblock. Missing or unregistered selected original subscribers fail closed before replay evidence is created with EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE.\n",
+      "params": [
+        {
+          "name": "event_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "subscribers",
+          "required": false,
+          "description": "Optional subset of original agent subscriber IDs. Empty or omitted means all original agent subscribers.",
+          "schema": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/EventReplayResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32006,
+          "message": "Application error: EVENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "event_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32008,
+          "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_REPLAY_NO_DELIVERY_HISTORY",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "event_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32009,
+          "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "original_subscribers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "requested_subscribers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "subscriber_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "event_id",
+                  "subscriber_id",
+                  "original_subscribers"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32010,
+          "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "deliverable": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "replay_event": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "requested": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "subscribers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "event_id",
+                  "subscribers"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32007,
+          "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_REPLAY_NOT_ELIGIBLE",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "delivery_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "subscriber_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "event_id",
+                  "delivery_id",
+                  "subscriber_id",
+                  "status",
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32017,
+          "message": "Application error: PAYLOAD_VALIDATION_FAILED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "PAYLOAD_VALIDATION_FAILED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "violations": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "field_path": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "rule": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "field_path",
+                        "rule",
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "violations"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1723,7 +2125,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32015,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1761,7 +2163,7 @@
           }
         },
         {
-          "code": -32009,
+          "code": -32013,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -1813,7 +2215,7 @@
           }
         },
         {
-          "code": -32010,
+          "code": -32014,
           "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
           "data": {
             "additionalProperties": false,
@@ -1855,7 +2257,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1950,7 +2352,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32015,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1988,7 +2390,7 @@
           }
         },
         {
-          "code": -32009,
+          "code": -32013,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -2040,7 +2442,7 @@
           }
         },
         {
-          "code": -32008,
+          "code": -32012,
           "message": "Application error: INVALID_DEFER_UNTIL",
           "data": {
             "additionalProperties": false,
@@ -2085,7 +2487,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2166,7 +2568,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32015,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2321,7 +2723,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32015,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2359,7 +2761,7 @@
           }
         },
         {
-          "code": -32009,
+          "code": -32013,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -2411,7 +2813,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2519,7 +2921,7 @@
       },
       "errors": [
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2557,7 +2959,7 @@
           }
         },
         {
-          "code": -32019,
+          "code": -32023,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -2599,7 +3001,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2680,7 +3082,7 @@
       },
       "errors": [
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2749,7 +3151,7 @@
       },
       "errors": [
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2882,7 +3284,7 @@
       },
       "errors": [
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2920,7 +3322,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32021,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -2962,7 +3364,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32020,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -3000,7 +3402,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3167,7 +3569,7 @@
           }
         },
         {
-          "code": -32021,
+          "code": -32025,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -3246,7 +3648,7 @@
           }
         },
         {
-          "code": -32013,
+          "code": -32017,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -3304,7 +3706,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3392,7 +3794,7 @@
       },
       "errors": [
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3430,7 +3832,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32021,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -3472,7 +3874,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3561,7 +3963,7 @@
       },
       "errors": [
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3638,7 +4040,7 @@
       },
       "errors": [
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3873,7 +4275,7 @@
       },
       "errors": [
         {
-          "code": -32014,
+          "code": -32018,
           "message": "Application error: RUNTIME_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -3904,7 +4306,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3985,7 +4387,7 @@
       },
       "errors": [
         {
-          "code": -32015,
+          "code": -32019,
           "message": "Application error: RUNTIME_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -4016,7 +4418,7 @@
           }
         },
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4594,6 +4996,83 @@
           "run_id",
           "new_run_created",
           "deliveries"
+        ],
+        "type": "object"
+      },
+      "EventReplayDelivery": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "delivery_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "source_delivery_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          },
+          "subscriber_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "subscriber_id",
+          "status",
+          "attempt"
+        ],
+        "type": "object"
+      },
+      "EventReplayResult": {
+        "additionalProperties": false,
+        "properties": {
+          "audit_event_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Persisted synthetic event.replayed audit event identity."
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Original persisted event requested for replay."
+          },
+          "new_deliveries": {
+            "description": "Fresh delivery rows created for replay_event_id. Each row carries source_delivery_id lineage to the original delivery.",
+            "items": {
+              "$ref": "#/components/schemas/EventReplayDelivery"
+            },
+            "type": "array"
+          },
+          "original_deliveries": {
+            "description": "Original agent delivery rows used as replay target authority.",
+            "items": {
+              "$ref": "#/components/schemas/EventReplayDelivery"
+            },
+            "type": "array"
+          },
+          "replay_event_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Fresh replay event identity. Its source_event_id/parent lineage points at event_id."
+          },
+          "subscribers_replayed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "event_id",
+          "replay_event_id",
+          "audit_event_id",
+          "subscribers_replayed",
+          "original_deliveries",
+          "new_deliveries"
         ],
         "type": "object"
       },
@@ -5692,8 +6171,215 @@
           "type": "object"
         }
       },
-      "IDEMPOTENCY_CONFLICT": {
+      "EVENT_REPLAY_NOT_ELIGIBLE": {
         "code": -32007,
+        "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "EVENT_REPLAY_NOT_ELIGIBLE",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "delivery_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "event_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "subscriber_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event_id",
+                "delivery_id",
+                "subscriber_id",
+                "status",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "EVENT_REPLAY_NO_DELIVERY_HISTORY": {
+        "code": -32008,
+        "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "EVENT_REPLAY_NO_DELIVERY_HISTORY",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "event_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "event_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL": {
+        "code": -32009,
+        "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "event_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "original_subscribers": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "requested_subscribers": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "subscriber_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event_id",
+                "subscriber_id",
+                "original_subscribers"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE": {
+        "code": -32010,
+        "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "deliverable": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "event_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "replay_event": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "requested": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "subscribers": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "event_id",
+                "subscribers"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "IDEMPOTENCY_CONFLICT": {
+        "code": -32011,
         "message": "Application error: IDEMPOTENCY_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -5752,7 +6438,7 @@
         }
       },
       "INVALID_DEFER_UNTIL": {
-        "code": -32008,
+        "code": -32012,
         "message": "Application error: INVALID_DEFER_UNTIL",
         "data": {
           "additionalProperties": false,
@@ -5797,7 +6483,7 @@
         }
       },
       "MAILBOX_ALREADY_DECIDED": {
-        "code": -32009,
+        "code": -32013,
         "message": "Application error: MAILBOX_ALREADY_DECIDED",
         "data": {
           "additionalProperties": false,
@@ -5849,7 +6535,7 @@
         }
       },
       "MAILBOX_APPROVAL_EVENT_UNCONFIGURED": {
-        "code": -32010,
+        "code": -32014,
         "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
         "data": {
           "additionalProperties": false,
@@ -5891,7 +6577,7 @@
         }
       },
       "MAILBOX_NOT_FOUND": {
-        "code": -32011,
+        "code": -32015,
         "message": "Application error: MAILBOX_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -5929,7 +6615,7 @@
         }
       },
       "METHOD_UNAVAILABLE": {
-        "code": -32012,
+        "code": -32016,
         "message": "Application error: METHOD_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -5967,7 +6653,7 @@
         }
       },
       "PAYLOAD_VALIDATION_FAILED": {
-        "code": -32013,
+        "code": -32017,
         "message": "Application error: PAYLOAD_VALIDATION_FAILED",
         "data": {
           "additionalProperties": false,
@@ -6025,7 +6711,7 @@
         }
       },
       "RUNTIME_ALREADY_PAUSED": {
-        "code": -32014,
+        "code": -32018,
         "message": "Application error: RUNTIME_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -6056,7 +6742,7 @@
         }
       },
       "RUNTIME_NOT_PAUSED": {
-        "code": -32015,
+        "code": -32019,
         "message": "Application error: RUNTIME_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -6087,7 +6773,7 @@
         }
       },
       "RUN_ALREADY_PAUSED": {
-        "code": -32016,
+        "code": -32020,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -6125,7 +6811,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32017,
+        "code": -32021,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -6167,7 +6853,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32018,
+        "code": -32022,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -6205,7 +6891,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32019,
+        "code": -32023,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -6247,7 +6933,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32020,
+        "code": -32024,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -6285,7 +6971,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_REF": {
-        "code": -32021,
+        "code": -32025,
         "message": "Application error: UNSUPPORTED_BUNDLE_REF",
         "data": {
           "additionalProperties": false,

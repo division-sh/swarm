@@ -936,6 +936,48 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	return nil
 }
 
+// CheckDirectRecipients applies the same direct-recipient policy used by
+// PublishDirect, then verifies the allowed recipients are currently deliverable.
+// It is intentionally side-effect free so public API owners can fail closed
+// before creating replay evidence.
+func (eb *EventBus) CheckDirectRecipients(ctx context.Context, evt events.Event, recipients []string) (DirectRecipientStatus, error) {
+	requested := uniqueStrings(recipients)
+	status := DirectRecipientStatus{Requested: append([]string(nil), requested...)}
+	if eb == nil {
+		status.Missing = append([]string(nil), requested...)
+		return status, nil
+	}
+	if evt.Type == "" {
+		return status, errors.New("event type is required")
+	}
+	if !isValidEventTypeName(string(evt.Type)) {
+		return status, fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	}
+	if eb.payloadValidator != nil {
+		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
+			return status, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		}
+	}
+	plan, err := eb.deliveryPlanner.PlanDirect(ctx, evt, requested)
+	if err != nil {
+		return status, err
+	}
+	status.Recipients = append([]string(nil), plan.Recipients...)
+	status.Filtered = filteredRecipients(requested, plan.Recipients)
+	liveRecipients := eb.snapshotRecipientChans(plan.Recipients)
+	live := make(map[string]struct{}, len(liveRecipients))
+	for _, recipient := range liveRecipients {
+		live[recipient.agentID] = struct{}{}
+	}
+	for _, recipient := range plan.Recipients {
+		if _, ok := live[recipient]; !ok {
+			status.Missing = append(status.Missing, recipient)
+		}
+	}
+	status.Missing = uniqueStrings(append(status.Missing, status.Filtered...))
+	return status, nil
+}
+
 // PublishPersistedRecipients delivers an already-committed event using the
 // persisted agent manifest plus the authoritative committed replay scope.
 func (eb *EventBus) PublishPersistedRecipients(ctx context.Context, evt events.Event, recipients []string) error {

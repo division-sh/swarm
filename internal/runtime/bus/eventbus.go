@@ -55,6 +55,13 @@ type PublishRecipientPlan struct {
 	SubscriptionRecipients []string
 }
 
+type DirectRecipientStatus struct {
+	Requested  []string
+	Recipients []string
+	Filtered   []string
+	Missing    []string
+}
+
 type PublishRecipientPlanAdmissionGuard func(context.Context, events.Event) error
 type PublishRecipientPlanGuard func(context.Context, events.Event, PublishRecipientPlan) error
 
