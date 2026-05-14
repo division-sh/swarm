@@ -1155,7 +1155,8 @@ handler_specification:
             may publish failure_event when declared. Content hashes are diagnostic and do not replace request/source idempotency.
             The public artifact URL is product-neutral
             (`swarm-artifact://repos/<repo_id>`). The local-git provider path is product-neutral, collision-safe by repo_id,
-            scoped below the runtime artifact root, and must not encode product-specific path segments.
+            scoped below the runtime artifact root defined by `runtime_storage.artifact_root`, and must not encode
+            product-specific path segments.
           operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service
             contract must declare the output fields it wants persisted; status is committed or failed, failure_reason records
             runtime failure detail when available, and current_ref updates only after git commit/ref verification succeeds.
@@ -4679,6 +4680,28 @@ observation_model:
     Agent emissions are NOT part of the entity emission chain — they are independent events that enter the event loop separately.
     An agent emitting ticket.classified creates a new event in the events table that is then delivered to subscribers. The
     agent emission does not appear in the triggering handler's emitted_events list.
+runtime_storage:
+  description: Runtime-owned writable host storage for service state. These paths are not part of the agent workspace model,
+    are not mounted into agent sessions, and must never be exposed to agents as raw host paths. Agents and product contracts
+    consume runtime-owned artifacts only through typed platform surfaces such as `swarm-artifact://...` URLs and immutable refs.
+  artifact_root:
+    description: Root directory for local-git repositories materialized by `artifact_repo_commit`.
+    default: /var/lib/swarm/artifacts
+    env_override: SWARM_ARTIFACT_ROOT
+    resolution_order:
+    - Explicit runtime coordinator option, when supplied by an embedding runtime.
+    - SWARM_ARTIFACT_ROOT environment variable, when non-empty.
+    - Platform default `/var/lib/swarm/artifacts`.
+    requirements:
+    - The resolved path MUST be an absolute runtime-private host path.
+    - The resolved path MUST be writable by the runtime process when `artifact_repo_commit` executes.
+    - The resolved path MUST persist across runtime restarts.
+    - The resolved path MUST NOT be `/workspace`, `/data`, `/opt/swarm/contracts`, or any descendant of those agent-visible
+      mounts.
+    - If the resolved path or its existing parent prefix resolves through symlinks under an agent-visible mount, startup/runtime
+      validation MUST fail closed before git writes.
+    - Product contracts and agents MUST NOT rely on the raw host path. The stable product surface remains the opaque
+      `swarm-artifact://repos/<repo_id>` URL plus immutable commit ref.
 workspace_model:
   description: Defines the filesystem contract for agent sessions. The platform provides three standard mount points and a
     scoping model. Products define workspace classes that map agent roles to specific scope configurations. If a product declares
