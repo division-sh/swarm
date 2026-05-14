@@ -112,6 +112,404 @@
       }
     },
     {
+      "name": "agent.replay",
+      "description": "Agent-scoped projection of the canonical operator-facing event redelivery primitive.\n\nRedelivers one existing persisted event to exactly one requested original agent subscriber. This method MUST consume the same canonical event redelivery owner as event.replay by projecting the request to the singleton subscriber set [agent_id]. It MUST NOT implement independent replay target derivation, fresh replay event creation, audit emission, idempotency, or delivery/session interpretation.\n\nThe target authority remains the original event_deliveries agent rows for event_id. If agent_id was not an original agent subscriber for that event, the method fails closed with EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL. Current live subscriptions, route tables, bundle declarations, or agent backlog state must not add recipients.\n\nThe replay preserves the original event, delivery, receipt, and session inspection surface, creates a distinct replay event identity with source_event_id/parent lineage to the original event, creates a fresh delivery row for the selected agent, and returns the single original/new delivery projection. The synthetic audit event is the canonical event.replayed event; this method does not create agent.event_replayed or mutate/abort the original session.\n",
+      "params": [
+        {
+          "name": "event_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/AgentReplayResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32006,
+          "message": "Application error: EVENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "event_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32008,
+          "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_REPLAY_NO_DELIVERY_HISTORY",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "event_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32009,
+          "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "original_subscribers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "requested_subscribers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "subscriber_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "event_id",
+                  "subscriber_id",
+                  "original_subscribers"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32010,
+          "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "deliverable": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "replay_event": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "requested": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "subscribers": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "event_id",
+                  "subscribers"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32007,
+          "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_REPLAY_NOT_ELIGIBLE",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "delivery_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "subscriber_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "event_id",
+                  "delivery_id",
+                  "subscriber_id",
+                  "status",
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32017,
+          "message": "Application error: PAYLOAD_VALIDATION_FAILED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "PAYLOAD_VALIDATION_FAILED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "violations": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "field_path": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "rule": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "field_path",
+                        "rule",
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "violations"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32011,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "agent.replay_backlog",
       "description": "Replay the agent's pending event backlog. Used for recovery after restart or ingress pause.",
       "params": [
@@ -4707,6 +5105,44 @@
         },
         "required": [
           "agent"
+        ],
+        "type": "object"
+      },
+      "AgentReplayResult": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "description": "Original agent subscriber selected for replay.",
+            "type": "string"
+          },
+          "audit_event_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Persisted synthetic event.replayed audit event identity."
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Original persisted event requested for agent-scoped replay."
+          },
+          "new_delivery": {
+            "$ref": "#/components/schemas/EventReplayDelivery",
+            "description": "Fresh delivery row created for replay_event_id with source_delivery_id lineage to original_delivery."
+          },
+          "original_delivery": {
+            "$ref": "#/components/schemas/EventReplayDelivery",
+            "description": "Original agent delivery row used as replay target authority."
+          },
+          "replay_event_id": {
+            "$ref": "#/components/schemas/OpaqueId",
+            "description": "Fresh replay event identity created by the canonical event redelivery owner."
+          }
+        },
+        "required": [
+          "event_id",
+          "agent_id",
+          "replay_event_id",
+          "audit_event_id",
+          "original_delivery",
+          "new_delivery"
         ],
         "type": "object"
       },

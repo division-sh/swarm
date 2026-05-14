@@ -16,17 +16,17 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 40 {
-		t.Fatalf("method count = %d, want 40", report.MethodCount)
+	if report.MethodCount != 41 {
+		t.Fatalf("method count = %d, want 41", report.MethodCount)
 	}
-	if report.SchemaCount != 57 {
-		t.Fatalf("schema count = %d, want 57", report.SchemaCount)
+	if report.SchemaCount != 58 {
+		t.Fatalf("schema count = %d, want 58", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 27 {
 		t.Fatalf("error code count = %d, want 27", report.ErrorCodeCount)
 	}
-	if report.MutatingMethodCount != 14 {
-		t.Fatalf("mutating method count = %d, want 14", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 15 {
+		t.Fatalf("mutating method count = %d, want 15", report.MutatingMethodCount)
 	}
 	if report.SubscriptionMethodCnt != 4 {
 		t.Fatalf("subscription method count = %d, want 4", report.SubscriptionMethodCnt)
@@ -61,11 +61,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 40 {
-		t.Fatalf("generated OpenRPC methods = %d, want 40", len(doc.Methods))
+	if len(doc.Methods) != 41 {
+		t.Fatalf("generated OpenRPC methods = %d, want 41", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 57 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 57", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 58 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 58", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 27 {
 		t.Fatalf("generated OpenRPC errors = %d, want 27", len(doc.Components.Errors))
@@ -79,6 +79,9 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 	if _, ok := methods["event.replay"]; !ok {
 		t.Fatal("generated OpenRPC missing event.replay")
+	}
+	if _, ok := methods["agent.replay"]; !ok {
+		t.Fatal("generated OpenRPC missing agent.replay")
 	}
 	if _, ok := methods["runtime.subscribe_logs"]; !ok {
 		t.Fatal("generated OpenRPC missing runtime.subscribe_logs")
