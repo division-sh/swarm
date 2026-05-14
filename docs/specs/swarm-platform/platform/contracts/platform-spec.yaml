@@ -5539,7 +5539,7 @@ api_specification:
         description: External webhook/provider events are queueable. While paused, valid signed ingress is persisted as events
           and deduplicated normally, but dispatch is gated until resume.
       - surface: api.event_producing_methods
-        description: Event-producing API/admin surfaces such as event.publish and deprecated run.start wrapper calls are queueable.
+        description: Event-producing API/admin surfaces such as event.publish, event.replay, and deprecated run.start wrapper calls are queueable.
           While paused, they may persist canonical root/input events and lifecycle rows but must not dispatch subscriber work until
           resume.
       - surface: timer.fire
@@ -5596,6 +5596,7 @@ api_specification:
       ttl: 24 hours after first completed response stored.
       mutating_methods:
       - event.publish
+      - event.replay
       - run.start
       - run.stop
       - run.pause
@@ -6080,6 +6081,62 @@ api_specification:
             description: Canonical persisted delivery rows for the published event; empty when the declared event has no subscribers.
             items:
               $ref: '#/components/schemas/EventPublishDelivery'
+      EventReplayDelivery:
+        type: object
+        additionalProperties: false
+        required:
+        - delivery_id
+        - subscriber_id
+        - status
+        - attempt
+        properties:
+          delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+          subscriber_id:
+            type: string
+          session_id:
+            type: string
+          status:
+            $ref: '#/components/schemas/DeliveryStatus'
+          attempt:
+            type: integer
+            minimum: 1
+          source_delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+      EventReplayResult:
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        - replay_event_id
+        - audit_event_id
+        - subscribers_replayed
+        - original_deliveries
+        - new_deliveries
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Original persisted event requested for replay.
+          replay_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Fresh replay event identity. Its source_event_id/parent lineage points at event_id.
+          audit_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Persisted synthetic event.replayed audit event identity.
+          subscribers_replayed:
+            type: array
+            items:
+              type: string
+          original_deliveries:
+            type: array
+            description: Original agent delivery rows used as replay target authority.
+            items:
+              $ref: '#/components/schemas/EventReplayDelivery'
+          new_deliveries:
+            type: array
+            description: Fresh delivery rows created for replay_event_id. Each row carries source_delivery_id lineage to the original delivery.
+            items:
+              $ref: '#/components/schemas/EventReplayDelivery'
       DeadLetterRecord:
         type: object
         additionalProperties: false
@@ -6869,6 +6926,77 @@ api_specification:
         properties:
           event_id:
             $ref: '#/components/schemas/OpaqueId'
+      EVENT_REPLAY_NO_DELIVERY_HISTORY:
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+      EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL:
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        - subscriber_id
+        - original_subscribers
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          subscriber_id:
+            type: string
+          original_subscribers:
+            type: array
+            items:
+              type: string
+          requested_subscribers:
+            type: array
+            items:
+              type: string
+      EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE:
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        - subscribers
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          subscribers:
+            type: array
+            items:
+              type: string
+          requested:
+            type: array
+            items:
+              type: string
+          deliverable:
+            type: array
+            items:
+              type: string
+          replay_event:
+            $ref: '#/components/schemas/OpaqueId'
+      EVENT_REPLAY_NOT_ELIGIBLE:
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        - delivery_id
+        - subscriber_id
+        - status
+        - reason
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          delivery_id:
+            $ref: '#/components/schemas/OpaqueId'
+          subscriber_id:
+            type: string
+          status:
+            type: string
+          reason:
+            type: string
       MAILBOX_NOT_FOUND:
         type: object
         additionalProperties: false
@@ -7094,6 +7222,57 @@ api_specification:
       - PAYLOAD_VALIDATION_FAILED
       - RUN_NOT_FOUND
       - RUN_ALREADY_TERMINAL
+      - IDEMPOTENCY_CONFLICT
+    event.replay:
+      tier: should_have
+      description: "Canonical operator-facing event redelivery primitive.\n\nRedelivers one existing persisted event to all\
+        \ original agent subscribers, or to a caller-supplied subset of those original agent subscribers. The target set is\
+        \ owned by the original event_deliveries agent rows; current live subscriptions, route tables, and bundle declarations\
+        \ must not add recipients. Requested subscribers outside the original agent delivery set fail closed with EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL.\n\
+        \nPublic replay creates fresh replay execution evidence. Implementations MUST preserve the original event, delivery,\
+        \ receipt, and session inspection surface, and MUST create a distinct replay event identity whose source_event_id/parent\
+        \ lineage points at the original event. The fresh replay event creates fresh event_deliveries rows, and the result\
+        \ reports source_delivery_id lineage back to the original delivery rows.\n\nOnly terminal original delivery rows are\
+        \ replayable in v1: delivered, failed, and dead_letter. Pending or in_progress originals fail closed with EVENT_REPLAY_NOT_ELIGIBLE.\
+        \ If the original event has no replayable original agent delivery history, the method fails with EVENT_REPLAY_NO_DELIVERY_HISTORY.\n\
+        \nThe server also persists a synthetic event.replayed audit event with original event identity, replay event identity,\
+        \ selected subscribers, actor token identity, and original delivery summary. event.list, event.get, run.trace, and\
+        \ event.subscribe observe this audit event through the normal event read/stream owners.\n\nRuntime pause and run-dispatch\
+        \ blocking follow the queueable event-producing ingress rule: replay/audit events and delivery rows may be persisted,\
+        \ but subscriber work must not dispatch until resume/unblock. Missing or unregistered selected original subscribers\
+        \ fail closed before replay evidence is created with EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE.\n"
+      scope:
+        required:
+        - write:runs
+      idempotency: per the convention.
+      params:
+      - name: event_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: subscribers
+        required: false
+        description: Optional subset of original agent subscriber IDs. Empty or omitted means all original agent subscribers.
+        schema:
+          type: array
+          items:
+            type: string
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/EventReplayResult'
+      errors:
+      - EVENT_NOT_FOUND
+      - EVENT_REPLAY_NO_DELIVERY_HISTORY
+      - EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL
+      - EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE
+      - EVENT_REPLAY_NOT_ELIGIBLE
+      - PAYLOAD_VALIDATION_FAILED
       - IDEMPOTENCY_CONFLICT
     run.start:
       tier: must_have

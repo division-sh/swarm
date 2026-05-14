@@ -199,6 +199,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	for name, handler := range OperatorEventPublishHandlers(opts) {
 		handlers[name] = handler
 	}
+	for name, handler := range OperatorEventReplayHandlers(opts) {
+		handlers[name] = handler
+	}
 	for name, handler := range OperatorRunControlHandlers(opts) {
 		handlers[name] = handler
 	}

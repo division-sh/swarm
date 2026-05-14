@@ -16,17 +16,17 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 37 {
-		t.Fatalf("method count = %d, want 37", report.MethodCount)
+	if report.MethodCount != 38 {
+		t.Fatalf("method count = %d, want 38", report.MethodCount)
 	}
-	if report.SchemaCount != 51 {
-		t.Fatalf("schema count = %d, want 51", report.SchemaCount)
+	if report.SchemaCount != 53 {
+		t.Fatalf("schema count = %d, want 53", report.SchemaCount)
 	}
-	if report.ErrorCodeCount != 22 {
-		t.Fatalf("error code count = %d, want 22", report.ErrorCodeCount)
+	if report.ErrorCodeCount != 26 {
+		t.Fatalf("error code count = %d, want 26", report.ErrorCodeCount)
 	}
-	if report.MutatingMethodCount != 13 {
-		t.Fatalf("mutating method count = %d, want 13", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 14 {
+		t.Fatalf("mutating method count = %d, want 14", report.MutatingMethodCount)
 	}
 	if report.SubscriptionMethodCnt != 3 {
 		t.Fatalf("subscription method count = %d, want 3", report.SubscriptionMethodCnt)
@@ -61,14 +61,14 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 37 {
-		t.Fatalf("generated OpenRPC methods = %d, want 37", len(doc.Methods))
+	if len(doc.Methods) != 38 {
+		t.Fatalf("generated OpenRPC methods = %d, want 38", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 51 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 51", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 53 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 53", len(doc.Components.Schemas))
 	}
-	if len(doc.Components.Errors) != 22 {
-		t.Fatalf("generated OpenRPC errors = %d, want 22", len(doc.Components.Errors))
+	if len(doc.Components.Errors) != 26 {
+		t.Fatalf("generated OpenRPC errors = %d, want 26", len(doc.Components.Errors))
 	}
 	methods := map[string]OpenRPCMethod{}
 	for _, method := range doc.Methods {
@@ -76,6 +76,9 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 	if _, ok := methods["event.publish"]; !ok {
 		t.Fatal("generated OpenRPC missing event.publish")
+	}
+	if _, ok := methods["event.replay"]; !ok {
+		t.Fatal("generated OpenRPC missing event.replay")
 	}
 	if !methods["run.start"].Deprecated {
 		t.Fatal("generated OpenRPC run.start deprecated flag = false, want true")
