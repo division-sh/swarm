@@ -33,6 +33,10 @@ type agentDirectiveRunTargetResolver interface {
 	ResolveAgentDirectiveRunTarget(ctx context.Context, agentID, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error)
 }
 
+type bundleFingerprintContextOwner interface {
+	WithBundleFingerprint(context.Context) context.Context
+}
+
 var errRuntimeShuttingDown = errors.New("runtime shutting down")
 
 func (am *AgentManager) RestartAgent(agentID string) error {
@@ -445,6 +449,9 @@ func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt even
 		return nil
 	}
 	eventCtx := runtimecorrelation.WithRunID(am.runtimePlatformControlEventContext(ctx), strings.TrimSpace(evt.RunID))
+	if owner, ok := am.bus.(bundleFingerprintContextOwner); ok && owner != nil {
+		eventCtx = owner.WithBundleFingerprint(eventCtx)
+	}
 	eventStore := am.bus.Store()
 	if eventStore == nil {
 		return errors.New("event store is required for agent directive persistence")

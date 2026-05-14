@@ -324,6 +324,10 @@ func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {
 	return runtimecorrelation.WithBundleFingerprint(ctx, eb.bundleFingerprint)
 }
 
+func (eb *EventBus) WithBundleFingerprint(ctx context.Context) context.Context {
+	return eb.withBundleFingerprint(ctx)
+}
+
 func (eb *EventBus) pipelineTransitionCapability() func(context.Context) (bool, error) {
 	if eb == nil || eb.store == nil {
 		return nil
