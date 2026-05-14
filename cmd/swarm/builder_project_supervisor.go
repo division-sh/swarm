@@ -147,6 +147,10 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if _, err := s.initStateStores(ctx, s.stores, bundle); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
+	bundleIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
+	if err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("derive project bundle identity: %w", err)
+	}
 	workspaces := s.newWorkspaces(s.stores, s.repoRoot, resolvedRoot, source)
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		return builderpkg.ProjectStatus{}, err
@@ -162,6 +166,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		SelfCheck:          false,
 		WorkflowModule:     module,
 		WorkspaceLifecycle: workspaces,
+		BundleFingerprint:  bundleIdentity.Fingerprint,
 	})
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err

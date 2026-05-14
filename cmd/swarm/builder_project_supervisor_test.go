@@ -136,6 +136,20 @@ func writeProjectRoot(t *testing.T) string {
 	return dir
 }
 
+func testBuilderSupervisorBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	dir := t.TempDir()
+	packagePath := filepath.Join(dir, "package.yaml")
+	if err := os.WriteFile(packagePath, []byte("name: test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+	bundle := testWorkflowValidationBundle()
+	bundle.Paths.ProjectPackageFile = packagePath
+	bundle.Semantics.Name = "test"
+	bundle.Semantics.Version = "1.0.0"
+	return bundle
+}
+
 func newSupervisorForLoadProjectFailureTest(
 	t *testing.T,
 	projectRoot string,
@@ -143,7 +157,7 @@ func newSupervisorForLoadProjectFailureTest(
 	createRuntime func(context.Context, *config.Config, runtimepkg.Stores, runtimepkg.RuntimeOptions) (*runtimepkg.Runtime, error),
 ) *runtimeProjectSupervisor {
 	t.Helper()
-	bundle := testWorkflowValidationBundle()
+	bundle := testBuilderSupervisorBundle(t)
 	source := semanticview.Wrap(bundle)
 	module := stubWorkflowModule{source: source}
 	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), "", nil, nil, nil)
@@ -241,6 +255,33 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesRuntimeStartFailure(t *te
 	}
 	if supervisor.CurrentRuntime() != nil {
 		t.Fatalf("CurrentRuntime = %p after start failure, want nil", supervisor.CurrentRuntime())
+	}
+}
+
+func TestRuntimeProjectSupervisorLoadProject_PassesBundleFingerprintToRuntime(t *testing.T) {
+	projectRoot := writeProjectRoot(t)
+	expectedIdentity, err := runtimecontracts.BootBundleIdentity(testBuilderSupervisorBundle(t))
+	if err != nil {
+		t.Fatalf("BootBundleIdentity: %v", err)
+	}
+
+	var gotFingerprint string
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, _ *config.Config, _ runtimepkg.Stores, opts runtimepkg.RuntimeOptions) (*runtimepkg.Runtime, error) {
+		gotFingerprint = opts.BundleFingerprint
+		return &runtimepkg.Runtime{}, nil
+	})
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+
+	status, err := supervisor.OpenProject(context.Background(), projectRoot)
+	if err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+	if !status.Loaded {
+		t.Fatalf("status.Loaded = false, want true")
+	}
+	if gotFingerprint != expectedIdentity.Fingerprint {
+		t.Fatalf("BundleFingerprint = %q, want %q", gotFingerprint, expectedIdentity.Fingerprint)
 	}
 }
 
