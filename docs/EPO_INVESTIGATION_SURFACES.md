@@ -77,6 +77,10 @@ SWARM_TOOL_GATEWAY_CONTAINER_URL=http://host.docker.internal:8081 \
 make run-clear
 ```
 
+Use `make run-clear-directed DIRECTIVE_AGENT=<agent> DIRECTIVE_MESSAGE='<message>'`
+for directive-bootstrapped runs. `make run-clear` is the corpus path only;
+it no longer switches behavior based on `DIRECTIVE_*`.
+
 Best for:
 - startup readiness
 - boot/runtime parity
