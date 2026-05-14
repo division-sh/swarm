@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
@@ -18,8 +19,12 @@ type AgentControlController interface {
 }
 
 type agentDirectiveResult struct {
-	OK       bool   `json:"ok"`
-	Response string `json:"response,omitempty"`
+	OK                 bool   `json:"ok"`
+	Response           string `json:"response,omitempty"`
+	RunID              string `json:"run_id"`
+	RunIDResolution    string `json:"run_id_resolution"`
+	DirectiveEventID   string `json:"directive_event_id"`
+	DirectiveEventType string `json:"directive_event_type"`
 }
 
 type agentReplayBacklogResult struct {
@@ -61,6 +66,10 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 	if err != nil {
 		return nil, err
 	}
+	runID, _, err := optionalStringParam(req.Params, "run_id")
+	if err != nil {
+		return nil, err
+	}
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return nil, err
@@ -78,11 +87,21 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 			AgentID:      agentID,
 			Directive:    directive,
 			KillPrevious: killPrevious,
+			RunID:        runID,
+			Source:       runtimeagentcontrol.DirectiveSourceV1RPC,
+			OperatorID:   req.ActorTokenID,
 		})
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
 		}
-		response, err := json.Marshal(agentDirectiveResult{OK: true, Response: result.Response})
+		response, err := json.Marshal(agentDirectiveResult{
+			OK:                 true,
+			Response:           result.Response,
+			RunID:              result.RunID,
+			RunIDResolution:    result.RunIDResolution,
+			DirectiveEventID:   result.DirectiveEventID,
+			DirectiveEventType: result.DirectiveEventType,
+		})
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
@@ -220,6 +239,22 @@ func agentControlError(method, agentID string, err error) error {
 				"agent_id":       agentID,
 				"current_status": stateErr.CurrentStatus,
 			})
+		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrRunNotFound) && method == "agent.send_directive":
+			return NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": stateErr.RunID})
+		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrRunAlreadyTerminal) && method == "agent.send_directive":
+			return NewApplicationError(RunAlreadyTerminalCode, false, map[string]any{
+				"run_id":         stateErr.RunID,
+				"current_status": stateErr.CurrentStatus,
+			})
+		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrAmbiguousRunTarget) && method == "agent.send_directive":
+			details := map[string]any{
+				"agent_id":        agentID,
+				"active_sessions": activeSessionDetails(stateErr.ActiveSessions),
+			}
+			if runID := strings.TrimSpace(stateErr.RunID); runID != "" {
+				details["run_id"] = runID
+			}
+			return NewApplicationError(AmbiguousRunTargetCode, false, details)
 		}
 	}
 	switch {
@@ -230,7 +265,30 @@ func agentControlError(method, agentID string, err error) error {
 			"agent_id":       agentID,
 			"current_status": runtimeagentcontrol.StatusTerminated,
 		})
+	case errors.Is(err, runtimeagentcontrol.ErrRunNotFound) && method == "agent.send_directive":
+		return NewApplicationError(RunNotFoundCode, false, nil)
+	case errors.Is(err, runtimeagentcontrol.ErrRunAlreadyTerminal) && method == "agent.send_directive":
+		return NewApplicationError(RunAlreadyTerminalCode, false, nil)
+	case errors.Is(err, runtimeagentcontrol.ErrAmbiguousRunTarget) && method == "agent.send_directive":
+		return NewApplicationError(AmbiguousRunTargetCode, false, map[string]any{"agent_id": agentID})
 	default:
 		return err
 	}
+}
+
+func activeSessionDetails(sessions []runtimeagentcontrol.ActiveSessionTarget) []map[string]any {
+	out := make([]map[string]any, 0, len(sessions))
+	for _, session := range sessions {
+		item := map[string]any{}
+		if sessionID := strings.TrimSpace(session.SessionID); sessionID != "" {
+			item["session_id"] = sessionID
+		}
+		if runID := strings.TrimSpace(session.RunID); runID != "" {
+			item["run_id"] = runID
+		}
+		if len(item) > 0 {
+			out = append(out, item)
+		}
+	}
+	return out
 }

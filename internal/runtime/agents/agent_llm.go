@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"swarm/internal/events"
+	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimeauthority "swarm/internal/runtime/authority"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -489,11 +490,15 @@ func (a *LLMAgent) injectHumanTaskToolResult(ctx context.Context, evt events.Eve
 	return a.conversation.InjectAsyncToolResult(ctx, "human_task_request", ok, result, errText)
 }
 
-func (a *LLMAgent) BoardStep(ctx context.Context, directive string) (string, error) {
+func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.BoardDirective) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	evt := boardDirectiveEvent(strings.TrimSpace(directive))
+	if err := runtimeagentcontrol.ValidateBoardDirective(directive); err != nil {
+		return "", err
+	}
+	directiveText := strings.TrimSpace(directive.Directive)
+	evt := directive.Event
 	a.applyPromptForEvent(evt)
 	a.resetConversationScopeIfNeeded(evt)
 
@@ -513,7 +518,7 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive string) (string, err
 	}
 
 	beforeRemediation := len(a.conversation.Messages)
-	resp, err = a.conversation.Step(ctx, boardDirectiveRemediationPrompt(directive, strings.TrimSpace(resp.Message.Content)))
+	resp, err = a.conversation.Step(ctx, boardDirectiveRemediationPrompt(directiveText, strings.TrimSpace(resp.Message.Content)))
 	if err != nil {
 		return "", err
 	}
@@ -551,19 +556,6 @@ func boardDirectiveRemediationPrompt(directive, assistantText string) string {
 		b.WriteString(assistantText)
 	}
 	return b.String()
-}
-
-func boardDirectiveEvent(directive string) events.Event {
-	payload := map[string]any{
-		"directive_text": strings.TrimSpace(directive),
-		"mode":           "directive",
-	}
-	raw, _ := json.Marshal(payload)
-	return events.Event{
-		Type:        events.EventType("board.directive"),
-		SourceAgent: "dashboard",
-		Payload:     raw,
-	}
 }
 
 func toolMessageHasSuccessfulResult(raw string) bool {

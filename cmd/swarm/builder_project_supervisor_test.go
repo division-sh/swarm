@@ -293,7 +293,9 @@ func (builderControlTestAgent) Subscriptions() []events.EventType { return nil }
 func (builderControlTestAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
 	return nil, nil
 }
-func (builderControlTestAgent) BoardStep(context.Context, string) (string, error) { return "ok", nil }
+func (builderControlTestAgent) BoardStep(context.Context, runtimeagentcontrol.BoardDirective) (string, error) {
+	return "ok", nil
+}
 
 func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
 	agent := builderControlTestAgent{id: "agent-1"}

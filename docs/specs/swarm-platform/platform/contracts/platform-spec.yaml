@@ -4533,6 +4533,21 @@ platform_events:
         resumed_by: string
         timestamp: string (ISO 8601)
       produced_by_type: platform
+    platform.agent_directive:
+      description: Operator-issued directive accepted by the runtime for an agent. This is the authoritative persisted root
+        event for directive-started or directive-targeted work; BoardStep and all child emissions inherit this event's run_id
+        and source_event_id. It is persisted before agent execution and is not defined by the legacy board.directive helper.
+      scope: global
+      payload:
+        agent_id: string
+        directive_text: string
+        kill_previous: boolean
+        run_id: string
+        run_id_resolution: string (specified | inferred_from_active_session | new_run_allocated)
+        source: string
+        operator_id: string (nullable)
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
     platform.agent_started:
       description: Agent session created and ready to process events.
       scope: flow
@@ -4580,9 +4595,9 @@ platform_events:
       platform.paused, platform.resumed, platform.boot, platform.recovery_failed, platform.agent_started, platform.budget_threshold_crossed.
       Products can subscribe to these.'
     diagnostic_events: 'Platform events that bypass the event loop and are persisted directly to the events table:
-      platform.runtime_log, platform.inbound_recorded. These are high-frequency diagnostic records. Routing them through the
-      event loop would cause recursive emission loops (a runtime_log about routing generates another runtime_log). They are
-      persisted for queryability but not routed to subscribers.'
+      platform.runtime_log, platform.inbound_recorded, platform.agent_directive. These are high-frequency diagnostic records
+      or operator-control root records. Routing them through the event loop would cause recursive emission loops or duplicate
+      control execution. They are persisted for queryability and causality but not routed to subscribers.'
   go_source_rule:
     description: Every hardcoded event name in Go runtime source must appear in this catalog. CI should enforce this — grep
       Go source for event name literals, verify each exists in platform_events.catalog or is a product event loaded from contracts.
@@ -6752,6 +6767,32 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           current_status:
             $ref: '#/components/schemas/RunStatus'
+      AMBIGUOUS_RUN_TARGET:
+        type: object
+        additionalProperties: false
+        required:
+        - agent_id
+        properties:
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Present when ambiguity was caused by an explicit run target combined with incompatible legacy targeting
+              flags.
+          active_sessions:
+            type: array
+            description: Active sessions that prevent implicit target resolution. A session without run_id is reported without
+              a run_id field and still fail-closes implicit resolution.
+            items:
+              type: object
+              additionalProperties: false
+              required:
+              - session_id
+              properties:
+                session_id:
+                  $ref: '#/components/schemas/OpaqueId'
+                run_id:
+                  $ref: '#/components/schemas/OpaqueId'
       RUN_NOT_PAUSED:
         type: object
         additionalProperties: false
@@ -7679,7 +7720,10 @@ api_specification:
       - AGENT_NOT_FOUND
     agent.send_directive:
       tier: should_have
-      description: Send a directive (free-form instruction) to a running agent. Optionally kills the previous turn first.
+      description: "Send a directive (free-form instruction) to a running agent. The runtime resolves the target run before\
+        \ execution: explicit run_id targets an existing nonterminal run; with no run_id, zero active sessions allocate a\
+        \ new run_id, one active session uses that session's run_id, and multiple active sessions fail closed with AMBIGUOUS_RUN_TARGET.\
+        \ The runtime persists platform.agent_directive before BoardStep and all child emissions inherit the resolved run_id."
       scope:
         required:
         - control:agents
@@ -7694,11 +7738,19 @@ api_specification:
         schema:
           type: string
           minLength: 1
+      - name: run_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+        description: Optional explicit nonterminal run target. If omitted, the runtime resolves from active sessions or allocates
+          a new run_id.
       - name: kill_previous
         required: false
         schema:
           type: boolean
           default: false
+        description: Legacy turn-cancellation flag. It is evaluated only after run target validation succeeds; explicit run_id
+          plus kill_previous is fail-closed if it would create dual target semantics.
       - name: idempotency_key
         required: false
         schema:
@@ -7711,6 +7763,10 @@ api_specification:
           additionalProperties: false
           required:
           - ok
+          - run_id
+          - run_id_resolution
+          - directive_event_id
+          - directive_event_type
           properties:
             ok:
               type: boolean
@@ -7718,9 +7774,25 @@ api_specification:
             response:
               type: string
               description: Optional acknowledgement or error from the agent.
+            run_id:
+              $ref: '#/components/schemas/OpaqueId'
+            run_id_resolution:
+              type: string
+              enum:
+              - specified
+              - inferred_from_active_session
+              - new_run_allocated
+            directive_event_id:
+              $ref: '#/components/schemas/OpaqueId'
+            directive_event_type:
+              type: string
+              const: platform.agent_directive
       errors:
       - AGENT_NOT_FOUND
       - AGENT_NOT_RUNNING
+      - RUN_NOT_FOUND
+      - RUN_ALREADY_TERMINAL
+      - AMBIGUOUS_RUN_TARGET
       - IDEMPOTENCY_CONFLICT
     agent.restart:
       tier: should_have

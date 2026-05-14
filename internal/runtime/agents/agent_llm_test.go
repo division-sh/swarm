@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"swarm/internal/events"
+	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimeauthority "swarm/internal/runtime/authority"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -22,6 +23,21 @@ import (
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
 )
+
+func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
+	return runtimeagentcontrol.BoardDirective{
+		Directive: text,
+		Event: events.Event{
+			ID:          "00000000-0000-0000-0000-000000000101",
+			Type:        events.EventType(runtimeagentcontrol.DirectiveEventType),
+			SourceAgent: "runtime",
+			RunID:       "00000000-0000-0000-0000-000000000201",
+			Payload:     []byte(`{"directive_text":"` + text + `","run_id":"00000000-0000-0000-0000-000000000201","run_id_resolution":"new_run_allocated","source":"test"}`),
+		},
+		RunIDResolution: runtimeagentcontrol.RunResolutionNewRunAllocated,
+		Source:          "test",
+	}
+}
 
 func TestFormatEventForAgent_UsesPostCompositionToolSurface(t *testing.T) {
 	cfg := models.AgentConfig{
@@ -587,7 +603,7 @@ func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
 		nil,
 	)
 
-	_, err := agent.BoardStep(context.Background(), "start a corpus run")
+	_, err := agent.BoardStep(context.Background(), testBoardDirective("start a corpus run"))
 	if err == nil {
 		t.Fatal("expected directive without action to fail")
 	}
@@ -615,7 +631,7 @@ func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
 		[]llm.ToolDefinition{{Name: "emit_scan_requested"}},
 	)
 
-	got, err := agent.BoardStep(context.Background(), "start a corpus run")
+	got, err := agent.BoardStep(context.Background(), testBoardDirective("start a corpus run"))
 	if err != nil {
 		t.Fatalf("BoardStep: %v", err)
 	}
@@ -749,7 +765,8 @@ type directiveFactoryPublishBus struct {
 	events []events.Event
 }
 
-func (b *directiveFactoryPublishBus) Publish(_ context.Context, evt events.Event) error {
+func (b *directiveFactoryPublishBus) Publish(ctx context.Context, evt events.Event) error {
+	_, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
 	b.events = append(b.events, evt)
 	return nil
 }
@@ -820,7 +837,7 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 		},
 	})
 
-	got, err := agent.BoardStep(context.Background(), "start a corpus run")
+	got, err := agent.BoardStep(context.Background(), testBoardDirective("start a corpus run"))
 	if err != nil {
 		t.Fatalf("BoardStep: %v", err)
 	}
@@ -835,6 +852,9 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 	}
 	if len(bus.events) != 1 || string(bus.events[0].Type) != "scan.requested" {
 		t.Fatalf("published events = %#v, want one scan.requested event", bus.events)
+	}
+	if bus.events[0].RunID != "00000000-0000-0000-0000-000000000201" || bus.events[0].ParentEventID != "00000000-0000-0000-0000-000000000101" {
+		t.Fatalf("published event lineage = run:%q parent:%q", bus.events[0].RunID, bus.events[0].ParentEventID)
 	}
 }
 
@@ -882,7 +902,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 		},
 	})
 
-	got, err := agent.BoardStep(context.Background(), "start a corpus run")
+	got, err := agent.BoardStep(context.Background(), testBoardDirective("start a corpus run"))
 	if err != nil {
 		t.Fatalf("BoardStep: %v", err)
 	}

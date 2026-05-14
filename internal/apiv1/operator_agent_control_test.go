@@ -2,11 +2,16 @@ package apiv1
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 	"time"
 
+	"swarm/internal/events"
 	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
 )
@@ -28,15 +33,16 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 		}),
 	})
 
-	directiveBody := agentDirectiveBody("agent-1", "run corpus", true, "idem-directive")
+	directiveRunID := "00000000-0000-0000-0000-000000000901"
+	directiveBody := agentDirectiveBodyWithRun("agent-1", directiveRunID, "run corpus", true, "idem-directive")
 	directive := rpcCall(t, handler, directiveBody)
 	if directive.Error != nil {
 		t.Fatalf("agent.send_directive error = %#v", directive.Error)
 	}
-	if result := asMap(t, directive.Result); result["ok"] != true || result["response"] != "accepted" {
+	if result := asMap(t, directive.Result); result["ok"] != true || result["response"] != "accepted" || result["run_id"] != directiveRunID || result["run_id_resolution"] != runtimeagentcontrol.RunResolutionSpecified {
 		t.Fatalf("agent.send_directive result = %#v", result)
 	}
-	if controller.directiveCalls != 1 || !controller.lastDirective.KillPrevious || controller.lastDirective.Directive != "run corpus" {
+	if controller.directiveCalls != 1 || !controller.lastDirective.KillPrevious || controller.lastDirective.Directive != "run corpus" || controller.lastDirective.RunID != directiveRunID || controller.lastDirective.Source != runtimeagentcontrol.DirectiveSourceV1RPC {
 		t.Fatalf("directive call count/request = %d/%#v, want owner request", controller.directiveCalls, controller.lastDirective)
 	}
 	directiveReplay := rpcCall(t, handler, directiveBody)
@@ -46,7 +52,7 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 	if controller.directiveCalls != 1 {
 		t.Fatalf("directive calls after replay = %d, want 1", controller.directiveCalls)
 	}
-	directiveConflict := rpcCall(t, handler, agentDirectiveBody("agent-1", "different", true, "idem-directive"))
+	directiveConflict := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", directiveRunID, "different", true, "idem-directive"))
 	if directiveConflict.Error == nil {
 		t.Fatal("agent.send_directive idempotency conflict error = nil")
 	}
@@ -139,6 +145,115 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 	}
 }
 
+func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := &store.PostgresStore{DB: db}
+	missingRunID := "00000000-0000-0000-0000-000000000404"
+	terminalRunID := "00000000-0000-0000-0000-000000000405"
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Idempotency: pg,
+			AgentControl: &fakeAgentControlController{
+				errs: map[string]error{
+					"missing": &runtimeagentcontrol.StateError{
+						Err:     runtimeagentcontrol.ErrRunNotFound,
+						AgentID: "agent-1",
+						RunID:   missingRunID,
+					},
+					"terminal": &runtimeagentcontrol.StateError{
+						Err:           runtimeagentcontrol.ErrRunAlreadyTerminal,
+						AgentID:       "agent-1",
+						RunID:         terminalRunID,
+						CurrentStatus: "completed",
+					},
+					"ambiguous": &runtimeagentcontrol.StateError{
+						Err:     runtimeagentcontrol.ErrAmbiguousRunTarget,
+						AgentID: "agent-1",
+						ActiveSessions: []runtimeagentcontrol.ActiveSessionTarget{{
+							SessionID: "00000000-0000-0000-0000-000000000501",
+							RunID:     "00000000-0000-0000-0000-000000000601",
+						}},
+					},
+				},
+			},
+		}),
+	})
+
+	cases := []struct {
+		name string
+		body string
+		code string
+	}{
+		{"missing", agentDirectiveBodyWithRun("agent-1", missingRunID, "missing", false, ""), RunNotFoundCode},
+		{"terminal", agentDirectiveBodyWithRun("agent-1", terminalRunID, "terminal", false, ""), RunAlreadyTerminalCode},
+		{"ambiguous", agentDirectiveBody("agent-1", "ambiguous", false, ""), AmbiguousRunTargetCode},
+	}
+	for _, tc := range cases {
+		resp := rpcCall(t, handler, tc.body)
+		if resp.Error == nil {
+			t.Fatalf("%s error = nil", tc.name)
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != tc.code {
+			t.Fatalf("%s data = %#v, want %s", tc.name, data, tc.code)
+		}
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 0 {
+		t.Fatalf("idempotency rows after run target errors = %d, want 0", count)
+	}
+}
+
+func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := &store.PostgresStore{DB: db}
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	agent := &directiveIntegrationAgent{id: "agent-1"}
+	manager := runtimemanager.NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return agent, nil
+	}, pg)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Idempotency:  pg,
+			AgentControl: manager,
+		}),
+	})
+
+	body := agentDirectiveBody("agent-1", "run corpus", false, "idem-directive-integration")
+	first := rpcCall(t, handler, body)
+	if first.Error != nil {
+		t.Fatalf("first directive error = %#v", first.Error)
+	}
+	replay := rpcCall(t, handler, body)
+	if replay.Error != nil {
+		t.Fatalf("replay directive error = %#v", replay.Error)
+	}
+	if agent.calls != 1 {
+		t.Fatalf("BoardStep calls = %d, want 1", agent.calls)
+	}
+	if count := countDirectiveEvents(t, db); count != 1 {
+		t.Fatalf("platform.agent_directive rows = %d, want 1", count)
+	}
+	conflict := rpcCall(t, handler, agentDirectiveBody("agent-1", "different", false, "idem-directive-integration"))
+	if conflict.Error == nil {
+		t.Fatal("conflict error = nil")
+	}
+	if agent.calls != 1 {
+		t.Fatalf("BoardStep calls after conflict = %d, want 1", agent.calls)
+	}
+	if count := countDirectiveEvents(t, db); count != 1 {
+		t.Fatalf("platform.agent_directive rows after conflict = %d, want 1", count)
+	}
+}
+
 func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -203,13 +318,50 @@ type fakeAgentControlController struct {
 	lastDirective     runtimeagentcontrol.SendDirectiveRequest
 }
 
+type directiveIntegrationAgent struct {
+	id    string
+	calls int
+}
+
+func (a *directiveIntegrationAgent) ID() string                      { return a.id }
+func (*directiveIntegrationAgent) Type() string                      { return "stub" }
+func (*directiveIntegrationAgent) Subscriptions() []events.EventType { return nil }
+func (*directiveIntegrationAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
+	return nil, nil
+}
+func (a *directiveIntegrationAgent) BoardStep(_ context.Context, directive runtimeagentcontrol.BoardDirective) (string, error) {
+	a.calls++
+	if err := runtimeagentcontrol.ValidateBoardDirective(directive); err != nil {
+		return "", err
+	}
+	return "accepted", nil
+}
+
 func (c *fakeAgentControlController) SendDirective(_ context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
 	c.directiveCalls++
 	c.lastDirective = req
+	if err := c.errs[req.Directive]; err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
 	if err := c.errs["agent.send_directive"]; err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	return runtimeagentcontrol.SendDirectiveResult{AgentID: req.AgentID, Response: c.directiveResponse}, nil
+	runID := req.RunID
+	if runID == "" {
+		runID = "00000000-0000-0000-0000-000000000902"
+	}
+	mode := runtimeagentcontrol.RunResolutionSpecified
+	if req.RunID == "" {
+		mode = runtimeagentcontrol.RunResolutionNewRunAllocated
+	}
+	return runtimeagentcontrol.SendDirectiveResult{
+		AgentID:            req.AgentID,
+		Response:           c.directiveResponse,
+		RunID:              runID,
+		RunIDResolution:    mode,
+		DirectiveEventID:   "00000000-0000-0000-0000-000000000903",
+		DirectiveEventType: runtimeagentcontrol.DirectiveEventType,
+	}, nil
 }
 
 func (c *fakeAgentControlController) Restart(_ context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
@@ -240,4 +392,20 @@ func agentDirectiveBody(agentID, directive string, killPrevious bool, idempotenc
 		return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"directive":%q,"kill_previous":%t}}`, agentID, directive, killPrevious)
 	}
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"directive":%q,"kill_previous":%t,"idempotency_key":%q}}`, agentID, directive, killPrevious, idempotencyKey)
+}
+
+func agentDirectiveBodyWithRun(agentID, runID, directive string, killPrevious bool, idempotencyKey string) string {
+	if idempotencyKey == "" {
+		return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"run_id":%q,"directive":%q,"kill_previous":%t}}`, agentID, runID, directive, killPrevious)
+	}
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"run_id":%q,"directive":%q,"kill_previous":%t,"idempotency_key":%q}}`, agentID, runID, directive, killPrevious, idempotencyKey)
+}
+
+func countDirectiveEvents(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'platform.agent_directive'`).Scan(&count); err != nil {
+		t.Fatalf("count directive events: %v", err)
+	}
+	return count
 }
