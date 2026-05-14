@@ -13,6 +13,7 @@ import (
 const runClearTestBundleFingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 type runClearConfig struct {
+	mode             string
 	apiToken         string
 	directiveAgent   string
 	directiveMessage string
@@ -165,6 +166,68 @@ func TestRunClear_DoesNotStartRunWhenHealthCheckIsNotReady(t *testing.T) {
 	}
 }
 
+func TestRunClear_ResetDevDoesNotStartRunOrDirective(t *testing.T) {
+	result := runRunClear(t, runClearConfig{mode: "reset-dev"})
+
+	if got := strings.TrimSpace(result.builtBinaryPath); got == "" {
+		t.Fatal("expected reset-dev to build a swarm binary")
+	}
+	if got := strings.TrimSpace(result.rpcBody); got != "" {
+		t.Fatalf("run.start body = %q, want no run.start in reset-dev", got)
+	}
+	if got := strings.TrimSpace(result.directiveBody); got != "" {
+		t.Fatalf("directive body = %q, want no directive in reset-dev", got)
+	}
+	if health := decodeJSONRPCBody(t, result.healthBody); health.Method != "health.check" {
+		t.Fatalf("health body = %#v, want health.check", health)
+	}
+}
+
+func TestRunClear_RunCorpusStartsOnlyCorpusRun(t *testing.T) {
+	const explicitAPIToken = "api-explicit-token"
+	result := runRunClear(t, runClearConfig{
+		mode:     "run-corpus",
+		apiToken: explicitAPIToken,
+	})
+
+	if got := strings.TrimSpace(result.builtBinaryPath); got != "" {
+		t.Fatalf("built binary path = %q, want no build in run-corpus", got)
+	}
+	if got := strings.TrimSpace(result.directiveBody); got != "" {
+		t.Fatalf("directive body = %q, want no directive in run-corpus", got)
+	}
+	if !strings.Contains(result.rpcHeaders, "Authorization: Bearer "+explicitAPIToken) {
+		t.Fatalf("run.start headers = %q, want explicit API token", result.rpcHeaders)
+	}
+	start := decodeJSONRPCBody(t, result.rpcBody)
+	if start.Method != "run.start" {
+		t.Fatalf("run.start body = %#v, want run.start", start)
+	}
+}
+
+func TestRunClear_RunClearRejectsHiddenDirectiveEnv(t *testing.T) {
+	result, err := runRunClearResult(t, runClearConfig{
+		directiveAgent:   "agent-7",
+		directiveMessage: "hello from test",
+	})
+
+	if err == nil {
+		t.Fatal("expected run-clear with DIRECTIVE_* to fail closed")
+	}
+	if !strings.Contains(result.stdout, "DIRECTIVE_AGENT/DIRECTIVE_MESSAGE no longer change run-clear; use run-clear-directed.") {
+		t.Fatalf("stdout = %q, want migration message", result.stdout)
+	}
+	if got := strings.TrimSpace(result.rpcBody); got != "" {
+		t.Fatalf("run.start body = %q, want no run.start on rejected hidden directive path", got)
+	}
+	if got := strings.TrimSpace(result.directiveBody); got != "" {
+		t.Fatalf("directive body = %q, want no directive on rejected hidden directive path", got)
+	}
+	if got := strings.TrimSpace(result.builtBinaryPath); got != "" {
+		t.Fatalf("built binary path = %q, want no reset/start on rejected hidden directive path", got)
+	}
+}
+
 func TestRunClear_BuildsAndLaunchesBinaryDirectly(t *testing.T) {
 	result := runRunClear(t, runClearConfig{})
 
@@ -206,15 +269,16 @@ func TestRunClear_DoesNotTreatLauncherStateChangeAsStartupFailure(t *testing.T) 
 func TestRunClear_UsesV1RPCForAgentDirective(t *testing.T) {
 	const explicitAPIToken = "api-explicit-token"
 	result := runRunClear(t, runClearConfig{
+		mode:             "run-directive",
 		apiToken:         explicitAPIToken,
 		directiveAgent:   "agent-7",
 		directiveMessage: "hello from test",
 	})
 
-	if got := strings.TrimSpace(result.apiToken); got != explicitAPIToken {
-		t.Fatalf("api token = %q, want %q", got, explicitAPIToken)
-	}
 	wantHeader := "Authorization: Bearer " + explicitAPIToken
+	if got := strings.TrimSpace(result.rpcBody); got != "" {
+		t.Fatalf("run.start body = %q, want no run.start in directive mode", got)
+	}
 	if !strings.Contains(result.directiveHeaders, wantHeader) {
 		t.Fatalf("directive headers = %q, want %q", result.directiveHeaders, wantHeader)
 	}
@@ -240,11 +304,69 @@ func TestRunClear_UsesV1RPCForAgentDirective(t *testing.T) {
 	if body.Params["directive"] != "hello from test" {
 		t.Fatalf("directive params = %#v, want directive message", body.Params)
 	}
-	if body.Params["kill_previous"] != true {
-		t.Fatalf("directive params = %#v, want kill_previous true", body.Params)
+	if _, ok := body.Params["kill_previous"]; ok {
+		t.Fatalf("directive params = %#v, want no kill_previous", body.Params)
 	}
 	if _, ok := body.Params["message"]; ok {
 		t.Fatalf("directive params = %#v, want no legacy message field", body.Params)
+	}
+}
+
+func TestRunClear_RunClearDirectedResetsAndSendsDirectiveOnly(t *testing.T) {
+	const explicitAPIToken = "api-explicit-token"
+	result := runRunClear(t, runClearConfig{
+		mode:             "run-clear-directed",
+		apiToken:         explicitAPIToken,
+		directiveAgent:   "agent-7",
+		directiveMessage: "hello from test",
+	})
+
+	if got := strings.TrimSpace(result.builtBinaryPath); got == "" {
+		t.Fatal("expected run-clear-directed to build a swarm binary")
+	}
+	if got := strings.TrimSpace(result.rpcBody); got != "" {
+		t.Fatalf("run.start body = %q, want no run.start in run-clear-directed", got)
+	}
+	body := decodeJSONRPCBody(t, result.directiveBody)
+	if body.Method != "agent.send_directive" {
+		t.Fatalf("directive body = %#v, want agent.send_directive", body)
+	}
+	if _, ok := body.Params["kill_previous"]; ok {
+		t.Fatalf("directive params = %#v, want no kill_previous", body.Params)
+	}
+}
+
+func TestRunClear_RunDirectiveRequiresExplicitTargetAndMessage(t *testing.T) {
+	result, err := runRunClearResult(t, runClearConfig{
+		mode:     "run-directive",
+		apiToken: "api-explicit-token",
+	})
+
+	if err == nil {
+		t.Fatal("expected missing directive target/message to fail")
+	}
+	if !strings.Contains(result.stdout, "DIRECTIVE_AGENT and DIRECTIVE_MESSAGE are required for run-directive.") {
+		t.Fatalf("stdout = %q, want missing directive message", result.stdout)
+	}
+	if got := strings.TrimSpace(result.healthBody); got != "" {
+		t.Fatalf("health body = %q, want no readiness probe before directive arg validation", got)
+	}
+}
+
+func TestRunClearMakefileDefinesSplitTargets(t *testing.T) {
+	makefilePath := filepath.Join(filepath.Dir(testScriptDir(t)), "Makefile")
+	data, err := os.ReadFile(makefilePath)
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	makefile := string(data)
+	for _, target := range []string{"reset-dev:", "run-corpus:", "run-directive:", "run-clear:", "run-clear-directed:"} {
+		if !strings.Contains(makefile, "\n"+target) {
+			t.Fatalf("Makefile missing target %s", target)
+		}
+	}
+	if !strings.Contains(makefile, "./scripts/run_clear.sh run-clear-directed") {
+		t.Fatalf("Makefile = %q, want run-clear-directed script mode", makefile)
 	}
 }
 
@@ -346,6 +468,7 @@ func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error)
 	binDir := t.TempDir()
 	logFile := filepath.Join(t.TempDir(), "swarm.log")
 	pidFile := filepath.Join(t.TempDir(), "swarm.pid")
+	tokenFile := filepath.Join(t.TempDir(), "swarm.token")
 	operatorTokenSink := filepath.Join(t.TempDir(), "operator-token.txt")
 	apiTokenSink := filepath.Join(t.TempDir(), "api-token.txt")
 	builderTokenSink := filepath.Join(t.TempDir(), "builder-token.txt")
@@ -619,7 +742,11 @@ fi
 printf '{}'
 `)
 
-	cmd := exec.Command("bash", filepath.Join(scriptDir, "run_clear.sh"))
+	args := []string{filepath.Join(scriptDir, "run_clear.sh")}
+	if cfg.mode != "" {
+		args = append(args, cfg.mode)
+	}
+	cmd := exec.Command("bash", args...)
 	cmd.Env = append(filteredEnv(
 		"SWARM_OPERATOR_AUTH_TOKEN",
 		"SWARM_API_TOKEN",
@@ -664,6 +791,7 @@ printf '{}'
 		"BINARY_PATH=" + filepath.Join(t.TempDir(), "swarm"),
 		"LOG_FILE=" + logFile,
 		"PID_FILE=" + pidFile,
+		"TOKEN_FILE=" + tokenFile,
 		"START_TIMEOUT=" + defaultString(cfg.startTimeout, "1"),
 	}...)
 	if cfg.apiToken != "" {
@@ -695,15 +823,15 @@ printf '{}'
 
 	return runClearResult{
 		stdout:              string(out),
-		apiToken:            readFileTrimmed(t, apiTokenSink),
-		operatorToken:       readFileTrimmed(t, operatorTokenSink),
-		builderToken:        readFileTrimmed(t, builderTokenSink),
-		hostGatewayURL:      readFileTrimmed(t, hostGatewayURLSink),
-		containerGatewayURL: readFileTrimmed(t, containerGatewayURLSink),
-		builtBinaryPath:     readFileTrimmed(t, goBuildOutputSink),
-		launchedBinaryPath:  readFileTrimmed(t, pythonBinaryPathSink),
-		launchedHealthAddr:  readFileTrimmed(t, pythonHealthAddrSink),
-		launchedCommand:     readFileTrimmed(t, pythonCommandSink),
+		apiToken:            readFileTrimmedOptional(t, apiTokenSink),
+		operatorToken:       readFileTrimmedOptional(t, operatorTokenSink),
+		builderToken:        readFileTrimmedOptional(t, builderTokenSink),
+		hostGatewayURL:      readFileTrimmedOptional(t, hostGatewayURLSink),
+		containerGatewayURL: readFileTrimmedOptional(t, containerGatewayURLSink),
+		builtBinaryPath:     readFileTrimmedOptional(t, goBuildOutputSink),
+		launchedBinaryPath:  readFileTrimmedOptional(t, pythonBinaryPathSink),
+		launchedHealthAddr:  readFileTrimmedOptional(t, pythonHealthAddrSink),
+		launchedCommand:     readFileTrimmedOptional(t, pythonCommandSink),
 		healthHeaders:       readFileTrimmedOptional(t, healthHeadersSink),
 		healthBody:          readFileTrimmedOptional(t, healthBodySink),
 		healthURL:           readFileTrimmedOptional(t, healthURLSink),

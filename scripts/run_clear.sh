@@ -22,8 +22,10 @@ SWARM_DB_NAME="${SWARM_DB_NAME:-swarm}"
 SWARM_DB_USER="${SWARM_DB_USER:-postgres}"
 SWARM_DB_PASSWORD="${SWARM_DB_PASSWORD:-postgres}"
 
+MODE="${1:-run-clear}"
 LOG_FILE="${LOG_FILE:-/tmp/swarm-empire.log}"
 PID_FILE="${PID_FILE:-/tmp/swarm-empire.pid}"
+TOKEN_FILE="${TOKEN_FILE:-/tmp/swarm-empire.token}"
 BINARY_PATH="${BINARY_PATH:-/tmp/swarm-empire-bin/swarm}"
 START_TIMEOUT="${START_TIMEOUT:-60}"
 
@@ -33,7 +35,7 @@ CORPUS_PATH="${CORPUS_PATH:-/data/test-signals-25.jsonl}"
 CORPUS_GEOGRAPHY="${CORPUS_GEOGRAPHY:-US}"
 RUN_CLEAR_INPUT_EVENT="${RUN_CLEAR_INPUT_EVENT:-scan.corpus_file_requested}"
 RUN_CLEAR_INPUT_PAYLOAD_JSON="${RUN_CLEAR_INPUT_PAYLOAD_JSON:-}"
-SWARM_API_TOKEN="${SWARM_API_TOKEN:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
+SWARM_API_TOKEN="${SWARM_API_TOKEN:-}"
 if [[ -n "${SWARM_TOOL_GATEWAY_URL:-}" && -n "${SWARM_TOOL_GATEWAY_CONTAINER_URL:-}" ]]; then
   SWARM_TOOL_GATEWAY_URL="${SWARM_TOOL_GATEWAY_URL}"
   SWARM_TOOL_GATEWAY_CONTAINER_URL="${SWARM_TOOL_GATEWAY_CONTAINER_URL}"
@@ -42,9 +44,36 @@ else
   SWARM_TOOL_GATEWAY_CONTAINER_URL="http://host.docker.internal:${HEALTH_PORT}"
 fi
 
-export SWARM_API_TOKEN
 export SWARM_TOOL_GATEWAY_URL
 export SWARM_TOOL_GATEWAY_CONTAINER_URL
+
+load_persisted_api_token() {
+  if [[ -n "${SWARM_API_TOKEN}" ]]; then
+    return
+  fi
+  if [[ -f "${TOKEN_FILE}" ]]; then
+    SWARM_API_TOKEN="$(tr -d '[:space:]' < "${TOKEN_FILE}")"
+  fi
+}
+
+ensure_api_token_for_reset() {
+  load_persisted_api_token
+  if [[ -z "${SWARM_API_TOKEN}" ]]; then
+    SWARM_API_TOKEN="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  fi
+  mkdir -p "$(dirname "${TOKEN_FILE}")"
+  printf '%s\n' "${SWARM_API_TOKEN}" > "${TOKEN_FILE}"
+  export SWARM_API_TOKEN
+}
+
+ensure_api_token_for_existing_runtime() {
+  load_persisted_api_token
+  if [[ -z "${SWARM_API_TOKEN}" ]]; then
+    echo "SWARM_API_TOKEN is required for ${MODE}; run reset-dev first or set SWARM_API_TOKEN."
+    exit 2
+  fi
+  export SWARM_API_TOKEN
+}
 
 kill_swarm_processes() {
   local pids=""
@@ -82,62 +111,6 @@ kill_swarm_processes() {
   fi
 }
 
-echo "Stopping local Swarm processes..."
-kill_swarm_processes
-
-echo "Stopping running Docker containers..."
-container_ids="$(docker ps -q 2>/dev/null || true)"
-if [[ -n "${container_ids}" ]]; then
-  docker stop ${container_ids} >/dev/null
-fi
-
-echo "Clearing database ${SWARM_DB_NAME}..."
-PGPASSWORD="${SWARM_DB_PASSWORD}" psql \
-  -h "${SWARM_DB_HOST}" \
-  -p "${SWARM_DB_PORT}" \
-  -U "${SWARM_DB_USER}" \
-  -d "${SWARM_DB_NAME}" \
-  -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
-DO $$
-DECLARE r RECORD;
-BEGIN
-  FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-    EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
-  END LOOP;
-END $$;
-SQL
-
-echo "Building Swarm binary at ${BINARY_PATH}..."
-mkdir -p "$(dirname "${BINARY_PATH}")"
-go build -o "${BINARY_PATH}" ./cmd/swarm
-
-echo "Starting Swarm with contracts ${CONTRACTS_ROOT}..."
-: > "${LOG_FILE}"
-launcher_pid="$(
-  LOG_FILE="${LOG_FILE}" BINARY_PATH="${BINARY_PATH}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" SWARM_API_TOKEN="${SWARM_API_TOKEN}" python3 - <<'PY'
-import os
-import subprocess
-import sys
-
-log_file = os.environ["LOG_FILE"]
-binary_path = os.environ["BINARY_PATH"]
-contracts_root = os.environ["CONTRACTS_ROOT"]
-health_addr = os.environ["HEALTH_ADDR"]
-
-with open(os.devnull, "rb", buffering=0) as devnull, open(log_file, "ab", buffering=0) as out:
-    proc = subprocess.Popen(
-        [binary_path, "serve", "--contracts", contracts_root, "--health-addr", health_addr],
-        stdin=devnull,
-        stdout=out,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        close_fds=True,
-    )
-print(proc.pid)
-PY
-)"
-echo "${launcher_pid}" > "${PID_FILE}"
-
 launcher_process_state() {
   local pid="${1:-}"
   [[ -n "${pid}" ]] || return 1
@@ -155,8 +128,6 @@ launcher_process_identity() {
   fi
   printf '%s\t%s\n' "${start}" "${command}"
 }
-
-launcher_identity="$(launcher_process_identity "${launcher_pid}" || true)"
 
 launcher_exited_before_ready() {
   local pid="${1:-}"
@@ -183,71 +154,185 @@ launcher_exited_before_ready() {
   return 1
 }
 
-ready=0
 bundle_fingerprint=""
-api_health_body='{"jsonrpc":"2.0","id":"run-clear-health","method":"health.check","params":{}}'
-for _ in $(seq 1 "${START_TIMEOUT}"); do
-  if launcher_exited_before_ready "${launcher_pid}" "${launcher_identity}"; then
-    echo "Swarm exited before becoming ready. Current log:"
+
+wait_for_ready() {
+  local launcher_pid="${1:-}"
+  local launcher_identity="${2:-}"
+  local ready=0
+  local api_health_body='{"jsonrpc":"2.0","id":"run-clear-health","method":"health.check","params":{}}'
+  for _ in $(seq 1 "${START_TIMEOUT}"); do
+    if [[ -n "${launcher_pid}" ]] && launcher_exited_before_ready "${launcher_pid}" "${launcher_identity}"; then
+      echo "Swarm exited before becoming ready. Current log:"
+      tail -n 200 "${LOG_FILE}"
+      exit 1
+    fi
+    health_code="$(curl -s -o /tmp/swarm-healthz.json -w '%{http_code}' "${HEALTH_URL}" || true)"
+    ready_code="$(curl -s -o /tmp/swarm-readyz.json -w '%{http_code}' "${READY_URL}" || true)"
+    api_code="$(curl -s -o /tmp/swarm-api-health.json -w '%{http_code}' "${API_RPC_URL}" \
+      -H 'content-type: application/json' \
+      -H "Authorization: Bearer ${SWARM_API_TOKEN}" \
+      --data-binary "${api_health_body}" || true)"
+    if [[ "${health_code}" == "200" && "${ready_code}" == "200" && "${api_code}" == "200" ]]; then
+      bundle_fingerprint="$(ruby -rjson -e 'doc = JSON.parse(File.read(ARGV[0])); abort("health.check returned error") if doc["error"]; result = doc["result"] || {}; abort("health.check not ready") unless result["ready"] == true && result["db_ok"] == true && result["runtime_ok"] == true; fingerprint = result.dig("bundle", "fingerprint").to_s; abort("health.check missing bundle fingerprint") if fingerprint.empty?; print fingerprint' /tmp/swarm-api-health.json 2>/dev/null || true)"
+      if [[ -n "${bundle_fingerprint}" ]]; then
+        ready=1
+        break
+      fi
+    fi
+    sleep 1
+  done
+
+  if [[ "${ready}" -ne 1 ]]; then
+    echo "Swarm failed to become ready. Current log:"
     tail -n 200 "${LOG_FILE}"
     exit 1
   fi
-  health_code="$(curl -s -o /tmp/swarm-healthz.json -w '%{http_code}' "${HEALTH_URL}" || true)"
-  ready_code="$(curl -s -o /tmp/swarm-readyz.json -w '%{http_code}' "${READY_URL}" || true)"
-  api_code="$(curl -s -o /tmp/swarm-api-health.json -w '%{http_code}' "${API_RPC_URL}" \
+
+  serving_pid="$(lsof -tiTCP:${HEALTH_PORT} -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+  if [[ -n "${serving_pid}" ]]; then
+    echo "${serving_pid}" > "${PID_FILE}"
+  fi
+
+  echo "Swarm ready at http://${HOST_HTTP_ADDR}"
+}
+
+reset_dev() {
+  ensure_api_token_for_reset
+
+  echo "Stopping local Swarm processes..."
+  kill_swarm_processes
+
+  echo "Stopping running Docker containers..."
+  container_ids="$(docker ps -q 2>/dev/null || true)"
+  if [[ -n "${container_ids}" ]]; then
+    docker stop ${container_ids} >/dev/null
+  fi
+
+  echo "Clearing database ${SWARM_DB_NAME}..."
+  PGPASSWORD="${SWARM_DB_PASSWORD}" psql \
+    -h "${SWARM_DB_HOST}" \
+    -p "${SWARM_DB_PORT}" \
+    -U "${SWARM_DB_USER}" \
+    -d "${SWARM_DB_NAME}" \
+    -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+    EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
+  END LOOP;
+END $$;
+SQL
+
+  echo "Building Swarm binary at ${BINARY_PATH}..."
+  mkdir -p "$(dirname "${BINARY_PATH}")"
+  go build -o "${BINARY_PATH}" ./cmd/swarm
+
+  echo "Starting Swarm with contracts ${CONTRACTS_ROOT}..."
+  : > "${LOG_FILE}"
+  launcher_pid="$(
+    LOG_FILE="${LOG_FILE}" BINARY_PATH="${BINARY_PATH}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" SWARM_API_TOKEN="${SWARM_API_TOKEN}" python3 - <<'PY'
+import os
+import subprocess
+
+log_file = os.environ["LOG_FILE"]
+binary_path = os.environ["BINARY_PATH"]
+contracts_root = os.environ["CONTRACTS_ROOT"]
+health_addr = os.environ["HEALTH_ADDR"]
+
+with open(os.devnull, "rb", buffering=0) as devnull, open(log_file, "ab", buffering=0) as out:
+    proc = subprocess.Popen(
+        [binary_path, "serve", "--contracts", contracts_root, "--health-addr", health_addr],
+        stdin=devnull,
+        stdout=out,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+print(proc.pid)
+PY
+)"
+  echo "${launcher_pid}" > "${PID_FILE}"
+  launcher_identity="$(launcher_process_identity "${launcher_pid}" || true)"
+  wait_for_ready "${launcher_pid}" "${launcher_identity}"
+}
+
+start_corpus_run() {
+  ensure_api_token_for_existing_runtime
+  if [[ -z "${bundle_fingerprint}" ]]; then
+    wait_for_ready
+  fi
+
+  run_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  echo "Starting default corpus run ${run_id}..."
+  if [[ -z "${RUN_CLEAR_INPUT_PAYLOAD_JSON}" ]]; then
+    if [[ "${RUN_CLEAR_INPUT_EVENT}" != "scan.corpus_file_requested" ]]; then
+      echo "RUN_CLEAR_INPUT_PAYLOAD_JSON is required when RUN_CLEAR_INPUT_EVENT is ${RUN_CLEAR_INPUT_EVENT}"
+      exit 1
+    fi
+    RUN_CLEAR_INPUT_PAYLOAD_JSON="$(ruby -rjson -e 'print JSON.generate({request: {geography: ARGV[0]}, corpus_path: ARGV[1]})' "${CORPUS_GEOGRAPHY}" "${CORPUS_PATH}")"
+  fi
+  run_start_body="$(ruby -rjson -e 'print JSON.generate({jsonrpc: "2.0", id: "run-clear", method: "run.start", params: {run_id: ARGV[0], event_name: ARGV[1], payload: JSON.parse(ARGV[2]), bundle_ref: {fingerprint: ARGV[3]}, idempotency_key: "run-clear:#{ARGV[0]}"}})' "${run_id}" "${RUN_CLEAR_INPUT_EVENT}" "${RUN_CLEAR_INPUT_PAYLOAD_JSON}" "${bundle_fingerprint}")"
+  run_response="$(curl -sS "${API_RPC_URL}" \
     -H 'content-type: application/json' \
     -H "Authorization: Bearer ${SWARM_API_TOKEN}" \
-    --data-binary "${api_health_body}" || true)"
-  if [[ "${health_code}" == "200" && "${ready_code}" == "200" && "${api_code}" == "200" ]]; then
-    bundle_fingerprint="$(ruby -rjson -e 'doc = JSON.parse(File.read(ARGV[0])); abort("health.check returned error") if doc["error"]; result = doc["result"] || {}; abort("health.check not ready") unless result["ready"] == true && result["db_ok"] == true && result["runtime_ok"] == true; fingerprint = result.dig("bundle", "fingerprint").to_s; abort("health.check missing bundle fingerprint") if fingerprint.empty?; print fingerprint' /tmp/swarm-api-health.json 2>/dev/null || true)"
-    if [[ -n "${bundle_fingerprint}" ]]; then
-      ready=1
-      break
-    fi
-  fi
-  sleep 1
-done
-
-if [[ "${ready}" -ne 1 ]]; then
-  echo "Swarm failed to become ready. Current log:"
-  tail -n 200 "${LOG_FILE}"
-  exit 1
-fi
-
-serving_pid="$(lsof -tiTCP:${HEALTH_PORT} -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
-if [[ -n "${serving_pid}" ]]; then
-  echo "${serving_pid}" > "${PID_FILE}"
-fi
-
-echo "Swarm ready at http://${HOST_HTTP_ADDR}"
-
-run_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-echo "Starting default corpus run ${run_id}..."
-if [[ -z "${RUN_CLEAR_INPUT_PAYLOAD_JSON}" ]]; then
-  if [[ "${RUN_CLEAR_INPUT_EVENT}" != "scan.corpus_file_requested" ]]; then
-    echo "RUN_CLEAR_INPUT_PAYLOAD_JSON is required when RUN_CLEAR_INPUT_EVENT is ${RUN_CLEAR_INPUT_EVENT}"
+    --data-binary "${run_start_body}")"
+  echo "${run_response}"
+  if ! ruby -rjson -e 'doc = JSON.parse(STDIN.read); exit 1 if doc["error"]; result = doc["result"] || {}; exit(result["run_id"].to_s == ARGV[0] && result["status"].to_s == "running" ? 0 : 1)' "${run_id}" <<<"${run_response}"; then
+    echo "Corpus run failed to start. Current log:"
+    tail -n 200 "${LOG_FILE}"
     exit 1
   fi
-  RUN_CLEAR_INPUT_PAYLOAD_JSON="$(ruby -rjson -e 'print JSON.generate({request: {geography: ARGV[0]}, corpus_path: ARGV[1]})' "${CORPUS_GEOGRAPHY}" "${CORPUS_PATH}")"
-fi
-run_start_body="$(ruby -rjson -e 'print JSON.generate({jsonrpc: "2.0", id: "run-clear", method: "run.start", params: {run_id: ARGV[0], event_name: ARGV[1], payload: JSON.parse(ARGV[2]), bundle_ref: {fingerprint: ARGV[3]}, idempotency_key: "run-clear:#{ARGV[0]}"}})' "${run_id}" "${RUN_CLEAR_INPUT_EVENT}" "${RUN_CLEAR_INPUT_PAYLOAD_JSON}" "${bundle_fingerprint}")"
-run_response="$(curl -sS "${API_RPC_URL}" \
-  -H 'content-type: application/json' \
-  -H "Authorization: Bearer ${SWARM_API_TOKEN}" \
-  --data-binary "${run_start_body}")"
-echo "${run_response}"
-if ! ruby -rjson -e 'doc = JSON.parse(STDIN.read); exit 1 if doc["error"]; result = doc["result"] || {}; exit(result["run_id"].to_s == ARGV[0] && result["status"].to_s == "running" ? 0 : 1)' "${run_id}" <<<"${run_response}"; then
-  echo "Corpus run failed to start. Current log:"
-  tail -n 200 "${LOG_FILE}"
-  exit 1
-fi
+}
 
-if [[ -n "${DIRECTIVE_AGENT}" && -n "${DIRECTIVE_MESSAGE}" ]]; then
+send_directive() {
+  ensure_api_token_for_existing_runtime
+  if [[ -z "${DIRECTIVE_AGENT}" || -z "${DIRECTIVE_MESSAGE}" ]]; then
+    echo "DIRECTIVE_AGENT and DIRECTIVE_MESSAGE are required for ${MODE}."
+    exit 2
+  fi
+  wait_for_ready
+
   echo "Sending directive to ${DIRECTIVE_AGENT}..."
-  directive_body="$(ruby -rjson -e 'print JSON.generate({jsonrpc: "2.0", id: "run-clear-directive", method: "agent.send_directive", params: {agent_id: ARGV[0], directive: ARGV[1], kill_previous: true}})' "${DIRECTIVE_AGENT}" "${DIRECTIVE_MESSAGE}")"
-  curl -sS "http://${HOST_HTTP_ADDR}/v1/rpc" \
+  directive_body="$(ruby -rjson -e 'print JSON.generate({jsonrpc: "2.0", id: "run-clear-directive", method: "agent.send_directive", params: {agent_id: ARGV[0], directive: ARGV[1]}})' "${DIRECTIVE_AGENT}" "${DIRECTIVE_MESSAGE}")"
+  directive_response="$(curl -sS "${API_RPC_URL}" \
     -H 'content-type: application/json' \
     -H "Authorization: Bearer ${SWARM_API_TOKEN}" \
-    --data-binary "${directive_body}"
-  echo
-fi
+    --data-binary "${directive_body}")"
+  echo "${directive_response}"
+  if ! ruby -rjson -e 'doc = JSON.parse(STDIN.read); exit 1 if doc["error"]; result = doc["result"] || {}; exit(result["ok"] == true ? 0 : 1)' <<<"${directive_response}"; then
+    echo "Directive failed. Current log:"
+    tail -n 200 "${LOG_FILE}"
+    exit 1
+  fi
+}
+
+case "${MODE}" in
+  reset-dev)
+    reset_dev
+    ;;
+  run-corpus)
+    start_corpus_run
+    ;;
+  run-directive)
+    send_directive
+    ;;
+  run-clear)
+    if [[ -n "${DIRECTIVE_AGENT}" || -n "${DIRECTIVE_MESSAGE}" ]]; then
+      echo "DIRECTIVE_AGENT/DIRECTIVE_MESSAGE no longer change run-clear; use run-clear-directed."
+      exit 2
+    fi
+    reset_dev
+    start_corpus_run
+    ;;
+  run-clear-directed)
+    reset_dev
+    send_directive
+    ;;
+  *)
+    echo "Unknown run_clear mode: ${MODE}"
+    echo "Supported modes: reset-dev, run-corpus, run-directive, run-clear, run-clear-directed"
+    exit 2
+    ;;
+esac
