@@ -58,6 +58,7 @@ type OperatorEventDelivery struct {
 	DeliveryID     string `json:"delivery_id"`
 	SubscriberType string `json:"subscriber_type"`
 	SubscriberID   string `json:"subscriber_id"`
+	SessionID      string `json:"session_id,omitempty"`
 	Status         string `json:"status"`
 	ReasonCode     string `json:"reason_code,omitempty"`
 	LastError      string `json:"last_error,omitempty"`
@@ -173,7 +174,7 @@ func (s *PostgresStore) requireOperatorObservabilityCapabilities(ctx context.Con
 		},
 		"event_deliveries": {
 			"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id",
-			"status", "retry_count", "reason_code", "last_error", "created_at",
+			"status", "retry_count", "reason_code", "last_error", "active_session_id", "created_at",
 		},
 		"dead_letters": {
 			"dead_letter_id", "original_event_id", "failure_type", "error_message",
@@ -391,6 +392,7 @@ func (s *PostgresStore) loadOperatorEventDeliveries(ctx context.Context, eventID
 			d.delivery_id::text,
 			COALESCE(d.subscriber_type, ''),
 			COALESCE(d.subscriber_id, ''),
+			COALESCE(d.active_session_id::text, ''),
 			COALESCE(d.status, ''),
 			COALESCE(d.reason_code, ''),
 			COALESCE(d.last_error, ''),
@@ -406,7 +408,7 @@ func (s *PostgresStore) loadOperatorEventDeliveries(ctx context.Context, eventID
 	out := []OperatorEventDelivery{}
 	for rows.Next() {
 		var item OperatorEventDelivery
-		if err := rows.Scan(&item.DeliveryID, &item.SubscriberType, &item.SubscriberID, &item.Status, &item.ReasonCode, &item.LastError, &item.RetryCount); err != nil {
+		if err := rows.Scan(&item.DeliveryID, &item.SubscriberType, &item.SubscriberID, &item.SessionID, &item.Status, &item.ReasonCode, &item.LastError, &item.RetryCount); err != nil {
 			return nil, fmt.Errorf("scan operator event delivery: %w", err)
 		}
 		out = append(out, item)

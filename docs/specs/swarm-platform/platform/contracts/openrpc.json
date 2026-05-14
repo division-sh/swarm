@@ -1230,6 +1230,385 @@
       }
     },
     {
+      "name": "event.publish",
+      "description": "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger, and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL.\n\nThe method consumes the same canonical EventBus/store event-publication\nowner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API layer must not re-plan\nsubscribers. This is the canonical primitive; run.start remains only\nas a deprecated wrapper for older callers.\n",
+      "params": [
+        {
+          "name": "bundle_ref",
+          "required": false,
+          "description": "Optional assertion that the server is running the expected boot bundle fingerprint.",
+          "schema": {
+            "$ref": "#/components/schemas/BundleRef"
+          }
+        },
+        {
+          "name": "event_name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "payload",
+          "required": true,
+          "schema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        {
+          "name": "run_id",
+          "required": false,
+          "description": "Existing nonterminal run to inject into; if omitted, runtime allocates and starts a new run.",
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "emitter",
+          "required": false,
+          "description": "Optional producer identifier. Defaults to cli-publish:\u003cactor_token_id\u003e.",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/EventPublishResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32003,
+          "message": "Application error: BUNDLE_MISMATCH",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "BUNDLE_MISMATCH",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "boot_fingerprint": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "provided_fingerprint": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  }
+                },
+                "required": [
+                  "provided_fingerprint",
+                  "boot_fingerprint"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32021,
+          "message": "Application error: UNSUPPORTED_BUNDLE_REF",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "UNSUPPORTED_BUNDLE_REF",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32005,
+          "message": "Application error: EVENT_NOT_DECLARED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "EVENT_NOT_DECLARED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "declared_events": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "event_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "event_name"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32013,
+          "message": "Application error: PAYLOAD_VALIDATION_FAILED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "PAYLOAD_VALIDATION_FAILED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "violations": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "field_path": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "rule": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "field_path",
+                        "rule",
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "violations"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32018,
+          "message": "Application error: RUN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32017,
+          "message": "Application error: RUN_ALREADY_TERMINAL",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_ALREADY_TERMINAL",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "current_status": {
+                    "$ref": "#/components/schemas/RunStatus"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "current_status"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32007,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "event.subscribe",
       "description": "Live event stream with the same filter shape as event.list. Filter\nparity is required by the conventions section. Pagination params\n(limit, cursor) and the time-window `until` are NOT accepted here\n— subscriptions deliver everything matching the filter live.\n",
       "params": [
@@ -2683,7 +3062,8 @@
     },
     {
       "name": "run.start",
-      "description": "Start a new run by injecting an event into the runtime bus.\nOptionally declares a bundle_ref by fingerprint; v1 runtime\nrequires the fingerprint to match the orchestrator's boot-time\nbundle (or the bundle_ref to be omitted, in which case the\nboot-time bundle is used). Per-run dynamic bundle loading is\ndeferred (see deferred_namespaces.bundle_lifecycle).\n",
+      "deprecated": true,
+      "description": "Deprecated wrapper over event.publish retained for older Builder/API callers. New clients should call event.publish directly.\nStart a new run by injecting an event into the runtime bus.\nOptionally declares a bundle_ref by fingerprint; v1 runtime\nrequires the fingerprint to match the orchestrator's boot-time\nbundle (or the bundle_ref to be omitted, in which case the\nboot-time bundle is used). Per-run dynamic bundle loading is\ndeferred (see deferred_namespaces.bundle_lifecycle).\n",
       "params": [
         {
           "name": "bundle_ref",
@@ -3790,7 +4170,7 @@
       },
       "BundleRef": {
         "additionalProperties": false,
-        "description": "Bundle reference passed by callers to assert \"I expect the server\nto be running this bundle.\" Identified by content fingerprint,\nNOT server-local filesystem paths — paths cannot be safely\nreferenced by external Phase-2 consumers, and the runtime's\nactual identity check is fingerprint comparison.\n\nv1 runtime requires the fingerprint to match the orchestrator's\nboot-time loaded bundle, or the call fails with BUNDLE_MISMATCH.\nPer-run dynamic bundle loading (a content-addressable bundle\nuploaded or referenced by registry coordinate) is part of the\ndeferred bundle_lifecycle namespace; v1 BundleRef carries\nfingerprint only.\n\nA typical caller flow: call health.check first to read the\nserver's current bundle.fingerprint, then pass the same\nfingerprint in run.start.bundle_ref to assert continuity.\n",
+        "description": "Bundle reference passed by callers to assert \"I expect the server\nto be running this bundle.\" Identified by content fingerprint,\nNOT server-local filesystem paths — paths cannot be safely\nreferenced by external Phase-2 consumers, and the runtime's\nactual identity check is fingerprint comparison.\n\nv1 runtime requires the fingerprint to match the orchestrator's\nboot-time loaded bundle, or the call fails with BUNDLE_MISMATCH.\nPer-run dynamic bundle loading (a content-addressable bundle\nuploaded or referenced by registry coordinate) is part of the\ndeferred bundle_lifecycle namespace; v1 BundleRef carries\nfingerprint only.\n\nA typical caller flow: call health.check first to read the\nserver's current bundle.fingerprint, then pass the same\nfingerprint in event.publish.bundle_ref or run.start.bundle_ref to assert continuity.\n",
         "properties": {
           "fingerprint": {
             "$ref": "#/components/schemas/Sha256Fingerprint"
@@ -4064,6 +4444,9 @@
           "reason_code": {
             "type": "string"
           },
+          "session_id": {
+            "type": "string"
+          },
           "status": {
             "$ref": "#/components/schemas/DeliveryStatus"
           },
@@ -4160,6 +4543,58 @@
             "$ref": "#/components/schemas/SubscriberType"
           }
         },
+        "type": "object"
+      },
+      "EventPublishDelivery": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          },
+          "subscriber_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "subscriber_id",
+          "status",
+          "attempt"
+        ],
+        "type": "object"
+      },
+      "EventPublishResult": {
+        "additionalProperties": false,
+        "properties": {
+          "deliveries": {
+            "description": "Canonical persisted delivery rows for the published event; empty when the declared event has no subscribers.",
+            "items": {
+              "$ref": "#/components/schemas/EventPublishDelivery"
+            },
+            "type": "array"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "new_run_created": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        "required": [
+          "event_id",
+          "run_id",
+          "new_run_created",
+          "deliveries"
+        ],
         "type": "object"
       },
       "HealthCheckResult": {

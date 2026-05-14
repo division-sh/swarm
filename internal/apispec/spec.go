@@ -55,6 +55,7 @@ type MailboxApprovalEventRoute struct {
 
 type Method struct {
 	Tier               string              `yaml:"tier" json:"tier,omitempty"`
+	Deprecated         bool                `yaml:"deprecated,omitempty" json:"deprecated,omitempty"`
 	Description        string              `yaml:"description" json:"description,omitempty"`
 	Scope              Scope               `yaml:"scope" json:"scope"`
 	Idempotency        any                 `yaml:"idempotency,omitempty" json:"idempotency,omitempty"`
@@ -104,6 +105,7 @@ type OpenRPCServer struct {
 
 type OpenRPCMethod struct {
 	Name        string              `json:"name"`
+	Deprecated  bool                `json:"deprecated,omitempty"`
 	Description string              `json:"description,omitempty"`
 	Params      []ContentDescriptor `json:"params"`
 	Result      *ContentDescriptor  `json:"result,omitempty"`
@@ -279,6 +281,7 @@ func GenerateOpenRPC(api *APISpecification) ([]byte, error) {
 		}
 		methods = append(methods, OpenRPCMethod{
 			Name:        methodName,
+			Deprecated:  method.Deprecated,
 			Description: method.Description,
 			Params:      normalizeDescriptors(method.Params),
 			Result:      normalizeDescriptorPointer(method.Result),

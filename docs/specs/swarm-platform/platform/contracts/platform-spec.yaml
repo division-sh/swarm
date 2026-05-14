@@ -5539,7 +5539,7 @@ api_specification:
         description: External webhook/provider events are queueable. While paused, valid signed ingress is persisted as events
           and deduplicated normally, but dispatch is gated until resume.
       - surface: api.event_producing_methods
-        description: Event-producing API/admin surfaces such as run.start and future explicit event-publish APIs are queueable.
+        description: Event-producing API/admin surfaces such as event.publish and deprecated run.start wrapper calls are queueable.
           While paused, they may persist canonical root/input events and lifecycle rows but must not dispatch subscriber work until
           resume.
       - surface: timer.fire
@@ -5595,6 +5595,7 @@ api_specification:
         '
       ttl: 24 hours after first completed response stored.
       mutating_methods:
+      - event.publish
       - run.start
       - run.stop
       - run.pause
@@ -5668,7 +5669,8 @@ api_specification:
         where content is identical.
       algorithm_migration: If a future version migrates to a different hash algorithm, the prefix changes (e.g., `blake3:<hex>`).
         v1 commits to sha256 only.
-      role_in_v1: "fingerprint is the load-bearing bundle identity in v1. BundleRef\n(passed by callers in run.start) carries\
+      role_in_v1: "fingerprint is the load-bearing bundle identity in v1. BundleRef\n(passed by callers in event.publish\
+        \ or deprecated run.start) carries\
         \ fingerprint only \u2014 no\nfilesystem paths. BundleIdentity (returned by health.check)\ncarries fingerprint + workflow_name\
         \ + workflow_version, again\nwithout paths. This makes every API surface that touches bundle\nidentity safely callable\
         \ by external Phase-2 consumers without\nleaking server deployment internals.\n"
@@ -5734,7 +5736,7 @@ api_specification:
           Per-run dynamic bundle loading (a content-addressable bundle\nuploaded or referenced by registry coordinate) is\
           \ part of the\ndeferred bundle_lifecycle namespace; v1 BundleRef carries\nfingerprint only.\n\nA typical caller\
           \ flow: call health.check first to read the\nserver's current bundle.fingerprint, then pass the same\nfingerprint\
-          \ in run.start.bundle_ref to assert continuity.\n"
+          \ in event.publish.bundle_ref or run.start.bundle_ref to assert continuity.\n"
         type: object
         additionalProperties: false
         required:
@@ -6033,12 +6035,51 @@ api_specification:
             $ref: '#/components/schemas/SubscriberType'
           subscriber_id:
             type: string
+          session_id:
+            type: string
           status:
             $ref: '#/components/schemas/DeliveryStatus'
           reason_code:
             type: string
           last_error:
             type: string
+      EventPublishDelivery:
+        type: object
+        additionalProperties: false
+        required:
+        - subscriber_id
+        - status
+        - attempt
+        properties:
+          subscriber_id:
+            type: string
+          session_id:
+            type: string
+          status:
+            $ref: '#/components/schemas/DeliveryStatus'
+          attempt:
+            type: integer
+            minimum: 1
+      EventPublishResult:
+        type: object
+        additionalProperties: false
+        required:
+        - event_id
+        - run_id
+        - new_run_created
+        - deliveries
+        properties:
+          event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          new_run_created:
+            type: boolean
+          deliveries:
+            type: array
+            description: Canonical persisted delivery rows for the published event; empty when the declared event has no subscribers.
+            items:
+              $ref: '#/components/schemas/EventPublishDelivery'
       DeadLetterRecord:
         type: object
         additionalProperties: false
@@ -6999,9 +7040,68 @@ api_specification:
         schema:
           $ref: '#/components/schemas/OkResult'
       errors: []
+    event.publish:
+      tier: should_have
+      description: "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into\
+        \ the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger,\
+        \ and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing\
+        \ or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL.\n\nThe method consumes the same canonical\
+        \ EventBus/store event-publication\nowner used by runtime dispatch. Delivery results are read back from the\npersisted\
+        \ event_deliveries owner; the API layer must not re-plan\nsubscribers. This is the canonical primitive; run.start\
+        \ remains only\nas a deprecated wrapper for older callers.\n"
+      scope:
+        required:
+        - write:runs
+      idempotency: per the convention.
+      params:
+      - name: bundle_ref
+        required: false
+        description: Optional assertion that the server is running the expected boot bundle fingerprint.
+        schema:
+          $ref: '#/components/schemas/BundleRef'
+      - name: event_name
+        required: true
+        schema:
+          type: string
+      - name: payload
+        required: true
+        schema:
+          type: object
+          additionalProperties: true
+      - name: run_id
+        required: false
+        description: Existing nonterminal run to inject into; if omitted, runtime allocates and starts a new run.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: emitter
+        required: false
+        description: Optional producer identifier. Defaults to cli-publish:<actor_token_id>.
+        schema:
+          type: string
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/EventPublishResult'
+      errors:
+      - BUNDLE_MISMATCH
+      - UNSUPPORTED_BUNDLE_REF
+      - EVENT_NOT_DECLARED
+      - PAYLOAD_VALIDATION_FAILED
+      - RUN_NOT_FOUND
+      - RUN_ALREADY_TERMINAL
+      - IDEMPOTENCY_CONFLICT
     run.start:
       tier: must_have
-      description: 'Start a new run by injecting an event into the runtime bus.
+      deprecated: true
+      description: 'Deprecated wrapper over event.publish retained for older Builder/API callers. New clients should call
+        event.publish directly.
+
+        Start a new run by injecting an event into the runtime bus.
 
         Optionally declares a bundle_ref by fingerprint; v1 runtime
 
@@ -8150,8 +8250,9 @@ api_specification:
       - bundle.open
       - bundle.reload
       - bundle.close
-      rationale: "Per-run dynamic bundle loading is deferred. v1 runtime uses\nboot-time bundle configuration; run.start may\
-        \ carry a bundle_ref\nwhose fingerprint must match the boot-time fingerprint, or the\nbundle_ref may be omitted entirely.\
+      rationale: "Per-run dynamic bundle loading is deferred. v1 runtime uses\nboot-time bundle configuration; event.publish\
+        \ and deprecated run.start may\ncarry a bundle_ref whose fingerprint must match the boot-time fingerprint,\nor the\
+        \ bundle_ref may be omitted entirely.\
         \ When dynamic loading lands,\nBundleRef likely gains content-addressable forms (registry\ncoordinate, uploaded content\
         \ hash) \u2014 additive change to the\nBundleRef schema, not a breaking one.\n"
     verify:
@@ -8223,7 +8324,8 @@ api_specification:
         \ auth surface, one token."
     cli_consumer_migration:
       make_run_clear: 'Migrates from legacy `/api/rpc` run.start payloads with builder-token auth to `curl /v1/rpc
-        {method: run.start, params: {bundle_ref?, event_name, payload, idempotency_key?}}` with the unified token.'
+        {method: run.start, params: {bundle_ref?, event_name, payload, idempotency_key?}}` with the unified token. run.start
+        is now a deprecated wrapper over event.publish until the helper moves to the canonical event.publish method.'
       swarm_investigate: "First-slice subcommands map to v1 methods:\n  swarm investigate runs   \u2192 run.list\n  swarm\
         \ investigate run    \u2192 run.diagnose (default), run.get (--no-diagnose)\n  swarm investigate trace  \u2192 run.trace\n\
         \  swarm investigate health \u2192 health.check\nFollow-on subcommands map to event.*, runtime.logs, runtime.incidents,\

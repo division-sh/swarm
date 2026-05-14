@@ -1,0 +1,416 @@
+package apiv1
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeingress "swarm/internal/runtime/ingress"
+	"swarm/internal/runtime/semanticview"
+	"swarm/internal/store"
+	"swarm/internal/testutil"
+)
+
+func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
+	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	defer bus.Unsubscribe("scan-orchestrator")
+	handler := eventPublishTestHandler(t, pg, bus, source)
+	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish")
+
+	published := rpcCall(t, handler, body)
+	if published.Error != nil {
+		t.Fatalf("event.publish error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	runID := stringValue(t, result["run_id"], "run_id")
+	if _, err := uuid.Parse(eventID); err != nil {
+		t.Fatalf("event_id = %q, want UUID", eventID)
+	}
+	if _, err := uuid.Parse(runID); err != nil {
+		t.Fatalf("run_id = %q, want UUID", runID)
+	}
+	if result["new_run_created"] != true {
+		t.Fatalf("new_run_created = %#v, want true", result["new_run_created"])
+	}
+	deliveries := asSlice(t, result["deliveries"])
+	if len(deliveries) != 1 {
+		t.Fatalf("deliveries = %#v, want one persisted delivery", deliveries)
+	}
+	delivery := asMap(t, deliveries[0])
+	if delivery["subscriber_id"] != "scan-orchestrator" || delivery["status"] != "pending" || delivery["attempt"] != float64(1) {
+		t.Fatalf("delivery = %#v, want scan-orchestrator pending attempt 1", delivery)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+		t.Fatalf("scan.requested event count = %d, want 1", count)
+	}
+	assertEventPublishPersistence(t, db, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows = %d, want 1", count)
+	}
+	select {
+	case got := <-ch:
+		if got.ID != eventID {
+			t.Fatalf("delivered event = %s, want %s", got.ID, eventID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for event.publish delivery")
+	}
+
+	replay := rpcCall(t, handler, body)
+	if replay.Error != nil {
+		t.Fatalf("event.publish replay error = %#v", replay.Error)
+	}
+	replayResult := asMap(t, replay.Result)
+	if replayResult["event_id"] != eventID || replayResult["run_id"] != runID {
+		t.Fatalf("event.publish replay result = %#v, want original event/run", replayResult)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
+	}
+
+	conflict := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"changed"}`, "", "idem-publish"))
+	if conflict.Error == nil {
+		t.Fatal("event.publish idempotency conflict error = nil")
+	}
+	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
+		t.Fatalf("event.publish conflict data = %#v", data)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+		t.Fatalf("scan.requested event count after conflict = %d, want 1", count)
+	}
+}
+
+func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
+	handler := eventPublishTestHandler(t, pg, bus, source)
+
+	initial := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"first"}`, "", "idem-new-run"))
+	if initial.Error != nil {
+		t.Fatalf("initial event.publish error = %#v", initial.Error)
+	}
+	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
+
+	targeted := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"second"}`, "operator-test", "idem-existing-run"))
+	if targeted.Error != nil {
+		t.Fatalf("targeted event.publish error = %#v", targeted.Error)
+	}
+	targetedResult := asMap(t, targeted.Result)
+	if targetedResult["run_id"] != runID || targetedResult["new_run_created"] != false {
+		t.Fatalf("targeted result = %#v, want existing run", targetedResult)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+		t.Fatalf("scan.requested events after targeted publish = %d, want 2", count)
+	}
+
+	missingRunID := uuid.NewString()
+	missing := rpcCall(t, handler, eventPublishBody(missingRunID, runStartTestFingerprint, "scan.requested", `{"topic":"missing"}`, "", "idem-missing-run"))
+	if missing.Error == nil {
+		t.Fatal("missing run event.publish error = nil")
+	}
+	if data := asMap(t, missing.Error.Data); data["code"] != RunNotFoundCode {
+		t.Fatalf("missing run data = %#v, want %s", data, RunNotFoundCode)
+	}
+
+	if _, err := db.Exec(`UPDATE runs SET status = 'completed', ended_at = now() WHERE run_id = $1::uuid`, runID); err != nil {
+		t.Fatalf("mark run terminal: %v", err)
+	}
+	terminal := rpcCall(t, handler, eventPublishBody(runID, runStartTestFingerprint, "scan.requested", `{"topic":"terminal"}`, "", "idem-terminal-run"))
+	if terminal.Error == nil {
+		t.Fatal("terminal run event.publish error = nil")
+	}
+	if data := asMap(t, terminal.Error.Data); data["code"] != RunAlreadyTerminalCode {
+		t.Fatalf("terminal run data = %#v, want %s", data, RunAlreadyTerminalCode)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+		t.Fatalf("scan.requested events after failed targets = %d, want 2", count)
+	}
+}
+
+func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
+	t.Run("bundle mismatch", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := eventPublishTestHandler(t, pg, bus, source)
+
+		resp := rpcCall(t, handler, eventPublishBody("", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "scan.requested", `{"topic":"medicine"}`, "", "idem-event-mismatch"))
+		if resp.Error == nil {
+			t.Fatal("event.publish bundle mismatch error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != BundleMismatchCode {
+			t.Fatalf("bundle mismatch data = %#v", data)
+		}
+		assertNoEventPublishPersistence(t, db)
+	})
+
+	t.Run("undeclared event", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := eventPublishTestHandler(t, pg, bus, source)
+
+		resp := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.missing", `{"topic":"medicine"}`, "", "idem-event-missing"))
+		if resp.Error == nil {
+			t.Fatal("event.publish undeclared event error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != EventNotDeclaredCode {
+			t.Fatalf("undeclared event data = %#v", data)
+		}
+		assertNoEventPublishPersistence(t, db)
+	})
+
+	t.Run("payload validation", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+			ContractBundle: source,
+			PayloadValidator: func(eventType string, payload []byte) error {
+				if eventType != "scan.requested" {
+					return fmt.Errorf("unexpected event type %q", eventType)
+				}
+				return errors.New("schema violation")
+			},
+		})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := eventPublishTestHandler(t, pg, bus, source)
+
+		resp := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-event-invalid-payload"))
+		if resp.Error == nil {
+			t.Fatal("event.publish payload validation error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != PayloadValidationFailedCode {
+			t.Fatalf("payload validation data = %#v", data)
+		}
+		assertNoEventPublishPersistence(t, db)
+	})
+
+	t.Run("invalid run id", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := eventPublishTestHandler(t, pg, bus, source)
+
+		resp := rpcCall(t, handler, eventPublishBody("abc", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-event-invalid-run-id"))
+		if resp.Error == nil || resp.Error.Code != codeInvalidParams {
+			t.Fatalf("event.publish invalid run_id error = %#v, want invalid params", resp.Error)
+		}
+		assertNoEventPublishPersistence(t, db)
+	})
+}
+
+func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
+	t.Cleanup(runtimebus.ResumeRuntimeIngress)
+	bus.SetRuntimeIngressDispatchGate(controller)
+
+	ctx := context.Background()
+	agentID := "scan-orchestrator"
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, agentID)
+	ch := bus.Subscribe(agentID, events.EventType("scan.requested"))
+	defer bus.Unsubscribe(agentID)
+
+	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
+		Reason:       "test_pause",
+		ControlledBy: "test",
+		Now:          time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	handler := eventPublishTestHandler(t, pg, bus, source)
+	published := rpcCall(t, handler, eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"paused"}`, "", "idem-paused-publish"))
+	if published.Error != nil {
+		t.Fatalf("paused event.publish error = %#v", published.Error)
+	}
+	eventID := stringValue(t, asMap(t, published.Result)["event_id"], "event_id")
+	if got := len(asSlice(t, asMap(t, published.Result)["deliveries"])); got != 1 {
+		t.Fatalf("paused event.publish deliveries = %d, want 1", got)
+	}
+	select {
+	case got := <-ch:
+		t.Fatalf("paused event.publish delivered event %s before resume", got.ID)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("paused event deliveries = %d, want 1", got)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+		t.Fatalf("paused pipeline receipts = %d, want 0", got)
+	}
+
+	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
+		Reason:       "test_resume",
+		ControlledBy: "test",
+		Now:          time.Now().UTC().Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if resumed.ReleasedCount != 1 {
+		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
+	}
+	select {
+	case got := <-ch:
+		if got.ID != eventID {
+			t.Fatalf("released event = %s, want %s", got.ID, eventID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for queued event.publish release")
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
+	}
+}
+
+func eventPublishTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, source semanticview.Source) *Handler {
+	t.Helper()
+	return testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Now:           func() time.Time { return time.Now().UTC() },
+			Ready:         func() bool { return true },
+			Database:      fakePinger{},
+			Runs:          pg,
+			Observability: pg,
+			Idempotency:   pg,
+			Events:        bus,
+			Source:        source,
+			Bundle: runtimecontracts.BundleIdentity{
+				WorkflowName:    "review",
+				WorkflowVersion: "1.0.0",
+				Fingerprint:     runStartTestFingerprint,
+			},
+		}),
+	})
+}
+
+func eventPublishBody(runID, fingerprint, eventName, payload, emitter, idempotencyKey string) string {
+	parts := []string{
+		fmt.Sprintf(`"bundle_ref":{"fingerprint":%q}`, fingerprint),
+		fmt.Sprintf(`"event_name":%q`, eventName),
+		fmt.Sprintf(`"payload":%s`, payload),
+		fmt.Sprintf(`"idempotency_key":%q`, idempotencyKey),
+	}
+	if strings.TrimSpace(runID) != "" {
+		parts = append(parts, fmt.Sprintf(`"run_id":%q`, runID))
+	}
+	if strings.TrimSpace(emitter) != "" {
+		parts = append(parts, fmt.Sprintf(`"emitter":%q`, emitter))
+	}
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{%s}}`, strings.Join(parts, ","))
+}
+
+func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy string) {
+	t.Helper()
+	var runStatus, triggerType, triggerID, persistedFingerprint string
+	if err := db.QueryRow(`SELECT status, trigger_event_type, trigger_event_id::text, COALESCE(bundle_fingerprint, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&runStatus, &triggerType, &triggerID, &persistedFingerprint); err != nil {
+		t.Fatalf("load event.publish run row: %v", err)
+	}
+	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
+		t.Fatalf("run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
+	}
+	if persistedFingerprint != runStartTestFingerprint {
+		t.Fatalf("run row bundle_fingerprint=%q, want %q", persistedFingerprint, runStartTestFingerprint)
+	}
+	var entityID, gotProducedBy string
+	var payload json.RawMessage
+	if err := db.QueryRow(`
+		SELECT entity_id::text, produced_by, payload
+		FROM events
+		WHERE event_id = $1::uuid
+	`, eventID).Scan(&entityID, &gotProducedBy, &payload); err != nil {
+		t.Fatalf("load event.publish event row: %v", err)
+	}
+	if entityID != runID {
+		t.Fatalf("event entity_id = %q, want run_id %q", entityID, runID)
+	}
+	if gotProducedBy != producedBy {
+		t.Fatalf("event produced_by = %q, want %q", gotProducedBy, producedBy)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("decode event.publish payload: %v", err)
+	}
+	if decoded["entity_id"] != runID || decoded["topic"] != "medicine" {
+		t.Fatalf("event.publish payload = %#v", decoded)
+	}
+}
+
+func assertNoEventPublishPersistence(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if count := countAllRunRows(t, db); count != 0 {
+		t.Fatalf("run rows = %d, want 0", count)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 0 {
+		t.Fatalf("scan.requested event rows = %d, want 0", count)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 0 {
+		t.Fatalf("api_idempotency rows = %d, want 0", count)
+	}
+}
+
+func stringValue(t *testing.T, value any, field string) string {
+	t.Helper()
+	text, ok := value.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		t.Fatalf("%s = %#v, want non-empty string", field, value)
+	}
+	return strings.TrimSpace(text)
+}
+
+func asSlice(t *testing.T, value any) []any {
+	t.Helper()
+	items, ok := value.([]any)
+	if !ok {
+		t.Fatalf("value = %#v, want []any", value)
+	}
+	return items
+}
