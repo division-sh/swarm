@@ -24,11 +24,13 @@ type Snapshot struct {
 }
 
 type EnsureActiveOptions struct {
-	ReopenCompleted bool
-	HasStartedAtCol bool
-	HasTriggerCols  bool
-	HasCounterCols  bool
-	HasTerminalCols bool
+	ReopenCompleted         bool
+	HasStartedAtCol         bool
+	HasTriggerCols          bool
+	HasCounterCols          bool
+	HasTerminalCols         bool
+	HasBundleFingerprintCol bool
+	BundleFingerprint       string
 }
 
 func CanonicalTerminalStatus(raw string) (string, error) {
@@ -56,6 +58,7 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 	}
 	triggerEventID = strings.TrimSpace(triggerEventID)
 	triggerEventType = strings.TrimSpace(triggerEventType)
+	bundleFingerprint := strings.TrimSpace(opts.BundleFingerprint)
 	reopenStatus := "runs.status"
 	reopenErrorSummary := ""
 	reopenEndedAt := ""
@@ -69,15 +72,28 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 		reopenErrorSummary = "runs.error_summary"
 		reopenEndedAt = "runs.ended_at"
 	}
-	insertCols := "run_id, status"
-	insertVals := "$1::uuid, 'running'"
+	insertCols := []string{"run_id", "status"}
+	insertVals := []string{"$1::uuid", "'running'"}
+	args := []any{runID}
+	addParam := func(col, expr string, value any) {
+		args = append(args, value)
+		insertCols = append(insertCols, col)
+		insertVals = append(insertVals, fmt.Sprintf(expr, len(args)))
+	}
+	if opts.HasTriggerCols {
+		addParam("trigger_event_id", "NULLIF($%d,'')::uuid", triggerEventID)
+		addParam("trigger_event_type", "NULLIF($%d,'')", triggerEventType)
+	}
+	if opts.HasBundleFingerprintCol {
+		addParam("bundle_fingerprint", "NULLIF($%d,'')", bundleFingerprint)
+	}
 	if opts.HasStartedAtCol {
-		insertCols += ", started_at"
-		insertVals += ", now()"
+		insertCols = append(insertCols, "started_at")
+		insertVals = append(insertVals, "now()")
 	}
 	query := `
-		INSERT INTO runs (` + insertCols + `)
-		VALUES (` + insertVals + `)
+		INSERT INTO runs (` + strings.Join(insertCols, ", ") + `)
+		VALUES (` + strings.Join(insertVals, ", ") + `)
 		ON CONFLICT (run_id) DO UPDATE SET
 			status = ` + reopenStatus
 	if opts.HasTerminalCols {
@@ -85,34 +101,14 @@ func EnsureActive(ctx context.Context, db DBTX, runID, triggerEventID, triggerEv
 			error_summary = ` + reopenErrorSummary + `,
 			ended_at = ` + reopenEndedAt
 	}
-	args := []any{runID}
+	if opts.HasBundleFingerprintCol {
+		query += `,
+			bundle_fingerprint = COALESCE(runs.bundle_fingerprint, EXCLUDED.bundle_fingerprint)`
+	}
 	if opts.HasTriggerCols {
-		query = `
-		INSERT INTO runs (
-			run_id, status, trigger_event_id, trigger_event_type`
-		if opts.HasStartedAtCol {
-			query += `, started_at`
-		}
-		query += `
-		)
-		VALUES (
-			$1::uuid, 'running', NULLIF($2,'')::uuid, NULLIF($3,'')`
-		if opts.HasStartedAtCol {
-			query += `, now()`
-		}
-		query += `
-		)
-		ON CONFLICT (run_id) DO UPDATE SET
-			status = ` + reopenStatus
-		if opts.HasTerminalCols {
-			query += `,
-			error_summary = ` + reopenErrorSummary + `,
-			ended_at = ` + reopenEndedAt
-		}
 		query += `,
 			trigger_event_id = COALESCE(runs.trigger_event_id, NULLIF($2,'')::uuid),
 			trigger_event_type = COALESCE(NULLIF(runs.trigger_event_type, ''), NULLIF($3, ''))`
-		args = append(args, triggerEventID, triggerEventType)
 	}
 	_, err := db.ExecContext(ctx, query, args...)
 	if err != nil {

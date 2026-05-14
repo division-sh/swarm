@@ -82,6 +82,15 @@ func newServeCommand(ctx context.Context, repo string) *cobra.Command {
 		Use:   "serve",
 		Short: "Start the Swarm runtime, API, health, and MCP surfaces.",
 		Args:  cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("require-bundle-match") && cmd.Flags().Changed("no-require-bundle-match") && opts.RequireBundleMatch && opts.NoRequireBundleMatch {
+				return fmt.Errorf("--require-bundle-match and --no-require-bundle-match cannot both be set")
+			}
+			if opts.NoRequireBundleMatch {
+				opts.RequireBundleMatch = false
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			code := runServeRuntime(ctx, repo, opts)
 			if code != 0 {
@@ -96,6 +105,8 @@ func newServeCommand(ctx context.Context, repo string) *cobra.Command {
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, "Store mode: postgres")
 	cmd.Flags().StringVar(&opts.HealthAddr, "health-addr", opts.HealthAddr, "HTTP bind address for health checks")
 	cmd.Flags().BoolVar(&opts.SelfCheck, "self-check", opts.SelfCheck, "Run runtime self-check during boot")
+	cmd.Flags().BoolVar(&opts.RequireBundleMatch, "require-bundle-match", opts.RequireBundleMatch, "Refuse startup when active runs belong to a different non-NULL bundle fingerprint")
+	cmd.Flags().BoolVar(&opts.NoRequireBundleMatch, "no-require-bundle-match", opts.NoRequireBundleMatch, "Allow startup even when active runs belong to a different bundle fingerprint")
 	return cmd
 }
 

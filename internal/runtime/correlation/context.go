@@ -12,6 +12,7 @@ type inboundEventContextKey struct{}
 type runIDContextKey struct{}
 type handlerIDContextKey struct{}
 type runtimeLineageContextKey struct{}
+type bundleFingerprintContextKey struct{}
 
 type RuntimeLineageRowCategory string
 
@@ -206,6 +207,25 @@ func HandlerIDFromContext(ctx context.Context) string {
 	}
 	handlerID, _ := ctx.Value(handlerIDContextKey{}).(string)
 	return strings.TrimSpace(handlerID)
+}
+
+func WithBundleFingerprint(ctx context.Context, fingerprint string) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	fingerprint = strings.TrimSpace(fingerprint)
+	if fingerprint == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, bundleFingerprintContextKey{}, fingerprint)
+}
+
+func BundleFingerprintFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	fingerprint, _ := ctx.Value(bundleFingerprintContextKey{}).(string)
+	return strings.TrimSpace(fingerprint)
 }
 
 func CorrelateEvent(ctx context.Context, evt events.Event) (context.Context, events.Event) {

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/mutationlog"
+	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
 
 const (
@@ -80,6 +81,10 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 	if err := s.requireRunForkMaterializerCapabilities(ctx); err != nil {
 		return RunForkMaterialization{}, err
 	}
+	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
+		return RunForkMaterialization{}, err
+	}
 	var selection *RunForkContractSelection
 	if req.ContractSelection != nil {
 		normalized, err := normalizeRunForkSelectedContractSelection(*req.ContractSelection)
@@ -129,16 +134,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req RunForkMater
 		return RunForkMaterialization{}, err
 	}
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO runs (
-			run_id, status, forked_from_run_id, forked_from_event_id,
-			entity_count, event_count, started_at
-		)
-		VALUES (
-			$1::uuid, $2, $3::uuid, $4::uuid,
-			$5, 0, $6
-		)
-	`, forkRunID, RunForkMaterializedStatus, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now); err != nil {
+	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("insert fork run: %w", err)
 	}
 
@@ -196,6 +192,41 @@ func ensureRunForkNotAlreadyMaterialized(ctx context.Context, tx *sql.Tx, forkRu
 		return fmt.Errorf("check existing fork materialization: %w", err)
 	}
 	return fmt.Errorf("fork materialization already exists for source run %s at event %s: %s", sourceRunID, forkEventID, existing)
+}
+
+func insertRunForkRun(ctx context.Context, tx *sql.Tx, catalog schemaColumnCatalog, forkRunID, sourceRunID, forkEventID string, entityCount int, startedAt time.Time) error {
+	opts := storerunlifecycle.InsertForkOptions{
+		HasBundleFingerprintCol: catalog.hasColumns("runs", "bundle_fingerprint"),
+	}
+	if catalog.hasColumns("runs", "bundle_fingerprint") {
+		fingerprint, err := runForkBundleFingerprintForInsert(ctx, tx, sourceRunID)
+		if err != nil {
+			return err
+		}
+		opts.BundleFingerprint = fingerprint
+	}
+	return storerunlifecycle.InsertFork(ctx, tx, forkRunID, RunForkMaterializedStatus, sourceRunID, forkEventID, entityCount, startedAt, opts)
+}
+
+func runForkBundleFingerprintForInsert(ctx context.Context, tx *sql.Tx, sourceRunID string) (string, error) {
+	if fingerprint := runtimecorrelation.BundleFingerprintFromContext(ctx); fingerprint != "" {
+		return fingerprint, nil
+	}
+	var source sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+		SELECT bundle_fingerprint
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, sourceRunID).Scan(&source); err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("source run %s not found", sourceRunID)
+		}
+		return "", fmt.Errorf("load source run bundle fingerprint: %w", err)
+	}
+	if !source.Valid {
+		return "", nil
+	}
+	return strings.TrimSpace(source.String), nil
 }
 
 func loadRunForkEntityMetadata(plan RunForkPlan) (map[string]runForkEntityMetadata, error) {

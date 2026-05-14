@@ -29,8 +29,8 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	fieldOnlyAt := at.Add(30 * time.Second)
 	afterAt := at.Add(time.Minute)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', $2)
+		INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', 'bundle-source-fingerprint', $2)
 	`, sourceRunID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed source run: %v", err)
 	}
@@ -102,16 +102,19 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		)
 	}
 
-	var forkStatus, forkedFromRun, forkedFromEvent string
+	var forkStatus, forkedFromRun, forkedFromEvent, forkBundleFingerprint string
 	if err := db.QueryRowContext(ctx, `
-		SELECT status, forked_from_run_id::text, forked_from_event_id::text
+		SELECT status, forked_from_run_id::text, forked_from_event_id::text, COALESCE(bundle_fingerprint, '')
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, result.ForkRunID).Scan(&forkStatus, &forkedFromRun, &forkedFromEvent); err != nil {
+	`, result.ForkRunID).Scan(&forkStatus, &forkedFromRun, &forkedFromEvent, &forkBundleFingerprint); err != nil {
 		t.Fatalf("load fork run: %v", err)
 	}
 	if forkStatus != "paused" || forkedFromRun != sourceRunID || forkedFromEvent != secondEventID {
 		t.Fatalf("fork run = status:%s from:%s event:%s", forkStatus, forkedFromRun, forkedFromEvent)
+	}
+	if forkBundleFingerprint != "bundle-source-fingerprint" {
+		t.Fatalf("fork bundle_fingerprint = %q, want source fingerprint", forkBundleFingerprint)
 	}
 	var sourceStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {

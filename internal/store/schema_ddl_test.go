@@ -177,6 +177,37 @@ func TestPlatformSpecEntityStateUsesRunScopedIdentity(t *testing.T) {
 	}
 }
 
+func TestPlatformSpecRunsOwnsBundleFingerprint(t *testing.T) {
+	_, file, _, _ := stdruntime.Caller(0)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("unmarshal platform spec: %v", err)
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	var runs SchemaTableDDL
+	for _, plan := range plans {
+		if plan.TableName == "runs" {
+			runs = plan
+			break
+		}
+	}
+	if runs.TableName == "" {
+		t.Fatal("runs ddl plan missing")
+	}
+	joined := strings.Join(runs.Statements, "\n")
+	if !strings.Contains(joined, "bundle_fingerprint TEXT") {
+		t.Fatalf("runs ddl missing bundle_fingerprint:\n%s", joined)
+	}
+}
+
 func TestGeneratePlatformTableDDLs_StripsDeprecatedEntitySubjectDDL(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
 	spec.PlatformTables.Tables = map[string]struct {

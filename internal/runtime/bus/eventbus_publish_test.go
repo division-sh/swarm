@@ -933,6 +933,36 @@ func TestEventBusPublishTransactional_PersistsInboundEventBeforeInterceptorsRun(
 	}
 }
 
+func TestEventBusPublish_PersistsBootBundleFingerprintThroughRunLifecycleOwner(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	runID := uuid.NewString()
+	fingerprint := "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		BundleFingerprint: fingerprint,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.Publish(context.Background(), events.Event{
+		ID:          uuid.NewString(),
+		RunID:       runID,
+		Type:        events.EventType("scan.requested"),
+		SourceAgent: "test",
+		CreatedAt:   time.Now().UTC(),
+		Payload:     []byte(`{}`),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	var got string
+	if err := db.QueryRowContext(context.Background(), `SELECT COALESCE(bundle_fingerprint, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&got); err != nil {
+		t.Fatalf("load run bundle fingerprint: %v", err)
+	}
+	if got != fingerprint {
+		t.Fatalf("bundle_fingerprint = %q, want %q", got, fingerprint)
+	}
+}
+
 func TestEventBusPublishDeferred_PersistsInboundEventBeforeInterceptorsRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}

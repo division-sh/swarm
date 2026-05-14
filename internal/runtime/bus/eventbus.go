@@ -43,6 +43,7 @@ type EventBus struct {
 	recipientPlanGuard          PublishRecipientPlanGuard
 	runtimeIngressDispatchGate  RuntimeIngressDispatchGate
 	runDispatchGate             RunDispatchGate
+	bundleFingerprint           string
 	outboxSweeperActive         bool
 	inFlightPublishes           atomic.Int64
 }
@@ -76,6 +77,7 @@ type EventBusOptions struct {
 	RecipientPlanGuard          PublishRecipientPlanGuard
 	RuntimeIngressDispatchGate  RuntimeIngressDispatchGate
 	RunDispatchGate             RunDispatchGate
+	BundleFingerprint           string
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -142,6 +144,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		recipientPlanGuard:          opts.RecipientPlanGuard,
 		runtimeIngressDispatchGate:  opts.RuntimeIngressDispatchGate,
 		runDispatchGate:             opts.RunDispatchGate,
+		bundleFingerprint:           strings.TrimSpace(opts.BundleFingerprint),
 	}
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 	return eb, nil

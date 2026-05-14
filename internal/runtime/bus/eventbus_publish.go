@@ -131,6 +131,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
+	ctx = eb.withBundleFingerprint(ctx)
 	eb.inFlightPublishes.Add(1)
 	defer eb.inFlightPublishes.Add(-1)
 	start := time.Now()
@@ -237,6 +238,7 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
+	ctx = eb.withBundleFingerprint(ctx)
 	if tx == nil {
 		return errors.New("publish tx is required")
 	}
@@ -310,6 +312,16 @@ func (eb *EventBus) PublishTx(ctx context.Context, tx *sql.Tx, evt events.Event)
 		return fmt.Errorf("persist pipeline receipt: %w", err)
 	}
 	return nil
+}
+
+func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {
+	if ctx == nil || eb == nil {
+		return ctx
+	}
+	if runtimecorrelation.BundleFingerprintFromContext(ctx) != "" {
+		return ctx
+	}
+	return runtimecorrelation.WithBundleFingerprint(ctx, eb.bundleFingerprint)
 }
 
 func (eb *EventBus) pipelineTransitionCapability() func(context.Context) (bool, error) {

@@ -64,6 +64,7 @@ type RuntimeOptions struct {
 	WorkspaceLifecycle workspace.Lifecycle
 	EnableToolGateway  bool
 	ToolGatewayToken   string
+	BundleFingerprint  string
 	WorkflowModule     runtimepipeline.WorkflowModule
 	LLMRuntime         llm.Runtime
 	Credentials        runtimecredentials.Store
@@ -264,7 +265,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if binder, ok := stores.InboundStore.(eventPayloadValidationBinder); ok && binder != nil {
 		binder.SetEventPayloadValidator(payloadValidator)
 	}
-	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, strings.TrimSpace(opts.BundleFingerprint), func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}

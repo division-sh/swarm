@@ -20,6 +20,13 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	eventID := uuid.NewString()
 	at := time.Unix(1700002400, 0).UTC()
 	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE runs
+		SET bundle_fingerprint = 'selected-source-fingerprint'
+		WHERE run_id = $1::uuid
+	`, sourceRunID); err != nil {
+		t.Fatalf("seed source bundle fingerprint: %v", err)
+	}
 
 	_, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err == nil || !strings.Contains(err.Error(), RunForkBlockerNonAgentDeliveryReplayUnsupported) {
@@ -41,6 +48,17 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	}
 	if materialized.ForkRunID == "" || materialized.SelectedContractBinding == nil || !materialized.DeliveryResumeBlocked {
 		t.Fatalf("materialization = %#v", materialized)
+	}
+	var forkBundleFingerprint string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(bundle_fingerprint, '')
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, materialized.ForkRunID).Scan(&forkBundleFingerprint); err != nil {
+		t.Fatalf("load selected fork bundle fingerprint: %v", err)
+	}
+	if forkBundleFingerprint != "selected-source-fingerprint" {
+		t.Fatalf("selected fork bundle_fingerprint = %q, want source fingerprint", forkBundleFingerprint)
 	}
 	var replayRows int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`, materialized.ForkRunID).Scan(&replayRows); err != nil {

@@ -42,7 +42,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", count)
 	}
-	assertRunStartPersistence(t, db, runID, "scan.requested")
+	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
@@ -89,6 +89,24 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	}
 }
 
+func TestOperatorRunStartHandlersPersistBootFingerprintWhenBundleRefOmitted(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := runStartTestHandler(t, pg, bus, source)
+	runID := uuid.NewString()
+
+	started := rpcCall(t, handler, runStartBodyWithoutBundle(runID, "scan.requested", `{"topic":"medicine"}`, "idem-start-no-bundle"))
+	if started.Error != nil {
+		t.Fatalf("run.start error = %#v", started.Error)
+	}
+	assertRunStartPersistence(t, db, runID, "scan.requested", runStartTestFingerprint)
+}
+
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("bundle mismatch", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
@@ -107,6 +125,27 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		if data := asMap(t, resp.Error.Data); data["code"] != BundleMismatchCode {
 			t.Fatalf("bundle mismatch data = %#v", data)
+		}
+		assertNoRunStartPersistence(t, db, runID)
+	})
+
+	t.Run("invalid bundle fingerprint", func(t *testing.T) {
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("NewEventBusWithOptions: %v", err)
+		}
+		handler := runStartTestHandler(t, pg, bus, source)
+		runID := uuid.NewString()
+
+		resp := rpcCall(t, handler, runStartBody(runID, "sha256:not-lower-64-hex", "scan.requested", `{"topic":"medicine"}`, "idem-invalid-bundle"))
+		if resp.Error == nil {
+			t.Fatal("run.start invalid bundle fingerprint error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleRefCode {
+			t.Fatalf("unsupported bundle ref data = %#v", data)
 		}
 		assertNoRunStartPersistence(t, db, runID)
 	})
@@ -290,6 +329,16 @@ func runStartBody(runID, fingerprint, eventName, payload, idempotencyKey string)
 	)
 }
 
+func runStartBodyWithoutBundle(runID, eventName, payload, idempotencyKey string) string {
+	return fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":"start","method":"run.start","params":{"event_name":%q,"payload":%s,"run_id":%q,"idempotency_key":%q}}`,
+		eventName,
+		payload,
+		runID,
+		idempotencyKey,
+	)
+}
+
 func assertInvalidRunStartParam(t *testing.T, resp rpcResponse, field string) {
 	t.Helper()
 	if resp.Error == nil {
@@ -303,14 +352,17 @@ func assertInvalidRunStartParam(t *testing.T, resp rpcResponse, field string) {
 	}
 }
 
-func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName string) {
+func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName, bundleFingerprint string) {
 	t.Helper()
-	var runStatus, triggerType string
-	if err := db.QueryRow(`SELECT status, trigger_event_type FROM runs WHERE run_id = $1::uuid`, runID).Scan(&runStatus, &triggerType); err != nil {
+	var runStatus, triggerType, persistedFingerprint string
+	if err := db.QueryRow(`SELECT status, trigger_event_type, COALESCE(bundle_fingerprint, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&runStatus, &triggerType, &persistedFingerprint); err != nil {
 		t.Fatalf("load run row: %v", err)
 	}
 	if runStatus != "running" || triggerType != eventName {
 		t.Fatalf("run row status=%q trigger=%q, want running/%s", runStatus, triggerType, eventName)
+	}
+	if persistedFingerprint != bundleFingerprint {
+		t.Fatalf("run row bundle_fingerprint=%q, want %q", persistedFingerprint, bundleFingerprint)
 	}
 	var entityID, producedBy string
 	var payload json.RawMessage

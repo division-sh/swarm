@@ -207,16 +207,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return RunForkMaterialization{}, err
 	}
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO runs (
-			run_id, status, forked_from_run_id, forked_from_event_id,
-			entity_count, event_count, started_at
-		)
-		VALUES (
-			$1::uuid, $2, $3::uuid, $4::uuid,
-			$5, 0, $6
-		)
-	`, forkRunID, RunForkMaterializedStatus, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now); err != nil {
+	if err := insertRunForkRun(ctx, tx, catalog, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now); err != nil {
 		return RunForkMaterialization{}, fmt.Errorf("insert selected-contract fork run: %w", err)
 	}
 
