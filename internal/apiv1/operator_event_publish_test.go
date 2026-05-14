@@ -98,6 +98,61 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	}
 }
 
+func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
+	ch := bus.Subscribe("scan-orchestrator", events.EventType("scan.requested"))
+	defer bus.Unsubscribe("scan-orchestrator")
+	observability := &failOnceEventReadStore{
+		ObservabilityReadStore: pg,
+		err:                    errors.New("transient event readback failure"),
+	}
+	handler := eventPublishTestHandlerWithObservability(t, pg, bus, source, observability)
+	body := eventPublishBody("", runStartTestFingerprint, "scan.requested", `{"topic":"medicine"}`, "", "idem-readback")
+
+	first := rpcCall(t, handler, body)
+	if first.Error == nil || !strings.Contains(fmt.Sprintf("%#v", first.Error.Data), "transient event readback failure") {
+		t.Fatalf("first event.publish error = %#v, want transient readback failure", first.Error)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+		t.Fatalf("scan.requested event count after readback failure = %d, want 1", count)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows after readback failure = %d, want 1", count)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for event delivery after readback failure")
+	}
+
+	replay := rpcCall(t, handler, body)
+	if replay.Error != nil {
+		t.Fatalf("event.publish replay after readback recovery error = %#v", replay.Error)
+	}
+	replayResult := asMap(t, replay.Result)
+	eventID := stringValue(t, replayResult["event_id"], "event_id")
+	runID := stringValue(t, replayResult["run_id"], "run_id")
+	if _, err := uuid.Parse(eventID); err != nil {
+		t.Fatalf("event_id = %q, want UUID", eventID)
+	}
+	if _, err := uuid.Parse(runID); err != nil {
+		t.Fatalf("run_id = %q, want UUID", runID)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
+	}
+	if got := len(asSlice(t, replayResult["deliveries"])); got != 1 {
+		t.Fatalf("replay deliveries = %d, want persisted delivery result", got)
+	}
+}
+
 func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -312,6 +367,11 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 
 func eventPublishTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, source semanticview.Source) *Handler {
 	t.Helper()
+	return eventPublishTestHandlerWithObservability(t, pg, bus, source, pg)
+}
+
+func eventPublishTestHandlerWithObservability(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, source semanticview.Source, observability ObservabilityReadStore) *Handler {
+	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
@@ -319,7 +379,7 @@ func eventPublishTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtime
 			Ready:         func() bool { return true },
 			Database:      fakePinger{},
 			Runs:          pg,
-			Observability: pg,
+			Observability: observability,
 			Idempotency:   pg,
 			Events:        bus,
 			Source:        source,
@@ -330,6 +390,20 @@ func eventPublishTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtime
 			},
 		}),
 	})
+}
+
+type failOnceEventReadStore struct {
+	ObservabilityReadStore
+	err error
+}
+
+func (s *failOnceEventReadStore) LoadOperatorEvent(ctx context.Context, eventID string) (store.OperatorEventFull, error) {
+	if s.err != nil {
+		err := s.err
+		s.err = nil
+		return store.OperatorEventFull{}, err
+	}
+	return s.ObservabilityReadStore.LoadOperatorEvent(ctx, eventID)
 }
 
 func eventPublishBody(runID, fingerprint, eventName, payload, emitter, idempotencyKey string) string {
