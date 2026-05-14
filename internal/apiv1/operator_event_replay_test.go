@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -86,6 +87,50 @@ func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *t
 	}
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after conflict = %d, want no duplicate replay", count)
+	}
+}
+
+func TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	inner := eventReplayTestBus(t, pg)
+	publisher := &failOnceAuditEventPublisher{inner: inner, err: errors.New("audit publish temporarily unavailable")}
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
+	ch := inner.Subscribe("agent-a")
+	defer inner.Unsubscribe("agent-a")
+	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusDelivered)
+	handler := eventReplayTestHandler(t, pg, publisher)
+	body := eventReplayBody(original.EventID, nil, "idem-audit-failure")
+
+	first := rpcCall(t, handler, body)
+	if first.Error == nil || !strings.Contains(fmt.Sprintf("%#v", first.Error.Data), "audit publish temporarily unavailable") {
+		t.Fatalf("first event.replay error = %#v, want audit publish failure", first.Error)
+	}
+	assertReplayEventDelivered(t, ch, latestEventIDByName(t, db, "scan.requested", original.EventID), original.EventID)
+	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+		t.Fatalf("scan.requested events after audit failure = %d, want original+replay", count)
+	}
+	if count := countEventsByName(t, db, "event.replayed"); count != 0 {
+		t.Fatalf("event.replayed events after failed audit publish = %d, want 0", count)
+	}
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows after audit failure = %d, want 1", count)
+	}
+
+	retry := rpcCall(t, handler, body)
+	if retry.Error != nil {
+		t.Fatalf("retry event.replay after audit recovery error = %#v", retry.Error)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+		t.Fatalf("scan.requested events after retry = %d, want no duplicate replay", count)
+	}
+	if count := countEventsByName(t, db, "event.replayed"); count != 1 {
+		t.Fatalf("event.replayed events after retry = %d, want 1", count)
+	}
+	result := asMap(t, retry.Result)
+	if stringValue(t, result["event_id"], "event_id") != original.EventID {
+		t.Fatalf("retry result = %#v, want original event id %s", result, original.EventID)
 	}
 }
 
@@ -269,7 +314,29 @@ func eventReplayTestBus(t *testing.T, pg *store.PostgresStore) *runtimebus.Event
 	return bus
 }
 
-func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus) *Handler {
+type failOnceAuditEventPublisher struct {
+	inner *runtimebus.EventBus
+	err   error
+}
+
+func (p *failOnceAuditEventPublisher) Publish(ctx context.Context, evt events.Event) error {
+	if strings.TrimSpace(string(evt.Type)) == eventReplaySyntheticEventName && p.err != nil {
+		err := p.err
+		p.err = nil
+		return err
+	}
+	return p.inner.Publish(ctx, evt)
+}
+
+func (p *failOnceAuditEventPublisher) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error {
+	return p.inner.PublishDirect(ctx, evt, recipients)
+}
+
+func (p *failOnceAuditEventPublisher) CheckDirectRecipients(ctx context.Context, evt events.Event, recipients []string) (runtimebus.DirectRecipientStatus, error) {
+	return p.inner.CheckDirectRecipients(ctx, evt, recipients)
+}
+
+func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus eventReplayPublisher) *Handler {
 	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -402,6 +469,21 @@ func countEventDeliveries(t *testing.T, db *sql.DB, eventID string) int {
 		t.Fatalf("count event deliveries: %v", err)
 	}
 	return count
+}
+
+func latestEventIDByName(t *testing.T, db *sql.DB, eventName, excludeEventID string) string {
+	t.Helper()
+	var eventID string
+	if err := db.QueryRow(`
+		SELECT event_id::text
+		FROM events
+		WHERE event_name = $1 AND event_id::text <> $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, eventName, excludeEventID).Scan(&eventID); err != nil {
+		t.Fatalf("latest event by name %s: %v", eventName, err)
+	}
+	return eventID
 }
 
 func stringSliceValue(t *testing.T, value any, field string) []string {
