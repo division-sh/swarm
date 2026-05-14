@@ -79,23 +79,12 @@ func executeEventPublish(ctx context.Context, req Request, opts OperatorReadOpti
 		requireExistingExplicitRun:     true,
 		injectRunIDEntityIDWhenMissing: true,
 		injectRunIDEntityIDOnlyNewRun:  true,
-		buildCompletion: func(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams) (any, string, error) {
-			event, err := opts.Observability.LoadOperatorEvent(ctx, params.EventID)
-			if errors.Is(err, store.ErrEventNotFound) {
-				return nil, "", fmt.Errorf("load published event %s: %w", params.EventID, err)
-			}
-			if err != nil {
-				return nil, "", err
-			}
-			runID := strings.TrimSpace(event.RunID)
-			if runID == "" {
-				runID = params.RunID
-			}
+		buildCompletion: func(_ context.Context, _ OperatorReadOptions, params eventPublicationParams) (any, string, error) {
 			return eventPublishResult{
 				EventID:       params.EventID,
-				RunID:         runID,
+				RunID:         params.RunID,
 				NewRunCreated: params.NewRunCreated,
-				Deliveries:    eventPublishDeliveries(event.Deliveries),
+				Deliveries:    []eventPublishDelivery{},
 			}, params.EventID, nil
 		},
 	}
@@ -103,14 +92,50 @@ func executeEventPublish(ctx context.Context, req Request, opts OperatorReadOpti
 	if err != nil {
 		return nil, runStartIdempotencyError(err)
 	}
-	var stored eventPublishResult
-	if err := json.Unmarshal(completion.Response, &stored); err != nil {
+	stored, err := eventPublishStoredResult(completion)
+	if err != nil {
 		if replay {
 			return nil, fmt.Errorf("decode event.publish idempotency response: %w", err)
 		}
 		return nil, fmt.Errorf("decode event.publish response: %w", err)
 	}
+	result, err := eventPublishResultFromStore(ctx, opts, completion, stored)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func eventPublishStoredResult(completion store.APIIdempotencyCompletion) (eventPublishResult, error) {
+	var stored eventPublishResult
+	if err := json.Unmarshal(completion.Response, &stored); err != nil {
+		return eventPublishResult{}, err
+	}
 	return stored, nil
+}
+
+func eventPublishResultFromStore(ctx context.Context, opts OperatorReadOptions, completion store.APIIdempotencyCompletion, stored eventPublishResult) (eventPublishResult, error) {
+	eventID := strings.TrimSpace(completion.ResourceID)
+	if eventID == "" {
+		eventID = strings.TrimSpace(stored.EventID)
+	}
+	event, err := opts.Observability.LoadOperatorEvent(ctx, eventID)
+	if errors.Is(err, store.ErrEventNotFound) {
+		return eventPublishResult{}, fmt.Errorf("load published event %s: %w", eventID, err)
+	}
+	if err != nil {
+		return eventPublishResult{}, err
+	}
+	runID := strings.TrimSpace(event.RunID)
+	if runID == "" {
+		runID = strings.TrimSpace(stored.RunID)
+	}
+	return eventPublishResult{
+		EventID:       strings.TrimSpace(event.EventID),
+		RunID:         runID,
+		NewRunCreated: stored.NewRunCreated,
+		Deliveries:    eventPublishDeliveries(event.Deliveries),
+	}, nil
 }
 
 func executeOperatorEventPublication(
