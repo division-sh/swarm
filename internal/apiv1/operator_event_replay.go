@@ -58,6 +58,11 @@ type eventReplayStoredResult struct {
 	SubscribersReplayed []string `json:"subscribers_replayed"`
 }
 
+type eventReplayPerformed struct {
+	Stored           eventReplayStoredResult
+	ReplayPublishErr error
+}
+
 func OperatorEventReplayHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	if !eventReplayConfigured(opts) {
 		return nil
@@ -98,6 +103,7 @@ func executeEventReplay(ctx context.Context, req Request, opts OperatorReadOptio
 	if !ok || publisher == nil {
 		return nil, errors.New("event replay publisher is required")
 	}
+	var replayPublishErr error
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
@@ -107,16 +113,17 @@ func executeEventReplay(ctx context.Context, req Request, opts OperatorReadOptio
 		TTL:            eventReplayIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		stored, err := performEventReplay(ctx, req, opts, publisher, eventID, requestedSubscribers, now)
+		performed, err := performEventReplay(ctx, req, opts, publisher, eventID, requestedSubscribers, now)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
-		response, err := json.Marshal(stored)
+		replayPublishErr = performed.ReplayPublishErr
+		response, err := json.Marshal(performed.Stored)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
 		return store.APIIdempotencyCompletion{
-			ResourceID: stored.ReplayEventID,
+			ResourceID: performed.Stored.ReplayEventID,
 			Response:   response,
 		}, nil
 	})
@@ -133,6 +140,9 @@ func executeEventReplay(ctx context.Context, req Request, opts OperatorReadOptio
 	if err := ensureEventReplayAudit(ctx, req, opts, publisher, stored, now); err != nil {
 		return nil, err
 	}
+	if replayPublishErr != nil {
+		return nil, replayPublishErr
+	}
 	result, err := eventReplayResultFromStore(ctx, opts, stored)
 	if err != nil {
 		return nil, err
@@ -148,29 +158,29 @@ func performEventReplay(
 	eventID string,
 	requestedSubscribers []string,
 	now time.Time,
-) (eventReplayStoredResult, error) {
+) (eventReplayPerformed, error) {
 	original, err := opts.Observability.LoadOperatorEvent(ctx, eventID)
 	if errors.Is(err, store.ErrEventNotFound) {
-		return eventReplayStoredResult{}, NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": eventID})
+		return eventReplayPerformed{}, NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": eventID})
 	}
 	if err != nil {
-		return eventReplayStoredResult{}, err
+		return eventReplayPerformed{}, err
 	}
 	_, selectedSubscribers, err := eventReplayTargets(original, requestedSubscribers)
 	if err != nil {
-		return eventReplayStoredResult{}, err
+		return eventReplayPerformed{}, err
 	}
 	replayEventID := uuid.NewString()
 	replayEvent, err := replayEventFromOriginal(original, replayEventID, now)
 	if err != nil {
-		return eventReplayStoredResult{}, err
+		return eventReplayPerformed{}, err
 	}
 	status, err := publisher.CheckDirectRecipients(ctx, replayEvent, selectedSubscribers)
 	if err != nil {
-		return eventReplayStoredResult{}, eventReplayPublishError(original.EventName, err)
+		return eventReplayPerformed{}, eventReplayPublishError(original.EventName, err)
 	}
 	if len(status.Missing) > 0 {
-		return eventReplayStoredResult{}, NewApplicationError(EventReplaySubscriberUnavailableCode, true, map[string]any{
+		return eventReplayPerformed{}, NewApplicationError(EventReplaySubscriberUnavailableCode, true, map[string]any{
 			"event_id":     original.EventID,
 			"subscribers":  status.Missing,
 			"requested":    status.Requested,
@@ -178,16 +188,37 @@ func performEventReplay(
 			"replay_event": replayEventID,
 		})
 	}
+	var replayPublishErr error
 	if err := publisher.PublishDirect(ctx, replayEvent, selectedSubscribers); err != nil {
-		return eventReplayStoredResult{}, eventReplayPublishError(original.EventName, err)
+		persisted, loadErr := eventReplayEvidencePersisted(ctx, opts, replayEventID)
+		if loadErr != nil {
+			return eventReplayPerformed{}, loadErr
+		}
+		if !persisted {
+			return eventReplayPerformed{}, eventReplayPublishError(original.EventName, err)
+		}
+		replayPublishErr = eventReplayPublishError(original.EventName, err)
 	}
 	auditEventID := uuid.NewString()
-	return eventReplayStoredResult{
-		EventID:             original.EventID,
-		ReplayEventID:       replayEventID,
-		AuditEventID:        auditEventID,
-		SubscribersReplayed: selectedSubscribers,
+	return eventReplayPerformed{
+		Stored: eventReplayStoredResult{
+			EventID:             original.EventID,
+			ReplayEventID:       replayEventID,
+			AuditEventID:        auditEventID,
+			SubscribersReplayed: selectedSubscribers,
+		},
+		ReplayPublishErr: replayPublishErr,
 	}, nil
+}
+
+func eventReplayEvidencePersisted(ctx context.Context, opts OperatorReadOptions, replayEventID string) (bool, error) {
+	if _, err := opts.Observability.LoadOperatorEvent(ctx, replayEventID); err == nil {
+		return true, nil
+	} else if errors.Is(err, store.ErrEventNotFound) {
+		return false, nil
+	} else {
+		return false, err
+	}
 }
 
 func ensureEventReplayAudit(
