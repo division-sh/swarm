@@ -134,6 +134,51 @@ func TestOperatorEventReplayStoresIdempotencyBeforeAuditPublishReadiness(t *test
 	}
 }
 
+func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	bus := eventReplayTestBus(t, pg)
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
+	ch := bus.Subscribe("agent-a")
+	defer bus.Unsubscribe("agent-a")
+	fillAgentChannel(t, ctx, bus, "agent-a", cap(ch))
+	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusDelivered)
+	handler := eventReplayTestHandler(t, pg, bus)
+	body := eventReplayBody(original.EventID, nil, "idem-direct-fanout-failure")
+
+	first := rpcCall(t, handler, body)
+	if first.Error == nil || !strings.Contains(fmt.Sprintf("%#v", first.Error), "authoritative delivery incomplete") {
+		t.Fatalf("first event.replay error = %#v, want direct delivery incomplete", first.Error)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+		t.Fatalf("scan.requested events after fanout error = %d, want original+replay", count)
+	}
+	replayEventID := latestEventIDByName(t, db, "scan.requested", original.EventID)
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows after fanout error = %d, want 1", count)
+	}
+	if count := countEventsByName(t, db, "event.replayed"); count != 1 {
+		t.Fatalf("event.replayed events after fanout error = %d, want 1", count)
+	}
+
+	drainAgentChannel(t, ch, cap(ch))
+	retry := rpcCall(t, handler, body)
+	if retry.Error != nil {
+		t.Fatalf("retry event.replay after direct fanout recovery error = %#v", retry.Error)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+		t.Fatalf("scan.requested events after retry = %d, want no duplicate replay", count)
+	}
+	if count := countEventsByName(t, db, "event.replayed"); count != 1 {
+		t.Fatalf("event.replayed events after retry = %d, want no duplicate audit", count)
+	}
+	result := asMap(t, retry.Result)
+	if got := stringValue(t, result["replay_event_id"], "replay_event_id"); got != replayEventID {
+		t.Fatalf("retry replay_event_id = %s, want persisted replay %s", got, replayEventID)
+	}
+}
+
 func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	t.Run("subset targets only requested original subscriber", func(t *testing.T) {
 		ctx := context.Background()
@@ -422,6 +467,32 @@ func assertNoReplayEvent(t *testing.T, ch <-chan events.Event) {
 	case got := <-ch:
 		t.Fatalf("unexpected replay event delivered: %#v", got)
 	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, agentID string, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		err := bus.PublishDirect(ctx, events.Event{
+			ID:        uuid.NewString(),
+			Type:      events.EventType("filler.event"),
+			Payload:   []byte(`{"ok":true}`),
+			CreatedAt: time.Now().UTC(),
+		}, []string{agentID})
+		if err != nil {
+			t.Fatalf("fill agent channel publish %d: %v", i, err)
+		}
+	}
+}
+
+func drainAgentChannel(t *testing.T, ch <-chan events.Event, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("timed out draining agent channel at item %d", i)
+		}
 	}
 }
 
