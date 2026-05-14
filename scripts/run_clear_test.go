@@ -353,6 +353,31 @@ func TestRunClear_RunDirectiveRequiresExplicitTargetAndMessage(t *testing.T) {
 	}
 }
 
+func TestRunClear_RunClearDirectedRequiresInputsBeforeReset(t *testing.T) {
+	result, err := runRunClearResult(t, runClearConfig{
+		mode: "run-clear-directed",
+	})
+
+	if err == nil {
+		t.Fatal("expected missing directive target/message to fail")
+	}
+	if !strings.Contains(result.stdout, "DIRECTIVE_AGENT and DIRECTIVE_MESSAGE are required for run-clear-directed.") {
+		t.Fatalf("stdout = %q, want missing directive message", result.stdout)
+	}
+	if got := strings.TrimSpace(result.builtBinaryPath); got != "" {
+		t.Fatalf("built binary path = %q, want no reset/build before directive arg validation", got)
+	}
+	if got := strings.TrimSpace(result.healthBody); got != "" {
+		t.Fatalf("health body = %q, want no readiness probe before directive arg validation", got)
+	}
+	if got := strings.TrimSpace(result.rpcBody); got != "" {
+		t.Fatalf("run.start body = %q, want no run.start before directive arg validation", got)
+	}
+	if got := strings.TrimSpace(result.directiveBody); got != "" {
+		t.Fatalf("directive body = %q, want no directive before directive arg validation", got)
+	}
+}
+
 func TestRunClearMakefileDefinesSplitTargets(t *testing.T) {
 	makefilePath := filepath.Join(filepath.Dir(testScriptDir(t)), "Makefile")
 	data, err := os.ReadFile(makefilePath)

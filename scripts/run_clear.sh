@@ -75,6 +75,13 @@ ensure_api_token_for_existing_runtime() {
   export SWARM_API_TOKEN
 }
 
+validate_directive_inputs() {
+  if [[ -z "${DIRECTIVE_AGENT}" || -z "${DIRECTIVE_MESSAGE}" ]]; then
+    echo "DIRECTIVE_AGENT and DIRECTIVE_MESSAGE are required for ${MODE}."
+    exit 2
+  fi
+}
+
 kill_swarm_processes() {
   local pids=""
   pids+=" $(pgrep -f 'go run ./cmd/swarm' 2>/dev/null || true)"
@@ -287,11 +294,8 @@ start_corpus_run() {
 }
 
 send_directive() {
+  validate_directive_inputs
   ensure_api_token_for_existing_runtime
-  if [[ -z "${DIRECTIVE_AGENT}" || -z "${DIRECTIVE_MESSAGE}" ]]; then
-    echo "DIRECTIVE_AGENT and DIRECTIVE_MESSAGE are required for ${MODE}."
-    exit 2
-  fi
   wait_for_ready
 
   echo "Sending directive to ${DIRECTIVE_AGENT}..."
@@ -327,6 +331,7 @@ case "${MODE}" in
     start_corpus_run
     ;;
   run-clear-directed)
+    validate_directive_inputs
     reset_dev
     send_directive
     ;;
