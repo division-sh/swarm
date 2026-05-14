@@ -447,6 +447,9 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	return &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			eventName: {},
+		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": flow.Nodes["scan-orchestrator"],
 		},

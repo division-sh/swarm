@@ -10,10 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
-	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimerunstart "swarm/internal/runtime/runstart"
 	"swarm/internal/store"
 )
 
@@ -24,15 +21,6 @@ var sha256FingerprintPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 type runStartResult struct {
 	RunID  string `json:"run_id"`
 	Status string `json:"status"`
-}
-
-type runStartParams struct {
-	BundleFingerprint string
-	EventName         string
-	Payload           json.RawMessage
-	EntityID          string
-	RunID             string
-	IdempotencyKey    string
 }
 
 func OperatorRunStartHandlers(opts OperatorReadOptions) map[string]MethodHandler {
@@ -58,51 +46,15 @@ func runStartConfigured(opts OperatorReadOptions) bool {
 }
 
 func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
-	bootFingerprint := strings.TrimSpace(opts.Bundle.Fingerprint)
-	ctx = runtimecorrelation.WithBundleFingerprint(ctx, bootFingerprint)
-	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
-	if err != nil {
-		return nil, err
+	cfg := eventPublicationConfig{
+		sourceAgent:                    func(Request) string { return "api.v1" },
+		rootInputOnly:                  true,
+		injectRunIDEntityIDWhenMissing: true,
+		buildCompletion: func(_ context.Context, _ OperatorReadOptions, params eventPublicationParams) (any, string, error) {
+			return runStartResult{RunID: params.RunID, Status: "running"}, params.RunID, nil
+		},
 	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
-		Method:         req.Method,
-		ActorTokenID:   req.ActorTokenID,
-		IdempotencyKey: idempotencyKey,
-		RequestHash:    req.RequestHash,
-		TTL:            runStartIDempotencyTTL,
-		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		params, err := runStartParamsFromRequest(req, bootFingerprint)
-		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
-		}
-		set, err := runtimerunstart.ValidateInputEvents(opts.Source, []string{params.EventName})
-		if err != nil {
-			return store.APIIdempotencyCompletion{}, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
-				"event_name":      params.EventName,
-				"declared_events": set.Declared,
-			})
-		}
-		result := runStartResult{RunID: params.RunID, Status: "running"}
-		if err := opts.Events.Publish(ctx, events.Event{
-			ID:          uuid.NewString(),
-			RunID:       params.RunID,
-			Type:        events.EventType(params.EventName),
-			SourceAgent: "api.v1",
-			Payload:     params.Payload,
-			CreatedAt:   now,
-		}.WithEntityID(params.EntityID)); err != nil {
-			return store.APIIdempotencyCompletion{}, runStartPublishError(params.EventName, err)
-		}
-		response, err := json.Marshal(result)
-		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
-		}
-		return store.APIIdempotencyCompletion{
-			ResourceID: params.RunID,
-			Response:   response,
-		}, nil
-	})
+	completion, replay, err := executeOperatorEventPublication(ctx, req, opts, now, cfg)
 	if err != nil {
 		return nil, runStartIdempotencyError(err)
 	}
@@ -114,50 +66,6 @@ func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions,
 		return nil, fmt.Errorf("decode run.start response: %w", err)
 	}
 	return stored, nil
-}
-
-func runStartParamsFromRequest(req Request, bootFingerprint string) (runStartParams, error) {
-	eventName := stringParam(req.Params, "event_name")
-	if eventName == "" {
-		return runStartParams{}, NewInvalidParamsError(map[string]any{"field": "event_name", "reason": "required parameter is missing"})
-	}
-	fingerprint, err := bundleFingerprintParam(req.Params)
-	if err != nil {
-		return runStartParams{}, err
-	}
-	if fingerprint != "" && fingerprint != strings.TrimSpace(bootFingerprint) {
-		return runStartParams{}, NewApplicationError(BundleMismatchCode, false, map[string]any{
-			"provided_fingerprint": fingerprint,
-			"boot_fingerprint":     strings.TrimSpace(bootFingerprint),
-		})
-	}
-	runID, _, err := optionalStringParam(req.Params, "run_id")
-	if err != nil {
-		return runStartParams{}, err
-	}
-	if runID == "" {
-		runID = uuid.NewString()
-	} else if parsed, err := uuid.Parse(runID); err != nil {
-		return runStartParams{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "must be a UUID"})
-	} else {
-		runID = parsed.String()
-	}
-	payload, entityID, err := runStartPayload(req.Params, runID)
-	if err != nil {
-		return runStartParams{}, err
-	}
-	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
-	if err != nil {
-		return runStartParams{}, err
-	}
-	return runStartParams{
-		BundleFingerprint: fingerprint,
-		EventName:         eventName,
-		Payload:           payload,
-		EntityID:          entityID,
-		RunID:             runID,
-		IdempotencyKey:    idempotencyKey,
-	}, nil
 }
 
 func bundleFingerprintParam(params map[string]any) (string, error) {
@@ -184,39 +92,6 @@ func bundleFingerprintParam(params map[string]any) (string, error) {
 		return "", NewApplicationError(UnsupportedBundleRefCode, false, map[string]any{"reason": "bundle_ref.fingerprint must be sha256:<64 lowercase hex>"})
 	}
 	return fingerprint, nil
-}
-
-func runStartPayload(params map[string]any, runID string) (json.RawMessage, string, error) {
-	if params == nil {
-		return nil, "", NewInvalidParamsError(map[string]any{"field": "payload", "reason": "required parameter is missing"})
-	}
-	raw, ok := params["payload"]
-	if !ok || isEmptyParam(raw) {
-		return nil, "", NewInvalidParamsError(map[string]any{"field": "payload", "reason": "required parameter is missing"})
-	}
-	payload, ok := raw.(map[string]any)
-	if !ok {
-		return nil, "", NewInvalidParamsError(map[string]any{"field": "payload", "reason": "must be an object"})
-	}
-	cloned := make(map[string]any, len(payload)+1)
-	for key, value := range payload {
-		cloned[key] = value
-	}
-	entityID, supplied, err := runStartPayloadEntityID(cloned["entity_id"])
-	if err != nil {
-		return nil, "", err
-	}
-	if !supplied {
-		entityID = strings.TrimSpace(runID)
-		cloned["entity_id"] = entityID
-	} else {
-		cloned["entity_id"] = entityID
-	}
-	encoded, err := json.Marshal(cloned)
-	if err != nil {
-		return nil, "", err
-	}
-	return encoded, entityID, nil
 }
 
 func runStartPayloadEntityID(value any) (string, bool, error) {
