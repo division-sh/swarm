@@ -62,10 +62,6 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 	if err != nil {
 		return nil, err
 	}
-	killPrevious, err := optionalBoolParam(req.Params, "kill_previous")
-	if err != nil {
-		return nil, err
-	}
 	runID, _, err := optionalStringParam(req.Params, "run_id")
 	if err != nil {
 		return nil, err
@@ -84,12 +80,11 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
 		result, err := opts.AgentControl.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
-			AgentID:      agentID,
-			Directive:    directive,
-			KillPrevious: killPrevious,
-			RunID:        runID,
-			Source:       runtimeagentcontrol.DirectiveSourceV1RPC,
-			OperatorID:   req.ActorTokenID,
+			AgentID:    agentID,
+			Directive:  directive,
+			RunID:      runID,
+			Source:     runtimeagentcontrol.DirectiveSourceV1RPC,
+			OperatorID: req.ActorTokenID,
 		})
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
@@ -200,18 +195,6 @@ func executeAgentReplayBacklog(ctx context.Context, req Request, opts OperatorRe
 		return nil, fmt.Errorf("decode %s response: %w", req.Method, err)
 	}
 	return stored, nil
-}
-
-func optionalBoolParam(params map[string]any, name string) (bool, error) {
-	raw, ok := params[name]
-	if !ok || isEmptyParam(raw) {
-		return false, nil
-	}
-	value, ok := raw.(bool)
-	if !ok {
-		return false, NewInvalidParamsError(map[string]any{"field": name, "reason": "must be a boolean"})
-	}
-	return value, nil
 }
 
 func agentControlError(method, agentID string, err error) error {

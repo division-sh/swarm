@@ -113,12 +113,11 @@ func (r RunTargetResolution) Normalized() RunTargetResolution {
 }
 
 type SendDirectiveRequest struct {
-	AgentID      string
-	Directive    string
-	KillPrevious bool
-	RunID        string
-	Source       string
-	OperatorID   string
+	AgentID    string
+	Directive  string
+	RunID      string
+	Source     string
+	OperatorID string
 }
 
 type SendDirectiveResult struct {
@@ -167,7 +166,6 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, now
 	payload := map[string]any{
 		"agent_id":          agentID,
 		"directive_text":    directive,
-		"kill_previous":     req.KillPrevious,
 		"mode":              DirectiveEventMode,
 		"run_id":            target.RunID,
 		"run_id_resolution": target.Mode,

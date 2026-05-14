@@ -815,10 +815,10 @@ func (s stubObservability) ListIncidents(context.Context, IncidentFilter) ([]inc
 }
 
 type stubAgentControl struct {
-	lastDirective    runtimeagentcontrol.SendDirectiveRequest
-	restartCalls     int
-	replayCalls      int
-	lastKillPrevious bool
+	lastDirective  runtimeagentcontrol.SendDirectiveRequest
+	directiveCalls int
+	restartCalls   int
+	replayCalls    int
 }
 
 func (s *stubAgentControl) Restart(_ context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
@@ -832,8 +832,8 @@ func (s *stubAgentControl) ReplayBacklog(_ context.Context, req runtimeagentcont
 }
 
 func (s *stubAgentControl) SendDirective(_ context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
+	s.directiveCalls++
 	s.lastDirective = req
-	s.lastKillPrevious = req.KillPrevious
 	return runtimeagentcontrol.SendDirectiveResult{AgentID: req.AgentID, Response: "ok"}, nil
 }
 
@@ -1199,17 +1199,25 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/directive", strings.NewReader(`{"message":"hello","kill_previous":true}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/directive", strings.NewReader(`{"message":"hello"}`))
 	setOperatorAuth(req)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("agent directive status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if !agentCtl.lastKillPrevious {
-		t.Fatal("expected kill_previous to be forwarded to agent control")
-	}
-	if agentCtl.lastDirective.AgentID != "agent-1" || agentCtl.lastDirective.Directive != "hello" {
+	if agentCtl.directiveCalls != 1 || agentCtl.lastDirective.AgentID != "agent-1" || agentCtl.lastDirective.Directive != "hello" {
 		t.Fatalf("directive request = %#v, want legacy payload adapted", agentCtl.lastDirective)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/directive", strings.NewReader(`{"message":"hello","kill_previous":true}`))
+	setOperatorAuth(req)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("stale kill_previous directive status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if agentCtl.directiveCalls != 1 {
+		t.Fatalf("directive calls after stale kill_previous = %d, want 1", agentCtl.directiveCalls)
 	}
 
 	rec = httptest.NewRecorder()

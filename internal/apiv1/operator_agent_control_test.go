@@ -34,7 +34,7 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 	})
 
 	directiveRunID := "00000000-0000-0000-0000-000000000901"
-	directiveBody := agentDirectiveBodyWithRun("agent-1", directiveRunID, "run corpus", true, "idem-directive")
+	directiveBody := agentDirectiveBodyWithRun("agent-1", directiveRunID, "run corpus", "idem-directive")
 	directive := rpcCall(t, handler, directiveBody)
 	if directive.Error != nil {
 		t.Fatalf("agent.send_directive error = %#v", directive.Error)
@@ -42,7 +42,7 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 	if result := asMap(t, directive.Result); result["ok"] != true || result["response"] != "accepted" || result["run_id"] != directiveRunID || result["run_id_resolution"] != runtimeagentcontrol.RunResolutionSpecified {
 		t.Fatalf("agent.send_directive result = %#v", result)
 	}
-	if controller.directiveCalls != 1 || !controller.lastDirective.KillPrevious || controller.lastDirective.Directive != "run corpus" || controller.lastDirective.RunID != directiveRunID || controller.lastDirective.Source != runtimeagentcontrol.DirectiveSourceV1RPC {
+	if controller.directiveCalls != 1 || controller.lastDirective.Directive != "run corpus" || controller.lastDirective.RunID != directiveRunID || controller.lastDirective.Source != runtimeagentcontrol.DirectiveSourceV1RPC {
 		t.Fatalf("directive call count/request = %d/%#v, want owner request", controller.directiveCalls, controller.lastDirective)
 	}
 	directiveReplay := rpcCall(t, handler, directiveBody)
@@ -52,7 +52,17 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 	if controller.directiveCalls != 1 {
 		t.Fatalf("directive calls after replay = %d, want 1", controller.directiveCalls)
 	}
-	directiveConflict := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", directiveRunID, "different", true, "idem-directive"))
+	staleKillPrevious := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-directive-stale","method":"agent.send_directive","params":{"agent_id":"agent-1","run_id":"00000000-0000-0000-0000-000000000901","directive":"run corpus","kill_previous":true,"idempotency_key":"idem-stale"}}`)
+	if staleKillPrevious.Error == nil || staleKillPrevious.Error.Code != codeInvalidParams {
+		t.Fatalf("stale kill_previous error = %#v, want invalid params", staleKillPrevious.Error)
+	}
+	if details := asMap(t, asMap(t, staleKillPrevious.Error.Data)["details"]); details["field"] != "kill_previous" {
+		t.Fatalf("stale kill_previous details = %#v", details)
+	}
+	if controller.directiveCalls != 1 {
+		t.Fatalf("directive calls after stale kill_previous = %d, want 1", controller.directiveCalls)
+	}
+	directiveConflict := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", directiveRunID, "different", "idem-directive"))
 	if directiveConflict.Error == nil {
 		t.Fatal("agent.send_directive idempotency conflict error = nil")
 	}
@@ -124,7 +134,7 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 		}),
 	})
 
-	notRunning := rpcCall(t, handler, agentDirectiveBody("agent-1", "run corpus", false, ""))
+	notRunning := rpcCall(t, handler, agentDirectiveBody("agent-1", "run corpus", ""))
 	if notRunning.Error == nil {
 		t.Fatal("agent.send_directive not-running error = nil")
 	}
@@ -186,9 +196,9 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 		body string
 		code string
 	}{
-		{"missing", agentDirectiveBodyWithRun("agent-1", missingRunID, "missing", false, ""), RunNotFoundCode},
-		{"terminal", agentDirectiveBodyWithRun("agent-1", terminalRunID, "terminal", false, ""), RunAlreadyTerminalCode},
-		{"ambiguous", agentDirectiveBody("agent-1", "ambiguous", false, ""), AmbiguousRunTargetCode},
+		{"missing", agentDirectiveBodyWithRun("agent-1", missingRunID, "missing", ""), RunNotFoundCode},
+		{"terminal", agentDirectiveBodyWithRun("agent-1", terminalRunID, "terminal", ""), RunAlreadyTerminalCode},
+		{"ambiguous", agentDirectiveBody("agent-1", "ambiguous", ""), AmbiguousRunTargetCode},
 	}
 	for _, tc := range cases {
 		resp := rpcCall(t, handler, tc.body)
@@ -227,7 +237,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 		}),
 	})
 
-	body := agentDirectiveBody("agent-1", "run corpus", false, "idem-directive-integration")
+	body := agentDirectiveBody("agent-1", "run corpus", "idem-directive-integration")
 	first := rpcCall(t, handler, body)
 	if first.Error != nil {
 		t.Fatalf("first directive error = %#v", first.Error)
@@ -242,7 +252,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	if count := countDirectiveEvents(t, db); count != 1 {
 		t.Fatalf("platform.agent_directive rows = %d, want 1", count)
 	}
-	conflict := rpcCall(t, handler, agentDirectiveBody("agent-1", "different", false, "idem-directive-integration"))
+	conflict := rpcCall(t, handler, agentDirectiveBody("agent-1", "different", "idem-directive-integration"))
 	if conflict.Error == nil {
 		t.Fatal("conflict error = nil")
 	}
@@ -281,7 +291,7 @@ func TestOperatorAgentSendDirectivePersistsRunBundleFingerprint(t *testing.T) {
 		}),
 	})
 
-	first := rpcCall(t, handler, agentDirectiveBody("agent-1", "new run", false, "idem-directive-bundle-new"))
+	first := rpcCall(t, handler, agentDirectiveBody("agent-1", "new run", "idem-directive-bundle-new"))
 	if first.Error != nil {
 		t.Fatalf("new-run directive error = %#v", first.Error)
 	}
@@ -298,7 +308,7 @@ func TestOperatorAgentSendDirectivePersistsRunBundleFingerprint(t *testing.T) {
 	`, existingRunID, existingFingerprint); err != nil {
 		t.Fatalf("seed existing run: %v", err)
 	}
-	explicit := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", existingRunID, "existing run", false, "idem-directive-bundle-existing"))
+	explicit := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", existingRunID, "existing run", "idem-directive-bundle-existing"))
 	if explicit.Error != nil {
 		t.Fatalf("existing-run directive error = %#v", explicit.Error)
 	}
@@ -438,18 +448,18 @@ func agentControlBody(method, agentID, idempotencyKey string) string {
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-control","method":%q,"params":{"agent_id":%q,"idempotency_key":%q}}`, method, agentID, idempotencyKey)
 }
 
-func agentDirectiveBody(agentID, directive string, killPrevious bool, idempotencyKey string) string {
+func agentDirectiveBody(agentID, directive, idempotencyKey string) string {
 	if idempotencyKey == "" {
-		return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"directive":%q,"kill_previous":%t}}`, agentID, directive, killPrevious)
+		return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"directive":%q}}`, agentID, directive)
 	}
-	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"directive":%q,"kill_previous":%t,"idempotency_key":%q}}`, agentID, directive, killPrevious, idempotencyKey)
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"directive":%q,"idempotency_key":%q}}`, agentID, directive, idempotencyKey)
 }
 
-func agentDirectiveBodyWithRun(agentID, runID, directive string, killPrevious bool, idempotencyKey string) string {
+func agentDirectiveBodyWithRun(agentID, runID, directive, idempotencyKey string) string {
 	if idempotencyKey == "" {
-		return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"run_id":%q,"directive":%q,"kill_previous":%t}}`, agentID, runID, directive, killPrevious)
+		return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"run_id":%q,"directive":%q}}`, agentID, runID, directive)
 	}
-	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"run_id":%q,"directive":%q,"kill_previous":%t,"idempotency_key":%q}}`, agentID, runID, directive, killPrevious, idempotencyKey)
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"run_id":%q,"directive":%q,"idempotency_key":%q}}`, agentID, runID, directive, idempotencyKey)
 }
 
 func countDirectiveEvents(t *testing.T, db *sql.DB) int {

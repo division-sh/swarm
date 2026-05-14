@@ -358,8 +358,7 @@ type controlResult struct {
 }
 
 type directiveRequest struct {
-	Message      string `json:"message"`
-	KillPrevious bool   `json:"kill_previous,omitempty"`
+	Message string `json:"message"`
 }
 
 type runtimeActionRequest struct {
@@ -437,7 +436,9 @@ func (h *Handler) handleAgentDirective(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req directiveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -447,10 +448,9 @@ func (h *Handler) handleAgentDirective(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.agentControl.SendDirective(r.Context(), runtimeagentcontrol.SendDirectiveRequest{
-		AgentID:      id,
-		Directive:    req.Message,
-		KillPrevious: req.KillPrevious,
-		Source:       runtimeagentcontrol.DirectiveSourceDashboardLegacy,
+		AgentID:   id,
+		Directive: req.Message,
+		Source:    runtimeagentcontrol.DirectiveSourceDashboardLegacy,
 	})
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err)
