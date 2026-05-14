@@ -406,15 +406,6 @@
           }
         },
         {
-          "name": "kill_previous",
-          "required": false,
-          "description": "Legacy turn-cancellation flag. It is evaluated only after run target validation succeeds; explicit run_id plus kill_previous is fail-closed if it would create dual target semantics.",
-          "schema": {
-            "default": false,
-            "type": "boolean"
-          }
-        },
-        {
           "name": "idempotency_key",
           "required": false,
           "schema": {

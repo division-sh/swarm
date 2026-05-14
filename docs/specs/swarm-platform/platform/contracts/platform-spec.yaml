@@ -4541,7 +4541,6 @@ platform_events:
       payload:
         agent_id: string
         directive_text: string
-        kill_previous: boolean
         mode: string (directive)
         run_id: string
         run_id_resolution: string (specified | inferred_from_active_session | new_run_allocated)
@@ -7745,13 +7744,6 @@ api_specification:
           $ref: '#/components/schemas/OpaqueId'
         description: Optional explicit nonterminal run target. If omitted, the runtime resolves from active sessions or allocates
           a new run_id.
-      - name: kill_previous
-        required: false
-        schema:
-          type: boolean
-          default: false
-        description: Legacy turn-cancellation flag. It is evaluated only after run target validation succeeds; explicit run_id
-          plus kill_previous is fail-closed if it would create dual target semantics.
       - name: idempotency_key
         required: false
         schema:

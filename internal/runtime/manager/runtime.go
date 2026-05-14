@@ -17,17 +17,12 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
-	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
 )
-
-type runCanceller interface {
-	CancelActiveRunWorkByProducer(ctx context.Context, producerID string) ([]runtimedelivery.Transition, error)
-}
 
 type agentDirectiveRunTargetResolver interface {
 	ResolveAgentDirectiveRunTarget(ctx context.Context, agentID, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error)
@@ -331,11 +326,10 @@ func (am *AgentManager) safeProcessEvent(ctx context.Context, agent Agent, evt e
 	return
 }
 
-func (am *AgentManager) ChatWithAgent(ctx context.Context, agentID, directive string, killPrevious bool) (string, error) {
+func (am *AgentManager) ChatWithAgent(ctx context.Context, agentID, directive string) (string, error) {
 	result, err := am.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
-		AgentID:      agentID,
-		Directive:    directive,
-		KillPrevious: killPrevious,
+		AgentID:   agentID,
+		Directive: directive,
 	})
 	if err != nil {
 		return "", legacyAgentControlError(err)
@@ -373,18 +367,6 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	target, err := am.resolveAgentDirectiveRunTarget(ctx, agentID, req.RunID)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
-	}
-	if req.KillPrevious && req.RunID != "" {
-		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.StateError{
-			Err:     runtimeagentcontrol.ErrAmbiguousRunTarget,
-			AgentID: agentID,
-			RunID:   target.RunID,
-		}
-	}
-	if req.KillPrevious {
-		if err := am.killPreviousRuns(ctx, agentID); err != nil {
-			return runtimeagentcontrol.SendDirectiveResult{}, err
-		}
 	}
 	directiveEvent, err := runtimeagentcontrol.NewDirectiveEvent(req, target, time.Now().UTC())
 	if err != nil {
@@ -473,94 +455,6 @@ func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt even
 	}
 	if scopeWriter, ok := eventStore.(runtimebus.EventReplayScopePersistence); ok && scopeWriter != nil {
 		return scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID, runtimereplayclaim.CommittedReplayScopeDirect)
-	}
-	return nil
-}
-
-func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string) error {
-	producerID = strings.TrimSpace(producerID)
-	if producerID == "" {
-		return nil
-	}
-	var (
-		transitions []runtimedelivery.Transition
-		err         error
-	)
-	if canceller, ok := am.store.(runCanceller); ok && canceller != nil {
-		transitions, err = canceller.CancelActiveRunWorkByProducer(ctx, producerID)
-		if err != nil {
-			return fmt.Errorf("cancel previous runs for %s: %w", producerID, err)
-		}
-	} else {
-		return nil
-	}
-	affectedAgents := make([]string, 0, len(transitions))
-	for _, transition := range transitions {
-		affectedAgents = append(affectedAgents, transition.AgentID)
-		if am.bus == nil {
-			continue
-		}
-		detail := map[string]any{
-			"delivery_state":          string(transition.State),
-			"delivery_transition":     string(transition.State),
-			"delivery_previous_state": string(transition.PreviousState),
-			"delivery_reason":         strings.TrimSpace(transition.Reason),
-			"subscriber_type":         "agent",
-			"subscriber_id":           strings.TrimSpace(transition.AgentID),
-			"retry_count":             transition.RetryCount,
-		}
-		if strings.TrimSpace(transition.TerminalOutcome) != "" {
-			detail["delivery_terminal_outcome"] = strings.TrimSpace(transition.TerminalOutcome)
-		}
-		_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-			Level:     "debug",
-			Component: "agent-manager",
-			Action:    "delivery_lifecycle_transition",
-			Message:   "Delivery entered exhausted state",
-			EventID:   strings.TrimSpace(transition.EventID),
-			AgentID:   strings.TrimSpace(transition.AgentID),
-			EntityID:  strings.TrimSpace(transition.EntityID),
-			Error:     strings.TrimSpace(transition.Error),
-			Detail:    detail,
-		})
-	}
-	if killer, ok := am.workspaces.(workspace.OrphanKiller); ok && killer != nil {
-		if err := killer.KillOrphanProcesses(am.runtimeContext()); err != nil {
-			if am.bus != nil {
-				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-					Level:     "error",
-					Component: "agent-manager",
-					Action:    "kill_previous_orphan_kill_failed",
-					AgentID:   producerID,
-					Error:     strings.TrimSpace(err.Error()),
-				})
-			}
-		}
-	}
-	seen := make(map[string]struct{}, len(affectedAgents))
-	for _, raw := range affectedAgents {
-		agentID := strings.TrimSpace(raw)
-		if agentID == "" || agentID == producerID {
-			continue
-		}
-		if _, ok := seen[agentID]; ok {
-			continue
-		}
-		seen[agentID] = struct{}{}
-		if err := am.RestartAgent(agentID); err != nil {
-			if am.bus != nil {
-				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-					Level:     "error",
-					Component: "agent-manager",
-					Action:    "kill_previous_restart_failed",
-					AgentID:   agentID,
-					Error:     strings.TrimSpace(err.Error()),
-					Detail: map[string]any{
-						"producer_id": producerID,
-					},
-				})
-			}
-		}
 	}
 	return nil
 }

@@ -8,10 +8,9 @@ import (
 
 func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 	evt, err := NewDirectiveEvent(SendDirectiveRequest{
-		AgentID:      "agent-1",
-		Directive:    "run corpus",
-		KillPrevious: true,
-		Source:       DirectiveSourceV1RPC,
+		AgentID:   "agent-1",
+		Directive: "run corpus",
+		Source:    DirectiveSourceV1RPC,
 	}, RunTargetResolution{
 		RunID: "00000000-0000-0000-0000-000000000701",
 		Mode:  RunResolutionSpecified,
@@ -28,5 +27,8 @@ func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 	}
 	if payload["directive_text"] != "run corpus" || payload["run_id"] != evt.RunID {
 		t.Fatalf("payload = %#v", payload)
+	}
+	if _, ok := payload["kill_previous"]; ok {
+		t.Fatalf("payload = %#v, want no kill_previous field", payload)
 	}
 }

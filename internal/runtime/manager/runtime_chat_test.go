@@ -8,7 +8,6 @@ import (
 	"swarm/internal/events"
 	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
 	runtimebus "swarm/internal/runtime/bus"
-	runtimedelivery "swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 )
@@ -37,11 +36,7 @@ func (a *chatTestAgent) BoardStep(_ context.Context, directive runtimeagentcontr
 	return "ok", nil
 }
 
-type chatTestStore struct {
-	cancelCalls int
-	cancelFor   string
-	transitions []runtimedelivery.Transition
-}
+type chatTestStore struct{}
 
 func (s *chatTestStore) UpsertAgent(context.Context, PersistedAgent) error { return nil }
 func (s *chatTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
@@ -57,11 +52,6 @@ func (s *chatTestStore) ListPendingEventsForAgent(context.Context, string, time.
 }
 func (s *chatTestStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
 	return nil, nil
-}
-func (s *chatTestStore) CancelActiveRunWorkByProducer(_ context.Context, producerID string) ([]runtimedelivery.Transition, error) {
-	s.cancelCalls++
-	s.cancelFor = producerID
-	return append([]runtimedelivery.Transition(nil), s.transitions...), nil
 }
 
 type directiveTargetStore struct {
@@ -125,27 +115,35 @@ func (*directiveEventStore) ListEventDeliveryRecipients(context.Context, string)
 }
 func (*directiveEventStore) SupportsPersistedReplay() bool { return false }
 
-func TestAgentManager_ChatWithAgent_KillPreviousCancelsBeforeBoardStep(t *testing.T) {
+func TestAgentManager_ChatWithAgentPersistsDirectiveEventBeforeBoardStep(t *testing.T) {
+	bus := &directiveTestBus{}
 	store := &chatTestStore{}
 	agent := &chatTestAgent{id: "campaign-coordinator"}
-	am := NewAgentManager(&directiveTestBus{}, nil, store)
+	am := NewAgentManager(bus, nil, store)
 	am.agents[agent.id] = agent
 
-	got, err := am.ChatWithAgent(context.Background(), agent.id, "run corpus", true)
+	got, err := am.ChatWithAgent(context.Background(), agent.id, "run corpus")
 	if err != nil {
 		t.Fatalf("ChatWithAgent: %v", err)
 	}
 	if got != "ok" {
 		t.Fatalf("ChatWithAgent result = %q, want ok", got)
 	}
-	if store.cancelCalls != 1 || store.cancelFor != agent.id {
-		t.Fatalf("cancel previous calls = %d for %q, want 1 for %q", store.cancelCalls, store.cancelFor, agent.id)
-	}
 	if agent.calls != 1 || agent.directive != "run corpus" {
 		t.Fatalf("board step calls=%d directive=%q", agent.calls, agent.directive)
 	}
 	if agent.runID == "" || agent.directiveEvent == "" || agent.directiveSource != runtimeagentcontrol.DirectiveEventType {
 		t.Fatalf("board directive event = run:%q event:%q type:%q", agent.runID, agent.directiveEvent, agent.directiveSource)
+	}
+	eventCount := 0
+	if bus.store != nil {
+		eventCount = len(bus.store.events)
+	}
+	if eventCount != 1 {
+		t.Fatalf("persisted directive events = %d, want 1", eventCount)
+	}
+	if bus.store.events[0].ID != agent.directiveEvent || bus.store.events[0].RunID != agent.runID {
+		t.Fatalf("persisted directive event = %#v, board saw event=%q run=%q", bus.store.events[0], agent.directiveEvent, agent.runID)
 	}
 }
 
@@ -197,7 +195,7 @@ func TestAgentManager_SendDirectivePersistsCanonicalDirectiveEventBeforeBoardSte
 	}
 }
 
-func TestAgentManager_SendDirectiveTargetErrorFailsBeforeKillPreviousAndBoardStep(t *testing.T) {
+func TestAgentManager_SendDirectiveTargetErrorFailsBeforeBoardStep(t *testing.T) {
 	bus := &directiveTestBus{}
 	store := &directiveTargetStore{
 		err: &runtimeagentcontrol.StateError{
@@ -211,10 +209,9 @@ func TestAgentManager_SendDirectiveTargetErrorFailsBeforeKillPreviousAndBoardSte
 	am.agents[agent.id] = agent
 
 	_, err := am.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{
-		AgentID:      agent.id,
-		Directive:    "run corpus",
-		RunID:        "00000000-0000-0000-0000-000000000404",
-		KillPrevious: true,
+		AgentID:   agent.id,
+		Directive: "run corpus",
+		RunID:     "00000000-0000-0000-0000-000000000404",
 	})
 	if err == nil {
 		t.Fatal("SendDirective error = nil")
@@ -223,63 +220,8 @@ func TestAgentManager_SendDirectiveTargetErrorFailsBeforeKillPreviousAndBoardSte
 	if bus.store != nil {
 		eventCount = len(bus.store.events)
 	}
-	if store.cancelCalls != 0 || agent.calls != 0 || eventCount != 0 {
-		t.Fatalf("side effects after target error: cancel=%d board=%d events=%d", store.cancelCalls, agent.calls, eventCount)
-	}
-}
-
-func TestAgentManager_ChatWithAgent_WithoutKillPreviousSkipsCancellation(t *testing.T) {
-	store := &chatTestStore{}
-	agent := &chatTestAgent{id: "campaign-coordinator"}
-	am := NewAgentManager(&directiveTestBus{}, nil, store)
-	am.agents[agent.id] = agent
-
-	if _, err := am.ChatWithAgent(context.Background(), agent.id, "run corpus", false); err != nil {
-		t.Fatalf("ChatWithAgent: %v", err)
-	}
-	if store.cancelCalls != 0 {
-		t.Fatalf("cancel previous calls = %d, want 0", store.cancelCalls)
-	}
-}
-
-func TestAgentManager_ChatWithAgent_KillPreviousLogsForcedTerminalLifecycle(t *testing.T) {
-	bus := &recordingReceiptBus{}
-	store := &chatTestStore{
-		transitions: []runtimedelivery.Transition{{
-			EventID:         "evt-1",
-			AgentID:         "market-research-agent",
-			EntityID:        "entity-1",
-			State:           runtimedelivery.StateExhausted,
-			PreviousState:   runtimedelivery.StateActive,
-			Reason:          "cancelled_by_kill_previous",
-			TerminalOutcome: "cancelled_by_kill_previous",
-			Error:           "cancelled by --kill-previous",
-		}},
-	}
-	agent := &chatTestAgent{id: "campaign-coordinator"}
-	am := NewAgentManager(bus, nil, store)
-	am.agents[agent.id] = agent
-	am.agents["market-research-agent"] = &chatTestAgent{id: "market-research-agent"}
-
-	if _, err := am.ChatWithAgent(context.Background(), agent.id, "run corpus", true); err != nil {
-		t.Fatalf("ChatWithAgent: %v", err)
-	}
-	if len(bus.runtimeLogs) != 1 {
-		t.Fatalf("runtime log count = %d, want 1", len(bus.runtimeLogs))
-	}
-	entry := bus.runtimeLogs[0]
-	if entry.Action != "delivery_lifecycle_transition" {
-		t.Fatalf("action = %q, want delivery_lifecycle_transition", entry.Action)
-	}
-	detail, ok := entry.Detail.(map[string]any)
-	if !ok {
-		t.Fatalf("detail = %#v", entry.Detail)
-	}
-	if detail["delivery_state"] != "exhausted" || detail["delivery_previous_state"] != "active" {
-		t.Fatalf("delivery lifecycle detail = %#v", detail)
-	}
-	if detail["delivery_reason"] != "cancelled_by_kill_previous" || detail["delivery_terminal_outcome"] != "cancelled_by_kill_previous" {
-		t.Fatalf("terminal detail = %#v", detail)
+	if agent.calls != 0 || eventCount != 0 {
+		t.Fatalf("side effects after target error: board=%d events=%d", agent.calls, eventCount)
 	}
 }
 
@@ -290,7 +232,7 @@ func TestAgentManager_ChatWithAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *
 	})
 	am.agents[agent.id] = agent
 
-	if _, err := am.ChatWithAgent(context.Background(), agent.id, "run corpus", false); err == nil || err.Error() != "runtime shutting down" {
+	if _, err := am.ChatWithAgent(context.Background(), agent.id, "run corpus"); err == nil || err.Error() != "runtime shutting down" {
 		t.Fatalf("ChatWithAgent err = %v, want runtime shutting down", err)
 	}
 	if agent.calls != 0 {
