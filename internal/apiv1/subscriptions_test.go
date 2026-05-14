@@ -450,6 +450,65 @@ func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testin
 	}
 }
 
+func TestRuntimeLogSubscriptionPreservesWatermarkAcrossPolls(t *testing.T) {
+	base := time.Unix(1700001350, 0).UTC()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session := &webSocketSession{
+		ctx:    ctx,
+		cancel: cancel,
+		out:    make(chan any, 4),
+		subs:   map[string]context.CancelFunc{},
+	}
+	observability := &fakeObservabilityReadStore{
+		logs: []store.OperatorRuntimeLogEntry{
+			{
+				LogID:   "log-1",
+				TS:      base.Add(time.Second),
+				Message: "first",
+			},
+		},
+	}
+	state := &runtimeLogSubscriptionState{since: &base}
+	runtime := &SubscriptionRuntime{}
+	opts := store.OperatorRuntimeLogListOptions{
+		Limit: subscriptionBatchLimit,
+		Order: "asc",
+	}
+
+	if !runtime.emitRuntimeLogNotifications(ctx, session, "sub-runtime-logs", observability, opts, state) {
+		t.Fatal("first runtime log emit returned false")
+	}
+	if observability.lastRuntimeLogs.Since == nil || !observability.lastRuntimeLogs.Since.Equal(base) {
+		t.Fatalf("first runtime log since = %#v, want %s", observability.lastRuntimeLogs.Since, base)
+	}
+	if state.since == nil || !state.since.After(base) {
+		t.Fatalf("runtime log watermark after first poll = %#v, want after %s", state.since, base)
+	}
+
+	observability.logs = append(observability.logs, store.OperatorRuntimeLogEntry{
+		LogID:   "log-2",
+		TS:      base.Add(2 * time.Second),
+		Message: "second",
+	})
+	if !runtime.emitRuntimeLogNotifications(ctx, session, "sub-runtime-logs", observability, opts, state) {
+		t.Fatal("second runtime log emit returned false")
+	}
+	if observability.lastRuntimeLogs.Since == nil || !observability.lastRuntimeLogs.Since.After(base) {
+		t.Fatalf("second runtime log since = %#v, want advanced watermark after %s", observability.lastRuntimeLogs.Since, base)
+	}
+	if got := len(session.out); got != 2 {
+		t.Fatalf("runtime log notifications = %d, want 2 without replaying old log", got)
+	}
+	first := (<-session.out).(rpcSubscriptionNotification)
+	second := (<-session.out).(rpcSubscriptionNotification)
+	firstLog := first.Params.Result.(store.OperatorRuntimeLogEntry)
+	secondLog := second.Params.Result.(store.OperatorRuntimeLogEntry)
+	if firstLog.LogID != "log-1" || secondLog.LogID != "log-2" {
+		t.Fatalf("runtime log notifications = %q then %q, want log-1 then log-2", firstLog.LogID, secondLog.LogID)
+	}
+}
+
 func TestRuntimeSubscribeLogsRejectsSnapshotControls(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},

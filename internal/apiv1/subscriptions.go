@@ -59,6 +59,11 @@ type subscriptionPlan struct {
 	Cancel context.CancelFunc
 }
 
+type runtimeLogSubscriptionState struct {
+	since *time.Time
+	seen  map[string]string
+}
+
 func OperatorSubscriptions(opts OperatorReadOptions, overrides ...SubscriptionRuntimeOptions) *SubscriptionRuntime {
 	now := opts.Now
 	if now == nil {
@@ -385,8 +390,11 @@ func (r *SubscriptionRuntime) emitTraceNotifications(ctx context.Context, sessio
 }
 
 func (r *SubscriptionRuntime) runRuntimeLogSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, opts store.OperatorRuntimeLogListOptions) {
-	seen := map[string]string{}
-	if !r.emitRuntimeLogNotifications(ctx, session, subscriptionID, reads, opts, seen) {
+	state := &runtimeLogSubscriptionState{
+		since: opts.Since,
+		seen:  map[string]string{},
+	}
+	if !r.emitRuntimeLogNotifications(ctx, session, subscriptionID, reads, opts, state) {
 		return
 	}
 	ticker := time.NewTicker(r.pollInterval)
@@ -396,17 +404,25 @@ func (r *SubscriptionRuntime) runRuntimeLogSubscription(ctx context.Context, ses
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !r.emitRuntimeLogNotifications(ctx, session, subscriptionID, reads, opts, seen) {
+			if !r.emitRuntimeLogNotifications(ctx, session, subscriptionID, reads, opts, state) {
 				return
 			}
 		}
 	}
 }
 
-func (r *SubscriptionRuntime) emitRuntimeLogNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, opts store.OperatorRuntimeLogListOptions, seen map[string]string) bool {
+func (r *SubscriptionRuntime) emitRuntimeLogNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, opts store.OperatorRuntimeLogListOptions, state *runtimeLogSubscriptionState) bool {
+	if state == nil {
+		state = &runtimeLogSubscriptionState{}
+	}
+	if state.seen == nil {
+		state.seen = map[string]string{}
+	}
 	cursor := ""
+	var latestDelivered time.Time
 	for page := 0; page < subscriptionMaxPages; page++ {
 		query := opts
+		query.Since = state.since
 		query.Cursor = cursor
 		result, err := reads.ListOperatorRuntimeLogs(ctx, query)
 		if err != nil {
@@ -419,21 +435,47 @@ func (r *SubscriptionRuntime) emitRuntimeLogNotifications(ctx context.Context, s
 				key = subscriptionPayloadFingerprint(log)
 			}
 			fingerprint := subscriptionPayloadFingerprint(log)
-			if seen[key] == fingerprint {
+			if state.seen[key] == fingerprint {
+				latestDelivered = laterRuntimeLogWatermark(latestDelivered, log.TS)
 				continue
 			}
-			seen[key] = fingerprint
+			state.seen[key] = fingerprint
 			if !session.notify(subscriptionID, log) {
 				return false
 			}
+			latestDelivered = laterRuntimeLogWatermark(latestDelivered, log.TS)
 		}
 		cursor = strings.TrimSpace(result.NextCursor)
 		if cursor == "" {
+			advanceRuntimeLogSubscriptionSince(state, latestDelivered)
 			return true
 		}
 	}
 	session.close()
 	return false
+}
+
+func laterRuntimeLogWatermark(current time.Time, candidate time.Time) time.Time {
+	if candidate.IsZero() {
+		return current
+	}
+	candidate = candidate.UTC()
+	if current.IsZero() || candidate.After(current) {
+		return candidate
+	}
+	return current
+}
+
+func advanceRuntimeLogSubscriptionSince(state *runtimeLogSubscriptionState, latest time.Time) {
+	if state == nil || latest.IsZero() {
+		return
+	}
+	next := latest.UTC().Add(-time.Nanosecond)
+	if state.since != nil && !next.After(state.since.UTC()) {
+		return
+	}
+	value := next
+	state.since = &value
 }
 
 func operatorHealthSnapshot(ctx context.Context, ready func() bool, database Pinger, bundle runtimecontracts.BundleIdentity) healthCheckResult {
