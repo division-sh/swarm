@@ -153,6 +153,15 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	if err := s.ensureAgentRuntimeDescriptorColumn(ctx); err != nil {
 		return err
 	}
+	if catalog.hasTable("runs") && !catalog.hasColumns("runs", "bundle_fingerprint") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE runs ADD COLUMN IF NOT EXISTS bundle_fingerprint TEXT`); err != nil {
+			return fmt.Errorf("ensure runs.bundle_fingerprint column: %w", err)
+		}
+		catalog, err = loadSchemaColumnCatalog(ctx, s.DB)
+		if err != nil {
+			return err
+		}
+	}
 	if !catalog.hasTable("entity_state") {
 		return nil
 	}

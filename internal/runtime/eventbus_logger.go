@@ -14,7 +14,7 @@ import (
 	runtimetools "swarm/internal/runtime/tools"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
@@ -24,6 +24,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, sour
 		InterceptorProvider: interceptorProvider,
 		ContractBundle:      source,
 		PayloadValidator:    payloadValidator,
+		BundleFingerprint:   bundleFingerprint,
 	})
 }
 

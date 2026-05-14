@@ -154,10 +154,72 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check"} {
+	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check", "--require-bundle-match", "--no-require-bundle-match"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+func TestServeBundleMatchAdmissionRejectsActiveMismatches(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	bootFingerprint := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	mismatchFingerprint := "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	runID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', $2, now())
+	`, runID, mismatchFingerprint); err != nil {
+		t.Fatalf("seed active mismatched run: %v", err)
+	}
+
+	err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true)
+	if err == nil {
+		t.Fatal("enforceServeBundleMatchAdmission error = nil, want mismatch")
+	}
+	if got := err.Error(); !strings.Contains(got, "active run bundle mismatch") || !strings.Contains(got, runID) || !strings.Contains(got, mismatchFingerprint) {
+		t.Fatalf("admission error = %q, want run/fingerprint detail", got)
+	}
+}
+
+func TestServeBundleMatchAdmissionAllowsMatchingNullAndDisabled(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	ctx := context.Background()
+	bootFingerprint := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	mismatchFingerprint := "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+
+	for _, seed := range []struct {
+		runID       string
+		status      string
+		fingerprint sql.NullString
+	}{
+		{runID: uuid.NewString(), status: "running", fingerprint: sql.NullString{String: bootFingerprint, Valid: true}},
+		{runID: uuid.NewString(), status: "paused", fingerprint: sql.NullString{}},
+		{runID: uuid.NewString(), status: "completed", fingerprint: sql.NullString{String: mismatchFingerprint, Valid: true}},
+	} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
+			VALUES ($1::uuid, $2, $3, now())
+		`, seed.runID, seed.status, seed.fingerprint); err != nil {
+			t.Fatalf("seed run %s: %v", seed.runID, err)
+		}
+	}
+	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, true); err != nil {
+		t.Fatalf("enforceServeBundleMatchAdmission matching/null/completed: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', $2, now())
+	`, uuid.NewString(), mismatchFingerprint); err != nil {
+		t.Fatalf("seed disabled mismatch: %v", err)
+	}
+	if err := enforceServeBundleMatchAdmission(ctx, pg, bootFingerprint, false); err != nil {
+		t.Fatalf("enforceServeBundleMatchAdmission disabled: %v", err)
 	}
 }
 

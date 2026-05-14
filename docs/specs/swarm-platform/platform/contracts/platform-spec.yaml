@@ -3413,7 +3413,7 @@ platform_tables:
         their parent via forked_from_run_id and forked_from_event_id.'
       ddl: "CREATE TABLE runs (\n    run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    status            TEXT\
         \ NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled', 'forked')),\n\
-        \    trigger_event_id  UUID,\n    trigger_event_type TEXT,\n    forked_from_run_id UUID REFERENCES runs(run_id),\n\
+        \    bundle_fingerprint TEXT,\n    trigger_event_id  UUID,\n    trigger_event_type TEXT,\n    forked_from_run_id UUID REFERENCES runs(run_id),\n\
         \    forked_from_event_id UUID,\n    entity_count      INTEGER NOT NULL DEFAULT 0,\n    event_count       INTEGER\
         \ NOT NULL DEFAULT 0,\n    error_summary     TEXT,\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
         \    ended_at          TIMESTAMPTZ,\n    INDEX idx_runs_status (status, started_at),\n    INDEX idx_runs_fork\
@@ -3430,6 +3430,11 @@ platform_tables:
         When a handler emits a new event, the child event inherits run_id from the parent event.
         External events (API, webhook, admin CLI) start a new run or join an existing one
         based on the ingress configuration.'
+      bundle_fingerprint: 'Optional boot bundle fingerprint pinned when the run row is first created.
+        New v1 run.start-created rows persist the orchestrator boot fingerprint after bundle_ref
+        validation. UPSERT/reopen paths must not overwrite an existing non-NULL fingerprint, but may
+        fill an unknown NULL fingerprint when a canonical boot-owned writer supplies one. Legacy NULL
+        values mean unknown bundle and are allowed by serve bundle-match admission.'
     entity_mutations:
       description: 'Append-only mutation log for entity_state changes. Every write to entity_state.fields,
         entity_state.current_state, entity_state.gates, or entity_state.accumulator produces a row.
@@ -5182,6 +5187,15 @@ cli_specification:
       command: swarm serve
       status: must_have
       behavior: starts current runtime, process probes, /v1/rpc, /v1/ws, and MCP surfaces
+      bundle_match_admission:
+        default: require-bundle-match
+        flags:
+        - --require-bundle-match
+        - --no-require-bundle-match
+        rule: After loading the boot bundle and ensuring platform schema, serve refuses startup before runtime start/readiness when
+          any active run has a non-NULL `runs.bundle_fingerprint` different from the boot bundle fingerprint. Legacy NULL fingerprints
+          mean unknown bundle and do not block startup. `--no-require-bundle-match` disables this admission gate for operator-approved
+          recovery/dev workflows.
     verify:
       command: swarm verify
       status: must_have

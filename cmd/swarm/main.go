@@ -80,20 +80,23 @@ func main() {
 }
 
 type serveOptions struct {
-	ConfigPath       string
-	ContractsPath    string
-	PlatformSpecPath string
-	StoreMode        string
-	HealthAddr       string
-	SelfCheck        bool
+	ConfigPath           string
+	ContractsPath        string
+	PlatformSpecPath     string
+	StoreMode            string
+	HealthAddr           string
+	SelfCheck            bool
+	RequireBundleMatch   bool
+	NoRequireBundleMatch bool
 }
 
 func defaultServeOptions() serveOptions {
 	return serveOptions{
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "postgres",
-		HealthAddr:       defaultHealthAddr,
-		SelfCheck:        true,
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		HealthAddr:         defaultHealthAddr,
+		SelfCheck:          true,
+		RequireBundleMatch: true,
 	}
 }
 
@@ -138,6 +141,10 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		slog.Error("initialize state stores", "error", err)
 		return 1
 	}
+	if err := enforceServeBundleMatchAdmission(ctx, stores.Postgres, bootBundleIdentity.Fingerprint, opts.RequireBundleMatch); err != nil {
+		slog.Error("bundle match admission failed", "error", err)
+		return 3
+	}
 	workspaces := configuredWorkspaceLifecycle(stores.SQLDB, repo, contractsRoot, source)
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		slog.Error("validate workspaces", "error", err)
@@ -175,6 +182,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		WorkspaceLifecycle: workspaces,
 		EnableToolGateway:  true,
 		ToolGatewayToken:   strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")),
+		BundleFingerprint:  bootBundleIdentity.Fingerprint,
 		Credentials:        credentialStore,
 	})
 	if err != nil {
@@ -1355,6 +1363,32 @@ func buildStores(ctx context.Context, storeMode string, cfg *config.Config) (sto
 	default:
 		return storeBundle{}, fmt.Errorf("store mode %q is unsupported; postgres is required", strings.TrimSpace(storeMode))
 	}
+}
+
+func enforceServeBundleMatchAdmission(ctx context.Context, pg *store.PostgresStore, bootFingerprint string, requireMatch bool) error {
+	bootFingerprint = strings.TrimSpace(bootFingerprint)
+	if !requireMatch {
+		log.Printf("bundle match admission disabled by --no-require-bundle-match; active run bundle fingerprints will not block startup")
+		return nil
+	}
+	if bootFingerprint == "" {
+		return fmt.Errorf("boot bundle fingerprint is required")
+	}
+	if pg == nil {
+		return nil
+	}
+	mismatches, err := pg.ActiveRunBundleMismatches(ctx, bootFingerprint)
+	if err != nil {
+		return err
+	}
+	if len(mismatches) == 0 {
+		return nil
+	}
+	details := make([]string, 0, len(mismatches))
+	for _, mismatch := range mismatches {
+		details = append(details, fmt.Sprintf("%s status=%s bundle_fingerprint=%s", mismatch.RunID, mismatch.Status, mismatch.BundleFingerprint))
+	}
+	return fmt.Errorf("active run bundle mismatch: boot bundle %s does not match %d active run(s): %s", bootFingerprint, len(mismatches), strings.Join(details, "; "))
 }
 
 func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {

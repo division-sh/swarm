@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimerunstart "swarm/internal/runtime/runstart"
 	"swarm/internal/store"
 )
@@ -57,6 +58,8 @@ func runStartConfigured(opts OperatorReadOptions) bool {
 }
 
 func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+	bootFingerprint := strings.TrimSpace(opts.Bundle.Fingerprint)
+	ctx = runtimecorrelation.WithBundleFingerprint(ctx, bootFingerprint)
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return nil, err
@@ -69,7 +72,7 @@ func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions,
 		TTL:            runStartIDempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		params, err := runStartParamsFromRequest(req, opts.Bundle.Fingerprint)
+		params, err := runStartParamsFromRequest(req, bootFingerprint)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}

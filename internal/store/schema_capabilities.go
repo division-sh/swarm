@@ -17,17 +17,18 @@ const (
 )
 
 type EventSchemaCapabilities struct {
-	Log               SchemaFlavor
-	Deliveries        SchemaFlavor
-	Receipts          SchemaFlavor
-	HasRuns           bool
-	RunStartedAt      bool
-	RunTriggerColumns bool
-	RunCounterColumns bool
-	RunTerminalFields bool
-	LogRunID          bool
-	DeliveryRunID     bool
-	LogIdempotencyKey bool
+	Log                  SchemaFlavor
+	Deliveries           SchemaFlavor
+	Receipts             SchemaFlavor
+	HasRuns              bool
+	RunStartedAt         bool
+	RunTriggerColumns    bool
+	RunCounterColumns    bool
+	RunTerminalFields    bool
+	RunBundleFingerprint bool
+	LogRunID             bool
+	DeliveryRunID        bool
+	LogIdempotencyKey    bool
 }
 
 type ConversationSchemaCapabilities struct {
@@ -172,14 +173,15 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 			},
 			[]string{"event_id", "agent_id", "processed_at", "status", "retry_count", "error"},
 		),
-		HasRuns:           catalog.hasColumns("runs", "run_id", "status"),
-		RunStartedAt:      catalog.hasColumns("runs", "started_at"),
-		RunTriggerColumns: catalog.hasColumns("runs", "trigger_event_id", "trigger_event_type"),
-		RunCounterColumns: catalog.hasColumns("runs", "event_count", "entity_count"),
-		RunTerminalFields: catalog.hasColumns("runs", "error_summary", "ended_at"),
-		LogRunID:          catalog.hasColumns("events", "run_id"),
-		DeliveryRunID:     catalog.hasColumns("event_deliveries", "run_id"),
-		LogIdempotencyKey: catalog.hasColumns("events", "idempotency_key"),
+		HasRuns:              catalog.hasColumns("runs", "run_id", "status"),
+		RunStartedAt:         catalog.hasColumns("runs", "started_at"),
+		RunTriggerColumns:    catalog.hasColumns("runs", "trigger_event_id", "trigger_event_type"),
+		RunCounterColumns:    catalog.hasColumns("runs", "event_count", "entity_count"),
+		RunTerminalFields:    catalog.hasColumns("runs", "error_summary", "ended_at"),
+		RunBundleFingerprint: catalog.hasColumns("runs", "bundle_fingerprint"),
+		LogRunID:             catalog.hasColumns("events", "run_id"),
+		DeliveryRunID:        catalog.hasColumns("event_deliveries", "run_id"),
+		LogIdempotencyKey:    catalog.hasColumns("events", "idempotency_key"),
 	}
 
 	caps.Conversations = ConversationSchemaCapabilities{

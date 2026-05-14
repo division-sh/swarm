@@ -898,6 +898,7 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabi
 	}
 	opts := runLifecycleOptions(caps)
 	opts.ReopenCompleted = reopenCompleted
+	opts.BundleFingerprint = runtimecorrelation.BundleFingerprintFromContext(ctx)
 	return storerunlifecycle.EnsureActive(ctx, chooseExecQueryer(s.DB, tx), runID, triggerEventID, triggerEventType, opts)
 }
 
@@ -962,10 +963,11 @@ func (s *PostgresStore) ConvergeStandaloneRuntimePlatformRun(ctx context.Context
 
 func runLifecycleOptions(caps StoreSchemaCapabilities) storerunlifecycle.EnsureActiveOptions {
 	return storerunlifecycle.EnsureActiveOptions{
-		HasStartedAtCol: caps.Events.RunStartedAt,
-		HasTriggerCols:  caps.Events.RunTriggerColumns,
-		HasCounterCols:  caps.Events.RunCounterColumns,
-		HasTerminalCols: caps.Events.RunTerminalFields,
+		HasStartedAtCol:         caps.Events.RunStartedAt,
+		HasTriggerCols:          caps.Events.RunTriggerColumns,
+		HasCounterCols:          caps.Events.RunCounterColumns,
+		HasTerminalCols:         caps.Events.RunTerminalFields,
+		HasBundleFingerprintCol: caps.Events.RunBundleFingerprint,
 	}
 }
 
