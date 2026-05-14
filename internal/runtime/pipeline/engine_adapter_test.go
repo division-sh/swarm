@@ -816,6 +816,111 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	}
 }
 
+func TestResolveArtifactRepoRootDefaultUsesRuntimePrivateRoot(t *testing.T) {
+	t.Setenv("SWARM_ARTIFACT_ROOT", "")
+
+	root, err := ResolveArtifactRepoRoot("")
+	if err != nil {
+		t.Fatalf("ResolveArtifactRepoRoot: %v", err)
+	}
+	if got, want := root, "/var/lib/swarm/artifacts"; got != want {
+		t.Fatalf("default artifact root = %q, want %q", got, want)
+	}
+}
+
+func TestResolveArtifactRepoRootExplicitOptionOverridesEnv(t *testing.T) {
+	t.Setenv("SWARM_ARTIFACT_ROOT", "/data/swarm/artifacts")
+	explicit := filepath.Join(t.TempDir(), "artifacts", "..", "repos")
+
+	root, err := ResolveArtifactRepoRoot(explicit)
+	if err != nil {
+		t.Fatalf("ResolveArtifactRepoRoot: %v", err)
+	}
+	if got, want := root, filepath.Clean(explicit); got != want {
+		t.Fatalf("explicit artifact root = %q, want %q", got, want)
+	}
+}
+
+func TestResolveArtifactRepoRootRejectsUnsafeRoots(t *testing.T) {
+	t.Setenv("SWARM_ARTIFACT_ROOT", "")
+	for _, tc := range []struct {
+		name string
+		root string
+		want string
+	}{
+		{name: "relative", root: "artifacts", want: "absolute runtime-private host path"},
+		{name: "data", root: "/data/swarm/artifacts", want: "agent-visible mount /data"},
+		{name: "workspace", root: "/workspace/artifacts", want: "agent-visible mount /workspace"},
+		{name: "contracts", root: "/opt/swarm/contracts/artifacts", want: "agent-visible mount /opt/swarm/contracts"},
+		{name: "prefix", root: "/database/swarm/artifacts", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ResolveArtifactRepoRoot(tc.root)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("ResolveArtifactRepoRoot(%q): %v", tc.root, err)
+				}
+				if got != filepath.Clean(tc.root) {
+					t.Fatalf("ResolveArtifactRepoRoot(%q) = %q", tc.root, got)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ResolveArtifactRepoRoot(%q) error = %v, want %q", tc.root, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifactRoot(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	store := NewWorkflowInstanceStore(db)
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: "/data/swarm/artifacts", bus: bus}
+	ctx := testWorkflowStoreRunContext(t, store)
+	entityID := "22222222-2222-2222-2222-222222222222"
+	initial := testArtifactRepoEntityFields()
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "artifact-repo",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "ready",
+		Metadata:        cloneStringAnyMap(initial),
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
+
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	if !ok {
+		t.Fatal("expected artifact_repo_commit action to be claimed")
+	}
+	if err == nil || !strings.Contains(err.Error(), "agent-visible mount /data") {
+		t.Fatalf("ExecuteAction error = %v, want invalid /data artifact root", err)
+	}
+	instance, _, err := store.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, "agent-visible mount /data") {
+		t.Fatalf("failure_reason = %q, want invalid root detail", got)
+	}
+	if _, exists := instance.Metadata["current_ref"]; exists {
+		t.Fatalf("current_ref should not be persisted on invalid artifact root: %#v", instance.Metadata["current_ref"])
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("failure event count = %d, want 1", got)
+	}
+	if got := string(bus.publishedEvent(0).Type); got != "artifact_repo.commit_failed" {
+		t.Fatalf("failure event type = %q", got)
+	}
+}
+
 func TestPipelineEngineActionRunner_ArtifactRepoCommitPublishesSuccessResultEvent(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
@@ -1483,7 +1588,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	if sameRef == "" || sameRef == initialRef {
 		t.Fatalf("same-tree request current_ref = %q, initial ref = %q; want a durable operation commit", sameRef, initialRef)
 	}
-	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), initial["namespace"].(string), initial["repo_id"].(string))
+	artifactRoot, err := pc.artifactRepoRoot()
+	if err != nil {
+		t.Fatalf("artifactRepoRoot: %v", err)
+	}
+	repoPath, err := artifactRepoPath(artifactRoot, initial["namespace"].(string), initial["repo_id"].(string))
 	if err != nil {
 		t.Fatalf("artifactRepoPath: %v", err)
 	}

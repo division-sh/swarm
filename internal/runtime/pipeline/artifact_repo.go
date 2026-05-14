@@ -27,12 +27,14 @@ import (
 const (
 	artifactRepoProviderLocalGit = "local_git"
 	artifactRepoPublicScheme     = "swarm-artifact://repos/"
-	defaultArtifactRoot          = "/data/swarm/artifacts"
+	defaultArtifactRoot          = "/var/lib/swarm/artifacts"
 	defaultYAMLMaxBytes          = 1 << 20
 	defaultMarkdownMaxBytes      = 5 << 20
 	defaultTextMaxBytes          = 1 << 20
 	defaultRepoMaxBytes          = 50 << 20
 )
+
+var invalidArtifactRootMounts = []string{"/workspace", "/data", "/opt/swarm/contracts"}
 
 type artifactRepoPreparedFile struct {
 	Path        string
@@ -107,7 +109,11 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 			}
 		}
 	}
-	repoPath, err := artifactRepoPath(pc.artifactRepoRoot(), namespace, repoID)
+	artifactRoot, err := pc.artifactRepoRoot()
+	if err != nil {
+		return fail(err)
+	}
+	repoPath, err := artifactRepoPath(artifactRoot, namespace, repoID)
 	if err != nil {
 		return fail(err)
 	}
@@ -277,14 +283,78 @@ func normalizedArtifactRepoFlowInstance(value string) string {
 	return strings.Trim(strings.TrimSpace(value), "/")
 }
 
-func (pc *PipelineCoordinator) artifactRepoRoot() string {
+func (pc *PipelineCoordinator) artifactRepoRoot() (string, error) {
 	if pc != nil && strings.TrimSpace(pc.artifactRoot) != "" {
-		return strings.TrimSpace(pc.artifactRoot)
+		return ResolveArtifactRepoRoot(pc.artifactRoot)
+	}
+	return ResolveArtifactRepoRoot("")
+}
+
+// ResolveArtifactRepoRoot returns the validated runtime-private artifact root.
+// The explicit root has precedence over SWARM_ARTIFACT_ROOT, which has
+// precedence over the platform default.
+func ResolveArtifactRepoRoot(explicit string) (string, error) {
+	root := strings.TrimSpace(explicit)
+	if root != "" {
+		return validateArtifactRepoRoot(root)
 	}
 	if env := strings.TrimSpace(os.Getenv("SWARM_ARTIFACT_ROOT")); env != "" {
-		return env
+		return validateArtifactRepoRoot(env)
 	}
-	return defaultArtifactRoot
+	return validateArtifactRepoRoot(defaultArtifactRoot)
+}
+
+func validateArtifactRepoRoot(raw string) (string, error) {
+	root := strings.TrimSpace(raw)
+	if root == "" {
+		return "", fmt.Errorf("artifact root is required")
+	}
+	if strings.Contains(root, "\x00") {
+		return "", fmt.Errorf("artifact root contains NUL byte")
+	}
+	cleaned := filepath.Clean(root)
+	if !filepath.IsAbs(cleaned) {
+		return "", fmt.Errorf("artifact root %q must be an absolute runtime-private host path", root)
+	}
+	if mount, ok := artifactRootAgentMount(cleaned); ok {
+		return "", fmt.Errorf("artifact root %q cannot live under agent-visible mount %s", cleaned, mount)
+	}
+	if resolved, ok := artifactRootResolveExistingPrefix(cleaned); ok {
+		if mount, ok := artifactRootAgentMount(resolved); ok {
+			return "", fmt.Errorf("artifact root %q resolves under agent-visible mount %s", cleaned, mount)
+		}
+	}
+	return cleaned, nil
+}
+
+func artifactRootAgentMount(root string) (string, bool) {
+	for _, mount := range invalidArtifactRootMounts {
+		cleanMount := filepath.Clean(mount)
+		if artifactPathWithinRoot(root, cleanMount) {
+			return cleanMount, true
+		}
+	}
+	return "", false
+}
+
+func artifactRootResolveExistingPrefix(cleaned string) (string, bool) {
+	current := cleaned
+	remaining := []string{}
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for i := len(remaining) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, remaining[i])
+			}
+			return filepath.Clean(resolved), true
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", false
+		}
+		remaining = append(remaining, filepath.Base(current))
+		current = parent
+	}
 }
 
 func artifactRepoOutputsComplete(metadata map[string]any, spec *runtimecontracts.ArtifactRepoSpec) bool {
@@ -628,9 +698,10 @@ func validateArtifactRepoDisplaySlug(raw string) error {
 }
 
 func artifactRepoPath(root, namespace, repoID string) (string, error) {
-	root = strings.TrimSpace(root)
-	if root == "" {
-		return "", fmt.Errorf("artifact root is required")
+	var err error
+	root, err = validateArtifactRepoRoot(root)
+	if err != nil {
+		return "", err
 	}
 	if _, err := uuid.Parse(repoID); err != nil {
 		return "", fmt.Errorf("repo_id must be UUID: %w", err)

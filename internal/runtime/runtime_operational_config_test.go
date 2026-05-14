@@ -15,6 +15,7 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
+	"swarm/internal/testutil"
 )
 
 type recoveryGuardManagerStore struct {
@@ -91,6 +92,24 @@ func testOperationalRuntimeConfig() *config.Config {
 		LLM: config.LLMConfig{
 			RuntimeMode: "api",
 		},
+	}
+}
+
+func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
+	t.Setenv("SWARM_ARTIFACT_ROOT", "/data/swarm/artifacts")
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	module := loadRuntimeOwnershipWorkflowModule(t)
+
+	_, err := NewRuntime(context.Background(), testOperationalRuntimeConfig(), Stores{
+		SQLDB:      db,
+		EventStore: &minimalRuntimeEventStore{},
+	}, RuntimeOptions{
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "artifact repo root validation failed") || !strings.Contains(err.Error(), "agent-visible mount /data") {
+		t.Fatalf("NewRuntime error = %v, want invalid artifact root", err)
 	}
 }
 

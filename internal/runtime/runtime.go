@@ -312,6 +312,10 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		}
 	})
 	if stores.SQLDB != nil {
+		artifactRoot, err := runtimepipeline.ResolveArtifactRepoRoot("")
+		if err != nil {
+			return nil, fmt.Errorf("artifact repo root validation failed: %w", err)
+		}
 		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
 			Module: opts.WorkflowModule,
 			InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -329,6 +333,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			TimerScheduler:          rt.Scheduler,
 			TimerScheduleStore:      stores.ScheduleStore,
 			EventReceiptsCapability: receiptCaps,
+			ArtifactRoot:            artifactRoot,
 		})
 		if rt.Pipeline != nil {
 			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
