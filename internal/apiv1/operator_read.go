@@ -42,6 +42,7 @@ type AgentConversationReadStore interface {
 	LoadOperatorAgent(context.Context, string) (store.OperatorAgentDetail, error)
 	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
 	LoadOperatorConversation(context.Context, string) (store.OperatorConversationDetail, error)
+	LoadOperatorConversationTurn(context.Context, string, int) (store.OperatorConversationTurnDetail, error)
 	LoadCurrentOperatorConversationForAgent(context.Context, string) (*store.OperatorConversationDetail, error)
 }
 
@@ -325,6 +326,59 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 			}
 			if err != nil {
 				return nil, err
+			}
+			return result, nil
+		},
+		"conversation.get_turn": func(ctx context.Context, req Request) (any, error) {
+			reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+			if err != nil {
+				return nil, err
+			}
+			sessionID, err := requiredStringParam(req.Params, "session_id")
+			if err != nil {
+				return nil, err
+			}
+			turnIndex, err := requiredBoundedIntegerParam(req.Params, "turn_index", 1, 1000000)
+			if err != nil {
+				return nil, err
+			}
+			includeLogs, err := optionalBoolParam(req.Params, "include_logs", true)
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.LoadOperatorConversationTurn(ctx, sessionID, turnIndex)
+			if errors.Is(err, store.ErrSessionNotFound) {
+				return nil, NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": sessionID})
+			}
+			if errors.Is(err, store.ErrTurnNotFound) {
+				return nil, NewApplicationError(TurnNotFoundCode, false, map[string]any{"session_id": sessionID, "turn_index": turnIndex})
+			}
+			if err != nil {
+				return nil, err
+			}
+			if includeLogs {
+				observability, err := requireObservabilityReadStore(opts.Observability)
+				if err != nil {
+					return nil, err
+				}
+				logOpts := store.OperatorRuntimeLogListOptions{
+					SessionID: result.Session.SessionID,
+					Since:     &result.RuntimeLogWindowStart,
+					Until:     result.RuntimeLogWindowEnd,
+					Limit:     1000,
+					Order:     "asc",
+				}
+				logs, err := observability.ListOperatorRuntimeLogs(ctx, logOpts)
+				if errors.Is(err, store.ErrInvalidObservabilityCursor) {
+					return nil, NewInvalidParamsError(map[string]any{"field": "runtime_log_entries", "reason": "invalid runtime log cursor"})
+				}
+				if err != nil {
+					return nil, err
+				}
+				if logs.Logs == nil {
+					logs.Logs = []store.OperatorRuntimeLogEntry{}
+				}
+				result.Turn.RuntimeLogEntries = logs.Logs
 			}
 			return result, nil
 		},
@@ -737,6 +791,9 @@ func operatorRuntimeLogListOptionsFromParams(params map[string]any) (store.Opera
 	if out.EntityID, _, err = optionalStringParam(params, "entity_id"); err != nil {
 		return store.OperatorRuntimeLogListOptions{}, err
 	}
+	if out.SessionID, _, err = optionalStringParam(params, "session_id"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, err
+	}
 	if out.Component, _, err = optionalStringParam(params, "component"); err != nil {
 		return store.OperatorRuntimeLogListOptions{}, err
 	}
@@ -754,6 +811,15 @@ func operatorRuntimeLogListOptionsFromParams(params map[string]any) (store.Opera
 	}
 	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
 		return store.OperatorRuntimeLogListOptions{}, err
+	}
+	if out.Since, err = timestampParam(params, "since"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, err
+	}
+	if out.Until, err = timestampParam(params, "until"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, err
+	}
+	if out.Since != nil && out.Until != nil && out.Since.After(*out.Until) {
+		return store.OperatorRuntimeLogListOptions{}, NewInvalidParamsError(map[string]any{"field": "until", "reason": "must be at or after since"})
 	}
 	if out.Limit, err = boundedIntegerParam(params, "limit", 1, 1000); err != nil {
 		return store.OperatorRuntimeLogListOptions{}, err
@@ -865,6 +931,21 @@ func requiredStringParam(params map[string]any, name string) (string, error) {
 	return value, nil
 }
 
+func optionalBoolParam(params map[string]any, name string, defaultValue bool) (bool, error) {
+	if params == nil {
+		return defaultValue, nil
+	}
+	value, ok := params[name]
+	if !ok || isEmptyParam(value) {
+		return defaultValue, nil
+	}
+	boolValue, ok := value.(bool)
+	if !ok {
+		return false, NewInvalidParamsError(map[string]any{"field": name, "reason": "must be a boolean"})
+	}
+	return boolValue, nil
+}
+
 func stringParam(params map[string]any, name string) string {
 	if params == nil {
 		return ""
@@ -887,6 +968,24 @@ func integerParam(value any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func requiredBoundedIntegerParam(params map[string]any, name string, minValue, maxValue int) (int, error) {
+	if params == nil {
+		return 0, NewInvalidParamsError(map[string]any{"field": name, "reason": "is required"})
+	}
+	raw, ok := params[name]
+	if !ok || isEmptyParam(raw) {
+		return 0, NewInvalidParamsError(map[string]any{"field": name, "reason": "is required"})
+	}
+	value, ok := integerParam(raw)
+	if !ok || value < minValue || value > maxValue {
+		return 0, NewInvalidParamsError(map[string]any{
+			"field":  name,
+			"reason": fmt.Sprintf("must be an integer from %d to %d", minValue, maxValue),
+		})
+	}
+	return value, nil
 }
 
 func boundedIntegerParam(params map[string]any, name string, minValue, maxValue int) (int, error) {

@@ -18,6 +18,8 @@ var ErrAgentNotFound = errors.New("store: agent not found")
 
 var ErrSessionNotFound = errors.New("store: session not found")
 
+var ErrTurnNotFound = errors.New("store: turn not found")
+
 var ErrAmbiguousEntityRunID = errors.New("store: ambiguous entity run_id")
 
 var ErrInvalidEntityCursor = errors.New("store: invalid entity cursor")

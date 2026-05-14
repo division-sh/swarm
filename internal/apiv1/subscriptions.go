@@ -219,6 +219,7 @@ func runtimeLogSubscriptionOptionsFromParams(params map[string]any) (store.Opera
 	allowed := map[string]struct{}{
 		"run_id":       {},
 		"entity_id":    {},
+		"session_id":   {},
 		"component":    {},
 		"level":        {},
 		"error_code":   {},
@@ -236,6 +237,9 @@ func runtimeLogSubscriptionOptionsFromParams(params map[string]any) (store.Opera
 		return store.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	if out.EntityID, _, err = optionalStringParam(params, "entity_id"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, nil, err
+	}
+	if out.SessionID, _, err = optionalStringParam(params, "session_id"); err != nil {
 		return store.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	if out.Component, _, err = optionalStringParam(params, "component"); err != nil {

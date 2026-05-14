@@ -367,6 +367,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testin
 				Source:    "agent-1",
 				RunID:     "run-1",
 				EntityID:  "entity-1",
+				SessionID: "sess-1",
 				ErrorCode: "E_OLD",
 				Message:   "old log",
 			},
@@ -378,6 +379,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testin
 				Source:    "agent-1",
 				RunID:     "run-1",
 				EntityID:  "entity-1",
+				SessionID: "sess-1",
 				ErrorCode: "E_RUNTIME",
 				Message:   "runtime failed",
 				Details:   map[string]any{"action": "dispatch"},
@@ -403,6 +405,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testin
 		"params": map[string]any{
 			"run_id":       "run-1",
 			"entity_id":    "entity-1",
+			"session_id":   "sess-1",
 			"component":    "scheduler",
 			"level":        "error",
 			"error_code":   "E_RUNTIME",
@@ -425,6 +428,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testin
 	}
 	if observability.lastRuntimeLogs.RunID != "run-1" ||
 		observability.lastRuntimeLogs.EntityID != "entity-1" ||
+		observability.lastRuntimeLogs.SessionID != "sess-1" ||
 		observability.lastRuntimeLogs.Component != "scheduler" ||
 		observability.lastRuntimeLogs.Level != "error" ||
 		observability.lastRuntimeLogs.ErrorCode != "E_RUNTIME" ||
@@ -519,7 +523,7 @@ func TestRuntimeSubscribeLogsRejectsSnapshotControls(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	for _, field := range []string{"limit", "cursor", "order"} {
+	for _, field := range []string{"limit", "cursor", "order", "since", "until"} {
 		t.Run(field, func(t *testing.T) {
 			conn := dialTestWS(t, server.URL)
 			defer conn.Close()
