@@ -51,11 +51,25 @@ type eventReplayDelivery struct {
 	SourceDeliveryID string `json:"source_delivery_id,omitempty"`
 }
 
+type agentReplayResult struct {
+	EventID          string              `json:"event_id"`
+	AgentID          string              `json:"agent_id"`
+	ReplayEventID    string              `json:"replay_event_id"`
+	AuditEventID     string              `json:"audit_event_id"`
+	OriginalDelivery eventReplayDelivery `json:"original_delivery"`
+	NewDelivery      eventReplayDelivery `json:"new_delivery"`
+}
+
 type eventReplayStoredResult struct {
 	EventID             string   `json:"event_id"`
 	ReplayEventID       string   `json:"replay_event_id"`
 	AuditEventID        string   `json:"audit_event_id"`
 	SubscribersReplayed []string `json:"subscribers_replayed"`
+}
+
+type operatorEventReplayRequest struct {
+	EventID              string
+	RequestedSubscribers []string
 }
 
 type eventReplayPerformed struct {
@@ -74,6 +88,9 @@ func OperatorEventReplayHandlers(opts OperatorReadOptions) map[string]MethodHand
 	return map[string]MethodHandler{
 		"event.replay": func(ctx context.Context, req Request) (any, error) {
 			return executeEventReplay(ctx, req, opts, now().UTC())
+		},
+		"agent.replay": func(ctx context.Context, req Request) (any, error) {
+			return executeAgentReplay(ctx, req, opts, now().UTC())
 		},
 	}
 }
@@ -95,13 +112,49 @@ func executeEventReplay(ctx context.Context, req Request, opts OperatorReadOptio
 	if err != nil {
 		return nil, err
 	}
-	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
+	return executeOperatorEventReplay(ctx, req, opts, now, operatorEventReplayRequest{
+		EventID:              eventID,
+		RequestedSubscribers: requestedSubscribers,
+	})
+}
+
+func executeAgentReplay(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+	agentID, err := requiredStringParam(req.Params, "agent_id")
 	if err != nil {
 		return nil, err
 	}
+	eventID, err := requiredStringParam(req.Params, "event_id")
+	if err != nil {
+		return nil, err
+	}
+	result, err := executeOperatorEventReplay(ctx, req, opts, now, operatorEventReplayRequest{
+		EventID:              eventID,
+		RequestedSubscribers: []string{agentID},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return agentReplayResultFromEventReplay(agentID, result)
+}
+
+func executeOperatorEventReplay(
+	ctx context.Context,
+	req Request,
+	opts OperatorReadOptions,
+	now time.Time,
+	replayReq operatorEventReplayRequest,
+) (eventReplayResult, error) {
 	publisher, ok := opts.Events.(eventReplayPublisher)
 	if !ok || publisher == nil {
-		return nil, errors.New("event replay publisher is required")
+		return eventReplayResult{}, errors.New("event replay publisher is required")
+	}
+	eventID := strings.TrimSpace(replayReq.EventID)
+	if eventID == "" {
+		return eventReplayResult{}, NewInvalidParamsError(map[string]any{"field": "event_id", "reason": "required parameter is missing"})
+	}
+	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
+	if err != nil {
+		return eventReplayResult{}, err
 	}
 	var replayPublishErr error
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
@@ -113,7 +166,7 @@ func executeEventReplay(ctx context.Context, req Request, opts OperatorReadOptio
 		TTL:            eventReplayIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		performed, err := performEventReplay(ctx, req, opts, publisher, eventID, requestedSubscribers, now)
+		performed, err := performEventReplay(ctx, req, opts, publisher, eventID, replayReq.RequestedSubscribers, now)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
@@ -128,24 +181,24 @@ func executeEventReplay(ctx context.Context, req Request, opts OperatorReadOptio
 		}, nil
 	})
 	if err != nil {
-		return nil, eventReplayError(err)
+		return eventReplayResult{}, eventReplayError(err)
 	}
 	var stored eventReplayStoredResult
 	if err := json.Unmarshal(completion.Response, &stored); err != nil {
 		if replay {
-			return nil, fmt.Errorf("decode event.replay idempotency response: %w", err)
+			return eventReplayResult{}, fmt.Errorf("decode %s idempotency response: %w", req.Method, err)
 		}
-		return nil, fmt.Errorf("decode event.replay response: %w", err)
+		return eventReplayResult{}, fmt.Errorf("decode %s response: %w", req.Method, err)
 	}
 	if err := ensureEventReplayAudit(ctx, req, opts, publisher, stored, now); err != nil {
-		return nil, err
+		return eventReplayResult{}, err
 	}
 	if replayPublishErr != nil {
-		return nil, replayPublishErr
+		return eventReplayResult{}, replayPublishErr
 	}
 	result, err := eventReplayResultFromStore(ctx, opts, stored)
 	if err != nil {
-		return nil, err
+		return eventReplayResult{}, err
 	}
 	return result, nil
 }
@@ -230,7 +283,7 @@ func ensureEventReplayAudit(
 	now time.Time,
 ) error {
 	if strings.TrimSpace(stored.AuditEventID) == "" {
-		return errors.New("event.replay idempotency response missing audit_event_id")
+		return fmt.Errorf("%s idempotency response missing audit_event_id", req.Method)
 	}
 	if _, err := opts.Observability.LoadOperatorEvent(ctx, stored.AuditEventID); err == nil {
 		return nil
@@ -443,6 +496,36 @@ func eventReplayNewDeliveries(deliveries []store.OperatorEventDelivery, original
 		})
 	}
 	return out
+}
+
+func agentReplayResultFromEventReplay(agentID string, replay eventReplayResult) (agentReplayResult, error) {
+	agentID = strings.TrimSpace(agentID)
+	original, ok := deliveryForSubscriber(replay.OriginalDeliveries, agentID)
+	if !ok {
+		return agentReplayResult{}, fmt.Errorf("agent.replay canonical replay result missing original delivery for agent %s", agentID)
+	}
+	newDelivery, ok := deliveryForSubscriber(replay.NewDeliveries, agentID)
+	if !ok {
+		return agentReplayResult{}, fmt.Errorf("agent.replay canonical replay result missing new delivery for agent %s", agentID)
+	}
+	return agentReplayResult{
+		EventID:          strings.TrimSpace(replay.EventID),
+		AgentID:          agentID,
+		ReplayEventID:    strings.TrimSpace(replay.ReplayEventID),
+		AuditEventID:     strings.TrimSpace(replay.AuditEventID),
+		OriginalDelivery: original,
+		NewDelivery:      newDelivery,
+	}, nil
+}
+
+func deliveryForSubscriber(deliveries []eventReplayDelivery, subscriberID string) (eventReplayDelivery, bool) {
+	subscriberID = strings.TrimSpace(subscriberID)
+	for _, delivery := range deliveries {
+		if strings.TrimSpace(delivery.SubscriberID) == subscriberID {
+			return delivery, true
+		}
+	}
+	return eventReplayDelivery{}, false
 }
 
 func eventReplayActorSource(req Request) string {

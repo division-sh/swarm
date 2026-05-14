@@ -297,6 +297,136 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 	})
 }
 
+func TestOperatorAgentReplayProjectsSingletonEventReplayOwner(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	bus := eventReplayTestBus(t, pg)
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
+	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-b")
+	chA := bus.Subscribe("agent-a")
+	defer bus.Unsubscribe("agent-a")
+	chB := bus.Subscribe("agent-b")
+	defer bus.Unsubscribe("agent-b")
+	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a", "agent-b"}, eventReplayStatusDelivered)
+	handler := eventReplayTestHandler(t, pg, bus)
+
+	body := agentReplayBody(original.EventID, "agent-a", "idem-agent-replay")
+	resp := rpcCall(t, handler, body)
+	if resp.Error != nil {
+		t.Fatalf("agent.replay error = %#v", resp.Error)
+	}
+	result := asMap(t, resp.Result)
+	if result["event_id"] != original.EventID || result["agent_id"] != "agent-a" {
+		t.Fatalf("agent.replay identity result = %#v, want event %s agent-a", result, original.EventID)
+	}
+	replayEventID := stringValue(t, result["replay_event_id"], "replay_event_id")
+	auditEventID := stringValue(t, result["audit_event_id"], "audit_event_id")
+	if replayEventID == original.EventID || auditEventID == original.EventID || auditEventID == replayEventID {
+		t.Fatalf("event IDs not distinct: original=%s replay=%s audit=%s", original.EventID, replayEventID, auditEventID)
+	}
+	originalDelivery := asMap(t, result["original_delivery"])
+	if originalDelivery["subscriber_id"] != "agent-a" || strings.TrimSpace(fmt.Sprint(originalDelivery["delivery_id"])) == "" {
+		t.Fatalf("original_delivery = %#v, want agent-a delivery", originalDelivery)
+	}
+	newDelivery := asMap(t, result["new_delivery"])
+	if newDelivery["subscriber_id"] != "agent-a" || newDelivery["source_delivery_id"] != originalDelivery["delivery_id"] {
+		t.Fatalf("new_delivery = %#v, want agent-a source delivery %s", newDelivery, originalDelivery["delivery_id"])
+	}
+	assertReplayEventDelivered(t, chA, replayEventID, original.EventID)
+	assertNoReplayEvent(t, chB)
+	assertAgentReplayPersistence(t, db, original.EventID, replayEventID, auditEventID, "agent-a", 2)
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows = %d, want 1", count)
+	}
+
+	replayed := rpcCall(t, handler, body)
+	if replayed.Error != nil {
+		t.Fatalf("agent.replay idempotent retry error = %#v", replayed.Error)
+	}
+	replayedResult := asMap(t, replayed.Result)
+	if replayedResult["replay_event_id"] != replayEventID || replayedResult["audit_event_id"] != auditEventID {
+		t.Fatalf("idempotent agent.replay result = %#v, want original replay/audit IDs", replayedResult)
+	}
+	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+		t.Fatalf("scan.requested events after idempotent retry = %d, want original+replay", count)
+	}
+
+	conflict := rpcCall(t, handler, agentReplayBody(original.EventID, "agent-b", "idem-agent-replay"))
+	if conflict.Error == nil {
+		t.Fatal("agent.replay idempotency conflict error = nil")
+	}
+	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
+		t.Fatalf("agent.replay conflict data = %#v, want %s", data, IdempotencyConflictCode)
+	}
+}
+
+func TestOperatorAgentReplayFailClosedCases(t *testing.T) {
+	t.Run("requested agent was not original subscriber", func(t *testing.T) {
+		ctx := context.Background()
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		bus := eventReplayTestBus(t, pg)
+		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
+		bus.Subscribe("agent-a")
+		defer bus.Unsubscribe("agent-a")
+		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusDelivered)
+		handler := eventReplayTestHandler(t, pg, bus)
+
+		resp := rpcCall(t, handler, agentReplayBody(original.EventID, "agent-b", "idem-agent-not-original"))
+		if resp.Error == nil {
+			t.Fatal("non-original agent.replay error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != EventReplaySubscriberNotOriginalCode {
+			t.Fatalf("non-original data = %#v, want %s", data, EventReplaySubscriberNotOriginalCode)
+		}
+		if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+			t.Fatalf("scan.requested events = %d, want original only", count)
+		}
+	})
+
+	t.Run("original agent no longer deliverable", func(t *testing.T) {
+		ctx := context.Background()
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		bus := eventReplayTestBus(t, pg)
+		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
+		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusDelivered)
+		handler := eventReplayTestHandler(t, pg, bus)
+
+		resp := rpcCall(t, handler, agentReplayBody(original.EventID, "agent-a", "idem-agent-unavailable"))
+		if resp.Error == nil {
+			t.Fatal("unavailable agent.replay error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != EventReplaySubscriberUnavailableCode {
+			t.Fatalf("unavailable data = %#v, want %s", data, EventReplaySubscriberUnavailableCode)
+		}
+		if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+			t.Fatalf("scan.requested events = %d, want original only", count)
+		}
+	})
+
+	t.Run("nonterminal original delivery is not eligible", func(t *testing.T) {
+		ctx := context.Background()
+		_, db, _ := testutil.StartPostgres(t)
+		pg := &store.PostgresStore{DB: db}
+		bus := eventReplayTestBus(t, pg)
+		seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "agent-a")
+		bus.Subscribe("agent-a")
+		defer bus.Unsubscribe("agent-a")
+		original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, eventReplayStatusPending)
+		handler := eventReplayTestHandler(t, pg, bus)
+
+		resp := rpcCall(t, handler, agentReplayBody(original.EventID, "agent-a", "idem-agent-not-eligible"))
+		if resp.Error == nil {
+			t.Fatal("not-eligible agent.replay error = nil")
+		}
+		if data := asMap(t, resp.Error.Data); data["code"] != EventReplayNotEligibleCode {
+			t.Fatalf("not-eligible data = %#v, want %s", data, EventReplayNotEligibleCode)
+		}
+	})
+}
+
 func TestOperatorEventReplayQueuesWhenDispatchGated(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -449,6 +579,10 @@ func eventReplayBody(eventID string, subscribers []string, idempotencyKey string
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"replay","method":"event.replay","params":{%s}}`, strings.Join(parts, ","))
 }
 
+func agentReplayBody(eventID, agentID, idempotencyKey string) string {
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-replay","method":"agent.replay","params":{"event_id":%q,"agent_id":%q,"idempotency_key":%q}}`, eventID, agentID, idempotencyKey)
+}
+
 func assertReplayEventDelivered(t *testing.T, ch <-chan events.Event, replayEventID, originalEventID string) {
 	t.Helper()
 	select {
@@ -530,6 +664,43 @@ func assertReplayPersistence(t *testing.T, db *sql.DB, originalEventID, replayEv
 	}
 	if !strings.Contains(payloadRaw, replayEventID) || !strings.Contains(payloadRaw, originalEventID) {
 		t.Fatalf("audit payload = %s, want original and replay IDs", payloadRaw)
+	}
+}
+
+func assertAgentReplayPersistence(t *testing.T, db *sql.DB, originalEventID, replayEventID, auditEventID, agentID string, wantOriginalDeliveries int) {
+	t.Helper()
+	if got := countEventDeliveries(t, db, replayEventID); got != 1 {
+		t.Fatalf("agent replay event deliveries = %d, want 1", got)
+	}
+	if got := countEventDeliveries(t, db, originalEventID); got != wantOriginalDeliveries {
+		t.Fatalf("original event deliveries = %d, want preserved %d", got, wantOriginalDeliveries)
+	}
+	if got := countEventsByName(t, db, "event.replayed"); got != 1 {
+		t.Fatalf("event.replayed count = %d, want 1", got)
+	}
+	var sourceEventID, payloadRaw string
+	if err := db.QueryRow(`
+		SELECT COALESCE(source_event_id::text, ''), payload::text
+		FROM events
+		WHERE event_id = $1::uuid
+	`, replayEventID).Scan(&sourceEventID, &payloadRaw); err != nil {
+		t.Fatalf("load agent replay event lineage: %v", err)
+	}
+	if sourceEventID != originalEventID {
+		t.Fatalf("agent replay source_event_id = %q, want original %q", sourceEventID, originalEventID)
+	}
+	if err := db.QueryRow(`
+		SELECT COALESCE(source_event_id::text, ''), payload::text
+		FROM events
+		WHERE event_id = $1::uuid
+	`, auditEventID).Scan(&sourceEventID, &payloadRaw); err != nil {
+		t.Fatalf("load agent replay audit event: %v", err)
+	}
+	if sourceEventID != originalEventID {
+		t.Fatalf("agent replay audit source_event_id = %q, want original %q", sourceEventID, originalEventID)
+	}
+	if !strings.Contains(payloadRaw, replayEventID) || !strings.Contains(payloadRaw, originalEventID) || !strings.Contains(payloadRaw, agentID) {
+		t.Fatalf("agent replay audit payload = %s, want original/replay IDs and %s", payloadRaw, agentID)
 	}
 }
 
