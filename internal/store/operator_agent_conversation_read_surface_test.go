@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -255,6 +256,94 @@ func TestOperatorConversationReadSurfaceCurrentForAgentReturnsNullWithoutActiveL
 	}
 	if detail != nil {
 		t.Fatalf("expected nil current conversation without active live session, got %+v", detail)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestOperatorConversationReadSurfaceLoadTurnComposesConversationOwner(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	sessionID := "11111111-1111-1111-1111-111111111111"
+	runID := "33333333-3333-3333-3333-333333333333"
+	firstTurnID := "44444444-4444-4444-4444-444444444444"
+	secondTurnID := "55555555-5555-5555-5555-555555555555"
+	startedAt := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+	firstCompletedAt := startedAt.Add(time.Second)
+	secondCompletedAt := startedAt.Add(5 * time.Second)
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   canonicalAgentConversationReadCaps(),
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+	}, 0)
+
+	mock.ExpectQuery("(?s)SELECT\\s+session_id,\\s+agent_id,.*FROM \\(.*\\) conversations\\s+WHERE session_id = \\$1").
+		WithArgs(sessionID).
+		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()).
+			AddRow(sessionID, "agent-1", runID, "live_session", "global", "global", "session", "terminated", 2, 4, []byte(`{"summary":"active session"}`), []byte(`[{"role":"assistant","content":"ready"}]`), startedAt, secondCompletedAt, secondCompletedAt))
+	mock.ExpectQuery("(?s)SELECT\\s+turn_id::text,.*FROM agent_turns.*ORDER BY created_at ASC, turn_id ASC").
+		WithArgs("agent-1", sessionID).
+		WillReturnRows(sqlmock.NewRows(operatorConversationTurnColumns()).
+			AddRow(firstTurnID, "agent-1", sessionID, "session", "global", "", "", "", "task-1", []byte(`["emit_done"]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`), []byte(`{"first":true}`), []byte(`{"ok":true}`), []byte(`[]`), true, 1000, 0, "", firstCompletedAt).
+			AddRow(secondTurnID, "agent-1", sessionID, "session", "global", "", "66666666-6666-6666-6666-666666666666", "input.received", "task-2", []byte(`["emit_done","read_state"]`), []byte(`[{"name":"read_state","arguments":{"id":"entity-1"}}]`), []byte(`["task.completed"]`), []byte(`{}`), []byte(`["read_state"]`), []byte(`["read_state"]`), []byte(`{"turn":2}`), []byte(`{"ok":true}`), []byte(`[{"kind":"assistant","text":"done"}]`), true, 1500, 1, "", secondCompletedAt))
+
+	result, err := reader.LoadOperatorConversationTurn(context.Background(), sessionID, 2)
+	if err != nil {
+		t.Fatalf("LoadOperatorConversationTurn: %v", err)
+	}
+	if result.Session.SessionID != sessionID || result.Session.RunID != runID {
+		t.Fatalf("session = %#v", result.Session)
+	}
+	wantStarted := secondCompletedAt.Add(-1500 * time.Millisecond)
+	if result.Turn.TurnIndex != 2 || result.Turn.TurnID != secondTurnID || !result.Turn.StartedAt.Equal(wantStarted) || !result.Turn.CompletedAt.Equal(secondCompletedAt) {
+		t.Fatalf("turn timing/id = %#v", result.Turn)
+	}
+	if !result.RuntimeLogWindowStart.Equal(wantStarted.Add(-time.Nanosecond)) || result.RuntimeLogWindowEnd == nil || !result.RuntimeLogWindowEnd.Equal(secondCompletedAt) {
+		t.Fatalf("runtime log window start=%s end=%v", result.RuntimeLogWindowStart, result.RuntimeLogWindowEnd)
+	}
+	if result.Turn.DispatchMetadata.TaskID != "task-2" || result.Turn.DispatchMetadata.RunID != runID || result.Turn.DispatchMetadata.TriggerEventType != "input.received" {
+		t.Fatalf("dispatch metadata = %#v", result.Turn.DispatchMetadata)
+	}
+	if len(result.Turn.AdvertisedTools) != 2 || result.Turn.AdvertisedTools[1] != "read_state" {
+		t.Fatalf("advertised tools = %#v", result.Turn.AdvertisedTools)
+	}
+	if len(result.TurnBlocksRaw) != 1 || result.TurnBlocksRaw[0].Text != "done" {
+		t.Fatalf("turn_blocks_raw = %#v", result.TurnBlocksRaw)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestOperatorConversationReadSurfaceLoadTurnOutOfRange(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	sessionID := "11111111-1111-1111-1111-111111111111"
+	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+		caps:   canonicalAgentConversationReadCaps(),
+		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
+	}, 0)
+
+	mock.ExpectQuery("(?s)SELECT\\s+session_id,\\s+agent_id,.*FROM \\(.*\\) conversations\\s+WHERE session_id = \\$1").
+		WithArgs(sessionID).
+		WillReturnRows(sqlmock.NewRows(operatorConversationDetailColumns()).
+			AddRow(sessionID, "agent-1", "", "live_session", "global", "global", "session", "active", 0, 0, []byte(`{}`), []byte(`[]`), now, nil, now))
+	mock.ExpectQuery("(?s)SELECT\\s+turn_id::text,.*FROM agent_turns.*ORDER BY created_at ASC, turn_id ASC").
+		WithArgs("agent-1", sessionID).
+		WillReturnRows(sqlmock.NewRows(operatorConversationTurnColumns()))
+
+	_, err = reader.LoadOperatorConversationTurn(context.Background(), sessionID, 1)
+	if !errors.Is(err, ErrTurnNotFound) {
+		t.Fatalf("LoadOperatorConversationTurn missing turn err = %v, want ErrTurnNotFound", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)

@@ -868,6 +868,126 @@
       ]
     },
     {
+      "name": "conversation.get_turn",
+      "description": "Read one deep single-turn diagnosis record for an existing conversation session.\nThis method composes the canonical conversation/session/turn owner with the canonical persisted runtime log owner; clients MUST NOT reconstruct this shape by independently joining conversation.get, runtime.logs, run.trace, or dashboard audit tables.\n",
+      "params": [
+        {
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "turn_index",
+          "required": true,
+          "description": "1-based position in the session's canonical turn order, matching the `conversation.get` turns array order (`agent_turns.created_at ASC, turn_id ASC`).",
+          "schema": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "include_logs",
+          "required": false,
+          "schema": {
+            "default": true,
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ConversationTurnDetail"
+        }
+      },
+      "errors": [
+        {
+          "code": -32024,
+          "message": "Application error: SESSION_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SESSION_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "session_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32025,
+          "message": "Application error: TURN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "TURN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "session_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "turn_index": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "turn_index"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "conversation.list",
       "description": "List conversation summaries (one per session).",
       "params": [
@@ -1331,7 +1451,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32026,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -3569,7 +3689,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32026,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -4174,6 +4294,13 @@
           }
         },
         {
+          "name": "session_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
           "name": "component",
           "required": false,
           "schema": {
@@ -4199,6 +4326,20 @@
           "required": false,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        {
+          "name": "until",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Timestamp"
           }
         },
         {
@@ -4480,7 +4621,7 @@
     },
     {
       "name": "runtime.subscribe_logs",
-      "description": "Live structured runtime log stream for `runtime.logs` follow mode.\nNotifications carry one `LogEntry` row from the same persisted runtime log read owner used by `runtime.logs`.\nThe method accepts the same runtime-log filter fields as `runtime.logs`, but snapshot pagination and sort controls (`limit`, `cursor`, `order`) are not accepted on the subscription.\n",
+      "description": "Live structured runtime log stream for `runtime.logs` follow mode.\nNotifications carry one `LogEntry` row from the same persisted runtime log read owner used by `runtime.logs`.\nThe method accepts the same runtime-log identity/content filter fields as `runtime.logs`, but snapshot pagination, sort, and fixed-window controls (`limit`, `cursor`, `order`, `since`, `until`) are not accepted on the subscription. Use `replay_since` for catch-up.\n",
       "params": [
         {
           "name": "run_id",
@@ -4491,6 +4632,13 @@
         },
         {
           "name": "entity_id",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "session_id",
           "required": false,
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -4646,6 +4794,164 @@
         ],
         "type": "object"
       },
+      "ConversationDeepTurn": {
+        "additionalProperties": false,
+        "properties": {
+          "advertised_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "assistant_visible_output": {
+            "type": "string"
+          },
+          "completed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "dispatch_metadata": {
+            "$ref": "#/components/schemas/ConversationTurnDispatchMetadata"
+          },
+          "duration_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "emitted_events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "error": {
+            "type": "string"
+          },
+          "full_prompt_context": {
+            "oneOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "full_prompt_context_v2_reserved": {
+            "const": true,
+            "type": "boolean"
+          },
+          "mcp_tools_listed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mcp_tools_visible": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "parse_ok": {
+            "type": "boolean"
+          },
+          "progress_updates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "provider_metadata": {
+            "$ref": "#/components/schemas/ConversationTurnProviderMetadata"
+          },
+          "raw_llm_response": {
+            "oneOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "raw_llm_response_v2_reserved": {
+            "const": true,
+            "type": "boolean"
+          },
+          "reasoning_blocks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "request_payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "response_payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "retry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runtime_log_entries": {
+            "items": {
+              "$ref": "#/components/schemas/LogEntry"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "tool_calls": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tool_results": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "turn_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "turn_index": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn_index",
+          "turn_id",
+          "started_at",
+          "completed_at",
+          "duration_ms",
+          "parse_ok",
+          "dispatch_metadata",
+          "advertised_tools",
+          "runtime_log_entries",
+          "provider_metadata",
+          "full_prompt_context",
+          "full_prompt_context_v2_reserved",
+          "raw_llm_response",
+          "raw_llm_response_v2_reserved"
+        ],
+        "type": "object"
+      },
       "ConversationDetail": {
         "additionalProperties": false,
         "properties": {
@@ -4714,6 +5020,64 @@
           "turn_count",
           "message_count",
           "status"
+        ],
+        "type": "object"
+      },
+      "ConversationTurnDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/ConversationSummary"
+          },
+          "turn": {
+            "$ref": "#/components/schemas/ConversationDeepTurn"
+          },
+          "turn_blocks_raw": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "session",
+          "turn",
+          "turn_blocks_raw"
+        ],
+        "type": "object"
+      },
+      "ConversationTurnDispatchMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "trigger_event_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "trigger_event_type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConversationTurnProviderMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "latency_ms": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "latency_ms"
         ],
         "type": "object"
       },
@@ -5240,6 +5604,9 @@
             "type": "string"
           },
           "run_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "session_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
           "source": {
@@ -7033,8 +7400,51 @@
           "type": "object"
         }
       },
-      "UNSUPPORTED_BUNDLE_REF": {
+      "TURN_NOT_FOUND": {
         "code": -32025,
+        "message": "Application error: TURN_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "TURN_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "session_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "turn_index": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "session_id",
+                "turn_index"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "UNSUPPORTED_BUNDLE_REF": {
+        "code": -32026,
         "message": "Application error: UNSUPPORTED_BUNDLE_REF",
         "data": {
           "additionalProperties": false,

@@ -312,7 +312,7 @@ func dashboardRuntimeLogRecord(log store.OperatorRuntimeLogEntry) runtimeLogReco
 		ErrorCode:     log.ErrorCode,
 		AgentID:       readString(details["agent_id"]),
 		EntityID:      log.EntityID,
-		SessionID:     readString(details["session_id"]),
+		SessionID:     firstString(log.SessionID, readString(details["session_id"])),
 		DurationUS:    readInt(details["duration_us"]),
 		Source:        log.Source,
 		Message:       log.Message,

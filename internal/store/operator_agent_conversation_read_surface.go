@@ -183,6 +183,113 @@ type OperatorConversationDetail struct {
 	RuntimeState OperatorConversationState     `json:"-"`
 }
 
+type OperatorConversationTurnDetail struct {
+	Session               OperatorConversationSummary     `json:"session"`
+	Turn                  OperatorConversationDeepTurn    `json:"turn"`
+	TurnBlocksRaw         []OperatorConversationTurnBlock `json:"turn_blocks_raw"`
+	RuntimeLogWindowStart time.Time                       `json:"-"`
+	RuntimeLogWindowEnd   *time.Time                      `json:"-"`
+}
+
+type OperatorConversationDeepTurn struct {
+	TurnIndex                   int                                  `json:"turn_index"`
+	TurnID                      string                               `json:"turn_id"`
+	Scope                       string                               `json:"scope,omitempty"`
+	StartedAt                   time.Time                            `json:"started_at"`
+	CompletedAt                 time.Time                            `json:"completed_at"`
+	DurationMS                  int                                  `json:"duration_ms"`
+	Outcome                     string                               `json:"outcome,omitempty"`
+	ParseOK                     bool                                 `json:"parse_ok"`
+	Error                       string                               `json:"error,omitempty"`
+	RetryCount                  int                                  `json:"retry_count,omitempty"`
+	DispatchMetadata            OperatorConversationDispatchMetadata `json:"dispatch_metadata"`
+	AdvertisedTools             []string                             `json:"advertised_tools"`
+	MCPToolsListed              []string                             `json:"mcp_tools_listed,omitempty"`
+	MCPToolsVisible             []string                             `json:"mcp_tools_visible,omitempty"`
+	ReasoningBlocks             []string                             `json:"reasoning_blocks,omitempty"`
+	ProgressUpdates             []string                             `json:"progress_updates,omitempty"`
+	ToolCalls                   []OperatorConversationToolCall       `json:"tool_calls,omitempty"`
+	ToolResults                 []OperatorConversationToolResult     `json:"tool_results,omitempty"`
+	EmittedEvents               []string                             `json:"emitted_events,omitempty"`
+	RuntimeLogEntries           []OperatorRuntimeLogEntry            `json:"runtime_log_entries"`
+	ProviderMetadata            OperatorConversationProviderMetadata `json:"provider_metadata"`
+	RequestPayload              json.RawMessage                      `json:"request_payload,omitempty"`
+	ResponsePayload             json.RawMessage                      `json:"response_payload,omitempty"`
+	FullPromptContext           any                                  `json:"full_prompt_context"`
+	FullPromptContextV2Reserved bool                                 `json:"full_prompt_context_v2_reserved"`
+	RawLLMResponse              any                                  `json:"raw_llm_response"`
+	RawLLMResponseV2Reserved    bool                                 `json:"raw_llm_response_v2_reserved"`
+	AssistantVisibleOutput      string                               `json:"assistant_visible_output,omitempty"`
+}
+
+type OperatorConversationDispatchMetadata struct {
+	TriggerEventID   string `json:"trigger_event_id,omitempty"`
+	TriggerEventType string `json:"trigger_event_type,omitempty"`
+	EntityID         string `json:"entity_id,omitempty"`
+	TaskID           string `json:"task_id,omitempty"`
+	RunID            string `json:"run_id,omitempty"`
+}
+
+type OperatorConversationProviderMetadata struct {
+	LatencyMS int `json:"latency_ms"`
+}
+
+func cloneStrings(in []string) []string {
+	if in == nil {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneRawMessage(in json.RawMessage) json.RawMessage {
+	if in == nil {
+		return nil
+	}
+	out := make(json.RawMessage, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneConversationToolCalls(in []OperatorConversationToolCall) []OperatorConversationToolCall {
+	if in == nil {
+		return nil
+	}
+	out := make([]OperatorConversationToolCall, len(in))
+	for i, item := range in {
+		out[i] = item
+		out[i].Arguments = cloneRawMessage(item.Arguments)
+	}
+	return out
+}
+
+func cloneConversationToolResults(in []OperatorConversationToolResult) []OperatorConversationToolResult {
+	if in == nil {
+		return nil
+	}
+	out := make([]OperatorConversationToolResult, len(in))
+	for i, item := range in {
+		out[i] = item
+		out[i].Output = cloneRawMessage(item.Output)
+	}
+	return out
+}
+
+func cloneConversationTurnBlocks(in []OperatorConversationTurnBlock) []OperatorConversationTurnBlock {
+	if in == nil {
+		return nil
+	}
+	out := make([]OperatorConversationTurnBlock, len(in))
+	for i, item := range in {
+		out[i] = item
+		out[i].Input = cloneRawMessage(item.Input)
+		out[i].Output = cloneRawMessage(item.Output)
+		out[i].Data = cloneRawMessage(item.Data)
+	}
+	return out
+}
+
 type OperatorConversationMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -311,6 +418,10 @@ func (s *PostgresStore) ListOperatorConversations(ctx context.Context, opts Oper
 
 func (s *PostgresStore) LoadOperatorConversation(ctx context.Context, sessionID string) (OperatorConversationDetail, error) {
 	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorConversation(ctx, sessionID)
+}
+
+func (s *PostgresStore) LoadOperatorConversationTurn(ctx context.Context, sessionID string, turnIndex int) (OperatorConversationTurnDetail, error) {
+	return NewOperatorAgentConversationReadSurface(s.DB, s, 0).LoadOperatorConversationTurn(ctx, sessionID, turnIndex)
 }
 
 func (s *PostgresStore) LoadCurrentOperatorConversationForAgent(ctx context.Context, agentID string) (*OperatorConversationDetail, error) {
@@ -551,6 +662,73 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorConversation(ctx cont
 		item.Turns = []OperatorConversationTurn{}
 	}
 	return item, nil
+}
+
+func (r *OperatorAgentConversationReadSurface) LoadOperatorConversationTurn(ctx context.Context, sessionID string, turnIndex int) (OperatorConversationTurnDetail, error) {
+	if turnIndex < 1 {
+		return OperatorConversationTurnDetail{}, ErrTurnNotFound
+	}
+	detail, err := r.LoadOperatorConversation(ctx, sessionID)
+	if err != nil {
+		return OperatorConversationTurnDetail{}, err
+	}
+	if turnIndex > len(detail.Turns) {
+		return OperatorConversationTurnDetail{}, ErrTurnNotFound
+	}
+	selected := detail.Turns[turnIndex-1]
+	completedAt := selected.CreatedAt.UTC()
+	startedAt := completedAt
+	if selected.LatencyMS > 0 {
+		startedAt = completedAt.Add(-time.Duration(selected.LatencyMS) * time.Millisecond)
+	}
+	windowStart := startedAt.Add(-time.Nanosecond)
+	windowEnd := completedAt
+	out := OperatorConversationTurnDetail{
+		Session:               detail.Conversation,
+		TurnBlocksRaw:         cloneConversationTurnBlocks(selected.TurnBlocks),
+		RuntimeLogWindowStart: windowStart,
+		RuntimeLogWindowEnd:   &windowEnd,
+		Turn: OperatorConversationDeepTurn{
+			TurnIndex:   turnIndex,
+			TurnID:      selected.TurnID,
+			Scope:       selected.ScopeKey,
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			DurationMS:  selected.LatencyMS,
+			Outcome:     selected.Outcome,
+			ParseOK:     selected.ParseOK,
+			Error:       selected.Error,
+			RetryCount:  selected.RetryCount,
+			DispatchMetadata: OperatorConversationDispatchMetadata{
+				TriggerEventID:   selected.TriggerEventID,
+				TriggerEventType: selected.TriggerEventType,
+				EntityID:         selected.EntityID,
+				TaskID:           selected.TaskID,
+				RunID:            detail.Conversation.RunID,
+			},
+			AdvertisedTools:             cloneStrings(selected.AvailableTools),
+			MCPToolsListed:              cloneStrings(selected.MCPToolsListed),
+			MCPToolsVisible:             cloneStrings(selected.MCPToolsVisible),
+			ReasoningBlocks:             cloneStrings(selected.ReasoningBlocks),
+			ProgressUpdates:             cloneStrings(selected.ProgressUpdates),
+			ToolCalls:                   cloneConversationToolCalls(selected.ToolCalls),
+			ToolResults:                 cloneConversationToolResults(selected.ToolResults),
+			EmittedEvents:               cloneStrings(selected.EmittedEvents),
+			RuntimeLogEntries:           []OperatorRuntimeLogEntry{},
+			ProviderMetadata:            OperatorConversationProviderMetadata{LatencyMS: selected.LatencyMS},
+			RequestPayload:              cloneRawMessage(selected.RequestPayload),
+			ResponsePayload:             cloneRawMessage(selected.ResponsePayload),
+			FullPromptContext:           nil,
+			FullPromptContextV2Reserved: true,
+			RawLLMResponse:              nil,
+			RawLLMResponseV2Reserved:    true,
+			AssistantVisibleOutput:      selected.AssistantVisibleOutput,
+		},
+	}
+	if out.Turn.AdvertisedTools == nil {
+		out.Turn.AdvertisedTools = []string{}
+	}
+	return out, nil
 }
 
 func (r *OperatorAgentConversationReadSurface) ListDashboardOperatorConversations(ctx context.Context, limit int) ([]OperatorConversationSummary, error) {

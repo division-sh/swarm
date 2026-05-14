@@ -249,6 +249,62 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	}
 }
 
+func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+
+	runID := uuid.NewString()
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	insertLog := func(sessionID string, createdAt time.Time) string {
+		t.Helper()
+		eventID := uuid.NewString()
+		payload := `{
+			"log_level":"warn",
+			"message":"runtime warning",
+			"details":{
+				"component":"agent-runtime",
+				"action":"turn_progress",
+				"session_id":"` + sessionID + `",
+				"error_code":"warn_code"
+			}
+		}`
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ($1::uuid, $2::uuid, 'platform.runtime_log', 'global', $3::jsonb, 'runtime', 'platform', $4)
+		`, eventID, runID, payload, createdAt); err != nil {
+			t.Fatalf("seed runtime log: %v", err)
+		}
+		return eventID
+	}
+	inWindow := insertLog("sess-1", base.Add(1*time.Second))
+	_ = insertLog("sess-2", base.Add(2*time.Second))
+	_ = insertLog("sess-1", base.Add(3*time.Second))
+
+	since := base
+	until := base.Add(2500 * time.Millisecond)
+	result, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+		RunID:     runID,
+		SessionID: "sess-1",
+		Since:     &since,
+		Until:     &until,
+		Limit:     10,
+		Order:     "asc",
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeLogs: %v", err)
+	}
+	if len(result.Logs) != 1 {
+		t.Fatalf("runtime logs len=%d logs=%#v, want one session/time-window row", len(result.Logs), result.Logs)
+	}
+	if got := result.Logs[0]; got.LogID != inWindow || got.SessionID != "sess-1" || got.Component != "agent-runtime" {
+		t.Fatalf("runtime log row = %#v", got)
+	}
+}
+
 func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)

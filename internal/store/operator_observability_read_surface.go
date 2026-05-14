@@ -78,12 +78,14 @@ type OperatorDeadLetterRecord struct {
 type OperatorRuntimeLogListOptions struct {
 	RunID             string
 	EntityID          string
+	SessionID         string
 	Component         string
 	Level             string
 	ErrorCode         string
 	Source            string
 	ActionOrEventType string
 	Since             *time.Time
+	Until             *time.Time
 	Limit             int
 	Cursor            string
 	Order             string
@@ -102,6 +104,7 @@ type OperatorRuntimeLogEntry struct {
 	Source    string         `json:"source"`
 	RunID     string         `json:"run_id,omitempty"`
 	EntityID  string         `json:"entity_id,omitempty"`
+	SessionID string         `json:"session_id,omitempty"`
 	ErrorCode string         `json:"error_code,omitempty"`
 	Message   string         `json:"message"`
 	Details   map[string]any `json:"details,omitempty"`
@@ -457,10 +460,14 @@ func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts Operat
 	}
 	opts = defaultOperatorRuntimeLogListOptions(opts)
 	cursorClause := ""
-	args := []any{opts.RunID, opts.EntityID, opts.Component, opts.Level, opts.ErrorCode, opts.Source, opts.ActionOrEventType}
+	args := []any{opts.RunID, opts.EntityID, opts.Component, opts.Level, opts.ErrorCode, opts.Source, opts.ActionOrEventType, opts.SessionID}
 	if opts.Since != nil {
 		args = append(args, opts.Since.UTC())
 		cursorClause += fmt.Sprintf(" AND e.created_at > $%d", len(args))
+	}
+	if opts.Until != nil {
+		args = append(args, opts.Until.UTC())
+		cursorClause += fmt.Sprintf(" AND e.created_at <= $%d", len(args))
 	}
 	if opts.Cursor != "" {
 		cursor, err := decodeObservabilityPositionCursor(opts.Cursor, "runtime.logs")
@@ -505,6 +512,7 @@ func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts Operat
 		  AND ($5 = '' OR COALESCE(e.payload->'details'->>'error_code', '') = $5)
 		  AND ($6 = '' OR COALESCE(e.payload->'details'->>'agent_id', e.produced_by, '') = $6)
 		  AND ($7 = '' OR COALESCE(e.payload->'details'->>'action', '') = $7 OR COALESCE(e.payload->'details'->>'event_name', e.payload->'details'->>'event_type', '') = $7)
+		  AND ($8 = '' OR COALESCE(e.payload->'details'->>'session_id', '') = $8)
 		  %s
 		ORDER BY e.created_at %s, e.event_id::text %s
 		LIMIT $%d
@@ -715,6 +723,7 @@ func operatorRuntimeLogEntry(eventID, runID, rowEntityID, producedBy string, cre
 		Source:    firstNonEmptyStore(payload.AgentID, producedBy, "runtime"),
 		RunID:     strings.TrimSpace(runID),
 		EntityID:  firstNonEmptyStore(payload.EntityID, rowEntityID),
+		SessionID: strings.TrimSpace(payload.SessionID),
 		ErrorCode: strings.TrimSpace(payload.ErrorCode),
 		Message:   strings.TrimSpace(payload.Message),
 		Details:   details,
@@ -750,6 +759,7 @@ func defaultOperatorEventListOptions(opts OperatorEventListOptions) OperatorEven
 func defaultOperatorRuntimeLogListOptions(opts OperatorRuntimeLogListOptions) OperatorRuntimeLogListOptions {
 	opts.RunID = strings.TrimSpace(opts.RunID)
 	opts.EntityID = strings.TrimSpace(opts.EntityID)
+	opts.SessionID = strings.TrimSpace(opts.SessionID)
 	opts.Component = strings.TrimSpace(opts.Component)
 	opts.Level = strings.TrimSpace(opts.Level)
 	opts.ErrorCode = strings.TrimSpace(opts.ErrorCode)

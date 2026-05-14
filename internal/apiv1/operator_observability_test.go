@@ -43,6 +43,7 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 			Source:    "runtime",
 			RunID:     "run-1",
 			ErrorCode: "retry_exhausted",
+			SessionID: "sess-1",
 			Message:   "retry exhausted",
 			Details:   map[string]any{"action": "dispatch"},
 		}},
@@ -92,15 +93,22 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 		t.Fatalf("event.get event_id = %#v", got)
 	}
 
-	logs := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"logs","method":"runtime.logs","params":{"run_id":"run-1","component":"scheduler","level":"warn","limit":5}}`)
+	logs := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"logs","method":"runtime.logs","params":{"run_id":"run-1","session_id":"sess-1","component":"scheduler","level":"warn","since":"2023-11-14T22:12:00Z","until":"2023-11-14T22:14:00Z","limit":5}}`)
 	if logs.Error != nil {
 		t.Fatalf("runtime.logs error = %#v", logs.Error)
 	}
 	if rows, _ := asMap(t, logs.Result)["logs"].([]any); len(rows) != 1 {
 		t.Fatalf("runtime.logs rows = %#v", asMap(t, logs.Result)["logs"])
 	}
-	if observability.lastRuntimeLogs.RunID != "run-1" || observability.lastRuntimeLogs.Component != "scheduler" {
+	if observability.lastRuntimeLogs.RunID != "run-1" || observability.lastRuntimeLogs.SessionID != "sess-1" || observability.lastRuntimeLogs.Component != "scheduler" {
 		t.Fatalf("runtime.logs options = %#v", observability.lastRuntimeLogs)
+	}
+	if observability.lastRuntimeLogs.Since == nil || observability.lastRuntimeLogs.Until == nil {
+		t.Fatalf("runtime.logs time window missing: %#v", observability.lastRuntimeLogs)
+	}
+	invalidWindow := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"logs-window","method":"runtime.logs","params":{"since":"2023-11-14T22:14:00Z","until":"2023-11-14T22:12:00Z"}}`)
+	if invalidWindow.Error == nil || invalidWindow.Error.Code != codeInvalidParams {
+		t.Fatalf("runtime.logs invalid window error = %#v, want invalid params", invalidWindow.Error)
 	}
 
 	incidents := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"incidents","method":"runtime.incidents","params":{"since_hours":24,"component":"scheduler","limit":5}}`)
@@ -234,6 +242,9 @@ func (s *fakeObservabilityReadStore) ListOperatorRuntimeLogs(_ context.Context, 
 		if opts.EntityID != "" && log.EntityID != opts.EntityID {
 			continue
 		}
+		if opts.SessionID != "" && log.SessionID != opts.SessionID {
+			continue
+		}
 		if opts.Component != "" && log.Component != opts.Component {
 			continue
 		}
@@ -244,6 +255,9 @@ func (s *fakeObservabilityReadStore) ListOperatorRuntimeLogs(_ context.Context, 
 			continue
 		}
 		if opts.Source != "" && log.Source != opts.Source {
+			continue
+		}
+		if opts.Until != nil && log.TS.After(opts.Until.UTC()) {
 			continue
 		}
 		out = append(out, log)

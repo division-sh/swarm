@@ -6493,6 +6493,154 @@ api_specification:
             minimum: 0
           error:
             type: string
+      ConversationTurnDispatchMetadata:
+        type: object
+        additionalProperties: false
+        properties:
+          trigger_event_id:
+            $ref: '#/components/schemas/OpaqueId'
+          trigger_event_type:
+            type: string
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          task_id:
+            type: string
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+      ConversationTurnProviderMetadata:
+        type: object
+        additionalProperties: false
+        required:
+        - latency_ms
+        properties:
+          latency_ms:
+            type: integer
+            minimum: 0
+      ConversationDeepTurn:
+        type: object
+        additionalProperties: false
+        required:
+        - turn_index
+        - turn_id
+        - started_at
+        - completed_at
+        - duration_ms
+        - parse_ok
+        - dispatch_metadata
+        - advertised_tools
+        - runtime_log_entries
+        - provider_metadata
+        - full_prompt_context
+        - full_prompt_context_v2_reserved
+        - raw_llm_response
+        - raw_llm_response_v2_reserved
+        properties:
+          turn_index:
+            type: integer
+            minimum: 1
+          turn_id:
+            $ref: '#/components/schemas/OpaqueId'
+          scope:
+            type: string
+          started_at:
+            $ref: '#/components/schemas/Timestamp'
+          completed_at:
+            $ref: '#/components/schemas/Timestamp'
+          duration_ms:
+            type: integer
+            minimum: 0
+          outcome:
+            type: string
+          parse_ok:
+            type: boolean
+          error:
+            type: string
+          retry_count:
+            type: integer
+            minimum: 0
+          dispatch_metadata:
+            $ref: '#/components/schemas/ConversationTurnDispatchMetadata'
+          advertised_tools:
+            type: array
+            items:
+              type: string
+          mcp_tools_listed:
+            type: array
+            items:
+              type: string
+          mcp_tools_visible:
+            type: array
+            items:
+              type: string
+          reasoning_blocks:
+            type: array
+            items:
+              type: string
+          progress_updates:
+            type: array
+            items:
+              type: string
+          tool_calls:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          tool_results:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          emitted_events:
+            type: array
+            items:
+              type: string
+          runtime_log_entries:
+            type: array
+            items:
+              $ref: '#/components/schemas/LogEntry'
+          provider_metadata:
+            $ref: '#/components/schemas/ConversationTurnProviderMetadata'
+          request_payload:
+            type: object
+            additionalProperties: true
+          response_payload:
+            type: object
+            additionalProperties: true
+          full_prompt_context:
+            oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+          full_prompt_context_v2_reserved:
+            type: boolean
+            const: true
+          raw_llm_response:
+            oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+          raw_llm_response_v2_reserved:
+            type: boolean
+            const: true
+          assistant_visible_output:
+            type: string
+      ConversationTurnDetail:
+        type: object
+        additionalProperties: false
+        required:
+        - session
+        - turn
+        - turn_blocks_raw
+        properties:
+          session:
+            $ref: '#/components/schemas/ConversationSummary'
+          turn:
+            $ref: '#/components/schemas/ConversationDeepTurn'
+          turn_blocks_raw:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
       ConversationDetail:
         type: object
         additionalProperties: false
@@ -6537,6 +6685,8 @@ api_specification:
           run_id:
             $ref: '#/components/schemas/OpaqueId'
           entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          session_id:
             $ref: '#/components/schemas/OpaqueId'
           error_code:
             type: string
@@ -7075,6 +7225,18 @@ api_specification:
         properties:
           session_id:
             $ref: '#/components/schemas/OpaqueId'
+      TURN_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required:
+        - session_id
+        - turn_index
+        properties:
+          session_id:
+            $ref: '#/components/schemas/OpaqueId'
+          turn_index:
+            type: integer
+            minimum: 1
       RUNTIME_ALREADY_PAUSED:
         type: object
         additionalProperties: false
@@ -8185,6 +8347,40 @@ api_specification:
           $ref: '#/components/schemas/ConversationDetail'
       errors:
       - SESSION_NOT_FOUND
+    conversation.get_turn:
+      tier: should_have
+      description: "Read one deep single-turn diagnosis record for an existing conversation session.\nThis method composes\
+        \ the canonical conversation/session/turn owner with the canonical persisted runtime log owner; clients MUST NOT\
+        \ reconstruct this shape by independently joining conversation.get, runtime.logs, run.trace, or dashboard audit tables.\n"
+      scope:
+        required:
+        - read:conversations
+        - read:runtime
+      params:
+      - name: session_id
+        required: true
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: turn_index
+        required: true
+        description: "1-based position in the session's canonical turn order, matching the `conversation.get` turns array\
+          \ order (`agent_turns.created_at ASC, turn_id ASC`)."
+        schema:
+          type: integer
+          minimum: 1
+      - name: include_logs
+        required: false
+        schema:
+          type: boolean
+          default: true
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/ConversationTurnDetail'
+      errors:
+      - SESSION_NOT_FOUND
+      - TURN_NOT_FOUND
     conversation.current_for_agent:
       tier: should_have
       description: "Read the agent's current (most-recent active) session. Replaces the\nownership-violating agent.get_session\
@@ -8222,6 +8418,10 @@ api_specification:
         required: false
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: session_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
       - name: component
         required: false
         schema:
@@ -8238,6 +8438,14 @@ api_specification:
         required: false
         schema:
           type: string
+      - name: since
+        required: false
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      - name: until
+        required: false
+        schema:
+          $ref: '#/components/schemas/Timestamp'
       - name: limit
         required: false
         schema:
@@ -8277,8 +8485,8 @@ api_specification:
       tier: should_have
       description: "Live structured runtime log stream for `runtime.logs` follow mode.\nNotifications carry one `LogEntry`\
         \ row from the same persisted runtime log read owner used by `runtime.logs`.\nThe method accepts the same runtime-log\
-        \ filter fields as `runtime.logs`, but snapshot pagination and sort controls (`limit`, `cursor`, `order`) are not\
-        \ accepted on the subscription.\n"
+        \ identity/content filter fields as `runtime.logs`, but snapshot pagination, sort, and fixed-window controls (`limit`,\
+        \ `cursor`, `order`, `since`, `until`) are not accepted on the subscription. Use `replay_since` for catch-up.\n"
       scope:
         required:
         - read:runtime
@@ -8288,6 +8496,10 @@ api_specification:
         schema:
           $ref: '#/components/schemas/OpaqueId'
       - name: entity_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: session_id
         required: false
         schema:
           $ref: '#/components/schemas/OpaqueId'
