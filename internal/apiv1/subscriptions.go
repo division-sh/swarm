@@ -116,6 +116,8 @@ func (r *SubscriptionRuntime) prepare(session *webSocketSession, req Request) (s
 		return r.prepareEventSubscription(session, req)
 	case "run.subscribe_trace":
 		return r.prepareRunTraceSubscription(session, req)
+	case "runtime.subscribe_logs":
+		return r.prepareRuntimeLogSubscription(session, req)
 	default:
 		return subscriptionPlan{}, NewApplicationError(MethodUnavailableCode, false, map[string]any{"method": req.Method})
 	}
@@ -184,6 +186,70 @@ func (r *SubscriptionRuntime) prepareRunTraceSubscription(session *webSocketSess
 		},
 		Cancel: cancel,
 	}, nil
+}
+
+func (r *SubscriptionRuntime) prepareRuntimeLogSubscription(session *webSocketSession, req Request) (subscriptionPlan, error) {
+	reads, err := requireObservabilityReadStore(r.observability)
+	if err != nil {
+		return subscriptionPlan{}, err
+	}
+	opts, replaySince, err := runtimeLogSubscriptionOptionsFromParams(req.Params)
+	if err != nil {
+		return subscriptionPlan{}, err
+	}
+	opts.Since = subscriptionBaseSince(replaySince, r.now())
+	opts.Limit = subscriptionBatchLimit
+	opts.Order = "asc"
+	id, ctx, cancel := session.newSubscriptionContext("runtime-logs")
+	return subscriptionPlan{
+		Result: subscriptionIDResult{SubscriptionID: id},
+		Start: func() {
+			go r.runRuntimeLogSubscription(ctx, session, id, reads, opts)
+		},
+		Cancel: cancel,
+	}, nil
+}
+
+func runtimeLogSubscriptionOptionsFromParams(params map[string]any) (store.OperatorRuntimeLogListOptions, *time.Time, error) {
+	allowed := map[string]struct{}{
+		"run_id":       {},
+		"entity_id":    {},
+		"component":    {},
+		"level":        {},
+		"error_code":   {},
+		"source":       {},
+		"replay_since": {},
+	}
+	for name := range params {
+		if _, ok := allowed[name]; !ok {
+			return store.OperatorRuntimeLogListOptions{}, nil, NewInvalidParamsError(map[string]any{"field": name, "reason": "unknown parameter"})
+		}
+	}
+	out := store.OperatorRuntimeLogListOptions{}
+	var err error
+	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, nil, err
+	}
+	if out.EntityID, _, err = optionalStringParam(params, "entity_id"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, nil, err
+	}
+	if out.Component, _, err = optionalStringParam(params, "component"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, nil, err
+	}
+	if out.Level, _, err = optionalStringParam(params, "level"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, nil, err
+	}
+	if out.ErrorCode, _, err = optionalStringParam(params, "error_code"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, nil, err
+	}
+	if out.Source, _, err = optionalStringParam(params, "source"); err != nil {
+		return store.OperatorRuntimeLogListOptions{}, nil, err
+	}
+	replaySince, err := timestampParam(params, "replay_since")
+	if err != nil {
+		return store.OperatorRuntimeLogListOptions{}, nil, err
+	}
+	return out, replaySince, nil
 }
 
 func (s *webSocketSession) newSubscriptionContext(prefix string) (string, context.Context, context.CancelFunc) {
@@ -310,6 +376,58 @@ func (r *SubscriptionRuntime) emitTraceNotifications(ctx context.Context, sessio
 			}
 		}
 		cursor = strings.TrimSpace(nextCursor)
+		if cursor == "" {
+			return true
+		}
+	}
+	session.close()
+	return false
+}
+
+func (r *SubscriptionRuntime) runRuntimeLogSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, opts store.OperatorRuntimeLogListOptions) {
+	seen := map[string]string{}
+	if !r.emitRuntimeLogNotifications(ctx, session, subscriptionID, reads, opts, seen) {
+		return
+	}
+	ticker := time.NewTicker(r.pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !r.emitRuntimeLogNotifications(ctx, session, subscriptionID, reads, opts, seen) {
+				return
+			}
+		}
+	}
+}
+
+func (r *SubscriptionRuntime) emitRuntimeLogNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, opts store.OperatorRuntimeLogListOptions, seen map[string]string) bool {
+	cursor := ""
+	for page := 0; page < subscriptionMaxPages; page++ {
+		query := opts
+		query.Cursor = cursor
+		result, err := reads.ListOperatorRuntimeLogs(ctx, query)
+		if err != nil {
+			session.close()
+			return false
+		}
+		for _, log := range result.Logs {
+			key := strings.TrimSpace(log.LogID)
+			if key == "" {
+				key = subscriptionPayloadFingerprint(log)
+			}
+			fingerprint := subscriptionPayloadFingerprint(log)
+			if seen[key] == fingerprint {
+				continue
+			}
+			seen[key] = fingerprint
+			if !session.notify(subscriptionID, log) {
+				return false
+			}
+		}
+		cursor = strings.TrimSpace(result.NextCursor)
 		if cursor == "" {
 			return true
 		}

@@ -253,6 +253,43 @@ func TestHandlerWebSocketSubscriptionOwnerErrorClosesConnection(t *testing.T) {
 	}
 }
 
+func TestHandlerWebSocketRuntimeSubscribeLogsOwnerErrorClosesConnection(t *testing.T) {
+	observability := &fakeObservabilityReadStore{runtimeLogsErr: errors.New("runtime logs unavailable")}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+			Observability: observability,
+		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	conn := dialTestWS(t, server.URL)
+	defer conn.Close()
+
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "sub-runtime-logs",
+		"method":  "runtime.subscribe_logs",
+		"params":  map[string]any{},
+	})
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	defer conn.SetReadDeadline(time.Time{})
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		return
+	}
+	var subscribe rpcResponse
+	if err := json.Unmarshal(raw, &subscribe); err != nil {
+		t.Fatalf("decode runtime.subscribe_logs response before close: %v raw=%s", err, raw)
+	}
+	if subscribe.Error != nil {
+		t.Fatalf("runtime.subscribe_logs response error = %#v", subscribe.Error)
+	}
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("websocket stayed open after runtime log owner read error, want fail-closed disconnect")
+	}
+}
+
 func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testing.T) {
 	base := time.Unix(1700001200, 0).UTC()
 	missing := &fakeObservabilityReadStore{traceErr: store.ErrRunNotFound}
@@ -315,6 +352,132 @@ func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testi
 	}
 	if observability.lastTrace.Since == nil || !observability.lastTrace.Since.Equal(base) {
 		t.Fatalf("run.subscribe_trace since = %#v, want %s", observability.lastTrace.Since, base)
+	}
+}
+
+func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testing.T) {
+	base := time.Unix(1700001300, 0).UTC()
+	observability := &fakeObservabilityReadStore{
+		logs: []store.OperatorRuntimeLogEntry{
+			{
+				LogID:     "old-log",
+				TS:        base.Add(-time.Second),
+				Level:     "error",
+				Component: "scheduler",
+				Source:    "agent-1",
+				RunID:     "run-1",
+				EntityID:  "entity-1",
+				ErrorCode: "E_OLD",
+				Message:   "old log",
+			},
+			{
+				LogID:     "log-1",
+				TS:        base.Add(time.Second),
+				Level:     "error",
+				Component: "scheduler",
+				Source:    "agent-1",
+				RunID:     "run-1",
+				EntityID:  "entity-1",
+				ErrorCode: "E_RUNTIME",
+				Message:   "runtime failed",
+				Details:   map[string]any{"action": "dispatch"},
+			},
+		},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+			Now:           func() time.Time { return base.Add(10 * time.Second) },
+			Observability: observability,
+		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	conn := dialTestWS(t, server.URL)
+	defer conn.Close()
+
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "sub-runtime-logs",
+		"method":  "runtime.subscribe_logs",
+		"params": map[string]any{
+			"run_id":       "run-1",
+			"entity_id":    "entity-1",
+			"component":    "scheduler",
+			"level":        "error",
+			"error_code":   "E_RUNTIME",
+			"source":       "agent-1",
+			"replay_since": base.Format(time.RFC3339Nano),
+		},
+	})
+	subscribe := readWSResponse(t, conn)
+	if subscribe.Error != nil {
+		t.Fatalf("runtime.subscribe_logs error = %#v", subscribe.Error)
+	}
+	subscriptionID := asMap(t, subscribe.Result)["subscription_id"].(string)
+	notification := readWSNotification(t, conn)
+	if notification.Params.Subscription != subscriptionID {
+		t.Fatalf("runtime log notification subscription = %q, want %q", notification.Params.Subscription, subscriptionID)
+	}
+	got := asMap(t, notification.Params.Result)
+	if got["log_id"] != "log-1" || got["message"] != "runtime failed" {
+		t.Fatalf("runtime log notification result = %#v", got)
+	}
+	if observability.lastRuntimeLogs.RunID != "run-1" ||
+		observability.lastRuntimeLogs.EntityID != "entity-1" ||
+		observability.lastRuntimeLogs.Component != "scheduler" ||
+		observability.lastRuntimeLogs.Level != "error" ||
+		observability.lastRuntimeLogs.ErrorCode != "E_RUNTIME" ||
+		observability.lastRuntimeLogs.Source != "agent-1" {
+		t.Fatalf("runtime.subscribe_logs filters = %#v", observability.lastRuntimeLogs)
+	}
+	if observability.lastRuntimeLogs.Since == nil || !observability.lastRuntimeLogs.Since.Equal(base) {
+		t.Fatalf("runtime.subscribe_logs since = %#v, want %s", observability.lastRuntimeLogs.Since, base)
+	}
+	if observability.lastRuntimeLogs.Order != "asc" || observability.lastRuntimeLogs.Limit != subscriptionBatchLimit || observability.lastRuntimeLogs.Cursor != "" {
+		t.Fatalf("runtime.subscribe_logs paging = %#v, want asc limit %d without cursor", observability.lastRuntimeLogs, subscriptionBatchLimit)
+	}
+
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "unsub-runtime-logs",
+		"method":  "rpc.unsubscribe",
+		"params":  map[string]any{"subscription_id": subscriptionID},
+	})
+	unsubscribe := readWSResponse(t, conn)
+	if unsubscribe.Error != nil || asMap(t, unsubscribe.Result)["ok"] != true {
+		t.Fatalf("rpc.unsubscribe runtime logs response = %#v", unsubscribe)
+	}
+}
+
+func TestRuntimeSubscribeLogsRejectsSnapshotControls(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+			Observability: &fakeObservabilityReadStore{},
+		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	for _, field := range []string{"limit", "cursor", "order"} {
+		t.Run(field, func(t *testing.T) {
+			conn := dialTestWS(t, server.URL)
+			defer conn.Close()
+			writeWSRequest(t, conn, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      "bad-runtime-logs",
+				"method":  "runtime.subscribe_logs",
+				"params":  map[string]any{field: "bad"},
+			})
+			resp := readWSResponse(t, conn)
+			if resp.Error == nil || resp.Error.Code != codeInvalidParams {
+				t.Fatalf("runtime.subscribe_logs %s response = %#v, want invalid params", field, resp)
+			}
+			if details := asMap(t, asMap(t, resp.Error.Data)["details"]); details["field"] != field {
+				t.Fatalf("runtime.subscribe_logs %s details = %#v", field, details)
+			}
+		})
 	}
 }
 

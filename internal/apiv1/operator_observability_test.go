@@ -158,8 +158,9 @@ type fakeObservabilityReadStore struct {
 	eventErr error
 	listErr  error
 
-	logs      []store.OperatorRuntimeLogEntry
-	incidents []store.OperatorRuntimeIncident
+	logs           []store.OperatorRuntimeLogEntry
+	runtimeLogsErr error
+	incidents      []store.OperatorRuntimeIncident
 
 	lastEventList   store.OperatorEventListOptions
 	lastTrace       store.RunDebugTraceQueryOptions
@@ -219,7 +220,35 @@ func (s *fakeObservabilityReadStore) LoadOperatorEvent(_ context.Context, eventI
 
 func (s *fakeObservabilityReadStore) ListOperatorRuntimeLogs(_ context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error) {
 	s.lastRuntimeLogs = opts
-	return store.OperatorRuntimeLogListResult{Logs: s.logs}, nil
+	if s.runtimeLogsErr != nil {
+		return store.OperatorRuntimeLogListResult{}, s.runtimeLogsErr
+	}
+	out := make([]store.OperatorRuntimeLogEntry, 0, len(s.logs))
+	for _, log := range s.logs {
+		if opts.Since != nil && !log.TS.After(opts.Since.UTC()) {
+			continue
+		}
+		if opts.RunID != "" && log.RunID != opts.RunID {
+			continue
+		}
+		if opts.EntityID != "" && log.EntityID != opts.EntityID {
+			continue
+		}
+		if opts.Component != "" && log.Component != opts.Component {
+			continue
+		}
+		if opts.Level != "" && log.Level != opts.Level {
+			continue
+		}
+		if opts.ErrorCode != "" && log.ErrorCode != opts.ErrorCode {
+			continue
+		}
+		if opts.Source != "" && log.Source != opts.Source {
+			continue
+		}
+		out = append(out, log)
+	}
+	return store.OperatorRuntimeLogListResult{Logs: out}, nil
 }
 
 func (s *fakeObservabilityReadStore) ListOperatorRuntimeIncidents(_ context.Context, opts store.OperatorRuntimeIncidentListOptions) (store.OperatorRuntimeIncidentListResult, error) {

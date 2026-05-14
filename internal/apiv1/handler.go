@@ -314,7 +314,7 @@ func (s *webSocketSession) handleRaw(raw []byte) bool {
 		return s.enqueue(*failure)
 	}
 	switch req.Method {
-	case "health.subscribe", "event.subscribe", "run.subscribe_trace":
+	case "health.subscribe", "event.subscribe", "run.subscribe_trace", "runtime.subscribe_logs":
 		if s.handler.subs == nil {
 			return s.enqueue(s.handler.dispatchPrepared(s.ctx, req))
 		}
