@@ -4542,6 +4542,7 @@ platform_events:
         agent_id: string
         directive_text: string
         kill_previous: boolean
+        mode: string (directive)
         run_id: string
         run_id_resolution: string (specified | inferred_from_active_session | new_run_allocated)
         source: string

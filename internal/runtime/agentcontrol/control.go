@@ -72,6 +72,7 @@ func (e *StateError) Unwrap() error {
 
 const (
 	DirectiveEventType = "platform.agent_directive"
+	DirectiveEventMode = "directive"
 
 	RunResolutionSpecified         = "specified"
 	RunResolutionActiveSession     = "inferred_from_active_session"
@@ -167,6 +168,7 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, now
 		"agent_id":          agentID,
 		"directive_text":    directive,
 		"kill_previous":     req.KillPrevious,
+		"mode":              DirectiveEventMode,
 		"run_id":            target.RunID,
 		"run_id_resolution": target.Mode,
 		"source":            source,
