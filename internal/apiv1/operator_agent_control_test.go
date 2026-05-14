@@ -254,6 +254,57 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	}
 }
 
+func TestOperatorAgentSendDirectivePersistsRunBundleFingerprint(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := &store.PostgresStore{DB: db}
+	bootFingerprint := "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+	existingFingerprint := "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		BundleFingerprint: bootFingerprint,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	agent := &directiveIntegrationAgent{id: "agent-1"}
+	manager := runtimemanager.NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return agent, nil
+	}, pg)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Idempotency:  pg,
+			AgentControl: manager,
+		}),
+	})
+
+	first := rpcCall(t, handler, agentDirectiveBody("agent-1", "new run", false, "idem-directive-bundle-new"))
+	if first.Error != nil {
+		t.Fatalf("new-run directive error = %#v", first.Error)
+	}
+	newRunID, _ := asMap(t, first.Result)["run_id"].(string)
+	if newRunID == "" {
+		t.Fatalf("new-run directive result = %#v", first.Result)
+	}
+	assertRunBundleFingerprint(t, db, newRunID, bootFingerprint)
+
+	existingRunID := "00000000-0000-0000-0000-000000000755"
+	if _, err := db.Exec(`
+		INSERT INTO runs (run_id, status, bundle_fingerprint)
+		VALUES ($1::uuid, 'running', $2)
+	`, existingRunID, existingFingerprint); err != nil {
+		t.Fatalf("seed existing run: %v", err)
+	}
+	explicit := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", existingRunID, "existing run", false, "idem-directive-bundle-existing"))
+	if explicit.Error != nil {
+		t.Fatalf("existing-run directive error = %#v", explicit.Error)
+	}
+	assertRunBundleFingerprint(t, db, existingRunID, existingFingerprint)
+}
+
 func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -408,4 +459,15 @@ func countDirectiveEvents(t *testing.T, db *sql.DB) int {
 		t.Fatalf("count directive events: %v", err)
 	}
 	return count
+}
+
+func assertRunBundleFingerprint(t *testing.T, db *sql.DB, runID, want string) {
+	t.Helper()
+	var got string
+	if err := db.QueryRow(`SELECT COALESCE(bundle_fingerprint, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&got); err != nil {
+		t.Fatalf("load run bundle fingerprint: %v", err)
+	}
+	if got != want {
+		t.Fatalf("run %s bundle_fingerprint = %q, want %q", runID, got, want)
+	}
 }
