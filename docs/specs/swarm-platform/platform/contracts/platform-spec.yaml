@@ -8273,6 +8273,55 @@ api_specification:
             next_cursor:
               $ref: '#/components/schemas/Cursor'
       errors: []
+    runtime.subscribe_logs:
+      tier: should_have
+      description: "Live structured runtime log stream for `runtime.logs` follow mode.\nNotifications carry one `LogEntry`\
+        \ row from the same persisted runtime log read owner used by `runtime.logs`.\nThe method accepts the same runtime-log\
+        \ filter fields as `runtime.logs`, but snapshot pagination and sort controls (`limit`, `cursor`, `order`) are not\
+        \ accepted on the subscription.\n"
+      scope:
+        required:
+        - read:runtime
+      params:
+      - name: run_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: entity_id
+        required: false
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: component
+        required: false
+        schema:
+          type: string
+      - name: level
+        required: false
+        schema:
+          $ref: '#/components/schemas/LogLevel'
+      - name: error_code
+        required: false
+        schema:
+          type: string
+      - name: source
+        required: false
+        schema:
+          type: string
+      - name: replay_since
+        required: false
+        description: Optional catch-up window. If present, delivers runtime log entries from this time forward, then continues
+          live. Subject to runtime log retention.
+        schema:
+          $ref: '#/components/schemas/Timestamp'
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/SubscriptionId'
+      notification_schema:
+        $ref: '#/components/schemas/LogEntry'
+      notification_cadence: Pushed per runtime log entry matching the filter.
+      errors: []
     runtime.incidents:
       tier: should_have
       description: Aggregated runtime incidents (errors and warnings grouped by error_code/component for triage).
