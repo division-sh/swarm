@@ -32,7 +32,7 @@ func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
 			Type:        events.EventType(runtimeagentcontrol.DirectiveEventType),
 			SourceAgent: "runtime",
 			RunID:       "00000000-0000-0000-0000-000000000201",
-			Payload:     []byte(`{"directive_text":"` + text + `","run_id":"00000000-0000-0000-0000-000000000201","run_id_resolution":"new_run_allocated","source":"test"}`),
+			Payload:     []byte(`{"directive_text":"` + text + `","mode":"directive","run_id":"00000000-0000-0000-0000-000000000201","run_id_resolution":"new_run_allocated","source":"test"}`),
 		},
 		RunIDResolution: runtimeagentcontrol.RunResolutionNewRunAllocated,
 		Source:          "test",
