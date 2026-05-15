@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
@@ -85,6 +86,18 @@ func (a *traceRecordingAgent) OnEvent(ctx context.Context, evt events.Event) ([]
 		a.parent = inbound.ID
 	}
 	return nil, nil
+}
+
+type outputRecordingAgent struct {
+	calls int
+}
+
+func (a *outputRecordingAgent) ID() string                        { return "agent-a" }
+func (a *outputRecordingAgent) Type() string                      { return "llm" }
+func (a *outputRecordingAgent) Subscriptions() []events.EventType { return nil }
+func (a *outputRecordingAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
+	a.calls++
+	return []events.Event{{ID: "out-1", Type: "task.done", SourceAgent: "agent-a", Payload: []byte(`{}`)}}, nil
 }
 
 type panicStubAgent struct{ id string }
@@ -356,12 +369,19 @@ func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 
 type deliveryLifecycleStoreStub struct {
 	receiptReaderStub
-	markCalls []string
+	markCalls           []string
+	quiescenceChecks    int
+	quiescedAfterChecks int
 }
 
 func (s *deliveryLifecycleStoreStub) MarkEventDeliveryInProgress(_ context.Context, eventID, agentID, sessionID string) error {
 	s.markCalls = append(s.markCalls, strings.TrimSpace(eventID)+"|"+strings.TrimSpace(agentID)+"|"+strings.TrimSpace(sessionID))
 	return nil
+}
+
+func (s *deliveryLifecycleStoreStub) DestructiveResetDeliveryQuiesced(context.Context, string, string, string) (bool, error) {
+	s.quiescenceChecks++
+	return s.quiescedAfterChecks > 0 && s.quiescenceChecks >= s.quiescedAfterChecks, nil
 }
 
 func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {
@@ -387,6 +407,30 @@ func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {
 	detail := entry.Detail.(map[string]any)
 	if detail["delivery_state"] != "launching" || detail["delivery_previous_state"] != "queued" || detail["delivery_reason"] != "agent_processing" {
 		t.Fatalf("launching detail = %#v", detail)
+	}
+}
+
+func TestProcessEvent_SkipsLateOutputAndReceiptAfterDestructiveResetQuiescence(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	store := &deliveryLifecycleStoreStub{quiescedAfterChecks: 2}
+	am := NewAgentManager(bus, nil, store)
+	agent := &outputRecordingAgent{}
+
+	result := am.processEventDetailed(context.Background(), agent, events.Event{ID: uuid.NewString(), Type: events.EventType("task.started")})
+	if result.err != nil {
+		t.Fatalf("processEventDetailed error = %v", result.err)
+	}
+	if agent.calls != 1 {
+		t.Fatalf("agent calls = %d, want 1 before late quiescence guard", agent.calls)
+	}
+	if len(bus.published) != 0 {
+		t.Fatalf("published events = %#v, want none after quiescence", bus.published)
+	}
+	if store.upsertCalls != 0 {
+		t.Fatalf("receipt upserts = %d, want none after quiescence", store.upsertCalls)
+	}
+	if result.record.ReasonCode != "runtime_nuke_cancelled" {
+		t.Fatalf("reason = %q, want runtime_nuke_cancelled", result.record.ReasonCode)
 	}
 }
 

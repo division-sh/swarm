@@ -10,6 +10,7 @@ import (
 
 	"swarm/internal/events"
 	"swarm/internal/runtime/core/eventidentity"
+	"swarm/internal/runtime/destructivereset"
 	runtimemanager "swarm/internal/runtime/manager"
 )
 
@@ -128,6 +129,7 @@ type agentReceiptWriteState struct {
 type lockedAgentDelivery struct {
 	retryCount      int
 	status          string
+	reasonCode      string
 	activeSessionID string
 	entityID        string
 	flowInstance    string
@@ -156,6 +158,9 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSc
 		}
 		if !delivery.found {
 			return fmt.Errorf("upsert event receipt: delivery row required for event %s agent %s", strings.TrimSpace(eventID), strings.TrimSpace(agentID))
+		}
+		if destructiveResetDeliveryTerminal(delivery.status, delivery.reasonCode) {
+			return nil
 		}
 		state := buildAgentReceiptWriteState(delivery.retryCount, status, errText)
 		if state.finalStatus == runtimemanager.ReceiptStatusDeadLetter {
@@ -223,6 +228,7 @@ func (s *PostgresStore) lockAgentDeliveryTx(
 		SELECT
 			d.retry_count,
 			COALESCE(d.status, ''),
+			COALESCE(d.reason_code, ''),
 			COALESCE(d.active_session_id::text, ''),
 			COALESCE(e.entity_id::text, ''),
 			COALESCE(e.flow_instance, '')
@@ -232,7 +238,7 @@ func (s *PostgresStore) lockAgentDeliveryTx(
 		  AND d.subscriber_type = 'agent'
 		  AND d.subscriber_id = $2
 		FOR UPDATE
-	`, eventID, agentID).Scan(&delivery.retryCount, &delivery.status, &delivery.activeSessionID, &delivery.entityID, &delivery.flowInstance)
+	`, eventID, agentID).Scan(&delivery.retryCount, &delivery.status, &delivery.reasonCode, &delivery.activeSessionID, &delivery.entityID, &delivery.flowInstance)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return lockedAgentDelivery{}, nil
@@ -356,11 +362,40 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
+		  AND status IN ('pending', 'in_progress')
+		  AND COALESCE(reason_code, '') <> $4
 	`
-	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, sessionID); err != nil {
+	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, sessionID, destructivereset.QuiescenceReasonCode); err != nil {
 		return fmt.Errorf("mark event delivery in progress: %w", err)
 	}
 	return nil
+}
+
+func (s *PostgresStore) DestructiveResetDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (bool, error) {
+	if s == nil || s.DB == nil {
+		return false, fmt.Errorf("postgres store is required")
+	}
+	eventID = strings.TrimSpace(eventID)
+	subscriberType = strings.TrimSpace(subscriberType)
+	subscriberID = strings.TrimSpace(subscriberID)
+	if eventID == "" || subscriberType == "" || subscriberID == "" {
+		return false, nil
+	}
+	var ok bool
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = $2
+			  AND subscriber_id = $3
+			  AND status = 'dead_letter'
+			  AND reason_code = $4
+		)
+	`, eventID, subscriberType, subscriberID, destructivereset.QuiescenceReasonCode).Scan(&ok); err != nil {
+		return false, fmt.Errorf("check destructive reset delivery quiescence: %w", err)
+	}
+	return ok, nil
 }
 
 func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
