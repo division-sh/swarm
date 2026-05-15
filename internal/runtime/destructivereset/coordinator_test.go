@@ -47,6 +47,8 @@ func TestCoordinatorBuildPlanStoresAndReplaysIdempotentResult(t *testing.T) {
 	if reader.reads != 1 || locks.acquires != 1 || locks.lease.releases != 1 || idempotency.stores != 1 {
 		t.Fatalf("first call counts reader=%d acquires=%d releases=%d stores=%d", reader.reads, locks.acquires, locks.lease.releases, idempotency.stores)
 	}
+	result.Plan.ActiveRuns[0].RunID = "tampered-return"
+	result.Plan.Preserved.SystemContainers[0] = "tampered-container"
 
 	replayed, replay, err := coord.BuildPlan(context.Background(), req)
 	if err != nil {
@@ -58,8 +60,25 @@ func TestCoordinatorBuildPlanStoresAndReplaysIdempotentResult(t *testing.T) {
 	if replayed.PlannedAt != result.PlannedAt || replayed.OperationName != result.OperationName {
 		t.Fatalf("replayed result = %#v, want stored result %#v", replayed, result)
 	}
+	if replayed.Plan.ActiveRuns[0].RunID != "run-1" {
+		t.Fatalf("replayed active run = %q, want original stored value", replayed.Plan.ActiveRuns[0].RunID)
+	}
+	if replayed.Plan.Preserved.SystemContainers[0] != "swarm-scaffold" {
+		t.Fatalf("replayed preserved system container = %q, want original stored value", replayed.Plan.Preserved.SystemContainers[0])
+	}
 	if reader.reads != 1 || locks.acquires != 1 || idempotency.stores != 1 {
 		t.Fatalf("replay should not re-plan/lock/store: reader=%d acquires=%d stores=%d", reader.reads, locks.acquires, idempotency.stores)
+	}
+	replayed.Plan.ActiveRuns[0].RunID = "tampered-replay"
+	replayedAgain, replay, err := coord.BuildPlan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("BuildPlan second replay error = %v", err)
+	}
+	if !replay {
+		t.Fatal("third call replay = false, want true")
+	}
+	if replayedAgain.Plan.ActiveRuns[0].RunID != "run-1" {
+		t.Fatalf("second replay active run = %q, want original stored value", replayedAgain.Plan.ActiveRuns[0].RunID)
 	}
 }
 
@@ -194,6 +213,27 @@ func TestInventoryPlannerCarriesSplitContractsAndResetSeams(t *testing.T) {
 	}
 	if !slices.Contains(plan.Preserved.SystemContainers, "swarm-scaffold") || !slices.Contains(plan.Preserved.SystemContainers, "swarm-system") {
 		t.Fatalf("system containers = %#v, want scaffold/system preserved", plan.Preserved.SystemContainers)
+	}
+}
+
+func TestInventoryPlannerMergesPreservedResourceDefaultsByField(t *testing.T) {
+	reader := &recordingInventoryReader{inventory: Inventory{
+		Preserved: PreservedResources{
+			SystemContainers: []string{"custom-system"},
+		},
+	}}
+	plan, err := (InventoryPlanner{Reader: reader}).BuildPlan(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("BuildPlan error = %v", err)
+	}
+	if !slices.Equal(plan.Preserved.SystemContainers, []string{"custom-system"}) {
+		t.Fatalf("system containers = %#v, want caller-provided value", plan.Preserved.SystemContainers)
+	}
+	if plan.Preserved.OperatorManagedBoundary == "" {
+		t.Fatalf("operator-managed boundary was not defaulted")
+	}
+	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || !plan.Preserved.BundleContracts {
+		t.Fatalf("preserved resources = %#v, want critical defaults merged", plan.Preserved)
 	}
 }
 
