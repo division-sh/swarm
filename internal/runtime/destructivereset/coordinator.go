@@ -53,7 +53,7 @@ func (c *Coordinator) BuildPlan(ctx context.Context, req Request) (Result, bool,
 					ConflictingRequestHash: req.RequestHash,
 				}
 			}
-			return stored.Result, true, nil
+			return copyResult(stored.Result), true, nil
 		}
 	}
 
@@ -88,7 +88,7 @@ func (c *Coordinator) BuildPlan(ctx context.Context, req Request) (Result, bool,
 		if err := c.Idempotency.StoreResetResult(ctx, StoredResult{
 			Key:         idemKey,
 			RequestHash: req.RequestHash,
-			Result:      result,
+			Result:      copyResult(result),
 			StoredAt:    now,
 		}); err != nil {
 			return Result{}, false, err
