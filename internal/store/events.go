@@ -14,6 +14,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeownership "swarm/internal/runtime/core/ownership"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	"swarm/internal/runtime/destructivereset"
 	runtimereplayclaim "swarm/internal/runtime/replayclaim"
 	storerunlifecycle "swarm/internal/store/runlifecycle"
 )
@@ -725,17 +726,25 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 			$2, NULLIF($3,''), $4::jsonb, now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM event_deliveries d
+			WHERE d.event_id = e.event_id
+			  AND d.status = 'dead_letter'
+			  AND d.reason_code = $5
+		  )
 		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
 			outcome = EXCLUDED.outcome,
 			reason_code = EXCLUDED.reason_code,
 			side_effects = EXCLUDED.side_effects,
 			processed_at = now()
+		WHERE COALESCE(event_receipts.reason_code, '') <> $5
 	`
 	execFn := s.DB.ExecContext
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
-	if _, err := execFn(ctx, q, eventID, outcome, reasonCode, string(sideEffects)); err != nil {
+	if _, err := execFn(ctx, q, eventID, outcome, reasonCode, string(sideEffects), destructivereset.QuiescenceReasonCode); err != nil {
 		return fmt.Errorf("upsert pipeline receipt: %w", err)
 	}
 	return nil

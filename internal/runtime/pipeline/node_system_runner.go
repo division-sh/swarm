@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
+	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimerterr "swarm/internal/runtime/rterrors"
 )
 
@@ -104,6 +105,9 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	if eventID == "" {
 		return
 	}
+	if n.isDestructiveResetQuiesced(ctx, evt) {
+		return
+	}
 	if n.isProcessed(ctx, evt) {
 		return
 	}
@@ -120,7 +124,9 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	}
 	for attempt := 1; attempt <= retryLimit; attempt++ {
 		if err := n.handle(ctx, evt); err == nil {
-			n.markProcessed(ctx, evt)
+			if !n.isDestructiveResetQuiesced(ctx, evt) {
+				n.markProcessed(ctx, evt)
+			}
 			return
 		} else {
 			lastErr = err
@@ -139,6 +145,9 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 			return
 		case <-time.After(backoffFn(attempt)):
 		}
+	}
+	if n.isDestructiveResetQuiesced(ctx, evt) {
+		return
 	}
 	n.emitDeadLetter(ctx, evt, lastErr, failureType, retryCount)
 	n.markProcessed(ctx, evt)
@@ -297,7 +306,7 @@ func (n *systemNodeRunner) isProcessed(ctx context.Context, evt events.Event) bo
 			  AND subscriber_id = $1
 			  AND idempotency_key = $2
 		)
-	`, n.nodeID, systemNodeReceiptIdempotencyKey(n.nodeID, eventID)).Scan(&ok)
+	`, n.nodeID, SystemNodeReceiptIdempotencyKey(n.nodeID, eventID)).Scan(&ok)
 	return err == nil && ok
 }
 
@@ -306,11 +315,14 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 	if n == nil || n.db == nil || eventID == "" {
 		return
 	}
+	if n.isDestructiveResetQuiesced(ctx, evt) {
+		return
+	}
 	if !n.eventReceiptsAvailable(ctx) {
 		return
 	}
 	sideEffects, _ := json.Marshal(map[string]any{
-		"idempotency_key": systemNodeReceiptIdempotencyKey(n.nodeID, eventID),
+		"idempotency_key": SystemNodeReceiptIdempotencyKey(n.nodeID, eventID),
 	})
 	if _, err := n.db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
@@ -323,7 +335,7 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 		FROM events e
 		WHERE e.event_id = $1::uuid
 		ON CONFLICT (event_id, subscriber_id) DO NOTHING
-	`, eventID, n.nodeID, string(sideEffects), systemNodeReceiptIdempotencyKey(n.nodeID, eventID)); err != nil {
+	`, eventID, n.nodeID, string(sideEffects), SystemNodeReceiptIdempotencyKey(n.nodeID, eventID)); err != nil {
 		slog.Error("system node mark processed failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
 		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
@@ -338,6 +350,33 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 			})
 		}
 	}
+}
+
+func (n *systemNodeRunner) isDestructiveResetQuiesced(ctx context.Context, evt events.Event) bool {
+	eventID := strings.TrimSpace(evt.ID)
+	if n == nil || n.db == nil || eventID == "" {
+		return false
+	}
+	if _, err := uuid.Parse(eventID); err != nil {
+		return false
+	}
+	var ok bool
+	err := n.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = $2
+			  AND status = 'dead_letter'
+			  AND reason_code = $3
+		)
+	`, eventID, n.nodeID, runtimedestructivereset.QuiescenceReasonCode).Scan(&ok)
+	if err != nil {
+		slog.Error("system node destructive reset quiescence check failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
+		return true
+	}
+	return ok
 }
 
 func (n *systemNodeRunner) eventReceiptsAvailable(ctx context.Context) bool {
@@ -388,6 +427,6 @@ func defaultSystemNodeBackoff(base time.Duration, attempt int) time.Duration {
 	return d
 }
 
-func systemNodeReceiptIdempotencyKey(nodeID, eventID string) string {
+func SystemNodeReceiptIdempotencyKey(nodeID, eventID string) string {
 	return strings.TrimSpace(nodeID) + ":" + strings.TrimSpace(eventID)
 }

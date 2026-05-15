@@ -27,6 +27,10 @@ type deliveryProgressWriter interface {
 	MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error
 }
 
+type destructiveResetDeliveryQuiescenceReader interface {
+	DestructiveResetDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (bool, error)
+}
+
 func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt events.Event) error {
 	result := am.processEventDetailed(ctx, agent, evt)
 	return result.err
@@ -101,7 +105,17 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 			})
 		}
 	}
+	if am.destructiveResetDeliveryQuiesced(ctx, evt.ID, agent.ID()) {
+		record.Outcome = startupManagerReplayOutcomeSkipped
+		record.ReasonCode = "runtime_nuke_cancelled"
+		return eventProcessResult{record: record}
+	}
 	out, err := agent.OnEvent(ctx, evt)
+	if am.destructiveResetDeliveryQuiesced(ctx, evt.ID, agent.ID()) {
+		record.Outcome = startupManagerReplayOutcomeSkipped
+		record.ReasonCode = "runtime_nuke_cancelled"
+		return eventProcessResult{record: record}
+	}
 	if err != nil {
 		if isTransientAgentError(err) {
 			// Transient lock/contention errors should be retried without poisoning receipts.
@@ -157,6 +171,31 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 	record.Outcome = startupManagerReplayOutcomeReplayed
 	record.ReasonCode = startupManagerReplayReasonReplayed
 	return eventProcessResult{record: record}
+}
+
+func (am *AgentManager) destructiveResetDeliveryQuiesced(ctx context.Context, eventID, agentID string) bool {
+	reader, ok := am.store.(destructiveResetDeliveryQuiescenceReader)
+	if !ok || reader == nil {
+		return false
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(eventID)); err != nil {
+		return false
+	}
+	ok, err := reader.DestructiveResetDeliveryQuiesced(ctx, eventID, "agent", agentID)
+	if err != nil {
+		if am.bus != nil {
+			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+				Level:     "error",
+				Component: "agent-manager",
+				Action:    "destructive_reset_quiescence_check_failed",
+				EventID:   strings.TrimSpace(eventID),
+				AgentID:   strings.TrimSpace(agentID),
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
+		return true
+	}
+	return ok
 }
 
 func (am *AgentManager) shouldInterceptDirective(agentID string, evt events.Event) bool {

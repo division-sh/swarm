@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimerterr "swarm/internal/runtime/rterrors"
 	"swarm/internal/testutil"
 )
@@ -128,6 +129,52 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	}
 	if failureType != "chain_depth_exceeded" || chainDepth != 6 || !strings.HasPrefix(handlerNode, "node-1") {
 		t.Fatalf("dead_letter row = type=%q chain_depth=%d handler=%q", failureType, chainDepth, handlerNode)
+	}
+}
+
+func TestSystemNodeRunner_SkipsQuiescedDestructiveResetDelivery(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := testPipelineRunContext(t, db)
+	eventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'source.evt', 'global', '{}'::jsonb, 'src', 'agent', now()
+		)
+	`, eventID, testPipelineRunID); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, reason_code, created_at, delivered_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'node', 'node-a', 'dead_letter', $3, now(), now()
+		)
+	`, testPipelineRunID, eventID, runtimedestructivereset.QuiescenceReasonCode); err != nil {
+		t.Fatalf("seed quiesced node delivery: %v", err)
+	}
+	bus := &capturingDeadLetterBus{}
+	handled := 0
+	runner := newSystemNodeRunner("node-a", bus, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
+		handled++
+		return errors.New("should not run")
+	})
+
+	runner.ProcessEventForTest(ctx, events.Event{ID: eventID, RunID: testPipelineRunID, Type: "source.evt", Payload: []byte(`{}`), CreatedAt: time.Now().UTC()})
+
+	if handled != 0 {
+		t.Fatalf("handler calls = %d, want 0 for quiesced delivery", handled)
+	}
+	if got := len(bus.published()); got != 0 {
+		t.Fatalf("published events = %d, want 0 for quiesced delivery", got)
+	}
+	var deadLetters int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letters WHERE original_event_id = $1::uuid`, eventID).Scan(&deadLetters); err != nil {
+		t.Fatalf("count dead letters: %v", err)
+	}
+	if deadLetters != 0 {
+		t.Fatalf("dead letters = %d, want 0", deadLetters)
 	}
 }
 

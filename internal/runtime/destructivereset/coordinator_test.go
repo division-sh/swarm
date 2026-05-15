@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -237,10 +238,90 @@ func TestInventoryPlannerMergesPreservedResourceDefaultsByField(t *testing.T) {
 	}
 }
 
+func TestQuiescerAppliesPlanResultThroughStore(t *testing.T) {
+	now := time.Date(2026, 5, 15, 2, 30, 0, 0, time.UTC)
+	store := &recordingQuiescenceStore{
+		result: QuiescenceResult{
+			OperationName: DefaultOperationName,
+			DryRun:        false,
+			AppliedAt:     now,
+			ReasonCode:    QuiescenceReasonCode,
+			ControlledBy:  QuiescenceControlledBy,
+			Runs:          []QuiescedRun{{RunID: "run-1", PreviousStatus: "running", Status: "cancelled", Changed: true}},
+		},
+	}
+	q := Quiescer{Store: store, Now: func() time.Time { return now }}
+	plan := Result{
+		OperationName: DefaultOperationName,
+		PlannedAt:     now.Add(-time.Minute),
+		Plan:          Plan{ActiveRuns: []RunRef{{RunID: "run-1", Status: "running"}}},
+	}
+
+	got, err := q.Apply(context.Background(), QuiescenceRequest{Result: plan, ActorTokenID: "operator-token"})
+	if err != nil {
+		t.Fatalf("Apply error = %v", err)
+	}
+	if store.calls != 1 {
+		t.Fatalf("store calls = %d, want 1", store.calls)
+	}
+	if store.last.ActorTokenID != "operator-token" || store.last.RequestedAt.IsZero() {
+		t.Fatalf("store request = %#v, want actor and requested_at", store.last)
+	}
+	if got.Runs[0].RunID != "run-1" {
+		t.Fatalf("quiescence runs = %#v", got.Runs)
+	}
+	got.Runs[0].RunID = "tampered"
+	if store.result.Runs[0].RunID != "run-1" {
+		t.Fatal("Apply leaked mutable result slices")
+	}
+}
+
+func TestQuiescerFailsClosedWithoutPlanResultOrStore(t *testing.T) {
+	_, err := (Quiescer{}).Apply(context.Background(), QuiescenceRequest{ActorTokenID: "operator-token"})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("missing plan error = %v, want ErrInvalidRequest", err)
+	}
+	_, err = (Quiescer{}).Apply(context.Background(), QuiescenceRequest{
+		ActorTokenID: "operator-token",
+		Result:       Result{PlannedAt: time.Date(2026, 5, 15, 2, 30, 0, 0, time.UTC)},
+	})
+	if err == nil || !strings.Contains(err.Error(), "quiescence store") {
+		t.Fatalf("missing store error = %v, want quiescence store failure", err)
+	}
+}
+
+func TestQuiescerPropagatesStoreFailure(t *testing.T) {
+	storeErr := errors.New("store failed")
+	_, err := (Quiescer{Store: &recordingQuiescenceStore{err: storeErr}}).Apply(context.Background(), QuiescenceRequest{
+		ActorTokenID: "operator-token",
+		Result: Result{
+			OperationName: DefaultOperationName,
+			PlannedAt:     time.Date(2026, 5, 15, 2, 30, 0, 0, time.UTC),
+			Plan:          Plan{ActiveRuns: []RunRef{{RunID: "run-1", Status: "running"}}},
+		},
+	})
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("Apply error = %v, want store failure", err)
+	}
+}
+
 type recordingInventoryReader struct {
 	inventory Inventory
 	err       error
 	reads     int
+}
+
+type recordingQuiescenceStore struct {
+	result QuiescenceResult
+	err    error
+	calls  int
+	last   QuiescenceRequest
+}
+
+func (s *recordingQuiescenceStore) ApplyDestructiveResetQuiescence(_ context.Context, req QuiescenceRequest) (QuiescenceResult, error) {
+	s.calls++
+	s.last = req
+	return copyQuiescenceResult(s.result), s.err
 }
 
 func (r *recordingInventoryReader) ReadResetInventory(context.Context) (Inventory, error) {

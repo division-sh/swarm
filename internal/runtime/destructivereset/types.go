@@ -11,6 +11,10 @@ import (
 const (
 	DefaultOperationName = "runtime.destructive_reset"
 	defaultLockKey       = "swarm:runtime:destructive-reset"
+
+	QuiescenceControlledBy = DefaultOperationName
+	QuiescenceReasonCode   = "runtime_nuke_cancelled"
+	QuiescenceDeliveryNote = "runtime destructive reset cancelled delivery"
 )
 
 var (
@@ -35,6 +39,45 @@ type Result struct {
 	DryRun        bool      `json:"dry_run"`
 	PlannedAt     time.Time `json:"planned_at"`
 	Plan          Plan      `json:"plan"`
+}
+
+type QuiescenceRequest struct {
+	Result       Result
+	ActorTokenID string
+	RequestedAt  time.Time
+}
+
+type QuiescenceResult struct {
+	OperationName        string             `json:"operation_name"`
+	DryRun               bool               `json:"dry_run"`
+	AppliedAt            time.Time          `json:"applied_at"`
+	ReasonCode           string             `json:"reason_code"`
+	ControlledBy         string             `json:"controlled_by"`
+	Runs                 []QuiescedRun      `json:"runs"`
+	Deliveries           []QuiescedDelivery `json:"deliveries"`
+	PipelineReceiptCount int                `json:"pipeline_receipt_count"`
+}
+
+type QuiescedRun struct {
+	RunID          string `json:"run_id"`
+	PreviousStatus string `json:"previous_status"`
+	Status         string `json:"status"`
+	ReasonCode     string `json:"reason_code"`
+	Changed        bool   `json:"changed"`
+}
+
+type QuiescedDelivery struct {
+	DeliveryID      string `json:"delivery_id"`
+	RunID           string `json:"run_id"`
+	EventID         string `json:"event_id"`
+	SubscriberType  string `json:"subscriber_type"`
+	SubscriberID    string `json:"subscriber_id"`
+	PreviousStatus  string `json:"previous_status"`
+	Status          string `json:"status"`
+	ReasonCode      string `json:"reason_code"`
+	PreviousReason  string `json:"previous_reason,omitempty"`
+	ActiveSessionID string `json:"active_session_id,omitempty"`
+	Changed         bool   `json:"changed"`
 }
 
 type Plan struct {
@@ -118,6 +161,10 @@ type LockLease interface {
 type IdempotencyStore interface {
 	LoadResetResult(context.Context, IdempotencyKey) (StoredResult, bool, error)
 	StoreResetResult(context.Context, StoredResult) error
+}
+
+type QuiescenceStore interface {
+	ApplyDestructiveResetQuiescence(context.Context, QuiescenceRequest) (QuiescenceResult, error)
 }
 
 type IdempotencyKey struct {
