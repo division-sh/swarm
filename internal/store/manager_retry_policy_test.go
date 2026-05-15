@@ -811,6 +811,39 @@ func TestListPendingEventsForAgent_InProgressWithoutReceipt_RemainsPending(t *te
 	}
 }
 
+func TestMarkEventDeliveryInProgress_AllowsRetryableFailedDeliveryClaim_V2(t *testing.T) {
+	pg, cleanup := newTestPostgresStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.retry_claim.failed")
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
+		t.Fatalf("insert deliveries: %v", err)
+	}
+	if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, runtimemanager.ReceiptStatusError, "retryable"); err != nil {
+		t.Fatalf("upsert retryable receipt: %v", err)
+	}
+	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID, agentID, time.Now().Add(-2*time.Minute))
+
+	if err := pg.MarkEventDeliveryInProgress(ctx, evt.ID, agentID, ""); err != nil {
+		t.Fatalf("MarkEventDeliveryInProgress retryable failed delivery: %v", err)
+	}
+
+	var status, reason string
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_id = $2
+	`, evt.ID, agentID).Scan(&status, &reason); err != nil {
+		t.Fatalf("load delivery: %v", err)
+	}
+	if status != "in_progress" || reason != "agent_processing" {
+		t.Fatalf("delivery = %s/%s, want in_progress/agent_processing", status, reason)
+	}
+}
+
 func TestListPendingSubscribedEvents_UsesCanonicalMatcherParity(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()

@@ -362,7 +362,10 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
-		  AND status IN ('pending', 'in_progress')
+		  AND (
+			status IN ('pending', 'in_progress')
+			OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
+		  )
 		  AND COALESCE(reason_code, '') <> $4
 	`
 	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, sessionID, destructivereset.QuiescenceReasonCode); err != nil {
