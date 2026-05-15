@@ -1,0 +1,175 @@
+package destructivereset
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
+
+const (
+	DefaultOperationName = "runtime.destructive_reset"
+	defaultLockKey       = "swarm:runtime:destructive-reset"
+)
+
+var (
+	ErrInvalidRequest       = errors.New("invalid destructive reset request")
+	ErrOperationInProgress  = errors.New("destructive reset operation already in progress")
+	ErrIdempotencyConflict  = errors.New("destructive reset idempotency conflict")
+	ErrPlannerNotConfigured = errors.New("destructive reset planner is not configured")
+	ErrLockNotConfigured    = errors.New("destructive reset lock manager is not configured")
+	ErrLockLeaseMissing     = errors.New("destructive reset lock lease is missing")
+)
+
+type Request struct {
+	ActorTokenID   string
+	IdempotencyKey string
+	RequestHash    string
+	DryRun         bool
+	RequestedAt    time.Time
+}
+
+type Result struct {
+	OperationName string    `json:"operation_name"`
+	DryRun        bool      `json:"dry_run"`
+	PlannedAt     time.Time `json:"planned_at"`
+	Plan          Plan      `json:"plan"`
+}
+
+type Plan struct {
+	ActiveRuns          []RunRef             `json:"active_runs"`
+	ActiveDeliveries    []DeliveryRef        `json:"active_deliveries"`
+	RunScopedTables     []TableRef           `json:"run_scoped_tables"`
+	EntityContainers    []ContainerRef       `json:"entity_containers"`
+	Preserved           PreservedResources   `json:"preserved"`
+	DownstreamContracts []DownstreamContract `json:"downstream_contracts"`
+	ResetSeams          []ResetSeam          `json:"reset_seams"`
+}
+
+type RunRef struct {
+	RunID  string `json:"run_id"`
+	Status string `json:"status"`
+}
+
+type DeliveryRef struct {
+	DeliveryID string `json:"delivery_id"`
+	RunID      string `json:"run_id"`
+	Status     string `json:"status"`
+}
+
+type TableRef struct {
+	Name   string `json:"name"`
+	Owner  string `json:"owner"`
+	Action string `json:"action"`
+}
+
+type ContainerRef struct {
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Action string `json:"action"`
+}
+
+type PreservedResources struct {
+	SystemContainers        []string `json:"system_containers"`
+	OperatorManagedBoundary string   `json:"operator_managed_boundary"`
+	SchemaMigrations        bool     `json:"schema_migrations"`
+	AuthTokens              bool     `json:"auth_tokens"`
+	BundleContracts         bool     `json:"bundle_contracts"`
+}
+
+type DownstreamContract struct {
+	ID          string `json:"id"`
+	Status      string `json:"status"`
+	Owner       string `json:"owner"`
+	Description string `json:"description"`
+}
+
+type ResetSeam struct {
+	ID             string `json:"id"`
+	Classification string `json:"classification"`
+	RequiredAction string `json:"required_action"`
+}
+
+type Inventory struct {
+	ActiveRuns       []RunRef
+	ActiveDeliveries []DeliveryRef
+	RunScopedTables  []TableRef
+	EntityContainers []ContainerRef
+	Preserved        PreservedResources
+}
+
+type InventoryReader interface {
+	ReadResetInventory(context.Context) (Inventory, error)
+}
+
+type Planner interface {
+	BuildPlan(context.Context, Request) (Plan, error)
+}
+
+type LockManager interface {
+	TryAcquire(context.Context, string) (LockLease, bool, error)
+}
+
+type LockLease interface {
+	Release(context.Context) error
+}
+
+type IdempotencyStore interface {
+	LoadResetResult(context.Context, IdempotencyKey) (StoredResult, bool, error)
+	StoreResetResult(context.Context, StoredResult) error
+}
+
+type IdempotencyKey struct {
+	OperationName  string
+	ActorTokenID   string
+	IdempotencyKey string
+}
+
+type StoredResult struct {
+	Key         IdempotencyKey
+	RequestHash string
+	Result      Result
+	StoredAt    time.Time
+}
+
+type IdempotencyConflictError struct {
+	Key                    IdempotencyKey
+	OriginalRequestHash    string
+	ConflictingRequestHash string
+}
+
+func (e *IdempotencyConflictError) Error() string {
+	return ErrIdempotencyConflict.Error()
+}
+
+func (e *IdempotencyConflictError) Is(target error) bool {
+	return target == ErrIdempotencyConflict
+}
+
+func (r Request) normalize(now time.Time) (Request, error) {
+	r.ActorTokenID = strings.TrimSpace(r.ActorTokenID)
+	r.IdempotencyKey = strings.TrimSpace(r.IdempotencyKey)
+	r.RequestHash = strings.TrimSpace(r.RequestHash)
+	if r.ActorTokenID == "" {
+		return Request{}, fmt.Errorf("%w: actor token id is required", ErrInvalidRequest)
+	}
+	if r.IdempotencyKey != "" && r.RequestHash == "" {
+		return Request{}, fmt.Errorf("%w: request hash is required when idempotency key is present", ErrInvalidRequest)
+	}
+	if r.RequestedAt.IsZero() {
+		r.RequestedAt = now
+	}
+	r.RequestedAt = r.RequestedAt.UTC()
+	return r, nil
+}
+
+func (k IdempotencyKey) normalized() IdempotencyKey {
+	k.OperationName = strings.TrimSpace(k.OperationName)
+	if k.OperationName == "" {
+		k.OperationName = DefaultOperationName
+	}
+	k.ActorTokenID = strings.TrimSpace(k.ActorTokenID)
+	k.IdempotencyKey = strings.TrimSpace(k.IdempotencyKey)
+	return k
+}
