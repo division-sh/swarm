@@ -197,12 +197,12 @@ func TestInventoryPlannerCarriesSplitContractsAndResetSeams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPlan error = %v", err)
 	}
-	if !containsContract(plan.DownstreamContracts, ContractRunDeliveryQuiescence) ||
-		!containsContract(plan.DownstreamContracts, ContractRunScopedTruncation) ||
-		!containsContract(plan.DownstreamContracts, ContractManagedContainers) ||
-		!containsContract(plan.DownstreamContracts, ContractPublicAPIWrapper) ||
-		!containsContract(plan.DownstreamContracts, ContractLegacyResetMigration) {
-		t.Fatalf("downstream contracts = %#v, missing required split contract", plan.DownstreamContracts)
+	if !containsContractStatus(plan.DownstreamContracts, ContractRunDeliveryQuiescence, "implemented_internal_owner") ||
+		!containsContractStatus(plan.DownstreamContracts, ContractRunScopedTruncation, "implemented_internal_owner") ||
+		!containsContractStatus(plan.DownstreamContracts, ContractManagedContainers, "split") ||
+		!containsContractStatus(plan.DownstreamContracts, ContractPublicAPIWrapper, "split") ||
+		!containsContractStatus(plan.DownstreamContracts, ContractLegacyResetMigration, "split") {
+		t.Fatalf("downstream contracts = %#v, missing required contract state", plan.DownstreamContracts)
 	}
 	if !containsSeam(plan.ResetSeams, "startup_recovery_failed_reset") ||
 		!containsSeam(plan.ResetSeams, "scripts_run_clear_reset_dev") ||
@@ -385,9 +385,9 @@ func (s *recordingIdempotencyStore) StoreResetResult(_ context.Context, result S
 	return nil
 }
 
-func containsContract(contracts []DownstreamContract, id string) bool {
+func containsContractStatus(contracts []DownstreamContract, id, status string) bool {
 	return slices.ContainsFunc(contracts, func(contract DownstreamContract) bool {
-		return contract.ID == id && contract.Status == "split"
+		return contract.ID == id && contract.Status == status
 	})
 }
 
