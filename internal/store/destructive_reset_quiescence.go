@@ -353,7 +353,6 @@ func destructiveResetQuiescenceDeliveryPredicateSQL(alias string) string {
 			OR (
 				` + prefix + `status = 'failed'
 				AND COALESCE(` + prefix + `retry_count, 0) < 2
-				AND COALESCE(` + prefix + `delivered_at, ` + prefix + `created_at) <= now() - interval '1 minute'
 			)
 		)`
 }
