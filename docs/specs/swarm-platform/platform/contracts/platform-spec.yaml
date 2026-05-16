@@ -4859,6 +4859,30 @@ workspace_model:
       /opt/swarm/contracts: Read-only volume from deployment artifact.
     portability_rule: A product contract that works on local dev MUST work on Docker and production without contract changes.
       Mount paths are invariant. Only the backing storage implementation changes.
+  managed_container_identity:
+    status: internal_only
+    owner: internal/runtime/containeridentity plus internal/runtime/workspace creation paths
+    purpose: Durable, inspectable identity for platform-created workspace containers. Destructive reset and recovery code must
+      consume this identity rather than inferring ownership from container names, prefixes, or raw Docker listings.
+    labels:
+      owner: dev.swarm.owner = runtime
+      kind: dev.swarm.container.kind = scaffold | system | entity | agent | flow
+      reset_eligibility: dev.swarm.reset.eligible = true | false
+      creation_source: dev.swarm.creation_source names the workspace creation owner
+      container_name: dev.swarm.container.name records the exact container name stamped at creation
+      workspace_scope: dev.swarm.workspace.scope records scaffold, system, entity, per-agent, or per-flow-instance scope
+      lineage: dev.swarm.run_id, dev.swarm.entity_id, dev.swarm.agent_id, and dev.swarm.flow_instance are stamped when
+        that lineage is available to the creation owner
+    reset_policy:
+    - Destructive reset may stop only containers whose typed identity proves owner=runtime, reset_eligible=true, and kind
+      is entity, agent, or flow.
+    - scaffold and system containers are platform-created but reset_eligible=false and must be preserved by destructive reset.
+    - Unlabeled, unregistered, operator-managed, postgres/tool-gateway, name-only, and ambiguous containers are preserved
+      fail-closed. A Swarm-looking container name is not ownership proof.
+    - Destructive reset planning captures managed container refs before run-scoped DB cleanup can remove supporting runtime
+      rows. Cleanup tables are not the container selector.
+    - Broad Docker enumeration such as raw `docker ps | docker stop` is not a production reset owner. Label-filtered inventory
+      may be used only as a consumer of this typed identity model.
 agent_prompt_lint:
   description: Prompt/schema lint for authored agent prompts on the verify surface.
   authority_distribution:

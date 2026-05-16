@@ -24,9 +24,9 @@ func DefaultDownstreamContracts() []DownstreamContract {
 		},
 		{
 			ID:          ContractManagedContainers,
-			Status:      "split",
-			Owner:       "future workspace destructive reset container owner",
-			Description: "Select and stop only swarm-managed entity containers while proving system/operator-managed containers are preserved.",
+			Status:      "implemented_internal_owner",
+			Owner:       "internal/runtime/containeridentity, internal/runtime/workspace managed identity stamping, and internal/runtime/destructivereset ManagedContainerStopper",
+			Description: "Select and stop only label-proven reset-eligible managed runtime containers while preserving system/operator/unowned containers.",
 		},
 		{
 			ID:          ContractPublicAPIWrapper,

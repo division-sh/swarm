@@ -10,6 +10,30 @@ type InventoryPlanner struct {
 	ResetSeams          []ResetSeam
 }
 
+type CompositeInventoryReader struct {
+	Reader     InventoryReader
+	Containers ManagedContainerInventoryReader
+}
+
+func (r CompositeInventoryReader) ReadResetInventory(ctx context.Context) (Inventory, error) {
+	if r.Reader == nil {
+		return Inventory{}, ErrPlannerNotConfigured
+	}
+	inventory, err := r.Reader.ReadResetInventory(ctx)
+	if err != nil {
+		return Inventory{}, err
+	}
+	if r.Containers == nil {
+		return inventory, nil
+	}
+	containers, err := r.Containers.ManagedResetContainerInventory(ctx)
+	if err != nil {
+		return Inventory{}, err
+	}
+	inventory.EntityContainers = append([]ContainerRef(nil), containers...)
+	return inventory, nil
+}
+
 func (p InventoryPlanner) BuildPlan(ctx context.Context, _ Request) (Plan, error) {
 	if p.Reader == nil {
 		return Plan{}, ErrPlannerNotConfigured
