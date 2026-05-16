@@ -363,6 +363,133 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesInt
 	}
 }
 
+func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLinkedEventsAndDeliveries(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+	ctx := context.Background()
+	cleanupRunID := uuid.NewString()
+	preservedSourceRunID := uuid.NewString()
+	preservedForkRunID := uuid.NewString()
+	cleanupEventID := uuid.NewString()
+	preservedSourceEventID := uuid.NewString()
+	preservedForkEventID := uuid.NewString()
+	cleanupDeliveryID := uuid.NewString()
+	preservedDeliveryID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status) VALUES
+			($1::uuid, 'running'),
+			($2::uuid, 'running'),
+			($3::uuid, 'running')
+	`, cleanupRunID, preservedSourceRunID, preservedForkRunID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by_type) VALUES
+			($1::uuid, $4::uuid, 'cleanup.event', $7::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external'),
+			($2::uuid, $5::uuid, 'source.event', $7::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external'),
+			($3::uuid, $6::uuid, 'fork.event', $7::uuid, 'flow/a', 'entity', '{}'::jsonb, 'platform')
+	`, cleanupEventID, preservedSourceEventID, preservedForkEventID, cleanupRunID, preservedSourceRunID, preservedForkRunID, entityID); err != nil {
+		t.Fatalf("seed events: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status) VALUES
+			($1::uuid, $3::uuid, $5::uuid, 'agent', 'agent-a', 'pending'),
+			($2::uuid, $4::uuid, $6::uuid, 'agent', 'agent-a', 'delivered')
+	`, cleanupDeliveryID, preservedDeliveryID, preservedSourceRunID, preservedForkRunID, cleanupEventID, preservedForkEventID); err != nil {
+		t.Fatalf("seed deliveries: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO run_fork_delivery_event_replays (
+			fork_run_id, source_run_id, source_event_id, source_delivery_id, fork_event_id, fork_delivery_id, subscriber_type, subscriber_id
+		) VALUES (
+			$1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid, 'agent', 'agent-a'
+		)
+	`, preservedForkRunID, preservedSourceRunID, preservedSourceEventID, cleanupDeliveryID, preservedForkEventID, preservedDeliveryID); err != nil {
+		t.Fatalf("seed delivery replay: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO run_fork_selected_contract_bindings (fork_run_id, source_run_id, fork_event_id, mode, contracts_root, workflow_name, workflow_version)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'selected_contracts', '/contracts', 'wf', 'v1')
+	`, preservedForkRunID, preservedSourceRunID, cleanupEventID); err != nil {
+		t.Fatalf("seed selected binding: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO run_fork_selected_contract_executions (fork_run_id, source_run_id, source_event_id, fork_event_id, event_name)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'cleanup.event')
+	`, preservedForkRunID, preservedSourceRunID, cleanupEventID, preservedForkEventID); err != nil {
+		t.Fatalf("seed selected execution: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO run_fork_selected_contract_branch_divergences (fork_run_id, source_run_id, fork_event_id, owner, policy, source_run_status_at_activation, source_run_status_after_activation)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'test', 'selected_contract_source_advanced_branch', 'running', 'completed')
+	`, preservedForkRunID, preservedSourceRunID, cleanupEventID); err != nil {
+		t.Fatalf("seed selected branch divergence: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO run_fork_selected_contract_route_recoveries (
+			fork_run_id, source_run_id, fork_event_id, owner, runtime_recovery_owner, mode, contracts_root, workflow_name, workflow_version,
+			route_topology_owner, recipient_planning_owner, frontier_evidence_fingerprint, route_topology_fingerprint,
+			recipient_planning_fingerprint, route_topology, recipient_planning
+		) VALUES (
+			$1::uuid, $2::uuid, $3::uuid, 'test', 'test', 'selected_contracts', '/contracts', 'wf', 'v1',
+			'topology', 'recipients', 'frontier', 'route', 'recipient', '{}'::jsonb, '{}'::jsonb
+		)
+	`, preservedForkRunID, preservedSourceRunID, cleanupEventID); err != nil {
+		t.Fatalf("seed selected route recovery: %v", err)
+	}
+
+	now := time.Date(2026, 5, 16, 19, 5, 0, 0, time.UTC)
+	result, err := pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		RequestedAt:  now,
+		Result: destructivereset.Result{
+			OperationName: destructivereset.DefaultOperationName,
+			PlannedAt:     now.Add(-time.Minute),
+			Plan:          cleanupPlanForRunIDs(cleanupRunID),
+		},
+		Quiescence: destructivereset.QuiescenceResult{
+			OperationName: destructivereset.DefaultOperationName,
+			AppliedAt:     now.Add(-30 * time.Second),
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyDestructiveResetCleanup: %v", err)
+	}
+	assertCleanupTableResult(t, result, "run_fork_delivery_event_replays", 1, 1)
+	assertCleanupTableResult(t, result, "run_fork_selected_contract_bindings", 1, 1)
+	assertCleanupTableResult(t, result, "run_fork_selected_contract_executions", 1, 1)
+	assertCleanupTableResult(t, result, "run_fork_selected_contract_branch_divergences", 1, 1)
+	assertCleanupTableResult(t, result, "run_fork_selected_contract_route_recoveries", 1, 1)
+	assertCleanupTableResult(t, result, "event_deliveries", 1, 1)
+	assertCleanupTableResult(t, result, "events", 1, 1)
+	for _, table := range []string{
+		"run_fork_delivery_event_replays",
+		"run_fork_selected_contract_bindings",
+		"run_fork_selected_contract_executions",
+		"run_fork_selected_contract_branch_divergences",
+		"run_fork_selected_contract_route_recoveries",
+	} {
+		if got := countRows(t, ctx, pg, table); got != 0 {
+			t.Fatalf("%s rows after cleanup = %d, want 0", table, got)
+		}
+	}
+	if got := countRowsWhere(t, ctx, pg, "runs", `run_id IN ($1::uuid, $2::uuid)`, preservedSourceRunID, preservedForkRunID); got != 2 {
+		t.Fatalf("preserved run rows after cleanup = %d, want 2", got)
+	}
+	if got := countRowsWhere(t, ctx, pg, "events", `event_id IN ($1::uuid, $2::uuid)`, preservedSourceEventID, preservedForkEventID); got != 2 {
+		t.Fatalf("preserved event rows after cleanup = %d, want 2", got)
+	}
+	if got := countRowsWhere(t, ctx, pg, "event_deliveries", `delivery_id = $1::uuid`, preservedDeliveryID); got != 1 {
+		t.Fatalf("preserved delivery rows after cleanup = %d, want 1", got)
+	}
+}
+
 func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKeyReference(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)

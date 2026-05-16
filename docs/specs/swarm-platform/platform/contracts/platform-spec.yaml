@@ -3088,6 +3088,7 @@ platform_tables:
       - Every platform_tables.tables entry must have exactly one destructive-reset cleanup classification in the typed cleanup catalog.
       - Apply and dry-run must consume the plan cleanup_runs snapshot only; runs created after the plan/quiescence envelope are out of scope for that cleanup call.
       - Before deleting planned run-scoped rows, apply must sever nullable preserved/out-of-scope references into the cleanup set; current severed references are agent_sessions.successor_session_id, runs.forked_from_run_id/forked_from_event_id, runtime_ingress_state.transition_event_id, entity_mutations.caused_by_event, and timers.source_timer_id.
+      - Fork-lineage cleanup must delete fork replay and selected-contract rows by fork/source run_id and by linked cleanup-owned event/delivery references before deleting event_deliveries or events; preserved fork/source run IDs are not sufficient proof that the row is out of scope.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - Generated product/entity/node-state tables remain split-preserved until a separate owner gives them exact run-scoped identity.
       - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
