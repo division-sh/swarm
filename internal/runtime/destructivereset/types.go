@@ -15,6 +15,13 @@ const (
 	QuiescenceControlledBy = DefaultOperationName
 	QuiescenceReasonCode   = "runtime_nuke_cancelled"
 	QuiescenceDeliveryNote = "runtime destructive reset cancelled delivery"
+
+	ContainerActionStop           = "stop"
+	ContainerActionPreserve       = "preserve"
+	ContainerActionMissing        = "missing"
+	ContainerActionAlreadyStopped = "already_stopped"
+	ContainerActionFailed         = "failed"
+	ContainerActionUnowned        = "preserve_unowned"
 )
 
 var (
@@ -84,6 +91,30 @@ type CleanupTableResult struct {
 	PreservedRows    int64  `json:"preserved_rows"`
 }
 
+type ContainerResetRequest struct {
+	Result       Result
+	Cleanup      CleanupResult
+	ActorTokenID string
+	RequestedAt  time.Time
+}
+
+type ContainerResetResult struct {
+	OperationName  string                 `json:"operation_name"`
+	DryRun         bool                   `json:"dry_run"`
+	AppliedAt      time.Time              `json:"applied_at"`
+	Selected       []ContainerRef         `json:"selected"`
+	Preserved      []ContainerRef         `json:"preserved"`
+	Missing        []ContainerRef         `json:"missing"`
+	AlreadyStopped []ContainerRef         `json:"already_stopped"`
+	Stopped        []ContainerRef         `json:"stopped"`
+	Failed         []ContainerStopFailure `json:"failed"`
+}
+
+type ContainerStopFailure struct {
+	Container ContainerRef `json:"container"`
+	Error     string       `json:"error"`
+}
+
 type CleanupCatalogEntry struct {
 	Table             string
 	TableKind         string
@@ -145,9 +176,16 @@ type TableRef struct {
 }
 
 type ContainerRef struct {
-	Name   string `json:"name"`
-	Kind   string `json:"kind"`
-	Action string `json:"action"`
+	Name           string `json:"name"`
+	Kind           string `json:"kind"`
+	Action         string `json:"action"`
+	ResetEligible  bool   `json:"reset_eligible,omitempty"`
+	CreationSource string `json:"creation_source,omitempty"`
+	WorkspaceScope string `json:"workspace_scope,omitempty"`
+	RunID          string `json:"run_id,omitempty"`
+	EntityID       string `json:"entity_id,omitempty"`
+	AgentID        string `json:"agent_id,omitempty"`
+	FlowInstance   string `json:"flow_instance,omitempty"`
 }
 
 type PreservedResources struct {
@@ -185,6 +223,10 @@ type InventoryReader interface {
 	ReadResetInventory(context.Context) (Inventory, error)
 }
 
+type ManagedContainerInventoryReader interface {
+	ManagedResetContainerInventory(context.Context) ([]ContainerRef, error)
+}
+
 type Planner interface {
 	BuildPlan(context.Context, Request) (Plan, error)
 }
@@ -208,6 +250,31 @@ type QuiescenceStore interface {
 
 type CleanupStore interface {
 	ApplyDestructiveResetCleanup(context.Context, CleanupRequest) (CleanupResult, error)
+}
+
+type ManagedContainerRuntime interface {
+	InspectManagedContainer(context.Context, string) (ManagedContainerInspection, error)
+	StopManagedContainer(context.Context, string) error
+}
+
+type ManagedContainerInspection struct {
+	Exists      bool
+	Running     bool
+	HasIdentity bool
+	Identity    ContainerIdentity
+}
+
+type ContainerIdentity struct {
+	Owner          string
+	Kind           string
+	ResetEligible  bool
+	CreationSource string
+	ContainerName  string
+	WorkspaceScope string
+	RunID          string
+	EntityID       string
+	AgentID        string
+	FlowInstance   string
 }
 
 type IdempotencyKey struct {

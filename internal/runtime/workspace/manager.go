@@ -12,9 +12,11 @@ import (
 	"sort"
 	"strings"
 
+	runtimecontaineridentity "swarm/internal/runtime/containeridentity"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	runtimecurrentstate "swarm/internal/runtime/currentstate"
+	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -144,7 +146,7 @@ func (m *DockerManager) SetRunDockerFnForTest(runDockerFn func(ctx context.Conte
 }
 
 func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
-	if err := m.EnsureContainerRunning(ctx, m.cfg.ScaffoldContainer, append(m.standardMountArgs(),
+	if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.ScaffoldContainer, m.systemContainerIdentity("workspace.EnsureSystemWorkspaces", runtimecontaineridentity.KindScaffold), append(m.standardMountArgs(),
 		[]string{
 			"-v", fmt.Sprintf("%s:%s", m.cfg.ScaffoldVolume, m.cfg.ScaffoldWorkdir),
 			"-w", m.cfg.ScaffoldWorkdir,
@@ -154,7 +156,7 @@ func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
 		return fmt.Errorf("ensure scaffold workspace: %w", err)
 	}
 
-	if err := m.EnsureContainerRunning(ctx, m.cfg.SystemContainer, append(m.standardMountArgs(),
+	if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.EnsureSystemWorkspaces", runtimecontaineridentity.KindSystem), append(m.standardMountArgs(),
 		[]string{
 			"--privileged",
 			"-v", fmt.Sprintf("%s:/opt/swarm/entities", m.cfg.SystemEntitiesVolume),
@@ -230,8 +232,21 @@ func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID stri
 	}
 	container := m.EntityContainerName(slug)
 	volume := fmt.Sprintf("entities_%s", slug)
+	runID, err := workspaceRunID(ctx)
+	if err != nil {
+		return err
+	}
 
-	return m.EnsureContainerRunning(ctx, container, append(m.standardMountArgs(),
+	return m.EnsureContainerRunningWithIdentity(ctx, container, runtimecontaineridentity.Identity{
+		Owner:          runtimecontaineridentity.OwnerRuntime,
+		Kind:           runtimecontaineridentity.KindEntity,
+		ResetEligible:  true,
+		CreationSource: "workspace.EnsureEntityWorkspace",
+		ContainerName:  container,
+		WorkspaceScope: "entity",
+		RunID:          runID,
+		EntityID:       strings.TrimSpace(entityID),
+	}, append(m.standardMountArgs(),
 		[]string{
 			"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),
 			"-w", m.cfg.EntityWorkdir,
@@ -343,7 +358,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 	}
 	switch workspaceRouteClass(class) {
 	case "scaffold":
-		if err := m.EnsureContainerRunning(ctx, m.cfg.ScaffoldContainer, []string{
+		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.ScaffoldContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindScaffold), []string{
 			"-v", fmt.Sprintf("%s:%s", m.cfg.ScaffoldVolume, m.cfg.ScaffoldWorkdir),
 			"-w", m.cfg.ScaffoldWorkdir,
 			m.cfg.WorkspaceImage,
@@ -356,7 +371,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 			Workdir:   m.cfg.ScaffoldWorkdir,
 		}, nil
 	case "system":
-		if err := m.EnsureContainerRunning(ctx, m.cfg.SystemContainer, []string{
+		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindSystem), []string{
 			"--privileged",
 			"-v", fmt.Sprintf("%s:/opt/swarm/entities", m.cfg.SystemEntitiesVolume),
 			"-v", fmt.Sprintf("%s:/opt/swarm/nginx", m.cfg.SystemNginxVolume),
@@ -377,7 +392,11 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 		return nil, err
 	}
 	container, volume := m.workspaceContainerAndVolume(scope, scopeKey)
-	if err := m.EnsureContainerRunning(ctx, container, append(m.standardMountArgs(),
+	identity, err := m.workspaceContainerIdentity(ctx, container, scope, scopeKey, actor)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.EnsureContainerRunningWithIdentity(ctx, container, identity, append(m.standardMountArgs(),
 		[]string{
 			"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),
 			"-w", m.cfg.EntityWorkdir,
@@ -471,6 +490,58 @@ func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string) (str
 	default:
 		return "swarm-agent-" + scopeKey, "workspaces_agent_" + scopeKey
 	}
+}
+
+func (m *DockerManager) systemContainerIdentity(source, kind string) runtimecontaineridentity.Identity {
+	name := strings.TrimSpace(m.cfg.ScaffoldContainer)
+	scope := runtimecontaineridentity.KindScaffold
+	if strings.TrimSpace(kind) == runtimecontaineridentity.KindSystem {
+		name = strings.TrimSpace(m.cfg.SystemContainer)
+		scope = runtimecontaineridentity.KindSystem
+	}
+	return runtimecontaineridentity.Identity{
+		Owner:          runtimecontaineridentity.OwnerRuntime,
+		Kind:           strings.TrimSpace(kind),
+		ResetEligible:  false,
+		CreationSource: strings.TrimSpace(source),
+		ContainerName:  name,
+		WorkspaceScope: scope,
+	}
+}
+
+func (m *DockerManager) workspaceContainerIdentity(ctx context.Context, container, scope, scopeKey string, actor models.AgentConfig) (runtimecontaineridentity.Identity, error) {
+	runID, err := workspaceRunID(ctx)
+	if err != nil {
+		return runtimecontaineridentity.Identity{}, err
+	}
+	identity := runtimecontaineridentity.Identity{
+		Owner:          runtimecontaineridentity.OwnerRuntime,
+		ResetEligible:  true,
+		CreationSource: "workspace.ResolveWorkspace",
+		ContainerName:  strings.TrimSpace(container),
+		WorkspaceScope: strings.TrimSpace(scope),
+		RunID:          runID,
+	}
+	switch strings.TrimSpace(scope) {
+	case "per-flow-instance":
+		identity.Kind = runtimecontaineridentity.KindFlow
+		identity.FlowInstance = strings.Trim(strings.TrimSpace(scopeKey), "/")
+	default:
+		identity.Kind = runtimecontaineridentity.KindAgent
+		identity.AgentID = strings.TrimSpace(actor.ID)
+	}
+	return identity, nil
+}
+
+func workspaceRunID(ctx context.Context) (string, error) {
+	runID, ok, err := runtimecurrentstate.RunIDFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", nil
+	}
+	return runID, nil
 }
 
 func (m *DockerManager) standardMountArgs() []string {
@@ -672,6 +743,10 @@ func asString(v any) string {
 }
 
 func (m *DockerManager) EnsureContainerRunning(ctx context.Context, name string, createArgs []string) error {
+	return m.EnsureContainerRunningWithIdentity(ctx, name, runtimecontaineridentity.Identity{}, createArgs)
+}
+
+func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, name string, identity runtimecontaineridentity.Identity, createArgs []string) error {
 	exists, running, err := m.InspectContainer(ctx, name)
 	if err != nil {
 		return err
@@ -680,6 +755,13 @@ func (m *DockerManager) EnsureContainerRunning(ctx context.Context, name string,
 		args := []string{"create", "--name", name}
 		if network := strings.TrimSpace(m.cfg.WorkspaceNetwork); network != "" {
 			args = append(args, "--network", network)
+		}
+		labels, err := identityLabelsForContainer(name, identity)
+		if err != nil {
+			return err
+		}
+		if len(labels) > 0 {
+			args = append(args, runtimecontaineridentity.DockerCreateLabelArgs(labels)...)
 		}
 		args = append(args, createArgs...)
 		if _, err := m.RunDocker(ctx, args...); err != nil {
@@ -703,6 +785,17 @@ func (m *DockerManager) EnsureContainerRunning(ctx context.Context, name string,
 		return err
 	}
 	return nil
+}
+
+func identityLabelsForContainer(name string, identity runtimecontaineridentity.Identity) (map[string]string, error) {
+	if strings.TrimSpace(identity.Owner) == "" {
+		return nil, nil
+	}
+	identity.ContainerName = strings.TrimSpace(name)
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+	return identity.Labels(), nil
 }
 
 func (m *DockerManager) EnsureContainerNetwork(ctx context.Context, name string) error {
@@ -734,6 +827,128 @@ func (m *DockerManager) StopContainer(ctx context.Context, name string) error {
 		return err
 	}
 	return nil
+}
+
+func (m *DockerManager) StopManagedContainer(ctx context.Context, name string) error {
+	return m.StopContainer(ctx, name)
+}
+
+func (m *DockerManager) ManagedResetContainerInventory(ctx context.Context) ([]runtimedestructivereset.ContainerRef, error) {
+	out, err := m.RunDocker(ctx,
+		"container", "ls", "--all",
+		"--filter", "label="+runtimecontaineridentity.LabelOwner+"="+runtimecontaineridentity.OwnerRuntime,
+		"--filter", "label="+runtimecontaineridentity.LabelResetEligible+"=true",
+		"--format", "{{.Names}}",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list managed reset containers: %w", err)
+	}
+	var refs []runtimedestructivereset.ContainerRef
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		inspection, err := m.InspectManagedContainer(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("inspect managed reset container %s: %w", name, err)
+		}
+		identity := containerIdentityFromResetInspection(inspection)
+		if !inspection.Exists || !inspection.HasIdentity || !identity.ResetEligibleManaged() {
+			continue
+		}
+		if strings.TrimSpace(identity.ContainerName) != name {
+			return nil, fmt.Errorf("managed reset container %s identity names %s", name, identity.ContainerName)
+		}
+		refs = append(refs, managedContainerRef(identity, runtimedestructivereset.ContainerActionStop))
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].Kind != refs[j].Kind {
+			return refs[i].Kind < refs[j].Kind
+		}
+		return refs[i].Name < refs[j].Name
+	})
+	return refs, nil
+}
+
+func (m *DockerManager) InspectManagedContainer(ctx context.Context, name string) (runtimedestructivereset.ManagedContainerInspection, error) {
+	out, err := m.RunDocker(ctx, "inspect", "--format", "{{json .}}", strings.TrimSpace(name))
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "no such object") {
+			return runtimedestructivereset.ManagedContainerInspection{}, nil
+		}
+		return runtimedestructivereset.ManagedContainerInspection{}, err
+	}
+	var doc struct {
+		State struct {
+			Running bool `json:"Running"`
+		} `json:"State"`
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &doc); err != nil {
+		return runtimedestructivereset.ManagedContainerInspection{}, err
+	}
+	identity, ok, err := runtimecontaineridentity.FromLabels(doc.Config.Labels)
+	if err != nil {
+		return runtimedestructivereset.ManagedContainerInspection{}, err
+	}
+	return runtimedestructivereset.ManagedContainerInspection{
+		Exists:      true,
+		Running:     doc.State.Running,
+		HasIdentity: ok,
+		Identity:    resetContainerIdentity(identity),
+	}, nil
+}
+
+func resetContainerIdentity(identity runtimecontaineridentity.Identity) runtimedestructivereset.ContainerIdentity {
+	identity = identity.Normalized()
+	return runtimedestructivereset.ContainerIdentity{
+		Owner:          identity.Owner,
+		Kind:           identity.Kind,
+		ResetEligible:  identity.ResetEligible,
+		CreationSource: identity.CreationSource,
+		ContainerName:  identity.ContainerName,
+		WorkspaceScope: identity.WorkspaceScope,
+		RunID:          identity.RunID,
+		EntityID:       identity.EntityID,
+		AgentID:        identity.AgentID,
+		FlowInstance:   identity.FlowInstance,
+	}
+}
+
+func containerIdentityFromResetInspection(inspection runtimedestructivereset.ManagedContainerInspection) runtimecontaineridentity.Identity {
+	identity := inspection.Identity
+	return runtimecontaineridentity.Identity{
+		Owner:          identity.Owner,
+		Kind:           identity.Kind,
+		ResetEligible:  identity.ResetEligible,
+		CreationSource: identity.CreationSource,
+		ContainerName:  identity.ContainerName,
+		WorkspaceScope: identity.WorkspaceScope,
+		RunID:          identity.RunID,
+		EntityID:       identity.EntityID,
+		AgentID:        identity.AgentID,
+		FlowInstance:   identity.FlowInstance,
+	}.Normalized()
+}
+
+func managedContainerRef(identity runtimecontaineridentity.Identity, action string) runtimedestructivereset.ContainerRef {
+	identity = identity.Normalized()
+	return runtimedestructivereset.ContainerRef{
+		Name:           identity.ContainerName,
+		Kind:           identity.Kind,
+		Action:         strings.TrimSpace(action),
+		ResetEligible:  identity.ResetEligible,
+		CreationSource: identity.CreationSource,
+		WorkspaceScope: identity.WorkspaceScope,
+		RunID:          identity.RunID,
+		EntityID:       identity.EntityID,
+		AgentID:        identity.AgentID,
+		FlowInstance:   identity.FlowInstance,
+	}
 }
 
 func (m *DockerManager) InspectContainer(ctx context.Context, name string) (bool, bool, error) {

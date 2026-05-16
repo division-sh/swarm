@@ -194,6 +194,58 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 	}
 }
 
+func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanup(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+	ctx := context.Background()
+	seedDestructiveResetCleanupRows(t, ctx, pg)
+	containerRefs := []destructivereset.ContainerRef{{
+		Name:          "swarm-agent-agent-a",
+		Kind:          "agent",
+		Action:        destructivereset.ContainerActionStop,
+		ResetEligible: true,
+		RunID:         "11111111-1111-1111-1111-111111111111",
+		AgentID:       "agent-a",
+	}}
+	plan, err := (destructivereset.InventoryPlanner{Reader: destructivereset.CompositeInventoryReader{
+		Reader:     pg,
+		Containers: managedContainerInventoryFunc(func(context.Context) ([]destructivereset.ContainerRef, error) { return containerRefs, nil }),
+	}}).BuildPlan(ctx, destructivereset.Request{ActorTokenID: "operator-token"})
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if len(plan.EntityContainers) != 1 || plan.EntityContainers[0].Name != "swarm-agent-agent-a" {
+		t.Fatalf("planned entity containers = %#v, want managed container snapshot", plan.EntityContainers)
+	}
+	now := time.Date(2026, 5, 16, 18, 45, 0, 0, time.UTC)
+	if _, err := pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		RequestedAt:  now,
+		Result: destructivereset.Result{
+			OperationName: destructivereset.DefaultOperationName,
+			PlannedAt:     now.Add(-time.Minute),
+			Plan:          plan,
+		},
+		Quiescence: destructivereset.QuiescenceResult{
+			OperationName: destructivereset.DefaultOperationName,
+			AppliedAt:     now.Add(-30 * time.Second),
+		},
+	}); err != nil {
+		t.Fatalf("ApplyDestructiveResetCleanup: %v", err)
+	}
+	if len(plan.EntityContainers) != 1 || plan.EntityContainers[0].Name != "swarm-agent-agent-a" {
+		t.Fatalf("plan entity containers after cleanup = %#v, want immutable pre-cleanup snapshot", plan.EntityContainers)
+	}
+	if got := countRows(t, ctx, pg, "entity_state"); got != 0 {
+		t.Fatalf("entity_state after cleanup = %d, want deleted while plan still carries container refs", got)
+	}
+}
+
 func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesIntoCleanupSet(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -629,6 +681,12 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresPlannedCleanupRunSet
 type destructiveResetCleanupSeed struct {
 	RunA string
 	RunB string
+}
+
+type managedContainerInventoryFunc func(context.Context) ([]destructivereset.ContainerRef, error)
+
+func (f managedContainerInventoryFunc) ManagedResetContainerInventory(ctx context.Context) ([]destructivereset.ContainerRef, error) {
+	return f(ctx)
 }
 
 func cleanupPlanForRunIDs(runIDs ...string) destructivereset.Plan {

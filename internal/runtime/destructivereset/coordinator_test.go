@@ -212,7 +212,7 @@ func TestInventoryPlannerCarriesSplitContractsAndResetSeams(t *testing.T) {
 	}
 	if !containsContractStatus(plan.DownstreamContracts, ContractRunDeliveryQuiescence, "implemented_internal_owner") ||
 		!containsContractStatus(plan.DownstreamContracts, ContractRunScopedTruncation, "implemented_internal_owner") ||
-		!containsContractStatus(plan.DownstreamContracts, ContractManagedContainers, "split") ||
+		!containsContractStatus(plan.DownstreamContracts, ContractManagedContainers, "implemented_internal_owner") ||
 		!containsContractStatus(plan.DownstreamContracts, ContractPublicAPIWrapper, "split") ||
 		!containsContractStatus(plan.DownstreamContracts, ContractLegacyResetMigration, "split") {
 		t.Fatalf("downstream contracts = %#v, missing required contract state", plan.DownstreamContracts)

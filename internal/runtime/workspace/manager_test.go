@@ -10,6 +10,7 @@ import (
 
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/testutil"
 )
@@ -106,7 +107,8 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 			return "", nil
 		}
 	})
-	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+	ctx := runtimecorrelation.WithRunID(context.Background(), "11111111-1111-1111-1111-111111111111")
+	target, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
 		ID:             "dedicated-agent",
 		WorkspaceClass: "dedicated",
 	})
@@ -121,6 +123,10 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 		dataDir + ":/data:ro",
 		contractsDir + ":/opt/swarm/contracts:ro",
 		"workspaces_agent_dedicated-agent:/workspace",
+		"--label dev.swarm.container.kind=agent",
+		"--label dev.swarm.reset.eligible=true",
+		"--label dev.swarm.agent_id=dedicated-agent",
+		"--label dev.swarm.run_id=11111111-1111-1111-1111-111111111111",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("create args missing %q: %v", expected, created)
@@ -165,7 +171,8 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 			return "", nil
 		}
 	})
-	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+	ctx := runtimecorrelation.WithRunID(context.Background(), "22222222-2222-2222-2222-222222222222")
+	target, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
 		ID:             "shared-work-lead",
 		WorkspaceClass: "shared_flow",
 		FlowPath:       "shared/work-001",
@@ -179,6 +186,16 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 	joined := strings.Join(created, " ")
 	if !strings.Contains(joined, "workspaces_flow_shared-work-001:/workspace") {
 		t.Fatalf("expected shared flow workspace volume, got %v", created)
+	}
+	for _, expected := range []string{
+		"--label dev.swarm.container.kind=flow",
+		"--label dev.swarm.reset.eligible=true",
+		"--label dev.swarm.flow_instance=shared/work-001",
+		"--label dev.swarm.run_id=22222222-2222-2222-2222-222222222222",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("create args missing %q: %v", expected, created)
+		}
 	}
 }
 
@@ -345,11 +362,63 @@ func TestEnsureSystemWorkspaces_CreatesScaffoldAndSystemContainers(t *testing.T)
 	for _, expected := range []string{
 		"create --name swarm-scaffold",
 		"create --name swarm-system",
+		"--label dev.swarm.container.kind=scaffold",
+		"--label dev.swarm.container.kind=system",
+		"--label dev.swarm.reset.eligible=false",
 		"test-image sleep infinity",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("EnsureSystemWorkspaces calls missing %q: %s", expected, joined)
 		}
+	}
+}
+
+func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.WorkspaceNetwork = ""
+	manager.SetConfig(cfg)
+
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case joined == "container ls --all --filter label=dev.swarm.owner=runtime --filter label=dev.swarm.reset.eligible=true --format {{.Names}}":
+			return "swarm-agent-agent-a\nswarm-system\n", nil
+		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-agent-agent-a":
+			return managedContainerInspectJSON(map[string]string{
+				"dev.swarm.owner":           "runtime",
+				"dev.swarm.container.kind":  "agent",
+				"dev.swarm.reset.eligible":  "true",
+				"dev.swarm.creation_source": "workspace.ResolveWorkspace",
+				"dev.swarm.container.name":  "swarm-agent-agent-a",
+				"dev.swarm.workspace.scope": "per-agent",
+				"dev.swarm.run_id":          "33333333-3333-3333-3333-333333333333",
+				"dev.swarm.agent_id":        "agent-a",
+			}, true), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-system":
+			return managedContainerInspectJSON(map[string]string{
+				"dev.swarm.owner":           "runtime",
+				"dev.swarm.container.kind":  "system",
+				"dev.swarm.reset.eligible":  "false",
+				"dev.swarm.creation_source": "workspace.EnsureSystemWorkspaces",
+				"dev.swarm.container.name":  "swarm-system",
+				"dev.swarm.workspace.scope": "system",
+			}, true), nil
+		default:
+			return "", nil
+		}
+	})
+
+	refs, err := manager.ManagedResetContainerInventory(context.Background())
+	if err != nil {
+		t.Fatalf("ManagedResetContainerInventory: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("refs = %#v, want one reset-eligible managed container", refs)
+	}
+	ref := refs[0]
+	if ref.Name != "swarm-agent-agent-a" || ref.Kind != "agent" || !ref.ResetEligible || ref.AgentID != "agent-a" || ref.RunID == "" {
+		t.Fatalf("ref = %#v, want agent identity with run lineage", ref)
 	}
 }
 
@@ -359,4 +428,12 @@ func flattenDockerCalls(calls [][]string) string {
 		lines = append(lines, strings.Join(call, " "))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func managedContainerInspectJSON(labels map[string]string, running bool) string {
+	labelParts := make([]string, 0, len(labels))
+	for key, value := range labels {
+		labelParts = append(labelParts, fmt.Sprintf("%q:%q", key, value))
+	}
+	return fmt.Sprintf(`{"State":{"Running":%t},"Config":{"Labels":{%s}}}`, running, strings.Join(labelParts, ","))
 }
