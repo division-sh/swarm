@@ -28,20 +28,24 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 	}
 	agentPending := seedDestructiveResetEvent(t, ctx, pg, runID, "agent.pending")
 	agentInProgress := seedDestructiveResetEvent(t, ctx, pg, runID, "agent.in_progress")
+	agentRetryableFailed := seedDestructiveResetEvent(t, ctx, pg, runID, "agent.failed_retryable")
+	agentExhaustedFailed := seedDestructiveResetEvent(t, ctx, pg, runID, "agent.failed_exhausted")
 	nodePending := seedDestructiveResetEvent(t, ctx, pg, runID, "node.pending")
 	nodeInProgress := seedDestructiveResetEvent(t, ctx, pg, runID, "node.in_progress")
 	delivered := seedDestructiveResetEvent(t, ctx, pg, runID, "agent.delivered")
 	activeSessionID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
+			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, retry_count, reason_code, created_at, delivered_at
 		) VALUES
-			($1::uuid, $2::uuid, 'agent', 'agent-a', 'pending', NULL, 'matched_agent_subscription', now()),
-			($1::uuid, $3::uuid, 'agent', 'agent-a', 'in_progress', $6::uuid, 'agent_processing', now()),
-			($1::uuid, $4::uuid, 'node', 'node-a', 'pending', NULL, 'matched_node_subscription', now()),
-			($1::uuid, $5::uuid, 'node', 'node-a', 'in_progress', $6::uuid, 'node_processing', now()),
-			($1::uuid, $7::uuid, 'agent', 'agent-a', 'delivered', NULL, 'agent_processed', now())
-	`, runID, agentPending, agentInProgress, nodePending, nodeInProgress, activeSessionID, delivered); err != nil {
+			($1::uuid, $2::uuid, 'agent', 'agent-a', 'pending', NULL, 0, 'matched_agent_subscription', now(), NULL),
+			($1::uuid, $3::uuid, 'agent', 'agent-a', 'in_progress', $8::uuid, 0, 'agent_processing', now(), NULL),
+			($1::uuid, $4::uuid, 'agent', 'agent-a', 'failed', NULL, 1, 'agent_retryable_error', now() - interval '5 minutes', now() - interval '2 minutes'),
+			($1::uuid, $5::uuid, 'agent', 'agent-a', 'failed', NULL, 2, 'retry_exhausted', now() - interval '5 minutes', now() - interval '2 minutes'),
+			($1::uuid, $6::uuid, 'node', 'node-a', 'pending', NULL, 0, 'matched_node_subscription', now(), NULL),
+			($1::uuid, $7::uuid, 'node', 'node-a', 'in_progress', $8::uuid, 0, 'node_processing', now(), NULL),
+			($1::uuid, $9::uuid, 'agent', 'agent-a', 'delivered', NULL, 0, 'agent_processed', now(), now())
+	`, runID, agentPending, agentInProgress, agentRetryableFailed, agentExhaustedFailed, nodePending, nodeInProgress, activeSessionID, delivered); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
 	}
 	if err := pg.UpsertPipelineReceipt(ctx, agentPending, "processed", ""); err != nil {
@@ -63,11 +67,11 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 	if len(result.Runs) != 1 || result.Runs[0].Status != "cancelled" || !result.Runs[0].Changed {
 		t.Fatalf("runs = %#v, want one cancelled run", result.Runs)
 	}
-	if len(result.Deliveries) != 4 {
-		t.Fatalf("deliveries = %#v, want four active deliveries", result.Deliveries)
+	if len(result.Deliveries) != 5 {
+		t.Fatalf("deliveries = %#v, want five active/retryable deliveries", result.Deliveries)
 	}
-	if result.PipelineReceiptCount != 4 {
-		t.Fatalf("pipeline receipt count = %d, want 4", result.PipelineReceiptCount)
+	if result.PipelineReceiptCount != 5 {
+		t.Fatalf("pipeline receipt count = %d, want 5", result.PipelineReceiptCount)
 	}
 
 	var runStatus, controlStatus, reason, controlledBy string
@@ -85,6 +89,7 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 
 	assertDestructiveResetDelivery(t, ctx, pg, agentPending, "agent", "agent-a")
 	assertDestructiveResetDelivery(t, ctx, pg, agentInProgress, "agent", "agent-a")
+	assertDestructiveResetDelivery(t, ctx, pg, agentRetryableFailed, "agent", "agent-a")
 	assertDestructiveResetDelivery(t, ctx, pg, nodePending, "node", "node-a")
 	assertDestructiveResetDelivery(t, ctx, pg, nodeInProgress, "node", "node-a")
 
@@ -99,9 +104,23 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 	if deliveredStatus != "delivered" || deliveredReason != "agent_processed" {
 		t.Fatalf("delivered row = %s/%s, want untouched", deliveredStatus, deliveredReason)
 	}
+	var exhaustedStatus, exhaustedReason string
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+	`, agentExhaustedFailed).Scan(&exhaustedStatus, &exhaustedReason); err != nil {
+		t.Fatalf("load exhausted failed row: %v", err)
+	}
+	if exhaustedStatus != "failed" || exhaustedReason != "retry_exhausted" {
+		t.Fatalf("exhausted failed row = %s/%s, want untouched", exhaustedStatus, exhaustedReason)
+	}
 
 	if err := pg.MarkEventDeliveryInProgress(ctx, agentInProgress, "agent-a", uuid.NewString()); err != nil {
 		t.Fatalf("late MarkEventDeliveryInProgress: %v", err)
+	}
+	if err := pg.MarkEventDeliveryInProgress(ctx, agentRetryableFailed, "agent-a", uuid.NewString()); err != nil {
+		t.Fatalf("late retryable failed MarkEventDeliveryInProgress: %v", err)
 	}
 	if err := pg.UpsertEventReceipt(ctx, agentInProgress, "agent-a", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
 		t.Fatalf("late UpsertEventReceipt: %v", err)
@@ -110,8 +129,11 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 		t.Fatalf("late UpsertPipelineReceipt: %v", err)
 	}
 	assertDestructiveResetDelivery(t, ctx, pg, agentInProgress, "agent", "agent-a")
+	assertDestructiveResetDelivery(t, ctx, pg, agentRetryableFailed, "agent", "agent-a")
 	assertDestructiveResetReceipt(t, ctx, pg, agentInProgress, "agent-a")
 	assertDestructiveResetReceipt(t, ctx, pg, agentInProgress, destructiveResetPipelineSubscriberID)
+	assertDestructiveResetReceipt(t, ctx, pg, agentRetryableFailed, "agent-a")
+	assertDestructiveResetReceipt(t, ctx, pg, agentRetryableFailed, destructiveResetPipelineSubscriberID)
 
 	pending, err := pg.ListPendingEventsForAgent(ctx, "agent-a", now.Add(-time.Hour), 50)
 	if err != nil {
@@ -127,8 +149,8 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 	if err != nil {
 		t.Fatalf("ListOperatorEvents: %v", err)
 	}
-	if len(events.Events) != 4 {
-		t.Fatalf("operator events = %d, want 4 nuke-quiesced events", len(events.Events))
+	if len(events.Events) != 5 {
+		t.Fatalf("operator events = %d, want 5 nuke-quiesced events", len(events.Events))
 	}
 }
 

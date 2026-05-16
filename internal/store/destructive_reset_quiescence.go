@@ -218,7 +218,7 @@ func (s *PostgresStore) lockDestructiveResetDeliveriesTx(ctx context.Context, tx
 		FROM event_deliveries d
 		WHERE d.run_id = ANY($1::uuid[])
 		  AND d.subscriber_type IN ('agent', 'node')
-		  AND d.status IN ('pending', 'in_progress')
+		  AND `+destructiveResetQuiescenceDeliveryPredicateSQL("d")+`
 		ORDER BY d.run_id::text, d.event_id::text, d.subscriber_type, d.subscriber_id
 		FOR UPDATE
 	`, pq.Array(runIDs))
@@ -258,7 +258,7 @@ func (s *PostgresStore) terminalizeDestructiveResetDeliveryTx(ctx context.Contex
 			active_session_id = NULL,
 			delivered_at = COALESCE(delivered_at, $4)
 		WHERE delivery_id = $1::uuid
-		  AND status IN ('pending', 'in_progress')
+		  AND `+destructiveResetQuiescenceDeliveryPredicateSQL("")+`
 	`, item.DeliveryID, destructivereset.QuiescenceReasonCode, destructivereset.QuiescenceDeliveryNote, at.UTC()); err != nil {
 		return fmt.Errorf("terminalize destructive reset delivery %s: %w", item.DeliveryID, err)
 	}
@@ -341,4 +341,19 @@ func (s *PostgresStore) upsertDestructiveResetRunControlTx(ctx context.Context, 
 
 func destructiveResetDeliveryTerminal(status, reasonCode string) bool {
 	return strings.TrimSpace(status) == "dead_letter" && strings.TrimSpace(reasonCode) == destructivereset.QuiescenceReasonCode
+}
+
+func destructiveResetQuiescenceDeliveryPredicateSQL(alias string) string {
+	prefix := ""
+	if strings.TrimSpace(alias) != "" {
+		prefix = strings.TrimSpace(alias) + "."
+	}
+	return `(
+			` + prefix + `status IN ('pending', 'in_progress')
+			OR (
+				` + prefix + `status = 'failed'
+				AND COALESCE(` + prefix + `retry_count, 0) < 2
+				AND COALESCE(` + prefix + `delivered_at, ` + prefix + `created_at) <= now() - interval '1 minute'
+			)
+		)`
 }

@@ -82,10 +82,10 @@ count=$((count + 1))
 printf '%s' "$count" > "$count_file"
 captured="$capture_dir/$count.stdin"
 cat > "$captured"
-# Branch on the actual tool-result payload, not the process invocation count.
-# Extra startup/probe/fallback invocations should not make the first real turn
-# skip the provider-native Read tool call.
-if grep -q '"name":"read_file"' "$captured"; then
+# Branch on the actual tool-result payload, not just the tool name or process
+# invocation count. Startup/probe prompts may include compact tool schema text
+# containing "read_file", but only the second turn includes an ok result.
+if grep -Eq '"name"[[:space:]]*:[[:space:]]*"read_file"' "$captured" && grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$captured"; then
   printf '%s\n' '{"type":"result","result":"done"}'
 else
   printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
