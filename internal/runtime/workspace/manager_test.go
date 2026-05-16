@@ -383,7 +383,7 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 		joined := strings.Join(args, " ")
 		switch {
 		case joined == "container ls --all --filter label=dev.swarm.owner=runtime --filter label=dev.swarm.reset.eligible=true --format {{.Names}}":
-			return "swarm-agent-agent-a\nswarm-system\nswarm-malformed\n", nil
+			return "swarm-agent-agent-a\nswarm-system\nswarm-malformed\nswarm-stale-name\n", nil
 		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-agent-agent-a":
 			return managedContainerInspectJSON(map[string]string{
 				"dev.swarm.owner":           "runtime",
@@ -410,6 +410,17 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 				"dev.swarm.container.kind": "agent",
 				"dev.swarm.reset.eligible": "true",
 				"dev.swarm.container.name": "different-container-name",
+			}, true), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-stale-name":
+			return managedContainerInspectJSON(map[string]string{
+				"dev.swarm.owner":           "runtime",
+				"dev.swarm.container.kind":  "agent",
+				"dev.swarm.reset.eligible":  "true",
+				"dev.swarm.creation_source": "workspace.ResolveWorkspace",
+				"dev.swarm.container.name":  "old-valid-container-name",
+				"dev.swarm.workspace.scope": "per-agent",
+				"dev.swarm.run_id":          "44444444-4444-4444-4444-444444444444",
+				"dev.swarm.agent_id":        "agent-stale",
 			}, true), nil
 		default:
 			return "", nil
