@@ -3087,6 +3087,7 @@ platform_tables:
       - No production cleanup owner may use all-table truncate, cascading bulk truncation, table name heuristics, entity_id-only predicates, or flow_instance-only predicates.
       - Every platform_tables.tables entry must have exactly one destructive-reset cleanup classification in the typed cleanup catalog.
       - Apply and dry-run must consume the plan cleanup_runs snapshot only; runs created after the plan/quiescence envelope are out of scope for that cleanup call.
+      - Before deleting planned run-scoped rows, apply must sever nullable preserved/out-of-scope references into the cleanup set; current severed references are agent_sessions.successor_session_id, runs.forked_from_run_id/forked_from_event_id, runtime_ingress_state.transition_event_id, entity_mutations.caused_by_event, and timers.source_timer_id.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - Generated product/entity/node-state tables remain split-preserved until a separate owner gives them exact run-scoped identity.
       - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
@@ -3102,7 +3103,6 @@ platform_tables:
         - run_fork_selected_contract_route_recoveries
         - run_fork_selected_contract_bindings
       delete_by_run_id:
-        - event_deliveries
         - agent_turns
         - agent_sessions
         - entity_mutations
@@ -3110,6 +3110,7 @@ platform_tables:
         - run_control_state
         - events
       delete_mixed_row_policy:
+        - event_deliveries
         - agent_conversation_audits
         - timers
       delete_all:
