@@ -194,7 +194,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 	}
 }
 
-func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnDeleteError(t *testing.T) {
+func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesIntoCleanupSet(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
@@ -204,13 +204,26 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnDeleteError(t *te
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := context.Background()
 	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	lateRunID := uuid.NewString()
+	lateMutationID := uuid.NewString()
 	activeSessionID := uuid.NewString()
 	predecessorSessionID := uuid.NewString()
+	cleanupTimerID := uuid.NewString()
+	preservedTimerID := uuid.NewString()
+	crossRunDeliveryID := uuid.NewString()
+	entityID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model_tier, conversation_mode) VALUES ('agent-a', 'operator', 'default', 'session')`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
 		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, entity_id, flow_instance, scope, payload, produced_by_type)
+		VALUES ($1::uuid, $2::uuid, 'cleanup.event', $3::uuid, 'flow/a', 'entity', '{}'::jsonb, 'external')
+	`, eventID, runID, entityID); err != nil {
+		t.Fatalf("seed cleanup event: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO agent_sessions (session_id, run_id, agent_id, scope_key, scope, runtime_mode, status)
@@ -227,6 +240,43 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnDeleteError(t *te
 	`, predecessorSessionID, activeSessionID); err != nil {
 		t.Fatalf("seed preserved predecessor session: %v", err)
 	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, forked_from_run_id, forked_from_event_id)
+		VALUES ($1::uuid, 'running', $2::uuid, $3::uuid)
+	`, lateRunID, runID, eventID); err != nil {
+		t.Fatalf("seed preserved late fork run: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-a', 'pending')
+	`, crossRunDeliveryID, lateRunID, eventID); err != nil {
+		t.Fatalf("seed cross-run delivery: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO entity_mutations (mutation_id, run_id, entity_id, field, caused_by_event, writer_type, writer_id)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'status', $4::uuid, 'platform', 'test')
+	`, lateMutationID, lateRunID, entityID, eventID); err != nil {
+		t.Fatalf("seed preserved late mutation: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, fire_at)
+		VALUES ($1::uuid, 'cleanup timer', $2::uuid, $3::uuid, 'flow/a', 'timer.fire', now())
+	`, cleanupTimerID, runID, entityID); err != nil {
+		t.Fatalf("seed cleanup timer: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO timers (timer_id, timer_name, source_timer_id, fire_event, fire_at, task_type)
+		VALUES ($1::uuid, 'preserved source timer', $2::uuid, 'timer.global', now(), 'global_recurring')
+	`, preservedTimerID, cleanupTimerID); err != nil {
+		t.Fatalf("seed preserved source timer: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO runtime_ingress_state (status, controlled_by, transition_event_id)
+		VALUES ('running', 'test', $1::uuid)
+		ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, controlled_by = EXCLUDED.controlled_by, transition_event_id = EXCLUDED.transition_event_id
+	`, eventID); err != nil {
+		t.Fatalf("seed runtime ingress transition event: %v", err)
+	}
 
 	now := time.Date(2026, 5, 16, 18, 45, 0, 0, time.UTC)
 	_, err = pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
@@ -242,14 +292,124 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnDeleteError(t *te
 			AppliedAt:     now.Add(-30 * time.Second),
 		},
 	})
-	if err == nil {
-		t.Fatal("ApplyDestructiveResetCleanup error = nil, want FK rollback failure")
+	if err != nil {
+		t.Fatalf("ApplyDestructiveResetCleanup: %v", err)
 	}
-	if got := countRows(t, ctx, pg, "runs"); got != 1 {
+	if got := countRowsWhere(t, ctx, pg, "runs", `run_id = $1::uuid`, runID); got != 0 {
+		t.Fatalf("cleanup run rows after cleanup = %d, want deleted", got)
+	}
+	if got := countRowsWhere(t, ctx, pg, "events", `event_id = $1::uuid`, eventID); got != 0 {
+		t.Fatalf("cleanup event rows after cleanup = %d, want deleted", got)
+	}
+	if got := countRowsWhere(t, ctx, pg, "agent_sessions", `session_id = $1::uuid`, activeSessionID); got != 0 {
+		t.Fatalf("cleanup session rows after cleanup = %d, want deleted", got)
+	}
+	if got := countRowsWhere(t, ctx, pg, "event_deliveries", `delivery_id = $1::uuid`, crossRunDeliveryID); got != 0 {
+		t.Fatalf("cross-run delivery rows after cleanup = %d, want deleted by event owner", got)
+	}
+	if got := countRowsWhere(t, ctx, pg, "timers", `timer_id = $1::uuid`, cleanupTimerID); got != 0 {
+		t.Fatalf("cleanup timer rows after cleanup = %d, want deleted", got)
+	}
+	var predecessorSuccessor sql.NullString
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT successor_session_id::text
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, predecessorSessionID).Scan(&predecessorSuccessor); err != nil {
+		t.Fatalf("read preserved predecessor successor: %v", err)
+	}
+	if predecessorSuccessor.Valid {
+		t.Fatalf("preserved predecessor successor_session_id = %q, want NULL", predecessorSuccessor.String)
+	}
+	var lateForkRun, lateForkEvent sql.NullString
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT forked_from_run_id::text, forked_from_event_id::text
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, lateRunID).Scan(&lateForkRun, &lateForkEvent); err != nil {
+		t.Fatalf("read preserved late run lineage: %v", err)
+	}
+	if lateForkRun.Valid || lateForkEvent.Valid {
+		t.Fatalf("preserved late run lineage = fork_run:%q fork_event:%q, want NULL/NULL", lateForkRun.String, lateForkEvent.String)
+	}
+	var transitionEvent sql.NullString
+	if err := pg.DB.QueryRowContext(ctx, `SELECT transition_event_id::text FROM runtime_ingress_state WHERE id = 1`).Scan(&transitionEvent); err != nil {
+		t.Fatalf("read runtime ingress transition event: %v", err)
+	}
+	if transitionEvent.Valid {
+		t.Fatalf("runtime ingress transition_event_id = %q, want NULL", transitionEvent.String)
+	}
+	var mutationCause sql.NullString
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT caused_by_event::text
+		FROM entity_mutations
+		WHERE mutation_id = $1::uuid
+	`, lateMutationID).Scan(&mutationCause); err != nil {
+		t.Fatalf("read preserved mutation cause: %v", err)
+	}
+	if mutationCause.Valid {
+		t.Fatalf("preserved mutation caused_by_event = %q, want NULL", mutationCause.String)
+	}
+	var sourceTimer sql.NullString
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT source_timer_id::text
+		FROM timers
+		WHERE timer_id = $1::uuid
+	`, preservedTimerID).Scan(&sourceTimer); err != nil {
+		t.Fatalf("read preserved timer source: %v", err)
+	}
+	if sourceTimer.Valid {
+		t.Fatalf("preserved timer source_timer_id = %q, want NULL", sourceTimer.String)
+	}
+}
+
+func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKeyReference(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+	ctx := context.Background()
+	runID := uuid.NewString()
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		CREATE TABLE cleanup_unknown_fk_probe (
+			probe_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			run_id UUID NOT NULL REFERENCES runs(run_id)
+		)
+	`); err != nil {
+		t.Fatalf("create unknown FK probe: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO cleanup_unknown_fk_probe (run_id) VALUES ($1::uuid)`, runID); err != nil {
+		t.Fatalf("seed unknown FK probe: %v", err)
+	}
+
+	now := time.Date(2026, 5, 16, 18, 46, 0, 0, time.UTC)
+	_, err = pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		RequestedAt:  now,
+		Result: destructivereset.Result{
+			OperationName: destructivereset.DefaultOperationName,
+			PlannedAt:     now.Add(-time.Minute),
+			Plan:          cleanupPlanForRunIDs(runID),
+		},
+		Quiescence: destructivereset.QuiescenceResult{
+			OperationName: destructivereset.DefaultOperationName,
+			AppliedAt:     now.Add(-30 * time.Second),
+		},
+	})
+	if err == nil {
+		t.Fatal("ApplyDestructiveResetCleanup error = nil, want unknown FK rollback failure")
+	}
+	if got := countRowsWhere(t, ctx, pg, "runs", `run_id = $1::uuid`, runID); got != 1 {
 		t.Fatalf("runs after rollback failure = %d, want 1", got)
 	}
-	if got := countRows(t, ctx, pg, "agent_sessions"); got != 2 {
-		t.Fatalf("agent_sessions after rollback failure = %d, want 2", got)
+	if got := countRows(t, ctx, pg, "cleanup_unknown_fk_probe"); got != 1 {
+		t.Fatalf("unknown FK probe rows after rollback failure = %d, want 1", got)
 	}
 }
 

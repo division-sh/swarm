@@ -59,6 +59,9 @@ func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req de
 	if err := lockDestructiveResetCleanupRuns(ctx, tx, runIDs); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
+	if err := destructiveResetCleanupSeverPreservedReferences(ctx, tx, runIDs); err != nil {
+		return destructivereset.CleanupResult{}, err
+	}
 	out.RunIDs = runIDs
 	rows, err := destructiveResetCleanupTableResults(ctx, tx, runIDs)
 	if err != nil {
@@ -189,6 +192,110 @@ func lockDestructiveResetCleanupRuns(ctx context.Context, exec destructiveResetC
 	return nil
 }
 
+func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string) error {
+	if len(runIDs) == 0 {
+		return nil
+	}
+	statements := []struct {
+		name  string
+		query string
+	}{
+		{
+			name: "agent_sessions.successor_session_id",
+			query: `
+				UPDATE agent_sessions preserved
+				SET successor_session_id = NULL
+				WHERE preserved.successor_session_id IS NOT NULL
+				  AND (preserved.run_id IS NULL OR NOT (preserved.run_id = ANY($1::uuid[])))
+				  AND EXISTS (
+					SELECT 1
+					FROM agent_sessions cleanup
+					WHERE cleanup.session_id = preserved.successor_session_id
+					  AND cleanup.run_id = ANY($1::uuid[])
+				  )
+			`,
+		},
+		{
+			name: "runs.fork_lineage",
+			query: `
+				UPDATE runs preserved
+				SET forked_from_run_id = NULL,
+				    forked_from_event_id = NULL
+				WHERE NOT (preserved.run_id = ANY($1::uuid[]))
+				  AND (
+					preserved.forked_from_run_id = ANY($1::uuid[])
+					OR EXISTS (
+						SELECT 1
+						FROM events cleanup_event
+						WHERE cleanup_event.event_id = preserved.forked_from_event_id
+						  AND cleanup_event.run_id = ANY($1::uuid[])
+					)
+				  )
+			`,
+		},
+		{
+			name: "runtime_ingress_state.transition_event_id",
+			query: `
+				UPDATE runtime_ingress_state preserved
+				SET transition_event_id = NULL
+				WHERE preserved.transition_event_id IS NOT NULL
+				  AND EXISTS (
+					SELECT 1
+					FROM events cleanup_event
+					WHERE cleanup_event.event_id = preserved.transition_event_id
+					  AND cleanup_event.run_id = ANY($1::uuid[])
+				  )
+			`,
+		},
+		{
+			name: "entity_mutations.caused_by_event",
+			query: `
+				UPDATE entity_mutations preserved
+				SET caused_by_event = NULL
+				WHERE NOT (preserved.run_id = ANY($1::uuid[]))
+				  AND preserved.caused_by_event IS NOT NULL
+				  AND EXISTS (
+					SELECT 1
+					FROM events cleanup_event
+					WHERE cleanup_event.event_id = preserved.caused_by_event
+					  AND cleanup_event.run_id = ANY($1::uuid[])
+				  )
+			`,
+		},
+		{
+			name: "timers.source_timer_id",
+			query: `
+				WITH cleanup_timers AS (
+					SELECT cleanup.timer_id
+					FROM timers cleanup
+					WHERE cleanup.run_id = ANY($1::uuid[])
+					   OR cleanup.forked_from_run_id = ANY($1::uuid[])
+					   OR EXISTS (
+							SELECT 1
+							FROM events cleanup_event
+							WHERE cleanup_event.event_id = cleanup.forked_from_event_id
+							  AND cleanup_event.run_id = ANY($1::uuid[])
+					   )
+				)
+				UPDATE timers preserved
+				SET source_timer_id = NULL
+				WHERE preserved.source_timer_id IN (SELECT timer_id FROM cleanup_timers)
+				  AND NOT EXISTS (
+					SELECT 1
+					FROM cleanup_timers cleanup
+					WHERE cleanup.timer_id = preserved.timer_id
+				  )
+			`,
+		},
+	}
+	for _, stmt := range statements {
+		if _, err := exec.ExecContext(ctx, stmt.query, pq.Array(runIDs)); err != nil {
+			return fmt.Errorf("sever destructive reset preserved reference %s: %w", stmt.name, err)
+		}
+	}
+	return nil
+}
+
 func destructiveResetCleanupTableResults(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string) ([]destructivereset.CleanupTableResult, error) {
 	catalog := destructivereset.DefaultCleanupCatalog()
 	out := make([]destructivereset.CleanupTableResult, 0, len(catalog))
@@ -280,7 +387,12 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string) (string, 
 			return `SELECT COUNT(*) FROM dead_letters d WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.original_event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
 		}
 		return `DELETE FROM dead_letters d USING events e WHERE d.original_event_id = e.event_id AND e.run_id = ANY($1::uuid[])`, args, nil
-	case "event_deliveries", "agent_turns", "agent_conversation_audits", "agent_sessions", "entity_mutations", "entity_state", "run_control_state", "events", "runs":
+	case "event_deliveries":
+		if mode == "count" {
+			return `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+		}
+		return `DELETE FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+	case "agent_turns", "agent_conversation_audits", "agent_sessions", "entity_mutations", "entity_state", "run_control_state", "events", "runs":
 		if mode == "count" {
 			return fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
 		}

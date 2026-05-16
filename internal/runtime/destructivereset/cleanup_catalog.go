@@ -18,7 +18,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "event_receipts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByEventJoin, PredicateOwner: "events.run_id", DeleteOrderGroup: 1},
 		{Table: "dead_letters", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByEventJoin, PredicateOwner: "dead_letters.original_event_id -> events.run_id", DeleteOrderGroup: 1},
 		{Table: "run_fork_delivery_event_replays", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunLineage, PredicateOwner: "fork_run_id|source_run_id", DeleteOrderGroup: 2},
-		{Table: "event_deliveries", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "event_deliveries.run_id", DeleteOrderGroup: 2},
+		{Table: "event_deliveries", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "event_deliveries.run_id|event_id -> events.run_id", DeleteOrderGroup: 2},
 		{Table: "run_fork_selected_contract_executions", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunLineage, PredicateOwner: "fork_run_id|source_run_id", DeleteOrderGroup: 2},
 		{Table: "run_fork_selected_contract_branch_divergences", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunLineage, PredicateOwner: "fork_run_id|source_run_id", DeleteOrderGroup: 2},
 		{Table: "run_fork_selected_contract_route_recoveries", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunLineage, PredicateOwner: "fork_run_id|source_run_id", DeleteOrderGroup: 2},
