@@ -58,6 +58,41 @@ type QuiescenceResult struct {
 	PipelineReceiptCount int                `json:"pipeline_receipt_count"`
 }
 
+type CleanupRequest struct {
+	Result       Result
+	Quiescence   QuiescenceResult
+	ActorTokenID string
+	RequestedAt  time.Time
+}
+
+type CleanupResult struct {
+	OperationName string               `json:"operation_name"`
+	DryRun        bool                 `json:"dry_run"`
+	AppliedAt     time.Time            `json:"applied_at"`
+	RunIDs        []string             `json:"run_ids"`
+	Tables        []CleanupTableResult `json:"tables"`
+}
+
+type CleanupTableResult struct {
+	Table            string `json:"table"`
+	TableKind        string `json:"table_kind"`
+	Classification   string `json:"classification"`
+	PredicateOwner   string `json:"predicate_owner"`
+	DeleteOrderGroup int    `json:"delete_order_group"`
+	MatchedRows      int64  `json:"matched_rows"`
+	DeletedRows      int64  `json:"deleted_rows"`
+	PreservedRows    int64  `json:"preserved_rows"`
+}
+
+type CleanupCatalogEntry struct {
+	Table             string
+	TableKind         string
+	Classification    string
+	PredicateOwner    string
+	DeleteOrderGroup  int
+	PreservationProof string
+}
+
 type QuiescedRun struct {
 	RunID          string `json:"run_id"`
 	PreviousStatus string `json:"previous_status"`
@@ -165,6 +200,10 @@ type IdempotencyStore interface {
 
 type QuiescenceStore interface {
 	ApplyDestructiveResetQuiescence(context.Context, QuiescenceRequest) (QuiescenceResult, error)
+}
+
+type CleanupStore interface {
+	ApplyDestructiveResetCleanup(context.Context, CleanupRequest) (CleanupResult, error)
 }
 
 type IdempotencyKey struct {

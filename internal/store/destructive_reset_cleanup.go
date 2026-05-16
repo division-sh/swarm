@@ -1,0 +1,277 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/lib/pq"
+	"swarm/internal/runtime/destructivereset"
+)
+
+type destructiveResetCleanupExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
+	if s == nil || s.DB == nil {
+		return destructivereset.CleanupResult{}, fmt.Errorf("postgres store is required")
+	}
+	if err := validateDestructiveResetCleanupCatalog(); err != nil {
+		return destructivereset.CleanupResult{}, err
+	}
+	if err := validateDestructiveResetCleanupRequest(req); err != nil {
+		return destructivereset.CleanupResult{}, err
+	}
+	now := req.RequestedAt.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	out := destructivereset.CleanupResult{
+		OperationName: strings.TrimSpace(req.Result.OperationName),
+		DryRun:        req.Result.DryRun,
+		AppliedAt:     now,
+	}
+	if out.OperationName == "" {
+		out.OperationName = destructivereset.DefaultOperationName
+	}
+	if req.Result.DryRun {
+		runIDs, err := destructiveResetCleanupRunIDs(ctx, s.DB, false)
+		if err != nil {
+			return destructivereset.CleanupResult{}, err
+		}
+		out.RunIDs = runIDs
+		rows, err := destructiveResetCleanupTableResults(ctx, s.DB, runIDs)
+		if err != nil {
+			return destructivereset.CleanupResult{}, err
+		}
+		out.Tables = rows
+		return out, nil
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return destructivereset.CleanupResult{}, fmt.Errorf("begin destructive reset cleanup tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	runIDs, err := destructiveResetCleanupRunIDs(ctx, tx, true)
+	if err != nil {
+		return destructivereset.CleanupResult{}, err
+	}
+	out.RunIDs = runIDs
+	rows, err := destructiveResetCleanupTableResults(ctx, tx, runIDs)
+	if err != nil {
+		return destructivereset.CleanupResult{}, err
+	}
+	for i := range rows {
+		if rows[i].TableKind == destructivereset.CleanupTableKindGenerated {
+			continue
+		}
+		deleted, err := destructiveResetCleanupDeleteTable(ctx, tx, rows[i].Table, runIDs)
+		if err != nil {
+			return destructivereset.CleanupResult{}, err
+		}
+		rows[i].DeletedRows = deleted
+	}
+	out.Tables = rows
+	if err := tx.Commit(); err != nil {
+		return destructivereset.CleanupResult{}, fmt.Errorf("commit destructive reset cleanup tx: %w", err)
+	}
+	return out, nil
+}
+
+func validateDestructiveResetCleanupRequest(req destructivereset.CleanupRequest) error {
+	if strings.TrimSpace(req.ActorTokenID) == "" {
+		return fmt.Errorf("%w: actor token id is required", destructivereset.ErrInvalidRequest)
+	}
+	if req.Result.PlannedAt.IsZero() {
+		return fmt.Errorf("%w: destructive reset plan result is required", destructivereset.ErrInvalidRequest)
+	}
+	if req.Result.DryRun {
+		return nil
+	}
+	if req.Quiescence.AppliedAt.IsZero() {
+		return fmt.Errorf("%w: destructive reset quiescence result is required", destructivereset.ErrInvalidRequest)
+	}
+	if req.Quiescence.DryRun {
+		return fmt.Errorf("%w: destructive reset cleanup requires applied quiescence", destructivereset.ErrInvalidRequest)
+	}
+	return nil
+}
+
+func validateDestructiveResetCleanupCatalog() error {
+	seen := map[string]struct{}{}
+	for _, entry := range destructivereset.DefaultPlatformCleanupCatalog() {
+		table := strings.TrimSpace(entry.Table)
+		if table == "" {
+			return fmt.Errorf("destructive reset cleanup catalog contains empty table")
+		}
+		if _, ok := seen[table]; ok {
+			return fmt.Errorf("destructive reset cleanup catalog duplicates table %s", table)
+		}
+		seen[table] = struct{}{}
+		if strings.TrimSpace(entry.Classification) == "" {
+			return fmt.Errorf("destructive reset cleanup catalog table %s has empty classification", table)
+		}
+		if strings.TrimSpace(entry.PredicateOwner) == "" {
+			return fmt.Errorf("destructive reset cleanup catalog table %s has empty predicate owner", table)
+		}
+	}
+	return nil
+}
+
+func destructiveResetCleanupRunIDs(ctx context.Context, exec destructiveResetCleanupExecutor, lock bool) ([]string, error) {
+	query := `SELECT run_id::text FROM runs ORDER BY run_id::text`
+	if lock {
+		query += ` FOR UPDATE`
+	}
+	rows, err := exec.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("read destructive reset cleanup run set: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var runID string
+		if err := rows.Scan(&runID); err != nil {
+			return nil, fmt.Errorf("scan destructive reset cleanup run id: %w", err)
+		}
+		runID = strings.TrimSpace(runID)
+		if runID != "" {
+			out = append(out, runID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read destructive reset cleanup run ids: %w", err)
+	}
+	return out, nil
+}
+
+func destructiveResetCleanupTableResults(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string) ([]destructivereset.CleanupTableResult, error) {
+	catalog := destructivereset.DefaultCleanupCatalog()
+	out := make([]destructivereset.CleanupTableResult, 0, len(catalog))
+	for _, entry := range catalog {
+		result := destructivereset.CleanupTableResult{
+			Table:            entry.Table,
+			TableKind:        entry.TableKind,
+			Classification:   entry.Classification,
+			PredicateOwner:   entry.PredicateOwner,
+			DeleteOrderGroup: entry.DeleteOrderGroup,
+		}
+		if entry.TableKind == destructivereset.CleanupTableKindGenerated {
+			out = append(out, result)
+			continue
+		}
+		count, err := destructiveResetCleanupCountTable(ctx, exec, entry, runIDs)
+		if err != nil {
+			return nil, err
+		}
+		switch entry.Classification {
+		case destructivereset.CleanupPreserve, destructivereset.CleanupSplitPreserve:
+			result.PreservedRows = count
+		default:
+			result.MatchedRows = count
+		}
+		out = append(out, result)
+	}
+	return out, nil
+}
+
+func destructiveResetCleanupCountTable(ctx context.Context, exec destructiveResetCleanupExecutor, entry destructivereset.CleanupCatalogEntry, runIDs []string) (int64, error) {
+	query, args, err := destructiveResetCleanupQuery(entry.Table, "count", runIDs)
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	if err := exec.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count destructive reset cleanup table %s: %w", entry.Table, err)
+	}
+	return count, nil
+}
+
+func destructiveResetCleanupDeleteTable(ctx context.Context, exec destructiveResetCleanupExecutor, table string, runIDs []string) (int64, error) {
+	query, args, err := destructiveResetCleanupQuery(table, "delete", runIDs)
+	if err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(query) == "" {
+		return 0, nil
+	}
+	res, err := exec.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("delete destructive reset cleanup table %s: %w", table, err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read destructive reset cleanup affected rows for %s: %w", table, err)
+	}
+	return rows, nil
+}
+
+func destructiveResetCleanupQuery(table, mode string, runIDs []string) (string, []any, error) {
+	table = strings.TrimSpace(table)
+	mode = strings.TrimSpace(mode)
+	if mode != "count" && mode != "delete" {
+		return "", nil, fmt.Errorf("unsupported destructive reset cleanup query mode %q", mode)
+	}
+	if len(runIDs) == 0 && mode == "delete" {
+		return "", nil, nil
+	}
+	if destructiveResetCleanupPreservesTable(table) {
+		if mode == "delete" {
+			return "", nil, nil
+		}
+		return fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quoteIdent(table)), nil, nil
+	}
+	if len(runIDs) == 0 {
+		return `SELECT 0`, nil, nil
+	}
+	args := []any{pq.Array(runIDs)}
+	switch table {
+	case "event_receipts":
+		if mode == "count" {
+			return `SELECT COUNT(*) FROM event_receipts r WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = r.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+		}
+		return `DELETE FROM event_receipts r USING events e WHERE r.event_id = e.event_id AND e.run_id = ANY($1::uuid[])`, args, nil
+	case "dead_letters":
+		if mode == "count" {
+			return `SELECT COUNT(*) FROM dead_letters d WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.original_event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+		}
+		return `DELETE FROM dead_letters d USING events e WHERE d.original_event_id = e.event_id AND e.run_id = ANY($1::uuid[])`, args, nil
+	case "event_deliveries", "agent_turns", "agent_conversation_audits", "agent_sessions", "entity_mutations", "entity_state", "run_control_state", "events", "runs":
+		if mode == "count" {
+			return fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
+		}
+		return fmt.Sprintf(`DELETE FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
+	case "run_fork_delivery_event_replays", "run_fork_selected_contract_executions", "run_fork_selected_contract_branch_divergences", "run_fork_selected_contract_route_recoveries", "run_fork_selected_contract_bindings":
+		if mode == "count" {
+			return fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE fork_run_id = ANY($1::uuid[]) OR source_run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
+		}
+		return fmt.Sprintf(`DELETE FROM %s WHERE fork_run_id = ANY($1::uuid[]) OR source_run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
+	case "timers":
+		if mode == "count" {
+			return `SELECT COUNT(*) FROM timers t WHERE t.run_id = ANY($1::uuid[]) OR t.forked_from_run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = t.forked_from_event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+		}
+		return `DELETE FROM timers t WHERE t.run_id = ANY($1::uuid[]) OR t.forked_from_run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = t.forked_from_event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+	default:
+		return "", nil, fmt.Errorf("destructive reset cleanup table %s is not implemented", table)
+	}
+}
+
+func destructiveResetCleanupPreservesTable(table string) bool {
+	entry, ok := destructivereset.CleanupCatalogByTable()[strings.TrimSpace(table)]
+	if !ok {
+		return false
+	}
+	switch entry.Classification {
+	case destructivereset.CleanupPreserve, destructivereset.CleanupSplitPreserve:
+		return true
+	default:
+		return false
+	}
+}

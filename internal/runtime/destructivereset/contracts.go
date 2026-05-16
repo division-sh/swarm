@@ -12,15 +12,15 @@ func DefaultDownstreamContracts() []DownstreamContract {
 	return []DownstreamContract{
 		{
 			ID:          ContractRunDeliveryQuiescence,
-			Status:      "split",
-			Owner:       "future runtime destructive reset run/delivery quiescence owner",
-			Description: "Stop active runs and cancel pending/in-progress deliveries with nuke-specific reasons before destructive reset can apply.",
+			Status:      "implemented_internal_owner",
+			Owner:       "internal/runtime/destructivereset Quiescer and PostgresStore.ApplyDestructiveResetQuiescence",
+			Description: "Stop active runs and cancel pending/in-progress deliveries with nuke-specific reasons before destructive reset cleanup can apply.",
 		},
 		{
 			ID:          ContractRunScopedTruncation,
-			Status:      "split",
-			Owner:       "future store destructive reset truncation owner",
-			Description: "Define the exact run-scoped table set and preservation rules for schema/auth/operator/system state before truncation can apply.",
+			Status:      "implemented_internal_owner",
+			Owner:       "internal/runtime/destructivereset cleanup catalog and PostgresStore.ApplyDestructiveResetCleanup",
+			Description: "Define the exact run-scoped table set and preservation rules for schema/auth/operator/system state before cleanup can apply.",
 		},
 		{
 			ID:          ContractManagedContainers,
