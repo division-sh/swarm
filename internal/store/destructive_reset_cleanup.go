@@ -21,15 +21,16 @@ func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req de
 	if s == nil || s.DB == nil {
 		return destructivereset.CleanupResult{}, fmt.Errorf("postgres store is required")
 	}
-	if err := validateDestructiveResetCleanupCatalog(); err != nil {
-		return destructivereset.CleanupResult{}, err
-	}
-	if err := validateDestructiveResetCleanupRequest(req); err != nil {
-		return destructivereset.CleanupResult{}, err
-	}
 	now := req.RequestedAt.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
+	}
+	if err := validateDestructiveResetCleanupCatalog(); err != nil {
+		return destructivereset.CleanupResult{}, err
+	}
+	runIDs, err := validateDestructiveResetCleanupRequest(req, now)
+	if err != nil {
+		return destructivereset.CleanupResult{}, err
 	}
 	out := destructivereset.CleanupResult{
 		OperationName: strings.TrimSpace(req.Result.OperationName),
@@ -40,10 +41,6 @@ func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req de
 		out.OperationName = destructivereset.DefaultOperationName
 	}
 	if req.Result.DryRun {
-		runIDs, err := destructiveResetCleanupRunIDs(ctx, s.DB, false)
-		if err != nil {
-			return destructivereset.CleanupResult{}, err
-		}
 		out.RunIDs = runIDs
 		rows, err := destructiveResetCleanupTableResults(ctx, s.DB, runIDs)
 		if err != nil {
@@ -59,8 +56,7 @@ func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req de
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	runIDs, err := destructiveResetCleanupRunIDs(ctx, tx, true)
-	if err != nil {
+	if err := lockDestructiveResetCleanupRuns(ctx, tx, runIDs); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
 	out.RunIDs = runIDs
@@ -85,23 +81,44 @@ func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req de
 	return out, nil
 }
 
-func validateDestructiveResetCleanupRequest(req destructivereset.CleanupRequest) error {
+func validateDestructiveResetCleanupRequest(req destructivereset.CleanupRequest, requestedAt time.Time) ([]string, error) {
 	if strings.TrimSpace(req.ActorTokenID) == "" {
-		return fmt.Errorf("%w: actor token id is required", destructivereset.ErrInvalidRequest)
+		return nil, fmt.Errorf("%w: actor token id is required", destructivereset.ErrInvalidRequest)
 	}
 	if req.Result.PlannedAt.IsZero() {
-		return fmt.Errorf("%w: destructive reset plan result is required", destructivereset.ErrInvalidRequest)
+		return nil, fmt.Errorf("%w: destructive reset plan result is required", destructivereset.ErrInvalidRequest)
+	}
+	runIDs, err := destructiveResetCleanupRunIDsFromPlan(req.Result.Plan)
+	if err != nil {
+		return nil, err
 	}
 	if req.Result.DryRun {
-		return nil
+		return runIDs, nil
 	}
 	if req.Quiescence.AppliedAt.IsZero() {
-		return fmt.Errorf("%w: destructive reset quiescence result is required", destructivereset.ErrInvalidRequest)
+		return nil, fmt.Errorf("%w: destructive reset quiescence result is required", destructivereset.ErrInvalidRequest)
 	}
 	if req.Quiescence.DryRun {
-		return fmt.Errorf("%w: destructive reset cleanup requires applied quiescence", destructivereset.ErrInvalidRequest)
+		return nil, fmt.Errorf("%w: destructive reset cleanup requires applied quiescence", destructivereset.ErrInvalidRequest)
 	}
-	return nil
+	if normalizeDestructiveResetOperationName(req.Quiescence.OperationName) != normalizeDestructiveResetOperationName(req.Result.OperationName) {
+		return nil, fmt.Errorf("%w: destructive reset quiescence operation does not match plan result", destructivereset.ErrInvalidRequest)
+	}
+	if req.Quiescence.AppliedAt.UTC().Before(req.Result.PlannedAt.UTC()) {
+		return nil, fmt.Errorf("%w: destructive reset quiescence predates plan result", destructivereset.ErrInvalidRequest)
+	}
+	if !requestedAt.IsZero() && requestedAt.UTC().Before(req.Quiescence.AppliedAt.UTC()) {
+		return nil, fmt.Errorf("%w: destructive reset cleanup request predates quiescence", destructivereset.ErrInvalidRequest)
+	}
+	return runIDs, nil
+}
+
+func normalizeDestructiveResetOperationName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return destructivereset.DefaultOperationName
+	}
+	return name
 }
 
 func validateDestructiveResetCleanupCatalog() error {
@@ -125,31 +142,51 @@ func validateDestructiveResetCleanupCatalog() error {
 	return nil
 }
 
-func destructiveResetCleanupRunIDs(ctx context.Context, exec destructiveResetCleanupExecutor, lock bool) ([]string, error) {
-	query := `SELECT run_id::text FROM runs ORDER BY run_id::text`
-	if lock {
-		query += ` FOR UPDATE`
+func destructiveResetCleanupRunIDsFromPlan(plan destructivereset.Plan) ([]string, error) {
+	if !plan.CleanupRunSetKnown {
+		return nil, fmt.Errorf("%w: destructive reset cleanup run set is required", destructivereset.ErrInvalidRequest)
 	}
-	rows, err := exec.QueryContext(ctx, query)
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(plan.CleanupRuns))
+	for _, run := range plan.CleanupRuns {
+		runID := nullUUIDString(run.RunID)
+		if runID == "" {
+			return nil, fmt.Errorf("%w: destructive reset cleanup run_id is required", destructivereset.ErrInvalidRequest)
+		}
+		if _, ok := seen[runID]; ok {
+			continue
+		}
+		seen[runID] = struct{}{}
+		out = append(out, runID)
+	}
+	return out, nil
+}
+
+func lockDestructiveResetCleanupRuns(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string) error {
+	if len(runIDs) == 0 {
+		return nil
+	}
+	rows, err := exec.QueryContext(ctx, `
+		SELECT run_id::text
+		FROM runs
+		WHERE run_id = ANY($1::uuid[])
+		ORDER BY run_id::text
+		FOR UPDATE
+	`, pq.Array(runIDs))
 	if err != nil {
-		return nil, fmt.Errorf("read destructive reset cleanup run set: %w", err)
+		return fmt.Errorf("lock destructive reset cleanup run set: %w", err)
 	}
 	defer rows.Close()
-	var out []string
 	for rows.Next() {
 		var runID string
 		if err := rows.Scan(&runID); err != nil {
-			return nil, fmt.Errorf("scan destructive reset cleanup run id: %w", err)
-		}
-		runID = strings.TrimSpace(runID)
-		if runID != "" {
-			out = append(out, runID)
+			return fmt.Errorf("scan destructive reset cleanup run id: %w", err)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read destructive reset cleanup run ids: %w", err)
+		return fmt.Errorf("lock destructive reset cleanup run ids: %w", err)
 	}
-	return out, nil
+	return nil
 }
 
 func destructiveResetCleanupTableResults(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string) ([]destructivereset.CleanupTableResult, error) {

@@ -3079,13 +3079,14 @@ platform_tables:
     status: internal_only
     owner: internal/runtime/destructivereset cleanup catalog and PostgresStore.ApplyDestructiveResetCleanup
     public_api: none
-    run_set: all rows in runs.run_id captured at destructive-reset cleanup-plan time
+    run_set: all rows in runs.run_id captured into the destructive reset plan cleanup_runs snapshot at plan time
     prerequisites:
       - destructive reset coordinator plan/result/lock/idempotency owner has accepted the operation
       - destructive reset quiescence has terminalized active runs and retryable deliveries for the same operation envelope
     invariants:
       - No production cleanup owner may use all-table truncate, cascading bulk truncation, table name heuristics, entity_id-only predicates, or flow_instance-only predicates.
       - Every platform_tables.tables entry must have exactly one destructive-reset cleanup classification in the typed cleanup catalog.
+      - Apply and dry-run must consume the plan cleanup_runs snapshot only; runs created after the plan/quiescence envelope are out of scope for that cleanup call.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - Generated product/entity/node-state tables remain split-preserved until a separate owner gives them exact run-scoped identity.
       - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.

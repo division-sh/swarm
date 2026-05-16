@@ -20,7 +20,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := context.Background()
-	seedDestructiveResetCleanupRows(t, ctx, pg)
+	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 
 	now := time.Date(2026, 5, 16, 18, 30, 0, 0, time.UTC)
 	result, err := pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
@@ -29,6 +29,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		Result: destructivereset.Result{
 			OperationName: destructivereset.DefaultOperationName,
 			PlannedAt:     now.Add(-time.Minute),
+			Plan:          cleanupPlanForRunIDs(seed.RunA, seed.RunB),
 		},
 		Quiescence: destructivereset.QuiescenceResult{
 			OperationName: destructivereset.DefaultOperationName,
@@ -103,7 +104,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	t.Cleanup(func() { _ = pg.DB.Close() })
 	ctx := context.Background()
-	seedDestructiveResetCleanupRows(t, ctx, pg)
+	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 
 	now := time.Date(2026, 5, 16, 18, 35, 0, 0, time.UTC)
 	result, err := pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
@@ -113,6 +114,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 			OperationName: destructivereset.DefaultOperationName,
 			DryRun:        true,
 			PlannedAt:     now.Add(-time.Minute),
+			Plan:          cleanupPlanForRunIDs(seed.RunA, seed.RunB),
 		},
 	})
 	if err != nil {
@@ -132,6 +134,63 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	if got := countRows(t, ctx, pg, "mailbox"); got != 1 {
 		t.Fatalf("mailbox after dry-run = %d, want preserved", got)
+	}
+}
+
+func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfterPlan(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+	ctx := context.Background()
+	seedDestructiveResetCleanupRows(t, ctx, pg)
+	plan, err := (destructivereset.InventoryPlanner{Reader: pg}).BuildPlan(ctx, destructivereset.Request{ActorTokenID: "operator-token"})
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if !plan.CleanupRunSetKnown || len(plan.CleanupRuns) != 2 {
+		t.Fatalf("planned cleanup runs = known:%v %#v, want two-run snapshot", plan.CleanupRunSetKnown, plan.CleanupRuns)
+	}
+	lateRun := uuid.NewString()
+	lateEvent := uuid.NewString()
+	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, lateRun); err != nil {
+		t.Fatalf("seed late run: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by_type)
+		VALUES ($1::uuid, $2::uuid, 'late.event', 'global', '{}'::jsonb, 'external')
+	`, lateEvent, lateRun); err != nil {
+		t.Fatalf("seed late event: %v", err)
+	}
+
+	now := time.Date(2026, 5, 16, 18, 42, 0, 0, time.UTC)
+	result, err := pg.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		RequestedAt:  now,
+		Result: destructivereset.Result{
+			OperationName: destructivereset.DefaultOperationName,
+			PlannedAt:     now.Add(-time.Minute),
+			Plan:          plan,
+		},
+		Quiescence: destructivereset.QuiescenceResult{
+			OperationName: destructivereset.DefaultOperationName,
+			AppliedAt:     now.Add(-30 * time.Second),
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyDestructiveResetCleanup: %v", err)
+	}
+	if len(result.RunIDs) != 2 {
+		t.Fatalf("cleanup run IDs = %#v, want only planned runs", result.RunIDs)
+	}
+	if got := countRowsWhere(t, ctx, pg, "runs", `run_id = $1::uuid`, lateRun); got != 1 {
+		t.Fatalf("late run rows after cleanup = %d, want preserved", got)
+	}
+	if got := countRowsWhere(t, ctx, pg, "events", `event_id = $1::uuid`, lateEvent); got != 1 {
+		t.Fatalf("late event rows after cleanup = %d, want preserved", got)
 	}
 }
 
@@ -176,6 +235,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnDeleteError(t *te
 		Result: destructivereset.Result{
 			OperationName: destructivereset.DefaultOperationName,
 			PlannedAt:     now.Add(-time.Minute),
+			Plan:          cleanupPlanForRunIDs(runID),
 		},
 		Quiescence: destructivereset.QuiescenceResult{
 			OperationName: destructivereset.DefaultOperationName,
@@ -208,6 +268,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresAppliedQuiescence(t 
 		Result: destructivereset.Result{
 			OperationName: destructivereset.DefaultOperationName,
 			PlannedAt:     now.Add(-time.Minute),
+			Plan:          cleanupPlanForRunIDs(uuid.NewString()),
 		},
 		Quiescence: destructivereset.QuiescenceResult{DryRun: true, AppliedAt: now.Add(-30 * time.Second)},
 	})
@@ -216,7 +277,82 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresAppliedQuiescence(t 
 	}
 }
 
-func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *PostgresStore) {
+func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsStaleQuiescenceEnvelope(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	now := time.Date(2026, 5, 16, 18, 55, 0, 0, time.UTC)
+	for name, quiescence := range map[string]destructivereset.QuiescenceResult{
+		"operation mismatch": {
+			OperationName: "runtime.other_reset",
+			AppliedAt:     now.Add(-30 * time.Second),
+		},
+		"predates plan": {
+			OperationName: destructivereset.DefaultOperationName,
+			AppliedAt:     now.Add(-2 * time.Minute),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := pg.ApplyDestructiveResetCleanup(context.Background(), destructivereset.CleanupRequest{
+				ActorTokenID: "operator-token",
+				RequestedAt:  now,
+				Result: destructivereset.Result{
+					OperationName: destructivereset.DefaultOperationName,
+					PlannedAt:     now.Add(-time.Minute),
+					Plan:          cleanupPlanForRunIDs(uuid.NewString()),
+				},
+				Quiescence: quiescence,
+			})
+			if err == nil {
+				t.Fatal("ApplyDestructiveResetCleanup error = nil, want stale envelope failure")
+			}
+		})
+	}
+}
+
+func TestPostgresStore_ApplyDestructiveResetCleanup_RequiresPlannedCleanupRunSet(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	now := time.Date(2026, 5, 16, 19, 0, 0, 0, time.UTC)
+	_, err = pg.ApplyDestructiveResetCleanup(context.Background(), destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		RequestedAt:  now,
+		Result: destructivereset.Result{
+			OperationName: destructivereset.DefaultOperationName,
+			DryRun:        true,
+			PlannedAt:     now.Add(-time.Minute),
+		},
+	})
+	if err == nil {
+		t.Fatal("ApplyDestructiveResetCleanup error = nil, want missing cleanup run set failure")
+	}
+}
+
+type destructiveResetCleanupSeed struct {
+	RunA string
+	RunB string
+}
+
+func cleanupPlanForRunIDs(runIDs ...string) destructivereset.Plan {
+	runs := make([]destructivereset.RunRef, 0, len(runIDs))
+	for _, runID := range runIDs {
+		runs = append(runs, destructivereset.RunRef{RunID: runID})
+	}
+	return destructivereset.Plan{CleanupRuns: runs, CleanupRunSetKnown: true}
+}
+
+func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *PostgresStore) destructiveResetCleanupSeed {
 	t.Helper()
 	runA := uuid.NewString()
 	runB := uuid.NewString()
@@ -400,6 +536,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO generated_node_state_fixture (entity_id, node_id) VALUES ($1::uuid, 'node-a')`, entityID); err != nil {
 		t.Fatalf("seed generated node table: %v", err)
 	}
+	return destructiveResetCleanupSeed{RunA: runA, RunB: runB}
 }
 
 func assertCleanupTableResult(t *testing.T, result destructivereset.CleanupResult, table string, matched, deleted int64) {
@@ -423,6 +560,15 @@ func countRows(t *testing.T, ctx context.Context, pg *PostgresStore, table strin
 			return 0
 		}
 		t.Fatalf("count %s: %v", table, err)
+	}
+	return count
+}
+
+func countRowsWhere(t *testing.T, ctx context.Context, pg *PostgresStore, table, where string, args ...any) int64 {
+	t.Helper()
+	var count int64
+	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+quoteIdent(table)+` WHERE `+where, args...).Scan(&count); err != nil {
+		t.Fatalf("count %s where %s: %v", table, where, err)
 	}
 	return count
 }

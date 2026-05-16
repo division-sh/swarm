@@ -12,10 +12,12 @@ import (
 func TestCoordinatorBuildPlanStoresAndReplaysIdempotentResult(t *testing.T) {
 	now := time.Date(2026, 5, 15, 1, 2, 3, 0, time.UTC)
 	reader := &recordingInventoryReader{inventory: Inventory{
-		ActiveRuns:       []RunRef{{RunID: "run-1", Status: "running"}},
-		ActiveDeliveries: []DeliveryRef{{DeliveryID: "delivery-1", RunID: "run-1", Status: "pending"}},
-		RunScopedTables:  []TableRef{{Name: "runs", Owner: ContractRunScopedTruncation, Action: "planned_by_downstream_owner"}},
-		EntityContainers: []ContainerRef{{Name: "swarm-entity-1", Kind: "entity", Action: "planned_by_downstream_owner"}},
+		ActiveRuns:         []RunRef{{RunID: "run-1", Status: "running"}},
+		CleanupRuns:        []RunRef{{RunID: "run-1", Status: "running"}, {RunID: "run-2", Status: "completed"}},
+		CleanupRunSetKnown: true,
+		ActiveDeliveries:   []DeliveryRef{{DeliveryID: "delivery-1", RunID: "run-1", Status: "pending"}},
+		RunScopedTables:    []TableRef{{Name: "runs", Owner: ContractRunScopedTruncation, Action: "planned_by_downstream_owner"}},
+		EntityContainers:   []ContainerRef{{Name: "swarm-entity-1", Kind: "entity", Action: "planned_by_downstream_owner"}},
 	}}
 	locks := &recordingLockManager{acquired: true}
 	idempotency := newRecordingIdempotencyStore()
@@ -45,10 +47,14 @@ func TestCoordinatorBuildPlanStoresAndReplaysIdempotentResult(t *testing.T) {
 	if len(result.Plan.ActiveRuns) != 1 || result.Plan.ActiveRuns[0].RunID != "run-1" {
 		t.Fatalf("active runs = %#v", result.Plan.ActiveRuns)
 	}
+	if !result.Plan.CleanupRunSetKnown || len(result.Plan.CleanupRuns) != 2 || result.Plan.CleanupRuns[1].RunID != "run-2" {
+		t.Fatalf("cleanup runs = known:%v %#v, want plan-time cleanup run set", result.Plan.CleanupRunSetKnown, result.Plan.CleanupRuns)
+	}
 	if reader.reads != 1 || locks.acquires != 1 || locks.lease.releases != 1 || idempotency.stores != 1 {
 		t.Fatalf("first call counts reader=%d acquires=%d releases=%d stores=%d", reader.reads, locks.acquires, locks.lease.releases, idempotency.stores)
 	}
 	result.Plan.ActiveRuns[0].RunID = "tampered-return"
+	result.Plan.CleanupRuns[1].RunID = "tampered-cleanup"
 	result.Plan.Preserved.SystemContainers[0] = "tampered-container"
 
 	replayed, replay, err := coord.BuildPlan(context.Background(), req)
@@ -64,6 +70,9 @@ func TestCoordinatorBuildPlanStoresAndReplaysIdempotentResult(t *testing.T) {
 	if replayed.Plan.ActiveRuns[0].RunID != "run-1" {
 		t.Fatalf("replayed active run = %q, want original stored value", replayed.Plan.ActiveRuns[0].RunID)
 	}
+	if replayed.Plan.CleanupRuns[1].RunID != "run-2" {
+		t.Fatalf("replayed cleanup run = %q, want original stored value", replayed.Plan.CleanupRuns[1].RunID)
+	}
 	if replayed.Plan.Preserved.SystemContainers[0] != "swarm-scaffold" {
 		t.Fatalf("replayed preserved system container = %q, want original stored value", replayed.Plan.Preserved.SystemContainers[0])
 	}
@@ -71,6 +80,7 @@ func TestCoordinatorBuildPlanStoresAndReplaysIdempotentResult(t *testing.T) {
 		t.Fatalf("replay should not re-plan/lock/store: reader=%d acquires=%d stores=%d", reader.reads, locks.acquires, idempotency.stores)
 	}
 	replayed.Plan.ActiveRuns[0].RunID = "tampered-replay"
+	replayed.Plan.CleanupRuns[1].RunID = "tampered-cleanup-replay"
 	replayedAgain, replay, err := coord.BuildPlan(context.Background(), req)
 	if err != nil {
 		t.Fatalf("BuildPlan second replay error = %v", err)
@@ -80,6 +90,9 @@ func TestCoordinatorBuildPlanStoresAndReplaysIdempotentResult(t *testing.T) {
 	}
 	if replayedAgain.Plan.ActiveRuns[0].RunID != "run-1" {
 		t.Fatalf("second replay active run = %q, want original stored value", replayedAgain.Plan.ActiveRuns[0].RunID)
+	}
+	if replayedAgain.Plan.CleanupRuns[1].RunID != "run-2" {
+		t.Fatalf("second replay cleanup run = %q, want original stored value", replayedAgain.Plan.CleanupRuns[1].RunID)
 	}
 }
 
