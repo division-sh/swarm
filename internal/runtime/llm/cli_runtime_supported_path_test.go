@@ -84,8 +84,9 @@ captured="$capture_dir/$count.stdin"
 cat > "$captured"
 # Branch on the actual tool-result payload, not just the tool name or process
 # invocation count. Startup/probe prompts may include compact tool schema text
-# containing "read_file", but only the second turn includes an ok result.
-if grep -Eq '"name"[[:space:]]*:[[:space:]]*"read_file"' "$captured" && grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$captured"; then
+# containing "read_file" and success examples, but only the actual second-turn
+# tool-result payload includes the read result's size_bytes field.
+if grep -Eq '"name"[[:space:]]*:[[:space:]]*"read_file"' "$captured" && grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$captured" && grep -Eq '"size_bytes"[[:space:]]*:' "$captured"; then
   printf '%s\n' '{"type":"result","result":"done"}'
 else
   printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
