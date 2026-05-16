@@ -29,6 +29,8 @@ func (p InventoryPlanner) BuildPlan(ctx context.Context, _ Request) (Plan, error
 	}
 	return Plan{
 		ActiveRuns:          append([]RunRef(nil), inventory.ActiveRuns...),
+		CleanupRuns:         append([]RunRef(nil), inventory.CleanupRuns...),
+		CleanupRunSetKnown:  inventory.CleanupRunSetKnown,
 		ActiveDeliveries:    append([]DeliveryRef(nil), inventory.ActiveDeliveries...),
 		RunScopedTables:     append([]TableRef(nil), inventory.RunScopedTables...),
 		EntityContainers:    append([]ContainerRef(nil), inventory.EntityContainers...),
@@ -64,6 +66,7 @@ func copyResult(result Result) Result {
 
 func copyPlan(plan Plan) Plan {
 	plan.ActiveRuns = append([]RunRef(nil), plan.ActiveRuns...)
+	plan.CleanupRuns = append([]RunRef(nil), plan.CleanupRuns...)
 	plan.ActiveDeliveries = append([]DeliveryRef(nil), plan.ActiveDeliveries...)
 	plan.RunScopedTables = append([]TableRef(nil), plan.RunScopedTables...)
 	plan.EntityContainers = append([]ContainerRef(nil), plan.EntityContainers...)

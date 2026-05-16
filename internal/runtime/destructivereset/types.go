@@ -117,6 +117,8 @@ type QuiescedDelivery struct {
 
 type Plan struct {
 	ActiveRuns          []RunRef             `json:"active_runs"`
+	CleanupRuns         []RunRef             `json:"cleanup_runs"`
+	CleanupRunSetKnown  bool                 `json:"cleanup_run_set_known"`
 	ActiveDeliveries    []DeliveryRef        `json:"active_deliveries"`
 	RunScopedTables     []TableRef           `json:"run_scoped_tables"`
 	EntityContainers    []ContainerRef       `json:"entity_containers"`
@@ -170,11 +172,13 @@ type ResetSeam struct {
 }
 
 type Inventory struct {
-	ActiveRuns       []RunRef
-	ActiveDeliveries []DeliveryRef
-	RunScopedTables  []TableRef
-	EntityContainers []ContainerRef
-	Preserved        PreservedResources
+	ActiveRuns         []RunRef
+	CleanupRuns        []RunRef
+	CleanupRunSetKnown bool
+	ActiveDeliveries   []DeliveryRef
+	RunScopedTables    []TableRef
+	EntityContainers   []ContainerRef
+	Preserved          PreservedResources
 }
 
 type InventoryReader interface {
