@@ -858,7 +858,7 @@ func (m *DockerManager) ManagedResetContainerInventory(ctx context.Context) ([]r
 			continue
 		}
 		if strings.TrimSpace(identity.ContainerName) != name {
-			return nil, fmt.Errorf("managed reset container %s identity names %s", name, identity.ContainerName)
+			continue
 		}
 		refs = append(refs, managedContainerRef(identity, runtimedestructivereset.ContainerActionStop))
 	}
