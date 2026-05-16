@@ -397,11 +397,98 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string) (string, 
 			return fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
 		}
 		return fmt.Sprintf(`DELETE FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
-	case "run_fork_delivery_event_replays", "run_fork_selected_contract_executions", "run_fork_selected_contract_branch_divergences", "run_fork_selected_contract_route_recoveries", "run_fork_selected_contract_bindings":
+	case "run_fork_delivery_event_replays":
 		if mode == "count" {
-			return fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE fork_run_id = ANY($1::uuid[]) OR source_run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
+			return `
+				SELECT COUNT(*)
+				FROM run_fork_delivery_event_replays r
+				WHERE r.fork_run_id = ANY($1::uuid[])
+				   OR r.source_run_id = ANY($1::uuid[])
+				   OR EXISTS (
+						SELECT 1
+						FROM events e
+						WHERE e.event_id IN (r.source_event_id, r.fork_event_id)
+						  AND e.run_id = ANY($1::uuid[])
+				   )
+				   OR EXISTS (
+						SELECT 1
+						FROM event_deliveries d
+						LEFT JOIN events e ON e.event_id = d.event_id
+						WHERE d.delivery_id IN (r.source_delivery_id, r.fork_delivery_id)
+						  AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[]))
+				   )
+			`, args, nil
 		}
-		return fmt.Sprintf(`DELETE FROM %s WHERE fork_run_id = ANY($1::uuid[]) OR source_run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
+		return `
+			DELETE FROM run_fork_delivery_event_replays r
+			WHERE r.fork_run_id = ANY($1::uuid[])
+			   OR r.source_run_id = ANY($1::uuid[])
+			   OR EXISTS (
+					SELECT 1
+					FROM events e
+					WHERE e.event_id IN (r.source_event_id, r.fork_event_id)
+					  AND e.run_id = ANY($1::uuid[])
+			   )
+			   OR EXISTS (
+					SELECT 1
+					FROM event_deliveries d
+					LEFT JOIN events e ON e.event_id = d.event_id
+					WHERE d.delivery_id IN (r.source_delivery_id, r.fork_delivery_id)
+					  AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[]))
+			   )
+		`, args, nil
+	case "run_fork_selected_contract_executions":
+		if mode == "count" {
+			return `
+				SELECT COUNT(*)
+				FROM run_fork_selected_contract_executions r
+				WHERE r.fork_run_id = ANY($1::uuid[])
+				   OR r.source_run_id = ANY($1::uuid[])
+				   OR EXISTS (
+						SELECT 1
+						FROM events e
+						WHERE e.event_id IN (r.source_event_id, r.fork_event_id)
+						  AND e.run_id = ANY($1::uuid[])
+				   )
+			`, args, nil
+		}
+		return `
+			DELETE FROM run_fork_selected_contract_executions r
+			WHERE r.fork_run_id = ANY($1::uuid[])
+			   OR r.source_run_id = ANY($1::uuid[])
+			   OR EXISTS (
+					SELECT 1
+					FROM events e
+					WHERE e.event_id IN (r.source_event_id, r.fork_event_id)
+					  AND e.run_id = ANY($1::uuid[])
+			   )
+		`, args, nil
+	case "run_fork_selected_contract_branch_divergences", "run_fork_selected_contract_route_recoveries", "run_fork_selected_contract_bindings":
+		if mode == "count" {
+			return fmt.Sprintf(`
+				SELECT COUNT(*)
+				FROM %s r
+				WHERE r.fork_run_id = ANY($1::uuid[])
+				   OR r.source_run_id = ANY($1::uuid[])
+				   OR EXISTS (
+						SELECT 1
+						FROM events e
+						WHERE e.event_id = r.fork_event_id
+						  AND e.run_id = ANY($1::uuid[])
+				   )
+			`, quoteIdent(table)), args, nil
+		}
+		return fmt.Sprintf(`
+			DELETE FROM %s r
+			WHERE r.fork_run_id = ANY($1::uuid[])
+			   OR r.source_run_id = ANY($1::uuid[])
+			   OR EXISTS (
+					SELECT 1
+					FROM events e
+					WHERE e.event_id = r.fork_event_id
+					  AND e.run_id = ANY($1::uuid[])
+			   )
+		`, quoteIdent(table)), args, nil
 	case "timers":
 		if mode == "count" {
 			return `SELECT COUNT(*) FROM timers t WHERE t.run_id = ANY($1::uuid[]) OR t.forked_from_run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = t.forked_from_event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
