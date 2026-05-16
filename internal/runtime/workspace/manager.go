@@ -893,7 +893,12 @@ func (m *DockerManager) InspectManagedContainer(ctx context.Context, name string
 	}
 	identity, ok, err := runtimecontaineridentity.FromLabels(doc.Config.Labels)
 	if err != nil {
-		return runtimedestructivereset.ManagedContainerInspection{}, err
+		// Malformed runtime labels are not ownership proof. Preserve fail-closed
+		// instead of letting one stale candidate abort the whole reset inventory.
+		return runtimedestructivereset.ManagedContainerInspection{
+			Exists:  true,
+			Running: doc.State.Running,
+		}, nil
 	}
 	return runtimedestructivereset.ManagedContainerInspection{
 		Exists:      true,

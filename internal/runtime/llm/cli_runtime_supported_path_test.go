@@ -69,6 +69,9 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 		t.Fatalf("mkdir capture dir: %v", err)
 	}
 	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
+	// Keep the fake provider turn progression tied to invocation count. CI has
+	// produced first-turn prompts containing read_file result markers, so the
+	// semantic proof stays in capturedToolResultInput rather than branching here.
 	script := `#!/bin/sh
 set -eu
 capture_dir="${FAKE_DOCKER_CAPTURE_DIR}"
@@ -82,11 +85,12 @@ count=$((count + 1))
 printf '%s' "$count" > "$count_file"
 captured="$capture_dir/$count.stdin"
 cat > "$captured"
-# Branch on the actual tool-result payload, not just the tool name or process
-# invocation count. Startup/probe prompts may include compact tool schema text
-# containing "read_file" and success examples, but only the actual second-turn
-# tool-result payload includes the read result's size_bytes field.
-if grep -Eq '"name"[[:space:]]*:[[:space:]]*"read_file"' "$captured" && grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$captured" && grep -Eq '"size_bytes"[[:space:]]*:' "$captured"; then
+# Keep the fake provider's control flow tied to process invocation order, not
+# stdin marker matching. CI has exposed prompts that can contain read_file
+# examples with ok/size_bytes before the tool is actually executed; the
+# capturedToolResultInput assertion below remains the proof that invocation 2
+# carried the real read_file result payload.
+if [ "$count" -ge 2 ]; then
   printf '%s\n' '{"type":"result","result":"done"}'
 else
   printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
