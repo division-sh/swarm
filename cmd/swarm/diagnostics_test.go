@@ -71,7 +71,7 @@ func TestRunsAndInvestigateRunsUseRunListV1RPC(t *testing.T) {
 	}
 }
 
-func TestInvestigateRunUsesDiagnoseAndRunGet(t *testing.T) {
+func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		args       []string
@@ -81,13 +81,13 @@ func TestInvestigateRunUsesDiagnoseAndRunGet(t *testing.T) {
 	}{
 		{
 			name:       "diagnose default",
-			args:       []string{"investigate", "run", "run-1"},
+			args:       []string{"status", "run-1"},
 			wantMethod: "run.diagnose",
 			wantOutput: []string{"Run: run-1", "operational_state=stalled", "blocking_layer=delivery_lifecycle", "dead letters exist"},
 		},
 		{
 			name:       "header only",
-			args:       []string{"investigate", "run", "run-1", "--no-diagnose"},
+			args:       []string{"status", "run-1", "--no-diagnose"},
 			wantMethod: "run.get",
 			wantOutput: []string{"Run: run-1", "status=running", "trigger=scan.requested"},
 			notOutput:  "operational_state=",
@@ -138,55 +138,85 @@ func TestInvestigateRunUsesDiagnoseAndRunGet(t *testing.T) {
 	}
 }
 
-func TestInvestigateRunAndTraceResolveLatestRunThroughRunList(t *testing.T) {
+func TestStatusAndInvestigateTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		args         []string
-		secondMethod string
-		wantOutput   string
+		name       string
+		args       []string
+		lists      [][]any
+		owner      string
+		selected   string
+		wantOutput string
 	}{
-		{name: "run", args: []string{"investigate", "run"}, secondMethod: "run.diagnose", wantOutput: "Run: latest-run"},
-		{name: "trace", args: []string{"investigate", "trace"}, secondMethod: "run.trace", wantOutput: "run trace: run_id=latest-run"},
+		{
+			name:       "status prefers running",
+			args:       []string{"status"},
+			lists:      [][]any{{validDiagnosticRunHeaderWithStatus("running-run", "running")}},
+			owner:      "run.diagnose",
+			selected:   "running-run",
+			wantOutput: "Run: running-run",
+		},
+		{
+			name:       "status falls back to paused",
+			args:       []string{"status", "--no-diagnose"},
+			lists:      [][]any{{}, {validDiagnosticRunHeaderWithStatus("paused-run", "paused")}},
+			owner:      "run.get",
+			selected:   "paused-run",
+			wantOutput: "Run: paused-run",
+		},
+		{
+			name:       "legacy trace uses terminal fallback",
+			args:       []string{"investigate", "trace"},
+			lists:      [][]any{{}, {}, {validDiagnosticRunHeaderWithStatus("terminal-run", "completed")}},
+			owner:      "run.trace",
+			selected:   "terminal-run",
+			wantOutput: "run trace: run_id=terminal-run",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "test-token")
 			server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
-				switch callIndex {
-				case 0:
+				if callIndex < len(tc.lists) {
 					if req.Method != "run.list" {
-						t.Fatalf("first method = %q, want run.list", req.Method)
+						t.Fatalf("method[%d] = %q, want run.list", callIndex, req.Method)
 					}
-					if got := req.Params["limit"]; got != float64(1) {
-						t.Fatalf("latest run limit = %#v, want 1", got)
+					wantParams := map[string]any{"limit": float64(1)}
+					switch callIndex {
+					case 0:
+						wantParams["status"] = "running"
+					case 1:
+						wantParams["status"] = "paused"
 					}
-					return map[string]any{"runs": []any{validDiagnosticRunHeader("latest-run")}}
-				case 1:
-					if req.Method != tc.secondMethod {
-						t.Fatalf("second method = %q, want %s", req.Method, tc.secondMethod)
+					if !reflect.DeepEqual(req.Params, wantParams) {
+						t.Fatalf("params[%d] = %#v, want %#v", callIndex, req.Params, wantParams)
 					}
-					if got := req.Params["run_id"]; got != "latest-run" {
-						t.Fatalf("second run_id = %#v, want latest-run", got)
-					}
-					if tc.secondMethod == "run.trace" {
-						return map[string]any{
-							"trace": []any{map[string]any{
-								"event_id":         "event-1",
-								"event_name":       "scan.requested",
-								"event_created_at": "2026-05-13T10:00:01Z",
-							}},
-						}
-					}
+					return map[string]any{"runs": tc.lists[callIndex]}
+				}
+				if req.Method != tc.owner {
+					t.Fatalf("owner method = %q, want %s", req.Method, tc.owner)
+				}
+				if got := req.Params["run_id"]; got != tc.selected {
+					t.Fatalf("owner run_id = %#v, want %s", got, tc.selected)
+				}
+				switch tc.owner {
+				case "run.trace":
 					return map[string]any{
-						"run":               validDiagnosticRunHeader("latest-run"),
+						"trace": []any{map[string]any{
+							"event_id":         "event-1",
+							"event_name":       "scan.requested",
+							"event_created_at": "2026-05-13T10:00:01Z",
+						}},
+					}
+				case "run.get":
+					return map[string]any{"run": validDiagnosticRunHeaderWithStatus(tc.selected, "paused")}
+				default:
+					return map[string]any{
+						"run":               validDiagnosticRunHeader(tc.selected),
 						"operational_state": "running",
 						"blocking_layer":    "",
 						"blocking_reason":   "",
 						"heuristics":        []any{},
 					}
-				default:
-					t.Fatalf("unexpected request %d: %s", callIndex+1, req.Method)
 				}
-				return nil
 			})
 			defer server.Close()
 
@@ -195,11 +225,44 @@ func TestInvestigateRunAndTraceResolveLatestRunThroughRunList(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 			}
-			if len(*requests) != 2 {
-				t.Fatalf("requests = %d, want 2", len(*requests))
+			if len(*requests) != len(tc.lists)+1 {
+				t.Fatalf("requests = %d, want %d", len(*requests), len(tc.lists)+1)
 			}
 			if !strings.Contains(stdout.String(), tc.wantOutput) {
 				t.Fatalf("stdout missing %q:\n%s", tc.wantOutput, stdout.String())
+			}
+		})
+	}
+}
+
+func TestInvestigateRunIsRetiredWithoutRequest(t *testing.T) {
+	for _, args := range [][]string{
+		{"investigate", "run"},
+		{"investigate", "run", "run-1"},
+		{"investigate", "run", "run-1", "--no-diagnose"},
+		{"investigate", "run", "--no-diagnose"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 2 {
+				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if strings.TrimSpace(stdout.String()) != "" {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if got := stderr.String(); !strings.Contains(got, "ERROR: `swarm investigate run` was retired in CLI v2.") || !strings.Contains(got, "Use `swarm status`.") {
+				t.Fatalf("stderr = %q, want retired migration message", got)
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("RPC calls = %d, want 0", calls.Load())
 			}
 		})
 	}
@@ -329,7 +392,7 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "runs invalid since", args: []string{"runs", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
 		{name: "trace invalid limit", args: []string{"investigate", "trace", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace follow unsupported", args: []string{"investigate", "trace", "run-1", "--follow"}, wantStderr: "unknown flag"},
-		{name: "run extra arg", args: []string{"investigate", "run", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
+		{name: "status extra arg", args: []string{"status", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := calls.Load()
@@ -373,26 +436,39 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 	}
 }
 
-func TestInvestigateOmittedRunFailsClosedWhenNoRunsExist(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
-	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
-		if req.Method != "run.list" {
-			t.Fatalf("method = %q, want run.list", req.Method)
-		}
-		return map[string]any{"runs": []any{}}
-	})
-	defer server.Close()
+func TestOmittedRunResolverFailsClosedWhenNoRunsExist(t *testing.T) {
+	for _, args := range [][]string{
+		{"status"},
+		{"status", "--no-diagnose"},
+		{"investigate", "trace"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Setenv("SWARM_API_TOKEN", "test-token")
+			server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
+				if req.Method != "run.list" {
+					t.Fatalf("method = %q, want run.list", req.Method)
+				}
+				return map[string]any{"runs": []any{}}
+			})
+			defer server.Close()
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"investigate", "run"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 2 {
-		t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	if len(*requests) != 1 {
-		t.Fatalf("requests = %d, want 1", len(*requests))
-	}
-	if !strings.Contains(stderr.String(), "no runs found") {
-		t.Fatalf("stderr = %q, want no-runs error", stderr.String())
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 2 {
+				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if len(*requests) != 3 {
+				t.Fatalf("requests = %d, want 3 active-preference run.list probes", len(*requests))
+			}
+			for _, req := range *requests {
+				if req.Method != "run.list" {
+					t.Fatalf("method = %q, want only run.list before no-runs failure", req.Method)
+				}
+			}
+			if !strings.Contains(stderr.String(), "no runs found") {
+				t.Fatalf("stderr = %q, want no-runs error", stderr.String())
+			}
+		})
 	}
 }
 
@@ -414,7 +490,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "json rpc run not found",
-			args: []string{"investigate", "run", "missing"},
+			args: []string{"status", "missing"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -448,7 +524,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run get missing required run id",
-			args: []string{"investigate", "run", "run-1", "--no-diagnose"},
+			args: []string{"status", "run-1", "--no-diagnose"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -472,7 +548,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run get invalid run status",
-			args: []string{"investigate", "run", "run-1", "--no-diagnose"},
+			args: []string{"status", "run-1", "--no-diagnose"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -484,7 +560,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run diagnose missing blocking layer",
-			args: []string{"investigate", "run", "run-1"},
+			args: []string{"status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -499,7 +575,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run diagnose invalid operational state",
-			args: []string{"investigate", "run", "run-1"},
+			args: []string{"status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -515,7 +591,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run diagnose missing blocking reason",
-			args: []string{"investigate", "run", "run-1"},
+			args: []string{"status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -530,7 +606,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run diagnose missing heuristics",
-			args: []string{"investigate", "run", "run-1"},
+			args: []string{"status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -660,4 +736,10 @@ func validDiagnosticRunHeader(runID string) map[string]any {
 		"event_count":        3,
 		"started_at":         "2026-05-13T10:00:00Z",
 	}
+}
+
+func validDiagnosticRunHeaderWithStatus(runID, status string) map[string]any {
+	run := validDiagnosticRunHeader(runID)
+	run["status"] = status
+	return run
 }

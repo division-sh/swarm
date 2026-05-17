@@ -259,14 +259,12 @@ func TestCLI_VerifyPreservesLocalContractCarveOut(t *testing.T) {
 	}
 }
 
-func TestCLI_StatusAndForkAreHardRetired(t *testing.T) {
+func TestCLI_ForkIsHardRetired(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
 		want string
 	}{
-		{name: "status", args: []string{"status"}, want: "ERROR: `swarm status` was removed in v1."},
-		{name: "status-help", args: []string{"status", "--help"}, want: "ERROR: `swarm status` was removed in v1."},
 		{name: "fork", args: []string{"fork"}, want: "ERROR: `swarm fork` was removed in v1."},
 		{name: "fork-help", args: []string{"fork", "--help"}, want: "ERROR: `swarm fork` was removed in v1."},
 	} {

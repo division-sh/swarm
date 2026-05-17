@@ -139,6 +139,24 @@ func newHealthCommand(opts rootCommandOptions) *cobra.Command {
 	}
 }
 
+func newStatusCommand(opts rootCommandOptions) *cobra.Command {
+	runOpts := diagnosticRunOptions{apiOptions: opts}
+	cmd := &cobra.Command{
+		Use:   "status [run-id]",
+		Short: "Diagnose one run through the v1 RPC read owner.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runID := ""
+			if len(args) == 1 {
+				runID = args[0]
+			}
+			return runDiagnosticRunCommand(cmd.Context(), cmd.OutOrStdout(), runOpts, runID)
+		},
+	}
+	cmd.Flags().BoolVar(&runOpts.noDiagnose, "no-diagnose", false, "Use run.get and print only the canonical run header")
+	return cmd
+}
+
 func newInvestigateCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "investigate",
@@ -175,21 +193,15 @@ func newInvestigateRunsCommand(opts rootCommandOptions) *cobra.Command {
 }
 
 func newInvestigateRunCommand(opts rootCommandOptions) *cobra.Command {
-	runOpts := diagnosticRunOptions{apiOptions: opts}
-	cmd := &cobra.Command{
-		Use:   "run [run-id]",
-		Short: "Diagnose one run through v1 RPC.",
-		Args:  cobra.MaximumNArgs(1),
+	return &cobra.Command{
+		Use:                "run [run-id]",
+		Short:              "Retired legacy command; use swarm status.",
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runID := ""
-			if len(args) == 1 {
-				runID = args[0]
-			}
-			return runDiagnosticRunCommand(cmd.Context(), cmd.OutOrStdout(), runOpts, runID)
+			writeInvestigateRunRetiredMessage(cmd.ErrOrStderr())
+			return commandExitError{code: 2}
 		},
 	}
-	cmd.Flags().BoolVar(&runOpts.noDiagnose, "no-diagnose", false, "Use run.get and print only the canonical run header")
-	return cmd
 }
 
 func newInvestigateTraceCommand(opts rootCommandOptions) *cobra.Command {
@@ -234,6 +246,15 @@ func writeInvestigateHealthRetiredMessage(w io.Writer) {
 	fmt.Fprintln(w, "  Use `swarm health`.")
 }
 
+func writeInvestigateRunRetiredMessage(w io.Writer) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, "ERROR: `swarm investigate run` was retired in CLI v2.")
+	fmt.Fprintln(w, "  Use `swarm status`.")
+	fmt.Fprintln(w, "  Use `swarm status --no-diagnose` for the header-only run read.")
+}
+
 func bindDiagnosticRunListFlags(cmd *cobra.Command, opts *diagnosticRunListOptions) {
 	cmd.Flags().StringVar(&opts.status, "status", "", "Optional run status filter")
 	cmd.Flags().StringVar(&opts.since, "since", "", "Optional RFC3339 lower started_at bound")
@@ -266,7 +287,7 @@ func runDiagnosticRunCommand(ctx context.Context, out io.Writer, opts diagnostic
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		runID, err = latestDiagnosticRunID(ctx, client)
+		runID, err = activePreferredDiagnosticRunID(ctx, client)
 		if err != nil {
 			return err
 		}
@@ -304,7 +325,7 @@ func runDiagnosticTraceCommand(ctx context.Context, out io.Writer, opts diagnost
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		runID, err = latestDiagnosticRunID(ctx, client)
+		runID, err = activePreferredDiagnosticRunID(ctx, client)
 		if err != nil {
 			return err
 		}
@@ -348,7 +369,16 @@ func fetchDiagnosticRunList(ctx context.Context, client *cliAPIClient, params ma
 	return result, nil
 }
 
-func latestDiagnosticRunID(ctx context.Context, client *cliAPIClient) (string, error) {
+func activePreferredDiagnosticRunID(ctx context.Context, client *cliAPIClient) (string, error) {
+	for _, status := range []string{"running", "paused"} {
+		result, err := fetchDiagnosticRunList(ctx, client, map[string]any{"status": status, "limit": 1})
+		if err != nil {
+			return "", err
+		}
+		if len(result.Runs) > 0 {
+			return result.Runs[0].RunID, nil
+		}
+	}
 	result, err := fetchDiagnosticRunList(ctx, client, map[string]any{"limit": 1})
 	if err != nil {
 		return "", err

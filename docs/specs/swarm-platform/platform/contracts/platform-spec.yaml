@@ -5428,7 +5428,7 @@ cli_specification:
     status:
       command: swarm status [<run-id>]
       tier: must_have
-      implementation_status: absent_v2_top_level_currently_retired
+      implementation_status: implemented
       owner: /v1/rpc run.diagnose by default; /v1/rpc run.get for header-only mode if exposed
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
@@ -5600,7 +5600,7 @@ cli_specification:
     investigate:
       command: swarm investigate *
       status: retired_legacy_v1_topology
-      current_code_state: partially_implemented_legacy_namespace; health fails closed after #797; runs/run/trace remain implemented legacy until sibling repairs
+      current_code_state: partially_implemented_legacy_namespace; health and run fail closed after #797/#800; runs/trace remain implemented legacy until sibling repairs
       v2_replacements:
         swarm investigate runs: swarm runs
         swarm investigate run: swarm status
@@ -5651,13 +5651,12 @@ cli_specification:
     - swarm control nuke
     implemented_legacy_or_wrong_namespace:
     - swarm investigate runs
-    - swarm investigate run
     - swarm investigate trace
     retired_or_fail_closed:
     - swarm investigate health
+    - swarm investigate run
     remaining_must_have_not_implemented:
     - swarm run
-    - swarm status
     - swarm trace
     - swarm version --server
     remaining_should_have_not_implemented:
