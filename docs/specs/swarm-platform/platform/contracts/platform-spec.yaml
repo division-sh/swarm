@@ -4643,7 +4643,10 @@ platform_events:
         static_agents_started: array<string>
         flow_required_agents_started: array<string>
         system_containers_started: array<string>
-        self_check_passed: boolean
+        self_check_required: boolean
+        self_check_passed: boolean (nullable)
+      notes:
+      - 'self_check_passed is nullable because platform.boot is the event verified by the post-publish self-check; the event MUST NOT claim a pass before that verification completes.'
       produced_by_type: platform
     platform.inbound_recorded:
       description: External event received and persisted. Emitted when an event enters the system from an external source
@@ -5365,7 +5368,7 @@ cli_specification:
         platform_boot_payload: >
           `platform.boot` carries the boot decision summary: boot timestamps/duration, bundle fingerprint,
           startup recovery decision, static and flow-required agent materialization lists, system container names,
-          and self-check status. CLI/dashboard/API readers consume this persisted event; they do not reconstruct boot
+          self-check-required state, and nullable self-check pass state. CLI/dashboard/API readers consume this persisted event; they do not reconstruct boot
           decisions from text logs.
       bundle_match_admission:
         default: require-bundle-match
