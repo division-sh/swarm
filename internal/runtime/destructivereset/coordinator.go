@@ -16,6 +16,10 @@ type Coordinator struct {
 }
 
 func (c *Coordinator) BuildPlan(ctx context.Context, req Request) (Result, bool, error) {
+	return c.BuildPlanWithLock(ctx, req, nil)
+}
+
+func (c *Coordinator) BuildPlanWithLock(ctx context.Context, req Request, apply func(context.Context, Result) error) (Result, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -83,6 +87,11 @@ func (c *Coordinator) BuildPlan(ctx context.Context, req Request) (Result, bool,
 		DryRun:        req.DryRun,
 		PlannedAt:     req.RequestedAt,
 		Plan:          plan,
+	}
+	if apply != nil {
+		if err := apply(ctx, copyResult(result)); err != nil {
+			return Result{}, false, err
+		}
 	}
 	if idemKey.IdempotencyKey != "" {
 		if err := c.Idempotency.StoreResetResult(ctx, StoredResult{

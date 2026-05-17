@@ -5688,6 +5688,7 @@ api_specification:
       - agent.replay_backlog
       - runtime.pause
       - runtime.resume
+      - runtime.nuke
     mailbox:
       status_storage_model: 'The storage table keeps terminal defer decisions as status = decided and decision = deferred.
         v1 read projections expose that row as MailboxStatus deferred. Approval/reject terminal rows remain status = decided
@@ -6980,6 +6981,65 @@ api_specification:
           ok:
             type: boolean
             const: true
+      RuntimeNukeResult:
+        type: object
+        additionalProperties: false
+        required:
+        - ok
+        - status
+        - dry_run
+        - operation_name
+        - plan
+        - quiescence
+        - cleanup
+        - containers
+        - partial_failure
+        properties:
+          ok:
+            type: boolean
+            description: True for dry-run or fully completed apply; false when the operation completed with explicit partial
+              failures.
+          status:
+            type: string
+            enum:
+            - dry_run
+            - completed
+            - partial_failure
+          dry_run:
+            type: boolean
+          operation_name:
+            type: string
+          plan:
+            type: object
+            additionalProperties: true
+            description: Exact result from the destructive-reset plan/result owner.
+          quiescence:
+            type: object
+            additionalProperties: true
+            description: Exact result from the active-run/delivery quiescence owner.
+          cleanup:
+            type: object
+            additionalProperties: true
+            description: Exact result from the run-scoped cleanup/preservation owner.
+          containers:
+            type: object
+            additionalProperties: true
+            description: Exact result from the managed entity-container selection/stop owner.
+          partial_failure:
+            type: boolean
+          errors:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required:
+              - scope
+              - message
+              properties:
+                scope:
+                  type: string
+                message:
+                  type: string
       SubscriptionId:
         type: object
         additionalProperties: false
@@ -7353,6 +7413,14 @@ api_specification:
         type: object
         additionalProperties: false
         properties: {}
+      RUNTIME_NUKE_IN_PROGRESS:
+        type: object
+        additionalProperties: false
+        required:
+        - operation_name
+        properties:
+          operation_name:
+            type: string
   method_catalog_metadata:
     description: "All v1 methods. Each method declares: tier, description, scope.required,\nparams (array of contentDescriptors),\
       \ result (contentDescriptor), errors\n(array of error codes from components.errors). Mutating methods include\nidempotency.\
@@ -8780,6 +8848,38 @@ api_specification:
       errors:
       - RUNTIME_NOT_PAUSED
       - IDEMPOTENCY_CONFLICT
+    runtime.nuke:
+      tier: should_have
+      description: "Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency\
+        \ contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery\
+        \ quiescence, run-scoped cleanup/preservation, and managed entity-container selection/stop. It MUST NOT directly\
+        \ truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/run_clear/CLI\
+        \ reset seams in this method implementation.\n\n`dry_run=true` returns the same top-level shape with side-effect-free\
+        \ previews from each owner. Apply mode sequences plan -> quiescence -> cleanup -> managed-container stop. Managed-container\
+        \ stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade\
+        \ as complete success. Public final-response idempotency follows the v1 API idempotency convention.\n"
+      scope:
+        required:
+        - control:runtime
+      idempotency: per the convention.
+      params:
+      - name: dry_run
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/RuntimeNukeResult'
+      errors:
+      - RUNTIME_NUKE_IN_PROGRESS
+      - IDEMPOTENCY_CONFLICT
   deferred_namespaces:
     description: 'Explicitly out of v1 scope. Listed here so consumers know to expect them
 
@@ -8835,7 +8935,9 @@ api_specification:
     runtime_admin:
       methods:
       - runtime.reset_state
-      rationale: Dangerous operation. Defer until operator-permission scoping is more concrete than the v1 single-token model.
+      rationale: Legacy reset_state naming remains deferred/retired. Public destructive reset is exposed as runtime.nuke,
+        backed by the destructive-reset owner chain; dashboard/Builder/reset_state migration is tracked separately from the
+        public wrapper.
     bundle_lifecycle:
       methods:
       - bundle.open
@@ -8906,7 +9008,8 @@ api_specification:
       - "GET /api/runtime/logs \u2192 runtime.logs"
       - "GET /api/runtime/incidents \u2192 runtime.incidents"
       - "POST /api/runtime/actions {pause/resume} \u2192 runtime.pause / runtime.resume"
-      - "POST /api/runtime/actions {reset_state} \u2192 deferred to runtime_admin.runtime.reset_state"
+      - "POST /api/runtime/actions {reset_state} \u2192 runtime.nuke in a later dashboard/Builder migration; the legacy reset_state
+        name remains deferred/retired."
       - "GET /api/runs/{runID}/trace \u2192 run.trace (also adds run.subscribe_trace as the live variant)"
     auth_token_disposition:
       v1_model: SWARM_API_TOKEN is the only user-facing API bearer-token source. SWARM_BUILDER_AUTH_TOKEN and SWARM_OPERATOR_AUTH_TOKEN

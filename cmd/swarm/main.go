@@ -29,6 +29,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecredentials "swarm/internal/runtime/credentials"
+	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
@@ -208,21 +209,34 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		apiEntities = stores.Postgres
 		apiAgentConversations = stores.Postgres
 	}
+	resetPlanner := runtimedestructivereset.InventoryPlanner{
+		Reader: runtimedestructivereset.CompositeInventoryReader{
+			Reader:     stores.Postgres,
+			Containers: workspaces,
+		},
+	}
 	apiReadOptions := apiv1.OperatorReadOptions{
 		Ready: func() bool {
 			return ready.Load()
 		},
-		Database:              stores.Postgres,
-		Runs:                  stores.Postgres,
-		Observability:         stores.Postgres,
-		Entities:              apiEntities,
-		AgentConversations:    apiAgentConversations,
-		AgentControl:          dashboardDynamicAgentControl{supervisor: supervisor},
-		Mailbox:               stores.Postgres,
-		Idempotency:           stores.Postgres,
-		Events:                rt.Bus,
-		RunControl:            rt.RunControl,
-		RuntimeIngress:        rt.RuntimeIngress,
+		Database:           stores.Postgres,
+		Runs:               stores.Postgres,
+		Observability:      stores.Postgres,
+		Entities:           apiEntities,
+		AgentConversations: apiAgentConversations,
+		AgentControl:       dashboardDynamicAgentControl{supervisor: supervisor},
+		Mailbox:            stores.Postgres,
+		Idempotency:        stores.Postgres,
+		Events:             rt.Bus,
+		RunControl:         rt.RunControl,
+		RuntimeIngress:     rt.RuntimeIngress,
+		ResetCoordinator: &runtimedestructivereset.Coordinator{
+			Planner: resetPlanner,
+			Locks:   stores.Postgres,
+		},
+		ResetQuiescer:         runtimedestructivereset.Quiescer{Store: stores.Postgres},
+		ResetCleaner:          runtimedestructivereset.Cleaner{Store: stores.Postgres},
+		ResetContainers:       runtimedestructivereset.ManagedContainerStopper{Runtime: workspaces},
 		Source:                source,
 		MailboxApprovalRoutes: mailboxApprovalRoutes,
 		Bundle:                bootBundleIdentity,

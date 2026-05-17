@@ -60,6 +60,10 @@ type OperatorReadOptions struct {
 	Events                EventPublisher
 	RunControl            RunControlController
 	RuntimeIngress        RuntimeIngressController
+	ResetCoordinator      DestructiveResetCoordinator
+	ResetQuiescer         DestructiveResetQuiescer
+	ResetCleaner          DestructiveResetCleaner
+	ResetContainers       DestructiveResetContainerStopper
 	Source                semanticview.Source
 	MailboxApprovalRoutes map[string]string
 	Bundle                runtimecontracts.BundleIdentity
@@ -207,6 +211,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorRuntimeControlHandlers(opts) {
+		handlers[name] = handler
+	}
+	for name, handler := range OperatorRuntimeNukeHandlers(opts) {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorObservabilityHandlers(opts) {
