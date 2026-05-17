@@ -249,7 +249,7 @@ func TestInvestigateTraceUsesRunTraceSnapshot(t *testing.T) {
 	}
 }
 
-func TestInvestigateHealthUsesHealthCheck(t *testing.T) {
+func TestHealthUsesHealthCheck(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 		if req.Method != "health.check" {
@@ -273,7 +273,7 @@ func TestInvestigateHealthUsesHealthCheck(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"investigate", "health"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"health"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -284,6 +284,30 @@ func TestInvestigateHealthUsesHealthCheck(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+func TestInvestigateHealthIsRetiredWithoutRequest(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"investigate", "health"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 2 {
+		t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "ERROR: `swarm investigate health` was retired in CLI v2.") || !strings.Contains(got, "Use `swarm health`.") {
+		t.Fatalf("stderr = %q, want retired migration message", got)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("RPC calls = %d, want 0", calls.Load())
 	}
 }
 
@@ -531,7 +555,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "health missing bundle fingerprint",
-			args: []string{"investigate", "health"},
+			args: []string{"health"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -547,7 +571,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "health missing workflow name",
-			args: []string{"investigate", "health"},
+			args: []string{"health"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -566,7 +590,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "health missing workflow version",
-			args: []string{"investigate", "health"},
+			args: []string{"health"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
