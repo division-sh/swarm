@@ -37,7 +37,10 @@ func newControlCommand(opts rootCommandOptions) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(newControlMailboxCommand(opts))
+	cmd.AddCommand(
+		newControlMailboxCommand(opts),
+		newControlNukeCommand(opts),
+	)
 	return cmd
 }
 

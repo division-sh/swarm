@@ -15,15 +15,24 @@ import (
 const defaultCLIAPIEndpoint = "http://127.0.0.1:8081/v1/rpc"
 
 type rootCommandOptions struct {
-	apiEndpoint string
-	httpClient  *http.Client
+	apiEndpoint     string
+	httpClient      *http.Client
+	input           io.Reader
+	stdinIsTerminal func() bool
 }
 
 func defaultRootCommandOptions() rootCommandOptions {
 	return rootCommandOptions{
-		apiEndpoint: defaultCLIAPIEndpoint,
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		apiEndpoint:     defaultCLIAPIEndpoint,
+		httpClient:      &http.Client{Timeout: 30 * time.Second},
+		input:           os.Stdin,
+		stdinIsTerminal: processStdinIsTerminal,
 	}
+}
+
+func processStdinIsTerminal() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 type cliAPIClient struct {
@@ -91,6 +100,18 @@ func applicationErrorCode(raw json.RawMessage) string {
 	return strings.TrimSpace(data.Code)
 }
 
+type cliAPIHTTPError struct {
+	statusCode int
+	message    string
+}
+
+func (e *cliAPIHTTPError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("v1 RPC HTTP %d: %s", e.statusCode, e.message)
+}
+
 func (c *cliAPIClient) call(ctx context.Context, method string, params map[string]any, result any) error {
 	requestID := "swarm-cli:" + method
 	body, err := json.Marshal(jsonRPCRequest{
@@ -124,7 +145,7 @@ func (c *cliAPIClient) call(ctx context.Context, method string, params map[strin
 		if message == "" {
 			message = http.StatusText(resp.StatusCode)
 		}
-		return fmt.Errorf("v1 RPC HTTP %d: %s", resp.StatusCode, message)
+		return &cliAPIHTTPError{statusCode: resp.StatusCode, message: message}
 	}
 
 	var envelope jsonRPCResponse
