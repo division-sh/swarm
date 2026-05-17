@@ -6306,7 +6306,6 @@
           "type",
           "status",
           "priority",
-          "source_event_id",
           "source_flow",
           "payload",
           "created_at"
