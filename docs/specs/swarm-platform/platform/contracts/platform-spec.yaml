@@ -5363,6 +5363,23 @@ cli_specification:
       status: must_have
       owner: /v1/rpc mailbox.defer
       behavior: Mailbox defer action through canonical v1 API owner; no direct DB/store/mailbox writes.
+    control_nuke:
+      command: swarm control nuke [--yes|-y] [--dry-run]
+      status: must_have
+      owner: /v1/rpc runtime.nuke
+      behavior: Destructive reset CLI consumer over the public runtime.nuke owner. The CLI MUST NOT call raw Docker, SQL,
+        store cleanup, runtime manager reset, or internal destructive-reset helpers directly.
+      flags:
+      - --yes
+      - -y
+      - --dry-run
+      exit_codes:
+        success_or_noop: 0
+        validation_or_abort: 2
+        transport_or_partial_failure: 3
+        auth_failure: 4
+        conflict_or_nuke_in_progress: 6
+      spec_status: implemented API consumer; supersedes older CLI v2 review-draft wording that marked runtime.nuke as proposed/pending.
     status:
       command: swarm status
       status: retired
@@ -5378,6 +5395,7 @@ cli_specification:
     - swarm control mailbox approve
     - swarm control mailbox reject
     - swarm control mailbox defer
+    - swarm control nuke
     - swarm runs
     - swarm investigate runs
     - swarm investigate run
