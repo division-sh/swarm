@@ -5348,9 +5348,9 @@ cli_specification:
     run:
       command: swarm run [flags]
       tier: must_have
-      implementation_status: absent
+      implementation_status: implemented
       tracker: '#743'
-      accepted_contract_status: 'merge-bearing contract promoted by #795; command code still requires #743 implementation gate.'
+      accepted_contract_status: 'merge-bearing contract promoted by #795; command code implemented by #743.'
       owners:
         readiness: /v1/rpc health.check
         start: /v1/rpc run.start
@@ -5640,6 +5640,7 @@ cli_specification:
     - swarm completion
     - swarm version (local only)
     - swarm serve (partial)
+    - swarm run
     - swarm verify
     - swarm runs
     - swarm health
@@ -5656,7 +5657,6 @@ cli_specification:
     - swarm investigate health
     - swarm investigate run
     remaining_must_have_not_implemented:
-    - swarm run
     - swarm trace
     - swarm version --server
     remaining_should_have_not_implemented:

@@ -19,6 +19,10 @@ type rootCommandOptions struct {
 	httpClient      *http.Client
 	input           io.Reader
 	stdinIsTerminal func() bool
+	runServe        func(context.Context, string, serveOptions) int
+	runReadyTimeout time.Duration
+	runReadyPoll    time.Duration
+	runStatusPoll   time.Duration
 }
 
 func defaultRootCommandOptions() rootCommandOptions {
@@ -27,6 +31,10 @@ func defaultRootCommandOptions() rootCommandOptions {
 		httpClient:      &http.Client{Timeout: 30 * time.Second},
 		input:           os.Stdin,
 		stdinIsTerminal: processStdinIsTerminal,
+		runServe:        runServeRuntime,
+		runReadyTimeout: 30 * time.Second,
+		runReadyPoll:    250 * time.Millisecond,
+		runStatusPoll:   time.Second,
 	}
 }
 
