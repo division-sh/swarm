@@ -136,7 +136,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 		stopLocal, err = startLocalRunServe(ctx, repo, opts)
 		if err != nil {
 			fmt.Fprintln(errOut, err)
-			return commandExitError{code: 3}
+			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
 		defer stopLocal()
 	}
@@ -355,6 +355,8 @@ func waitForRunCommandReady(ctx context.Context, opts runCommandOptions, done <-
 			}
 			if _, err := runCommandHealth(ctx, client); err == nil {
 				return nil
+			} else if runCommandErrorExitCode(err) == 4 {
+				return err
 			}
 		}
 	}
@@ -439,6 +441,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
 	defer sub.close()
+	rows := sub.rows
 	poll := opts.apiOptions.runStatusPoll
 	if poll <= 0 {
 		poll = time.Second
@@ -460,8 +463,9 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 				fmt.Fprintln(errOut, "detached from run trace")
 			}
 			return commandExitError{code: 130}
-		case row, ok := <-sub.rows:
+		case row, ok := <-rows:
 			if !ok {
+				rows = nil
 				continue
 			}
 			writeRunCommandTraceRow(out, row)

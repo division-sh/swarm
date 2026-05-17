@@ -269,6 +269,79 @@ func TestRunCommandStartCtrlCCallsRunStopAfterRunID(t *testing.T) {
 	}
 }
 
+func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "bad-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
+	}))
+	defer server.Close()
+
+	var serveCanceled atomic.Bool
+	opts := testRunCommandOptions(server)
+	opts.runReadyTimeout = time.Minute
+	opts.runReadyPoll = time.Millisecond
+	opts.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
+		<-ctx.Done()
+		serveCanceled.Store(true)
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	if code != 4 {
+		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !serveCanceled.Load() {
+		t.Fatal("local serve hook was not canceled after readiness auth failure")
+	}
+	if !strings.Contains(stderr.String(), "v1 RPC HTTP 401") {
+		t.Fatalf("stderr = %q, want auth failure", stderr.String())
+	}
+}
+
+func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	var runGetCalls atomic.Int32
+	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				return map[string]any{"run_id": "run-closed-ws", "status": "running"}
+			case "run.get":
+				run := validDiagnosticRunHeader("run-closed-ws")
+				if runGetCalls.Add(1) == 1 {
+					return map[string]any{"run": run}
+				}
+				run["status"] = "completed"
+				run["ended_at"] = "2026-05-13T10:01:00Z"
+				return map[string]any{"run": run}
+			default:
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return nil
+		},
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, testRunCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.get", "run.get"})
+	if !strings.Contains(stdout.String(), "run terminal: run_id=run-closed-ws status=completed") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	for _, tc := range []struct {
