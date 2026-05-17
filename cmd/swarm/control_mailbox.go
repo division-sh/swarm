@@ -38,13 +38,13 @@ func newControlCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(
-		newControlMailboxCommand(opts),
+		newRetiredControlMailboxCommand(),
 		newControlNukeCommand(opts),
 	)
 	return cmd
 }
 
-func newControlMailboxCommand(opts rootCommandOptions) *cobra.Command {
+func newMailboxCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mailbox",
 		Short: "Approve, reject, or defer mailbox items through v1 RPC.",
@@ -54,14 +54,37 @@ func newControlMailboxCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(
-		newControlMailboxApproveCommand(opts),
-		newControlMailboxRejectCommand(opts),
-		newControlMailboxDeferCommand(opts),
+		newMailboxApproveCommand(opts),
+		newMailboxRejectCommand(opts),
+		newMailboxDeferCommand(opts),
 	)
 	return cmd
 }
 
-func newControlMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
+func newRetiredControlMailboxCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:                "mailbox",
+		Short:              "Removed v2 command; use swarm mailbox.",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			writeControlMailboxRetiredMessage(cmd.ErrOrStderr())
+			return commandExitError{code: 2}
+		},
+	}
+}
+
+func writeControlMailboxRetiredMessage(w io.Writer) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, "ERROR: `swarm control mailbox` was removed in CLI v2.")
+	fmt.Fprintln(w, "  Mailbox decisions are resource-noun-first commands now:")
+	fmt.Fprintln(w, "  `swarm mailbox approve <mailbox-item-id>`")
+	fmt.Fprintln(w, "  `swarm mailbox reject <mailbox-item-id> --reason <text>`")
+	fmt.Fprintln(w, "  `swarm mailbox defer <mailbox-item-id> --until <RFC3339>`")
+}
+
+func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 	actionOpts := mailboxDecisionCommandOptions{
 		apiOptions: opts,
 		action:     "approve",
@@ -80,7 +103,7 @@ func newControlMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func newControlMailboxRejectCommand(opts rootCommandOptions) *cobra.Command {
+func newMailboxRejectCommand(opts rootCommandOptions) *cobra.Command {
 	actionOpts := mailboxDecisionCommandOptions{
 		apiOptions: opts,
 		action:     "reject",
@@ -99,7 +122,7 @@ func newControlMailboxRejectCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func newControlMailboxDeferCommand(opts rootCommandOptions) *cobra.Command {
+func newMailboxDeferCommand(opts rootCommandOptions) *cobra.Command {
 	actionOpts := mailboxDecisionCommandOptions{
 		apiOptions: opts,
 		action:     "defer",
