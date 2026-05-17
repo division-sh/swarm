@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"log/slog"
-	"strconv"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -63,7 +61,7 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 				t.Fatalf("verifyBundle: %v", err)
 			}
 
-			assertBootSkeletonUsesRuntimeToolInventory(t, source, result.BootReport)
+			assertBootProgressUsesRuntimeToolInventory(t, source)
 		})
 	}
 }
@@ -85,7 +83,7 @@ func assertToolResolutionWarning(t *testing.T, warnings []runtimebootverify.Find
 	}
 }
 
-func assertBootSkeletonUsesRuntimeToolInventory(t *testing.T, source semanticview.Source, report runtimebootverify.Report) {
+func assertBootProgressUsesRuntimeToolInventory(t *testing.T, source semanticview.Source) {
 	t.Helper()
 
 	wantTools := len(runtimetools.RuntimeAvailableToolNamesForSource(source))
@@ -93,22 +91,11 @@ func assertBootSkeletonUsesRuntimeToolInventory(t *testing.T, source semanticvie
 		t.Fatal("runtime tool inventory unexpectedly empty")
 	}
 
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	previous := slog.Default()
-	slog.SetDefault(logger)
-	defer slog.SetDefault(previous)
-
-	logBootSkeleton(source, "/tmp/contracts", "/tmp/platform-spec.yaml", report, "state stores ready")
-
-	out := buf.String()
-	if !strings.Contains(out, "name=build_registries") {
-		t.Fatalf("log output missing build_registries step:\n%s", out)
-	}
-	if !strings.Contains(out, "tools="+strconv.Itoa(wantTools)) {
-		t.Fatalf("log output missing runtime tool count %d:\n%s", wantTools, out)
+	out := serveBootRegistryDetail(source)
+	if !strings.Contains(out, fmt.Sprintf("tools=%d", wantTools)) {
+		t.Fatalf("boot progress detail missing runtime tool count %d:\n%s", wantTools, out)
 	}
 	if strings.Contains(out, "tools=0") {
-		t.Fatalf("log output still reports zero tools:\n%s", out)
+		t.Fatalf("boot progress detail still reports zero tools:\n%s", out)
 	}
 }

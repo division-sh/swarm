@@ -6,12 +6,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,7 +18,6 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
-	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
@@ -154,9 +151,47 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check", "--require-bundle-match", "--no-require-bundle-match"} {
+	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check", "--require-bundle-match", "--no-require-bundle-match", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestCLI_ServeVerboseFlagConsumesServeOwner(t *testing.T) {
+	var captured serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		captured = serveOpts
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--verbose"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !captured.Verbose {
+		t.Fatalf("serve verbose = false, want true")
+	}
+	if captured.Output == nil {
+		t.Fatalf("serve output writer was not passed to serve owner")
+	}
+}
+
+func TestServeBootReporterEmitsNumberedProgressOnlyWhenVerbose(t *testing.T) {
+	var quiet bytes.Buffer
+	newServeBootReporter(false, &quiet).emit(1, "process_start", "ok", "")
+	if quiet.Len() != 0 {
+		t.Fatalf("quiet reporter output = %q, want empty", quiet.String())
+	}
+
+	var verbose bytes.Buffer
+	newServeBootReporter(true, &verbose).emit(1, "process_start", "ok", "contracts=contracts")
+	out := verbose.String()
+	for _, want := range []string{"[1/22]", "process_start", "ok", "contracts=contracts"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("verbose output missing %q:\n%s", want, out)
 		}
 	}
 }
@@ -2601,27 +2636,15 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 	}
 }
 
-func TestLogBootSkeleton_UsesRuntimeToolInventoryCount(t *testing.T) {
+func TestServeBootRegistryDetail_UsesRuntimeToolInventoryCount(t *testing.T) {
 	source := semanticview.Wrap(testWorkflowValidationBundle())
 	wantTools := len(runtimetools.RuntimeAvailableToolNamesForSource(source))
 	if wantTools == 0 {
 		t.Fatal("runtime tool inventory unexpectedly empty")
 	}
 
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	previous := slog.Default()
-	slog.SetDefault(logger)
-	defer slog.SetDefault(previous)
-
-	logBootSkeleton(source, "/tmp/contracts", "/tmp/platform-spec.yaml", runtimebootverify.Report{}, "state stores ready")
-
-	out := buf.String()
-	want := "name=build_registries"
-	if !strings.Contains(out, want) {
-		t.Fatalf("log output missing %q:\n%s", want, out)
-	}
-	if !strings.Contains(out, "tools="+strconv.Itoa(wantTools)) {
+	out := serveBootRegistryDetail(source)
+	if !strings.Contains(out, fmt.Sprintf("tools=%d", wantTools)) {
 		t.Fatalf("log output missing runtime tool count %d:\n%s", wantTools, out)
 	}
 	if strings.Contains(out, "tools=0") {

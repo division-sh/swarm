@@ -89,6 +89,8 @@ type serveOptions struct {
 	SelfCheck            bool
 	RequireBundleMatch   bool
 	NoRequireBundleMatch bool
+	Verbose              bool
+	Output               io.Writer
 }
 
 func defaultServeOptions() serveOptions {
@@ -102,41 +104,53 @@ func defaultServeOptions() serveOptions {
 }
 
 func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
+	bootStartedAt := time.Now().UTC()
+	reporter := newServeBootReporter(opts.Verbose, opts.Output)
+	reporter.emit(1, "process_start", "ok", "")
 	resolvedConfigPath := resolvePath(repo, opts.ConfigPath)
 	resolvedContractsPath := resolveContractsPath(repo, opts.ContractsPath)
 	resolvedPlatformSpecPath := resolvePath(repo, opts.PlatformSpecPath)
 	if err := loadRepoDotEnv(repo); err != nil {
+		reporter.emit(2, "config_load", "FAILED", err.Error())
 		log.Printf("load .env: %v", err)
 		return 1
 	}
 
 	cfg, err := loadRuntimeConfig(resolvedConfigPath)
 	if err != nil {
+		reporter.emit(2, "config_load", "FAILED", err.Error())
 		log.Printf("load config: %v", err)
 		return 1
 	}
+	reporter.emit(2, "config_load", "ok", fmt.Sprintf("config=%s contracts=%s", filepath.Clean(resolvedConfigPath), filepath.Clean(resolvedContractsPath)))
 	stores, err := buildStores(ctx, opts.StoreMode, cfg)
 	if err != nil {
+		reporter.emit(3, "db_connection", "FAILED", err.Error())
 		log.Printf("init stores: %v", err)
 		return 1
 	}
+	reporter.emit(3, "db_connection", "ok", opts.StoreMode)
 	defer closeDB(stores.SQLDB)
 	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
 	if err != nil {
+		reporter.emit(4, "bundle_load", "FAILED", err.Error())
 		log.Printf("resolve contracts: %v", err)
 		return 1
 	}
 	module, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPlatformSpecPath)
 	if err != nil {
+		reporter.emit(4, "bundle_load", "FAILED", err.Error())
 		log.Printf("load Swarm contracts: %v", err)
 		return 1
 	}
 	bootBundleIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
+		reporter.emit(4, "bundle_load", "FAILED", err.Error())
 		log.Printf("compute boot bundle identity: %v", err)
 		return 1
 	}
 	source := semanticview.Wrap(bundle)
+	reporter.emit(4, "bundle_load", "ok", fmt.Sprintf("%s, %d agents, %d events", bootBundleIdentity.Fingerprint, len(source.AgentEntries()), len(source.ResolvedEventCatalog())))
 	stateStoreSummary, err := initializeStateStores(ctx, stores, bundle)
 	if err != nil {
 		slog.Error("initialize state stores", "error", err)
@@ -159,6 +173,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		slog.Error("ensure system workspaces", "error", err)
 		return 1
 	}
+	systemContainers := systemWorkspaceContainers(workspaces)
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
 		slog.Error("configure credentials", "error", err)
@@ -185,6 +200,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		ToolGatewayToken:   strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")),
 		BundleFingerprint:  bootBundleIdentity.Fingerprint,
 		Credentials:        credentialStore,
+		BootStartedAt:      bootStartedAt,
+		BootProgress:       reporter.runtimeSink(),
+		SystemContainers:   systemContainers,
 	})
 	if err != nil {
 		log.Printf("init runtime: %v", err)
@@ -254,13 +272,16 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	healthServer := newHealthServer(opts.HealthAddr, &ready, rt.ToolGateway, apiV1Handler)
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
-
-	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath, bootReport, stateStoreSummary)
+	logBootWarnings(bootReport)
 	if err := rt.Start(ctx); err != nil {
+		reporter.emit(22, "ready", "FAILED", err.Error())
 		log.Printf("start runtime: %v", err)
 		return 1
 	}
+	reporter.emit(20, "http_servers_start", "ok", fmt.Sprintf("health=%s v1_rpc=/v1/rpc v1_ws=/v1/ws listener active", opts.HealthAddr))
 	ready.Store(true)
+	reporter.emit(21, "health_endpoints_respond", "ok", "/healthz /readyz /v1/rpc /v1/ws")
+	reporter.emit(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", time.Since(bootStartedAt).Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
 	logReadySummary(source, contractsRoot, opts.HealthAddr)
 
 	<-ctx.Done()
@@ -1485,49 +1506,73 @@ func (m *swarmWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
 	return m.actionRegistry
 }
 
-func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string, report runtimebootverify.Report, stateStoreSummary string) {
+type serveBootReporter struct {
+	enabled bool
+	out     io.Writer
+}
+
+func newServeBootReporter(enabled bool, out io.Writer) serveBootReporter {
+	if out == nil {
+		out = io.Discard
+	}
+	return serveBootReporter{enabled: enabled, out: out}
+}
+
+func (r serveBootReporter) runtimeSink() func(runtime.BootProgressEvent) {
+	if !r.enabled {
+		return nil
+	}
+	return func(evt runtime.BootProgressEvent) {
+		r.emit(evt.Step, evt.Name, evt.Status, evt.Detail)
+	}
+}
+
+func (r serveBootReporter) emit(step int, name, status, detail string) {
+	if !r.enabled || r.out == nil {
+		return
+	}
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "ok"
+	}
+	detail = strings.TrimSpace(detail)
+	if detail != "" {
+		detail = "  (" + detail + ")"
+	}
+	fmt.Fprintf(r.out, "[%d/%d] %-34s %s%s\n", step, runtime.BootProgressTotalSteps, strings.TrimSpace(name), status, detail)
+}
+
+func serveBootRegistryDetail(source semanticview.Source) string {
+	availableToolNames := runtimetools.RuntimeAvailableToolNamesForSource(source)
+	return fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(source.AgentEntries()), len(source.ResolvedEventCatalog()), len(availableToolNames))
+}
+
+func logBootWarnings(report runtimebootverify.Report) {
 	warningCounts := make(map[string]int, len(report.Findings))
 	for _, finding := range report.Warnings() {
 		warningCounts[strings.TrimSpace(finding.CheckID)]++
 	}
-	availableToolNames := runtimetools.RuntimeAvailableToolNamesForSource(source)
-	steps := []struct {
-		index int
-		name  string
-		note  string
-	}{
-		{1, "load_platform_spec", fmt.Sprintf("loaded %s", filepath.Clean(platformSpecPath))},
-		{2, "walk_flow_tree", fmt.Sprintf("discovered %d flow(s)", len(source.FlowSchemaEntries()))},
-		{3, "construct_paths", "constructed hierarchical contract paths from package tree"},
-		{4, "register_templates", fmt.Sprintf("registered %d template flow(s)", templateFlowCount(source))},
-		{5, "build_registries", fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(source.AgentEntries()), len(source.ResolvedEventCatalog()), len(availableToolNames))},
-		{6, "resolve_subscriptions", "subscription resolution skeleton in place; full validation lands in CP4"},
-		{7, "validate_pins", fmt.Sprintf("validated flow pins and event wiring; warnings=%d", warningCounts["event_chain_integrity"]+warningCounts["event_consumer_exists"]+warningCounts["event_producer_exists"])},
-		{8, "validate_required_agents", "validated required_agents coverage and state-machine targets"},
-		{9, "validate_tools", fmt.Sprintf("validated tools and prompt coverage; warnings=%d", warningCounts["prompt_exists"]+warningCounts["tool_resolution"])},
-		{10, "validate_permissions", "validated platform permission requirements during boot verification"},
-		{11, "validate_platform_version", fmt.Sprintf("loaded platform spec version %s for workflow %s", strings.TrimSpace(source.PlatformSpec().Platform.Version), strings.TrimSpace(source.WorkflowVersion()))},
-		{12, "initialize_state_stores", fmt.Sprintf("%s (contracts=%s)", strings.TrimSpace(stateStoreSummary), contractsRoot)},
-		{13, "start_system_nodes", "delegated to runtime.Start()"},
-		{14, "start_agents", "delegated to runtime.Start()"},
-		{15, "ready", "health server transitions to ready after runtime start"},
-	}
-	for _, step := range steps {
-		slog.Info("swarm boot", "step", fmt.Sprintf("%02d", step.index), "name", step.name, "detail", step.note)
+	if len(warningCounts) > 0 {
+		slog.Info("swarm boot validation warning summary",
+			"event_wiring_warnings", warningCounts["event_chain_integrity"]+warningCounts["event_consumer_exists"]+warningCounts["event_producer_exists"],
+			"tool_warnings", warningCounts["prompt_exists"]+warningCounts["tool_resolution"],
+		)
 	}
 	for _, finding := range report.Warnings() {
 		slog.Warn("swarm boot validation warning", "check_id", finding.CheckID, "location", finding.Location, "detail", finding.Message)
 	}
 }
 
-func templateFlowCount(source semanticview.Source) int {
-	count := 0
-	for _, flow := range source.FlowSchemaEntries() {
-		if strings.EqualFold(strings.TrimSpace(flow.Mode), "template") {
-			count++
-		}
+type systemWorkspaceContainerLister interface {
+	SystemWorkspaceContainers() []string
+}
+
+func systemWorkspaceContainers(lifecycle workspace.Lifecycle) []string {
+	lister, ok := lifecycle.(systemWorkspaceContainerLister)
+	if !ok || lister == nil {
+		return nil
 	}
-	return count
+	return lister.SystemWorkspaceContainers()
 }
 
 func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Gateway, apiV1Handler http.Handler) *http.Server {
