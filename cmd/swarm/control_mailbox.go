@@ -18,6 +18,52 @@ type mailboxDecisionResult struct {
 	Status            string `json:"status"`
 }
 
+type mailboxItem struct {
+	MailboxID      string         `json:"mailbox_id"`
+	Type           string         `json:"type"`
+	Status         string         `json:"status"`
+	Priority       string         `json:"priority"`
+	SourceEventID  string         `json:"source_event_id"`
+	SourceFlow     string         `json:"source_flow"`
+	SourceEntityID string         `json:"source_entity_id,omitempty"`
+	Payload        map[string]any `json:"payload"`
+	CreatedAt      string         `json:"created_at"`
+	DecidedAt      string         `json:"decided_at,omitempty"`
+	Decision       string         `json:"decision,omitempty"`
+}
+
+type mailboxHistoryEntry struct {
+	Action          string         `json:"action"`
+	ActorTokenID    string         `json:"actor_token_id"`
+	TS              string         `json:"ts"`
+	DecisionPayload map[string]any `json:"decision_payload,omitempty"`
+	Reason          string         `json:"reason,omitempty"`
+}
+
+type mailboxListResult struct {
+	Items      []mailboxItem `json:"items"`
+	NextCursor string        `json:"next_cursor,omitempty"`
+}
+
+type mailboxDetailResult struct {
+	Item    mailboxItem           `json:"item"`
+	Payload map[string]any        `json:"payload"`
+	History []mailboxHistoryEntry `json:"history"`
+}
+
+type mailboxListCommandOptions struct {
+	apiOptions rootCommandOptions
+	status     string
+	all        bool
+	runID      string
+	entityID   string
+	itemType   string
+	priority   string
+	limit      int
+	limitSet   bool
+	cursor     string
+}
+
 type mailboxDecisionCommandOptions struct {
 	apiOptions          rootCommandOptions
 	action              string
@@ -47,13 +93,15 @@ func newControlCommand(opts rootCommandOptions) *cobra.Command {
 func newMailboxCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mailbox",
-		Short: "Approve, reject, or defer mailbox items through v1 RPC.",
+		Short: "List, view, and decide mailbox items through v1 RPC.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 	cmd.AddCommand(
+		newMailboxListCommand(opts),
+		newMailboxViewCommand(opts),
 		newMailboxApproveCommand(opts),
 		newMailboxRejectCommand(opts),
 		newMailboxDeferCommand(opts),
@@ -82,6 +130,42 @@ func writeControlMailboxRetiredMessage(w io.Writer) {
 	fmt.Fprintln(w, "  `swarm mailbox approve <mailbox-item-id>`")
 	fmt.Fprintln(w, "  `swarm mailbox reject <mailbox-item-id> --reason <text>`")
 	fmt.Fprintln(w, "  `swarm mailbox defer <mailbox-item-id> --until <RFC3339>`")
+}
+
+func newMailboxListCommand(opts rootCommandOptions) *cobra.Command {
+	listOpts := mailboxListCommandOptions{
+		apiOptions: opts,
+		status:     "pending",
+	}
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List mailbox items through v1 RPC.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			listOpts.limitSet = cmd.Flags().Changed("limit")
+			return runMailboxListCommand(cmd.Context(), cmd.OutOrStdout(), listOpts)
+		},
+	}
+	cmd.Flags().StringVar(&listOpts.status, "status", listOpts.status, "Mailbox status: pending, decided, expired, or deferred")
+	cmd.Flags().BoolVar(&listOpts.all, "all", false, "List all mailbox statuses instead of only pending")
+	cmd.Flags().StringVar(&listOpts.runID, "run-id", "", "Filter to one run")
+	cmd.Flags().StringVar(&listOpts.entityID, "entity-id", "", "Filter to one entity")
+	cmd.Flags().StringVar(&listOpts.itemType, "type", "", "Filter by mailbox item type")
+	cmd.Flags().StringVar(&listOpts.priority, "priority", "", "Mailbox priority: normal, high, or critical")
+	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Page size from 1 to 200; omitted uses the API default")
+	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Continuation cursor")
+	return cmd
+}
+
+func newMailboxViewCommand(opts rootCommandOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "view <mailbox-item-id>",
+		Short: "View one mailbox item through v1 RPC.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runMailboxViewCommand(cmd.Context(), cmd.OutOrStdout(), opts, args[0])
+		},
+	}
 }
 
 func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
@@ -141,6 +225,46 @@ func newMailboxDeferCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
+func runMailboxListCommand(ctx context.Context, out io.Writer, opts mailboxListCommandOptions) error {
+	params, err := opts.params()
+	if err != nil {
+		return err
+	}
+	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		return err
+	}
+	var result mailboxListResult
+	if err := client.call(ctx, "mailbox.list", params, &result); err != nil {
+		return err
+	}
+	if err := validateMailboxListResult(result); err != nil {
+		return err
+	}
+	writeMailboxListResult(out, result)
+	return nil
+}
+
+func runMailboxViewCommand(ctx context.Context, out io.Writer, opts rootCommandOptions, mailboxID string) error {
+	mailboxID = strings.TrimSpace(mailboxID)
+	if mailboxID == "" {
+		return fmt.Errorf("mailbox item id is required")
+	}
+	client, err := newCLIAPIClient(opts)
+	if err != nil {
+		return err
+	}
+	var result mailboxDetailResult
+	if err := client.call(ctx, "mailbox.get", map[string]any{"mailbox_id": mailboxID}, &result); err != nil {
+		return err
+	}
+	if err := validateMailboxDetailResult(result); err != nil {
+		return err
+	}
+	writeMailboxDetailResult(out, result)
+	return nil
+}
+
 func runMailboxDecisionCommand(ctx context.Context, out io.Writer, opts mailboxDecisionCommandOptions, mailboxID string) error {
 	mailboxID = strings.TrimSpace(mailboxID)
 	if mailboxID == "" {
@@ -162,6 +286,65 @@ func runMailboxDecisionCommand(ctx context.Context, out io.Writer, opts mailboxD
 		return err
 	}
 	writeMailboxDecisionResult(out, opts.action, mailboxID, result)
+	return nil
+}
+
+func validateMailboxListResult(result mailboxListResult) error {
+	if result.Items == nil {
+		return fmt.Errorf("malformed mailbox.list result: items is required")
+	}
+	for i, item := range result.Items {
+		if err := validateMailboxItem(item); err != nil {
+			return fmt.Errorf("malformed mailbox.list result: items[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func validateMailboxDetailResult(result mailboxDetailResult) error {
+	if err := validateMailboxItem(result.Item); err != nil {
+		return fmt.Errorf("malformed mailbox.get result: item: %w", err)
+	}
+	if result.Payload == nil {
+		return fmt.Errorf("malformed mailbox.get result: payload is required")
+	}
+	if result.History == nil {
+		return fmt.Errorf("malformed mailbox.get result: history is required")
+	}
+	for i, entry := range result.History {
+		if strings.TrimSpace(entry.Action) == "" {
+			return fmt.Errorf("malformed mailbox.get result: history[%d].action is required", i)
+		}
+		if strings.TrimSpace(entry.ActorTokenID) == "" {
+			return fmt.Errorf("malformed mailbox.get result: history[%d].actor_token_id is required", i)
+		}
+		if strings.TrimSpace(entry.TS) == "" {
+			return fmt.Errorf("malformed mailbox.get result: history[%d].ts is required", i)
+		}
+	}
+	return nil
+}
+
+func validateMailboxItem(item mailboxItem) error {
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "mailbox_id", value: item.MailboxID},
+		{name: "type", value: item.Type},
+		{name: "status", value: item.Status},
+		{name: "priority", value: item.Priority},
+		{name: "source_event_id", value: item.SourceEventID},
+		{name: "source_flow", value: item.SourceFlow},
+		{name: "created_at", value: item.CreatedAt},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("%s is required", field.name)
+		}
+	}
+	if item.Payload == nil {
+		return fmt.Errorf("payload is required")
+	}
 	return nil
 }
 
@@ -193,6 +376,63 @@ func expectedMailboxDecisionStatus(action string) (string, error) {
 		return "deferred", nil
 	default:
 		return "", fmt.Errorf("unsupported mailbox action %q", action)
+	}
+}
+
+func (o mailboxListCommandOptions) params() (map[string]any, error) {
+	params := map[string]any{}
+	if !o.all {
+		status := strings.TrimSpace(strings.ToLower(o.status))
+		if status == "" {
+			status = "pending"
+		}
+		if !validMailboxStatus(status) {
+			return nil, fmt.Errorf("--status must be one of pending, decided, expired, deferred")
+		}
+		params["status"] = status
+	}
+	if runID := strings.TrimSpace(o.runID); runID != "" {
+		params["run_id"] = runID
+	}
+	if entityID := strings.TrimSpace(o.entityID); entityID != "" {
+		params["entity_id"] = entityID
+	}
+	if itemType := strings.TrimSpace(o.itemType); itemType != "" {
+		params["type"] = itemType
+	}
+	if priority := strings.TrimSpace(strings.ToLower(o.priority)); priority != "" {
+		if !validMailboxPriority(priority) {
+			return nil, fmt.Errorf("--priority must be one of normal, high, critical")
+		}
+		params["priority"] = priority
+	}
+	if (o.limitSet && o.limit <= 0) || o.limit > 200 {
+		return nil, fmt.Errorf("--limit must be an integer from 1 to 200")
+	}
+	if o.limit > 0 {
+		params["limit"] = o.limit
+	}
+	if cursor := strings.TrimSpace(o.cursor); cursor != "" {
+		params["cursor"] = cursor
+	}
+	return params, nil
+}
+
+func validMailboxStatus(status string) bool {
+	switch status {
+	case "pending", "decided", "expired", "deferred":
+		return true
+	default:
+		return false
+	}
+}
+
+func validMailboxPriority(priority string) bool {
+	switch priority {
+	case "normal", "high", "critical":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -247,6 +487,65 @@ func parseOptionalDecisionPayload(raw string) (map[string]any, bool, error) {
 	return payload, true, nil
 }
 
+func writeMailboxListResult(out io.Writer, result mailboxListResult) {
+	if out == nil {
+		return
+	}
+	if len(result.Items) == 0 {
+		fmt.Fprintln(out, "No mailbox items match the filter.")
+		return
+	}
+	fmt.Fprintln(out, "MAILBOX_ID\tSTATUS\tPRIORITY\tTYPE\tSOURCE_EVENT\tENTITY\tCREATED\tDECISION")
+	for _, item := range result.Items {
+		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			item.MailboxID,
+			item.Status,
+			item.Priority,
+			item.Type,
+			item.SourceEventID,
+			mailboxDash(item.SourceEntityID),
+			item.CreatedAt,
+			mailboxDash(item.Decision),
+		)
+	}
+	if result.NextCursor != "" {
+		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
+	}
+}
+
+func writeMailboxDetailResult(out io.Writer, result mailboxDetailResult) {
+	if out == nil {
+		return
+	}
+	item := result.Item
+	fmt.Fprintf(out, "Mailbox %s\n", item.MailboxID)
+	fmt.Fprintf(out, "status=%s priority=%s type=%s\n", item.Status, item.Priority, item.Type)
+	fmt.Fprintf(out, "source_event_id=%s source_flow=%s source_entity_id=%s created_at=%s\n",
+		item.SourceEventID,
+		item.SourceFlow,
+		mailboxDash(item.SourceEntityID),
+		item.CreatedAt,
+	)
+	if item.Decision != "" || item.DecidedAt != "" {
+		fmt.Fprintf(out, "decision=%s decided_at=%s\n", mailboxDash(item.Decision), mailboxDash(item.DecidedAt))
+	}
+	writeMailboxObject(out, "payload", result.Payload)
+	if len(result.History) > 0 {
+		fmt.Fprintln(out, "history:")
+		for _, entry := range result.History {
+			fmt.Fprintf(out, "- action=%s actor=%s ts=%s", entry.Action, entry.ActorTokenID, entry.TS)
+			if entry.Reason != "" {
+				fmt.Fprintf(out, " reason=%q", entry.Reason)
+			}
+			if len(entry.DecisionPayload) > 0 {
+				fmt.Fprint(out, " decision_payload=")
+				writeCompactJSON(out, entry.DecisionPayload)
+			}
+			fmt.Fprintln(out)
+		}
+	}
+}
+
 func writeMailboxDecisionResult(out io.Writer, action, mailboxID string, result mailboxDecisionResult) {
 	if out == nil {
 		return
@@ -256,4 +555,30 @@ func writeMailboxDecisionResult(out io.Writer, action, mailboxID string, result 
 		fmt.Fprintf(out, " downstream_event_id=%s", result.DownstreamEventID)
 	}
 	fmt.Fprintln(out)
+}
+
+func writeMailboxObject(out io.Writer, label string, value map[string]any) {
+	if len(value) == 0 {
+		fmt.Fprintf(out, "%s={}\n", label)
+		return
+	}
+	fmt.Fprintf(out, "%s=", label)
+	writeCompactJSON(out, value)
+	fmt.Fprintln(out)
+}
+
+func writeCompactJSON(out io.Writer, value map[string]any) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		fmt.Fprint(out, "{}")
+		return
+	}
+	fmt.Fprint(out, string(raw))
+}
+
+func mailboxDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
 }

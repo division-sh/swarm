@@ -5348,6 +5348,25 @@ cli_specification:
       status: must_have
       owner: /v1/rpc health.check
       behavior: Structured authenticated operator health; do not consume /healthz, /readyz, or retired dashboard aliases.
+    mailbox_list:
+      command: swarm mailbox list
+      status: must_have
+      owner: /v1/rpc mailbox.list
+      behavior: >
+        Primary mailbox read/discovery list through canonical v1 API owner; default status is pending, --all omits the status filter,
+        and supported filters/pagination map directly to mailbox.list params. No direct DB/store/dashboard REST/mailbox reads.
+      split_tail: >
+        Richer operator decision-sheet composition remains under #735; this implemented slice does not derive cross-resource
+        entity/downstream truth locally.
+    mailbox_view:
+      command: swarm mailbox view <mailbox-item-id>
+      status: must_have
+      owner: /v1/rpc mailbox.get
+      behavior: >
+        Primary mailbox item detail view through canonical v1 API owner. No direct DB/store/dashboard REST/mailbox reads and no
+        CLI-side entity/downstream composition in this first slice.
+      split_tail: >
+        The v2 review draft's richer composed view using entity context and downstream-subscriber preview remains split under #735.
     mailbox_approve:
       command: swarm mailbox approve <mailbox-item-id>
       status: must_have
@@ -5397,6 +5416,8 @@ cli_specification:
       message: "ERROR: `swarm fork` was removed in v1. Forking is a mutating control action; use `swarm control run fork <run-id>` once that command ships. For v1, manual run forking goes through the API owner and the API spec."
   parent_tail:
     implemented_after_first_slice:
+    - swarm mailbox list
+    - swarm mailbox view
     - swarm mailbox approve
     - swarm mailbox reject
     - swarm mailbox defer
@@ -5408,8 +5429,6 @@ cli_specification:
     - swarm investigate health
     remaining_not_implemented:
     - swarm run
-    - swarm mailbox list
-    - swarm mailbox view
     - swarm control run/runtime/agent
     rule: 'Remaining commands require separate gates and must consume v1 API owners; they MUST NOT resurrect local DB/store/runtime-state readers.'
 
