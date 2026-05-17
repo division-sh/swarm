@@ -5348,21 +5348,26 @@ cli_specification:
       status: must_have
       owner: /v1/rpc health.check
       behavior: Structured authenticated operator health; do not consume /healthz, /readyz, or retired dashboard aliases.
-    control_mailbox_approve:
-      command: swarm control mailbox approve <mailbox-item-id>
+    mailbox_approve:
+      command: swarm mailbox approve <mailbox-item-id>
       status: must_have
       owner: /v1/rpc mailbox.approve
       behavior: Mailbox approval action through canonical v1 API owner; no direct DB/store/mailbox writes.
-    control_mailbox_reject:
-      command: swarm control mailbox reject <mailbox-item-id>
+    mailbox_reject:
+      command: swarm mailbox reject <mailbox-item-id>
       status: must_have
       owner: /v1/rpc mailbox.reject
       behavior: Mailbox rejection action through canonical v1 API owner; no direct DB/store/mailbox writes.
-    control_mailbox_defer:
-      command: swarm control mailbox defer <mailbox-item-id>
+    mailbox_defer:
+      command: swarm mailbox defer <mailbox-item-id>
       status: must_have
       owner: /v1/rpc mailbox.defer
       behavior: Mailbox defer action through canonical v1 API owner; no direct DB/store/mailbox writes.
+    control_mailbox:
+      command: swarm control mailbox approve|reject|defer
+      status: retired
+      exit_code: 2
+      message: "ERROR: `swarm control mailbox` was removed in CLI v2. Use resource-noun-first `swarm mailbox approve|reject|defer`."
     control_nuke:
       command: swarm control nuke [--yes|-y] [--dry-run]
       status: must_have
@@ -5392,9 +5397,9 @@ cli_specification:
       message: "ERROR: `swarm fork` was removed in v1. Forking is a mutating control action; use `swarm control run fork <run-id>` once that command ships. For v1, manual run forking goes through the API owner and the API spec."
   parent_tail:
     implemented_after_first_slice:
-    - swarm control mailbox approve
-    - swarm control mailbox reject
-    - swarm control mailbox defer
+    - swarm mailbox approve
+    - swarm mailbox reject
+    - swarm mailbox defer
     - swarm control nuke
     - swarm runs
     - swarm investigate runs
@@ -5403,6 +5408,8 @@ cli_specification:
     - swarm investigate health
     remaining_not_implemented:
     - swarm run
+    - swarm mailbox list
+    - swarm mailbox view
     - swarm control run/runtime/agent
     rule: 'Remaining commands require separate gates and must consume v1 API owners; they MUST NOT resurrect local DB/store/runtime-state readers.'
 

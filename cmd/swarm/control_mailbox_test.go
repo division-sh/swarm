@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestControlMailboxCommandsSendV1RPCRequests(t *testing.T) {
+func TestMailboxCommandsSendV1RPCRequests(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		args       []string
@@ -22,7 +22,7 @@ func TestControlMailboxCommandsSendV1RPCRequests(t *testing.T) {
 	}{
 		{
 			name:       "approve",
-			args:       []string{"control", "mailbox", "approve", "mailbox-1", "--idempotency-key", "idem-approve", "--decision-payload-json", `{"approved":true}`},
+			args:       []string{"mailbox", "approve", "mailbox-1", "--idempotency-key", "idem-approve", "--decision-payload-json", `{"approved":true}`},
 			wantMethod: "mailbox.approve",
 			wantParams: map[string]any{
 				"mailbox_id":       "mailbox-1",
@@ -33,7 +33,7 @@ func TestControlMailboxCommandsSendV1RPCRequests(t *testing.T) {
 		},
 		{
 			name:       "reject",
-			args:       []string{"control", "mailbox", "reject", "mailbox-2", "--reason", "not enough evidence", "--idempotency-key", "idem-reject"},
+			args:       []string{"mailbox", "reject", "mailbox-2", "--reason", "not enough evidence", "--idempotency-key", "idem-reject"},
 			wantMethod: "mailbox.reject",
 			wantParams: map[string]any{
 				"mailbox_id":      "mailbox-2",
@@ -44,7 +44,7 @@ func TestControlMailboxCommandsSendV1RPCRequests(t *testing.T) {
 		},
 		{
 			name:       "defer",
-			args:       []string{"control", "mailbox", "defer", "mailbox-3", "--until", "2026-05-13T12:30:00Z", "--idempotency-key", "idem-defer"},
+			args:       []string{"mailbox", "defer", "mailbox-3", "--until", "2026-05-13T12:30:00Z", "--idempotency-key", "idem-defer"},
 			wantMethod: "mailbox.defer",
 			wantParams: map[string]any{
 				"mailbox_id":      "mailbox-3",
@@ -107,7 +107,7 @@ func TestControlMailboxCommandsSendV1RPCRequests(t *testing.T) {
 	}
 }
 
-func TestControlMailboxRejectsInvalidInputBeforeRequest(t *testing.T) {
+func TestMailboxRejectsInvalidInputBeforeRequest(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -122,15 +122,15 @@ func TestControlMailboxRejectsInvalidInputBeforeRequest(t *testing.T) {
 		wantStderr  string
 		wantNoCalls bool
 	}{
-		{name: "approve missing id", args: []string{"control", "mailbox", "approve"}, wantStderr: "accepts 1 arg(s)", wantNoCalls: true},
-		{name: "approve extra arg", args: []string{"control", "mailbox", "approve", "mailbox-1", "extra"}, wantStderr: "accepts 1 arg(s)", wantNoCalls: true},
-		{name: "approve unsupported flag", args: []string{"control", "mailbox", "approve", "mailbox-1", "--unknown"}, wantStderr: "unknown flag", wantNoCalls: true},
-		{name: "approve malformed payload", args: []string{"control", "mailbox", "approve", "mailbox-1", "--decision-payload-json", "{"}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
-		{name: "approve non-object payload", args: []string{"control", "mailbox", "approve", "mailbox-1", "--decision-payload-json", "[]"}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
-		{name: "reject missing reason", args: []string{"control", "mailbox", "reject", "mailbox-1"}, wantStderr: "--reason is required", wantNoCalls: true},
-		{name: "reject blank reason", args: []string{"control", "mailbox", "reject", "mailbox-1", "--reason", "  "}, wantStderr: "--reason is required", wantNoCalls: true},
-		{name: "defer missing until", args: []string{"control", "mailbox", "defer", "mailbox-1"}, wantStderr: "--until is required", wantNoCalls: true},
-		{name: "defer invalid until", args: []string{"control", "mailbox", "defer", "mailbox-1", "--until", "tomorrow"}, wantStderr: "--until must be an RFC3339 timestamp", wantNoCalls: true},
+		{name: "approve missing id", args: []string{"mailbox", "approve"}, wantStderr: "accepts 1 arg(s)", wantNoCalls: true},
+		{name: "approve extra arg", args: []string{"mailbox", "approve", "mailbox-1", "extra"}, wantStderr: "accepts 1 arg(s)", wantNoCalls: true},
+		{name: "approve unsupported flag", args: []string{"mailbox", "approve", "mailbox-1", "--unknown"}, wantStderr: "unknown flag", wantNoCalls: true},
+		{name: "approve malformed payload", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload-json", "{"}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
+		{name: "approve non-object payload", args: []string{"mailbox", "approve", "mailbox-1", "--decision-payload-json", "[]"}, wantStderr: "--decision-payload-json must be a JSON object", wantNoCalls: true},
+		{name: "reject missing reason", args: []string{"mailbox", "reject", "mailbox-1"}, wantStderr: "--reason is required", wantNoCalls: true},
+		{name: "reject blank reason", args: []string{"mailbox", "reject", "mailbox-1", "--reason", "  "}, wantStderr: "--reason is required", wantNoCalls: true},
+		{name: "defer missing until", args: []string{"mailbox", "defer", "mailbox-1"}, wantStderr: "--until is required", wantNoCalls: true},
+		{name: "defer invalid until", args: []string{"mailbox", "defer", "mailbox-1", "--until", "tomorrow"}, wantStderr: "--until must be an RFC3339 timestamp", wantNoCalls: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := calls.Load()
@@ -152,7 +152,7 @@ func TestControlMailboxRejectsInvalidInputBeforeRequest(t *testing.T) {
 	}
 }
 
-func TestControlMailboxRequiresAPITokenBeforeRequest(t *testing.T) {
+func TestMailboxRequiresAPITokenBeforeRequest(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +162,7 @@ func TestControlMailboxRequiresAPITokenBeforeRequest(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "mailbox", "approve", "mailbox-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "approve", "mailbox-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 2 {
 		t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -174,7 +174,48 @@ func TestControlMailboxRequiresAPITokenBeforeRequest(t *testing.T) {
 	}
 }
 
-func TestControlMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
+func TestControlMailboxRetiredAliasesFailClosedBeforeRequest(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSONRPCResult(t, w, "unexpected", map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	for _, args := range [][]string{
+		{"control", "mailbox", "approve", "mailbox-1"},
+		{"control", "mailbox", "reject", "mailbox-1", "--reason", "not enough evidence"},
+		{"control", "mailbox", "defer", "mailbox-1", "--until", "2026-05-13T12:30:00Z"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			before := calls.Load()
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 2 {
+				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if strings.TrimSpace(stdout.String()) != "" {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			for _, want := range []string{
+				"`swarm control mailbox` was removed in CLI v2",
+				"`swarm mailbox approve <mailbox-item-id>`",
+				"`swarm mailbox reject <mailbox-item-id> --reason <text>`",
+				"`swarm mailbox defer <mailbox-item-id> --until <RFC3339>`",
+			} {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+				}
+			}
+			if calls.Load() != before {
+				t.Fatalf("server calls changed from %d to %d, want no request", before, calls.Load())
+			}
+		})
+	}
+}
+
+func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		handler    http.HandlerFunc
@@ -259,7 +300,7 @@ func TestControlMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "mailbox", "approve", "mailbox-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "approve", "mailbox-1"}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != 2 {
 				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -273,7 +314,7 @@ func TestControlMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 	}
 }
 
-func TestControlMailboxRejectsMalformedStatusByAction(t *testing.T) {
+func TestMailboxRejectsMalformedStatusByAction(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		args   []string
@@ -282,19 +323,19 @@ func TestControlMailboxRejectsMalformedStatusByAction(t *testing.T) {
 	}{
 		{
 			name:   "approve invalid enum status",
-			args:   []string{"control", "mailbox", "approve", "mailbox-1"},
+			args:   []string{"mailbox", "approve", "mailbox-1"},
 			status: "garbage",
 			want:   `status="garbage", want "decided" for mailbox approve`,
 		},
 		{
 			name:   "reject wrong action status",
-			args:   []string{"control", "mailbox", "reject", "mailbox-1", "--reason", "not enough evidence"},
+			args:   []string{"mailbox", "reject", "mailbox-1", "--reason", "not enough evidence"},
 			status: "deferred",
 			want:   `status="deferred", want "decided" for mailbox reject`,
 		},
 		{
 			name:   "defer wrong action status",
-			args:   []string{"control", "mailbox", "defer", "mailbox-1", "--until", "2026-05-13T12:30:00Z"},
+			args:   []string{"mailbox", "defer", "mailbox-1", "--until", "2026-05-13T12:30:00Z"},
 			status: "decided",
 			want:   `status="decided", want "deferred" for mailbox defer`,
 		},
