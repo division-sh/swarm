@@ -20,7 +20,7 @@ import (
 func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
-	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, callIndex int) map[string]any {
 			switch req.Method {
 			case "health.check":
@@ -74,6 +74,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 		t.Fatal("local serve hook was not canceled after terminal run")
 	}
 	assertRunCommandMethods(t, calls, []string{"health.check", "health.check", "run.start", "run.get"})
+	assertRunCommandTraceSubscription(t, wsRequests, "run-local", true)
 	for _, want := range []string{"run started: run_id=run-local", "trace event_id=evt-local", "run terminal: run_id=run-local status=completed"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -204,12 +205,7 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.get"})
-	if len(*wsRequests) != 1 || (*wsRequests)[0].Method != "run.subscribe_trace" {
-		t.Fatalf("ws requests = %#v, want run.subscribe_trace", *wsRequests)
-	}
-	if got := (*wsRequests)[0].Params["run_id"]; got != "run-foreground" {
-		t.Fatalf("ws run_id = %#v, want run-foreground", got)
-	}
+	assertRunCommandTraceSubscription(t, wsRequests, "run-foreground", true)
 	for _, want := range []string{"trace event_id=evt-foreground", "run terminal: run_id=run-foreground status=completed"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -250,7 +246,7 @@ func TestRunCommandReattachTerminalUsesRunGetWithoutWebSocket(t *testing.T) {
 func TestRunCommandReattachActiveCtrlCDetachesWithoutRunStop(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	wsSubscribed := make(chan struct{})
-	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
 			if req.Method == "run.stop" {
 				t.Fatal("reattach Ctrl-C must not call run.stop")
@@ -277,6 +273,7 @@ func TestRunCommandReattachActiveCtrlCDetachesWithoutRunStop(t *testing.T) {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	assertRunCommandMethods(t, calls, []string{"run.get"})
+	assertRunCommandTraceSubscription(t, wsRequests, "run-active", false)
 	if !strings.Contains(stderr.String(), "detached from run trace") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
@@ -469,7 +466,11 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "reattach rejects local startup flags", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--contracts", "contracts"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --contracts"},
 		{name: "reattach rejects platform spec flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --platform-spec"},
 		{name: "reattach rejects api port flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--api-port", "8081"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --api-port"},
-		{name: "reattach rejects mcp port flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --mcp-port"},
+		{name: "api port zero rejected when explicit", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "0"}, wantCode: 2, wantStderr: "--api-port must be between 1 and 65535"},
+		{name: "mcp port unsupported", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--mcp-port is not supported"},
+		{name: "connect rejects contracts local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts"}, wantCode: 2, wantStderr: "--contracts requires local foreground mode"},
+		{name: "connect rejects platform spec local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--platform-spec requires local foreground mode"},
+		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},
 		{name: "connect rejects legacy path", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1/api/rpc", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect path must be empty or /v1/rpc"},
 		{name: "connect rejects unsupported scheme", token: "test-token", args: []string{"run", "--connect", "ftp://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect must use http or https"},
 		{name: "missing token exits four", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "SWARM_API_TOKEN is required"},
@@ -697,6 +698,30 @@ func assertRunCommandMethods(t *testing.T, calls *[]jsonRPCRequest, want []strin
 		if req.Method != want[i] {
 			t.Fatalf("method[%d] = %q, want %q; all=%v", i, req.Method, want[i], runCommandMethodNames(*calls))
 		}
+	}
+}
+
+func assertRunCommandTraceSubscription(t *testing.T, requests *[]jsonRPCRequest, runID string, wantReplaySince bool) {
+	t.Helper()
+	if len(*requests) != 1 || (*requests)[0].Method != runCommandMethodSubscribeTrace {
+		t.Fatalf("ws requests = %#v, want %s", *requests, runCommandMethodSubscribeTrace)
+	}
+	if got := (*requests)[0].Params["run_id"]; got != runID {
+		t.Fatalf("ws run_id = %#v, want %s", got, runID)
+	}
+	rawReplaySince, ok := (*requests)[0].Params["replay_since"]
+	if !wantReplaySince {
+		if ok {
+			t.Fatalf("ws replay_since = %#v, want omitted", rawReplaySince)
+		}
+		return
+	}
+	replaySince, ok := rawReplaySince.(string)
+	if !ok || strings.TrimSpace(replaySince) == "" {
+		t.Fatalf("ws replay_since = %#v, want RFC3339Nano string", rawReplaySince)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, replaySince); err != nil {
+		t.Fatalf("ws replay_since = %q, want RFC3339Nano: %v", replaySince, err)
 	}
 }
 
