@@ -124,7 +124,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertSourceRowsFrozen(t, sourceRowsBefore, selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID), "source rows after selected execution")
 	assertSourceRunLifecycle(t, h.db, sourceRunID, "forked", true)
 	negativeFixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-non-agent-replay-fail-closed")
-	assertUnsupportedNonAgentHistoricalReplayFailsClosed(t, negativeFixtureRoot)
+	assertUnsupportedHistoricalReplayFailsClosed(t, negativeFixtureRoot)
 }
 
 func TestTier12RuntimeForkFixtures_AreExplicitlyClassified(t *testing.T) {
@@ -388,7 +388,7 @@ func assertSourceRunLifecycle(t testing.TB, db *sql.DB, runID, wantStatus string
 	}
 }
 
-func assertUnsupportedNonAgentHistoricalReplayFailsClosed(t *testing.T, fixtureRoot string) {
+func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot string) {
 	t.Helper()
 	var expected catalogExpectedDocument
 	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
@@ -403,9 +403,19 @@ func assertUnsupportedNonAgentHistoricalReplayFailsClosed(t *testing.T, fixtureR
 	if err != nil {
 		t.Fatalf("PlanRunFork negative replay proof: %v", err)
 	}
-	if plan.ExecutionReady || !runForkPlanHasTier12Blocker(plan.UnsupportedBlockers, store.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
-		t.Fatalf("negative replay plan ready=%v blockers=%#v, want fail-closed %s",
-			plan.ExecutionReady, plan.UnsupportedBlockers, store.RunForkBlockerNonAgentDeliveryReplayUnsupported)
+	// Runtime bootstrap diagnostics can add committed replay-scope marker evidence
+	// before this fixture's non-agent delivery reaches the planner on slower CI
+	// runners. Both blockers are the same fail-closed historical-replay safety
+	// gate this negative fixture is proving: selected-contract forks must not
+	// silently replay source facts that lack a supported fork-local owner.
+	if plan.ExecutionReady || !runForkPlanHasAnyTier12Blocker(plan.UnsupportedBlockers,
+		store.RunForkBlockerNonAgentDeliveryReplayUnsupported,
+		store.RunForkBlockerCommittedReplayScopeReplayUnsupported,
+	) {
+		t.Fatalf("negative replay plan ready=%v blockers=%#v, want fail-closed %s or %s",
+			plan.ExecutionReady, plan.UnsupportedBlockers,
+			store.RunForkBlockerNonAgentDeliveryReplayUnsupported,
+			store.RunForkBlockerCommittedReplayScopeReplayUnsupported)
 	}
 }
 
@@ -528,6 +538,15 @@ func containsTier12String(values []string, want string) bool {
 func runForkPlanHasTier12Blocker(blockers []store.RunForkUnsupportedBlocker, code string) bool {
 	for _, blocker := range blockers {
 		if strings.TrimSpace(blocker.Code) == code {
+			return true
+		}
+	}
+	return false
+}
+
+func runForkPlanHasAnyTier12Blocker(blockers []store.RunForkUnsupportedBlocker, codes ...string) bool {
+	for _, code := range codes {
+		if runForkPlanHasTier12Blocker(blockers, code) {
 			return true
 		}
 	}
