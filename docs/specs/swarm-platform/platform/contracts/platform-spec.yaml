@@ -5273,164 +5273,402 @@ static_analyzer:
     rule: Emit hard invalidity when a parseable structural prompt reference drifts from the declared event or entity contract.
 
 cli_specification:
-  description: 'Authoritative v1 Swarm CLI UX contract. This section is the merge artifact for v1 command topology, migration boundary, and local/runtime-state ownership rules.'
+  description: |
+    Authoritative Swarm CLI v2 UX contract. This section is the merge artifact
+    for command topology, migration boundary, runtime-state ownership rules,
+    and #735 child gating. It supersedes the earlier v1 `swarm investigate`
+    topology and the non-promoted CLI v2 review draft as a merge artifact.
+  source_of_truth:
+    status: promoted_cli_v2_catalog
+    promoted_by: '#795'
+    local_review_spec_disposition: >
+      docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux-v2.yaml
+      remains design context. Merge-bearing behavior must be reflected here.
+    supersedes:
+    - docs/SWARM_INVESTIGATE_COMMAND_DRAFT.md
+    - docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux.yaml
+    - stale v1 `swarm investigate *` command catalog entries
   foundations:
     command_router:
       canonical_owner: cmd/swarm Cobra command tree
       implementation_framework: github.com/spf13/cobra
       rule: 'Cobra is the only semantic command router. Bare os.Args routing or parallel flag dispatch for operator commands is not authoritative.'
     no_args_behavior: '`swarm` with no arguments prints root help and exits 0. Bare `swarm` MUST NOT start the runtime.'
-    daemon_startup: '`swarm serve` owns runtime/API/health/MCP startup. Existing runtime startup flags and behavior move behind this subcommand.'
-    cli_consumes_api_rule: 'All CLI commands that read or mutate runtime state consume the canonical v1 API at /v1/rpc or /v1/ws. The only v1 local carve-out is `swarm verify`, which validates contract files on disk and does not require runtime DB/API state.'
-    local_version: '`swarm version` prints local binary identity without contacting runtime. Server-version querying is split until the API-consuming CLI slice.'
-    completion: '`swarm completion <bash|zsh|fish|powershell>` emits Cobra-generated shell completion scripts.'
+    daemon_startup: '`swarm serve` owns runtime/API/health/MCP startup. `swarm run` may consume the serve startup owner for local foreground start, but MUST NOT fork a second runtime boot owner.'
+    cli_consumes_api_rule: 'All CLI commands that read or mutate runtime state consume the canonical API at /v1/rpc or /v1/ws. The only local file-contract carve-out is `swarm verify`, which validates contract files on disk and does not require runtime DB/API state.'
+    topology: >
+      CLI v2 uses top-level verbs for dominant single-intent operations, resource-noun-first
+      commands for multi-verb resources, and `swarm control` only for run-state intervention.
+      `swarm investigate` is retired legacy topology and MUST NOT be extended.
+    output_contract: 'Default output is human/agent-readable text. `--json` emits JSON or NDJSON for streaming commands. `--quiet` prints only the load-bearing value.'
+    auth_boundary: 'Runtime-state commands use v1 bearer auth through `SWARM_API_TOKEN`; legacy Builder/operator token fallback is invalid.'
+  tiers:
+    must_have: 'Closure-gate command set for the promoted CLI v2 catalog.'
+    should_have: 'Subsequent slices and backlog commands; each still requires a gated implementation child before code changes.'
   command_catalog:
     root:
       command: swarm
-      status: must_have
+      tier: must_have
+      implementation_status: implemented
       behavior: print root help on no args, exit 0
     help:
-      command: swarm help [command]
-      status: must_have
+      command: swarm help [topic]
+      tier: must_have
+      implementation_status: implemented
       owner: Cobra help command
     completion:
       command: swarm completion <bash|zsh|fish|powershell>
-      status: must_have
+      tier: must_have
+      implementation_status: implemented
       owner: Cobra completion generation
     version:
-      command: swarm version
-      status: must_have
-      behavior: local binary identity only in the first v1 CLI slice
+      command: swarm version [--server]
+      tier: must_have
+      implementation_status: partial
+      local_owner: local binary metadata
+      server_owner: /v1/rpc health.check or a future promoted server-identity owner
+      behavior: '`swarm version` prints local binary identity. `--server` remains an API-consuming tail until a child promotes exact server identity rendering.'
     serve:
-      command: swarm serve
-      status: must_have
+      command: swarm serve [flags]
+      tier: must_have
+      implementation_status: partial
       behavior: starts current runtime, process probes, /v1/rpc, /v1/ws, and MCP surfaces
       bundle_match_admission:
         default: require-bundle-match
+        implemented_by: '#753/#754'
         flags:
         - --require-bundle-match
         - --no-require-bundle-match
-        rule: After loading the boot bundle and ensuring platform schema, serve refuses startup before runtime start/readiness when
+        rule: >
+          After loading the boot bundle and ensuring platform schema, serve refuses startup before runtime start/readiness when
           any active run has a non-NULL `runs.bundle_fingerprint` different from the boot bundle fingerprint. Legacy NULL fingerprints
           mean unknown bundle and do not block startup. `--no-require-bundle-match` disables this admission gate for operator-approved
           recovery/dev workflows.
+      remaining_tail: '#750 owns remaining serve/dev/boot/shutdown lifecycle behavior.'
+    run:
+      command: swarm run [flags]
+      tier: must_have
+      implementation_status: absent
+      tracker: '#743'
+      accepted_contract_status: 'merge-bearing contract promoted by #795; command code still requires #743 implementation gate.'
+      owners:
+        readiness: /v1/rpc health.check
+        start: /v1/rpc run.start
+        status: /v1/rpc run.get
+        cancellation: /v1/rpc run.stop
+        follow: /v1/ws run.subscribe_trace
+        local_startup: existing `swarm serve` startup owner
+      flags:
+      - --event <name>
+      - --payload <path>
+      - --connect <url>
+      - --no-follow
+      - --reattach <run-id>
+      - --bundle-fingerprint <sha>
+      - --contracts <path>
+      - --platform-spec <path>
+      - --idempotency-key <key>
+      - --run-id <id>
+      - --api-port <int>
+      - --mcp-port <int>
+      dropped_flags:
+        --detach: 'Unsupported in v2; fail before API calls with exit 2 and migration text. Use `swarm serve` plus `swarm run --connect ... --no-follow`.'
+      modes:
+        foreground_local_start:
+          invocation: swarm run --event <name> --payload <file> --contracts <path> --platform-spec <path>
+          behavior: >
+            Start runtime/API/MCP through the existing serve startup owner, call health.check, call run.start, subscribe
+            with run.subscribe_trace, render composed trace rows and final summary until terminal.
+          ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists, shuts down the locally started runtime, and exits 130. A second interrupt may hard-exit.'
+        foreground_connected_start:
+          invocation: swarm run --connect <url> --event <name> --payload <file>
+          behavior: 'Use an existing API server, call health.check, call run.start, subscribe with run.subscribe_trace, and render until terminal.'
+          ctrl_c: 'First Ctrl-C calls run.stop against the connected server and exits 130; it MUST NOT stop the server.'
+        connected_no_follow:
+          invocation: swarm run --connect <url> --event <name> --payload <file> --no-follow
+          behavior: 'Call health.check and run.start, print run_id plus follow/inspect guidance, exit 0, and do not open /v1/ws.'
+          validation: '`--no-follow` requires `--connect` and is mutually exclusive with `--reattach`.'
+        reattach_active:
+          invocation: swarm run --reattach <run-id> [--connect <url>]
+          behavior: 'Call run.get, then subscribe with run.subscribe_trace when the run is active.'
+          ctrl_c: 'Detach only, exit 130, and MUST NOT call run.stop.'
+        reattach_terminal:
+          invocation: swarm run --reattach <run-id> [--connect <url>]
+          behavior: 'Call run.get, render terminal summary, and exit according to terminal status without opening /v1/ws.'
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        config_readiness_transport_or_malformed_api: 3
+        auth_failure: 4
+        run_not_found: 5
+        bundle_or_idempotency_conflict: 6
+        workflow_failed_or_cancelled: 7
+        interrupted: 130
+      proof_expectations:
+      - exact /v1/rpc calls for health.check, run.start, run.get, and run.stop
+      - exact /v1/ws subscription for run.subscribe_trace where follow is in scope
+      - no direct DB/store/runtime/EventBus reads or writes
+      - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or legacy token fallback
+      - tests for every mode, invalid flag combination, Ctrl-C behavior, exit mapping, malformed RPC/WS response, and no-call invalid paths
+      split_siblings:
+      - swarm trace --follow
+      - swarm control pause|continue|stop
+      - broader run-control/fork command surfaces
     verify:
-      command: swarm verify
-      status: must_have
+      command: swarm verify [flags]
+      tier: must_have
+      implementation_status: implemented
       behavior: local contract-file validation carve-out
     runs:
-      command: swarm runs
-      status: must_have
+      command: swarm runs [filters]
+      tier: must_have
+      implementation_status: implemented
       owner: /v1/rpc run.list
-      behavior: List runs through the canonical v1 run.list read owner; no direct DB/store/runtime-state reads.
-    investigate:
-      command: swarm investigate
-      status: must_have
-      behavior: Runtime diagnosis command group. Subcommands consume v1 API read owners only.
-    investigate_runs:
-      command: swarm investigate runs
-      status: must_have
-      owner: /v1/rpc run.list
-      behavior: Same client and renderer path as `swarm runs`.
-    investigate_run:
-      command: swarm investigate run [run-id]
-      status: must_have
-      owner: /v1/rpc run.diagnose by default; /v1/rpc run.get when --no-diagnose is set
-      behavior: If run-id is omitted, resolve the latest run through run.list({limit:1}); do not call local run-debug/store helpers.
-    investigate_trace:
-      command: swarm investigate trace [run-id]
-      status: must_have
-      owner: /v1/rpc run.trace
-      behavior: Snapshot trace only. If run-id is omitted, resolve the latest run through run.list({limit:1}).
-      split_tail: Live follow mode is not part of this command; it requires run.subscribe_trace over /v1/ws.
-    investigate_health:
-      command: swarm investigate health
-      status: must_have
-      owner: /v1/rpc health.check
-      behavior: Structured authenticated operator health; do not consume /healthz, /readyz, or retired dashboard aliases.
+      behavior: List runs through the canonical run.list read owner; no direct DB/store/runtime-state reads.
+    status:
+      command: swarm status [<run-id>]
+      tier: must_have
+      implementation_status: absent_v2_top_level_currently_retired
+      owner: /v1/rpc run.diagnose by default; /v1/rpc run.get for header-only mode if exposed
+      defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
+      behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
+    trace:
+      command: swarm trace [<run-id>] [--follow]
+      tier: must_have
+      implementation_status: absent_v2_top_level_snapshot_exists_under_legacy_investigate
+      owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow
+      defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
+      behavior: Run trace rendering over API-owned RunTraceRow facts only; no CLI reconstruction from tables.
     mailbox_list:
       command: swarm mailbox list
-      status: must_have
+      tier: must_have
+      implementation_status: implemented
       owner: /v1/rpc mailbox.list
-      behavior: >
-        Primary mailbox read/discovery list through canonical v1 API owner; default status is pending, --all omits the status filter,
-        and supported filters/pagination map directly to mailbox.list params. No direct DB/store/dashboard REST/mailbox reads.
-      split_tail: >
-        Richer operator decision-sheet composition remains under #735; this implemented slice does not derive cross-resource
-        entity/downstream truth locally.
+      behavior: Primary mailbox read/discovery list through canonical API owner; no direct DB/store/dashboard REST/mailbox reads.
+      split_tail: Richer operator decision-sheet composition remains under #735.
     mailbox_view:
       command: swarm mailbox view <mailbox-item-id>
-      status: must_have
+      tier: must_have
+      implementation_status: implemented
       owner: /v1/rpc mailbox.get
-      behavior: >
-        Primary mailbox item detail view through canonical v1 API owner. No direct DB/store/dashboard REST/mailbox reads and no
-        CLI-side entity/downstream composition in this first slice.
-      split_tail: >
-        The v2 review draft's richer composed view using entity context and downstream-subscriber preview remains split under #735.
+      behavior: Primary mailbox item detail view through canonical API owner; no direct DB/store/dashboard REST/mailbox reads.
+      split_tail: Richer entity/downstream composition remains under #735.
     mailbox_approve:
       command: swarm mailbox approve <mailbox-item-id>
-      status: must_have
+      tier: must_have
+      implementation_status: implemented
       owner: /v1/rpc mailbox.approve
-      behavior: Mailbox approval action through canonical v1 API owner; no direct DB/store/mailbox writes.
+      behavior: Mailbox approval action through canonical API owner; no direct DB/store/mailbox writes.
     mailbox_reject:
       command: swarm mailbox reject <mailbox-item-id>
-      status: must_have
+      tier: must_have
+      implementation_status: implemented
       owner: /v1/rpc mailbox.reject
-      behavior: Mailbox rejection action through canonical v1 API owner; no direct DB/store/mailbox writes.
+      behavior: Mailbox rejection action through canonical API owner; no direct DB/store/mailbox writes.
     mailbox_defer:
       command: swarm mailbox defer <mailbox-item-id>
-      status: must_have
+      tier: must_have
+      implementation_status: implemented
       owner: /v1/rpc mailbox.defer
-      behavior: Mailbox defer action through canonical v1 API owner; no direct DB/store/mailbox writes.
+      behavior: Mailbox defer action through canonical API owner; no direct DB/store/mailbox writes.
+    health:
+      command: swarm health
+      tier: must_have
+      implementation_status: absent_v2_top_level_exists_under_legacy_investigate
+      owner: /v1/rpc health.check
+      behavior: Structured authenticated operator health; separate from lightweight /healthz and /readyz process probes.
+    control_pause:
+      command: swarm control pause <run-id> | --all
+      tier: should_have
+      implementation_status: absent
+      owners: /v1/rpc run.pause for one run; /v1/rpc runtime.pause for --all
+    control_continue:
+      command: swarm control continue <run-id> | --all
+      tier: should_have
+      implementation_status: absent
+      owners: /v1/rpc run.continue for one run; /v1/rpc runtime.resume for --all
+    control_stop:
+      command: swarm control stop <run-id> | --all
+      tier: should_have
+      implementation_status: absent
+      owners: /v1/rpc run.stop for one run; run.list plus run.stop iteration for --all unless a future runtime stop-all owner is promoted
+    control_nuke:
+      command: swarm control nuke [--yes|-y] [--dry-run]
+      tier: should_have
+      implementation_status: implemented
+      owner: /v1/rpc runtime.nuke
+      behavior: Destructive reset CLI consumer over the public runtime.nuke owner. The CLI MUST NOT call raw Docker, SQL, store cleanup, runtime manager reset, or internal destructive-reset helpers directly.
+    agents_list:
+      command: swarm agents list
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc agent.list
+    agent_view:
+      command: swarm agent view <agent-id>
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc agent.get
+    agent_restart:
+      command: swarm agent restart <agent-id>
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc agent.restart
+    agent_replay:
+      command: swarm agent replay <agent-id>
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc agent.replay_backlog and /v1/rpc agent.replay
+    agent_directive:
+      command: swarm agent directive <agent-id> "<message>"
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc agent.send_directive
+      blocker_state: '#755 closed runtime directive run-targeting basics; CLI still needs its own gate.'
+    events_list:
+      command: swarm events list
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc event.list
+    events_follow:
+      command: swarm events follow
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/ws event.subscribe
+    event_view:
+      command: swarm event view <event-id>
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc event.get
+    event_replay:
+      command: swarm event replay <event-id>
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc event.replay
+    event_publish:
+      command: swarm event publish <event-name>
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc event.publish
+      relation_to_run_start: '`run.start` remains usable for #743 until a separate migration changes the CLI internals to event.publish.'
+    conversations_list:
+      command: swarm conversations list
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc conversation.list
+    conversation_view:
+      command: swarm conversation view <session-id>
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc conversation.get
+    conversation_turn:
+      command: swarm conversation turn <session-id> <turn-index>
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc conversation.get_turn
+    forkchat:
+      command: swarm forkchat new|resume|list|view|delete
+      tier: should_have
+      implementation_status: absent
+      blocker_state: '#749; conversation.fork* API methods and runtime subsystem are not present in current OpenRPC.'
+      owners: conversation.fork, conversation.fork_chat, conversation.fork_list, conversation.fork_view, conversation.fork_delete
+    entities_list:
+      command: swarm entities list
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc entity.list
+    entity_view:
+      command: swarm entity view <entity-id>
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc entity.get
+    entity_aggregate:
+      command: swarm entity aggregate --group-by <field>
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc entity.aggregate
+    logs:
+      command: swarm logs [filters]
+      tier: should_have
+      implementation_status: absent
+      owners: /v1/rpc runtime.logs for snapshot; /v1/ws runtime.subscribe_logs for --follow
+    incidents:
+      command: swarm incidents [filters]
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc runtime.incidents
+  retired_namespaces:
+    investigate:
+      command: swarm investigate *
+      status: retired_legacy_v1_topology
+      current_code_state: implemented legacy namespace until a command repair child removes or fails it closed
+      v2_replacements:
+        swarm investigate runs: swarm runs
+        swarm investigate run: swarm status
+        swarm investigate trace: swarm trace
+        swarm investigate health: swarm health
+      rule: '`swarm investigate` is not CLI v2 topology and MUST NOT be extended for new commands.'
     control_mailbox:
       command: swarm control mailbox approve|reject|defer
       status: retired
-      exit_code: 2
-      message: "ERROR: `swarm control mailbox` was removed in CLI v2. Use resource-noun-first `swarm mailbox approve|reject|defer`."
-    control_nuke:
-      command: swarm control nuke [--yes|-y] [--dry-run]
-      status: must_have
-      owner: /v1/rpc runtime.nuke
-      behavior: Destructive reset CLI consumer over the public runtime.nuke owner. The CLI MUST NOT call raw Docker, SQL,
-        store cleanup, runtime manager reset, or internal destructive-reset helpers directly.
-      flags:
-      - --yes
-      - -y
-      - --dry-run
-      exit_codes:
-        success_or_noop: 0
-        validation_or_abort: 2
-        transport_or_partial_failure: 3
-        auth_failure: 4
-        conflict_or_nuke_in_progress: 6
-      spec_status: implemented API consumer; supersedes older CLI v2 review-draft wording that marked runtime.nuke as proposed/pending.
-    status:
-      command: swarm status
-      status: retired
-      exit_code: 2
-      message: "ERROR: `swarm status` was removed in v1. Replaced by `swarm investigate run` (interpreted) or `swarm investigate run --no-diagnose` (header only). See `swarm investigate run --help`."
+      v2_replacement: swarm mailbox approve|reject|defer
+    status_v1_retirement_message:
+      status: superseded
+      rule: 'The old v1 retirement of top-level `swarm status` is no longer authoritative; v2 restores top-level `swarm status`.'
     fork:
       command: swarm fork
       status: retired
       exit_code: 2
-      message: "ERROR: `swarm fork` was removed in v1. Forking is a mutating control action; use `swarm control run fork <run-id>` once that command ships. For v1, manual run forking goes through the API owner and the API spec."
+      message: "ERROR: `swarm fork` was removed in v1. Forking is a mutating control action; use a future gated run-fork API/control surface. Historical `swarm fork` remains a runtime-owner test harness only, not a supported operator command."
+  blocker_state:
+    '#748':
+      state: stale_method_blocker
+      current_openrpc_reality: 'event.publish, event.replay, agent.replay, conversation.get_turn, runtime.subscribe_logs, and runtime.nuke are present in current OpenRPC/API.'
+      remaining_role: 'Track deprecations/ratification cleanup only if kept open; do not block those CLI commands solely on method existence.'
+    '#749':
+      state: active_blocker
+      reason: 'conversation.fork, conversation.fork_chat, conversation.fork_list, conversation.fork_view, and conversation.fork_delete are absent.'
+    '#750':
+      state: parent_runtime_tail
+      closed_slices:
+      - '#753/#754 run bundle fingerprint and serve bundle-match admission'
+      - '#755 directive run targeting and persisted platform.agent_directive'
+      remaining_tail: 'serve dev/shutdown/boot observability/runtime lifecycle behavior; not a direct blocker for #743 API owners.'
   parent_tail:
-    implemented_after_first_slice:
+    implemented_v2_compliant:
+    - swarm
+    - swarm help
+    - swarm completion
+    - swarm version (local only)
+    - swarm serve (partial)
+    - swarm verify
+    - swarm runs
     - swarm mailbox list
     - swarm mailbox view
     - swarm mailbox approve
     - swarm mailbox reject
     - swarm mailbox defer
     - swarm control nuke
-    - swarm runs
+    implemented_legacy_or_wrong_namespace:
     - swarm investigate runs
     - swarm investigate run
     - swarm investigate trace
     - swarm investigate health
-    remaining_not_implemented:
+    remaining_must_have_not_implemented:
     - swarm run
-    - swarm control run/runtime/agent
-    rule: 'Remaining commands require separate gates and must consume v1 API owners; they MUST NOT resurrect local DB/store/runtime-state readers.'
+    - swarm status
+    - swarm trace
+    - swarm health
+    - swarm version --server
+    remaining_should_have_not_implemented:
+    - swarm control pause|continue|stop
+    - swarm agents list / agent view / agent restart / agent replay / agent directive
+    - swarm events list / events follow / event view / event replay / event publish
+    - swarm conversations list / conversation view / conversation turn
+    - swarm forkchat new|resume|list|view|delete
+    - swarm entities list / entity view / entity aggregate
+    - swarm logs
+    - swarm incidents
+    rule: 'Remaining commands require separate gates and must consume canonical API owners; they MUST NOT resurrect direct DB/store/runtime-state readers.'
 
 api_specification:
   description: "Single canonical user-facing API for the Swarm platform. JSON-RPC 2.0 over\nHTTP for request/response, JSON-RPC\
@@ -5506,11 +5744,13 @@ api_specification:
       forward_compatibility: "Each method declares its required scope(s) in this spec (see scopes\nsection). v1 enforcement\
         \ does not check scopes \u2014 every valid token\ngrants every scope. Phase 2/3 enforcement may add per-token scope\n\
         restrictions without spec changes. The scope declarations exist in\nv1 specifically to make later enforcement non-breaking.\n"
-    cli_consumption_rule: "The `swarm investigate` CLI (and any future `swarm control` CLI) consumes\nthis API. The CLI MUST\
-      \ NOT reach directly into internal packages for\nruntime reads or actions. One narrow exception: `swarm verify` \u2014\
-      \ which\noperates on contract files on disk and does not require a running runtime\n\u2014 may continue to call into\
-      \ the verification packages directly. All\nother CLI commands route through the API.\n\nSame rule applies to the dashboard\
-      \ (when one ships) and any future\nexternal SDK or third-party tooling.\n"
+    cli_consumption_rule: "CLI v2 runtime-state commands consume this API. The CLI MUST NOT reach directly into internal packages\
+      \ for runtime reads or actions. One narrow exception: `swarm verify` \u2014 which operates on contract files on disk\
+      \ and does not require a running runtime \u2014 may continue to call into the verification packages directly. All other\
+      \ CLI commands route through the API, including `swarm runs`, `swarm status`, `swarm trace`, `swarm health`, `swarm run`,\
+      \ `swarm mailbox`, `swarm control`, and later resource-noun surfaces.\n\nSame rule applies to the dashboard (when one\
+      \ ships) and any future external SDK or third-party tooling. Retired `swarm investigate *` commands are legacy consumers\
+      \ only and are not a source for new CLI topology.\n"
   namespaces:
     description: "Nine canonical owner namespaces. Every concept the API exposes lives in\nexactly one namespace. No overlap.\
       \ Two ownership rules locked because\nthey were the source of the prior dual-API spec drift:\n  - conversation.* owns\
@@ -7472,8 +7712,8 @@ api_specification:
       \ Subscription methods include notification_schema.\n\ncontentDescriptor shape (per OpenRPC):\n  { name: string, required:\
       \ boolean, description?: string,\n    schema: <JSON Schema or $ref> }\n\ntier values:\n  must_have   \u2014 closure-gate\
       \ set. The minimal API surface required to:\n                (a) close Empire #57 (mailbox approval API gap blocking\n\
-      \                    every end-to-end run), and\n                (b) back the `swarm investigate` first-slice CLI\n\
-      \                    subcommands (runs, run, trace, health) per\n                    docs/SWARM_INVESTIGATE_COMMAND_DRAFT.md.\n\
+      \                    every end-to-end run), and\n                (b) back the promoted CLI v2 read commands\n\
+      \                    (`swarm runs`, `swarm status`, `swarm trace`, `swarm health`).\n\
       \                Implementable as one PR; 12 methods total.\n  should_have \u2014 v1-scoped but ships in subsequent\
       \ slices. Spec is\n                authoritative now (so consumers can plan against it),\n                but implementation\
       \ is sequenced after the must_have set.\n                Includes streaming subscriptions, observability drill-down\n\
@@ -9068,10 +9308,11 @@ api_specification:
         migrates from legacy `/api/rpc` run.start payloads with builder-token auth to `curl /v1/rpc {method: run.start,
         params: {bundle_ref?, event_name, payload, idempotency_key?}}` with the unified token. run.start is now a
         deprecated wrapper over event.publish until the helper moves to the canonical event.publish method.'
-      swarm_investigate: "First-slice subcommands map to v1 methods:\n  swarm investigate runs   \u2192 run.list\n  swarm\
-        \ investigate run    \u2192 run.diagnose (default), run.get (--no-diagnose)\n  swarm investigate trace  \u2192 run.trace\n\
-        \  swarm investigate health \u2192 health.check\nFollow-on subcommands map to event.*, runtime.logs, runtime.incidents,\
-        \ agent.*, conversation.*, entity.* per the canonical-owner rule.\n"
+      cli_v2_read_commands: "Promoted CLI v2 read commands map to v1 methods:\n  swarm runs     \u2192 run.list\n  swarm\
+        \ status   \u2192 run.diagnose (default), run.get for header-only mode if exposed\n  swarm trace    \u2192 run.trace,\
+        \ run.subscribe_trace (--follow)\n  swarm health   \u2192 health.check\nRetired `swarm investigate *` commands are\
+        \ legacy consumers only. They are not authoritative CLI v2 topology and must either migrate to the promoted commands\
+        \ or fail closed when the legacy namespace is removed.\n"
       dashboard: "When a dashboard ships, it consumes v1 \u2014 no direct DB or internal-package access."
   out_of_scope_for_v1:
     multi_tenancy: No org_id, tenant_id, workspace_id in v1. URL paths reserved for tenant prefix in Phase 3 without breaking
@@ -9104,8 +9345,8 @@ api_specification:
       is the canonical owner and is unchanged; this proof confirms the API surface routes through it (no second interpretation
       layer in the API handler).
     cli:
-    - '`swarm investigate runs/run/trace/health` first-slice consumes /v1/rpc methods, no direct internal-package access (except
-      `swarm verify` carve-out).'
+    - '`swarm runs`, `swarm status`, `swarm trace`, and `swarm health` consume /v1/rpc or /v1/ws methods, with no direct internal-package
+      access (except the `swarm verify` carve-out). Retired `swarm investigate *` commands are non-authoritative legacy consumers.'
     - '`make run-clear` migrated to /v1/rpc and unified token, including `reset-dev` consuming `runtime.nuke` instead of
       raw Docker stop or table truncation.'
     deprecation:
