@@ -134,6 +134,7 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 		"static_agents_started",
 		"flow_required_agents_started",
 		"system_containers_started",
+		"self_check_required",
 		"self_check_passed",
 	} {
 		if _, ok := payload[key]; !ok {
@@ -150,7 +151,10 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 	if got := recovery["reason_code"]; got != "recovery_disabled_no_persisted_work" {
 		t.Fatalf("recovery reason = %#v", got)
 	}
-	if got := payload["self_check_passed"]; got != true {
+	if got := payload["self_check_required"]; got != true {
+		t.Fatalf("self_check_required = %#v", got)
+	}
+	if got := payload["self_check_passed"]; got != nil {
 		t.Fatalf("self_check_passed = %#v", got)
 	}
 	if !bootProgressContains(progress, 19, "platform_boot_event_published") {
