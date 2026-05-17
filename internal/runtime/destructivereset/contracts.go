@@ -30,9 +30,9 @@ func DefaultDownstreamContracts() []DownstreamContract {
 		},
 		{
 			ID:          ContractPublicAPIWrapper,
-			Status:      "split",
-			Owner:       "future v1 runtime.nuke API wrapper",
-			Description: "Expose /v1/rpc runtime.nuke and authoritative platform-spec/OpenRPC only after destructive reset owners exist.",
+			Status:      "implemented_public_owner",
+			Owner:       "platform-spec.yaml, generated openrpc.json, and internal/apiv1 runtime.nuke handler over destructive reset owners",
+			Description: "Expose /v1/rpc runtime.nuke as the authoritative public wrapper over the destructive reset plan, quiescence, cleanup, and managed-container owners.",
 		},
 		{
 			ID:          ContractLegacyResetMigration,

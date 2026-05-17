@@ -41,6 +41,8 @@ func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 	if got, want := strings.Join(owners.calls, ","), "plan,quiescence,cleanup,containers"; got != want {
 		t.Fatalf("owner calls = %s, want %s", got, want)
 	}
+	assertRuntimeNukeContractStatus(t, result, destructivereset.ContractPublicAPIWrapper, "implemented_public_owner")
+	assertRuntimeNukeContractStatus(t, result, destructivereset.ContractLegacyResetMigration, "split")
 	if owners.lastPlan.DryRun != true || owners.lastQuiescence.Result.DryRun != true || owners.lastCleanup.Result.DryRun != true || owners.lastContainers.Result.DryRun != true {
 		t.Fatalf("dry-run flag not propagated through owners: plan=%v quiescence=%v cleanup=%v containers=%v", owners.lastPlan.DryRun, owners.lastQuiescence.Result.DryRun, owners.lastCleanup.Result.DryRun, owners.lastContainers.Result.DryRun)
 	}
@@ -187,6 +189,8 @@ func (o *recordingRuntimeNukeOwners) BuildPlan(_ context.Context, req destructiv
 				ResetEligible: true,
 				RunID:         "00000000-0000-0000-0000-000000000001",
 			}},
+			DownstreamContracts: destructivereset.DefaultDownstreamContracts(),
+			ResetSeams:          destructivereset.DefaultResetSeams(),
 		},
 	}, false, nil
 }
@@ -319,4 +323,24 @@ func (s *recordingAPIIdempotencyStore) WithAPIIdempotency(
 	s.records[key] = copied
 	s.hashes[key] = req.RequestHash
 	return completion, false, nil
+}
+
+func assertRuntimeNukeContractStatus(t *testing.T, result map[string]any, contractID, status string) {
+	t.Helper()
+	planResult := asMap(t, result["plan"])
+	plan := asMap(t, planResult["plan"])
+	contracts, ok := plan["downstream_contracts"].([]any)
+	if !ok {
+		t.Fatalf("downstream_contracts = %#v, want array", plan["downstream_contracts"])
+	}
+	for _, raw := range contracts {
+		contract := asMap(t, raw)
+		if contract["id"] == contractID {
+			if contract["status"] != status {
+				t.Fatalf("contract %s status = %#v, want %s", contractID, contract["status"], status)
+			}
+			return
+		}
+	}
+	t.Fatalf("contract %s missing from downstream_contracts: %#v", contractID, contracts)
 }
