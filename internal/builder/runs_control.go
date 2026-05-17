@@ -17,13 +17,12 @@ import (
 
 var runCompletionTimeout = 30 * time.Second
 
-func newRunHub(runtimeProvider func() *runtimepkg.Runtime, resetRuntime func() error, pauseRuntime func() error, resumeRuntime func() error, runDebug RunDebugReader) *runHub {
+func newRunHub(runtimeProvider func() *runtimepkg.Runtime, pauseRuntime func() error, resumeRuntime func() error, runDebug RunDebugReader) *runHub {
 	if runtimeProvider == nil {
 		return nil
 	}
 	return &runHub{
 		runtimeProvider: runtimeProvider,
-		resetRuntime:    resetRuntime,
 		pauseRuntime:    pauseRuntime,
 		resumeRuntime:   resumeRuntime,
 		runDebug:        runDebug,

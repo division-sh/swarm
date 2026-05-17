@@ -101,7 +101,7 @@ func TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath(t *testing.T) {
 			ScopeKey:          "global",
 			PreviousStatus:    "active",
 			TerminationReason: sessions.TerminationReasonOrphaned.String(),
-			TerminationDetail: "builder_api",
+			TerminationDetail: "admin_cli",
 		}},
 	}}
 
@@ -109,7 +109,7 @@ func TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath(t *testing.T) {
 		RuntimeMode: "session",
 		Sessions:    registry,
 	})
-	if err := am.ResetRuntimeStateWithSource("builder_api"); err != nil {
+	if err := am.ResetRuntimeStateWithSource("admin_cli"); err != nil {
 		t.Fatalf("ResetRuntimeStateWithSource: %v", err)
 	}
 
@@ -130,8 +130,8 @@ func TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath(t *testing.T) {
 	if !ok {
 		t.Fatalf("runtime log detail = %#v, want map", entry.Detail)
 	}
-	if got := detail["source"]; got != "builder_api" {
-		t.Fatalf("detail.source = %#v, want builder_api", got)
+	if got := detail["source"]; got != "admin_cli" {
+		t.Fatalf("detail.source = %#v, want admin_cli", got)
 	}
 	if got := detail["orphaned_session_count"]; got != 1 {
 		t.Fatalf("detail.orphaned_session_count = %#v, want 1", got)
@@ -149,18 +149,30 @@ func TestResetRuntimeState_LogsCanonicalOrphanedSessionAftermath(t *testing.T) {
 }
 
 func TestResetRuntimeStateWithSource_PublishesPlatformResetOnlyForExplicitAdminSources(t *testing.T) {
-	t.Run("builder_api", func(t *testing.T) {
+	t.Run("admin_cli", func(t *testing.T) {
 		bus := &resetTestBus{}
 		am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{})
 
-		if err := am.ResetRuntimeStateWithSource("builder_api"); err != nil {
-			t.Fatalf("ResetRuntimeStateWithSource(builder_api): %v", err)
+		if err := am.ResetRuntimeStateWithSource("admin_cli"); err != nil {
+			t.Fatalf("ResetRuntimeStateWithSource(admin_cli): %v", err)
 		}
 		if len(bus.publishes) != 1 {
 			t.Fatalf("published event count = %d, want 1", len(bus.publishes))
 		}
 		if got := string(bus.publishes[0].Type); got != "platform.reset" {
 			t.Fatalf("published event type = %q, want platform.reset", got)
+		}
+	})
+
+	t.Run("builder api retired", func(t *testing.T) {
+		bus := &resetTestBus{}
+		am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{})
+
+		if err := am.ResetRuntimeStateWithSource("builder_api"); err != nil {
+			t.Fatalf("ResetRuntimeStateWithSource(builder_api): %v", err)
+		}
+		if len(bus.publishes) != 0 {
+			t.Fatalf("published event count = %d, want 0", len(bus.publishes))
 		}
 	})
 

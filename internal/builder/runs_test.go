@@ -86,7 +86,7 @@ func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	rt := &runtimepkg.Runtime{Bus: eb}
-	hub := newRunHub(func() *runtimepkg.Runtime { return rt }, nil, nil, nil, nil)
+	hub := newRunHub(func() *runtimepkg.Runtime { return rt }, nil, nil, nil)
 	ch := eb.Subscribe("observer", "review.requested")
 
 	if err := hub.startRun(context.Background(), "run-123", map[string]any{

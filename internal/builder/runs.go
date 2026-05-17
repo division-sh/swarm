@@ -8,7 +8,6 @@ import (
 
 type runHub struct {
 	runtimeProvider func() *runtimepkg.Runtime
-	resetRuntime    func() error
 	pauseRuntime    func() error
 	resumeRuntime   func() error
 	runDebug        RunDebugReader
