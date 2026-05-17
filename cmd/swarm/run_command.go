@@ -167,6 +167,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 		fmt.Fprintf(errOut, "bundle fingerprint mismatch: server=%s expected=%s\n", health.Bundle.Fingerprint, expected)
 		return commandExitError{code: 6}
 	}
+	traceReplaySince := time.Now().UTC()
 	start, err := runCommandStart(ctx, client, health, opts, payload)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
@@ -177,18 +178,21 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 		writeRunCommandNoFollowGuidance(out, start.RunID, opts.connectURL)
 		return nil
 	}
-	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, start.RunID, true)
+	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, start.RunID, &traceReplaySince, true)
 }
 
 func (o runCommandOptions) validate() error {
 	if o.detach {
 		return fmt.Errorf("ERROR: `swarm run --detach` is not supported in CLI v2. Use `swarm serve` plus `swarm run --connect <url> --event <name> --payload <file> --no-follow`.")
 	}
-	if o.apiPort < 0 || o.apiPort > 65535 {
+	if o.apiPort < 0 || o.apiPort > 65535 || (o.changedFlags["api-port"] && o.apiPort == 0) {
 		return fmt.Errorf("--api-port must be between 1 and 65535")
 	}
 	if o.mcpPort < 0 || o.mcpPort > 65535 {
 		return fmt.Errorf("--mcp-port must be between 1 and 65535")
+	}
+	if o.changedFlags["mcp-port"] {
+		return fmt.Errorf("--mcp-port is not supported until the serve owner can bind MCP explicitly")
 	}
 	if o.noFollow && strings.TrimSpace(o.connectURL) == "" {
 		return fmt.Errorf("--no-follow requires --connect")
@@ -206,6 +210,13 @@ func (o runCommandOptions) validate() error {
 			}
 		}
 		return nil
+	}
+	if strings.TrimSpace(o.connectURL) != "" {
+		for _, flag := range []string{"contracts", "platform-spec", "api-port"} {
+			if o.changedFlags[flag] {
+				return fmt.Errorf("--%s requires local foreground mode and cannot be used with --connect", flag)
+			}
+		}
 	}
 	if strings.TrimSpace(o.eventName) == "" {
 		return fmt.Errorf("--event is required")
@@ -448,11 +459,11 @@ func runReattachCommand(ctx context.Context, out, errOut io.Writer, opts runComm
 		return runCommandTerminalExit(run.Status)
 	}
 	writeRunCommandReattached(out, run)
-	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, runID, false)
+	return followRunCommand(ctx, out, errOut, client, opts, wsEndpoint, runID, nil, false)
 }
 
-func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, opts runCommandOptions, wsEndpoint, runID string, stopOnInterrupt bool) error {
-	sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID)
+func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, opts runCommandOptions, wsEndpoint, runID string, replaySince *time.Time, stopOnInterrupt bool) error {
+	sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, replaySince)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
@@ -505,18 +516,22 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	}
 }
 
-func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string) (*runTraceSubscription, error) {
+func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, replaySince *time.Time) (*runTraceSubscription, error) {
 	header := http.Header{"Authorization": []string{"Bearer " + token}}
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsEndpoint, header)
 	if err != nil {
 		return nil, fmt.Errorf("v1 WS dial failed: %w", err)
 	}
 	requestID := "swarm-cli:" + runCommandMethodSubscribeTrace
+	params := map[string]any{"run_id": runID}
+	if replaySince != nil {
+		params["replay_since"] = replaySince.UTC().Format(time.RFC3339Nano)
+	}
 	if err := conn.WriteJSON(jsonRPCRequest{
 		JSONRPC: "2.0",
 		ID:      requestID,
 		Method:  runCommandMethodSubscribeTrace,
-		Params:  map[string]any{"run_id": runID},
+		Params:  params,
 	}); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("write run.subscribe_trace request: %w", err)
