@@ -118,6 +118,62 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	}
 }
 
+func TestRunCommandStartIncludesOptionalRunIDAndIdempotencyKey(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				if got := req.Params["run_id"]; got != "run-explicit" {
+					t.Fatalf("run_id = %#v, want run-explicit", got)
+				}
+				if got := req.Params["idempotency_key"]; got != "idem-start" {
+					t.Fatalf("idempotency_key = %#v, want idem-start", got)
+				}
+				return map[string]any{"run_id": "run-explicit", "status": "running"}
+			default:
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return nil
+		},
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--run-id", "run-explicit", "--idempotency-key", "idem-start", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, []string{"health.check", "run.start"})
+}
+
+func TestRunCommandBundleFingerprintMismatchFailsBeforeRunStart(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			if req.Method != "health.check" {
+				t.Fatalf("unexpected method = %q; run.start must not be called after bundle mismatch", req.Method)
+			}
+			return runCommandHealthResult()
+		},
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-fingerprint", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	if code != 6 {
+		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, []string{"health.check"})
+	if !strings.Contains(stderr.String(), "bundle fingerprint mismatch") {
+		t.Fatalf("stderr = %q, want bundle mismatch", stderr.String())
+	}
+}
+
 func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
@@ -342,6 +398,61 @@ func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
 	}
 }
 
+func TestRunCommandMalformedWebSocketFailuresExitThree(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	for _, tc := range []struct {
+		name       string
+		serverOpts runCommandServerOptions
+		wantStderr string
+	}{
+		{
+			name: "subscription response missing id",
+			serverOpts: runCommandServerOptions{
+				wsSubscriptionResult: map[string]any{},
+			},
+			wantStderr: "subscription_id is required",
+		},
+		{
+			name: "notification missing event id",
+			serverOpts: runCommandServerOptions{
+				wsRows: []map[string]any{{
+					"event_name":       "scan.requested",
+					"event_created_at": "2026-05-13T10:00:01Z",
+				}},
+			},
+			wantStderr: "event_id is required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.serverOpts.rpcResponder = func(req jsonRPCRequest, _ int) map[string]any {
+				switch req.Method {
+				case "health.check":
+					return runCommandHealthResult()
+				case "run.start":
+					return map[string]any{"run_id": "run-bad-ws", "status": "running"}
+				default:
+					t.Fatalf("unexpected method = %q", req.Method)
+				}
+				return nil
+			}
+			server, _, _ := newRunCommandServer(t, tc.serverOpts)
+			defer server.Close()
+
+			opts := testRunCommandOptions(server)
+			opts.runStatusPoll = time.Hour
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+			if code != 3 {
+				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			}
+		})
+	}
+}
+
 func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	for _, tc := range []struct {
@@ -353,6 +464,14 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 	}{
 		{name: "detach retired", token: "test-token", args: []string{"run", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "swarm run --detach"},
 		{name: "no follow requires connect", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, wantCode: 2, wantStderr: "--no-follow requires --connect"},
+		{name: "no follow reattach rejected", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--no-follow"}, wantCode: 2, wantStderr: "--no-follow and --reattach are mutually exclusive"},
+		{name: "reattach rejects bundle fingerprint", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-fingerprint"},
+		{name: "reattach rejects local startup flags", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--contracts", "contracts"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --contracts"},
+		{name: "reattach rejects platform spec flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --platform-spec"},
+		{name: "reattach rejects api port flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--api-port", "8081"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --api-port"},
+		{name: "reattach rejects mcp port flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --mcp-port"},
+		{name: "connect rejects legacy path", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1/api/rpc", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect path must be empty or /v1/rpc"},
+		{name: "connect rejects unsupported scheme", token: "test-token", args: []string{"run", "--connect", "ftp://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect must use http or https"},
 		{name: "missing token exits four", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "SWARM_API_TOKEN is required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -429,9 +548,10 @@ func TestRunCommandMapsRPCAndMalformedFailures(t *testing.T) {
 }
 
 type runCommandServerOptions struct {
-	rpcResponder func(jsonRPCRequest, int) map[string]any
-	wsRows       []map[string]any
-	wsSubscribed chan struct{}
+	rpcResponder         func(jsonRPCRequest, int) map[string]any
+	wsRows               []map[string]any
+	wsSubscribed         chan struct{}
+	wsSubscriptionResult map[string]any
 }
 
 func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.Server, *[]jsonRPCRequest, *[]jsonRPCRequest) {
@@ -479,10 +599,14 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 			if req.Method != "run.subscribe_trace" {
 				t.Errorf("ws method = %q, want run.subscribe_trace", req.Method)
 			}
+			result := opts.wsSubscriptionResult
+			if result == nil {
+				result = map[string]any{"subscription_id": "sub-run"}
+			}
 			if err := conn.WriteJSON(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      req.ID,
-				"result":  map[string]any{"subscription_id": "sub-run"},
+				"result":  result,
 			}); err != nil {
 				t.Errorf("write ws subscription response: %v", err)
 				return

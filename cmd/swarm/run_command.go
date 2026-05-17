@@ -15,6 +15,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 const (
@@ -44,6 +45,7 @@ type runCommandOptions struct {
 	apiPort           int
 	mcpPort           int
 	detach            bool
+	changedFlags      map[string]bool
 }
 
 type runStartResult struct {
@@ -82,7 +84,9 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 		Short: "Start or reattach to a Swarm run through v1 RPC and trace subscriptions.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRunCommand(cmd.Context(), repo, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+			runOpts := opts
+			runOpts.changedFlags = runCommandChangedFlags(cmd)
+			return runRunCommand(cmd.Context(), repo, cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.eventName, "event", "", "Declared event name to publish as the run trigger")
@@ -99,6 +103,14 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	cmd.Flags().IntVar(&opts.mcpPort, "mcp-port", 0, "Reserved local MCP port for local foreground startup")
 	cmd.Flags().BoolVar(&opts.detach, "detach", false, "Unsupported in CLI v2; use --connect with --no-follow")
 	return cmd
+}
+
+func runCommandChangedFlags(cmd *cobra.Command) map[string]bool {
+	changed := map[string]bool{}
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		changed[flag.Name] = true
+	})
+	return changed
 }
 
 func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts runCommandOptions) error {
@@ -187,6 +199,11 @@ func (o runCommandOptions) validate() error {
 	if strings.TrimSpace(o.reattachRunID) != "" {
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
+		}
+		for _, flag := range []string{"bundle-fingerprint", "contracts", "platform-spec", "api-port", "mcp-port"} {
+			if o.changedFlags[flag] {
+				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
+			}
 		}
 		return nil
 	}
