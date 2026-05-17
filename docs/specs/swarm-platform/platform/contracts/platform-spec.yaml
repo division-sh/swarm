@@ -5370,9 +5370,9 @@ cli_specification:
       - --idempotency-key <key>
       - --run-id <id>
       - --api-port <int>
-      - --mcp-port <int>
       dropped_flags:
         --detach: 'Unsupported in v2; fail before API calls with exit 2 and migration text. Use `swarm serve` plus `swarm run --connect ... --no-follow`.'
+        --mcp-port: 'Unsupported in #743; `swarm run` may consume the existing serve startup owner, but explicit MCP bind ownership remains split to the #750 serve-owner tail and MUST fail before API/WS calls.'
       modes:
         foreground_local_start:
           invocation: swarm run --event <name> --payload <file> --contracts <path> --platform-spec <path>
@@ -5414,6 +5414,7 @@ cli_specification:
       - swarm trace --follow
       - swarm control pause|continue|stop
       - broader run-control/fork command surfaces
+      - '#750 serve-owner MCP bind ownership for future explicit --mcp-port support'
     verify:
       command: swarm verify [flags]
       tier: must_have
