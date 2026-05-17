@@ -252,7 +252,7 @@ func TestCoordinatorFailsClosedWhenLockLeaseIsMissing(t *testing.T) {
 	}
 }
 
-func TestInventoryPlannerCarriesSplitContractsAndResetSeams(t *testing.T) {
+func TestInventoryPlannerCarriesImplementedContractsAndSplitResetSeams(t *testing.T) {
 	reader := &recordingInventoryReader{}
 	plan, err := (InventoryPlanner{Reader: reader}).BuildPlan(context.Background(), Request{})
 	if err != nil {
@@ -261,7 +261,7 @@ func TestInventoryPlannerCarriesSplitContractsAndResetSeams(t *testing.T) {
 	if !containsContractStatus(plan.DownstreamContracts, ContractRunDeliveryQuiescence, "implemented_internal_owner") ||
 		!containsContractStatus(plan.DownstreamContracts, ContractRunScopedTruncation, "implemented_internal_owner") ||
 		!containsContractStatus(plan.DownstreamContracts, ContractManagedContainers, "implemented_internal_owner") ||
-		!containsContractStatus(plan.DownstreamContracts, ContractPublicAPIWrapper, "split") ||
+		!containsContractStatus(plan.DownstreamContracts, ContractPublicAPIWrapper, "implemented_public_owner") ||
 		!containsContractStatus(plan.DownstreamContracts, ContractLegacyResetMigration, "split") {
 		t.Fatalf("downstream contracts = %#v, missing required contract state", plan.DownstreamContracts)
 	}
