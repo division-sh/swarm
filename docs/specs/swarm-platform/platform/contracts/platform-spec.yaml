@@ -7714,12 +7714,12 @@ api_specification:
       \ set. The minimal API surface required to:\n                (a) close Empire #57 (mailbox approval API gap blocking\n\
       \                    every end-to-end run), and\n                (b) back the promoted CLI v2 read commands\n\
       \                    (`swarm runs`, `swarm status`, `swarm trace`, `swarm health`)\n\
-      \                    and the promoted `swarm run` follow path.\n\
-      \                Implementable as one PR; 13 methods total.\n  should_have \u2014 v1-scoped but ships in subsequent\
+      \                    and the promoted `swarm run` follow/cancellation paths.\n\
+      \                Implementable as one PR; 14 methods total.\n  should_have \u2014 v1-scoped but ships in subsequent\
       \ slices. Spec is\n                authoritative now (so consumers can plan against it),\n                but implementation\
       \ is sequenced after the must_have set.\n                Includes remaining streaming subscriptions, observability drill-down\n\
-      \                (event/entity/runtime), agent control, conversation reads,\n                production run-control\
-      \ (pause/continue/stop), runtime\n                ingress control.\n  deferred    \u2014 explicitly out of v1 scope.\
+      \                (event/entity/runtime), agent control, conversation reads,\n                remaining production run-control\
+      \ (pause/continue and broader stop command surfaces), runtime\n                ingress control.\n  deferred    \u2014 explicitly out of v1 scope.\
       \ Listed in deferred_namespaces.\n"
   method_catalog:
     health.ping:
@@ -7965,7 +7965,7 @@ api_specification:
       - PAYLOAD_VALIDATION_FAILED
       - IDEMPOTENCY_CONFLICT
     run.stop:
-      tier: should_have
+      tier: must_have
       description: Stop an in-progress run. Pending events are abandoned; in-flight handlers complete or roll back per their
         own semantics.
       scope:
@@ -9337,6 +9337,7 @@ api_specification:
       scopes, and errors.
     - "Idempotency replay-store implementation: (method, actor, idempotency_key) \u2192 response; 24h TTL; IDEMPOTENCY_CONFLICT\
       \ response on body mismatch."
+    - run.stop is must-have because promoted CLI v2 `swarm run` foreground modes require Ctrl-C cancellation after run creation.
     - run.subscribe_trace is must-have because promoted CLI v2 `swarm run` foreground follow and `swarm trace --follow` depend
       on it. Remaining subscription methods are sequenced by their own slices, but every subscription wire format must match
       the geth-style rpc.subscription shape.
