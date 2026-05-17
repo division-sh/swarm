@@ -120,9 +120,11 @@ func TestMailboxListSendsV1RPCRequestAndRendersResult(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
+		first := mailboxItemResult("mailbox-1", "pending", "high")
+		delete(first, "source_event_id")
 		writeJSONRPCResult(t, w, captured.ID, map[string]any{
 			"items": []map[string]any{
-				mailboxItemResult("mailbox-1", "pending", "high"),
+				first,
 				mailboxItemResult("mailbox-2", "decided", "normal"),
 			},
 			"next_cursor": "cursor-2",
@@ -160,7 +162,7 @@ func TestMailboxListSendsV1RPCRequestAndRendersResult(t *testing.T) {
 	}
 	for _, want := range []string{
 		"MAILBOX_ID\tSTATUS\tPRIORITY\tTYPE",
-		"mailbox-1\tpending\thigh\treview_request",
+		"mailbox-1\tpending\thigh\treview_request\t-\tentity-1",
 		"mailbox-2\tdecided\tnormal\treview_request",
 		"next_cursor=cursor-2",
 	} {
@@ -210,8 +212,10 @@ func TestMailboxViewSendsV1RPCRequestAndRendersDetail(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
+		item := mailboxItemResult("mailbox-1", "pending", "high")
+		delete(item, "source_event_id")
 		writeJSONRPCResult(t, w, captured.ID, map[string]any{
-			"item":    mailboxItemResult("mailbox-1", "pending", "high"),
+			"item":    item,
 			"payload": map[string]any{"summary": "needs review"},
 			"history": []map[string]any{
 				{"action": "created", "actor_token_id": "system", "ts": "2026-05-13T12:00:00Z"},
@@ -234,7 +238,7 @@ func TestMailboxViewSendsV1RPCRequestAndRendersDetail(t *testing.T) {
 	for _, want := range []string{
 		"Mailbox mailbox-1",
 		"status=pending priority=high type=review_request",
-		"source_event_id=event-mailbox-1 source_flow=validation",
+		"source_event_id=- source_flow=validation",
 		`payload={"summary":"needs review"}`,
 		"history:",
 		"- action=created actor=system ts=2026-05-13T12:00:00Z",
@@ -507,10 +511,10 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				item := mailboxItemResult("mailbox-1", "pending", "normal")
-				delete(item, "source_event_id")
+				delete(item, "source_flow")
 				writeJSONRPCResult(t, w, req.ID, map[string]any{"items": []map[string]any{item}})
 			},
-			wantStderr: "items[0]: source_event_id is required",
+			wantStderr: "items[0]: source_flow is required",
 		},
 		{
 			name: "view malformed missing payload",

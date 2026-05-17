@@ -334,7 +334,6 @@ func validateMailboxItem(item mailboxItem) error {
 		{name: "type", value: item.Type},
 		{name: "status", value: item.Status},
 		{name: "priority", value: item.Priority},
-		{name: "source_event_id", value: item.SourceEventID},
 		{name: "source_flow", value: item.SourceFlow},
 		{name: "created_at", value: item.CreatedAt},
 	} {
@@ -502,7 +501,7 @@ func writeMailboxListResult(out io.Writer, result mailboxListResult) {
 			item.Status,
 			item.Priority,
 			item.Type,
-			item.SourceEventID,
+			mailboxDash(item.SourceEventID),
 			mailboxDash(item.SourceEntityID),
 			item.CreatedAt,
 			mailboxDash(item.Decision),
@@ -521,7 +520,7 @@ func writeMailboxDetailResult(out io.Writer, result mailboxDetailResult) {
 	fmt.Fprintf(out, "Mailbox %s\n", item.MailboxID)
 	fmt.Fprintf(out, "status=%s priority=%s type=%s\n", item.Status, item.Priority, item.Type)
 	fmt.Fprintf(out, "source_event_id=%s source_flow=%s source_entity_id=%s created_at=%s\n",
-		item.SourceEventID,
+		mailboxDash(item.SourceEventID),
 		item.SourceFlow,
 		mailboxDash(item.SourceEntityID),
 		item.CreatedAt,
