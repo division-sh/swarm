@@ -128,6 +128,17 @@ func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
+func newHealthCommand(opts rootCommandOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "health",
+		Short: "Print structured operator health through v1 RPC.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDiagnosticHealthCommand(cmd.Context(), cmd.OutOrStdout(), opts)
+		},
+	}
+}
+
 func newInvestigateCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "investigate",
@@ -141,7 +152,7 @@ func newInvestigateCommand(opts rootCommandOptions) *cobra.Command {
 		newInvestigateRunsCommand(opts),
 		newInvestigateRunCommand(opts),
 		newInvestigateTraceCommand(opts),
-		newInvestigateHealthCommand(opts),
+		newInvestigateHealthCommand(),
 	)
 	return cmd
 }
@@ -203,15 +214,24 @@ func newInvestigateTraceCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func newInvestigateHealthCommand(opts rootCommandOptions) *cobra.Command {
+func newInvestigateHealthCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "health",
-		Short: "Print structured operator health through v1 RPC.",
-		Args:  cobra.NoArgs,
+		Use:                "health",
+		Short:              "Retired legacy command; use swarm health.",
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDiagnosticHealthCommand(cmd.Context(), cmd.OutOrStdout(), opts)
+			writeInvestigateHealthRetiredMessage(cmd.ErrOrStderr())
+			return commandExitError{code: 2}
 		},
 	}
+}
+
+func writeInvestigateHealthRetiredMessage(w io.Writer) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, "ERROR: `swarm investigate health` was retired in CLI v2.")
+	fmt.Fprintln(w, "  Use `swarm health`.")
 }
 
 func bindDiagnosticRunListFlags(cmd *cobra.Command, opts *diagnosticRunListOptions) {

@@ -5474,7 +5474,7 @@ cli_specification:
     health:
       command: swarm health
       tier: must_have
-      implementation_status: absent_v2_top_level_exists_under_legacy_investigate
+      implementation_status: implemented
       owner: /v1/rpc health.check
       behavior: Structured authenticated operator health; separate from lightweight /healthz and /readyz process probes.
     control_pause:
@@ -5600,7 +5600,7 @@ cli_specification:
     investigate:
       command: swarm investigate *
       status: retired_legacy_v1_topology
-      current_code_state: implemented legacy namespace until a command repair child removes or fails it closed
+      current_code_state: partially_implemented_legacy_namespace; health fails closed after #797; runs/run/trace remain implemented legacy until sibling repairs
       v2_replacements:
         swarm investigate runs: swarm runs
         swarm investigate run: swarm status
@@ -5642,6 +5642,7 @@ cli_specification:
     - swarm serve (partial)
     - swarm verify
     - swarm runs
+    - swarm health
     - swarm mailbox list
     - swarm mailbox view
     - swarm mailbox approve
@@ -5652,12 +5653,12 @@ cli_specification:
     - swarm investigate runs
     - swarm investigate run
     - swarm investigate trace
+    retired_or_fail_closed:
     - swarm investigate health
     remaining_must_have_not_implemented:
     - swarm run
     - swarm status
     - swarm trace
-    - swarm health
     - swarm version --server
     remaining_should_have_not_implemented:
     - swarm control pause|continue|stop
