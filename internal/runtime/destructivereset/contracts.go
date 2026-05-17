@@ -38,23 +38,13 @@ func DefaultDownstreamContracts() []DownstreamContract {
 			ID:          ContractLegacyResetMigration,
 			Status:      "split",
 			Owner:       "future legacy reset migration owner",
-			Description: "Retire, redirect, or explicitly split dashboard/Builder/run_clear reset seams after canonical reset ownership exists.",
+			Description: "Retire, redirect, or explicitly split remaining run_clear/CLI reset seams after canonical reset ownership exists; stale dashboard/Builder reset_state plumbing is retired/fail-closed.",
 		},
 	}
 }
 
 func DefaultResetSeams() []ResetSeam {
 	return []ResetSeam{
-		{
-			ID:             "dashboard_runtime_actions_reset_state",
-			Classification: "legacy_deferred_sibling",
-			RequiredAction: "Do not treat dashboard reset_state as canonical reset ownership; migrate, retire, or split before runtime.nuke closure.",
-		},
-		{
-			ID:             "builder_runtime_reset_state",
-			Classification: "legacy_deferred_sibling",
-			RequiredAction: "Do not treat Builder reset_state/run hub reset as canonical reset ownership; migrate, retire, or split before runtime.nuke closure.",
-		},
 		{
 			ID:             "agent_manager_reset_runtime_state_with_source",
 			Classification: "partial_internal_primitive",

@@ -942,7 +942,7 @@ func (am *AgentManager) ResetRuntimeStateWithSource(source string) error {
 
 func platformResetSourceAuthorized(source string) bool {
 	switch strings.TrimSpace(source) {
-	case "admin_cli", "builder_api":
+	case "admin_cli":
 		return true
 	default:
 		return false

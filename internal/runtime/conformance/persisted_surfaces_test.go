@@ -1488,7 +1488,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 		RuntimeMode: runtimesessions.RuntimeModeSession.String(),
 		Sessions:    registry,
 	})
-	if err := am.ResetRuntimeStateWithSource("builder_api"); err != nil {
+	if err := am.ResetRuntimeStateWithSource("admin_cli"); err != nil {
 		t.Fatalf("ResetRuntimeStateWithSource: %v", err)
 	}
 
@@ -1514,8 +1514,8 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("log action = %q, want reset_orphaned_sessions", log.Action)
 	}
 	detail, _ := log.Detail.(map[string]any)
-	if got := readString(detail["source"]); got != "builder_api" {
-		t.Fatalf("detail.source = %q, want builder_api", got)
+	if got := readString(detail["source"]); got != "admin_cli" {
+		t.Fatalf("detail.source = %q, want admin_cli", got)
 	}
 	if got, _ := detail["orphaned_session_count"].(float64); int(got) != 1 {
 		t.Fatalf("detail.orphaned_session_count = %v, want 1", detail["orphaned_session_count"])
@@ -1537,8 +1537,8 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	if got := readString(sessionRow["termination_reason"]); got != "orphaned" {
 		t.Fatalf("detail.orphaned_sessions[0].termination_reason = %q, want orphaned", got)
 	}
-	if got := readString(sessionRow["termination_detail"]); got != "builder_api" {
-		t.Fatalf("detail.orphaned_sessions[0].termination_detail = %q, want builder_api", got)
+	if got := readString(sessionRow["termination_detail"]); got != "admin_cli" {
+		t.Fatalf("detail.orphaned_sessions[0].termination_detail = %q, want admin_cli", got)
 	}
 
 	var (
@@ -1562,8 +1562,8 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	if terminationReason != "orphaned" {
 		t.Fatalf("termination_reason = %q, want orphaned", terminationReason)
 	}
-	if terminationDetail != "builder_api" {
-		t.Fatalf("termination_detail = %q, want builder_api", terminationDetail)
+	if terminationDetail != "admin_cli" {
+		t.Fatalf("termination_detail = %q, want admin_cli", terminationDetail)
 	}
 
 	var resetPayloadRaw []byte
@@ -1580,8 +1580,8 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	if err := json.Unmarshal(resetPayloadRaw, &resetPayload); err != nil {
 		t.Fatalf("unmarshal platform.reset payload: %v", err)
 	}
-	if got := readString(resetPayload["source"]); got != "builder_api" {
-		t.Fatalf("platform.reset payload.source = %q, want builder_api", got)
+	if got := readString(resetPayload["source"]); got != "admin_cli" {
+		t.Fatalf("platform.reset payload.source = %q, want admin_cli", got)
 	}
 }
 

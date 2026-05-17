@@ -7,7 +7,20 @@ import (
 	"testing"
 
 	"github.com/gorilla/websocket"
+
+	runtimepkg "swarm/internal/runtime"
+	runtimebus "swarm/internal/runtime/bus"
 )
+
+type stubBuilderRuntimeControl struct{}
+
+func (stubBuilderRuntimeControl) PauseIngress() error {
+	return nil
+}
+
+func (stubBuilderRuntimeControl) ResumeIngress() error {
+	return nil
+}
 
 func TestHandler_LegacyRoutesFailClosed(t *testing.T) {
 	handler := NewHandler(Options{
@@ -51,5 +64,31 @@ func TestHandler_LegacyWebSocketRoutesDoNotUpgrade(t *testing.T) {
 				t.Fatalf("upgrade response = %#v, want 404", resp)
 			}
 		})
+	}
+}
+
+func TestHandler_RuntimeControllerHasNoResetCallback(t *testing.T) {
+	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	h := NewHandler(Options{
+		AuthToken: testBuilderAuthToken,
+		Runtime:   stubBuilderRuntimeControl{},
+		CurrentRuntime: func() *runtimepkg.Runtime {
+			return &runtimepkg.Runtime{Bus: eb}
+		},
+	})
+	typed, ok := h.(*handler)
+	if !ok || typed.runHub == nil {
+		t.Fatalf("builder handler runHub = %#v, want configured runHub", typed)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"runtime.reset_state"}`))
+	req.Header.Set("Authorization", "Bearer "+testBuilderAuthToken)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("legacy reset RPC status = %d, want %d body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
 	}
 }

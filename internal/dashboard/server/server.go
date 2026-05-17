@@ -196,7 +196,6 @@ type AgentController interface {
 type RuntimeController interface {
 	PauseIngress() error
 	ResumeIngress() error
-	ResetState() error
 }
 
 type Options struct {
@@ -913,12 +912,6 @@ func (h *Handler) handleRuntimeAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "runtime resumed"})
-	case "reset_state":
-		if err := h.runtime.ResetState(); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "runtime state reset"})
 	default:
 		writeJSONError(w, http.StatusBadRequest, errors.New("unsupported runtime action"))
 	}

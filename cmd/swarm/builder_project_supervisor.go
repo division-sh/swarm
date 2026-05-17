@@ -292,17 +292,6 @@ func (c dashboardDynamicRuntimeControl) ResumeIngress() error {
 	return err
 }
 
-func (c dashboardDynamicRuntimeControl) ResetState() error {
-	rt := c.supervisor.CurrentRuntime()
-	if rt == nil || rt.Manager == nil {
-		return fmt.Errorf("runtime manager unavailable")
-	}
-	if resetter, ok := any(rt.Manager).(interface{ ResetRuntimeStateWithSource(string) error }); ok {
-		return resetter.ResetRuntimeStateWithSource("builder_api")
-	}
-	return rt.Manager.ResetRuntimeState()
-}
-
 type dashboardDynamicAgentControl struct {
 	supervisor *runtimeProjectSupervisor
 }

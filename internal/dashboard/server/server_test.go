@@ -920,7 +920,6 @@ func testToolsContainName(tools []runtimellm.ToolDefinition, want string) bool {
 }
 
 type stubRuntimeControl struct {
-	resetCalls  int
 	pauseCalls  int
 	resumeCalls int
 }
@@ -931,10 +930,6 @@ func (s *stubRuntimeControl) PauseIngress() error {
 }
 func (s *stubRuntimeControl) ResumeIngress() error {
 	s.resumeCalls++
-	return nil
-}
-func (s *stubRuntimeControl) ResetState() error {
-	s.resetCalls++
 	return nil
 }
 
@@ -1393,6 +1388,12 @@ func TestHandler_LegacyDashboardRoutesFailClosedWithoutAuthBoundary(t *testing.T
 			body:   `{"action":"pause"}`,
 		},
 		{
+			name:   "runtime reset_state",
+			method: http.MethodPost,
+			path:   "/api/runtime/actions",
+			body:   `{"action":"reset_state"}`,
+		},
+		{
 			name:   "run trace",
 			method: http.MethodGet,
 			path:   "/api/runs/run-1/trace",
@@ -1430,6 +1431,24 @@ func TestHandler_LegacyDashboardRoutesFailClosedWithoutAuthBoundary(t *testing.T
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestHandler_RuntimeResetStateActionIsRetired(t *testing.T) {
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Runtime: runtimeCtl,
+	}).(*Handler)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/runtime/actions", strings.NewReader(`{"action":"reset_state"}`))
+	handler.handleRuntimeAction(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("reset_state runtime action status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if runtimeCtl.pauseCalls != 0 || runtimeCtl.resumeCalls != 0 {
+		t.Fatalf("runtime control calls = pause:%d resume:%d, want no calls", runtimeCtl.pauseCalls, runtimeCtl.resumeCalls)
 	}
 }
 
@@ -3929,8 +3948,8 @@ func TestHandler_RunStopUsesRunControlOwnerAndStreamsStopped(t *testing.T) {
 		if eventType != "run.stopped" {
 			continue
 		}
-		if runtimeCtl.resetCalls != 0 {
-			t.Fatalf("expected run.stop not to reset runtime ingress, got %d reset calls", runtimeCtl.resetCalls)
+		if runtimeCtl.pauseCalls != 0 || runtimeCtl.resumeCalls != 0 {
+			t.Fatalf("expected run.stop not to change runtime ingress, got pause:%d resume:%d", runtimeCtl.pauseCalls, runtimeCtl.resumeCalls)
 		}
 		return
 	}

@@ -4525,17 +4525,19 @@ platform_events:
       produced_by_type: platform
     platform.reset:
       description: Admin-initiated platform state reset. Emitted ONLY when a human administrator explicitly triggers a reset
-        via the admin CLI or builder API. NOT emitted on crash recovery or automatic recovery fallback — those use
-        platform.recovery_failed if they fail, or normal boot if they succeed.
+        via the internal admin reset source. Builder/dashboard reset_state is retired and MUST NOT emit this event. NOT
+        emitted on crash recovery or automatic recovery fallback — those use platform.recovery_failed if they fail, or normal
+        boot if they succeed.
       scope: global
-      trigger: Explicit admin action only. The runtime calls ResetRuntimeState() and emits this event after the reset completes.
+      trigger: Explicit internal admin action only. The runtime calls ResetRuntimeState() and emits this event after the reset
+        completes.
         Product nodes may subscribe to this event to clear their own state (e.g., accumulator state, cycle counters).
       payload:
-        source: string — who initiated the reset (admin_cli, builder_api, etc.)
+        source: string — who initiated the reset (admin_cli)
         timestamp: string (ISO 8601)
       produced_by_type: platform
       swarm:
-        source: external (platform admin CLI or builder API)
+        source: external (platform admin CLI)
     platform.auth_required:
       description: Agent or tool call blocked pending authorization.
       scope: flow
@@ -8936,8 +8938,8 @@ api_specification:
       methods:
       - runtime.reset_state
       rationale: Legacy reset_state naming remains deferred/retired. Public destructive reset is exposed as runtime.nuke,
-        backed by the destructive-reset owner chain; dashboard/Builder/reset_state migration is tracked separately from the
-        public wrapper.
+        backed by the destructive-reset owner chain. Dashboard/Builder reset_state plumbing is retired/fail-closed rather
+        than migrated as a legacy API; any future privileged admin reset namespace requires a separate spec-gated child.
     bundle_lifecycle:
       methods:
       - bundle.open
@@ -9008,8 +9010,8 @@ api_specification:
       - "GET /api/runtime/logs \u2192 runtime.logs"
       - "GET /api/runtime/incidents \u2192 runtime.incidents"
       - "POST /api/runtime/actions {pause/resume} \u2192 runtime.pause / runtime.resume"
-      - "POST /api/runtime/actions {reset_state} \u2192 runtime.nuke in a later dashboard/Builder migration; the legacy reset_state
-        name remains deferred/retired."
+      - "POST /api/runtime/actions {reset_state} \u2192 retired/fail-closed; future dashboard consumers must call runtime.nuke
+        directly and the legacy reset_state name remains deferred/retired."
       - "GET /api/runs/{runID}/trace \u2192 run.trace (also adds run.subscribe_trace as the live variant)"
     auth_token_disposition:
       v1_model: SWARM_API_TOKEN is the only user-facing API bearer-token source. SWARM_BUILDER_AUTH_TOKEN and SWARM_OPERATOR_AUTH_TOKEN

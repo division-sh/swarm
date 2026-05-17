@@ -23,7 +23,6 @@ type EntityReader interface {
 type RuntimeController interface {
 	PauseIngress() error
 	ResumeIngress() error
-	ResetState() error
 }
 
 type SourceProvider func() semanticview.Source
@@ -169,12 +168,6 @@ func NewHandler(opts Options) http.Handler {
 	if h.currentRuntime != nil {
 		h.runHub = newRunHub(
 			h.currentRuntime,
-			func() error {
-				if h.runtime == nil {
-					return errUnavailable("runtime controller is not configured")
-				}
-				return h.runtime.ResetState()
-			},
 			func() error {
 				if h.runtime == nil {
 					return errUnavailable("runtime controller is not configured")
