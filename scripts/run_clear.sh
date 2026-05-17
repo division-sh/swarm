@@ -158,6 +158,40 @@ launcher_exited_before_ready() {
 
 bundle_fingerprint=""
 
+wait_for_api_reachable() {
+  local launcher_pid="${1:-}"
+  local launcher_identity="${2:-}"
+  local reachable=0
+  local api_health_body='{"jsonrpc":"2.0","id":"run-clear-health","method":"health.check","params":{}}'
+  for _ in $(seq 1 "${START_TIMEOUT}"); do
+    if [[ -n "${launcher_pid}" ]] && launcher_exited_before_ready "${launcher_pid}" "${launcher_identity}"; then
+      echo "Swarm exited before API became reachable. Current log:"
+      tail -n 200 "${LOG_FILE}"
+      exit 1
+    fi
+    health_code="$(curl -s -o /tmp/swarm-healthz.json -w '%{http_code}' "${HEALTH_URL}" || true)"
+    api_code="$(curl -s -o /tmp/swarm-api-health.json -w '%{http_code}' "${API_RPC_URL}" \
+      -H 'content-type: application/json' \
+      -H "Authorization: Bearer ${SWARM_API_TOKEN}" \
+      --data-binary "${api_health_body}" || true)"
+    if [[ "${health_code}" == "200" && "${api_code}" == "200" ]]; then
+      if ruby -rjson -e 'doc = JSON.parse(File.read(ARGV[0])); abort("health.check returned error") if doc["error"]; result = doc["result"] || {}; exit(result["alive"] == true && result["db_ok"] == true ? 0 : 1)' /tmp/swarm-api-health.json 2>/dev/null; then
+        reachable=1
+        break
+      fi
+    fi
+    sleep 1
+  done
+
+  if [[ "${reachable}" -ne 1 ]]; then
+    echo "Swarm API failed to become reachable for runtime.nuke. Current log:"
+    tail -n 200 "${LOG_FILE}"
+    exit 1
+  fi
+
+  echo "Swarm API reachable at http://${HOST_HTTP_ADDR}"
+}
+
 wait_for_ready() {
   local launcher_pid="${1:-}"
   local launcher_identity="${2:-}"
@@ -255,7 +289,7 @@ PY
 )"
   echo "${launcher_pid}" > "${PID_FILE}"
   launcher_identity="$(launcher_process_identity "${launcher_pid}" || true)"
-  wait_for_ready "${launcher_pid}" "${launcher_identity}"
+  wait_for_api_reachable "${launcher_pid}" "${launcher_identity}"
   reset_runtime_with_nuke
   bundle_fingerprint=""
   wait_for_ready "${launcher_pid}" "${launcher_identity}"

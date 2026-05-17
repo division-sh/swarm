@@ -13,29 +13,33 @@ import (
 const runClearTestBundleFingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 type runClearConfig struct {
-	mode             string
-	apiToken         string
-	directiveAgent   string
-	directiveMessage string
-	healthAddr       string
-	hostGatewayURL   string
-	containerURL     string
-	launcherMode     string
-	launcherLogText  string
-	psMode           string
-	readyCode        string
-	apiHealthCode    string
-	apiHealthReady   string
-	apiHealthDBOK    string
-	apiHealthRuntime string
-	startTimeout     string
-	inputEvent       string
-	inputPayloadJSON string
-	resetIDKey       string
-	nukeError        string
-	nukeOK           string
-	nukeStatus       string
-	nukePartial      string
+	mode                  string
+	apiToken              string
+	directiveAgent        string
+	directiveMessage      string
+	healthAddr            string
+	hostGatewayURL        string
+	containerURL          string
+	launcherMode          string
+	launcherLogText       string
+	psMode                string
+	readyCode             string
+	apiHealthCode         string
+	apiHealthReady        string
+	apiHealthDBOK         string
+	apiHealthRuntime      string
+	preResetReadyCode     string
+	preResetHealthReady   string
+	preResetHealthDBOK    string
+	preResetHealthRuntime string
+	startTimeout          string
+	inputEvent            string
+	inputPayloadJSON      string
+	resetIDKey            string
+	nukeError             string
+	nukeOK                string
+	nukeStatus            string
+	nukePartial           string
 }
 
 func TestRunClear_UsesV1RPCHealthCheckAndRunStart(t *testing.T) {
@@ -152,10 +156,11 @@ func TestRunClear_MapsConfiguredInputEventAndPayloadToV1RunStart(t *testing.T) {
 
 func TestRunClear_DoesNotStartRunWhenHealthCheckIsNotReady(t *testing.T) {
 	result, err := runRunClearResult(t, runClearConfig{
-		apiHealthReady:   "false",
-		apiHealthDBOK:    "false",
-		apiHealthRuntime: "true",
-		startTimeout:     "1",
+		apiHealthReady:     "false",
+		apiHealthDBOK:      "false",
+		apiHealthRuntime:   "true",
+		preResetHealthDBOK: "true",
+		startTimeout:       "1",
 	})
 
 	if err == nil {
@@ -210,6 +215,26 @@ func TestRunClear_ResetDevDoesNotStartRunOrDirective(t *testing.T) {
 		t.Fatalf("psql calls = %q, want no raw database reset in reset-dev", got)
 	}
 	assertEventOrder(t, result.events, "serve_start", "health.check", "runtime.nuke", "health.check")
+}
+
+func TestRunClear_RuntimeNukeDoesNotRequireReadyBeforeReset(t *testing.T) {
+	result := runRunClear(t, runClearConfig{
+		mode:                  "reset-dev",
+		preResetReadyCode:     "503",
+		preResetHealthReady:   "false",
+		preResetHealthRuntime: "false",
+	})
+
+	if got := strings.TrimSpace(result.resetBody); got == "" {
+		t.Fatal("expected runtime.nuke request before full readiness")
+	}
+	assertEventOrder(t, result.events, "serve_start", "health.check", "runtime.nuke", "health.check")
+	if !strings.Contains(result.stdout, "Swarm API reachable at http://127.0.0.1:8081") {
+		t.Fatalf("stdout = %q, want API-reachable pre-reset gate", result.stdout)
+	}
+	if !strings.Contains(result.stdout, "Swarm ready at http://127.0.0.1:8081") {
+		t.Fatalf("stdout = %q, want full readiness after runtime.nuke", result.stdout)
+	}
 }
 
 func TestRunClear_UsesConfiguredResetIdempotencyKey(t *testing.T) {
@@ -536,8 +561,8 @@ func TestRunClear_FailsFastWhenSwarmExitsBeforeReady(t *testing.T) {
 	if err == nil {
 		t.Fatalf("run_clear.sh err = nil, want startup failure\n%s", result.stdout)
 	}
-	if !strings.Contains(result.stdout, "Swarm exited before becoming ready. Current log:") {
-		t.Fatalf("stdout = %q, want early-exit startup failure text", result.stdout)
+	if !strings.Contains(result.stdout, "Swarm exited before API became reachable. Current log:") {
+		t.Fatalf("stdout = %q, want early API startup failure text", result.stdout)
 	}
 	if !strings.Contains(result.stdout, "workspace validation failed: workspace image is required") {
 		t.Fatalf("stdout = %q, want startup failure log detail", result.stdout)
@@ -782,6 +807,10 @@ if [[ "$url" == *"/readyz" ]]; then
   if [[ -n "$out" ]]; then
     printf '{}' > "$out"
   fi
+  if [[ ! -s "${CURL_RESET_BODY_SINK}" ]]; then
+    printf '%s' "${CURL_PRE_RESET_READYZ_CODE:-${CURL_READYZ_CODE:-200}}"
+    exit 0
+  fi
   printf '%s' "${CURL_READYZ_CODE:-200}"
   exit 0
 fi
@@ -812,6 +841,15 @@ fi
 if [[ "$url" == *"/v1/rpc" ]]; then
   if [[ "$body" == *'"method":"health.check"'* ]]; then
     printf 'health.check\n' >> "${RUN_CLEAR_EVENTS_SINK}"
+    if [[ ! -s "${CURL_RESET_BODY_SINK}" ]]; then
+      health_ready="${RUN_CLEAR_TEST_PRE_RESET_HEALTH_READY}"
+      health_db_ok="${RUN_CLEAR_TEST_PRE_RESET_HEALTH_DB_OK}"
+      health_runtime_ok="${RUN_CLEAR_TEST_PRE_RESET_HEALTH_RUNTIME_OK}"
+    else
+      health_ready="${RUN_CLEAR_TEST_HEALTH_READY}"
+      health_db_ok="${RUN_CLEAR_TEST_HEALTH_DB_OK}"
+      health_runtime_ok="${RUN_CLEAR_TEST_HEALTH_RUNTIME_OK}"
+    fi
     printf '%s' "$url" > "${CURL_API_HEALTH_URL_SINK}"
     printf '%s' "$body" > "${CURL_API_HEALTH_BODY_SINK}"
     if ((${#headers[@]})); then
@@ -823,7 +861,7 @@ if [[ "$url" == *"/v1/rpc" ]]; then
     for header in "${headers[@]}"; do
       if [[ "$header" == "$want" ]]; then
         if [[ -n "$out" ]]; then
-          printf '{"jsonrpc":"2.0","id":"run-clear-health","result":{"alive":true,"ready":%s,"db_ok":%s,"runtime_ok":%s,"bundle":{"workflow_name":"empire","workflow_version":"test","fingerprint":"%s"}}}' "${RUN_CLEAR_TEST_HEALTH_READY}" "${RUN_CLEAR_TEST_HEALTH_DB_OK}" "${RUN_CLEAR_TEST_HEALTH_RUNTIME_OK}" "${RUN_CLEAR_TEST_BUNDLE_FINGERPRINT}" > "$out"
+          printf '{"jsonrpc":"2.0","id":"run-clear-health","result":{"alive":true,"ready":%s,"db_ok":%s,"runtime_ok":%s,"bundle":{"workflow_name":"empire","workflow_version":"test","fingerprint":"%s"}}}' "${health_ready}" "${health_db_ok}" "${health_runtime_ok}" "${RUN_CLEAR_TEST_BUNDLE_FINGERPRINT}" > "$out"
         fi
         printf '%s' "${CURL_API_HEALTH_CODE:-200}"
         exit 0
@@ -939,10 +977,14 @@ printf '{}'
 		"CURL_RESET_URL_SINK=" + resetURLSink,
 		"CURL_HEALTHZ_CODE=200",
 		"CURL_READYZ_CODE=" + defaultString(cfg.readyCode, "200"),
+		"CURL_PRE_RESET_READYZ_CODE=" + defaultString(cfg.preResetReadyCode, defaultString(cfg.readyCode, "200")),
 		"CURL_API_HEALTH_CODE=" + defaultString(cfg.apiHealthCode, "200"),
 		"RUN_CLEAR_TEST_HEALTH_READY=" + defaultString(cfg.apiHealthReady, "true"),
 		"RUN_CLEAR_TEST_HEALTH_DB_OK=" + defaultString(cfg.apiHealthDBOK, "true"),
 		"RUN_CLEAR_TEST_HEALTH_RUNTIME_OK=" + defaultString(cfg.apiHealthRuntime, "true"),
+		"RUN_CLEAR_TEST_PRE_RESET_HEALTH_READY=" + defaultString(cfg.preResetHealthReady, defaultString(cfg.apiHealthReady, "true")),
+		"RUN_CLEAR_TEST_PRE_RESET_HEALTH_DB_OK=" + defaultString(cfg.preResetHealthDBOK, defaultString(cfg.apiHealthDBOK, "true")),
+		"RUN_CLEAR_TEST_PRE_RESET_HEALTH_RUNTIME_OK=" + defaultString(cfg.preResetHealthRuntime, defaultString(cfg.apiHealthRuntime, "true")),
 		"RUN_CLEAR_TEST_BUNDLE_FINGERPRINT=" + runClearTestBundleFingerprint,
 		"RUN_CLEAR_TEST_NUKE_ERROR=" + cfg.nukeError,
 		"RUN_CLEAR_TEST_NUKE_OK=" + defaultString(cfg.nukeOK, "true"),
