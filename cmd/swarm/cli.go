@@ -64,6 +64,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 	cmd.SetErr(errOut)
 	cmd.AddCommand(
 		newServeCommand(ctx, repo),
+		newRunCommand(repo, opts),
 		newVerifyCommand(ctx, repo),
 		newVersionCommand(),
 		newCompletionCommand(),

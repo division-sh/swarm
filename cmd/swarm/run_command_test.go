@@ -1,0 +1,533 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
+	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, callIndex int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				if got := req.Params["event_name"]; got != "scan.requested" {
+					t.Fatalf("event_name = %#v, want scan.requested", got)
+				}
+				if got := req.Params["bundle_ref"]; !reflect.DeepEqual(got, map[string]any{"fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}) {
+					t.Fatalf("bundle_ref = %#v", got)
+				}
+				return map[string]any{"run_id": "run-local", "status": "running"}
+			case "run.get":
+				run := validDiagnosticRunHeader("run-local")
+				run["status"] = "completed"
+				run["ended_at"] = "2026-05-13T10:01:00Z"
+				return map[string]any{"run": run}
+			default:
+				t.Fatalf("unexpected method[%d] = %q", callIndex, req.Method)
+			}
+			return nil
+		},
+		wsRows: []map[string]any{validRunCommandTraceRow("evt-local")},
+	})
+	defer server.Close()
+
+	var serveCalled atomic.Int32
+	serveCanceled := make(chan struct{})
+	opts := testRunCommandOptions(server)
+	opts.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
+		serveCalled.Add(1)
+		if serveOpts.ContractsPath != "contracts" || serveOpts.PlatformSpecPath != "platform.yaml" {
+			t.Errorf("serve opts = %#v", serveOpts)
+		}
+		<-ctx.Done()
+		close(serveCanceled)
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts", "--platform-spec", "platform.yaml"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if serveCalled.Load() != 1 {
+		t.Fatalf("serve called = %d, want 1", serveCalled.Load())
+	}
+	select {
+	case <-serveCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("local serve hook was not canceled after terminal run")
+	}
+	assertRunCommandMethods(t, calls, []string{"health.check", "health.check", "run.start", "run.get"})
+	for _, want := range []string{"run started: run_id=run-local", "trace event_id=evt-local", "run terminal: run_id=run-local status=completed"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				return map[string]any{"run_id": "run-no-follow", "status": "running"}
+			default:
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return nil
+		},
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, []string{"health.check", "run.start"})
+	if len(*wsRequests) != 0 {
+		t.Fatalf("websocket requests = %d, want 0", len(*wsRequests))
+	}
+	for _, want := range []string{"run started: run_id=run-no-follow", "reattach: swarm run --connect " + server.URL + " --reattach run-no-follow"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				return map[string]any{"run_id": "run-foreground", "status": "running"}
+			case "run.get":
+				run := validDiagnosticRunHeader("run-foreground")
+				run["status"] = "completed"
+				run["ended_at"] = "2026-05-13T10:01:00Z"
+				return map[string]any{"run": run}
+			default:
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return nil
+		},
+		wsRows: []map[string]any{validRunCommandTraceRow("evt-foreground")},
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, testRunCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.get"})
+	if len(*wsRequests) != 1 || (*wsRequests)[0].Method != "run.subscribe_trace" {
+		t.Fatalf("ws requests = %#v, want run.subscribe_trace", *wsRequests)
+	}
+	if got := (*wsRequests)[0].Params["run_id"]; got != "run-foreground" {
+		t.Fatalf("ws run_id = %#v, want run-foreground", got)
+	}
+	for _, want := range []string{"trace event_id=evt-foreground", "run terminal: run_id=run-foreground status=completed"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestRunCommandReattachTerminalUsesRunGetWithoutWebSocket(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			if req.Method != "run.get" {
+				t.Fatalf("method = %q, want run.get", req.Method)
+			}
+			run := validDiagnosticRunHeader("run-terminal")
+			run["status"] = "failed"
+			run["ended_at"] = "2026-05-13T10:01:00Z"
+			run["error_summary"] = "workflow failed"
+			return map[string]any{"run": run}
+		},
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--reattach", "run-terminal"}, &stdout, &stderr, testRunCommandOptions(server))
+	if code != 7 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, []string{"run.get"})
+	if len(*wsRequests) != 0 {
+		t.Fatalf("websocket requests = %d, want 0", len(*wsRequests))
+	}
+	if !strings.Contains(stdout.String(), "run terminal: run_id=run-terminal status=failed") || !strings.Contains(stdout.String(), "workflow failed") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunCommandReattachActiveCtrlCDetachesWithoutRunStop(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	wsSubscribed := make(chan struct{})
+	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			if req.Method == "run.stop" {
+				t.Fatal("reattach Ctrl-C must not call run.stop")
+			}
+			if req.Method != "run.get" {
+				t.Fatalf("method = %q, want run.get", req.Method)
+			}
+			return map[string]any{"run": validDiagnosticRunHeader("run-active")}
+		},
+		wsSubscribed: wsSubscribed,
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-wsSubscribed
+		cancel()
+	}()
+	opts := testRunCommandOptions(server)
+	opts.runStatusPoll = time.Hour
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "--connect", server.URL, "--reattach", "run-active"}, &stdout, &stderr, opts)
+	if code != 130 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, []string{"run.get"})
+	if !strings.Contains(stderr.String(), "detached from run trace") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunCommandStartCtrlCCallsRunStopAfterRunID(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	wsSubscribed := make(chan struct{})
+	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				return map[string]any{"run_id": "run-interrupt", "status": "running"}
+			case "run.stop":
+				if got := req.Params["run_id"]; got != "run-interrupt" {
+					t.Fatalf("run.stop run_id = %#v", got)
+				}
+				return map[string]any{"ok": true}
+			default:
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return nil
+		},
+		wsSubscribed: wsSubscribed,
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-wsSubscribed
+		cancel()
+	}()
+	opts := testRunCommandOptions(server)
+	opts.runStatusPoll = time.Hour
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	if code != 130 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.stop"})
+	if !strings.Contains(stderr.String(), "interrupted; requested run.stop") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	for _, tc := range []struct {
+		name       string
+		token      string
+		args       []string
+		wantCode   int
+		wantStderr string
+	}{
+		{name: "detach retired", token: "test-token", args: []string{"run", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "swarm run --detach"},
+		{name: "no follow requires connect", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, wantCode: 2, wantStderr: "--no-follow requires --connect"},
+		{name: "missing token exits four", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "SWARM_API_TOKEN is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.token == "" {
+				_ = os.Unsetenv("SWARM_API_TOKEN")
+			} else {
+				t.Setenv("SWARM_API_TOKEN", tc.token)
+			}
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRunCommandOptions(nil))
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			}
+		})
+	}
+}
+
+func TestRunCommandMapsRPCAndMalformedFailures(t *testing.T) {
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	for _, tc := range []struct {
+		name       string
+		handler    http.HandlerFunc
+		wantCode   int
+		wantStderr string
+	}{
+		{
+			name: "run not found exits five",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeRunCommandJSONRPCError(t, w, req.ID, "RUN_NOT_FOUND")
+			},
+			wantCode:   5,
+			wantStderr: "RUN_NOT_FOUND",
+		},
+		{
+			name: "malformed response exits three",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				if req.Method == "health.check" {
+					writeJSONRPCResult(t, w, req.ID, runCommandHealthResult())
+					return
+				}
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"run_id": "run-1"})
+			},
+			wantCode:   3,
+			wantStderr: "malformed run.start result",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SWARM_API_TOKEN", "test-token")
+			server := httptest.NewServer(tc.handler)
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			var code int
+			if tc.name == "malformed response exits three" {
+				code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+			} else {
+				code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--reattach", "run-1"}, &stdout, &stderr, testRunCommandOptions(server))
+			}
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			}
+		})
+	}
+}
+
+type runCommandServerOptions struct {
+	rpcResponder func(jsonRPCRequest, int) map[string]any
+	wsRows       []map[string]any
+	wsSubscribed chan struct{}
+}
+
+func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.Server, *[]jsonRPCRequest, *[]jsonRPCRequest) {
+	t.Helper()
+	var mu sync.Mutex
+	rpcRequests := []jsonRPCRequest{}
+	wsRequests := []jsonRPCRequest{}
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/rpc":
+			if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+				t.Errorf("Authorization = %q, want bearer token", got)
+			}
+			var req jsonRPCRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode request: %v", err)
+			}
+			mu.Lock()
+			callIndex := len(rpcRequests)
+			rpcRequests = append(rpcRequests, req)
+			mu.Unlock()
+			if opts.rpcResponder == nil {
+				t.Fatalf("unexpected RPC request %q", req.Method)
+			}
+			writeJSONRPCResult(t, w, req.ID, opts.rpcResponder(req, callIndex))
+		case "/v1/ws":
+			if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+				t.Errorf("WS Authorization = %q, want bearer token", got)
+			}
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Errorf("upgrade websocket: %v", err)
+				return
+			}
+			defer conn.Close()
+			var req jsonRPCRequest
+			if err := conn.ReadJSON(&req); err != nil {
+				t.Errorf("read ws request: %v", err)
+				return
+			}
+			mu.Lock()
+			wsRequests = append(wsRequests, req)
+			mu.Unlock()
+			if req.Method != "run.subscribe_trace" {
+				t.Errorf("ws method = %q, want run.subscribe_trace", req.Method)
+			}
+			if err := conn.WriteJSON(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result":  map[string]any{"subscription_id": "sub-run"},
+			}); err != nil {
+				t.Errorf("write ws subscription response: %v", err)
+				return
+			}
+			if opts.wsSubscribed != nil {
+				close(opts.wsSubscribed)
+			}
+			for _, row := range opts.wsRows {
+				if err := conn.WriteJSON(map[string]any{
+					"jsonrpc": "2.0",
+					"method":  "rpc.subscription",
+					"params": map[string]any{
+						"subscription": "sub-run",
+						"result":       row,
+					},
+				}); err != nil {
+					return
+				}
+			}
+			<-r.Context().Done()
+		default:
+			t.Errorf("path = %q, want /v1/rpc or /v1/ws", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	return server, &rpcRequests, &wsRequests
+}
+
+func testRunCommandOptions(server *httptest.Server) rootCommandOptions {
+	opts := defaultRootCommandOptions()
+	if server != nil {
+		opts.apiEndpoint = server.URL + "/v1/rpc"
+		opts.httpClient = server.Client()
+	}
+	opts.runReadyTimeout = time.Second
+	opts.runReadyPoll = time.Millisecond
+	opts.runStatusPoll = time.Millisecond
+	opts.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
+		<-ctx.Done()
+		return 0
+	}
+	return opts
+}
+
+func writeRunCommandPayloadFile(t *testing.T, payload map[string]any) string {
+	t.Helper()
+	path := t.TempDir() + "/payload.json"
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	return path
+}
+
+func runCommandHealthResult() map[string]any {
+	return map[string]any{
+		"alive":      true,
+		"ready":      true,
+		"db_ok":      true,
+		"runtime_ok": true,
+		"bundle": map[string]any{
+			"workflow_name":    "review",
+			"workflow_version": "1.2.3",
+			"fingerprint":      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+	}
+}
+
+func validRunCommandTraceRow(eventID string) map[string]any {
+	return map[string]any{
+		"event_id":         eventID,
+		"event_name":       "scan.requested",
+		"event_created_at": "2026-05-13T10:00:01Z",
+		"entity_id":        "entity-1",
+		"delivery_status":  "delivered",
+	}
+}
+
+func assertRunCommandMethods(t *testing.T, calls *[]jsonRPCRequest, want []string) {
+	t.Helper()
+	if len(*calls) != len(want) {
+		t.Fatalf("methods = %v, want %v", runCommandMethodNames(*calls), want)
+	}
+	for i, req := range *calls {
+		if req.Method != want[i] {
+			t.Fatalf("method[%d] = %q, want %q; all=%v", i, req.Method, want[i], runCommandMethodNames(*calls))
+		}
+	}
+}
+
+func runCommandMethodNames(calls []jsonRPCRequest) []string {
+	out := make([]string, 0, len(calls))
+	for _, req := range calls {
+		out = append(out, req.Method)
+	}
+	return out
+}
+
+func writeRunCommandJSONRPCError(t *testing.T, w http.ResponseWriter, id string, code string) {
+	t.Helper()
+	w.Header().Set("content-type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]any{
+			"code":    -32003,
+			"message": "Application error: " + code,
+			"data": map[string]any{
+				"code":           code,
+				"retryable":      false,
+				"correlation_id": "corr",
+				"details":        map[string]any{},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("encode error: %v", err)
+	}
+}
