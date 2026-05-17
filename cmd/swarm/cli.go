@@ -63,7 +63,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 	cmd.SetOut(out)
 	cmd.SetErr(errOut)
 	cmd.AddCommand(
-		newServeCommand(ctx, repo),
+		newServeCommand(ctx, repo, opts.runServe),
 		newRunCommand(repo, opts),
 		newVerifyCommand(ctx, repo),
 		newVersionCommand(),
@@ -79,8 +79,11 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 	return cmd
 }
 
-func newServeCommand(ctx context.Context, repo string) *cobra.Command {
+func newServeCommand(ctx context.Context, repo string, runServe func(context.Context, string, serveOptions) int) *cobra.Command {
 	opts := defaultServeOptions()
+	if runServe == nil {
+		runServe = runServeRuntime
+	}
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the Swarm runtime, API, health, and MCP surfaces.",
@@ -95,7 +98,8 @@ func newServeCommand(ctx context.Context, repo string) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			code := runServeRuntime(ctx, repo, opts)
+			opts.Output = cmd.OutOrStdout()
+			code := runServe(ctx, repo, opts)
 			if code != 0 {
 				return commandExitError{code: code}
 			}
@@ -110,6 +114,7 @@ func newServeCommand(ctx context.Context, repo string) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.SelfCheck, "self-check", opts.SelfCheck, "Run runtime self-check during boot")
 	cmd.Flags().BoolVar(&opts.RequireBundleMatch, "require-bundle-match", opts.RequireBundleMatch, "Refuse startup when active runs belong to a different non-NULL bundle fingerprint")
 	cmd.Flags().BoolVar(&opts.NoRequireBundleMatch, "no-require-bundle-match", opts.NoRequireBundleMatch, "Allow startup even when active runs belong to a different bundle fingerprint")
+	cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", opts.Verbose, "Emit the serve boot sequence to stdout as each phase completes")
 	return cmd
 }
 

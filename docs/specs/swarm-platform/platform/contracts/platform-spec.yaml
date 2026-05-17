@@ -4616,7 +4616,8 @@ platform_events:
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.boot:
-      description: Platform boot completed successfully. Emitted after all validation passes and nodes/agents are started.
+      description: Platform boot completed successfully. Emitted after validation passes, runtime boot/recovery decisions are made,
+        nodes/agents are started, and the boot event is published before the runtime becomes ready.
       scope: global
       payload:
         flow_count: integer
@@ -4624,6 +4625,25 @@ platform_events:
         agent_count: integer
         event_count: integer
         timestamp: string (ISO 8601)
+        boot_started_at: string (ISO 8601)
+        boot_completed_at: string (ISO 8601)
+        duration_ms: integer
+        bundle_fingerprint: string
+        recovery_decision:
+          outcome: string (allowed | denied | degraded)
+          reason_code: string
+          recovery_on_startup: boolean
+          schedule_replay_count: integer
+          schedule_skip_count: integer
+          schedule_drop_count: integer
+          manager_replay_count: integer
+          manager_skip_count: integer
+          manager_drop_count: integer
+          error_text: string
+        static_agents_started: array<string>
+        flow_required_agents_started: array<string>
+        system_containers_started: array<string>
+        self_check_passed: boolean
       produced_by_type: platform
     platform.inbound_recorded:
       description: External event received and persisted. Emitted when an event enters the system from an external source
@@ -5333,6 +5353,20 @@ cli_specification:
       tier: must_have
       implementation_status: partial
       behavior: starts current runtime, process probes, /v1/rpc, /v1/ws, and MCP surfaces
+      boot_observability:
+        implemented_by: '#802'
+        flags:
+        - --verbose
+        - '-v'
+        rule: >
+          By default `swarm serve` remains quiet except for readiness and errors. With `--verbose` or `-v`, serve prints
+          the numbered boot-progress sequence to stdout as the canonical serve/runtime boot phases complete. The CLI
+          owns stdout rendering; runtime owns the boot-progress facts and the persisted `platform.boot` payload.
+        platform_boot_payload: >
+          `platform.boot` carries the boot decision summary: boot timestamps/duration, bundle fingerprint,
+          startup recovery decision, static and flow-required agent materialization lists, system container names,
+          and self-check status. CLI/dashboard/API readers consume this persisted event; they do not reconstruct boot
+          decisions from text logs.
       bundle_match_admission:
         default: require-bundle-match
         implemented_by: '#753/#754'
@@ -5344,7 +5378,8 @@ cli_specification:
           any active run has a non-NULL `runs.bundle_fingerprint` different from the boot bundle fingerprint. Legacy NULL fingerprints
           mean unknown bundle and do not block startup. `--no-require-bundle-match` disables this admission gate for operator-approved
           recovery/dev workflows.
-      remaining_tail: '#750 owns remaining serve/dev/boot/shutdown lifecycle behavior.'
+      remaining_tail: '#750 owns remaining serve/dev/shutdown lifecycle behavior: --abandon-active-runs, --shutdown-grace, --dev,
+        and dev entity-container shutdown cleanup are not implemented by #802.'
     run:
       command: swarm run [flags]
       tier: must_have

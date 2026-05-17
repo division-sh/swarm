@@ -82,6 +82,17 @@ func (s startupRecoverySnapshot) Detail() map[string]any {
 	return detail
 }
 
+func (s startupRecoverySnapshot) summary() string {
+	if !s.InspectionComplete {
+		return "inspection incomplete"
+	}
+	classes := s.WorkClasses()
+	if len(classes) == 0 {
+		return "no recovery state"
+	}
+	return strings.Join(classes, ", ")
+}
+
 type startupRecoveryDecisionReport struct {
 	Snapshot startupRecoverySnapshot
 
@@ -182,6 +193,21 @@ func (r startupRecoveryDecisionReport) detail() map[string]any {
 		detail["manager_reset_error"] = resetErr
 	}
 	return detail
+}
+
+func (r startupRecoveryDecisionReport) bootPayload() map[string]any {
+	return map[string]any{
+		"outcome":               string(r.Outcome),
+		"reason_code":           string(r.ReasonCode),
+		"recovery_on_startup":   r.Snapshot.RecoveryOnStartup,
+		"schedule_replay_count": r.ScheduleReplayCount,
+		"schedule_skip_count":   r.ScheduleSkipCount,
+		"schedule_drop_count":   r.ScheduleDropCount,
+		"manager_replay_count":  r.ManagerReplayCount,
+		"manager_skip_count":    r.ManagerSkipCount,
+		"manager_drop_count":    r.ManagerDropCount,
+		"error_text":            strings.TrimSpace(r.ErrorText),
+	}
 }
 
 func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context) (startupRecoverySnapshot, error) {

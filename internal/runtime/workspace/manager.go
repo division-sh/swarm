@@ -171,6 +171,21 @@ func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
 	return nil
 }
 
+func (m *DockerManager) SystemWorkspaceContainers() []string {
+	if m == nil {
+		return nil
+	}
+	out := []string{}
+	if name := strings.TrimSpace(m.cfg.ScaffoldContainer); name != "" {
+		out = append(out, name)
+	}
+	if name := strings.TrimSpace(m.cfg.SystemContainer); name != "" {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (m *DockerManager) ValidateSource(ctx context.Context, source semanticview.Source) error {
 	if m == nil {
 		return fmt.Errorf("workspace manager is required")

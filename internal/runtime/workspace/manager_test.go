@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -370,6 +371,20 @@ func TestEnsureSystemWorkspaces_CreatesScaffoldAndSystemContainers(t *testing.T)
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("EnsureSystemWorkspaces calls missing %q: %s", expected, joined)
 		}
+	}
+}
+
+func TestSystemWorkspaceContainersUsesConfiguredNames(t *testing.T) {
+	manager := NewDockerManager(nil)
+	manager.SetConfigForTest(DockerConfig{
+		ScaffoldContainer: "custom-scaffold",
+		SystemContainer:   "custom-system",
+	})
+
+	got := manager.SystemWorkspaceContainers()
+	want := []string{"custom-scaffold", "custom-system"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SystemWorkspaceContainers = %#v, want %#v", got, want)
 	}
 }
 

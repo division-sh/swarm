@@ -68,6 +68,20 @@ type RuntimeOptions struct {
 	WorkflowModule     runtimepipeline.WorkflowModule
 	LLMRuntime         llm.Runtime
 	Credentials        runtimecredentials.Store
+	BootStartedAt      time.Time
+	BootProgress       func(BootProgressEvent)
+	SystemContainers   []string
+}
+
+const BootProgressTotalSteps = 22
+
+type BootProgressEvent struct {
+	Step   int
+	Total  int
+	Name   string
+	Status string
+	Detail string
+	At     time.Time
 }
 
 type Runtime struct {
@@ -100,6 +114,20 @@ type Runtime struct {
 	Authority      runtimeauthority.Provider
 	EmitRegistry   *runtimetools.EmitRegistry
 	PromptResolver runtimecontracts.PromptResolver
+}
+
+func (rt *Runtime) emitBootProgress(step int, name, status, detail string) {
+	if rt == nil || rt.Options.BootProgress == nil {
+		return
+	}
+	rt.Options.BootProgress(BootProgressEvent{
+		Step:   step,
+		Total:  BootProgressTotalSteps,
+		Name:   strings.TrimSpace(name),
+		Status: strings.TrimSpace(status),
+		Detail: strings.TrimSpace(detail),
+		At:     time.Now().UTC(),
+	})
 }
 
 func (rt *Runtime) shutdownAdmissionClosed() bool {
@@ -549,6 +577,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
 	}
+	bootStartedAt := rt.Options.BootStartedAt
+	if bootStartedAt.IsZero() {
+		bootStartedAt = time.Now().UTC()
+	}
 	if rt.shutdownAdmissionClosed() {
 		return fmt.Errorf("runtime shutdown already started")
 	}
@@ -563,10 +595,14 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		var err error
 		lease, err = rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, rt.ownerID)
 		if err != nil {
+			rt.emitBootProgress(5, "startup_ownership_lease", "FAILED", err.Error())
 			cancelStart()
 			rt.lifecycleMu.Unlock()
 			return err
 		}
+		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "owner="+rt.ownerID)
+	} else {
+		rt.emitBootProgress(5, "startup_ownership_lease", "skipped", "startup ownership store unavailable")
 	}
 	rt.startCtx = startCtx
 	rt.cancelStart = cancelStart
@@ -583,6 +619,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 
 	startupRecoverySnapshot, err := rt.inspectStartupRecoverySnapshot(ctx)
 	startupRecoveryDecision := newStartupRecoveryDecisionReport(startupRecoverySnapshot)
+	if err != nil {
+		rt.emitBootProgress(6, "recovery_snapshot_inspection", "FAILED", err.Error())
+	} else {
+		rt.emitBootProgress(6, "recovery_snapshot_inspection", "ok", startupRecoverySnapshot.summary())
+	}
 	if err != nil && !startupRecoverySnapshot.RecoveryOnStartup {
 		return err
 	}
@@ -595,20 +636,29 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if denyErr := startupRecoveryDecision.denialError(); denyErr != nil {
 		startupRecoveryDecision.ErrorText = denyErr.Error()
 		rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
+		rt.emitBootProgress(7, "recovery_decision", "FAILED", denyErr.Error())
 		return denyErr
 	}
+	rt.emitBootProgress(7, "recovery_decision", string(startupRecoveryDecision.Outcome), string(startupRecoveryDecision.ReasonCode))
 
 	if rt.Pipeline != nil {
 		go rt.Pipeline.RunMaintenance(startCtx)
+		rt.emitBootProgress(8, "pipeline_maintenance", "started", "")
+	} else {
+		rt.emitBootProgress(8, "pipeline_maintenance", "skipped", "pipeline unavailable")
 	}
+	systemNodeCount := 0
 	for _, node := range rt.SystemNodes {
 		if node != nil {
 			go node.Run(startCtx)
+			systemNodeCount++
 		}
 	}
+	rt.emitBootProgress(9, "system_nodes_start", "ok", fmt.Sprintf("%d nodes started", systemNodeCount))
 	if rt.Scheduler != nil && rt.Stores.ScheduleStore != nil {
 		schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
 		if err != nil {
+			rt.emitBootProgress(10, "schedule_restoration", "FAILED", err.Error())
 			return fmt.Errorf("load schedules failed: %w", err)
 		}
 		startupRecoveryDecision.ScheduleRestoreAttempted = len(schedules) > 0
@@ -636,6 +686,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				startupRecoveryDecision.ErrorText = fmt.Sprintf("failed to restore %d active schedule(s)", startupRecoveryDecision.ScheduleDropCount)
 			}
 		}
+		rt.emitBootProgress(10, "schedule_restoration", "ok", fmt.Sprintf("%d schedules restored, %d skipped, %d dropped", startupRecoveryDecision.ScheduleReplayCount, startupRecoveryDecision.ScheduleSkipCount, startupRecoveryDecision.ScheduleDropCount))
+	} else {
+		rt.emitBootProgress(10, "schedule_restoration", "skipped", "scheduler or schedule store unavailable")
 	}
 	if rt.Config.Runtime.RecoveryOnStartup && rt.Manager != nil {
 		startupRecoveryDecision.ManagerRecoveryAttempted = true
@@ -700,42 +753,93 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				startupRecoveryDecision.ErrorText = fmt.Sprintf("failed to replay %d pending event(s) during startup recovery", startupRecoveryDecision.ManagerDropCount)
 			}
 		}
+		status := "ok"
+		if startupRecoveryDecision.Outcome == startupRecoveryOutcomeDegraded {
+			status = string(startupRecoveryDecision.Outcome)
+		}
+		rt.emitBootProgress(11, "manager_recovery_if_enabled", status, fmt.Sprintf("%d replayed, %d skipped, %d dropped", startupRecoveryDecision.ManagerReplayCount, startupRecoveryDecision.ManagerSkipCount, startupRecoveryDecision.ManagerDropCount))
+	} else {
+		rt.emitBootProgress(11, "manager_recovery_if_enabled", "skipped", "recovery_on_startup disabled or manager unavailable")
 	}
 	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
 	if rt.Bus != nil {
 		rt.Bus.StartOutboxSweeper(startCtx, runtimebus.DefaultOutboxSweeperConfig())
+		rt.emitBootProgress(12, "outbox_sweeper", "started", "")
+	} else {
+		rt.emitBootProgress(12, "outbox_sweeper", "skipped", "event bus unavailable")
 	}
+	staticAgentIDs := []string{}
 	if rt.Manager != nil {
-		if err := rt.Manager.EnsureStaticAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+		staticAgentIDs, err = staticBootAgentIDs(rt.Options.WorkflowModule.SemanticSource())
+		if err != nil {
+			rt.emitBootProgress(13, "static_agents_bootstrap", "FAILED", err.Error())
 			return fmt.Errorf("bootstrap static agents: %w", err)
 		}
+		if err := rt.Manager.EnsureStaticAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+			rt.emitBootProgress(13, "static_agents_bootstrap", "FAILED", err.Error())
+			return fmt.Errorf("bootstrap static agents: %w", err)
+		}
+		rt.emitBootProgress(13, "static_agents_bootstrap", "ok", fmt.Sprintf("%d static agents", len(staticAgentIDs)))
+	} else {
+		rt.emitBootProgress(13, "static_agents_bootstrap", "skipped", "manager unavailable")
 	}
+	flowRequiredAgentIDs := []string{}
 	if rt.Manager != nil {
-		if err := rt.Manager.EnsureStaticFlowRequiredAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+		flowRequiredAgentIDs, err = staticFlowRequiredBootAgentIDs(rt.Options.WorkflowModule.SemanticSource())
+		if err != nil {
+			rt.emitBootProgress(14, "flow_required_agents", "FAILED", err.Error())
 			return fmt.Errorf("bootstrap static flow required agents: %w", err)
 		}
+		if err := rt.Manager.EnsureStaticFlowRequiredAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+			rt.emitBootProgress(14, "flow_required_agents", "FAILED", err.Error())
+			return fmt.Errorf("bootstrap static flow required agents: %w", err)
+		}
+		rt.emitBootProgress(14, "flow_required_agents", "ok", fmt.Sprintf("%d flow-required agents", len(flowRequiredAgentIDs)))
+	} else {
+		rt.emitBootProgress(14, "flow_required_agents", "skipped", "manager unavailable")
 	}
 	if err := validateClaudeManagedAgentWorkspaces(ctx, rt.Config, rt.Workspace, rt.Manager); err != nil {
+		rt.emitBootProgress(15, "workspace_validation_and_system_containers", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime workspace validation failed: %w", err)
 	}
+	rt.emitBootProgress(15, "workspace_validation_and_system_containers", "ok", fmt.Sprintf("%d system containers", len(rt.Options.SystemContainers)))
 	startupProbe, _ := rt.LLM.(llm.StartupVisibleToolSurfaceProber)
 	if err := validateClaudeMCPToolsForManagedAgents(ctx, rt.Config, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager); err != nil {
+		rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}
+	rt.emitBootProgress(16, "mcp_tool_validation", "ok", "")
 	if rt.Manager != nil {
 		rt.Manager.Run(startCtx)
+		rt.emitBootProgress(17, "manager_event_loop_start", "ok", "")
+	} else {
+		rt.emitBootProgress(17, "manager_event_loop_start", "skipped", "manager unavailable")
 	}
 	if rt.Stores.SQLDB != nil && rt.Logger != nil {
 	}
 	var bootCheck <-chan events.Event
 	if rt.Options.SelfCheck && rt.Bus != nil {
 		bootCheck = rt.Bus.SubscribeInternal("bootstrap-self-check", events.EventType("platform.boot"))
+		rt.emitBootProgress(18, "boot_self_check_optional", "ok", "platform.boot self-check subscribed")
+	} else {
+		rt.emitBootProgress(18, "boot_self_check_optional", "skipped", "self-check disabled or event bus unavailable")
 	}
-	if err := rt.publishBootCompleted(context.Background()); err != nil {
+	bootEventID, err := rt.publishBootCompleted(context.Background(), bootCompletedReport{
+		StartedAt:                 bootStartedAt,
+		RecoveryDecision:          startupRecoveryDecision,
+		StaticAgentsStarted:       staticAgentIDs,
+		FlowRequiredAgentsStarted: flowRequiredAgentIDs,
+		SystemContainersStarted:   rt.Options.SystemContainers,
+		SelfCheckPassed:           rt.Options.SelfCheck,
+	})
+	if err != nil {
+		rt.emitBootProgress(19, "platform_boot_event_published", "FAILED", err.Error())
 		return fmt.Errorf("publish platform.boot: %w", err)
 	}
+	rt.emitBootProgress(19, "platform_boot_event_published", "ok", bootEventID)
 	if rt.Options.SelfCheck {
 		if err := rt.verifyBootPublished(bootCheck); err != nil {
+			rt.emitBootProgress(18, "boot_self_check_optional", "FAILED", err.Error())
 			return fmt.Errorf("self-check failed: %w", err)
 		}
 	}
@@ -820,9 +924,55 @@ func (rt *Runtime) Wait(ctx context.Context) {
 	<-ctx.Done()
 }
 
-func (rt *Runtime) publishBootCompleted(ctx context.Context) error {
+type bootCompletedReport struct {
+	StartedAt                 time.Time
+	RecoveryDecision          startupRecoveryDecisionReport
+	StaticAgentsStarted       []string
+	FlowRequiredAgentsStarted []string
+	SystemContainersStarted   []string
+	SelfCheckPassed           bool
+}
+
+func staticBootAgentIDs(source semanticview.Source) ([]string, error) {
+	records, err := runtimemanager.StaticAgentMaterializationRecords(source)
+	if err != nil {
+		return nil, err
+	}
+	return persistedBootAgentIDs(records), nil
+}
+
+func staticFlowRequiredBootAgentIDs(source semanticview.Source) ([]string, error) {
+	records, err := runtimemanager.StaticFlowRequiredAgentMaterializationRecords(source)
+	if err != nil {
+		return nil, err
+	}
+	return persistedBootAgentIDs(records), nil
+}
+
+func persistedBootAgentIDs(records []runtimemanager.PersistedAgent) []string {
+	out := make([]string, 0, len(records))
+	for _, rec := range records {
+		if id := strings.TrimSpace(rec.Config.ID); id != "" {
+			out = append(out, id)
+		}
+	}
+	return sortedNonEmptyStrings(out)
+}
+
+func sortedNonEmptyStrings(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootCompletedReport) (string, error) {
 	if rt == nil || rt.Bus == nil {
-		return nil
+		return "", nil
 	}
 	t := events.EventType("platform.boot")
 	var flowCount, nodeCount, agentCount, eventCount int
@@ -834,21 +984,40 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context) error {
 			eventCount = len(source.ResolvedEventCatalog())
 		}
 	}
+	completedAt := time.Now().UTC()
+	startedAt := report.StartedAt
+	if startedAt.IsZero() {
+		startedAt = completedAt
+	}
+	durationMS := completedAt.Sub(startedAt).Milliseconds()
+	if durationMS < 0 {
+		durationMS = 0
+	}
 	payload := mustJSON(map[string]any{
-		"flow_count":  flowCount,
-		"node_count":  nodeCount,
-		"agent_count": agentCount,
-		"event_count": eventCount,
-		"timestamp":   time.Now().UTC().Format(time.RFC3339Nano),
+		"flow_count":                   flowCount,
+		"node_count":                   nodeCount,
+		"agent_count":                  agentCount,
+		"event_count":                  eventCount,
+		"timestamp":                    completedAt.Format(time.RFC3339Nano),
+		"boot_started_at":              startedAt.Format(time.RFC3339Nano),
+		"boot_completed_at":            completedAt.Format(time.RFC3339Nano),
+		"duration_ms":                  durationMS,
+		"bundle_fingerprint":           strings.TrimSpace(rt.Options.BundleFingerprint),
+		"recovery_decision":            report.RecoveryDecision.bootPayload(),
+		"static_agents_started":        sortedNonEmptyStrings(report.StaticAgentsStarted),
+		"flow_required_agents_started": sortedNonEmptyStrings(report.FlowRequiredAgentsStarted),
+		"system_containers_started":    sortedNonEmptyStrings(report.SystemContainersStarted),
+		"self_check_passed":            report.SelfCheckPassed,
 	})
+	eventID := uuid.NewString()
 	evt := events.Event{
-		ID:          uuid.NewString(),
+		ID:          eventID,
 		Type:        t,
 		SourceAgent: "runtime",
 		Payload:     payload,
 		CreatedAt:   time.Now(),
 	}
-	return rt.Bus.Publish(ctx, evt)
+	return eventID, rt.Bus.Publish(ctx, evt)
 }
 
 func (rt *Runtime) verifyBootPublished(ch <-chan events.Event) error {
