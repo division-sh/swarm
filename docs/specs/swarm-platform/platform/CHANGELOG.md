@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed: run_clear reset-dev consumes runtime.nuke
+The local `reset-dev` stage now starts the daemon and resets through `/v1/rpc runtime.nuke` with `SWARM_API_TOKEN` and a per-reset idempotency key. The supported helper path no longer performs broad Docker stops or all-table database truncation directly.
+
 ### Changed: run_clear helper intents are explicit
 The local `run_clear` helper now separates reset/startup, corpus run start, and directive bootstrap into explicit targets. `make run-clear` remains the reset-plus-corpus convenience path, while directive bootstraps use `make run-clear-directed`; hidden `DIRECTIVE_* make run-clear` fusion is retired and no script path sends `agent.send_directive.kill_previous`.
 

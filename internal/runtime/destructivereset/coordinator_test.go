@@ -266,13 +266,13 @@ func TestInventoryPlannerCarriesImplementedContractsAndSplitResetSeams(t *testin
 		t.Fatalf("downstream contracts = %#v, missing required contract state", plan.DownstreamContracts)
 	}
 	if !containsSeam(plan.ResetSeams, "startup_recovery_failed_reset") ||
-		!containsSeam(plan.ResetSeams, "scripts_run_clear_reset_dev") ||
 		!containsSeam(plan.ResetSeams, "agent_manager_reset_runtime_state_with_source") {
 		t.Fatalf("reset seams = %#v, missing required live seam classification", plan.ResetSeams)
 	}
 	if containsSeam(plan.ResetSeams, "dashboard_runtime_actions_reset_state") ||
-		containsSeam(plan.ResetSeams, "builder_runtime_reset_state") {
-		t.Fatalf("reset seams = %#v, want retired dashboard/Builder reset_state seams omitted", plan.ResetSeams)
+		containsSeam(plan.ResetSeams, "builder_runtime_reset_state") ||
+		containsSeam(plan.ResetSeams, "scripts_run_clear_reset_dev") {
+		t.Fatalf("reset seams = %#v, want retired dashboard/Builder and migrated run_clear reset seams omitted", plan.ResetSeams)
 	}
 	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || !plan.Preserved.BundleContracts {
 		t.Fatalf("preserved resources = %#v, want schema/auth/bundle preserved", plan.Preserved)

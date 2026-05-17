@@ -38,7 +38,7 @@ func DefaultDownstreamContracts() []DownstreamContract {
 			ID:          ContractLegacyResetMigration,
 			Status:      "split",
 			Owner:       "future legacy reset migration owner",
-			Description: "Retire, redirect, or explicitly split remaining run_clear/CLI reset seams after canonical reset ownership exists; stale dashboard/Builder reset_state plumbing is retired/fail-closed.",
+			Description: "Retire, redirect, or explicitly split remaining CLI reset seams after canonical reset ownership exists; stale dashboard/Builder reset_state plumbing is retired/fail-closed and run_clear reset-dev consumes runtime.nuke.",
 		},
 	}
 }
@@ -69,11 +69,6 @@ func DefaultResetSeams() []ResetSeam {
 			ID:             "workspace_docker_helpers",
 			Classification: "container_primitive",
 			RequiredAction: "Workspace helpers can be downstream primitives; they do not own global preservation or selection semantics.",
-		},
-		{
-			ID:             "scripts_run_clear_reset_dev",
-			Classification: "direct_dev_bypass",
-			RequiredAction: "Keep dev-only until migrated or split; raw truncate/docker stop must not become production reset ownership.",
 		},
 	}
 }

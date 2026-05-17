@@ -31,6 +31,11 @@ type runClearConfig struct {
 	startTimeout     string
 	inputEvent       string
 	inputPayloadJSON string
+	resetIDKey       string
+	nukeError        string
+	nukeOK           string
+	nukeStatus       string
+	nukePartial      string
 }
 
 func TestRunClear_UsesV1RPCHealthCheckAndRunStart(t *testing.T) {
@@ -96,6 +101,7 @@ func TestRunClear_UsesV1RPCHealthCheckAndRunStart(t *testing.T) {
 	if strings.Contains(result.stdout, `"status":"started"`) {
 		t.Fatalf("stdout = %q, want no legacy started response", result.stdout)
 	}
+	assertEventOrder(t, result.events, "serve_start", "health.check", "runtime.nuke", "health.check", "run.start")
 }
 
 func TestRunClear_UsesConfiguredAPITokenForHealthCheckAndRunStart(t *testing.T) {
@@ -180,6 +186,85 @@ func TestRunClear_ResetDevDoesNotStartRunOrDirective(t *testing.T) {
 	}
 	if health := decodeJSONRPCBody(t, result.healthBody); health.Method != "health.check" {
 		t.Fatalf("health body = %#v, want health.check", health)
+	}
+	if !strings.Contains(result.resetHeaders, "Authorization: Bearer "+result.apiToken) {
+		t.Fatalf("runtime.nuke headers = %q, want API bearer token", result.resetHeaders)
+	}
+	if got := strings.TrimSpace(result.resetURL); got != "http://127.0.0.1:8081/v1/rpc" {
+		t.Fatalf("runtime.nuke url = %q, want v1 rpc endpoint", got)
+	}
+	reset := decodeJSONRPCBody(t, result.resetBody)
+	if reset.JSONRPC != "2.0" || reset.ID != "run-clear-reset-dev" || reset.Method != "runtime.nuke" {
+		t.Fatalf("runtime.nuke body = %#v, want JSON-RPC runtime.nuke envelope", reset)
+	}
+	if reset.Params["dry_run"] != false {
+		t.Fatalf("runtime.nuke params = %#v, want apply mode", reset.Params)
+	}
+	if reset.Params["idempotency_key"] != "run-clear:reset-dev:11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("runtime.nuke params = %#v, want per-reset idempotency key", reset.Params)
+	}
+	if got := strings.TrimSpace(result.dockerCalls); got != "" {
+		t.Fatalf("docker calls = %q, want no raw docker reset in reset-dev", got)
+	}
+	if got := strings.TrimSpace(result.psqlCalls); got != "" {
+		t.Fatalf("psql calls = %q, want no raw database reset in reset-dev", got)
+	}
+	assertEventOrder(t, result.events, "serve_start", "health.check", "runtime.nuke", "health.check")
+}
+
+func TestRunClear_UsesConfiguredResetIdempotencyKey(t *testing.T) {
+	result := runRunClear(t, runClearConfig{
+		mode:       "reset-dev",
+		apiToken:   "api-explicit-token",
+		resetIDKey: "reset-dev-test-key",
+	})
+
+	reset := decodeJSONRPCBody(t, result.resetBody)
+	if reset.Params["idempotency_key"] != "reset-dev-test-key" {
+		t.Fatalf("runtime.nuke params = %#v, want configured reset idempotency key", reset.Params)
+	}
+	if !strings.Contains(result.resetHeaders, "Authorization: Bearer api-explicit-token") {
+		t.Fatalf("runtime.nuke headers = %q, want explicit API bearer token", result.resetHeaders)
+	}
+}
+
+func TestRunClear_RuntimeNukeFailureStopsCompositeBeforeRunStart(t *testing.T) {
+	result, err := runRunClearResult(t, runClearConfig{
+		nukeError: "jsonrpc",
+	})
+
+	if err == nil {
+		t.Fatal("expected runtime.nuke error to fail run-clear")
+	}
+	if got := strings.TrimSpace(result.rpcBody); got != "" {
+		t.Fatalf("run.start body = %q, want no run.start after failed runtime.nuke", got)
+	}
+	if !strings.Contains(result.stdout, "runtime.nuke reset failed. Current log:") {
+		t.Fatalf("stdout = %q, want runtime.nuke failure message", result.stdout)
+	}
+	if got := strings.TrimSpace(result.dockerCalls); got != "" {
+		t.Fatalf("docker calls = %q, want no raw docker fallback after runtime.nuke failure", got)
+	}
+	if got := strings.TrimSpace(result.psqlCalls); got != "" {
+		t.Fatalf("psql calls = %q, want no raw DB fallback after runtime.nuke failure", got)
+	}
+}
+
+func TestRunClear_RuntimeNukePartialFailureStopsCompositeBeforeRunStart(t *testing.T) {
+	result, err := runRunClearResult(t, runClearConfig{
+		nukeOK:      "false",
+		nukeStatus:  "partial_failure",
+		nukePartial: "true",
+	})
+
+	if err == nil {
+		t.Fatal("expected runtime.nuke partial failure to fail run-clear")
+	}
+	if got := strings.TrimSpace(result.rpcBody); got != "" {
+		t.Fatalf("run.start body = %q, want no run.start after partial runtime.nuke", got)
+	}
+	if !strings.Contains(result.stdout, `"status":"partial_failure"`) {
+		t.Fatalf("stdout = %q, want partial runtime.nuke response", result.stdout)
 	}
 }
 
@@ -334,6 +419,7 @@ func TestRunClear_RunClearDirectedResetsAndSendsDirectiveOnly(t *testing.T) {
 	if _, ok := body.Params["kill_previous"]; ok {
 		t.Fatalf("directive params = %#v, want no kill_previous", body.Params)
 	}
+	assertEventOrder(t, result.events, "serve_start", "health.check", "runtime.nuke", "health.check", "agent.send_directive")
 }
 
 func TestRunClear_RunDirectiveRequiresExplicitTargetAndMessage(t *testing.T) {
@@ -392,6 +478,12 @@ func TestRunClearMakefileDefinesSplitTargets(t *testing.T) {
 	}
 	if !strings.Contains(makefile, "./scripts/run_clear.sh run-clear-directed") {
 		t.Fatalf("Makefile = %q, want run-clear-directed script mode", makefile)
+	}
+	if !strings.Contains(makefile, "RUN_CLEAR_RESET_IDEMPOTENCY_KEY") {
+		t.Fatalf("Makefile = %q, want reset-dev idempotency override surface", makefile)
+	}
+	if strings.Contains(makefile, "SWARM_DB_HOST") || strings.Contains(makefile, "SWARM_DB_PASSWORD") {
+		t.Fatalf("Makefile = %q, want no reset-dev DB credential surface", makefile)
 	}
 }
 
@@ -469,12 +561,18 @@ type runClearResult struct {
 	healthHeaders       string
 	healthBody          string
 	healthURL           string
+	resetHeaders        string
+	resetBody           string
+	resetURL            string
 	rpcHeaders          string
 	rpcBody             string
 	rpcURL              string
 	directiveHeaders    string
 	directiveBody       string
 	directiveURL        string
+	dockerCalls         string
+	psqlCalls           string
+	events              string
 }
 
 func runRunClear(t *testing.T, cfg runClearConfig) runClearResult {
@@ -507,12 +605,18 @@ func runRunClearResult(t *testing.T, cfg runClearConfig) (runClearResult, error)
 	healthHeadersSink := filepath.Join(t.TempDir(), "api-health-headers.txt")
 	healthBodySink := filepath.Join(t.TempDir(), "api-health-body.txt")
 	healthURLSink := filepath.Join(t.TempDir(), "api-health-url.txt")
+	resetHeadersSink := filepath.Join(t.TempDir(), "reset-headers.txt")
+	resetBodySink := filepath.Join(t.TempDir(), "reset-body.txt")
+	resetURLSink := filepath.Join(t.TempDir(), "reset-url.txt")
 	rpcHeadersSink := filepath.Join(t.TempDir(), "rpc-headers.txt")
 	bodySink := filepath.Join(t.TempDir(), "rpc-body.txt")
 	urlSink := filepath.Join(t.TempDir(), "rpc-url.txt")
 	directiveHeadersSink := filepath.Join(t.TempDir(), "directive-headers.txt")
 	directiveBodySink := filepath.Join(t.TempDir(), "directive-body.txt")
 	directiveURLSink := filepath.Join(t.TempDir(), "directive-url.txt")
+	dockerCallsSink := filepath.Join(t.TempDir(), "docker-calls.txt")
+	psqlCallsSink := filepath.Join(t.TempDir(), "psql-calls.txt")
+	eventsSink := filepath.Join(t.TempDir(), "events.txt")
 
 	writeExecutable(t, binDir, "pgrep", "#!/usr/bin/env bash\nexit 1\n")
 	writeExecutable(t, binDir, "lsof", "#!/usr/bin/env bash\nexit 1\n")
@@ -569,8 +673,8 @@ case "${PS_MODE:-}" in
     ;;
 esac
 `)
-	writeExecutable(t, binDir, "docker", "#!/usr/bin/env bash\nif [[ \"${1:-}\" == \"ps\" ]]; then exit 0; fi\nif [[ \"${1:-}\" == \"stop\" ]]; then exit 0; fi\nexit 0\n")
-	writeExecutable(t, binDir, "psql", "#!/usr/bin/env bash\nexit 0\n")
+	writeExecutable(t, binDir, "docker", "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"${DOCKER_CALLS_SINK}\"\nif [[ \"${1:-}\" == \"ps\" ]]; then exit 0; fi\nif [[ \"${1:-}\" == \"stop\" ]]; then exit 0; fi\nexit 0\n")
+	writeExecutable(t, binDir, "psql", "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"${PSQL_CALLS_SINK}\"\ncat >/dev/null\nexit 0\n")
 	writeExecutable(t, binDir, "uuidgen", "#!/usr/bin/env bash\nprintf '11111111-1111-1111-1111-111111111111\\n'\n")
 	writeExecutable(t, binDir, "go", `#!/usr/bin/env bash
 set -euo pipefail
@@ -615,6 +719,7 @@ chmod +x "$out"
 `)
 	writeExecutable(t, binDir, "python3", `#!/usr/bin/env bash
 set -euo pipefail
+printf 'serve_start\n' >> "${RUN_CLEAR_EVENTS_SINK}"
 printf '%s' "${SWARM_OPERATOR_AUTH_TOKEN:-}" > "${PYTHON_OPERATOR_TOKEN_SINK}"
 printf '%s' "${SWARM_API_TOKEN:-}" > "${PYTHON_API_TOKEN_SINK}"
 printf '%s' "${SWARM_BUILDER_AUTH_TOKEN:-}" > "${PYTHON_ENV_SINK}"
@@ -706,6 +811,7 @@ if [[ "$url" == *"/api/rpc" ]]; then
 fi
 if [[ "$url" == *"/v1/rpc" ]]; then
   if [[ "$body" == *'"method":"health.check"'* ]]; then
+    printf 'health.check\n' >> "${RUN_CLEAR_EVENTS_SINK}"
     printf '%s' "$url" > "${CURL_API_HEALTH_URL_SINK}"
     printf '%s' "$body" > "${CURL_API_HEALTH_BODY_SINK}"
     if ((${#headers[@]})); then
@@ -729,7 +835,35 @@ if [[ "$url" == *"/v1/rpc" ]]; then
     printf '401'
     exit 0
   fi
+  if [[ "$body" == *'"method":"runtime.nuke"'* ]]; then
+    printf 'runtime.nuke\n' >> "${RUN_CLEAR_EVENTS_SINK}"
+    printf '%s' "$url" > "${CURL_RESET_URL_SINK}"
+    if ((${#headers[@]})); then
+      printf '%s\n' "${headers[@]}" > "${CURL_RESET_HEADERS_SINK}"
+    else
+      : > "${CURL_RESET_HEADERS_SINK}"
+    fi
+    printf '%s' "$body" > "${CURL_RESET_BODY_SINK}"
+    want="Authorization: Bearer ${SWARM_API_TOKEN}"
+    authorized=0
+    for header in "${headers[@]}"; do
+      if [[ "$header" == "$want" ]]; then
+        authorized=1
+      fi
+    done
+    if [[ "$authorized" != "1" ]]; then
+      printf '{"jsonrpc":"2.0","id":"run-clear-reset-dev","error":{"code":-32000,"message":"missing authorization bearer token","data":{"code":"UNAUTHORIZED"}}}'
+      exit 0
+    fi
+    if [[ "${RUN_CLEAR_TEST_NUKE_ERROR:-}" == "jsonrpc" ]]; then
+      printf '{"jsonrpc":"2.0","id":"run-clear-reset-dev","error":{"code":-32000,"message":"runtime nuke failed","data":{"code":"RUNTIME_NUKE_IN_PROGRESS"}}}'
+      exit 0
+    fi
+    printf '{"jsonrpc":"2.0","id":"run-clear-reset-dev","result":{"ok":%s,"status":"%s","dry_run":false,"operation_name":"runtime.destructive_reset","partial_failure":%s}}' "${RUN_CLEAR_TEST_NUKE_OK}" "${RUN_CLEAR_TEST_NUKE_STATUS}" "${RUN_CLEAR_TEST_NUKE_PARTIAL}"
+    exit 0
+  fi
   if [[ "$body" == *'"method":"run.start"'* ]]; then
+    printf 'run.start\n' >> "${RUN_CLEAR_EVENTS_SINK}"
     printf '%s' "$url" > "${CURL_URL_SINK}"
     if ((${#headers[@]})); then
       printf '%s\n' "${headers[@]}" > "${CURL_HEADERS_SINK}"
@@ -748,6 +882,7 @@ if [[ "$url" == *"/v1/rpc" ]]; then
     exit 0
   fi
   printf '%s' "$url" > "${CURL_DIRECTIVE_URL_SINK}"
+  printf 'agent.send_directive\n' >> "${RUN_CLEAR_EVENTS_SINK}"
   if ((${#headers[@]})); then
     printf '%s\n' "${headers[@]}" > "${CURL_DIRECTIVE_HEADERS_SINK}"
   else
@@ -780,6 +915,7 @@ printf '{}'
 		"SWARM_TOOL_GATEWAY_CONTAINER_URL",
 		"RUN_CLEAR_INPUT_EVENT",
 		"RUN_CLEAR_INPUT_PAYLOAD_JSON",
+		"RUN_CLEAR_RESET_IDEMPOTENCY_KEY",
 	), []string{
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"PYTHON_OPERATOR_TOKEN_SINK=" + operatorTokenSink,
@@ -798,6 +934,9 @@ printf '{}'
 		"CURL_API_HEALTH_HEADERS_SINK=" + healthHeadersSink,
 		"CURL_API_HEALTH_BODY_SINK=" + healthBodySink,
 		"CURL_API_HEALTH_URL_SINK=" + healthURLSink,
+		"CURL_RESET_HEADERS_SINK=" + resetHeadersSink,
+		"CURL_RESET_BODY_SINK=" + resetBodySink,
+		"CURL_RESET_URL_SINK=" + resetURLSink,
 		"CURL_HEALTHZ_CODE=200",
 		"CURL_READYZ_CODE=" + defaultString(cfg.readyCode, "200"),
 		"CURL_API_HEALTH_CODE=" + defaultString(cfg.apiHealthCode, "200"),
@@ -805,12 +944,19 @@ printf '{}'
 		"RUN_CLEAR_TEST_HEALTH_DB_OK=" + defaultString(cfg.apiHealthDBOK, "true"),
 		"RUN_CLEAR_TEST_HEALTH_RUNTIME_OK=" + defaultString(cfg.apiHealthRuntime, "true"),
 		"RUN_CLEAR_TEST_BUNDLE_FINGERPRINT=" + runClearTestBundleFingerprint,
+		"RUN_CLEAR_TEST_NUKE_ERROR=" + cfg.nukeError,
+		"RUN_CLEAR_TEST_NUKE_OK=" + defaultString(cfg.nukeOK, "true"),
+		"RUN_CLEAR_TEST_NUKE_STATUS=" + defaultString(cfg.nukeStatus, "completed"),
+		"RUN_CLEAR_TEST_NUKE_PARTIAL=" + defaultString(cfg.nukePartial, "false"),
 		"CURL_HEADERS_SINK=" + rpcHeadersSink,
 		"CURL_BODY_SINK=" + bodySink,
 		"CURL_URL_SINK=" + urlSink,
 		"CURL_DIRECTIVE_HEADERS_SINK=" + directiveHeadersSink,
 		"CURL_DIRECTIVE_BODY_SINK=" + directiveBodySink,
 		"CURL_DIRECTIVE_URL_SINK=" + directiveURLSink,
+		"DOCKER_CALLS_SINK=" + dockerCallsSink,
+		"PSQL_CALLS_SINK=" + psqlCallsSink,
+		"RUN_CLEAR_EVENTS_SINK=" + eventsSink,
 		"CONTRACTS_ROOT=/tmp/contracts",
 		"HEALTH_ADDR=" + defaultString(cfg.healthAddr, "0.0.0.0:8081"),
 		"BINARY_PATH=" + filepath.Join(t.TempDir(), "swarm"),
@@ -833,6 +979,9 @@ printf '{}'
 	}
 	if cfg.inputPayloadJSON != "" {
 		cmd.Env = append(cmd.Env, "RUN_CLEAR_INPUT_PAYLOAD_JSON="+cfg.inputPayloadJSON)
+	}
+	if cfg.resetIDKey != "" {
+		cmd.Env = append(cmd.Env, "RUN_CLEAR_RESET_IDEMPOTENCY_KEY="+cfg.resetIDKey)
 	}
 	if cfg.hostGatewayURL != "" {
 		cmd.Env = append(cmd.Env, "SWARM_TOOL_GATEWAY_URL="+cfg.hostGatewayURL)
@@ -860,12 +1009,18 @@ printf '{}'
 		healthHeaders:       readFileTrimmedOptional(t, healthHeadersSink),
 		healthBody:          readFileTrimmedOptional(t, healthBodySink),
 		healthURL:           readFileTrimmedOptional(t, healthURLSink),
+		resetHeaders:        readFileTrimmedOptional(t, resetHeadersSink),
+		resetBody:           readFileTrimmedOptional(t, resetBodySink),
+		resetURL:            readFileTrimmedOptional(t, resetURLSink),
 		rpcHeaders:          readFileTrimmedOptional(t, rpcHeadersSink),
 		rpcBody:             readFileTrimmedOptional(t, bodySink),
 		rpcURL:              readFileTrimmedOptional(t, urlSink),
 		directiveHeaders:    readFileTrimmedOptional(t, directiveHeadersSink),
 		directiveBody:       readFileTrimmedOptional(t, directiveBodySink),
 		directiveURL:        readFileTrimmedOptional(t, directiveURLSink),
+		dockerCalls:         readFileTrimmedOptional(t, dockerCallsSink),
+		psqlCalls:           readFileTrimmedOptional(t, psqlCallsSink),
+		events:              readFileTrimmedOptional(t, eventsSink),
 	}, err
 }
 
@@ -899,6 +1054,20 @@ func mapParam(t *testing.T, values map[string]any, name string) map[string]any {
 		t.Fatalf("%s = %#v, want object", name, value)
 	}
 	return mapped
+}
+
+func assertEventOrder(t *testing.T, events string, want ...string) {
+	t.Helper()
+	seen := strings.Fields(events)
+	next := 0
+	for _, event := range seen {
+		if next < len(want) && event == want[next] {
+			next++
+		}
+	}
+	if next != len(want) {
+		t.Fatalf("events = %v, want order %v", seen, want)
+	}
 }
 
 func filteredEnv(removeKeys ...string) []string {
