@@ -68,11 +68,11 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newVersionCommand(),
 		newCompletionCommand(),
 		newRunsCommand(opts),
+		newStatusCommand(opts),
 		newHealthCommand(opts),
 		newInvestigateCommand(opts),
 		newMailboxCommand(opts),
 		newControlCommand(opts),
-		newRetiredStatusCommand(),
 		newRetiredForkCommand(),
 	)
 	return cmd
@@ -164,18 +164,6 @@ func newCompletionCommand() *cobra.Command {
 	}
 }
 
-func newRetiredStatusCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:                "status",
-		Short:              "Removed v1 command; use swarm investigate run.",
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			writeStatusRetiredMessage(cmd.ErrOrStderr())
-			return commandExitError{code: 2}
-		},
-	}
-}
-
 func newRetiredForkCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:                "fork",
@@ -186,16 +174,6 @@ func newRetiredForkCommand() *cobra.Command {
 			return commandExitError{code: 2}
 		},
 	}
-}
-
-func writeStatusRetiredMessage(w io.Writer) {
-	if w == nil {
-		return
-	}
-	fmt.Fprintln(w, "ERROR: `swarm status` was removed in v1.")
-	fmt.Fprintln(w, "  Replaced by `swarm investigate run` (interpreted) or")
-	fmt.Fprintln(w, "  `swarm investigate run --no-diagnose` (header only).")
-	fmt.Fprintln(w, "  See `swarm investigate run --help`.")
 }
 
 func writeForkRetiredMessage(w io.Writer) {
