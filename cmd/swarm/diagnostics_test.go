@@ -138,7 +138,7 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 	}
 }
 
-func TestStatusAndInvestigateTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
+func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		args       []string
@@ -164,8 +164,8 @@ func TestStatusAndInvestigateTraceResolveOmittedRunThroughActivePreference(t *te
 			wantOutput: "Run: paused-run",
 		},
 		{
-			name:       "legacy trace uses terminal fallback",
-			args:       []string{"investigate", "trace"},
+			name:       "trace uses terminal fallback",
+			args:       []string{"trace"},
 			lists:      [][]any{{}, {}, {validDiagnosticRunHeaderWithStatus("terminal-run", "completed")}},
 			owner:      "run.trace",
 			selected:   "terminal-run",
@@ -268,13 +268,47 @@ func TestInvestigateRunIsRetiredWithoutRequest(t *testing.T) {
 	}
 }
 
-func TestInvestigateTraceUsesRunTraceSnapshot(t *testing.T) {
+func TestInvestigateTraceIsRetiredWithoutRequest(t *testing.T) {
+	for _, args := range [][]string{
+		{"investigate", "trace"},
+		{"investigate", "trace", "run-1"},
+		{"investigate", "trace", "run-1", "--limit", "5"},
+		{"investigate", "trace", "--cursor", "trace-cur"},
+		{"investigate", "trace", "run-1", "--follow"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 2 {
+				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if strings.TrimSpace(stdout.String()) != "" {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if got := stderr.String(); !strings.Contains(got, "ERROR: `swarm investigate trace` was retired in CLI v2.") || !strings.Contains(got, "Use `swarm trace`.") {
+				t.Fatalf("stderr = %q, want retired migration message", got)
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("RPC calls = %d, want 0", calls.Load())
+			}
+		})
+	}
+}
+
+func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 		if req.Method != "run.trace" {
 			t.Fatalf("method = %q, want run.trace", req.Method)
 		}
-		wantParams := map[string]any{"run_id": "run-1", "limit": float64(5), "cursor": "trace-cur"}
+		wantParams := map[string]any{"run_id": "run-1"}
 		if !reflect.DeepEqual(req.Params, wantParams) {
 			t.Fatalf("params = %#v, want %#v", req.Params, wantParams)
 		}
@@ -295,7 +329,7 @@ func TestInvestigateTraceUsesRunTraceSnapshot(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"investigate", "trace", "run-1", "--limit", "5", "--cursor", "trace-cur"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -309,6 +343,131 @@ func TestInvestigateTraceUsesRunTraceSnapshot(t *testing.T) {
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestTraceFollowUsesRunSubscribeTrace(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+		wsRows:           []map[string]any{validRunCommandTraceRow("evt-follow")},
+		wsCloseAfterRows: true,
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-follow", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, nil)
+	assertRunCommandTraceSubscription(t, wsRequests, "run-follow", false)
+	if !strings.Contains(stdout.String(), "trace event_id=evt-follow") {
+		t.Fatalf("stdout = %q, want trace row", stdout.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestTraceFollowOmittedRunReusesActivePreferenceResolver(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, callIndex int) map[string]any {
+			if req.Method != "run.list" {
+				t.Fatalf("method[%d] = %q, want run.list", callIndex, req.Method)
+			}
+			if !reflect.DeepEqual(req.Params, map[string]any{"status": "running", "limit": float64(1)}) {
+				t.Fatalf("params = %#v, want running active preference", req.Params)
+			}
+			return map[string]any{"runs": []any{validDiagnosticRunHeaderWithStatus("active-run", "running")}}
+		},
+		wsRows:           []map[string]any{validRunCommandTraceRow("evt-active")},
+		wsCloseAfterRows: true,
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, []string{"run.list"})
+	assertRunCommandTraceSubscription(t, wsRequests, "active-run", false)
+	if !strings.Contains(stdout.String(), "trace event_id=evt-active") {
+		t.Fatalf("stdout = %q, want trace row", stdout.String())
+	}
+}
+
+func TestTraceFollowCtrlCDetachesWithoutRunStop(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	wsSubscribed := make(chan struct{})
+	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			if req.Method == "run.stop" {
+				t.Fatal("read-only trace Ctrl-C must not call run.stop")
+			}
+			t.Fatalf("unexpected RPC method = %q", req.Method)
+			return nil
+		},
+		wsSubscribed: wsSubscribed,
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-wsSubscribed
+		cancel()
+	}()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"trace", "run-active", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 130 {
+		t.Fatalf("code = %d, want 130 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, nil)
+	assertRunCommandTraceSubscription(t, wsRequests, "run-active", false)
+	if !strings.Contains(stderr.String(), "detached from run trace") {
+		t.Fatalf("stderr = %q, want detach message", stderr.String())
+	}
+}
+
+func TestTraceFollowMalformedWebSocketFailuresExitThree(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	for _, tc := range []struct {
+		name       string
+		serverOpts runCommandServerOptions
+		wantStderr string
+	}{
+		{
+			name: "subscription response missing id",
+			serverOpts: runCommandServerOptions{
+				wsSubscriptionResult: map[string]any{},
+			},
+			wantStderr: "subscription_id is required",
+		},
+		{
+			name: "notification missing event id",
+			serverOpts: runCommandServerOptions{
+				wsRows:           []map[string]any{{"event_name": "scan.requested", "event_created_at": "2026-05-13T10:00:01Z"}},
+				wsCloseAfterRows: true,
+			},
+			wantStderr: "event_id is required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, calls, wsRequests := newRunCommandServer(t, tc.serverOpts)
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-bad-ws", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 3 {
+				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			assertRunCommandMethods(t, calls, nil)
+			assertRunCommandTraceSubscription(t, wsRequests, "run-bad-ws", false)
+			if !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			}
+		})
 	}
 }
 
@@ -390,8 +549,8 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 	}{
 		{name: "runs invalid limit", args: []string{"runs", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
 		{name: "runs invalid since", args: []string{"runs", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
-		{name: "trace invalid limit", args: []string{"investigate", "trace", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 2000"},
-		{name: "trace follow unsupported", args: []string{"investigate", "trace", "run-1", "--follow"}, wantStderr: "unknown flag"},
+		{name: "trace extra arg", args: []string{"trace", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
+		{name: "trace unknown legacy flag", args: []string{"trace", "run-1", "--limit", "5"}, wantStderr: "unknown flag"},
 		{name: "status extra arg", args: []string{"status", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -415,24 +574,32 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 }
 
 func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "")
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		writeJSONRPCResult(t, w, "unexpected", map[string]any{"runs": []any{}})
-	}))
-	defer server.Close()
+	for _, args := range [][]string{
+		{"runs"},
+		{"trace", "run-1"},
+		{"trace", "run-1", "--follow"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Setenv("SWARM_API_TOKEN", "")
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				writeJSONRPCResult(t, w, "unexpected", map[string]any{"runs": []any{}})
+			}))
+			defer server.Close()
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 2 {
-		t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
-		t.Fatalf("stderr = %q, want missing-token message", stderr.String())
-	}
-	if calls.Load() != 0 {
-		t.Fatalf("server calls = %d, want 0", calls.Load())
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 2 {
+				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+				t.Fatalf("stderr = %q, want missing-token message", stderr.String())
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("server calls = %d, want 0", calls.Load())
+			}
+		})
 	}
 }
 
@@ -440,7 +607,7 @@ func TestOmittedRunResolverFailsClosedWhenNoRunsExist(t *testing.T) {
 	for _, args := range [][]string{
 		{"status"},
 		{"status", "--no-diagnose"},
-		{"investigate", "trace"},
+		{"trace"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "test-token")
@@ -621,7 +788,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "trace missing trace",
-			args: []string{"investigate", "trace", "run-1"},
+			args: []string{"trace", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)

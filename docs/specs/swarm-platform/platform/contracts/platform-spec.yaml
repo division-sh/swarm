@@ -5436,7 +5436,7 @@ cli_specification:
     trace:
       command: swarm trace [<run-id>] [--follow]
       tier: must_have
-      implementation_status: absent_v2_top_level_snapshot_exists_under_legacy_investigate
+      implementation_status: implemented
       owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run trace rendering over API-owned RunTraceRow facts only; no CLI reconstruction from tables.
@@ -5601,7 +5601,7 @@ cli_specification:
     investigate:
       command: swarm investigate *
       status: retired_legacy_v1_topology
-      current_code_state: partially_implemented_legacy_namespace; health and run fail closed after #797/#800; runs/trace remain implemented legacy until sibling repairs
+      current_code_state: partially_implemented_legacy_namespace; health, run, and trace fail closed after #797/#800/#803; the runs subcommand remains implemented legacy until sibling repair
       v2_replacements:
         swarm investigate runs: swarm runs
         swarm investigate run: swarm status

@@ -21,8 +21,7 @@ type diagnosticRunListOptions struct {
 
 type diagnosticTraceOptions struct {
 	apiOptions rootCommandOptions
-	limit      int
-	cursor     string
+	follow     bool
 }
 
 type diagnosticRunOptions struct {
@@ -157,6 +156,24 @@ func newStatusCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
+func newTraceCommand(opts rootCommandOptions) *cobra.Command {
+	traceOpts := diagnosticTraceOptions{apiOptions: opts}
+	cmd := &cobra.Command{
+		Use:   "trace [run-id]",
+		Short: "Print or follow a run trace through v1 API owners.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runID := ""
+			if len(args) == 1 {
+				runID = args[0]
+			}
+			return runDiagnosticTraceCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), traceOpts, runID)
+		},
+	}
+	cmd.Flags().BoolVar(&traceOpts.follow, "follow", false, "Follow live trace rows through /v1/ws run.subscribe_trace")
+	return cmd
+}
+
 func newInvestigateCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "investigate",
@@ -205,25 +222,15 @@ func newInvestigateRunCommand(opts rootCommandOptions) *cobra.Command {
 }
 
 func newInvestigateTraceCommand(opts rootCommandOptions) *cobra.Command {
-	traceOpts := diagnosticTraceOptions{apiOptions: opts}
-	cmd := &cobra.Command{
-		Use:   "trace [run-id]",
-		Short: "Print a snapshot run trace through v1 RPC.",
-		Args:  cobra.MaximumNArgs(1),
+	return &cobra.Command{
+		Use:                "trace [run-id]",
+		Short:              "Retired legacy command; use swarm trace.",
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Flags().Changed("limit") && traceOpts.limit == 0 {
-				return fmt.Errorf("--limit must be between 1 and 2000")
-			}
-			runID := ""
-			if len(args) == 1 {
-				runID = args[0]
-			}
-			return runDiagnosticTraceCommand(cmd.Context(), cmd.OutOrStdout(), traceOpts, runID)
+			writeInvestigateTraceRetiredMessage(cmd.ErrOrStderr())
+			return commandExitError{code: 2}
 		},
 	}
-	cmd.Flags().IntVar(&traceOpts.limit, "limit", 0, "Optional page size, 1-2000")
-	cmd.Flags().StringVar(&traceOpts.cursor, "cursor", "", "Optional pagination cursor")
-	return cmd
 }
 
 func newInvestigateHealthCommand() *cobra.Command {
@@ -253,6 +260,15 @@ func writeInvestigateRunRetiredMessage(w io.Writer) {
 	fmt.Fprintln(w, "ERROR: `swarm investigate run` was retired in CLI v2.")
 	fmt.Fprintln(w, "  Use `swarm status`.")
 	fmt.Fprintln(w, "  Use `swarm status --no-diagnose` for the header-only run read.")
+}
+
+func writeInvestigateTraceRetiredMessage(w io.Writer) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, "ERROR: `swarm investigate trace` was retired in CLI v2.")
+	fmt.Fprintln(w, "  Use `swarm trace`.")
+	fmt.Fprintln(w, "  Use `swarm trace --follow` for live trace streaming.")
 }
 
 func bindDiagnosticRunListFlags(cmd *cobra.Command, opts *diagnosticRunListOptions) {
@@ -287,7 +303,7 @@ func runDiagnosticRunCommand(ctx context.Context, out io.Writer, opts diagnostic
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		runID, err = activePreferredDiagnosticRunID(ctx, client)
+		runID, err = resolveActivePreferredRunID(ctx, client)
 		if err != nil {
 			return err
 		}
@@ -314,23 +330,22 @@ func runDiagnosticRunCommand(ctx context.Context, out io.Writer, opts diagnostic
 	return nil
 }
 
-func runDiagnosticTraceCommand(ctx context.Context, out io.Writer, opts diagnosticTraceOptions, runID string) error {
-	params, err := opts.params()
-	if err != nil {
-		return err
-	}
+func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticTraceOptions, runID string) error {
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return err
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		runID, err = activePreferredDiagnosticRunID(ctx, client)
+		runID, err = resolveActivePreferredRunID(ctx, client)
 		if err != nil {
 			return err
 		}
 	}
-	params["run_id"] = runID
+	if opts.follow {
+		return followDiagnosticTraceCommand(ctx, out, errOut, client, runID)
+	}
+	params := map[string]any{"run_id": runID}
 	var result diagnosticRunTraceResult
 	if err := client.call(ctx, "run.trace", params, &result); err != nil {
 		return err
@@ -340,6 +355,55 @@ func runDiagnosticTraceCommand(ctx context.Context, out io.Writer, opts diagnost
 	}
 	writeDiagnosticRunTrace(out, runID, result)
 	return nil
+}
+
+func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, runID string) error {
+	wsEndpoint, err := runCommandWebSocketEndpoint(client.endpoint)
+	if err != nil {
+		if errOut != nil {
+			fmt.Fprintln(errOut, err)
+		}
+		return commandExitError{code: runCommandErrorExitCode(err)}
+	}
+	sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, nil)
+	if err != nil {
+		if errOut != nil {
+			fmt.Fprintln(errOut, err)
+		}
+		return commandExitError{code: runCommandErrorExitCode(err)}
+	}
+	defer sub.close()
+	for {
+		select {
+		case <-ctx.Done():
+			if errOut != nil {
+				fmt.Fprintln(errOut, "detached from run trace")
+			}
+			return commandExitError{code: 130}
+		case row, ok := <-sub.rows:
+			if !ok {
+				select {
+				case err := <-sub.errs:
+					if err != nil {
+						if errOut != nil {
+							fmt.Fprintln(errOut, err)
+						}
+						return commandExitError{code: runCommandErrorExitCode(err)}
+					}
+				default:
+				}
+				return nil
+			}
+			writeRunCommandTraceRow(out, row)
+		case err := <-sub.errs:
+			if err != nil {
+				if errOut != nil {
+					fmt.Fprintln(errOut, err)
+				}
+				return commandExitError{code: runCommandErrorExitCode(err)}
+			}
+		}
+	}
 }
 
 func runDiagnosticHealthCommand(ctx context.Context, out io.Writer, opts rootCommandOptions) error {
@@ -369,7 +433,7 @@ func fetchDiagnosticRunList(ctx context.Context, client *cliAPIClient, params ma
 	return result, nil
 }
 
-func activePreferredDiagnosticRunID(ctx context.Context, client *cliAPIClient) (string, error) {
+func resolveActivePreferredRunID(ctx context.Context, client *cliAPIClient) (string, error) {
 	for _, status := range []string{"running", "paused"} {
 		result, err := fetchDiagnosticRunList(ctx, client, map[string]any{"status": status, "limit": 1})
 		if err != nil {
@@ -414,20 +478,6 @@ func (o diagnosticRunListOptions) params() (map[string]any, error) {
 			return nil, err
 		}
 		params["until"] = until
-	}
-	return params, nil
-}
-
-func (o diagnosticTraceOptions) params() (map[string]any, error) {
-	params := map[string]any{}
-	if cursor := strings.TrimSpace(o.cursor); cursor != "" {
-		params["cursor"] = cursor
-	}
-	if o.limit != 0 {
-		if o.limit < 1 || o.limit > 2000 {
-			return nil, fmt.Errorf("--limit must be between 1 and 2000")
-		}
-		params["limit"] = o.limit
 	}
 	return params, nil
 }

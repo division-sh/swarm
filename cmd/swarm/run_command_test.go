@@ -553,6 +553,7 @@ type runCommandServerOptions struct {
 	wsRows               []map[string]any
 	wsSubscribed         chan struct{}
 	wsSubscriptionResult map[string]any
+	wsCloseAfterRows     bool
 }
 
 func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.Server, *[]jsonRPCRequest, *[]jsonRPCRequest) {
@@ -626,6 +627,10 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 				}); err != nil {
 					return
 				}
+			}
+			if opts.wsCloseAfterRows {
+				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+				return
 			}
 			<-r.Context().Done()
 		default:

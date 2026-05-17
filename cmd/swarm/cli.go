@@ -70,6 +70,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newCompletionCommand(),
 		newRunsCommand(opts),
 		newStatusCommand(opts),
+		newTraceCommand(opts),
 		newHealthCommand(opts),
 		newInvestigateCommand(opts),
 		newMailboxCommand(opts),
