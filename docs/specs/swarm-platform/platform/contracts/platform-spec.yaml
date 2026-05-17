@@ -7713,10 +7713,11 @@ api_specification:
       \ boolean, description?: string,\n    schema: <JSON Schema or $ref> }\n\ntier values:\n  must_have   \u2014 closure-gate\
       \ set. The minimal API surface required to:\n                (a) close Empire #57 (mailbox approval API gap blocking\n\
       \                    every end-to-end run), and\n                (b) back the promoted CLI v2 read commands\n\
-      \                    (`swarm runs`, `swarm status`, `swarm trace`, `swarm health`).\n\
-      \                Implementable as one PR; 12 methods total.\n  should_have \u2014 v1-scoped but ships in subsequent\
+      \                    (`swarm runs`, `swarm status`, `swarm trace`, `swarm health`)\n\
+      \                    and the promoted `swarm run` follow path.\n\
+      \                Implementable as one PR; 13 methods total.\n  should_have \u2014 v1-scoped but ships in subsequent\
       \ slices. Spec is\n                authoritative now (so consumers can plan against it),\n                but implementation\
-      \ is sequenced after the must_have set.\n                Includes streaming subscriptions, observability drill-down\n\
+      \ is sequenced after the must_have set.\n                Includes remaining streaming subscriptions, observability drill-down\n\
       \                (event/entity/runtime), agent control, conversation reads,\n                production run-control\
       \ (pause/continue/stop), runtime\n                ingress control.\n  deferred    \u2014 explicitly out of v1 scope.\
       \ Listed in deferred_namespaces.\n"
@@ -8172,7 +8173,7 @@ api_specification:
       errors:
       - RUN_NOT_FOUND
     run.subscribe_trace:
-      tier: should_have
+      tier: must_have
       description: 'Live composed trace stream for one run. Each notification carries one
 
         joined trace row (the same RunTraceRow shape returned by run.trace).
@@ -9336,8 +9337,9 @@ api_specification:
       scopes, and errors.
     - "Idempotency replay-store implementation: (method, actor, idempotency_key) \u2192 response; 24h TTL; IDEMPOTENCY_CONFLICT\
       \ response on body mismatch."
-    - For each subscription method when implemented in a should_have slice, the wire format matches the geth-style rpc.subscription
-      shape. Not a must_have closure gate (no subscription method is must_have in v1).
+    - run.subscribe_trace is must-have because promoted CLI v2 `swarm run` foreground follow and `swarm trace --follow` depend
+      on it. Remaining subscription methods are sequenced by their own slices, but every subscription wire format must match
+      the geth-style rpc.subscription shape.
     - health.check returns the BundleIdentity block including fingerprint.
     - mailbox.approve / reject / defer mutate the mailbox table and emit downstream events as configured.
     - run.diagnose exposes the existing operator-state projection from internal/store/run_operational_status_read_surface.go.ProjectRunOperationalStatus
