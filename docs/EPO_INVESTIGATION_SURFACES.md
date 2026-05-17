@@ -81,6 +81,10 @@ Use `make run-clear-directed DIRECTIVE_AGENT=<agent> DIRECTIVE_MESSAGE='<message
 for directive-bootstrapped runs. `make run-clear` is the corpus path only;
 it no longer switches behavior based on `DIRECTIVE_*`.
 
+The reset stage starts `swarm serve`, waits for `/v1/rpc health.check`, and then
+resets through `/v1/rpc runtime.nuke` with `SWARM_API_TOKEN`. It does not stop
+Docker containers or truncate database tables directly.
+
 Best for:
 - startup readiness
 - boot/runtime parity

@@ -9019,9 +9019,12 @@ api_specification:
       auth_boundary_bug_fix: "The current bug where /api/rpc and /api/ws bypass operator auth is moot under v1 \u2014 one\
         \ auth surface, one token."
     cli_consumer_migration:
-      make_run_clear: 'Migrates from legacy `/api/rpc` run.start payloads with builder-token auth to `curl /v1/rpc
-        {method: run.start, params: {bundle_ref?, event_name, payload, idempotency_key?}}` with the unified token. run.start
-        is now a deprecated wrapper over event.publish until the helper moves to the canonical event.publish method.'
+      make_run_clear: '`reset-dev` starts a local `swarm serve` bootstrap and consumes `/v1/rpc runtime.nuke`
+        for destructive reset with the unified `SWARM_API_TOKEN` and a `run-clear:reset-dev:<uuid>` idempotency
+        key. The helper MUST NOT stop broad Docker inventory or truncate database tables directly. Corpus startup
+        migrates from legacy `/api/rpc` run.start payloads with builder-token auth to `curl /v1/rpc {method: run.start,
+        params: {bundle_ref?, event_name, payload, idempotency_key?}}` with the unified token. run.start is now a
+        deprecated wrapper over event.publish until the helper moves to the canonical event.publish method.'
       swarm_investigate: "First-slice subcommands map to v1 methods:\n  swarm investigate runs   \u2192 run.list\n  swarm\
         \ investigate run    \u2192 run.diagnose (default), run.get (--no-diagnose)\n  swarm investigate trace  \u2192 run.trace\n\
         \  swarm investigate health \u2192 health.check\nFollow-on subcommands map to event.*, runtime.logs, runtime.incidents,\
@@ -9060,7 +9063,8 @@ api_specification:
     cli:
     - '`swarm investigate runs/run/trace/health` first-slice consumes /v1/rpc methods, no direct internal-package access (except
       `swarm verify` carve-out).'
-    - '`make run-clear` migrated to /v1/rpc and unified token.'
+    - '`make run-clear` migrated to /v1/rpc and unified token, including `reset-dev` consuming `runtime.nuke` instead of
+      raw Docker stop or table truncation.'
     deprecation:
     - 'Legacy /rpc, /api/rpc, /ws, /api/ws, and dashboard /api/* endpoints are removed or fail closed. They are not aliases.'
     - SWARM_BUILDER_AUTH_TOKEN and SWARM_OPERATOR_AUTH_TOKEN are not accepted as API auth fallbacks. SWARM_API_TOKEN is required.

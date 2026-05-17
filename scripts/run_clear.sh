@@ -16,18 +16,13 @@ HEALTH_URL="http://${HOST_HTTP_ADDR}/healthz"
 READY_URL="http://${HOST_HTTP_ADDR}/readyz"
 API_RPC_URL="http://${HOST_HTTP_ADDR}/v1/rpc"
 
-SWARM_DB_HOST="${SWARM_DB_HOST:-127.0.0.1}"
-SWARM_DB_PORT="${SWARM_DB_PORT:-5432}"
-SWARM_DB_NAME="${SWARM_DB_NAME:-swarm}"
-SWARM_DB_USER="${SWARM_DB_USER:-postgres}"
-SWARM_DB_PASSWORD="${SWARM_DB_PASSWORD:-postgres}"
-
 MODE="${1:-run-clear}"
 LOG_FILE="${LOG_FILE:-/tmp/swarm-empire.log}"
 PID_FILE="${PID_FILE:-/tmp/swarm-empire.pid}"
 TOKEN_FILE="${TOKEN_FILE:-/tmp/swarm-empire.token}"
 BINARY_PATH="${BINARY_PATH:-/tmp/swarm-empire-bin/swarm}"
 START_TIMEOUT="${START_TIMEOUT:-60}"
+RUN_CLEAR_RESET_IDEMPOTENCY_KEY="${RUN_CLEAR_RESET_IDEMPOTENCY_KEY:-}"
 
 DIRECTIVE_AGENT="${DIRECTIVE_AGENT:-}"
 DIRECTIVE_MESSAGE="${DIRECTIVE_MESSAGE:-}"
@@ -204,33 +199,31 @@ wait_for_ready() {
   echo "Swarm ready at http://${HOST_HTTP_ADDR}"
 }
 
+reset_runtime_with_nuke() {
+  local reset_idempotency_key="${RUN_CLEAR_RESET_IDEMPOTENCY_KEY}"
+  if [[ -z "${reset_idempotency_key}" ]]; then
+    reset_idempotency_key="run-clear:reset-dev:$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  fi
+
+  echo "Resetting runtime with /v1/rpc runtime.nuke..."
+  runtime_nuke_body="$(ruby -rjson -e 'print JSON.generate({jsonrpc: "2.0", id: "run-clear-reset-dev", method: "runtime.nuke", params: {dry_run: false, idempotency_key: ARGV[0]}})' "${reset_idempotency_key}")"
+  runtime_nuke_response="$(curl -sS "${API_RPC_URL}" \
+    -H 'content-type: application/json' \
+    -H "Authorization: Bearer ${SWARM_API_TOKEN}" \
+    --data-binary "${runtime_nuke_body}")"
+  echo "${runtime_nuke_response}"
+  if ! ruby -rjson -e 'doc = JSON.parse(STDIN.read); if doc["error"]; warn "runtime.nuke error: #{doc["error"]}"; exit 1; end; result = doc["result"] || {}; exit(result["ok"] == true && result["status"].to_s == "completed" && result["dry_run"] == false && result["partial_failure"] != true ? 0 : 1)' <<<"${runtime_nuke_response}"; then
+    echo "runtime.nuke reset failed. Current log:"
+    tail -n 200 "${LOG_FILE}"
+    exit 1
+  fi
+}
+
 reset_dev() {
   ensure_api_token_for_reset
 
   echo "Stopping local Swarm processes..."
   kill_swarm_processes
-
-  echo "Stopping running Docker containers..."
-  container_ids="$(docker ps -q 2>/dev/null || true)"
-  if [[ -n "${container_ids}" ]]; then
-    docker stop ${container_ids} >/dev/null
-  fi
-
-  echo "Clearing database ${SWARM_DB_NAME}..."
-  PGPASSWORD="${SWARM_DB_PASSWORD}" psql \
-    -h "${SWARM_DB_HOST}" \
-    -p "${SWARM_DB_PORT}" \
-    -U "${SWARM_DB_USER}" \
-    -d "${SWARM_DB_NAME}" \
-    -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
-DO $$
-DECLARE r RECORD;
-BEGIN
-  FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-    EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
-  END LOOP;
-END $$;
-SQL
 
   echo "Building Swarm binary at ${BINARY_PATH}..."
   mkdir -p "$(dirname "${BINARY_PATH}")"
@@ -262,6 +255,9 @@ PY
 )"
   echo "${launcher_pid}" > "${PID_FILE}"
   launcher_identity="$(launcher_process_identity "${launcher_pid}" || true)"
+  wait_for_ready "${launcher_pid}" "${launcher_identity}"
+  reset_runtime_with_nuke
+  bundle_fingerprint=""
   wait_for_ready "${launcher_pid}" "${launcher_identity}"
 }
 
