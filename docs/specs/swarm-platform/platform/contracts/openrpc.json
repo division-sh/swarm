@@ -936,7 +936,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -974,7 +974,7 @@
           }
         },
         {
-          "code": -32021,
+          "code": -32022,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -1226,7 +1226,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1303,7 +1303,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32025,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1341,7 +1341,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32026,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1849,7 +1849,7 @@
           }
         },
         {
-          "code": -32026,
+          "code": -32027,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -1986,7 +1986,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2024,7 +2024,7 @@
           }
         },
         {
-          "code": -32021,
+          "code": -32022,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -3439,7 +3439,7 @@
       },
       "errors": [
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3477,7 +3477,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32024,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -3600,7 +3600,7 @@
       },
       "errors": [
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3669,7 +3669,7 @@
       },
       "errors": [
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3802,7 +3802,7 @@
       },
       "errors": [
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3840,7 +3840,7 @@
           }
         },
         {
-          "code": -32021,
+          "code": -32022,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -3882,7 +3882,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32021,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -4087,7 +4087,7 @@
           }
         },
         {
-          "code": -32026,
+          "code": -32027,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -4312,7 +4312,7 @@
       },
       "errors": [
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4350,7 +4350,7 @@
           }
         },
         {
-          "code": -32021,
+          "code": -32022,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -4481,7 +4481,7 @@
       },
       "errors": [
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4558,7 +4558,7 @@
       },
       "errors": [
         {
-          "code": -32022,
+          "code": -32023,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4792,6 +4792,133 @@
           "type": "object"
         }
       }
+    },
+    {
+      "name": "runtime.nuke",
+      "description": "Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery quiescence, run-scoped cleanup/preservation, and managed entity-container selection/stop. It MUST NOT directly truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/run_clear/CLI reset seams in this method implementation.\n\n`dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences plan -\u003e quiescence -\u003e cleanup -\u003e managed-container stop. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. Public final-response idempotency follows the v1 API idempotency convention.\n",
+      "params": [
+        {
+          "name": "dry_run",
+          "required": false,
+          "schema": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/RuntimeNukeResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32020,
+          "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUNTIME_NUKE_IN_PROGRESS",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "operation_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_name"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32011,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
     },
     {
       "name": "runtime.pause",
@@ -6517,6 +6644,83 @@
         ],
         "type": "object"
       },
+      "RuntimeNukeResult": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup": {
+            "additionalProperties": true,
+            "description": "Exact result from the run-scoped cleanup/preservation owner.",
+            "type": "object"
+          },
+          "containers": {
+            "additionalProperties": true,
+            "description": "Exact result from the managed entity-container selection/stop owner.",
+            "type": "object"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "scope",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "description": "True for dry-run or fully completed apply; false when the operation completed with explicit partial failures.",
+            "type": "boolean"
+          },
+          "operation_name": {
+            "type": "string"
+          },
+          "partial_failure": {
+            "type": "boolean"
+          },
+          "plan": {
+            "additionalProperties": true,
+            "description": "Exact result from the destructive-reset plan/result owner.",
+            "type": "object"
+          },
+          "quiescence": {
+            "additionalProperties": true,
+            "description": "Exact result from the active-run/delivery quiescence owner.",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "dry_run",
+              "completed",
+              "partial_failure"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "status",
+          "dry_run",
+          "operation_name",
+          "plan",
+          "quiescence",
+          "cleanup",
+          "containers",
+          "partial_failure"
+        ],
+        "type": "object"
+      },
       "ScopeName": {
         "description": "Action-resource scopes used for v1 authorization. v1 enforcement\ntreats every valid token as granting every scope; the enum exists\nfor forward-compat with Phase 2/3 per-token scope restrictions.\nNew scopes added by deferred namespaces (e.g., verify:contracts\nwhen verify.* lands, debug:* when debug.* lands) are additive.\n",
         "enum": [
@@ -7638,8 +7842,46 @@
           "type": "object"
         }
       },
-      "RUN_ALREADY_PAUSED": {
+      "RUNTIME_NUKE_IN_PROGRESS": {
         "code": -32020,
+        "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUNTIME_NUKE_IN_PROGRESS",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "operation_name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "operation_name"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "RUN_ALREADY_PAUSED": {
+        "code": -32021,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -7677,7 +7919,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32021,
+        "code": -32022,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -7719,7 +7961,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32022,
+        "code": -32023,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -7757,7 +7999,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32023,
+        "code": -32024,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -7799,7 +8041,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32024,
+        "code": -32025,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -7837,7 +8079,7 @@
         }
       },
       "TURN_NOT_FOUND": {
-        "code": -32025,
+        "code": -32026,
         "message": "Application error: TURN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -7880,7 +8122,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_REF": {
-        "code": -32026,
+        "code": -32027,
         "message": "Application error: UNSUPPORTED_BUNDLE_REF",
         "data": {
           "additionalProperties": false,

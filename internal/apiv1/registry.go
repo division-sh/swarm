@@ -38,6 +38,7 @@ const (
 	IdempotencyConflictCode              = "IDEMPOTENCY_CONFLICT"
 	RuntimeAlreadyPausedCode             = "RUNTIME_ALREADY_PAUSED"
 	RuntimeNotPausedCode                 = "RUNTIME_NOT_PAUSED"
+	RuntimeNukeInProgressCode            = "RUNTIME_NUKE_IN_PROGRESS"
 )
 
 type Registry struct {

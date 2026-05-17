@@ -188,6 +188,54 @@ func TestCoordinatorLockConflictPreventsPlanning(t *testing.T) {
 	}
 }
 
+func TestCoordinatorBuildPlanWithLockHoldsLeaseThroughApply(t *testing.T) {
+	now := time.Date(2026, 5, 15, 1, 2, 3, 0, time.UTC)
+	reader := &recordingInventoryReader{inventory: Inventory{
+		ActiveRuns: []RunRef{{RunID: "run-1", Status: "running"}},
+	}}
+	locks := &recordingLockManager{acquired: true}
+	idempotency := newRecordingIdempotencyStore()
+	coord := &Coordinator{
+		Planner:     InventoryPlanner{Reader: reader},
+		Locks:       locks,
+		Idempotency: idempotency,
+		Now:         func() time.Time { return now },
+	}
+	called := false
+	_, replay, err := coord.BuildPlanWithLock(context.Background(), Request{
+		ActorTokenID:   "operator-token",
+		IdempotencyKey: "idem-locked-apply",
+		RequestHash:    "hash-locked-apply",
+	}, func(_ context.Context, result Result) error {
+		called = true
+		if result.OperationName != DefaultOperationName || result.PlannedAt != now {
+			t.Fatalf("callback result = %#v, want normalized plan result", result)
+		}
+		if locks.lease == nil || locks.lease.releases != 0 {
+			t.Fatalf("lock release before callback completed = %#v", locks.lease)
+		}
+		if idempotency.stores != 0 {
+			t.Fatalf("idempotency stored before callback completed = %d, want 0", idempotency.stores)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("BuildPlanWithLock error = %v", err)
+	}
+	if replay {
+		t.Fatal("BuildPlanWithLock replay = true, want false")
+	}
+	if !called {
+		t.Fatal("BuildPlanWithLock callback not called")
+	}
+	if locks.lease.releases != 1 {
+		t.Fatalf("lock releases after callback = %d, want 1", locks.lease.releases)
+	}
+	if idempotency.stores != 1 {
+		t.Fatalf("idempotency stores after callback = %d, want 1", idempotency.stores)
+	}
+}
+
 func TestCoordinatorFailsClosedWhenLockLeaseIsMissing(t *testing.T) {
 	reader := &recordingInventoryReader{}
 	coord := &Coordinator{
