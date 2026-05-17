@@ -5644,6 +5644,7 @@ cli_specification:
     - swarm run
     - swarm verify
     - swarm runs
+    - swarm status
     - swarm health
     - swarm mailbox list
     - swarm mailbox view
