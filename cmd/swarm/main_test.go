@@ -2643,12 +2643,31 @@ func TestServeBootRegistryDetail_UsesRuntimeToolInventoryCount(t *testing.T) {
 		t.Fatal("runtime tool inventory unexpectedly empty")
 	}
 
-	out := serveBootRegistryDetail(source)
+	out := serveBootBundleLoadDetail("sha256:test", source)
+	if !strings.Contains(out, "sha256:test") {
+		t.Fatalf("boot progress detail missing fingerprint:\n%s", out)
+	}
 	if !strings.Contains(out, fmt.Sprintf("tools=%d", wantTools)) {
 		t.Fatalf("log output missing runtime tool count %d:\n%s", wantTools, out)
 	}
 	if strings.Contains(out, "tools=0") {
 		t.Fatalf("log output still reports zero tools:\n%s", out)
+	}
+}
+
+func TestWaitForServeHealthEndpointsProvesHealthAndReadyRoutes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz", "/readyz":
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	if err := waitForServeHealthEndpoints(context.Background(), server.Listener.Addr()); err != nil {
+		t.Fatalf("waitForServeHealthEndpoints: %v", err)
 	}
 }
 
