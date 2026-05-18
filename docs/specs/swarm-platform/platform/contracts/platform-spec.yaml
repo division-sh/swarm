@@ -5534,8 +5534,8 @@ cli_specification:
         - sets `--verbose`
         - enables dev entity-container cleanup after runtime shutdown/drain
         conflict_rules:
-        - '`--dev --require-bundle-match` fails before runtime boot because dev mode disables bundle-match admission.'
-        - '`--dev --no-require-bundle-match`, `--dev --abandon-active-runs`, and `--dev --verbose` are redundant but valid.'
+        - '`--dev --require-bundle-match` or `--dev --require-bundle-match=true` fails before runtime boot because dev mode disables bundle-match admission.'
+        - '`--dev --require-bundle-match=false`, `--dev --no-require-bundle-match`, `--dev --abandon-active-runs`, and `--dev --verbose` are redundant but valid.'
         shutdown_ordering: >
           On serve shutdown, runtime shutdown admission and the runtime/manager shutdown-grace drain run first. Dev cleanup runs
           only after that shutdown attempt reaches its completion point. Cleanup still runs after a shutdown timeout/error and
