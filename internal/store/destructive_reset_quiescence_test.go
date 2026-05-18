@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/runtime/destructivereset"
 	runtimemanager "swarm/internal/runtime/manager"
+	runtimerunquiescence "swarm/internal/runtime/runquiescence"
 	"swarm/internal/testutil"
 )
 
@@ -173,6 +174,109 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 	}
 }
 
+func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableWork(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+	ctx := context.Background()
+	now := time.Date(2026, 5, 18, 2, 10, 0, 0, time.UTC)
+	runID := uuid.NewString()
+	terminalRunID := uuid.NewString()
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status) VALUES
+			($1::uuid, 'running'),
+			($2::uuid, 'completed')
+	`, runID, terminalRunID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	agentPending := seedDestructiveResetEvent(t, ctx, pg, runID, "serve.agent.pending")
+	agentInProgress := seedDestructiveResetEvent(t, ctx, pg, runID, "serve.agent.in_progress")
+	agentRetryableFailed := seedDestructiveResetEvent(t, ctx, pg, runID, "serve.agent.failed_retryable")
+	nodePending := seedDestructiveResetEvent(t, ctx, pg, runID, "serve.node.pending")
+	terminalRunPending := seedDestructiveResetEvent(t, ctx, pg, terminalRunID, "serve.terminal.pending")
+	activeSessionID := uuid.NewString()
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, retry_count, reason_code, created_at, delivered_at
+		) VALUES
+			($1::uuid, $2::uuid, 'agent', 'agent-a', 'pending', NULL, 0, 'matched_agent_subscription', now(), NULL),
+			($1::uuid, $3::uuid, 'agent', 'agent-a', 'in_progress', $7::uuid, 0, 'agent_processing', now(), NULL),
+			($1::uuid, $4::uuid, 'agent', 'agent-a', 'failed', NULL, 1, 'agent_retryable_error', now() - interval '5 minutes', now() - interval '2 minutes'),
+			($1::uuid, $5::uuid, 'node', 'node-a', 'pending', NULL, 0, 'matched_node_subscription', now(), NULL),
+			($6::uuid, $8::uuid, 'agent', 'agent-a', 'pending', NULL, 0, 'matched_agent_subscription', now(), NULL)
+	`, runID, agentPending, agentInProgress, agentRetryableFailed, nodePending, terminalRunID, activeSessionID, terminalRunPending); err != nil {
+		t.Fatalf("seed deliveries: %v", err)
+	}
+
+	result, err := pg.ApplyServeAbandonActiveRunQuiescence(ctx, now)
+	if err != nil {
+		t.Fatalf("ApplyServeAbandonActiveRunQuiescence: %v", err)
+	}
+	if result.OperationName != runtimerunquiescence.ServeAbandonOperationName || result.ReasonCode != runtimerunquiescence.ServeAbandonReasonCode || result.ControlledBy != runtimerunquiescence.ServeAbandonControlledBy {
+		t.Fatalf("serve abandon result metadata = %#v", result)
+	}
+	if len(result.Runs) != 1 || result.Runs[0].RunID != runID || result.Runs[0].Status != "cancelled" || !result.Runs[0].Changed {
+		t.Fatalf("runs = %#v, want one cancelled active run", result.Runs)
+	}
+	if len(result.Deliveries) != 4 || result.PipelineReceiptCount != 4 {
+		t.Fatalf("deliveries=%d pipeline_receipts=%d, want 4/4", len(result.Deliveries), result.PipelineReceiptCount)
+	}
+
+	var runStatus, controlStatus, reason, controlledBy string
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT r.status, rc.control_status, COALESCE(rc.reason,''), COALESCE(rc.controlled_by,'')
+		FROM runs r
+		JOIN run_control_state rc ON rc.run_id = r.run_id
+		WHERE r.run_id = $1::uuid
+	`, runID).Scan(&runStatus, &controlStatus, &reason, &controlledBy); err != nil {
+		t.Fatalf("load run/control state: %v", err)
+	}
+	if runStatus != "cancelled" || controlStatus != "stopped" || reason != runtimerunquiescence.ServeAbandonReasonCode || controlledBy != runtimerunquiescence.ServeAbandonControlledBy {
+		t.Fatalf("run/control = %s/%s/%s/%s", runStatus, controlStatus, reason, controlledBy)
+	}
+
+	assertServeAbandonDelivery(t, ctx, pg, agentPending, "agent", "agent-a")
+	assertServeAbandonDelivery(t, ctx, pg, agentInProgress, "agent", "agent-a")
+	assertServeAbandonDelivery(t, ctx, pg, agentRetryableFailed, "agent", "agent-a")
+	assertServeAbandonDelivery(t, ctx, pg, nodePending, "node", "node-a")
+
+	if err := pg.MarkEventDeliveryInProgress(ctx, agentRetryableFailed, "agent-a", uuid.NewString()); err != nil {
+		t.Fatalf("late retryable failed MarkEventDeliveryInProgress: %v", err)
+	}
+	if err := pg.UpsertEventReceipt(ctx, agentInProgress, "agent-a", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+		t.Fatalf("late UpsertEventReceipt: %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, agentInProgress, "processed", ""); err != nil {
+		t.Fatalf("late UpsertPipelineReceipt: %v", err)
+	}
+	assertServeAbandonDelivery(t, ctx, pg, agentRetryableFailed, "agent", "agent-a")
+	assertServeAbandonReceipt(t, ctx, pg, agentInProgress, "agent-a")
+	assertServeAbandonReceipt(t, ctx, pg, agentInProgress, activeRunQuiescencePipelineSubscriberID)
+
+	replay, err := pg.ListEventsMissingPipelineReceiptForRun(ctx, runID, now.Add(-time.Hour), 20)
+	if err != nil {
+		t.Fatalf("ListEventsMissingPipelineReceiptForRun: %v", err)
+	}
+	if len(replay) != 0 {
+		t.Fatalf("missing pipeline replay events = %#v, want none", replay)
+	}
+	var terminalDeliveryStatus, terminalDeliveryReason string
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+	`, terminalRunPending).Scan(&terminalDeliveryStatus, &terminalDeliveryReason); err != nil {
+		t.Fatalf("load terminal run delivery: %v", err)
+	}
+	if terminalDeliveryStatus != "pending" || terminalDeliveryReason != "matched_agent_subscription" {
+		t.Fatalf("terminal run delivery = %s/%s, want untouched", terminalDeliveryStatus, terminalDeliveryReason)
+	}
+}
+
 func TestPostgresStore_ApplyDestructiveResetQuiescence_DryRunDoesNotMutate(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -220,6 +324,41 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_DryRunDoesNotMutate(t *te
 	}
 	if status != "pending" || reason != "" {
 		t.Fatalf("dry-run mutated delivery = %s/%s", status, reason)
+	}
+}
+
+func assertServeAbandonDelivery(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, subscriberType, subscriberID string) {
+	t.Helper()
+	var status, reason string
+	var activeSession sql.NullString
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, ''), active_session_id::text
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = $2
+		  AND subscriber_id = $3
+	`, eventID, subscriberType, subscriberID).Scan(&status, &reason, &activeSession); err != nil {
+		t.Fatalf("load delivery %s/%s/%s: %v", eventID, subscriberType, subscriberID, err)
+	}
+	if status != "dead_letter" || reason != runtimerunquiescence.ServeAbandonReasonCode || activeSession.Valid {
+		t.Fatalf("delivery %s/%s/%s = %s/%s active=%v, want serve abandon dead_letter", eventID, subscriberType, subscriberID, status, reason, activeSession.Valid)
+	}
+	assertServeAbandonReceipt(t, ctx, pg, eventID, subscriberID)
+}
+
+func assertServeAbandonReceipt(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, subscriberID string) {
+	t.Helper()
+	var outcome, reason string
+	if err := pg.DB.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_id = $2
+	`, eventID, subscriberID).Scan(&outcome, &reason); err != nil {
+		t.Fatalf("load receipt %s/%s: %v", eventID, subscriberID, err)
+	}
+	if outcome != "dead_letter" || reason != runtimerunquiescence.ServeAbandonReasonCode {
+		t.Fatalf("receipt %s/%s = %s/%s, want serve abandon dead_letter", eventID, subscriberID, outcome, reason)
 	}
 }
 

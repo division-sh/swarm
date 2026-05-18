@@ -5468,8 +5468,36 @@ cli_specification:
           any active run has a non-NULL `runs.bundle_fingerprint` different from the boot bundle fingerprint. Legacy NULL fingerprints
           mean unknown bundle and do not block startup. `--no-require-bundle-match` disables this admission gate for operator-approved
           recovery/dev workflows.
-      remaining_tail: '#750 owns remaining serve/dev/shutdown lifecycle behavior: --abandon-active-runs, --shutdown-grace, --dev,
-        and dev entity-container shutdown cleanup are not implemented by #802.'
+      active_run_abandon_quiescence:
+        implemented_by: '#808'
+        flag: --abandon-active-runs
+        owner: internal/runtime/runquiescence plus PostgresStore active-run quiescence owner, consumed by cmd/swarm serve
+        ordering: >
+          `swarm serve --abandon-active-runs` applies after platform schema/state-store initialization and before bundle-match
+          admission, startup recovery, runtime start, API readiness, or late delivery recovery can reclaim work. Failure to apply
+          the quiescence owner is a serve startup failure; serve MUST NOT continue with partial abandon state.
+        active_run_scope: >
+          The owner selects all active source runs with `runs.status` in `running` or `paused`. Each selected run is terminalized
+          as `runs.status=cancelled`, with `run_control_state.control_status=stopped`, `reason=server_restart_abandon`, and
+          `controlled_by=swarm.serve.abandon_active_runs`.
+        delivery_scope: >
+          For those selected runs, same-run agent/node deliveries in `pending`, `in_progress`, or retryable `failed` state are
+          terminalized as `dead_letter` with `reason_code=server_restart_abandon`; `active_session_id` is cleared. Retryable failed
+          means the delivery is still eligible for normal runtime retry under the delivery retry policy. Delivered, exhausted,
+          unrelated, or terminal-run deliveries remain untouched.
+        receipt_scope: >
+          The owner writes matching agent/node event receipts and platform pipeline receipts with `outcome=dead_letter` and
+          `reason_code=server_restart_abandon` so missing-pipeline-receipt recovery cannot resurrect abandoned work.
+        late_writer_rule: >
+          EventBus, AgentManager, node pipeline, and pipeline-receipt writers MUST treat `server_restart_abandon` as a terminal
+          active-run quiescence reason. They MUST NOT overwrite the delivery/receipt reason, reclaim the delivery, or requeue
+          missing pipeline work after the owner has applied.
+        destructive_reset_separation: >
+          Destructive reset/runtime.nuke consumes the same active-run quiescence owner with `runtime_nuke_cancelled` reasons and
+          must retain its existing run-scoped cleanup and managed-container deletion semantics. `--abandon-active-runs` does not
+          delete source rows, truncate tables, stop managed entity containers, or reuse nuke-specific reason codes.
+      remaining_tail: '#750 owns remaining serve/dev/shutdown lifecycle behavior: --shutdown-grace, --dev,
+        and dev entity-container shutdown cleanup are not implemented by #808.'
     run:
       command: swarm run [flags]
       tier: must_have

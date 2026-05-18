@@ -26,7 +26,7 @@ func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructiverese
 		Preserved:          destructivereset.DefaultPreservedResources(),
 	}
 	for _, run := range runs {
-		if destructiveResetRunStatusActive(run.Status) {
+		if activeRunQuiescenceRunStatusActive(run.Status) {
 			out.ActiveRuns = append(out.ActiveRuns, run)
 		}
 	}
@@ -74,7 +74,7 @@ func (s *PostgresStore) readDestructiveResetInventoryDeliveries(ctx context.Cont
 		SELECT delivery_id::text, run_id::text, COALESCE(status, '')
 		FROM event_deliveries
 		WHERE subscriber_type IN ('agent', 'node')
-		  AND `+destructiveResetQuiescenceDeliveryPredicateSQL("")+`
+		  AND `+activeRunQuiescenceDeliveryPredicateSQL("")+`
 		ORDER BY run_id::text, event_id::text, subscriber_type, subscriber_id
 	`)
 	if err != nil {

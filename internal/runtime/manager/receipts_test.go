@@ -379,9 +379,13 @@ func (s *deliveryLifecycleStoreStub) MarkEventDeliveryInProgress(_ context.Conte
 	return nil
 }
 
-func (s *deliveryLifecycleStoreStub) DestructiveResetDeliveryQuiesced(context.Context, string, string, string) (bool, error) {
+func (s *deliveryLifecycleStoreStub) ActiveRunDeliveryQuiesced(context.Context, string, string, string) (string, bool, error) {
 	s.quiescenceChecks++
-	return s.quiescedAfterChecks > 0 && s.quiescenceChecks >= s.quiescedAfterChecks, nil
+	ok := s.quiescedAfterChecks > 0 && s.quiescenceChecks >= s.quiescedAfterChecks
+	if !ok {
+		return "", false, nil
+	}
+	return "runtime_nuke_cancelled", true, nil
 }
 
 func TestProcessEvent_LogsLaunchingDeliveryLifecycleTransition(t *testing.T) {

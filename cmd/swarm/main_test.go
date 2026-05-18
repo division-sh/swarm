@@ -30,6 +30,7 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimerunforkexecution "swarm/internal/runtime/runforkexecution"
+	runtimerunquiescence "swarm/internal/runtime/runquiescence"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
@@ -157,7 +158,7 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check", "--require-bundle-match", "--no-require-bundle-match", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -182,6 +183,24 @@ func TestCLI_ServeVerboseFlagConsumesServeOwner(t *testing.T) {
 	}
 	if captured.Output == nil {
 		t.Fatalf("serve output writer was not passed to serve owner")
+	}
+}
+
+func TestCLI_ServeAbandonActiveRunsFlagConsumesServeOwner(t *testing.T) {
+	var captured serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		captured = serveOpts
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--abandon-active-runs"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !captured.AbandonActiveRuns {
+		t.Fatalf("serve abandon active runs = false, want true")
 	}
 }
 
@@ -2685,21 +2704,25 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 
 	oldBuildStores := buildStoresForServe
 	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	runtimePG, err := store.NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
 	buildStoresForServe = func(ctx context.Context, _ string, cfg *config.Config) (storeBundle, error) {
-		if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
 			return storeBundle{}, err
 		}
 		return storeBundle{
-			Postgres:          pg,
-			SQLDB:             pg.DB,
-			EventStore:        pg,
-			SessionRegistry:   sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
-			ConversationStore: pg,
-			ManagerStore:      pg,
-			ScheduleStore:     pg,
-			TurnStore:         pg,
+			Postgres:          runtimePG,
+			SQLDB:             runtimePG.DB,
+			EventStore:        runtimePG,
+			SessionRegistry:   sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
+			ConversationStore: runtimePG,
+			ManagerStore:      runtimePG,
+			ScheduleStore:     runtimePG,
+			TurnStore:         runtimePG,
 		}, nil
 	}
 	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
@@ -2746,6 +2769,136 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "health_endpoints_respond       ok  (/healthz /readyz /v1/rpc /v1/ws)") {
 		t.Fatalf("serve verbose output still claims unproven v1 endpoint response:\n%s", out.String())
+	}
+}
+
+func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *testing.T) {
+	oldBuildStores := buildStoresForServe
+	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	runtimePG, err := store.NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	buildStoresForServe = func(ctx context.Context, _ string, cfg *config.Config) (storeBundle, error) {
+		if _, err := runtimePG.BindSchemaCapabilities(ctx); err != nil {
+			return storeBundle{}, err
+		}
+		return storeBundle{
+			Postgres:          runtimePG,
+			SQLDB:             runtimePG.DB,
+			EventStore:        runtimePG,
+			SessionRegistry:   sessions.NewPostgresRegistry(runtimePG.DB, cfg.LLM.Session.LockTTL),
+			ConversationStore: runtimePG,
+			ManagerStore:      runtimePG,
+			ScheduleStore:     runtimePG,
+			TurnStore:         runtimePG,
+		}, nil
+	}
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	}
+	t.Cleanup(func() {
+		buildStoresForServe = oldBuildStores
+		configuredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
+	})
+
+	ctx := context.Background()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	activeSessionID := uuid.NewString()
+	mismatchFingerprint := "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_fingerprint, started_at)
+		VALUES ($1::uuid, 'running', $2, now())
+	`, runID, mismatchFingerprint); err != nil {
+		t.Fatalf("seed active mismatched run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'serve.abandon.test', 'global', '{}'::jsonb, 'test', 'agent', now()
+		)
+	`, eventID, runID); err != nil {
+		t.Fatalf("seed active delivery event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, reason_code, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'agent', 'agent-a', 'in_progress', $3::uuid, 'agent_processing', now()
+		)
+	`, runID, eventID, activeSessionID); err != nil {
+		t.Fatalf("seed active delivery: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
+			ConfigPath:         writeServeRuntimeTestConfig(t),
+			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+			PlatformSpecPath:   defaultPlatformSpecPath,
+			StoreMode:          "postgres",
+			HealthAddr:         "127.0.0.1:0",
+			SelfCheck:          true,
+			RequireBundleMatch: true,
+			AbandonActiveRuns:  true,
+			Verbose:            true,
+			Output:             &out,
+		})
+	}()
+
+	waitForServeReadyLine(t, &out, done)
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+
+	var runStatus, controlStatus, reason, controlledBy string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT r.status, rc.control_status, COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
+		FROM runs r
+		JOIN run_control_state rc ON rc.run_id = r.run_id
+		WHERE r.run_id = $1::uuid
+	`, runID).Scan(&runStatus, &controlStatus, &reason, &controlledBy); err != nil {
+		t.Fatalf("load run/control state: %v", err)
+	}
+	if runStatus != "cancelled" || controlStatus != "stopped" || reason != runtimerunquiescence.ServeAbandonReasonCode || controlledBy != runtimerunquiescence.ServeAbandonControlledBy {
+		t.Fatalf("run/control = %s/%s/%s/%s, want cancelled/stopped/%s/%s", runStatus, controlStatus, reason, controlledBy, runtimerunquiescence.ServeAbandonReasonCode, runtimerunquiescence.ServeAbandonControlledBy)
+	}
+
+	var deliveryStatus, deliveryReason string
+	var deliveryActiveSession sql.NullString
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT status, COALESCE(reason_code, ''), active_session_id::text
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'agent-a'
+	`, eventID).Scan(&deliveryStatus, &deliveryReason, &deliveryActiveSession); err != nil {
+		t.Fatalf("load delivery: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || deliveryReason != runtimerunquiescence.ServeAbandonReasonCode || deliveryActiveSession.Valid {
+		t.Fatalf("delivery = %s/%s active=%v, want serve abandon dead_letter", deliveryStatus, deliveryReason, deliveryActiveSession.Valid)
+	}
+	for _, subscriberID := range []string{"agent-a", "pipeline"} {
+		var outcome, receiptReason string
+		if err := db.QueryRowContext(context.Background(), `
+			SELECT outcome, COALESCE(reason_code, '')
+			FROM event_receipts
+			WHERE event_id = $1::uuid
+			  AND subscriber_id = $2
+		`, eventID, subscriberID).Scan(&outcome, &receiptReason); err != nil {
+			t.Fatalf("load receipt %s: %v", subscriberID, err)
+		}
+		if outcome != "dead_letter" || receiptReason != runtimerunquiescence.ServeAbandonReasonCode {
+			t.Fatalf("receipt %s = %s/%s, want serve abandon dead_letter", subscriberID, outcome, receiptReason)
+		}
 	}
 }
 
