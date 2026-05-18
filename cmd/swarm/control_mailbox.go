@@ -85,6 +85,9 @@ func newControlCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newRetiredControlMailboxCommand(),
+		newControlPauseCommand(opts),
+		newControlContinueCommand(opts),
+		newControlStopCommand(opts),
 		newControlNukeCommand(opts),
 	)
 	return cmd
