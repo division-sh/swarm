@@ -12,60 +12,104 @@ import (
 	"testing"
 )
 
-func TestRunsAndInvestigateRunsUseRunListV1RPC(t *testing.T) {
+func TestRunsUseRunListV1RPC(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
+		if req.Method != "run.list" {
+			t.Fatalf("method = %q, want run.list", req.Method)
+		}
+		return map[string]any{
+			"runs":        []any{validDiagnosticRunHeader("run-1")},
+			"next_cursor": "next-1",
+		}
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs", "--status", "RUNNING", "--limit", "2", "--cursor", "cur-1", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T11:00:00Z"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if len(*requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(*requests))
+	}
+	wantParams := map[string]any{
+		"status": "running",
+		"limit":  float64(2),
+		"cursor": "cur-1",
+		"since":  "2026-05-13T10:00:00Z",
+		"until":  "2026-05-13T11:00:00Z",
+	}
+	if !reflect.DeepEqual((*requests)[0].Params, wantParams) {
+		t.Fatalf("params = %#v, want %#v", (*requests)[0].Params, wantParams)
+	}
+	for _, want := range []string{"RUN ID", "run-1", "running", "scan.requested", "next_cursor=next-1"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestInvestigateNamespaceIsRetiredWithoutRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		args       []string
-		wantParams map[string]any
+		wantOutput []string
 	}{
 		{
-			name: "swarm runs",
-			args: []string{"runs", "--status", "RUNNING", "--limit", "2", "--cursor", "cur-1", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T11:00:00Z"},
-			wantParams: map[string]any{
-				"status": "running",
-				"limit":  float64(2),
-				"cursor": "cur-1",
-				"since":  "2026-05-13T10:00:00Z",
-				"until":  "2026-05-13T11:00:00Z",
+			name: "bare investigate",
+			args: []string{"investigate"},
+			wantOutput: []string{
+				"ERROR: `swarm investigate` was retired in CLI v2.",
+				"Use `swarm runs`",
+				"Use `swarm status [run-id]`",
+				"Use `swarm trace [run-id] [--follow]`",
+				"Use `swarm health`",
 			},
 		},
 		{
-			name:       "swarm investigate runs",
-			args:       []string{"investigate", "runs", "--limit", "1"},
-			wantParams: map[string]any{"limit": float64(1)},
+			name: "investigate runs",
+			args: []string{"investigate", "runs"},
+			wantOutput: []string{
+				"ERROR: `swarm investigate runs` was retired in CLI v2.",
+				"Use `swarm runs`.",
+			},
+		},
+		{
+			name: "investigate runs legacy flags",
+			args: []string{"investigate", "runs", "--status", "running", "--limit", "1", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T11:00:00Z"},
+			wantOutput: []string{
+				"ERROR: `swarm investigate runs` was retired in CLI v2.",
+				"Use `swarm runs`.",
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
-			server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
-				if req.Method != "run.list" {
-					t.Fatalf("method = %q, want run.list", req.Method)
-				}
-				return map[string]any{
-					"runs":        []any{validDiagnosticRunHeader("run-1")},
-					"next_cursor": "next-1",
-				}
-			})
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+			}))
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 0 {
-				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			if code != 2 {
+				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
-			if len(*requests) != 1 {
-				t.Fatalf("requests = %d, want 1", len(*requests))
+			if strings.TrimSpace(stdout.String()) != "" {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
-			if !reflect.DeepEqual((*requests)[0].Params, tc.wantParams) {
-				t.Fatalf("params = %#v, want %#v", (*requests)[0].Params, tc.wantParams)
-			}
-			for _, want := range []string{"RUN ID", "run-1", "running", "scan.requested", "next_cursor=next-1"} {
-				if !strings.Contains(stdout.String(), want) {
-					t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+			for _, want := range tc.wantOutput {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
 				}
 			}
-			if strings.TrimSpace(stderr.String()) != "" {
-				t.Fatalf("stderr = %q, want empty", stderr.String())
+			if calls.Load() != 0 {
+				t.Fatalf("RPC calls = %d, want 0", calls.Load())
 			}
 		})
 	}

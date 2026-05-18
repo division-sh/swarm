@@ -5601,7 +5601,7 @@ cli_specification:
     investigate:
       command: swarm investigate *
       status: retired_legacy_v1_topology
-      current_code_state: partially_implemented_legacy_namespace; health, run, and trace fail closed after #797/#800/#803; the runs subcommand remains implemented legacy until sibling repair
+      current_code_state: fully_fail_closed_after_806; bare namespace and runs/run/trace/health subcommands exit 2 with migration guidance before API calls
       v2_replacements:
         swarm investigate runs: swarm runs
         swarm investigate run: swarm status
@@ -5645,6 +5645,7 @@ cli_specification:
     - swarm verify
     - swarm runs
     - swarm status
+    - swarm trace
     - swarm health
     - swarm mailbox list
     - swarm mailbox view
@@ -5652,14 +5653,14 @@ cli_specification:
     - swarm mailbox reject
     - swarm mailbox defer
     - swarm control nuke
-    implemented_legacy_or_wrong_namespace:
-    - swarm investigate runs
-    - swarm investigate trace
+    implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
+    - swarm investigate
+    - swarm investigate runs
     - swarm investigate health
     - swarm investigate run
+    - swarm investigate trace
     remaining_must_have_not_implemented:
-    - swarm trace
     - swarm version --server
     remaining_should_have_not_implemented:
     - swarm control pause|continue|stop
