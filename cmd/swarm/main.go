@@ -100,6 +100,7 @@ type serveOptions struct {
 	PlatformSpecPath     string
 	StoreMode            string
 	HealthAddr           string
+	ShutdownGrace        time.Duration
 	SelfCheck            bool
 	RequireBundleMatch   bool
 	NoRequireBundleMatch bool
@@ -113,6 +114,7 @@ func defaultServeOptions() serveOptions {
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "postgres",
 		HealthAddr:         defaultHealthAddr,
+		ShutdownGrace:      runtime.DefaultShutdownGrace,
 		SelfCheck:          true,
 		RequireBundleMatch: true,
 	}
@@ -239,7 +241,8 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, contractsRoot, bundle, source, rt)
 	defer func() {
-		if _, err := supervisor.CloseProject(context.Background()); err != nil {
+		shutdownOpts := runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
+		if _, err := supervisor.CloseProjectWithShutdownOptions(context.Background(), shutdownOpts); err != nil {
 			log.Printf("runtime shutdown failed: %v", err)
 		}
 	}()

@@ -5496,8 +5496,34 @@ cli_specification:
           Destructive reset/runtime.nuke consumes the same active-run quiescence owner with `runtime_nuke_cancelled` reasons and
           must retain its existing run-scoped cleanup and managed-container deletion semantics. `--abandon-active-runs` does not
           delete source rows, truncate tables, stop managed entity containers, or reuse nuke-specific reason codes.
-      remaining_tail: '#750 owns remaining serve/dev/shutdown lifecycle behavior: --shutdown-grace, --dev,
-        and dev entity-container shutdown cleanup are not implemented by #808.'
+      shutdown_grace_drain_budget:
+        implemented_by: '#825'
+        flag: --shutdown-grace <duration>
+        default: 30s
+        owner: cmd/swarm serve parses the operator duration; runtime.Runtime.ShutdownWithOptions and
+          internal/runtime/manager.AgentManager.ShutdownWithOptions own the runtime shutdown drain budget.
+        validation: >
+          The duration MUST be a positive Go duration string accepted by the CLI duration parser. Invalid, zero, or negative
+          values fail before runtime boot and MUST NOT start the runtime, mutate active runs, or begin shutdown.
+        ordering: >
+          The budget applies only after serve has already booted and the serve process begins shutdown from its signal/close
+          path. Runtime shutdown admission closes before the drain begins, so inbound, MCP/tool, manager replay/restart/chat,
+          and new agent work remain fail-closed while in-flight work drains.
+        drain_scope: >
+          The configured budget is consumed by the runtime/manager shutdown owner for agent in-flight quiescence and final
+          manager run goroutine shutdown. Serve MUST NOT keep a hidden manager timeout or a CLI-local timeout as an alternate
+          shutdown policy.
+        timeout_outcome: >
+          If in-flight work does not quiesce within the configured budget, the manager cancels active loop contexts and returns
+          an explicit timeout error that includes the configured budget. This slice does not persist `platform.shutdown` events
+          or terminalize event deliveries as `interrupted_by_shutdown`; those semantics remain split until promoted by a
+          merge-bearing spec contract.
+        sibling_boundaries: >
+          `--dev`, dev entity-container shutdown cleanup, `platform.shutdown` event persistence, and persisted delivery/receipt
+          interruption reasons remain outside this owner and under #750 unless a later child promotes them.
+      remaining_tail: '#750 owns remaining serve/dev lifecycle behavior after #825: --dev and dev entity-container shutdown cleanup.
+        `platform.shutdown` event persistence and persisted delivery/receipt interruption reasons remain unpromoted unless a later
+        child makes them authoritative.'
     run:
       command: swarm run [flags]
       tier: must_have

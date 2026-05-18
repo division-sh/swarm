@@ -74,6 +74,15 @@ type RuntimeOptions struct {
 }
 
 const BootProgressTotalSteps = 22
+const DefaultShutdownGrace = runtimemanager.DefaultShutdownGrace
+
+type ShutdownOptions struct {
+	Grace time.Duration
+}
+
+func DefaultShutdownOptions() ShutdownOptions {
+	return ShutdownOptions{Grace: DefaultShutdownGrace}
+}
 
 type BootProgressEvent struct {
 	Step   int
@@ -848,13 +857,22 @@ func (rt *Runtime) Start(ctx context.Context) error {
 }
 
 func (rt *Runtime) Shutdown() error {
+	return rt.ShutdownWithOptions(DefaultShutdownOptions())
+}
+
+func (rt *Runtime) ShutdownWithOptions(opts ShutdownOptions) error {
 	if rt == nil {
 		return nil
+	}
+	grace, err := runtimemanager.ResolveShutdownGrace(opts.Grace)
+	if err != nil {
+		return err
 	}
 	rt.shutdownGate.Close()
 	var shutdownErr error
 	if rt.Manager != nil {
-		if err := rt.Manager.Shutdown(); err != nil && shutdownErr == nil {
+		managerOpts := runtimemanager.ShutdownOptions{Grace: grace}
+		if err := rt.Manager.ShutdownWithOptions(managerOpts); err != nil && shutdownErr == nil {
 			shutdownErr = err
 		}
 	}

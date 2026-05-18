@@ -60,7 +60,6 @@ type AgentManager struct {
 }
 
 const (
-	managerShutdownTimeout        = 15 * time.Second
 	poisonPanicQuarantineAt       = 3
 	poisonEventEntityThreshold    = 3
 	deadLetterEscalationThreshold = 3

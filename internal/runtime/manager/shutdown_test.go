@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -127,6 +128,82 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for shutdown to finish")
+	}
+}
+
+func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	started := make(chan struct{}, 1)
+	ctxErrCh := make(chan error, 1)
+
+	agent := shutdownTestAgent{
+		id:            "agent-1",
+		subscriptions: []events.EventType{"test.in"},
+		onEvent: func(ctx context.Context, evt events.Event) ([]events.Event, error) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+			ctxErrCh <- ctx.Err()
+			return nil, ctx.Err()
+		},
+	}
+
+	am := NewAgentManager(bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+		return agent, nil
+	})
+	if err := am.spawnAgentInternal(context.Background(), PersistedAgent{
+		Config: runtimeactors.AgentConfig{ID: agent.id},
+	}, false); err != nil {
+		t.Fatalf("spawnAgentInternal: %v", err)
+	}
+
+	am.Run(context.Background())
+	if err := bus.Publish(context.Background(), events.Event{
+		ID:          "evt-in-1",
+		Type:        events.EventType("test.in"),
+		SourceAgent: "tester",
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for in-flight work to start")
+	}
+
+	grace := 25 * time.Millisecond
+	err = am.ShutdownWithOptions(ShutdownOptions{Grace: grace})
+	if err == nil || !strings.Contains(err.Error(), "agent manager shutdown drain timed out after 25ms") {
+		t.Fatalf("ShutdownWithOptions err = %v, want configured grace timeout", err)
+	}
+
+	select {
+	case err := <-ctxErrCh:
+		if err == nil {
+			t.Fatal("OnEvent context error = nil, want cancellation after timeout")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for in-flight context cancellation")
+	}
+}
+
+func TestShutdownWithOptions_RejectsNegativeGrace(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	am := NewAgentManager(bus, nil)
+
+	err = am.ShutdownWithOptions(ShutdownOptions{Grace: -time.Second})
+	if err == nil || !strings.Contains(err.Error(), "shutdown grace must be positive") {
+		t.Fatalf("ShutdownWithOptions err = %v, want positive grace validation", err)
 	}
 }
 

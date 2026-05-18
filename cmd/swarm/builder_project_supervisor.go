@@ -27,7 +27,7 @@ type runtimeProjectSupervisor struct {
 	stores           storeBundle
 	ready            *atomic.Bool
 	startRuntime     func(context.Context, *runtime.Runtime) error
-	shutdownRuntime  func(context.Context, *runtime.Runtime) error
+	shutdownRuntime  func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	loadWorkflow     func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
 	validateSource   func(context.Context, semanticview.Source) error
 	initStateStores  func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
@@ -61,8 +61,8 @@ func newRuntimeProjectSupervisor(
 		startRuntime: func(ctx context.Context, rt *runtime.Runtime) error {
 			return rt.Start(ctx)
 		},
-		shutdownRuntime: func(_ context.Context, rt *runtime.Runtime) error {
-			return rt.Shutdown()
+		shutdownRuntime: func(_ context.Context, rt *runtime.Runtime, opts runtime.ShutdownOptions) error {
+			return rt.ShutdownWithOptions(opts)
 		},
 		loadWorkflow: func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 			return newSwarmWorkflowModule(repoRoot, contractsRoot, platformSpecPath)
@@ -119,11 +119,15 @@ func (s *runtimeProjectSupervisor) ReloadProject(ctx context.Context, projectDir
 	return s.loadProject(ctx, projectDir)
 }
 
-func (s *runtimeProjectSupervisor) CloseProject(context.Context) (builderpkg.ProjectStatus, error) {
+func (s *runtimeProjectSupervisor) CloseProject(ctx context.Context) (builderpkg.ProjectStatus, error) {
+	return s.CloseProjectWithShutdownOptions(ctx, runtime.DefaultShutdownOptions())
+}
+
+func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.Context, opts runtime.ShutdownOptions) (builderpkg.ProjectStatus, error) {
 	oldRT := s.detachCurrentRuntime()
 
 	if oldRT != nil {
-		if err := s.shutdownCurrentRuntime(context.Background(), oldRT); err != nil {
+		if err := s.shutdownCurrentRuntimeWithOptions(ctx, oldRT, opts); err != nil {
 			return builderpkg.ProjectStatus{}, err
 		}
 	}
@@ -243,13 +247,17 @@ func (s *runtimeProjectSupervisor) startCurrentRuntime(ctx context.Context, rt *
 }
 
 func (s *runtimeProjectSupervisor) shutdownCurrentRuntime(ctx context.Context, rt *runtime.Runtime) error {
+	return s.shutdownCurrentRuntimeWithOptions(ctx, rt, runtime.DefaultShutdownOptions())
+}
+
+func (s *runtimeProjectSupervisor) shutdownCurrentRuntimeWithOptions(ctx context.Context, rt *runtime.Runtime, opts runtime.ShutdownOptions) error {
 	if s == nil || rt == nil {
 		return nil
 	}
 	if s.shutdownRuntime != nil {
-		return s.shutdownRuntime(ctx, rt)
+		return s.shutdownRuntime(ctx, rt, opts)
 	}
-	return rt.Shutdown()
+	return rt.ShutdownWithOptions(opts)
 }
 
 func (s *runtimeProjectSupervisor) projectStatusLocked() builderpkg.ProjectStatus {

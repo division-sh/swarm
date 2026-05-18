@@ -184,3 +184,60 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 		t.Fatal("timed out waiting for shutdown to finish")
 	}
 }
+
+func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	started := make(chan struct{}, 1)
+
+	agent := runtimeShutdownTestAgent{
+		id:            "agent-1",
+		subscriptions: []events.EventType{"test.in"},
+		onEvent: func(ctx context.Context, evt events.Event) ([]events.Event, error) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+
+	rt := &Runtime{}
+	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return agent, nil
+	}, runtimemanager.AgentManagerOptions{
+		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+	})
+	rt.Manager = am
+
+	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	am.Run(context.Background())
+	if err := bus.Publish(context.Background(), events.Event{
+		ID:          "evt-in-1",
+		Type:        events.EventType("test.in"),
+		SourceAgent: "tester",
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for in-flight work to start")
+	}
+
+	grace := 25 * time.Millisecond
+	err = rt.ShutdownWithOptions(ShutdownOptions{Grace: grace})
+	if err == nil || !strings.Contains(err.Error(), "agent manager shutdown drain timed out after 25ms") {
+		t.Fatalf("ShutdownWithOptions err = %v, want configured grace manager timeout", err)
+	}
+	if !rt.shutdownAdmissionClosed() {
+		t.Fatal("runtime shutdown admission was not closed")
+	}
+}
