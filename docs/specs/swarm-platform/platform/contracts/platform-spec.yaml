@@ -5841,7 +5841,7 @@ cli_specification:
     agent_replay:
       command: swarm agent replay <agent-id> --event-id <event-id> [--idempotency-key <key>]
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc agent.replay
       behavior: Event-targeted redelivery CLI consumer. The CLI sends agent_id, event_id, and optional idempotency_key to /v1/rpc agent.replay through the shared v1 API client. This command MUST NOT replay backlog state, call agent.replay_backlog, derive recipients locally, synthesize replay events, or call dashboard/Builder REST, runtime/store/EventBus/agentcontrol, directive, restart, list, or view owners.
       output:
@@ -6069,6 +6069,7 @@ cli_specification:
     - swarm agent view
     - swarm agent restart
     - swarm agent directive
+    - swarm agent replay
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
     - swarm investigate
@@ -6078,7 +6079,6 @@ cli_specification:
     - swarm investigate trace
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
-    - swarm agent replay <agent-id> --event-id <event-id>
     - swarm agent replay-backlog <agent-id>
     - swarm events list / events follow / event view / event replay / event publish
     - swarm conversations list / conversation view / conversation turn
