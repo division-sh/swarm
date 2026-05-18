@@ -93,6 +93,28 @@ func TestAgentDirectiveOmitsOptionalParamsWhenNotProvided(t *testing.T) {
 	}
 }
 
+func TestAgentDirectivePreservesDirectiveWhitespace(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, agentDirectiveTestResult("specified"))
+	}))
+	defer server.Close()
+
+	directive := "  keep this spacing\n  "
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", directive}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if got := captured.Params["directive"]; got != directive {
+		t.Fatalf("directive param = %#v, want exact original %#v", got, directive)
+	}
+}
+
 func TestAgentDirectiveRejectsInvalidInputBeforeRequest(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	var calls atomic.Int32
