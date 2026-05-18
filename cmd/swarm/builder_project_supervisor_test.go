@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"swarm/internal/config"
 	"swarm/internal/events"
@@ -38,10 +39,13 @@ func TestRuntimeProjectSupervisorReplaceCurrentRuntime_ClearsReadinessBeforeShut
 
 	shutdownCalled := false
 	startCalled := false
-	supervisor.shutdownRuntime = func(_ context.Context, rt *runtimepkg.Runtime) error {
+	supervisor.shutdownRuntime = func(_ context.Context, rt *runtimepkg.Runtime, opts runtimepkg.ShutdownOptions) error {
 		shutdownCalled = true
 		if rt != oldRT {
 			t.Fatalf("shutdown runtime = %p, want old runtime %p", rt, oldRT)
+		}
+		if opts.Grace != runtimepkg.DefaultShutdownGrace {
+			t.Fatalf("shutdown grace = %s, want default %s", opts.Grace, runtimepkg.DefaultShutdownGrace)
 		}
 		if got := supervisor.CurrentRuntime(); got != nil {
 			t.Fatalf("CurrentRuntime during shutdown = %p, want nil", got)
@@ -95,6 +99,43 @@ func TestRuntimeProjectSupervisorReplaceCurrentRuntime_ClearsReadinessBeforeShut
 	}
 	if status.ProjectDir != "/tmp/new-project" {
 		t.Fatalf("status.ProjectDir = %q, want /tmp/new-project", status.ProjectDir)
+	}
+}
+
+func TestRuntimeProjectSupervisorCloseProjectWithShutdownOptionsUsesConfiguredGrace(t *testing.T) {
+	oldRT := &runtimepkg.Runtime{}
+	var ready atomic.Bool
+	ready.Store(true)
+	wantGrace := 75 * time.Millisecond
+
+	supervisor := &runtimeProjectSupervisor{
+		ready:         &ready,
+		currentRoot:   "/tmp/old-project",
+		currentBundle: &runtimecontracts.WorkflowContractBundle{},
+		currentSource: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		currentRT:     oldRT,
+	}
+
+	var capturedGrace time.Duration
+	supervisor.shutdownRuntime = func(_ context.Context, rt *runtimepkg.Runtime, opts runtimepkg.ShutdownOptions) error {
+		if rt != oldRT {
+			t.Fatalf("shutdown runtime = %p, want old runtime %p", rt, oldRT)
+		}
+		capturedGrace = opts.Grace
+		return nil
+	}
+
+	if _, err := supervisor.CloseProjectWithShutdownOptions(context.Background(), runtimepkg.ShutdownOptions{Grace: wantGrace}); err != nil {
+		t.Fatalf("CloseProjectWithShutdownOptions: %v", err)
+	}
+	if capturedGrace != wantGrace {
+		t.Fatalf("shutdown grace = %s, want %s", capturedGrace, wantGrace)
+	}
+	if ready.Load() {
+		t.Fatal("ready flag remained true after close")
+	}
+	if got := supervisor.CurrentRuntime(); got != nil {
+		t.Fatalf("CurrentRuntime after close = %p, want nil", got)
 	}
 }
 
@@ -238,7 +279,7 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesRuntimeStartFailure(t *te
 	supervisor.currentSource = semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	supervisor.currentRT = oldRT
 	ready.Store(true)
-	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error {
 		return errors.New("runtime start denied by workspace dependency failure")
 	}
@@ -271,7 +312,7 @@ func TestRuntimeProjectSupervisorLoadProject_PassesBundleFingerprintToRuntime(t 
 		return &runtimepkg.Runtime{}, nil
 	})
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
-	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 
 	status, err := supervisor.OpenProject(context.Background(), projectRoot)
 	if err != nil {

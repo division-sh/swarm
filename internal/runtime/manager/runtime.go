@@ -32,7 +32,28 @@ type bundleFingerprintContextOwner interface {
 	WithBundleFingerprint(context.Context) context.Context
 }
 
+const DefaultShutdownGrace = 30 * time.Second
+
 var errRuntimeShuttingDown = errors.New("runtime shutting down")
+
+type ShutdownOptions struct {
+	Grace time.Duration
+}
+
+func DefaultShutdownOptions() ShutdownOptions {
+	return ShutdownOptions{Grace: DefaultShutdownGrace}
+}
+
+func ResolveShutdownGrace(grace time.Duration) (time.Duration, error) {
+	switch {
+	case grace < 0:
+		return 0, fmt.Errorf("shutdown grace must be positive: %s", grace)
+	case grace == 0:
+		return DefaultShutdownGrace, nil
+	default:
+		return grace, nil
+	}
+}
 
 func (am *AgentManager) RestartAgent(agentID string) error {
 	_, err := am.Restart(context.Background(), runtimeagentcontrol.RestartRequest{AgentID: agentID})
@@ -70,13 +91,21 @@ func (am *AgentManager) Restart(_ context.Context, req runtimeagentcontrol.Resta
 }
 
 func (am *AgentManager) Shutdown() error {
-	drainCtx, cancelDrain := context.WithTimeout(context.Background(), managerShutdownTimeout)
+	return am.ShutdownWithOptions(DefaultShutdownOptions())
+}
+
+func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
+	grace, err := ResolveShutdownGrace(opts.Grace)
+	if err != nil {
+		return err
+	}
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 
 	am.runMu.Lock()
 	if am.shuttingDown {
 		am.runMu.Unlock()
-		return am.waitForRunShutdown()
+		return am.waitForRunShutdown(grace)
 	}
 	am.shuttingDown = true
 	am.running = false
@@ -84,7 +113,7 @@ func (am *AgentManager) Shutdown() error {
 
 	var shutdownErr error
 	if err := am.WaitForQuiescence(drainCtx); err != nil {
-		shutdownErr = fmt.Errorf("agent manager shutdown drain timed out after %s", managerShutdownTimeout)
+		shutdownErr = fmt.Errorf("agent manager shutdown drain timed out after %s", grace)
 	}
 
 	am.runMu.Lock()
@@ -98,7 +127,7 @@ func (am *AgentManager) Shutdown() error {
 	}
 	am.runMu.Unlock()
 
-	if err := am.waitForRunShutdown(); err != nil {
+	if err := am.waitForRunShutdown(grace); err != nil {
 		if shutdownErr == nil {
 			shutdownErr = err
 		}
@@ -152,7 +181,7 @@ func (am *AgentManager) shutdownAdmissionClosedLocked() bool {
 	return false
 }
 
-func (am *AgentManager) waitForRunShutdown() error {
+func (am *AgentManager) waitForRunShutdown(grace time.Duration) error {
 	done := make(chan struct{})
 	go func() {
 		am.runWG.Wait()
@@ -161,8 +190,8 @@ func (am *AgentManager) waitForRunShutdown() error {
 	select {
 	case <-done:
 		return nil
-	case <-time.After(managerShutdownTimeout):
-		return fmt.Errorf("agent manager shutdown timed out after %s", managerShutdownTimeout)
+	case <-time.After(grace):
+		return fmt.Errorf("agent manager shutdown timed out after %s", grace)
 	}
 }
 

@@ -158,7 +158,7 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -201,6 +201,58 @@ func TestCLI_ServeAbandonActiveRunsFlagConsumesServeOwner(t *testing.T) {
 	}
 	if !captured.AbandonActiveRuns {
 		t.Fatalf("serve abandon active runs = false, want true")
+	}
+}
+
+func TestCLI_ServeShutdownGraceFlagConsumesServeOwner(t *testing.T) {
+	var captured serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		captured = serveOpts
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	wantGrace := 42 * time.Second
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--shutdown-grace", wantGrace.String()}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.ShutdownGrace != wantGrace {
+		t.Fatalf("serve shutdown grace = %s, want %s", captured.ShutdownGrace, wantGrace)
+	}
+}
+
+func TestCLI_ServeShutdownGraceRejectsNonPositiveDurationBeforeOwner(t *testing.T) {
+	for _, args := range [][]string{
+		{"serve", "--shutdown-grace", "0s"},
+		{"serve", "--shutdown-grace", "-1s"},
+		{"serve", "--shutdown-grace", "not-a-duration"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			var called atomic.Bool
+			opts := defaultRootCommandOptions()
+			opts.runServe = func(context.Context, string, serveOptions) int {
+				called.Store(true)
+				return 0
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)
+			if code != 2 {
+				t.Fatalf("serve code = %d stderr=%s stdout=%s, want 2", code, stderr.String(), stdout.String())
+			}
+			if args[2] == "not-a-duration" {
+				if !strings.Contains(stderr.String(), "invalid argument") {
+					t.Fatalf("stderr = %q, want invalid duration parse error", stderr.String())
+				}
+			} else if !strings.Contains(stderr.String(), "--shutdown-grace must be a positive duration") {
+				t.Fatalf("stderr = %q, want shutdown-grace validation error", stderr.String())
+			}
+			if called.Load() {
+				t.Fatal("serve owner was called despite invalid shutdown grace")
+			}
+		})
 	}
 }
 
