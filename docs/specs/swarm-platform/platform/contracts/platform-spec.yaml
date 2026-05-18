@@ -5810,10 +5810,63 @@ cli_specification:
       - AGENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, dashboard/Builder REST, conversation owners, directive, or replay method usage
     agent_replay:
-      command: swarm agent replay <agent-id>
+      command: swarm agent replay <agent-id> --event-id <event-id> [--idempotency-key <key>]
       tier: should_have
       implementation_status: absent
-      owner: /v1/rpc agent.replay_backlog and /v1/rpc agent.replay
+      owner: /v1/rpc agent.replay
+      behavior: Event-targeted redelivery CLI consumer. The CLI sends agent_id, event_id, and optional idempotency_key to /v1/rpc agent.replay through the shared v1 API client. This command MUST NOT replay backlog state, call agent.replay_backlog, derive recipients locally, synthesize replay events, or call dashboard/Builder REST, runtime/store/EventBus/agentcontrol, directive, restart, list, or view owners.
+      output:
+        success_line: agent replay ok with agent_id, event_id, replay_event_id, audit_event_id, original_delivery_id, and new_delivery_id
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        not_found_errors:
+        - EVENT_NOT_FOUND
+        resource_state_or_conflict: 6
+        resource_state_or_conflict_errors:
+        - EVENT_REPLAY_NO_DELIVERY_HISTORY
+        - EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL
+        - EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE
+        - EVENT_REPLAY_NOT_ELIGIBLE
+        - PAYLOAD_VALIDATION_FAILED
+        - IDEMPOTENCY_CONFLICT
+      proof_expectations:
+      - exact /v1/rpc agent.replay call with agent_id and event_id params
+      - --event-id is required and no event-targeted replay request is made without it
+      - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
+      - output renders event_id, replay_event_id, audit_event_id, original_delivery, and new_delivery from AgentReplayResult
+      - invalid args/flags and missing SWARM_API_TOKEN make zero API calls
+      - EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
+      - no agent.replay_backlog, direct DB/store/runtime/EventBus/agentcontrol, dashboard/Builder REST, legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, directive, restart, list, or view method usage
+    agent_replay_backlog:
+      command: swarm agent replay-backlog <agent-id> [--idempotency-key <key>]
+      tier: should_have
+      implementation_status: absent
+      owner: /v1/rpc agent.replay_backlog
+      behavior: Backlog recovery CLI consumer. The CLI sends agent_id and optional idempotency_key to /v1/rpc agent.replay_backlog through the shared v1 API client and renders only the server-owned replayed_count. This command is distinct from event-targeted redelivery and MUST NOT call agent.replay, event.replay, dashboard/Builder REST, runtime/store/EventBus/agentcontrol directly, or infer event/delivery/session replay evidence locally.
+      output:
+        success_line: agent replay-backlog ok with agent_id and replayed_count
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        not_found_errors:
+        - AGENT_NOT_FOUND
+        resource_state_or_conflict: 6
+        resource_state_or_conflict_errors:
+        - IDEMPOTENCY_CONFLICT
+      proof_expectations:
+      - exact /v1/rpc agent.replay_backlog call with agent_id param
+      - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
+      - output renders replayed_count and validates ok is true
+      - invalid args/flags and missing SWARM_API_TOKEN make zero API calls
+      - AGENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
+      - no agent.replay, event.replay, direct DB/store/runtime/EventBus/agentcontrol, dashboard/Builder REST, legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, directive, restart, list, or view method usage
     agent_directive:
       command: swarm agent directive <agent-id> "<message>" [--run-id <run-id>] [--idempotency-key <key>]
       tier: should_have
@@ -5991,8 +6044,8 @@ cli_specification:
     - swarm investigate trace
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
-    - swarm agent replay backlog shape over agent.replay_backlog, if exposed
-    - swarm agent replay event-targeted/catalog repair over agent.replay
+    - swarm agent replay <agent-id> --event-id <event-id>
+    - swarm agent replay-backlog <agent-id>
     - swarm events list / events follow / event view / event replay / event publish
     - swarm conversations list / conversation view / conversation turn
     - swarm forkchat new|resume|list|view|delete
