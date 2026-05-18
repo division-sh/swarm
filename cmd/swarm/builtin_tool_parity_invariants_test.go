@@ -91,7 +91,7 @@ func assertBootProgressUsesRuntimeToolInventory(t *testing.T, source semanticvie
 		t.Fatal("runtime tool inventory unexpectedly empty")
 	}
 
-	out := serveBootRegistryDetail(source)
+	out := serveBootBundleLoadDetail("sha256:test", source)
 	if !strings.Contains(out, fmt.Sprintf("tools=%d", wantTools)) {
 		t.Fatalf("boot progress detail missing runtime tool count %d:\n%s", wantTools, out)
 	}

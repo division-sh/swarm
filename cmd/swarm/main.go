@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -150,7 +151,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	source := semanticview.Wrap(bundle)
-	reporter.emit(4, "bundle_load", "ok", fmt.Sprintf("%s, %d agents, %d events", bootBundleIdentity.Fingerprint, len(source.AgentEntries()), len(source.ResolvedEventCatalog())))
+	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(bootBundleIdentity.Fingerprint, source))
 	stateStoreSummary, err := initializeStateStores(ctx, stores, bundle)
 	if err != nil {
 		slog.Error("initialize state stores", "error", err)
@@ -270,7 +271,14 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	healthServer := newHealthServer(opts.HealthAddr, &ready, rt.ToolGateway, apiV1Handler)
-	go serveHealth(healthServer)
+	healthListener, err := listenHealthServer(healthServer)
+	if err != nil {
+		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
+		log.Printf("bind health server: %v", err)
+		return 1
+	}
+	reporter.emit(20, "http_listener_bind", "ok", fmt.Sprintf("health=%s routes=/healthz /readyz /v1/rpc /v1/ws", healthListener.Addr()))
+	go serveHealth(healthServer, healthListener)
 	defer shutdownHealthServer(healthServer)
 	logBootWarnings(bootReport)
 	if err := rt.Start(ctx); err != nil {
@@ -278,9 +286,13 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("start runtime: %v", err)
 		return 1
 	}
-	reporter.emit(20, "http_servers_start", "ok", fmt.Sprintf("health=%s v1_rpc=/v1/rpc v1_ws=/v1/ws listener active", opts.HealthAddr))
 	ready.Store(true)
-	reporter.emit(21, "health_endpoints_respond", "ok", "/healthz /readyz /v1/rpc /v1/ws")
+	if err := waitForServeHealthEndpoints(ctx, healthListener.Addr()); err != nil {
+		reporter.emit(21, "health_endpoints_respond", "FAILED", err.Error())
+		log.Printf("health endpoint verification failed: %v", err)
+		return 1
+	}
+	reporter.emit(21, "health_endpoints_respond", "ok", "/healthz /readyz")
 	reporter.emit(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", time.Since(bootStartedAt).Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
 	logReadySummary(source, contractsRoot, opts.HealthAddr)
 
@@ -1547,6 +1559,14 @@ func serveBootRegistryDetail(source semanticview.Source) string {
 	return fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(source.AgentEntries()), len(source.ResolvedEventCatalog()), len(availableToolNames))
 }
 
+func serveBootBundleLoadDetail(fingerprint string, source semanticview.Source) string {
+	fingerprint = strings.TrimSpace(fingerprint)
+	if fingerprint == "" {
+		return serveBootRegistryDetail(source)
+	}
+	return fmt.Sprintf("%s, %s", fingerprint, serveBootRegistryDetail(source))
+}
+
 func logBootWarnings(report runtimebootverify.Report) {
 	warningCounts := make(map[string]int, len(report.Findings))
 	for _, finding := range report.Warnings() {
@@ -1605,10 +1625,82 @@ func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Ga
 	}
 }
 
-func serveHealth(server *http.Server) {
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+func listenHealthServer(server *http.Server) (net.Listener, error) {
+	if server == nil {
+		return nil, errors.New("health server is not configured")
+	}
+	addr := strings.TrimSpace(server.Addr)
+	if addr == "" {
+		addr = defaultHealthAddr
+	}
+	return net.Listen("tcp", addr)
+}
+
+func serveHealth(server *http.Server, listener net.Listener) {
+	if server == nil || listener == nil {
+		return
+	}
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Printf("health server stopped: %v", err)
 	}
+}
+
+func waitForServeHealthEndpoints(ctx context.Context, addr net.Addr) error {
+	baseURL, err := serveHealthProbeBaseURL(addr)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	deadline := time.Now().Add(2 * time.Second)
+	var lastErr error
+	for {
+		lastErr = probeServeHealthEndpoint(ctx, client, baseURL+"/healthz")
+		if lastErr == nil {
+			lastErr = probeServeHealthEndpoint(ctx, client, baseURL+"/readyz")
+		}
+		if lastErr == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
+func serveHealthProbeBaseURL(addr net.Addr) (string, error) {
+	if addr == nil {
+		return "", errors.New("health listener address is unavailable")
+	}
+	host, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return "", fmt.Errorf("parse health listener address: %w", err)
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" || host == "::" || host == "0.0.0.0" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port), nil
+}
+
+func probeServeHealthEndpoint(ctx context.Context, client *http.Client, endpoint string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("%s returned HTTP %d", endpoint, resp.StatusCode)
+	}
+	return nil
 }
 
 func shutdownHealthServer(server *http.Server) {
