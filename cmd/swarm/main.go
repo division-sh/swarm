@@ -49,6 +49,19 @@ const (
 	defaultHealthAddr       = ":8081"
 )
 
+var (
+	buildStoresForServe                  = buildStores
+	configuredWorkspaceLifecycleForServe = func(db *sql.DB, repoRoot, contractsRoot string, source semanticview.Source) serveWorkspaceLifecycle {
+		return configuredWorkspaceLifecycle(db, repoRoot, contractsRoot, source)
+	}
+)
+
+type serveWorkspaceLifecycle interface {
+	workspace.Lifecycle
+	runtimedestructivereset.ManagedContainerInventoryReader
+	runtimedestructivereset.ManagedContainerRuntime
+}
+
 type storeBundle struct {
 	Postgres          *store.PostgresStore
 	SQLDB             *sql.DB
@@ -124,7 +137,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	reporter.emit(2, "config_load", "ok", fmt.Sprintf("config=%s contracts=%s", filepath.Clean(resolvedConfigPath), filepath.Clean(resolvedContractsPath)))
-	stores, err := buildStores(ctx, opts.StoreMode, cfg)
+	stores, err := buildStoresForServe(ctx, opts.StoreMode, cfg)
 	if err != nil {
 		reporter.emit(3, "db_connection", "FAILED", err.Error())
 		log.Printf("init stores: %v", err)
@@ -161,7 +174,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		slog.Error("bundle match admission failed", "error", err)
 		return 3
 	}
-	workspaces := configuredWorkspaceLifecycle(stores.SQLDB, repo, contractsRoot, source)
+	workspaces := configuredWorkspaceLifecycleForServe(stores.SQLDB, repo, contractsRoot, source)
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		slog.Error("validate workspaces", "error", err)
 		return 1
@@ -277,7 +290,6 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("bind health server: %v", err)
 		return 1
 	}
-	reporter.emit(20, "http_listener_bind", "ok", fmt.Sprintf("health=%s routes=/healthz /readyz /v1/rpc /v1/ws", healthListener.Addr()))
 	go serveHealth(healthServer, healthListener)
 	defer shutdownHealthServer(healthServer)
 	logBootWarnings(bootReport)
@@ -286,6 +298,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("start runtime: %v", err)
 		return 1
 	}
+	reporter.emit(20, "http_listener_bind", "ok", fmt.Sprintf("health=%s routes=/healthz /readyz /v1/rpc /v1/ws", healthListener.Addr()))
 	ready.Store(true)
 	if err := waitForServeHealthEndpoints(ctx, healthListener.Addr()); err != nil {
 		reporter.emit(21, "health_endpoints_respond", "FAILED", err.Error())
