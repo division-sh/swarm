@@ -5521,9 +5521,38 @@ cli_specification:
         sibling_boundaries: >
           `--dev`, dev entity-container shutdown cleanup, `platform.shutdown` event persistence, and persisted delivery/receipt
           interruption reasons remain outside this owner and under #750 unless a later child promotes them.
-      remaining_tail: '#750 owns remaining serve/dev lifecycle behavior after #825: --dev and dev entity-container shutdown cleanup.
-        `platform.shutdown` event persistence and persisted delivery/receipt interruption reasons remain unpromoted unless a later
-        child makes them authoritative.'
+      dev_mode_lifecycle_composition:
+        implemented_by: '#830'
+        flag: --dev
+        owner: >
+          `cmd/swarm serve` owns command-line composition; existing serve startup owners perform active-run abandon,
+          bundle-match admission, and verbose boot output; `internal/runtime/workspace` plus
+          `internal/runtime/containeridentity` own dev entity-container cleanup and preservation.
+        composition:
+        - sets `--abandon-active-runs`
+        - sets `--no-require-bundle-match`
+        - sets `--verbose`
+        - enables dev entity-container cleanup after runtime shutdown/drain
+        conflict_rules:
+        - '`--dev --require-bundle-match` fails before runtime boot because dev mode disables bundle-match admission.'
+        - '`--dev --no-require-bundle-match`, `--dev --abandon-active-runs`, and `--dev --verbose` are redundant but valid.'
+        shutdown_ordering: >
+          On serve shutdown, runtime shutdown admission and the runtime/manager shutdown-grace drain run first. Dev cleanup runs
+          only after that shutdown attempt reaches its completion point. Cleanup still runs after a shutdown timeout/error and
+          the serve path reports joined shutdown and cleanup errors.
+        cleanup_scope: >
+          Dev cleanup stops only identity-proven runtime-owned, reset-eligible, `kind=entity` containers. The cleanup owner
+          consumes typed managed-container identity and MUST NOT infer ownership from names, raw Docker listings, or
+          `RuntimeWorkspaceContainers` alone.
+        preservation_boundary: >
+          Scaffold/system containers, operator-managed containers, unlabeled containers, malformed identity rows, name-mismatched
+          containers, unrelated containers, and runtime-owned `kind=agent` or `kind=flow` containers are preserved fail-closed.
+        sibling_boundaries: >
+          `platform.shutdown` event persistence, persisted `interrupted_by_shutdown` delivery/receipt terminalization,
+          destructive reset/runtime.nuke behavior, and `swarm run` foreground behavior remain outside this owner unless a later
+          child promotes them.
+      remaining_tail: '#750 has no remaining promoted serve/dev lifecycle tail after #830. `platform.shutdown` event persistence
+        and persisted delivery/receipt interruption reasons remain unpromoted unless a later child makes them authoritative.'
     run:
       command: swarm run [flags]
       tier: must_have
@@ -5954,7 +5983,12 @@ cli_specification:
       closed_slices:
       - '#753/#754 run bundle fingerprint and serve bundle-match admission'
       - '#755 directive run targeting and persisted platform.agent_directive'
-      remaining_tail: 'serve dev/shutdown/boot observability/runtime lifecycle behavior; not a direct blocker for #743 API owners.'
+      - '#802/#804 serve verbose boot output and platform.boot payload'
+      - '#808/#811 serve active-run abandon quiescence'
+      - '#825/#827 serve shutdown-grace drain budget'
+      - '#830 serve dev-mode lifecycle composition and dev entity-container cleanup'
+      remaining_tail: 'No promoted serve lifecycle tail remains after #830. `platform.shutdown` and persisted `interrupted_by_shutdown`
+        remain unpromoted unless a later runtime lifecycle child makes them authoritative; not a direct blocker for #743 API owners.'
   parent_tail:
     implemented_v2_compliant:
     - swarm

@@ -58,6 +58,7 @@ var (
 
 type serveWorkspaceLifecycle interface {
 	workspace.Lifecycle
+	workspace.DevEntityContainerCleaner
 	runtimedestructivereset.ManagedContainerInventoryReader
 	runtimedestructivereset.ManagedContainerRuntime
 }
@@ -101,6 +102,7 @@ type serveOptions struct {
 	StoreMode            string
 	HealthAddr           string
 	ShutdownGrace        time.Duration
+	Dev                  bool
 	SelfCheck            bool
 	RequireBundleMatch   bool
 	NoRequireBundleMatch bool
@@ -190,6 +192,10 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 3
 	}
 	workspaces := configuredWorkspaceLifecycleForServe(stores.SQLDB, repo, contractsRoot, source)
+	if opts.Dev && workspaces == nil {
+		slog.Error("dev entity cleanup owner unavailable", "error", "workspace lifecycle is not configured")
+		return 1
+	}
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		slog.Error("validate workspaces", "error", err)
 		return 1
@@ -241,8 +247,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, contractsRoot, bundle, source, rt)
 	defer func() {
-		shutdownOpts := runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
-		if _, err := supervisor.CloseProjectWithShutdownOptions(context.Background(), shutdownOpts); err != nil {
+		if err := closeServeRuntime(context.Background(), supervisor, opts, workspaces); err != nil {
 			log.Printf("runtime shutdown failed: %v", err)
 		}
 	}()
@@ -328,6 +333,26 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	<-ctx.Done()
 	ready.Store(false)
 	return 0
+}
+
+func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor, opts serveOptions, workspaces serveWorkspaceLifecycle) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var shutdownErr error
+	if supervisor != nil {
+		shutdownOpts := runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
+		_, shutdownErr = supervisor.CloseProjectWithShutdownOptions(ctx, shutdownOpts)
+	}
+	var cleanupErr error
+	if opts.Dev {
+		if workspaces == nil {
+			cleanupErr = fmt.Errorf("dev entity cleanup owner unavailable")
+		} else {
+			_, cleanupErr = workspaces.CleanupDevEntityContainers(ctx)
+		}
+	}
+	return errors.Join(shutdownErr, cleanupErr)
 }
 
 func runVerifyCommand(ctx context.Context, repo string, args []string, out io.Writer) int {

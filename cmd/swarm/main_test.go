@@ -158,9 +158,106 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestCLI_ServeDevFlagComposesClosedServeOwners(t *testing.T) {
+	var captured serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		captured = serveOpts
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	wantGrace := 42 * time.Second
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--dev", "--shutdown-grace", wantGrace.String()}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !captured.Dev {
+		t.Fatal("serve dev = false, want true")
+	}
+	if !captured.AbandonActiveRuns {
+		t.Fatal("serve abandon active runs = false, want dev composition")
+	}
+	if !captured.NoRequireBundleMatch || captured.RequireBundleMatch {
+		t.Fatalf("serve bundle match = require:%t no-require:%t, want dev no-require composition", captured.RequireBundleMatch, captured.NoRequireBundleMatch)
+	}
+	if !captured.Verbose {
+		t.Fatal("serve verbose = false, want dev composition")
+	}
+	if captured.ShutdownGrace != wantGrace {
+		t.Fatalf("serve shutdown grace = %s, want explicit %s", captured.ShutdownGrace, wantGrace)
+	}
+}
+
+func TestCLI_ServeDevRejectsRequireBundleMatchBeforeOwner(t *testing.T) {
+	var called atomic.Bool
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(context.Context, string, serveOptions) int {
+		called.Store(true)
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--dev", "--require-bundle-match"}, &stdout, &stderr, opts)
+	if code != 2 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s, want 2", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--dev cannot be combined with --require-bundle-match") {
+		t.Fatalf("stderr = %q, want dev conflict error", stderr.String())
+	}
+	if called.Load() {
+		t.Fatal("serve owner was called despite dev/require-bundle-match conflict")
+	}
+}
+
+func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
+	spec := loadServeDevModeSpec(t)
+	if strings.TrimSpace(spec.ImplementedBy) != "#830" {
+		t.Fatalf("dev mode implemented_by = %q, want #830", spec.ImplementedBy)
+	}
+	if strings.TrimSpace(spec.Flag) != "--dev" {
+		t.Fatalf("dev mode flag = %q, want --dev", spec.Flag)
+	}
+	for _, want := range []string{
+		"`--abandon-active-runs`",
+		"`--no-require-bundle-match`",
+		"`--verbose`",
+		"dev entity-container cleanup",
+	} {
+		if !stringSliceContains(spec.Composition, want) {
+			t.Fatalf("dev mode composition missing %q: %#v", want, spec.Composition)
+		}
+	}
+	for _, want := range []string{"workspace", "containeridentity"} {
+		if !strings.Contains(spec.Owner, want) {
+			t.Fatalf("dev mode owner missing %q:\n%s", want, spec.Owner)
+		}
+	}
+	for _, want := range []string{"--dev --require-bundle-match", "fails before runtime boot"} {
+		if !stringSliceContains(spec.ConflictRules, want) {
+			t.Fatalf("dev mode conflict rules missing %q: %#v", want, spec.ConflictRules)
+		}
+	}
+	for _, want := range []string{"runtime shutdown admission", "Cleanup still runs after a shutdown timeout/error", "joined shutdown and cleanup errors"} {
+		if !strings.Contains(spec.ShutdownOrdering, want) {
+			t.Fatalf("dev mode shutdown ordering missing %q:\n%s", want, spec.ShutdownOrdering)
+		}
+	}
+	for _, want := range []string{"identity-proven runtime-owned", "`kind=entity`", "MUST NOT infer ownership from names"} {
+		if !strings.Contains(spec.CleanupScope, want) {
+			t.Fatalf("dev mode cleanup scope missing %q:\n%s", want, spec.CleanupScope)
+		}
+	}
+	for _, want := range []string{"Scaffold/system", "operator-managed", "unlabeled", "`kind=agent`", "`kind=flow`"} {
+		if !strings.Contains(spec.PreservationBoundary, want) {
+			t.Fatalf("dev mode preservation boundary missing %q:\n%s", want, spec.PreservationBoundary)
 		}
 	}
 }
@@ -253,6 +350,39 @@ func TestCLI_ServeShutdownGraceRejectsNonPositiveDurationBeforeOwner(t *testing.
 				t.Fatal("serve owner was called despite invalid shutdown grace")
 			}
 		})
+	}
+}
+
+func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T) {
+	shutdownErr := fmt.Errorf("shutdown timed out")
+	cleanupErr := fmt.Errorf("cleanup failed")
+	var order []string
+	supervisor := &runtimeProjectSupervisor{
+		currentRT: &runtimepkg.Runtime{},
+	}
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
+		order = append(order, "shutdown")
+		return shutdownErr
+	}
+	workspaces := serveRuntimeWorkspaceStub{
+		cleanup: func(context.Context) (runtimedestructivereset.ContainerResetResult, error) {
+			order = append(order, "cleanup")
+			return runtimedestructivereset.ContainerResetResult{}, cleanupErr
+		},
+	}
+
+	err := closeServeRuntime(context.Background(), supervisor, serveOptions{
+		Dev:           true,
+		ShutdownGrace: runtimepkg.DefaultShutdownGrace,
+	}, workspaces)
+	if err == nil || !strings.Contains(err.Error(), shutdownErr.Error()) || !strings.Contains(err.Error(), cleanupErr.Error()) {
+		t.Fatalf("closeServeRuntime err = %v, want joined shutdown and cleanup errors", err)
+	}
+	if got := strings.Join(order, ","); got != "shutdown,cleanup" {
+		t.Fatalf("order = %s, want shutdown,cleanup", got)
+	}
+	if got := supervisor.CurrentRuntime(); got != nil {
+		t.Fatalf("CurrentRuntime after close = %p, want nil", got)
 	}
 }
 
@@ -2956,6 +3086,14 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 
 type serveRuntimeWorkspaceStub struct {
 	stubWorkspaceLifecycle
+	cleanup func(context.Context) (runtimedestructivereset.ContainerResetResult, error)
+}
+
+func (s serveRuntimeWorkspaceStub) CleanupDevEntityContainers(ctx context.Context) (runtimedestructivereset.ContainerResetResult, error) {
+	if s.cleanup != nil {
+		return s.cleanup(ctx)
+	}
+	return runtimedestructivereset.ContainerResetResult{}, nil
 }
 
 func (serveRuntimeWorkspaceStub) ManagedResetContainerInventory(context.Context) ([]runtimedestructivereset.ContainerRef, error) {
@@ -2974,6 +3112,18 @@ type serveBootProgressSpecStep struct {
 	Step  int    `yaml:"step"`
 	Name  string `yaml:"name"`
 	Owner string `yaml:"owner"`
+}
+
+type serveDevModeSpec struct {
+	ImplementedBy        string   `yaml:"implemented_by"`
+	Flag                 string   `yaml:"flag"`
+	Owner                string   `yaml:"owner"`
+	Composition          []string `yaml:"composition"`
+	ConflictRules        []string `yaml:"conflict_rules"`
+	ShutdownOrdering     string   `yaml:"shutdown_ordering"`
+	CleanupScope         string   `yaml:"cleanup_scope"`
+	PreservationBoundary string   `yaml:"preservation_boundary"`
+	SiblingBoundaries    string   `yaml:"sibling_boundaries"`
 }
 
 func loadServeBootProgressSequenceFromSpec(t *testing.T) []serveBootProgressSpecStep {
@@ -3015,6 +3165,39 @@ func loadServeBootProgressSequenceFromSpec(t *testing.T) []serveBootProgressSpec
 		}
 	}
 	return sequence.Steps
+}
+
+func loadServeDevModeSpec(t *testing.T) serveDevModeSpec {
+	t.Helper()
+	var spec struct {
+		CLISpecification struct {
+			CommandCatalog struct {
+				Serve struct {
+					DevMode serveDevModeSpec `yaml:"dev_mode_lifecycle_composition"`
+				} `yaml:"serve"`
+			} `yaml:"command_catalog"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	if strings.TrimSpace(spec.CLISpecification.CommandCatalog.Serve.DevMode.Flag) == "" {
+		t.Fatal("platform spec missing serve dev_mode_lifecycle_composition")
+	}
+	return spec.CLISpecification.CommandCatalog.Serve.DevMode
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if strings.Contains(value, want) {
+			return true
+		}
+	}
+	return false
 }
 
 type lockedBuffer struct {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	runtimecontaineridentity "swarm/internal/runtime/containeridentity"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -46,6 +47,12 @@ type Lifecycle interface {
 type OrphanKiller interface {
 	KillOrphanProcesses(ctx context.Context) error
 }
+
+type DevEntityContainerCleaner interface {
+	CleanupDevEntityContainers(ctx context.Context) (runtimedestructivereset.ContainerResetResult, error)
+}
+
+const DevEntityCleanupOperationName = "swarm.serve.dev.entity_container_cleanup"
 
 type DockerConfig struct {
 	DockerBin             string
@@ -283,6 +290,68 @@ func (m *DockerManager) StopEntityWorkspace(ctx context.Context, entityID string
 		return fmt.Errorf("stop entity workspace %s: %w", container, err)
 	}
 	return nil
+}
+
+func (m *DockerManager) CleanupDevEntityContainers(ctx context.Context) (runtimedestructivereset.ContainerResetResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result := runtimedestructivereset.ContainerResetResult{
+		OperationName: DevEntityCleanupOperationName,
+		AppliedAt:     time.Now().UTC(),
+	}
+	if m == nil {
+		return result, fmt.Errorf("dev entity container cleanup workspace manager is not configured")
+	}
+	inventory, err := m.ManagedResetContainerInventory(ctx)
+	if err != nil {
+		return result, fmt.Errorf("dev entity container cleanup inventory: %w", err)
+	}
+	for _, candidate := range inventory {
+		name := strings.TrimSpace(candidate.Name)
+		if name == "" {
+			continue
+		}
+		if strings.TrimSpace(candidate.Kind) != runtimecontaineridentity.KindEntity {
+			result.Preserved = append(result.Preserved, containerRefWithAction(candidate, runtimedestructivereset.ContainerActionPreserve))
+			continue
+		}
+		inspection, err := m.InspectManagedContainer(ctx, name)
+		if err != nil {
+			result.Failed = append(result.Failed, runtimedestructivereset.ContainerStopFailure{
+				Container: containerRefWithAction(candidate, runtimedestructivereset.ContainerActionFailed),
+				Error:     err.Error(),
+			})
+			continue
+		}
+		if !inspection.Exists {
+			result.Missing = append(result.Missing, containerRefWithAction(candidate, runtimedestructivereset.ContainerActionMissing))
+			continue
+		}
+		identity := containerIdentityFromResetInspection(inspection)
+		if !inspection.HasIdentity || !identity.ResetEligibleManaged() || strings.TrimSpace(identity.Kind) != runtimecontaineridentity.KindEntity || strings.TrimSpace(identity.ContainerName) != name {
+			result.Preserved = append(result.Preserved, preservedManagedContainerRef(candidate, identity))
+			continue
+		}
+		ref := managedContainerRef(identity, runtimedestructivereset.ContainerActionStop)
+		if !inspection.Running {
+			result.AlreadyStopped = append(result.AlreadyStopped, containerRefWithAction(ref, runtimedestructivereset.ContainerActionAlreadyStopped))
+			continue
+		}
+		result.Selected = append(result.Selected, ref)
+		if err := m.StopManagedContainer(ctx, ref.Name); err != nil {
+			result.Failed = append(result.Failed, runtimedestructivereset.ContainerStopFailure{
+				Container: containerRefWithAction(ref, runtimedestructivereset.ContainerActionFailed),
+				Error:     err.Error(),
+			})
+			continue
+		}
+		result.Stopped = append(result.Stopped, ref)
+	}
+	if len(result.Failed) > 0 {
+		return result, fmt.Errorf("dev entity container cleanup failed: %d container(s)", len(result.Failed))
+	}
+	return result, nil
 }
 
 func (m *DockerManager) KillOrphanProcesses(ctx context.Context) error {
@@ -969,6 +1038,19 @@ func managedContainerRef(identity runtimecontaineridentity.Identity, action stri
 		AgentID:        identity.AgentID,
 		FlowInstance:   identity.FlowInstance,
 	}
+}
+
+func containerRefWithAction(ref runtimedestructivereset.ContainerRef, action string) runtimedestructivereset.ContainerRef {
+	ref.Action = strings.TrimSpace(action)
+	return ref
+}
+
+func preservedManagedContainerRef(fallback runtimedestructivereset.ContainerRef, identity runtimecontaineridentity.Identity) runtimedestructivereset.ContainerRef {
+	identity = identity.Normalized()
+	if strings.TrimSpace(identity.ContainerName) == "" {
+		return containerRefWithAction(fallback, runtimedestructivereset.ContainerActionPreserve)
+	}
+	return managedContainerRef(identity, runtimedestructivereset.ContainerActionPreserve)
 }
 
 func (m *DockerManager) InspectContainer(ctx context.Context, name string) (bool, bool, error) {

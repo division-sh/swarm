@@ -455,6 +455,160 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 	}
 }
 
+func TestCleanupDevEntityContainersStopsOnlyIdentityProvenEntityContainers(t *testing.T) {
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.WorkspaceNetwork = ""
+	manager.SetConfig(cfg)
+
+	var calls [][]string
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		calls = append(calls, append([]string{}, args...))
+		joined := strings.Join(args, " ")
+		switch {
+		case joined == "container ls --all --filter label=dev.swarm.owner=runtime --filter label=dev.swarm.reset.eligible=true --format {{.Names}}":
+			return strings.Join([]string{
+				"swarm-entity-acme",
+				"swarm-agent-agent-a",
+				"swarm-flow-flow-a",
+				"swarm-system",
+				"swarm-unlabeled",
+				"swarm-operator",
+				"swarm-stale-name",
+			}, "\n"), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-entity-acme":
+			return managedContainerInspectJSON(map[string]string{
+				"dev.swarm.owner":           "runtime",
+				"dev.swarm.container.kind":  "entity",
+				"dev.swarm.reset.eligible":  "true",
+				"dev.swarm.creation_source": "workspace.EnsureEntityWorkspace",
+				"dev.swarm.container.name":  "swarm-entity-acme",
+				"dev.swarm.workspace.scope": "entity",
+				"dev.swarm.entity_id":       "entity-1",
+			}, true), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-agent-agent-a":
+			return managedContainerInspectJSON(map[string]string{
+				"dev.swarm.owner":           "runtime",
+				"dev.swarm.container.kind":  "agent",
+				"dev.swarm.reset.eligible":  "true",
+				"dev.swarm.creation_source": "workspace.ResolveWorkspace",
+				"dev.swarm.container.name":  "swarm-agent-agent-a",
+				"dev.swarm.workspace.scope": "per-agent",
+				"dev.swarm.agent_id":        "agent-a",
+			}, true), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-flow-flow-a":
+			return managedContainerInspectJSON(map[string]string{
+				"dev.swarm.owner":           "runtime",
+				"dev.swarm.container.kind":  "flow",
+				"dev.swarm.reset.eligible":  "true",
+				"dev.swarm.creation_source": "workspace.ResolveWorkspace",
+				"dev.swarm.container.name":  "swarm-flow-flow-a",
+				"dev.swarm.workspace.scope": "per-flow-instance",
+				"dev.swarm.flow_instance":   "flow-a",
+			}, true), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-system":
+			return managedContainerInspectJSON(map[string]string{
+				"dev.swarm.owner":           "runtime",
+				"dev.swarm.container.kind":  "system",
+				"dev.swarm.reset.eligible":  "false",
+				"dev.swarm.creation_source": "workspace.EnsureSystemWorkspaces",
+				"dev.swarm.container.name":  "swarm-system",
+				"dev.swarm.workspace.scope": "system",
+			}, true), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-unlabeled":
+			return managedContainerInspectJSON(nil, true), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-operator":
+			return managedContainerInspectJSON(map[string]string{
+				"dev.swarm.owner":           "operator",
+				"dev.swarm.container.kind":  "entity",
+				"dev.swarm.reset.eligible":  "true",
+				"dev.swarm.container.name":  "swarm-operator",
+				"dev.swarm.workspace.scope": "entity",
+				"dev.swarm.entity_id":       "operator-entity",
+			}, true), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-stale-name":
+			return managedContainerInspectJSON(map[string]string{
+				"dev.swarm.owner":          "runtime",
+				"dev.swarm.container.kind": "entity",
+				"dev.swarm.reset.eligible": "true",
+				"dev.swarm.container.name": "different-container-name",
+				"dev.swarm.entity_id":      "stale-entity",
+			}, true), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{.State.Running}}" && args[len(args)-1] == "swarm-entity-acme":
+			return "true", nil
+		case joined == "stop swarm-entity-acme":
+			return "", nil
+		default:
+			return "", nil
+		}
+	})
+
+	result, err := manager.CleanupDevEntityContainers(context.Background())
+	if err != nil {
+		t.Fatalf("CleanupDevEntityContainers: %v", err)
+	}
+	if result.OperationName != DevEntityCleanupOperationName {
+		t.Fatalf("operation = %q, want %q", result.OperationName, DevEntityCleanupOperationName)
+	}
+	if len(result.Stopped) != 1 || result.Stopped[0].Name != "swarm-entity-acme" || result.Stopped[0].Kind != "entity" {
+		t.Fatalf("stopped = %#v, want only entity container", result.Stopped)
+	}
+	if len(result.Preserved) != 2 {
+		t.Fatalf("preserved = %#v, want agent and flow reset-eligible containers preserved", result.Preserved)
+	}
+	joined := flattenDockerCalls(calls)
+	for _, forbidden := range []string{"stop swarm-agent-agent-a", "stop swarm-flow-flow-a", "stop swarm-system", "stop swarm-unlabeled", "stop swarm-operator", "stop swarm-stale-name"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("dev cleanup stopped forbidden container %q:\n%s", forbidden, joined)
+		}
+	}
+}
+
+func TestCleanupDevEntityContainersReportsStopFailures(t *testing.T) {
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.WorkspaceNetwork = ""
+	manager.SetConfig(cfg)
+
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case joined == "container ls --all --filter label=dev.swarm.owner=runtime --filter label=dev.swarm.reset.eligible=true --format {{.Names}}":
+			return "swarm-entity-acme", nil
+		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-entity-acme":
+			return managedContainerInspectJSON(map[string]string{
+				"dev.swarm.owner":           "runtime",
+				"dev.swarm.container.kind":  "entity",
+				"dev.swarm.reset.eligible":  "true",
+				"dev.swarm.creation_source": "workspace.EnsureEntityWorkspace",
+				"dev.swarm.container.name":  "swarm-entity-acme",
+				"dev.swarm.workspace.scope": "entity",
+				"dev.swarm.entity_id":       "entity-1",
+			}, true), nil
+		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{.State.Running}}" && args[len(args)-1] == "swarm-entity-acme":
+			return "true", nil
+		case joined == "stop swarm-entity-acme":
+			return "", fmt.Errorf("docker stop failed")
+		default:
+			return "", nil
+		}
+	})
+
+	result, err := manager.CleanupDevEntityContainers(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "dev entity container cleanup failed: 1 container(s)") {
+		t.Fatalf("CleanupDevEntityContainers err = %v, want stop failure", err)
+	}
+	if len(result.Selected) != 1 || result.Selected[0].Name != "swarm-entity-acme" {
+		t.Fatalf("selected = %#v, want failed entity selected", result.Selected)
+	}
+	if len(result.Stopped) != 0 {
+		t.Fatalf("stopped = %#v, want none after failure", result.Stopped)
+	}
+	if len(result.Failed) != 1 || result.Failed[0].Container.Name != "swarm-entity-acme" || !strings.Contains(result.Failed[0].Error, "docker stop failed") {
+		t.Fatalf("failed = %#v, want entity stop failure", result.Failed)
+	}
+}
+
 func flattenDockerCalls(calls [][]string) string {
 	lines := make([]string, 0, len(calls))
 	for _, call := range calls {
