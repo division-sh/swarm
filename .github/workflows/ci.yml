@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches:
+      - master
       - main
   pull_request:
   workflow_dispatch:
@@ -53,6 +54,12 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+      - name: Build packages
+        run: go build ./...
+
+      - name: Build swarm binary
+        run: go build ./cmd/swarm
 
       - name: Vet
         run: go vet ./...
