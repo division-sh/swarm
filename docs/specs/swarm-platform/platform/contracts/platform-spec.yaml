@@ -5816,7 +5816,7 @@ cli_specification:
       owner: /v1/rpc agent.replay
       behavior: Event-targeted redelivery CLI consumer. The CLI sends agent_id, event_id, and optional idempotency_key to /v1/rpc agent.replay through the shared v1 API client. This command MUST NOT replay backlog state, call agent.replay_backlog, derive recipients locally, synthesize replay events, or call dashboard/Builder REST, runtime/store/EventBus/agentcontrol, directive, restart, list, or view owners.
       output:
-        success_line: agent replay ok with agent_id, event_id, replay_event_id, audit_event_id, original_delivery_id, and new_delivery_id
+        success_line: agent replay ok with agent_id, event_id, replay_event_id, audit_event_id, original_delivery.delivery_id, and new_delivery.delivery_id
       exit_codes:
         success: 0
         cli_validation: 2
@@ -5837,7 +5837,7 @@ cli_specification:
       - exact /v1/rpc agent.replay call with agent_id and event_id params
       - --event-id is required and no event-targeted replay request is made without it
       - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
-      - output renders event_id, replay_event_id, audit_event_id, original_delivery, and new_delivery from AgentReplayResult
+      - output renders event_id, replay_event_id, audit_event_id, original_delivery.delivery_id, and new_delivery.delivery_id from AgentReplayResult.original_delivery/new_delivery
       - invalid args/flags and missing SWARM_API_TOKEN make zero API calls
       - EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, HTTP failures, unknown RPC errors, and malformed success responses fail closed with tested exit codes
       - no agent.replay_backlog, direct DB/store/runtime/EventBus/agentcontrol, dashboard/Builder REST, legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, directive, restart, list, or view method usage
