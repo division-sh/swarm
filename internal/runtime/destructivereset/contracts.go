@@ -13,8 +13,8 @@ func DefaultDownstreamContracts() []DownstreamContract {
 		{
 			ID:          ContractRunDeliveryQuiescence,
 			Status:      "implemented_internal_owner",
-			Owner:       "internal/runtime/destructivereset Quiescer and PostgresStore.ApplyDestructiveResetQuiescence",
-			Description: "Stop active runs and cancel pending/in-progress deliveries with nuke-specific reasons before destructive reset cleanup can apply.",
+			Owner:       "internal/runtime/runquiescence and PostgresStore active-run quiescence owner, consumed by internal/runtime/destructivereset",
+			Description: "Stop active runs and cancel pending/in-progress deliveries with operation-specific reasons before destructive reset cleanup or serve restart recovery can apply.",
 		},
 		{
 			ID:          ContractRunScopedTruncation,

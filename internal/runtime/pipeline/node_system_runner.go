@@ -14,6 +14,7 @@ import (
 	runtimedeadletters "swarm/internal/runtime/deadletters"
 	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimerterr "swarm/internal/runtime/rterrors"
+	runtimerunquiescence "swarm/internal/runtime/runquiescence"
 )
 
 type systemNodeBus interface {
@@ -105,7 +106,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	if eventID == "" {
 		return
 	}
-	if n.isDestructiveResetQuiesced(ctx, evt) {
+	if n.isActiveRunQuiesced(ctx, evt) {
 		return
 	}
 	if n.isProcessed(ctx, evt) {
@@ -124,7 +125,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	}
 	for attempt := 1; attempt <= retryLimit; attempt++ {
 		if err := n.handle(ctx, evt); err == nil {
-			if !n.isDestructiveResetQuiesced(ctx, evt) {
+			if !n.isActiveRunQuiesced(ctx, evt) {
 				n.markProcessed(ctx, evt)
 			}
 			return
@@ -146,7 +147,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 		case <-time.After(backoffFn(attempt)):
 		}
 	}
-	if n.isDestructiveResetQuiesced(ctx, evt) {
+	if n.isActiveRunQuiesced(ctx, evt) {
 		return
 	}
 	n.emitDeadLetter(ctx, evt, lastErr, failureType, retryCount)
@@ -315,7 +316,7 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 	if n == nil || n.db == nil || eventID == "" {
 		return
 	}
-	if n.isDestructiveResetQuiesced(ctx, evt) {
+	if n.isActiveRunQuiesced(ctx, evt) {
 		return
 	}
 	if !n.eventReceiptsAvailable(ctx) {
@@ -352,7 +353,7 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 	}
 }
 
-func (n *systemNodeRunner) isDestructiveResetQuiesced(ctx context.Context, evt events.Event) bool {
+func (n *systemNodeRunner) isActiveRunQuiesced(ctx context.Context, evt events.Event) bool {
 	eventID := strings.TrimSpace(evt.ID)
 	if n == nil || n.db == nil || eventID == "" {
 		return false
@@ -369,11 +370,11 @@ func (n *systemNodeRunner) isDestructiveResetQuiesced(ctx context.Context, evt e
 			  AND subscriber_type = 'node'
 			  AND subscriber_id = $2
 			  AND status = 'dead_letter'
-			  AND reason_code = $3
+			  AND reason_code IN ($3, $4)
 		)
-	`, eventID, n.nodeID, runtimedestructivereset.QuiescenceReasonCode).Scan(&ok)
+	`, eventID, n.nodeID, runtimedestructivereset.QuiescenceReasonCode, runtimerunquiescence.ServeAbandonReasonCode).Scan(&ok)
 	if err != nil {
-		slog.Error("system node destructive reset quiescence check failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
+		slog.Error("system node active run quiescence check failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
 		return true
 	}
 	return ok

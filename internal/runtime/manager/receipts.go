@@ -27,8 +27,8 @@ type deliveryProgressWriter interface {
 	MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error
 }
 
-type destructiveResetDeliveryQuiescenceReader interface {
-	DestructiveResetDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (bool, error)
+type activeRunDeliveryQuiescenceReader interface {
+	ActiveRunDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (string, bool, error)
 }
 
 func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt events.Event) error {
@@ -105,15 +105,15 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 			})
 		}
 	}
-	if am.destructiveResetDeliveryQuiesced(ctx, evt.ID, agent.ID()) {
+	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID, agent.ID()); ok {
 		record.Outcome = startupManagerReplayOutcomeSkipped
-		record.ReasonCode = "runtime_nuke_cancelled"
+		record.ReasonCode = reason
 		return eventProcessResult{record: record}
 	}
 	out, err := agent.OnEvent(ctx, evt)
-	if am.destructiveResetDeliveryQuiesced(ctx, evt.ID, agent.ID()) {
+	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID, agent.ID()); ok {
 		record.Outcome = startupManagerReplayOutcomeSkipped
-		record.ReasonCode = "runtime_nuke_cancelled"
+		record.ReasonCode = reason
 		return eventProcessResult{record: record}
 	}
 	if err != nil {
@@ -173,29 +173,29 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 	return eventProcessResult{record: record}
 }
 
-func (am *AgentManager) destructiveResetDeliveryQuiesced(ctx context.Context, eventID, agentID string) bool {
-	reader, ok := am.store.(destructiveResetDeliveryQuiescenceReader)
+func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID, agentID string) (startupManagerReplayReasonCode, bool) {
+	reader, ok := am.store.(activeRunDeliveryQuiescenceReader)
 	if !ok || reader == nil {
-		return false
+		return "", false
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(eventID)); err != nil {
-		return false
+		return "", false
 	}
-	ok, err := reader.DestructiveResetDeliveryQuiesced(ctx, eventID, "agent", agentID)
+	reason, ok, err := reader.ActiveRunDeliveryQuiesced(ctx, eventID, "agent", agentID)
 	if err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
 				Component: "agent-manager",
-				Action:    "destructive_reset_quiescence_check_failed",
+				Action:    "active_run_quiescence_check_failed",
 				EventID:   strings.TrimSpace(eventID),
 				AgentID:   strings.TrimSpace(agentID),
 				Error:     strings.TrimSpace(err.Error()),
 			})
 		}
-		return true
+		return "active_run_quiescence_check_failed", true
 	}
-	return ok
+	return startupManagerReplayReasonCode(strings.TrimSpace(reason)), ok
 }
 
 func (am *AgentManager) shouldInterceptDirective(agentID string, evt events.Event) bool {

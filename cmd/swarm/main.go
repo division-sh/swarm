@@ -103,6 +103,7 @@ type serveOptions struct {
 	SelfCheck            bool
 	RequireBundleMatch   bool
 	NoRequireBundleMatch bool
+	AbandonActiveRuns    bool
 	Verbose              bool
 	Output               io.Writer
 }
@@ -169,6 +170,18 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	if err != nil {
 		slog.Error("initialize state stores", "error", err)
 		return 1
+	}
+	if opts.AbandonActiveRuns {
+		if stores.Postgres == nil {
+			slog.Error("abandon active runs failed", "error", "postgres store is required")
+			return 3
+		}
+		result, err := stores.Postgres.ApplyServeAbandonActiveRunQuiescence(ctx, time.Now().UTC())
+		if err != nil {
+			slog.Error("abandon active runs failed", "error", err)
+			return 3
+		}
+		log.Printf("serve abandon active runs complete: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
 	if err := enforceServeBundleMatchAdmission(ctx, stores.Postgres, bootBundleIdentity.Fingerprint, opts.RequireBundleMatch); err != nil {
 		slog.Error("bundle match admission failed", "error", err)

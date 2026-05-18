@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
 	"swarm/internal/events"
 	"swarm/internal/runtime/core/eventidentity"
 	"swarm/internal/runtime/destructivereset"
 	runtimemanager "swarm/internal/runtime/manager"
+	runtimerunquiescence "swarm/internal/runtime/runquiescence"
 )
 
 func (s *PostgresStore) MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error {
@@ -159,7 +161,7 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSc
 		if !delivery.found {
 			return fmt.Errorf("upsert event receipt: delivery row required for event %s agent %s", strings.TrimSpace(eventID), strings.TrimSpace(agentID))
 		}
-		if destructiveResetDeliveryTerminal(delivery.status, delivery.reasonCode) {
+		if activeRunQuiescenceDeliveryTerminal(delivery.status, delivery.reasonCode) {
 			return nil
 		}
 		state := buildAgentReceiptWriteState(delivery.retryCount, status, errText)
@@ -366,12 +368,44 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 			status IN ('pending', 'in_progress')
 			OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
 		  )
-		  AND COALESCE(reason_code, '') <> $4
+		  AND COALESCE(reason_code, '') <> ALL($4)
 	`
-	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, sessionID, destructivereset.QuiescenceReasonCode); err != nil {
+	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, sessionID, pq.Array(activeRunQuiescenceTerminalReasonCodes())); err != nil {
 		return fmt.Errorf("mark event delivery in progress: %w", err)
 	}
 	return nil
+}
+
+func (s *PostgresStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (string, bool, error) {
+	if s == nil || s.DB == nil {
+		return "", false, fmt.Errorf("postgres store is required")
+	}
+	eventID = strings.TrimSpace(eventID)
+	subscriberType = strings.TrimSpace(subscriberType)
+	subscriberID = strings.TrimSpace(subscriberID)
+	if eventID == "" || subscriberType == "" || subscriberID == "" {
+		return "", false, nil
+	}
+	var reason string
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = $2
+		  AND subscriber_id = $3
+		  AND status = 'dead_letter'
+		  AND reason_code = ANY($4)
+		ORDER BY reason_code
+		LIMIT 1
+	`, eventID, subscriberType, subscriberID, pq.Array(activeRunQuiescenceTerminalReasonCodes())).Scan(&reason)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", false, nil
+	case err != nil:
+		return "", false, fmt.Errorf("check active run delivery quiescence: %w", err)
+	default:
+		return strings.TrimSpace(reason), true, nil
+	}
 }
 
 func (s *PostgresStore) DestructiveResetDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (bool, error) {
@@ -397,6 +431,33 @@ func (s *PostgresStore) DestructiveResetDeliveryQuiesced(ctx context.Context, ev
 		)
 	`, eventID, subscriberType, subscriberID, destructivereset.QuiescenceReasonCode).Scan(&ok); err != nil {
 		return false, fmt.Errorf("check destructive reset delivery quiescence: %w", err)
+	}
+	return ok, nil
+}
+
+func (s *PostgresStore) ServeAbandonDeliveryQuiesced(ctx context.Context, eventID, subscriberType, subscriberID string) (bool, error) {
+	if s == nil || s.DB == nil {
+		return false, fmt.Errorf("postgres store is required")
+	}
+	eventID = strings.TrimSpace(eventID)
+	subscriberType = strings.TrimSpace(subscriberType)
+	subscriberID = strings.TrimSpace(subscriberID)
+	if eventID == "" || subscriberType == "" || subscriberID == "" {
+		return false, nil
+	}
+	var ok bool
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = $2
+			  AND subscriber_id = $3
+			  AND status = 'dead_letter'
+			  AND reason_code = $4
+		)
+	`, eventID, subscriberType, subscriberID, runtimerunquiescence.ServeAbandonReasonCode).Scan(&ok); err != nil {
+		return false, fmt.Errorf("check serve abandon delivery quiescence: %w", err)
 	}
 	return ok, nil
 }
