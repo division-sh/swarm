@@ -5724,13 +5724,39 @@ cli_specification:
     agents_list:
       command: swarm agents list
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc agent.list
+      behavior: Read-only agent discovery CLI consumer. The CLI sends only non-empty --flow and --role filters to /v1/rpc agent.list, renders AgentSummary rows returned by the API, and MUST NOT filter locally or read dashboard/Builder REST, DB/store, runtime, EventBus, agentcontrol, or conversation owners.
+      output:
+        empty: No agents match the filter.
+        columns: AGENT_ID, ROLE, TYPE, STATUS, MODEL_TIER, MODE, SCOPE
+      exit_codes:
+        success: 0
+        cli_validation_or_transport_or_rpc_or_malformed_response: 2
+      proof_expectations:
+      - exact /v1/rpc agent.list call with flow/role params only when provided
+      - fail-closed SWARM_API_TOKEN behavior before any request
+      - invalid args/flags make zero API calls
+      - malformed agent.list responses fail closed
+      - no direct DB/store/runtime/EventBus/agentcontrol reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or token fallback
     agent_view:
       command: swarm agent view <agent-id>
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc agent.get
+      behavior: Read-only single-agent detail CLI consumer. The CLI renders only AgentDetail and refs returned by /v1/rpc agent.get; it MUST NOT expand transcripts, call conversation.current_for_agent, call conversation.get, or reconstruct agent/session/turn state locally.
+      output:
+        header: Agent <agent-id>
+        summary_line: role=<role> type=<type> status=<status> model_tier=<model_tier> conversation_mode=<mode> session_scope=<scope>
+        refs_only: optional current_session_ref and last_turn_ref lines when present
+      exit_codes:
+        success: 0
+        cli_validation_or_transport_or_rpc_or_malformed_response: 2
+      proof_expectations:
+      - exact /v1/rpc agent.get call with agent_id
+      - AGENT_NOT_FOUND and malformed AgentDetail responses fail closed
+      - invalid args/flags make zero API calls
+      - output remains refs-only; no conversation.current_for_agent, conversation.get, transcript, direct DB/store/runtime/EventBus/agentcontrol, or legacy endpoint usage
     agent_restart:
       command: swarm agent restart <agent-id>
       tier: should_have
@@ -5879,6 +5905,8 @@ cli_specification:
     - swarm control continue
     - swarm control stop
     - swarm control nuke
+    - swarm agents list
+    - swarm agent view
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
     - swarm investigate
@@ -5888,7 +5916,7 @@ cli_specification:
     - swarm investigate trace
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
-    - swarm agents list / agent view / agent restart / agent replay / agent directive
+    - swarm agent restart / agent replay / agent directive
     - swarm events list / events follow / event view / event replay / event publish
     - swarm conversations list / conversation view / conversation turn
     - swarm forkchat new|resume|list|view|delete
