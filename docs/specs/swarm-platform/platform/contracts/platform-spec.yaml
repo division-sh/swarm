@@ -5768,11 +5768,37 @@ cli_specification:
       implementation_status: absent
       owner: /v1/rpc agent.replay_backlog and /v1/rpc agent.replay
     agent_directive:
-      command: swarm agent directive <agent-id> "<message>"
+      command: swarm agent directive <agent-id> "<message>" [--run-id <run-id>] [--idempotency-key <key>]
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc agent.send_directive
-      blocker_state: '#755 closed runtime directive run-targeting basics; CLI still needs its own gate.'
+      behavior: Mutating directive-delivery CLI consumer. The CLI sends agent_id, directive, optional run_id, and optional idempotency_key to /v1/rpc agent.send_directive. The CLI MUST NOT resolve runs, inspect sessions, read conversations, call dashboard/Builder REST, or call runtime/store/EventBus/agentcontrol directly; server-side agent.send_directive owns run target resolution, platform.agent_directive persistence, idempotency, and directive event identity.
+      output:
+        success_line: agent directive ok with agent_id, run_id, run_id_resolution, directive_event_id, and directive_event_type
+        optional_response_line: response=<server acknowledgement> when the API response includes a non-empty response
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        not_found_errors:
+        - AGENT_NOT_FOUND
+        - RUN_NOT_FOUND
+        resource_state_or_conflict: 6
+        resource_state_or_conflict_errors:
+        - AGENT_NOT_RUNNING
+        - RUN_ALREADY_TERMINAL
+        - AMBIGUOUS_RUN_TARGET
+        - IDEMPOTENCY_CONFLICT
+      proof_expectations:
+      - exact /v1/rpc agent.send_directive call with agent_id and directive params
+      - --run-id passes run_id exactly and does not trigger local run/session lookup
+      - --idempotency-key passes idempotency_key exactly when provided and is never generated or persisted locally
+      - output renders server-owned run_id, run_id_resolution, directive_event_id, and directive_event_type
+      - invalid args/flags and missing SWARM_API_TOKEN make zero API calls
+      - AGENT_NOT_FOUND, RUN_NOT_FOUND, AGENT_NOT_RUNNING, RUN_ALREADY_TERMINAL, AMBIGUOUS_RUN_TARGET, IDEMPOTENCY_CONFLICT, HTTP failures, and malformed success responses fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/agentcontrol reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, dashboard/Builder REST, conversation owners, restart, or replay method usage
     events_list:
       command: swarm events list
       tier: should_have
@@ -5907,6 +5933,7 @@ cli_specification:
     - swarm control nuke
     - swarm agents list
     - swarm agent view
+    - swarm agent directive
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
     - swarm investigate
@@ -5916,7 +5943,7 @@ cli_specification:
     - swarm investigate trace
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
-    - swarm agent restart / agent replay / agent directive
+    - swarm agent restart / agent replay
     - swarm events list / events follow / event view / event replay / event publish
     - swarm conversations list / conversation view / conversation turn
     - swarm forkchat new|resume|list|view|delete

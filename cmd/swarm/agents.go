@@ -84,13 +84,16 @@ func newAgentsCommand(opts rootCommandOptions) *cobra.Command {
 func newAgentCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
-		Short: "View one agent through v1 RPC.",
+		Short: "View or direct one agent through v1 RPC.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(newAgentViewCommand(opts))
+	cmd.AddCommand(
+		newAgentViewCommand(opts),
+		newAgentDirectiveCommand(opts),
+	)
 	return cmd
 }
 
