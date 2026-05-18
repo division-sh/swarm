@@ -92,6 +92,7 @@ func newAgentCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newAgentViewCommand(opts),
+		newAgentRestartCommand(opts),
 		newAgentDirectiveCommand(opts),
 	)
 	return cmd
