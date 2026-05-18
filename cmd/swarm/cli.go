@@ -95,7 +95,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 			if cmd.Flags().Changed("require-bundle-match") && cmd.Flags().Changed("no-require-bundle-match") && opts.RequireBundleMatch && opts.NoRequireBundleMatch {
 				return fmt.Errorf("--require-bundle-match and --no-require-bundle-match cannot both be set")
 			}
-			if opts.Dev && cmd.Flags().Changed("require-bundle-match") {
+			if opts.Dev && cmd.Flags().Changed("require-bundle-match") && opts.RequireBundleMatch {
 				return fmt.Errorf("--dev cannot be combined with --require-bundle-match")
 			}
 			if opts.Dev {

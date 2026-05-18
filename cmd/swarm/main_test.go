@@ -217,6 +217,27 @@ func TestCLI_ServeDevRejectsRequireBundleMatchBeforeOwner(t *testing.T) {
 	}
 }
 
+func TestCLI_ServeDevAcceptsExplicitRequireBundleMatchFalse(t *testing.T) {
+	var captured serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		captured = serveOpts
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--dev", "--require-bundle-match=false"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d stderr=%s stdout=%s, want 0", code, stderr.String(), stdout.String())
+	}
+	if !captured.Dev {
+		t.Fatal("serve dev = false, want true")
+	}
+	if !captured.NoRequireBundleMatch || captured.RequireBundleMatch {
+		t.Fatalf("serve bundle match = require:%t no-require:%t, want dev no-require composition", captured.RequireBundleMatch, captured.NoRequireBundleMatch)
+	}
+}
+
 func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
 	spec := loadServeDevModeSpec(t)
 	if strings.TrimSpace(spec.ImplementedBy) != "#830" {
@@ -241,6 +262,11 @@ func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"--dev --require-bundle-match", "fails before runtime boot"} {
+		if !stringSliceContains(spec.ConflictRules, want) {
+			t.Fatalf("dev mode conflict rules missing %q: %#v", want, spec.ConflictRules)
+		}
+	}
+	for _, want := range []string{"--dev --require-bundle-match=false", "redundant but valid"} {
 		if !stringSliceContains(spec.ConflictRules, want) {
 			t.Fatalf("dev mode conflict rules missing %q: %#v", want, spec.ConflictRules)
 		}
