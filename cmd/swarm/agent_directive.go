@@ -91,11 +91,10 @@ func validateAgentDirectiveArgs(args []string) (string, string, error) {
 	if agentID == "" {
 		return "", "", fmt.Errorf("agent id is required")
 	}
-	directive := strings.TrimSpace(args[1])
-	if directive == "" {
+	if strings.TrimSpace(args[1]) == "" {
 		return "", "", fmt.Errorf("directive is required")
 	}
-	return agentID, directive, nil
+	return agentID, args[1], nil
 }
 
 func (opts agentDirectiveCommandOptions) params(agentID, directive string) map[string]any {
