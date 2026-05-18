@@ -5347,10 +5347,28 @@ cli_specification:
     version:
       command: swarm version [--server]
       tier: must_have
-      implementation_status: partial
+      implementation_status: implemented
       local_owner: local binary metadata
-      server_owner: /v1/rpc health.check or a future promoted server-identity owner
-      behavior: '`swarm version` prints local binary identity. `--server` remains an API-consuming tail until a child promotes exact server identity rendering.'
+      server_owner: /v1/rpc health.check
+      behavior: '`swarm version` prints local binary identity and performs no API call. `swarm version --server` first queries `/v1/rpc health.check`, then prints the same local binary identity followed by a `Server:` section containing v1 server bundle/runtime identity from health.check.'
+      output_contract:
+        local:
+        - Swarm <binary-version>
+        - 'Commit: <binary-commit>'
+        - 'Built: <binary-build-date>'
+        - 'Go: <go-version> <goos>/<goarch>'
+        server_flag:
+          source: /v1/rpc health.check
+          rendering:
+          - local output block first
+          - 'Server:'
+          - alive=<bool> ready=<bool> db_ok=<bool> runtime_ok=<bool>
+          - bundle fingerprint=<fingerprint> workflow_name=<workflow-name-or-dash> workflow_version=<workflow-version-or-dash>
+          forbidden_claims:
+          - remote server binary version
+          - remote server commit
+          - remote server build date
+          - server-local bundle path
     serve:
       command: swarm serve [flags]
       tier: must_have
@@ -5746,7 +5764,8 @@ cli_specification:
     - swarm
     - swarm help
     - swarm completion
-    - swarm version (local only)
+    - swarm version
+    - swarm version --server
     - swarm serve (partial)
     - swarm run
     - swarm verify
@@ -5767,8 +5786,7 @@ cli_specification:
     - swarm investigate health
     - swarm investigate run
     - swarm investigate trace
-    remaining_must_have_not_implemented:
-    - swarm version --server
+    remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
     - swarm control pause|continue|stop
     - swarm agents list / agent view / agent restart / agent replay / agent directive

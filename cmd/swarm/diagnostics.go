@@ -422,19 +422,27 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 }
 
 func runDiagnosticHealthCommand(ctx context.Context, out io.Writer, opts rootCommandOptions) error {
-	client, err := newCLIAPIClient(opts)
+	result, err := fetchDiagnosticHealthCheck(ctx, opts)
 	if err != nil {
-		return err
-	}
-	var result diagnosticHealthCheckResult
-	if err := client.call(ctx, "health.check", map[string]any{}, &result); err != nil {
-		return err
-	}
-	if err := validateDiagnosticHealthCheck(result); err != nil {
 		return err
 	}
 	writeDiagnosticHealth(out, result)
 	return nil
+}
+
+func fetchDiagnosticHealthCheck(ctx context.Context, opts rootCommandOptions) (diagnosticHealthCheckResult, error) {
+	client, err := newCLIAPIClient(opts)
+	if err != nil {
+		return diagnosticHealthCheckResult{}, err
+	}
+	var result diagnosticHealthCheckResult
+	if err := client.call(ctx, "health.check", map[string]any{}, &result); err != nil {
+		return diagnosticHealthCheckResult{}, err
+	}
+	if err := validateDiagnosticHealthCheck(result); err != nil {
+		return diagnosticHealthCheckResult{}, err
+	}
+	return result, nil
 }
 
 func fetchDiagnosticRunList(ctx context.Context, client *cliAPIClient, params map[string]any) (diagnosticRunListResult, error) {

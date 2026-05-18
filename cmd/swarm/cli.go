@@ -66,7 +66,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newServeCommand(ctx, repo, opts.runServe),
 		newRunCommand(repo, opts),
 		newVerifyCommand(ctx, repo),
-		newVersionCommand(),
+		newVersionCommand(opts),
 		newCompletionCommand(),
 		newRunsCommand(opts),
 		newStatusCommand(opts),
@@ -134,18 +134,55 @@ func newVerifyCommand(ctx context.Context, repo string) *cobra.Command {
 	}
 }
 
-func newVersionCommand() *cobra.Command {
-	return &cobra.Command{
+type versionCommandOptions struct {
+	apiOptions rootCommandOptions
+	server     bool
+}
+
+func newVersionCommand(opts rootCommandOptions) *cobra.Command {
+	versionOpts := versionCommandOptions{apiOptions: opts}
+	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print local Swarm binary version information.",
 		Args:  cobra.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "Swarm %s\n", binaryVersion)
-			fmt.Fprintf(cmd.OutOrStdout(), "Commit: %s\n", binaryCommit)
-			fmt.Fprintf(cmd.OutOrStdout(), "Built: %s\n", binaryDate)
-			fmt.Fprintf(cmd.OutOrStdout(), "Go: %s %s/%s\n", goruntime.Version(), goruntime.GOOS, goruntime.GOARCH)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runVersionCommand(cmd.Context(), cmd.OutOrStdout(), versionOpts)
 		},
 	}
+	cmd.Flags().BoolVar(&versionOpts.server, "server", false, "Also query /v1/rpc health.check and print server bundle/runtime identity")
+	return cmd
+}
+
+func runVersionCommand(ctx context.Context, out io.Writer, opts versionCommandOptions) error {
+	if !opts.server {
+		writeLocalVersion(out)
+		return nil
+	}
+	result, err := fetchDiagnosticHealthCheck(ctx, opts.apiOptions)
+	if err != nil {
+		return err
+	}
+	writeLocalVersion(out)
+	writeVersionServerIdentity(out, result)
+	return nil
+}
+
+func writeLocalVersion(out io.Writer) {
+	if out == nil {
+		return
+	}
+	fmt.Fprintf(out, "Swarm %s\n", binaryVersion)
+	fmt.Fprintf(out, "Commit: %s\n", binaryCommit)
+	fmt.Fprintf(out, "Built: %s\n", binaryDate)
+	fmt.Fprintf(out, "Go: %s %s/%s\n", goruntime.Version(), goruntime.GOOS, goruntime.GOARCH)
+}
+
+func writeVersionServerIdentity(out io.Writer, result diagnosticHealthCheckResult) {
+	if out == nil {
+		return
+	}
+	fmt.Fprintln(out, "Server:")
+	writeDiagnosticHealth(out, result)
 }
 
 func newCompletionCommand() *cobra.Command {
