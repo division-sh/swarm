@@ -5606,18 +5606,87 @@ cli_specification:
     control_pause:
       command: swarm control pause <run-id> | --all
       tier: should_have
-      implementation_status: absent
-      owners: /v1/rpc run.pause for one run; /v1/rpc runtime.pause for --all
+      implementation_status: implemented
+      owners:
+        single_run: /v1/rpc run.pause
+        all_scope: /v1/rpc runtime.pause
+      targeting:
+        rule: 'Exactly one target is required: either one <run-id> or --all. Supplying both, supplying neither, blank run IDs, extra args, or unsupported flags fails before any API request with exit 2.'
+        all_scope_semantics: '`--all` pauses runtime ingress through runtime.pause. It does not claim to pause every existing run-control state individually.'
+      output:
+        single_run_success: 'control pause ok: scope=run run_id=<run-id>'
+        all_success: 'control pause ok: scope=runtime'
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_api_or_state_error: 3
+        auth_failure: 4
+        run_not_found: 5
+        idempotency_conflict: 6
+      proof_expectations:
+      - exact /v1/rpc run.pause call with run_id for single-run mode
+      - exact /v1/rpc runtime.pause call with empty params for --all
+      - no direct DB/store/runtime/EventBus reads or writes
+      - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, Builder/operator token fallback, runtime.nuke, or runtime.stop
     control_continue:
       command: swarm control continue <run-id> | --all
       tier: should_have
-      implementation_status: absent
-      owners: /v1/rpc run.continue for one run; /v1/rpc runtime.resume for --all
+      implementation_status: implemented
+      owners:
+        single_run: /v1/rpc run.continue
+        all_scope: /v1/rpc runtime.resume
+      targeting:
+        rule: 'Exactly one target is required: either one <run-id> or --all. Supplying both, supplying neither, blank run IDs, extra args, or unsupported flags fails before any API request with exit 2.'
+        all_scope_semantics: '`--all` resumes runtime ingress through runtime.resume. It does not claim to continue every existing run-control state individually.'
+      output:
+        single_run_success: 'control continue ok: scope=run run_id=<run-id>'
+        all_success: 'control continue ok: scope=runtime'
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_api_or_state_error: 3
+        auth_failure: 4
+        run_not_found: 5
+        idempotency_conflict: 6
+      proof_expectations:
+      - exact /v1/rpc run.continue call with run_id for single-run mode
+      - exact /v1/rpc runtime.resume call with empty params for --all
+      - no direct DB/store/runtime/EventBus reads or writes
+      - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, Builder/operator token fallback, runtime.nuke, or runtime.stop
     control_stop:
       command: swarm control stop <run-id> | --all
       tier: should_have
-      implementation_status: absent
-      owners: /v1/rpc run.stop for one run; run.list plus run.stop iteration for --all unless a future runtime stop-all owner is promoted
+      implementation_status: implemented
+      owners:
+        single_run: /v1/rpc run.stop
+        all_discovery: /v1/rpc run.list
+        all_stop: /v1/rpc run.stop
+      targeting:
+        rule: 'Exactly one target is required: either one <run-id> or --all. Supplying both, supplying neither, blank run IDs, extra args, or unsupported flags fails before any API request with exit 2.'
+        all_scope_semantics: >
+          `--all` is an API-only CLI composite, not an atomic runtime-wide stop owner. The CLI lists active runs with status=running
+          and status=paused, follows next_cursor pagination to exhaustion with limit=500, deduplicates run IDs, and calls run.stop once
+          for each discovered target. It MUST NOT call runtime.nuke, introduce runtime.stop, inspect local DB/store/runtime state, or
+          infer targets from logs/EventBus.
+      output:
+        single_run_success: 'control stop ok: scope=run run_id=<run-id>'
+        all_success: 'control stop ok: scope=all matched=<n> stopped=<n> failed=0'
+        all_partial_stdout: 'control stop partial: scope=all matched=<n> stopped=<m> failed=<k>'
+        all_partial_stderr: 'control stop failed: run_id=<run-id> error=<error>'
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_api_or_state_error: 3
+        auth_failure: 4
+        run_not_found: 5
+        idempotency_conflict: 6
+        stop_all_partial_failure: 3
+      proof_expectations:
+      - exact /v1/rpc run.stop call with run_id for single-run mode
+      - exact /v1/rpc run.list status=running/status=paused paginated discovery for --all
+      - exact /v1/rpc run.stop calls for unique discovered run IDs and explicit partial-failure reporting
+      - no direct DB/store/runtime/EventBus reads or writes
+      - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, Builder/operator token fallback, runtime.nuke, or runtime.stop
     control_nuke:
       command: swarm control nuke [--yes|-y] [--dry-run]
       tier: should_have
@@ -5778,6 +5847,9 @@ cli_specification:
     - swarm mailbox approve
     - swarm mailbox reject
     - swarm mailbox defer
+    - swarm control pause
+    - swarm control continue
+    - swarm control stop
     - swarm control nuke
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
@@ -5788,7 +5860,6 @@ cli_specification:
     - swarm investigate trace
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
-    - swarm control pause|continue|stop
     - swarm agents list / agent view / agent restart / agent replay / agent directive
     - swarm events list / events follow / event view / event replay / event publish
     - swarm conversations list / conversation view / conversation turn
