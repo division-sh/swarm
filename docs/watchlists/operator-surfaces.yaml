@@ -65,6 +65,10 @@ active_issues:
     title: Move builder run event streams onto canonical run-bound diagnostics
     maps_to:
       - run_scoped_operator_identity
+  - id: 835
+    title: Add OpenRPC-driven v1 API compliance harness and coverage matrix
+    maps_to:
+      - v1_openrpc_api_conformance
 nodes:
   - id: canonical_operator_projection_truth
     title: Canonical Operator Projection Truth
@@ -148,6 +152,31 @@ nodes:
         - run scoping is inconsistent
       too_narrow:
         - one dashboard filter or query is wrong
+    current_action_pressure: active
+  - id: v1_openrpc_api_conformance
+    title: V1 OpenRPC API Conformance
+    parent_class: operator-facing API/spec/runtime parity and conformance proof drift
+    canonical_owners:
+      - docs/specs/swarm-platform/platform/contracts/platform-spec.yaml api_specification
+      - docs/specs/swarm-platform/platform/contracts/openrpc.json
+      - internal/apispec
+      - internal/apiv1
+      - .github/workflows/ci.yml
+    why_this_node_exists: v1 API compliance drifts when method coverage, OpenRPC generation, CI checks, and runtime proof accounting are inferred from scattered tests instead of a method-keyed canonical matrix
+    known_manifestations:
+      - no checked-in 42-method matrix keyed by generated OpenRPC method name
+      - required params, unknown params, auth, declared errors, idempotency, result schema, and notification schema proof status can drift silently
+      - OpenRPC method examples and rpc.discover publication status are not explicitly tracked
+      - CI can pass without a direct swarm-openrpc-gen --check step
+    representative_issues:
+      - 835
+    common_framing_mistakes:
+      too_broad:
+        - full v1 runtime conformance can be closed by one matrix PR
+        - rpc.discover should be added without a promoted platform-spec requirement
+      too_narrow:
+        - one handler test is enough API compliance accounting
+        - generated OpenRPC drift is only an internal/apispec concern
     current_action_pressure: active
 reserve_backlog:
   - ordinal: 17

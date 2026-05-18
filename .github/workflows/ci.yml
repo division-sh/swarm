@@ -61,6 +61,9 @@ jobs:
       - name: Build swarm binary
         run: go build ./cmd/swarm
 
+      - name: Check OpenRPC artifact
+        run: go run ./cmd/swarm-openrpc-gen --check
+
       - name: Vet
         run: go vet ./...
 
