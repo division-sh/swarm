@@ -5365,6 +5365,75 @@ cli_specification:
           By default `swarm serve` remains quiet except for readiness and errors. With `--verbose` or `-v`, serve prints
           the numbered boot-progress sequence to stdout as the canonical serve/runtime boot phases complete. The CLI
           owns stdout rendering; runtime owns the boot-progress facts and the persisted `platform.boot` payload.
+        boot_progress_sequence:
+          total_steps: 22
+          steps:
+          - step: 1
+            name: process_start
+            owner: cmd/swarm
+          - step: 2
+            name: config_load
+            owner: cmd/swarm
+          - step: 3
+            name: db_connection
+            owner: cmd/swarm
+          - step: 4
+            name: bundle_load
+            owner: cmd/swarm
+          - step: 5
+            name: startup_ownership_lease
+            owner: internal/runtime
+          - step: 6
+            name: recovery_snapshot_inspection
+            owner: internal/runtime
+          - step: 7
+            name: recovery_decision
+            owner: internal/runtime
+          - step: 8
+            name: pipeline_maintenance
+            owner: internal/runtime
+          - step: 9
+            name: system_nodes_start
+            owner: internal/runtime
+          - step: 10
+            name: schedule_restoration
+            owner: internal/runtime
+          - step: 11
+            name: manager_recovery_if_enabled
+            owner: internal/runtime
+          - step: 12
+            name: outbox_sweeper
+            owner: internal/runtime
+          - step: 13
+            name: static_agents_bootstrap
+            owner: internal/runtime
+          - step: 14
+            name: flow_required_agents
+            owner: internal/runtime
+          - step: 15
+            name: workspace_validation_and_system_containers
+            owner: internal/runtime
+          - step: 16
+            name: mcp_tool_validation
+            owner: internal/runtime
+          - step: 17
+            name: manager_event_loop_start
+            owner: internal/runtime
+          - step: 18
+            name: boot_self_check_optional
+            owner: internal/runtime
+          - step: 19
+            name: platform_boot_event_published
+            owner: internal/runtime
+          - step: 20
+            name: http_listener_bind
+            owner: cmd/swarm
+          - step: 21
+            name: health_endpoints_respond
+            owner: cmd/swarm
+          - step: 22
+            name: ready
+            owner: cmd/swarm
         platform_boot_payload: >
           `platform.boot` carries the boot decision summary: boot timestamps/duration, bundle fingerprint,
           startup recovery decision, static and flow-required agent materialization lists, system container names,

@@ -10,22 +10,28 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
+	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
+	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimerunforkexecution "swarm/internal/runtime/runforkexecution"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
@@ -2669,6 +2675,231 @@ func TestWaitForServeHealthEndpointsProvesHealthAndReadyRoutes(t *testing.T) {
 	if err := waitForServeHealthEndpoints(context.Background(), server.Listener.Addr()); err != nil {
 		t.Fatalf("waitForServeHealthEndpoints: %v", err)
 	}
+}
+
+func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
+	steps := loadServeBootProgressSequenceFromSpec(t)
+	if got, want := len(steps), runtimepkg.BootProgressTotalSteps; got != want {
+		t.Fatalf("serve boot progress spec step count = %d, want %d", got, want)
+	}
+
+	oldBuildStores := buildStoresForServe
+	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	buildStoresForServe = func(ctx context.Context, _ string, cfg *config.Config) (storeBundle, error) {
+		if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+			return storeBundle{}, err
+		}
+		return storeBundle{
+			Postgres:          pg,
+			SQLDB:             pg.DB,
+			EventStore:        pg,
+			SessionRegistry:   sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
+			ConversationStore: pg,
+			ManagerStore:      pg,
+			ScheduleStore:     pg,
+			TurnStore:         pg,
+		}, nil
+	}
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, string, semanticview.Source) serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	}
+	t.Cleanup(func() {
+		buildStoresForServe = oldBuildStores
+		configuredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runServeRuntime(ctx, repoRoot(), serveOptions{
+			ConfigPath:         writeServeRuntimeTestConfig(t),
+			ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+			PlatformSpecPath:   defaultPlatformSpecPath,
+			StoreMode:          "postgres",
+			HealthAddr:         "127.0.0.1:0",
+			SelfCheck:          true,
+			RequireBundleMatch: true,
+			Verbose:            true,
+			Output:             &out,
+		})
+	}()
+
+	waitForServeReadyLine(t, &out, done)
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, out.String())
+	}
+
+	rows := parseServeBootProgressRows(t, out.String())
+	if got, want := len(rows), len(steps); got != want {
+		t.Fatalf("serve boot progress rows = %d, want %d\noutput:\n%s", got, want, out.String())
+	}
+	for i, want := range steps {
+		got := rows[i]
+		if got.Step != want.Step || got.Total != runtimepkg.BootProgressTotalSteps || got.Name != want.Name {
+			t.Fatalf("row %d = step=%d total=%d name=%q, want step=%d total=%d name=%q\noutput:\n%s", i, got.Step, got.Total, got.Name, want.Step, runtimepkg.BootProgressTotalSteps, want.Name, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "health_endpoints_respond       ok  (/healthz /readyz /v1/rpc /v1/ws)") {
+		t.Fatalf("serve verbose output still claims unproven v1 endpoint response:\n%s", out.String())
+	}
+}
+
+type serveRuntimeWorkspaceStub struct {
+	stubWorkspaceLifecycle
+}
+
+func (serveRuntimeWorkspaceStub) ManagedResetContainerInventory(context.Context) ([]runtimedestructivereset.ContainerRef, error) {
+	return nil, nil
+}
+
+func (serveRuntimeWorkspaceStub) InspectManagedContainer(context.Context, string) (runtimedestructivereset.ManagedContainerInspection, error) {
+	return runtimedestructivereset.ManagedContainerInspection{}, nil
+}
+
+func (serveRuntimeWorkspaceStub) StopManagedContainer(context.Context, string) error {
+	return nil
+}
+
+type serveBootProgressSpecStep struct {
+	Step  int    `yaml:"step"`
+	Name  string `yaml:"name"`
+	Owner string `yaml:"owner"`
+}
+
+func loadServeBootProgressSequenceFromSpec(t *testing.T) []serveBootProgressSpecStep {
+	t.Helper()
+	var spec struct {
+		CLISpecification struct {
+			CommandCatalog struct {
+				Serve struct {
+					BootObservability struct {
+						BootProgressSequence struct {
+							TotalSteps int                         `yaml:"total_steps"`
+							Steps      []serveBootProgressSpecStep `yaml:"steps"`
+						} `yaml:"boot_progress_sequence"`
+					} `yaml:"boot_observability"`
+				} `yaml:"serve"`
+			} `yaml:"command_catalog"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	sequence := spec.CLISpecification.CommandCatalog.Serve.BootObservability.BootProgressSequence
+	if sequence.TotalSteps != runtimepkg.BootProgressTotalSteps {
+		t.Fatalf("platform spec total_steps = %d, want %d", sequence.TotalSteps, runtimepkg.BootProgressTotalSteps)
+	}
+	for i, step := range sequence.Steps {
+		if step.Step != i+1 {
+			t.Fatalf("platform spec step index %d has step %d", i, step.Step)
+		}
+		if strings.TrimSpace(step.Name) == "" {
+			t.Fatalf("platform spec step %d missing name", step.Step)
+		}
+		if strings.TrimSpace(step.Owner) == "" {
+			t.Fatalf("platform spec step %d missing owner", step.Step)
+		}
+	}
+	return sequence.Steps
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func waitForServeReadyLine(t *testing.T, out *lockedBuffer, done <-chan int) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case code := <-done:
+			t.Fatalf("runServeRuntime exited before ready line with code %d\noutput:\n%s", code, out.String())
+		case <-deadline:
+			t.Fatalf("timed out waiting for serve ready line\noutput:\n%s", out.String())
+		case <-ticker.C:
+			if strings.Contains(out.String(), "[22/22]") {
+				return
+			}
+		}
+	}
+}
+
+type serveBootProgressRow struct {
+	Step  int
+	Total int
+	Name  string
+}
+
+func parseServeBootProgressRows(t *testing.T, output string) []serveBootProgressRow {
+	t.Helper()
+	rows := []serveBootProgressRow{}
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "[") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			t.Fatalf("malformed serve boot progress line: %q", line)
+		}
+		parts := strings.Split(strings.Trim(fields[0], "[]"), "/")
+		if len(parts) != 2 {
+			t.Fatalf("malformed serve boot progress marker %q in line %q", fields[0], line)
+		}
+		step, err := strconv.Atoi(parts[0])
+		if err != nil {
+			t.Fatalf("parse step from %q: %v", fields[0], err)
+		}
+		total, err := strconv.Atoi(parts[1])
+		if err != nil {
+			t.Fatalf("parse total from %q: %v", fields[0], err)
+		}
+		rows = append(rows, serveBootProgressRow{Step: step, Total: total, Name: fields[1]})
+	}
+	return rows
+}
+
+func writeServeRuntimeTestConfig(t *testing.T) string {
+	t.Helper()
+	configText := strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"llm:",
+		"  runtime_mode: api",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n") + "\n"
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
+		t.Fatalf("write serve runtime config: %v", err)
+	}
+	return path
 }
 
 func TestVerifyBundle_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(t *testing.T) {
