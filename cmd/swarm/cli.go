@@ -95,6 +95,14 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 			if cmd.Flags().Changed("require-bundle-match") && cmd.Flags().Changed("no-require-bundle-match") && opts.RequireBundleMatch && opts.NoRequireBundleMatch {
 				return fmt.Errorf("--require-bundle-match and --no-require-bundle-match cannot both be set")
 			}
+			if opts.Dev && cmd.Flags().Changed("require-bundle-match") {
+				return fmt.Errorf("--dev cannot be combined with --require-bundle-match")
+			}
+			if opts.Dev {
+				opts.AbandonActiveRuns = true
+				opts.NoRequireBundleMatch = true
+				opts.Verbose = true
+			}
 			if opts.NoRequireBundleMatch {
 				opts.RequireBundleMatch = false
 			}
@@ -119,6 +127,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().StringVar(&opts.HealthAddr, "health-addr", opts.HealthAddr, "HTTP bind address for health checks")
 	cmd.Flags().DurationVar(&opts.ShutdownGrace, "shutdown-grace", opts.ShutdownGrace, "Time to wait for in-flight work to drain after shutdown starts")
 	cmd.Flags().BoolVar(&opts.SelfCheck, "self-check", opts.SelfCheck, "Run runtime self-check during boot")
+	cmd.Flags().BoolVar(&opts.Dev, "dev", opts.Dev, "Enable local development mode: abandon active runs, skip bundle-match admission, emit verbose boot output, and clean up dev entity containers on shutdown")
 	cmd.Flags().BoolVar(&opts.RequireBundleMatch, "require-bundle-match", opts.RequireBundleMatch, "Refuse startup when active runs belong to a different non-NULL bundle fingerprint")
 	cmd.Flags().BoolVar(&opts.NoRequireBundleMatch, "no-require-bundle-match", opts.NoRequireBundleMatch, "Allow startup even when active runs belong to a different bundle fingerprint")
 	cmd.Flags().BoolVar(&opts.AbandonActiveRuns, "abandon-active-runs", opts.AbandonActiveRuns, "Cancel active runs and quiesce recoverable work before startup recovery")
