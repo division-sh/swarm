@@ -177,10 +177,11 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 func newInvestigateCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "investigate",
-		Short: "Inspect runtime state through v1 RPC read owners.",
+		Short: "Retired legacy namespace; use swarm runs/status/trace/health.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
+			writeInvestigateRetiredMessage(cmd.ErrOrStderr())
+			return commandExitError{code: 2}
 		},
 	}
 	cmd.AddCommand(
@@ -193,20 +194,15 @@ func newInvestigateCommand(opts rootCommandOptions) *cobra.Command {
 }
 
 func newInvestigateRunsCommand(opts rootCommandOptions) *cobra.Command {
-	runOpts := diagnosticRunListOptions{apiOptions: opts}
-	cmd := &cobra.Command{
-		Use:   "runs",
-		Short: "List runs through the same v1 RPC path as swarm runs.",
-		Args:  cobra.NoArgs,
+	return &cobra.Command{
+		Use:                "runs",
+		Short:              "Retired legacy command; use swarm runs.",
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Flags().Changed("limit") && runOpts.limit == 0 {
-				return fmt.Errorf("--limit must be between 1 and 500")
-			}
-			return runDiagnosticRunListCommand(cmd.Context(), cmd.OutOrStdout(), runOpts)
+			writeInvestigateRunsRetiredMessage(cmd.ErrOrStderr())
+			return commandExitError{code: 2}
 		},
 	}
-	bindDiagnosticRunListFlags(cmd, &runOpts)
-	return cmd
 }
 
 func newInvestigateRunCommand(opts rootCommandOptions) *cobra.Command {
@@ -243,6 +239,25 @@ func newInvestigateHealthCommand() *cobra.Command {
 			return commandExitError{code: 2}
 		},
 	}
+}
+
+func writeInvestigateRetiredMessage(w io.Writer) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, "ERROR: `swarm investigate` was retired in CLI v2.")
+	fmt.Fprintln(w, "  Use `swarm runs` to list runs.")
+	fmt.Fprintln(w, "  Use `swarm status [run-id]` to diagnose a run.")
+	fmt.Fprintln(w, "  Use `swarm trace [run-id] [--follow]` for run traces.")
+	fmt.Fprintln(w, "  Use `swarm health` for runtime health.")
+}
+
+func writeInvestigateRunsRetiredMessage(w io.Writer) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, "ERROR: `swarm investigate runs` was retired in CLI v2.")
+	fmt.Fprintln(w, "  Use `swarm runs`.")
 }
 
 func writeInvestigateHealthRetiredMessage(w io.Writer) {
