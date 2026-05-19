@@ -5931,18 +5931,91 @@ cli_specification:
     events_list:
       command: swarm events list
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc event.list
+      behavior: Read-only event observation CLI consumer. The CLI sends only EventListFilter fields plus list-only limit/cursor/since/until params to /v1/rpc event.list through the shared v1 API client, renders server-owned EventFull summaries, and never reconstructs event, delivery, or dead-letter truth locally.
+      flags:
+      - --run-id <run-id>
+      - --entity-id <entity-id>
+      - --event-name <name>
+      - --delivery-status <pending|in_progress|delivered|failed|dead_letter>
+      - --subscriber-id <id>
+      - --subscriber-type <node|agent>
+      - --reason-code <code>
+      - --has-dead-letter[=true|false]
+      - --since <RFC3339>
+      - --until <RFC3339>
+      - --limit <1-1000>
+      - --cursor <cursor>
+      output:
+        success_table: EVENT AT / EVENT / EVENT ID / RUN / ENTITY / DELIVERIES / DEAD_LETTERS plus next_cursor when present
+        empty: No events match the filter.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+      proof_expectations:
+      - exact /v1/rpc event.list call with filter, since, until, limit, and cursor params only
+      - filter fields match EventListFilter and bool has_dead_letter is sent only when explicitly provided
+      - invalid flags and missing SWARM_API_TOKEN make zero API calls
+      - malformed event list results and HTTP/RPC failures fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
     events_follow:
       command: swarm events follow
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/ws event.subscribe
+      behavior: Live read-only event observation CLI consumer. The CLI sends EventListFilter fields and optional replay_since to /v1/ws event.subscribe through the shared v1 WebSocket path, renders server-owned EventFull notifications, and rejects list-only pagination/time-window params.
+      flags:
+      - --run-id <run-id>
+      - --entity-id <entity-id>
+      - --event-name <name>
+      - --delivery-status <pending|in_progress|delivered|failed|dead_letter>
+      - --subscriber-id <id>
+      - --subscriber-type <node|agent>
+      - --reason-code <code>
+      - --has-dead-letter[=true|false]
+      - --replay-since <RFC3339>
+      rejected_list_only_flags:
+      - --limit
+      - --cursor
+      - --until
+      output:
+        notification_line: event event_id=<id> event_name=<name> at=<timestamp> source=<source> [run_id=<run>] [entity_id=<entity>] deliveries=<n> dead_letters=<n>
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        interrupted: 130
+      proof_expectations:
+      - exact /v1/ws event.subscribe call with filter and replay_since params only
+      - filter shape is identical to event.list EventListFilter; pagination and list-only until are not accepted
+      - invalid flags and missing SWARM_API_TOKEN make zero WS calls
+      - malformed subscription result/notification and HTTP/RPC/WS failures fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.subscribe_trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
     event_view:
       command: swarm event view <event-id>
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc event.get
+      behavior: Read-only event detail CLI consumer. The CLI sends event_id to /v1/rpc event.get through the shared v1 API client and renders only the server-owned EventFull payload, delivery, and dead-letter detail.
+      output:
+        success_detail: Event header with event_id/event_name/created_at/source/run_id/entity_id, compact payload JSON, delivery rows, and dead-letter rows
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        not_found_errors:
+        - EVENT_NOT_FOUND
+      proof_expectations:
+      - exact /v1/rpc event.get call with event_id param only
+      - missing or blank event id and missing SWARM_API_TOKEN make zero API calls
+      - EVENT_NOT_FOUND, HTTP/RPC failures, and malformed EventFull results fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
     event_replay:
       command: swarm event replay <event-id>
       tier: should_have
@@ -6071,6 +6144,9 @@ cli_specification:
     - swarm agent directive
     - swarm agent replay
     - swarm agent replay-backlog
+    - swarm events list
+    - swarm events follow
+    - swarm event view
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
     - swarm investigate
@@ -6080,7 +6156,7 @@ cli_specification:
     - swarm investigate trace
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
-    - swarm events list / events follow / event view / event replay / event publish
+    - swarm event replay / event publish
     - swarm conversations list / conversation view / conversation turn
     - swarm forkchat new|resume|list|view|delete
     - swarm entities list / entity view / entity aggregate
