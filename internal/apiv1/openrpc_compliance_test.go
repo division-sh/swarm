@@ -210,7 +210,7 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 func TestOpenRPCComplianceMatrixRejectsInvalidProofReferences(t *testing.T) {
 	root := repoRoot(t)
 	matrixPath := filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml")
-	trackerRef := complianceProofRef{Kind: "tracker", Issue: 847, Watchlist: "operator_surfaces.v1_openrpc_api_conformance"}
+	trackerRef := complianceProofRef{Kind: "tracker", Issue: 857, Watchlist: "operator_surfaces.v1_openrpc_api_conformance"}
 	tests := []struct {
 		name   string
 		mutate func(*openRPCComplianceMatrix)

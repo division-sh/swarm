@@ -65,8 +65,8 @@ active_issues:
     title: Move builder run event streams onto canonical run-bound diagnostics
     maps_to:
       - run_scoped_operator_identity
-  - id: 847
-    title: Gate OpenRPC compliance proof-reference integrity
+  - id: 857
+    title: Track residual v1 OpenRPC runtime/schema/example gaps after proof-ref integrity
     maps_to:
       - v1_openrpc_api_conformance
 nodes:
@@ -172,6 +172,7 @@ nodes:
     representative_issues:
       - 835
       - 847
+      - 857
     common_framing_mistakes:
       too_broad:
         - full v1 runtime conformance can be closed by one matrix PR
