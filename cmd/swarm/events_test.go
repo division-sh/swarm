@@ -368,6 +368,41 @@ func TestEventsFollowMalformedWSFailsClosed(t *testing.T) {
 	}
 }
 
+func TestEventsFollowMapsHandshakeAuthToAuthExit(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var rpcCalls atomic.Int32
+	var wsCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/rpc":
+			rpcCalls.Add(1)
+			t.Errorf("unexpected RPC request for event follow")
+			http.Error(w, "unexpected rpc", http.StatusInternalServerError)
+		case "/v1/ws":
+			wsCalls.Add(1)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"events", "follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 4 {
+		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if rpcCalls.Load() != 0 {
+		t.Fatalf("rpc calls = %d, want 0", rpcCalls.Load())
+	}
+	if wsCalls.Load() != 1 {
+		t.Fatalf("ws calls = %d, want 1", wsCalls.Load())
+	}
+	if !strings.Contains(stderr.String(), "v1 WS HTTP 401") {
+		t.Fatalf("stderr = %q, want WS auth status", stderr.String())
+	}
+}
+
 type eventObservationWSServerOptions struct {
 	subscriptionResult map[string]any
 	events             []map[string]any
