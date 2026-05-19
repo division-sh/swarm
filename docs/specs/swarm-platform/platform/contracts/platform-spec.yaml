@@ -5364,9 +5364,9 @@ cli_specification:
         tracker: '#860'
         action: Promote richer agent filters, directive/replay output, restart/session options, and composed view semantics before implementation.
       event_replay:
-        disposition: active_child
+        disposition: closed_child
         tracker: '#863'
-        action: '`swarm event replay` has an active independently gated child over `/v1/rpc event.replay`; it must not be grouped with future event publish work.'
+        action: '`swarm event replay` is implemented over `/v1/rpc event.replay` by PR #866 / commit 23ef7d9c; it must not be reopened or grouped with future event publish work.'
       event_publish:
         disposition: future_child
         tracker: '#735'
