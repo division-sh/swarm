@@ -2,9 +2,13 @@ package apiv1
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"swarm/internal/store"
 )
 
@@ -59,6 +63,26 @@ func (s *fakeAgentConversationReadStore) LoadOperatorConversationTurn(_ context.
 func (s *fakeAgentConversationReadStore) LoadCurrentOperatorConversationForAgent(_ context.Context, agentID string) (*store.OperatorConversationDetail, error) {
 	s.lastCurrentConversationFor = agentID
 	return s.currentConversationResult, s.currentConversationErr
+}
+
+type apiConversationCapabilitySource struct {
+	caps store.StoreSchemaCapabilities
+}
+
+func (s apiConversationCapabilitySource) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
+	return s.caps, nil
+}
+
+func apiConversationReadCaps(sessionRunID, auditRunID bool) store.StoreSchemaCapabilities {
+	return store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Sessions:     store.SchemaFlavorCanonical,
+			Audits:       store.SchemaFlavorCanonical,
+			Turns:        store.SchemaFlavorCanonical,
+			SessionRunID: sessionRunID,
+			AuditRunID:   auditRunID,
+		},
+	}
 }
 
 func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
@@ -163,6 +187,97 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	}
 	if reads.lastCurrentConversationFor != "agent-1" {
 		t.Fatalf("current_for_agent id = %q", reads.lastCurrentConversationFor)
+	}
+}
+
+func TestOperatorAgentConversationHandlersSanitizeRunIDProjectionFailures(t *testing.T) {
+	rawRunIDColumnErr := errors.New(`pq: column "run_id" does not exist at position 46:14 (42703)`)
+	tests := []struct {
+		name   string
+		body   string
+		caps   store.StoreSchemaCapabilities
+		expect func(sqlmock.Sqlmock)
+	}{
+		{
+			name: "conversation list raw projection error",
+			body: `{"jsonrpc":"2.0","id":"convs","method":"conversation.list","params":{"limit":20}}`,
+			caps: apiConversationReadCaps(true, true),
+			expect: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery("(?s)SELECT\\s+conversations\\.session_id,\\s+conversations\\.agent_id,\\s+conversations\\.run_id,.*FROM \\(").
+					WithArgs(21).
+					WillReturnError(rawRunIDColumnErr)
+			},
+		},
+		{
+			name: "conversation get raw projection error",
+			body: `{"jsonrpc":"2.0","id":"conv","method":"conversation.get","params":{"session_id":"sess-1"}}`,
+			caps: apiConversationReadCaps(true, true),
+			expect: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery("(?s)SELECT\\s+session_id,\\s+agent_id,\\s+run_id,.*FROM \\(.*\\) conversations\\s+WHERE session_id = \\$1").
+					WithArgs("sess-1").
+					WillReturnError(rawRunIDColumnErr)
+			},
+		},
+		{
+			name: "conversation get_turn raw projection error",
+			body: `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"sess-1","turn_index":1,"include_logs":true}}`,
+			caps: apiConversationReadCaps(true, true),
+			expect: func(mock sqlmock.Sqlmock) {
+				mock.ExpectQuery("(?s)SELECT\\s+session_id,\\s+agent_id,\\s+run_id,.*FROM \\(.*\\) conversations\\s+WHERE session_id = \\$1").
+					WithArgs("sess-1").
+					WillReturnError(rawRunIDColumnErr)
+			},
+		},
+		{
+			name: "conversation list run_id filter without any run_id capability",
+			body: `{"jsonrpc":"2.0","id":"convs","method":"conversation.list","params":{"run_id":"11111111-1111-1111-1111-111111111111"}}`,
+			caps: apiConversationReadCaps(false, false),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock: %v", err)
+			}
+			defer db.Close()
+			if tc.expect != nil {
+				tc.expect(mock)
+			}
+
+			reader := store.NewOperatorConversationReadSurface(db, apiConversationCapabilitySource{caps: tc.caps})
+			handler := testHandler(t, Options{
+				AuthTokens: []string{testToken},
+				Handlers: OperatorReadHandlers(OperatorReadOptions{
+					AgentConversations: reader,
+				}),
+			})
+
+			resp := rpcCall(t, handler, tc.body)
+			assertConversationRunIDErrorSanitized(t, resp)
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("expectations: %v", err)
+			}
+		})
+	}
+}
+
+func assertConversationRunIDErrorSanitized(t *testing.T, resp rpcResponse) {
+	t.Helper()
+	if resp.Error == nil {
+		t.Fatal("response error = nil, want sanitized run_id capability error")
+	}
+	if resp.Error.Code != codeInternalError {
+		t.Fatalf("error code = %d, want %d", resp.Error.Code, codeInternalError)
+	}
+	text := strings.ToLower(resp.Error.Message + " " + fmt.Sprint(resp.Error.Data))
+	if !strings.Contains(text, "operator conversation read surface run_id capability unavailable") {
+		t.Fatalf("error data = %s, want stable run_id capability error", text)
+	}
+	for _, forbidden := range []string{"pq:", `column "run_id"`, "42703", "position"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("error data leaked %q: %s", forbidden, text)
+		}
 	}
 }
 

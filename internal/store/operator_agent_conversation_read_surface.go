@@ -6,11 +6,13 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimesessions "swarm/internal/runtime/sessions"
@@ -497,7 +499,7 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 		return OperatorConversationListResult{}, err
 	}
 	if opts.RunID != "" && !caps.Conversations.SessionRunID && !caps.Conversations.AuditRunID {
-		return OperatorConversationListResult{}, fmt.Errorf("operator conversation read surface requires conversation run_id columns for run_id filtering")
+		return OperatorConversationListResult{}, operatorConversationRunIDCapabilityError("run_id filtering requires agent_sessions.run_id or agent_conversation_audits.run_id")
 	}
 	sources := operatorConversationQuerySources(caps)
 	if len(sources) == 0 {
@@ -578,7 +580,7 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 		LIMIT $%d
 	`, strings.Join(sources, "\nUNION ALL\n"), latestTurnBlocksExpr, strings.Join(where, " AND "), limitArg), args...)
 	if err != nil {
-		return OperatorConversationListResult{}, fmt.Errorf("list operator conversations: %w", err)
+		return OperatorConversationListResult{}, operatorConversationReadQueryError("list operator conversations", err)
 	}
 	defer rows.Close()
 	conversations := []OperatorConversationSummary{}
@@ -590,7 +592,7 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 		conversations = append(conversations, item)
 	}
 	if err := rows.Err(); err != nil {
-		return OperatorConversationListResult{}, fmt.Errorf("read operator conversations: %w", err)
+		return OperatorConversationListResult{}, operatorConversationReadQueryError("read operator conversations", err)
 	}
 	nextCursor := ""
 	if len(conversations) > opts.Limit {
@@ -652,7 +654,7 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorConversation(ctx cont
 		return OperatorConversationDetail{}, ErrSessionNotFound
 	}
 	if err != nil {
-		return OperatorConversationDetail{}, fmt.Errorf("load operator conversation: %w", err)
+		return OperatorConversationDetail{}, operatorConversationReadQueryError("load operator conversation", err)
 	}
 	item.Turns, err = r.loadConversationTurns(ctx, item.Conversation.AgentID, item.Conversation.SessionID)
 	if err != nil {
@@ -1289,6 +1291,43 @@ func defaultOperatorConversationListOptions(opts OperatorConversationListOptions
 		opts.Limit = 500
 	}
 	return opts, nil
+}
+
+func operatorConversationRunIDCapabilityError(reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ErrOperatorConversationRunIDCapability
+	}
+	return fmt.Errorf("%w: %s", ErrOperatorConversationRunIDCapability, reason)
+}
+
+func operatorConversationReadQueryError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	operation = strings.TrimSpace(operation)
+	if operation == "" {
+		operation = "operator conversation read"
+	}
+	if operatorConversationRunIDProjectionError(err) {
+		return fmt.Errorf("%s: %w", operation, operatorConversationRunIDCapabilityError("selected conversation source cannot project run_id"))
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
+func operatorConversationRunIDProjectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && pqErr != nil {
+		if string(pqErr.Code) == "42703" && (strings.EqualFold(pqErr.Column, "run_id") || strings.Contains(strings.ToLower(pqErr.Message), "run_id")) {
+			return true
+		}
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "run_id") &&
+		(strings.Contains(message, `column "run_id" does not exist`) || strings.Contains(message, "42703"))
 }
 
 func operatorConversationQuerySources(caps StoreSchemaCapabilities) []string {
