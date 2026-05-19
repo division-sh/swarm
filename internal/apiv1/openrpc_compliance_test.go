@@ -52,9 +52,29 @@ type openRPCMethodMatrix struct {
 }
 
 type complianceEvidence struct {
-	Status      string               `yaml:"status"`
-	ProofRefs   []complianceProofRef `yaml:"proof_refs"`
-	LegacyProof []string             `yaml:"proof"`
+	Status             string               `yaml:"status"`
+	ProofRefs          []complianceProofRef `yaml:"proof_refs"`
+	LegacyProof        []string             `yaml:"proof"`
+	LegacyProofPresent bool                 `yaml:"-"`
+}
+
+func (e *complianceEvidence) UnmarshalYAML(value *yaml.Node) error {
+	type plain complianceEvidence
+	var decoded plain
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*e = complianceEvidence(decoded)
+	if value.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value == "proof" {
+			e.LegacyProofPresent = true
+			return nil
+		}
+	}
+	return nil
 }
 
 type complianceProofRef struct {
@@ -281,6 +301,28 @@ func TestOpenRPCComplianceMatrixRejectsInvalidProofReferences(t *testing.T) {
 	}
 }
 
+func TestOpenRPCComplianceMatrixRejectsEmptyLegacyProofKey(t *testing.T) {
+	root := repoRoot(t)
+	matrix := loadComplianceMatrix(t, filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml"))
+	row := complianceMatrixRow(t, &matrix, "agent.get")
+	raw := []byte(`status: covered
+proof: []
+proof_refs:
+  - kind: go_test
+    name: TestOperatorAgentConversationHandlersExposeReadOwner
+`)
+	if err := yaml.Unmarshal(raw, &row.HappyPath); err != nil {
+		t.Fatalf("parse evidence fixture: %v", err)
+	}
+	if !row.HappyPath.LegacyProofPresent {
+		t.Fatal("legacy proof key presence was not recorded")
+	}
+	problems := validateProofReferenceIntegrity(root, matrix)
+	if !problemContains(problems, "agent.get happy_path uses legacy proof strings") {
+		t.Fatalf("validateProofReferenceIntegrity() problems = %v, want empty legacy proof key rejection", problems)
+	}
+}
+
 func loadComplianceAPISpec(t *testing.T, root string) *apispec.APISpecification {
 	t.Helper()
 	api, err := apispec.LoadPlatformSpec(filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
@@ -436,7 +478,7 @@ func validateEvidenceProofRefs(root string, index complianceProofIndex, matrix o
 	var problems []string
 	label := methodName + " " + field
 	status := strings.TrimSpace(evidence.Status)
-	if len(evidence.LegacyProof) > 0 {
+	if evidence.LegacyProofPresent || len(evidence.LegacyProof) > 0 {
 		problems = append(problems, fmt.Sprintf("%s uses legacy proof strings; use proof_refs", label))
 	}
 	if status == "not_applicable" {
@@ -796,7 +838,7 @@ func assertEvidence(t *testing.T, methodName, field string, evidence complianceE
 	if _, ok := allowed[status]; !ok {
 		t.Fatalf("%s %s status = %q, want one of %v", methodName, field, status, sortedKeys(allowed))
 	}
-	if len(evidence.LegacyProof) > 0 {
+	if evidence.LegacyProofPresent || len(evidence.LegacyProof) > 0 {
 		t.Fatalf("%s %s proof uses legacy string refs; use proof_refs", methodName, field)
 	}
 	if len(evidence.ProofRefs) == 0 {
@@ -832,7 +874,7 @@ func assertNotApplicable(t *testing.T, methodName, field string, evidence compli
 	if evidence.Status != "not_applicable" {
 		t.Fatalf("%s %s status = %q, want not_applicable", methodName, field, evidence.Status)
 	}
-	if len(evidence.LegacyProof) > 0 || len(evidence.ProofRefs) > 0 {
+	if evidence.LegacyProofPresent || len(evidence.LegacyProof) > 0 || len(evidence.ProofRefs) > 0 {
 		t.Fatalf("%s %s not_applicable must not carry proof refs", methodName, field)
 	}
 }
