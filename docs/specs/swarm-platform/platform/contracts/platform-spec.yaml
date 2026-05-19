@@ -5304,13 +5304,142 @@ cli_specification:
   source_of_truth:
     status: promoted_cli_v2_catalog
     promoted_by: '#795'
+    merge_bearing_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification
+    authority_rule: >
+      This cli_specification block is the sole merge-bearing CLI v2 authority. CLI implementation gates, PRs,
+      tests, and tracker closeouts MUST bind to this tracked section. Issue prose, local review drafts,
+      ignored files, audit matrices, and unpromoted design notes are evidence only until their accepted
+      behavior is promoted here.
     local_review_spec_disposition: >
       docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux-v2.yaml
-      remains design context. Merge-bearing behavior must be reflected here.
+      is ignored/untracked on origin/master and remains reconciliation input only. Any local
+      "AUTHORITATIVE" or "source-of-truth" claim in that file is superseded by this tracked
+      source_of_truth block. Merge-bearing behavior must be reflected here.
+    promotion_rule: >
+      When the local CLI UX v2 review artifact contains behavior not represented in this section, the
+      behavior is candidate intent. It must be promoted into this section, split to a tracked child, or
+      explicitly downgraded to backlog before it can be used as implementation authority.
     supersedes:
     - docs/SWARM_INVESTIGATE_COMMAND_DRAFT.md
     - docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux.yaml
     - stale v1 `swarm investigate *` command catalog entries
+  review_artifact_reconciliation:
+    source: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux-v2.yaml
+    source_status: ignored_untracked_reconciliation_input
+    rule: >
+      This ledger records the current disposition of CLI UX v2 review-artifact content that is missing,
+      under-promoted, or more general than the tracked platform spec. It prevents future #794/#735
+      gates from citing the ignored review artifact as merge authority.
+    under_promoted_review_features:
+      universal_flags_config_env_precedence:
+        disposition: tracked_child
+        tracker: '#844'
+        action: Promote exact universal flag, config-file, and environment-precedence rules before implementation.
+      exit_code_and_error_channel_normalization:
+        disposition: tracked_child
+        tracker: '#846'
+        action: Promote exact exit-code taxonomy and stderr/stdout error-channel rules before implementation.
+      output_modes_and_shared_renderer:
+        disposition: tracked_child
+        tracker: '#848'
+        action: 'Promote exact `--json`, `--quiet`, streaming NDJSON, and shared renderer rules before implementation.'
+      serve_bind_listener_surface:
+        disposition: tracked_child
+        tracker: '#853'
+        action: Promote exact API/MCP/health bind-address and listener flag contract before implementation.
+      trace_filters_and_subscription_recovery:
+        disposition: tracked_child
+        tracker: '#855'
+        action: Promote rich trace filters, follow semantics, and recovery rules before implementation.
+      mailbox_decision_sheet_and_result_ux:
+        disposition: tracked_child
+        tracker: '#856'
+        action: Promote rich decision-sheet, downstream preview, file-backed decision payload, and result rendering rules before implementation.
+      control_idempotency_and_stop_all_confirmation:
+        disposition: tracked_child
+        tracker: '#859'
+        action: Promote idempotency-key and stop-all confirmation/non-TTY rules before implementation.
+      rich_agent_operator_ux:
+        disposition: tracked_child
+        tracker: '#860'
+        action: Promote richer agent filters, directive/replay output, restart/session options, and composed view semantics before implementation.
+      event_replay_and_publish:
+        disposition: remaining_event_child
+        tracker: '#735'
+        action: 'Event read/stream is promoted and implemented; `swarm event replay` and `swarm event publish` require separate gated children.'
+      conversations:
+        disposition: future_child
+        tracker: '#735'
+        action: '`swarm conversations list`, `swarm conversation view`, and `swarm conversation turn` require separate gated children.'
+      entities:
+        disposition: future_child
+        tracker: '#735'
+        action: '`swarm entities list`, `swarm entity view`, and `swarm entity aggregate` require separate gated children.'
+      logs:
+        disposition: future_child
+        tracker: '#735'
+        action: '`swarm logs` snapshot/follow semantics require a separate gated child.'
+      incidents:
+        disposition: future_child
+        tracker: '#735'
+        action: '`swarm incidents` read semantics require a separate gated child.'
+      forkchat:
+        disposition: blocked
+        tracker: '#749'
+        action: Forkchat remains blocked until `conversation.fork*` API/runtime contract exists.
+    platform_spec_refinements_not_cleanly_present_in_review_artifact:
+      agent_replay_backlog:
+        classification: required_current_contract
+        reason: >
+          Platform spec splits backlog replay from event-targeted replay. This is required to avoid
+          overloading `swarm agent replay` with two different owners.
+      agent_replay_event_targeted:
+        classification: required_current_contract
+        reason: >
+          Platform spec requires `swarm agent replay <agent-id> --event-id <event-id>` over `agent.replay`.
+          The review artifact anticipated event-targeted replay but left the command row under-specified.
+      agent_directive_run_targeting:
+        classification: required_current_contract
+        reason: >
+          Platform spec promotes directive run targeting through `--run-id` and server-owned run target
+          resolution after #755. This is required current behavior, not legacy compatibility.
+      serve_bundle_match_admission:
+        classification: required_current_contract
+        reason: >
+          Platform spec carries exact `--require-bundle-match` and `--no-require-bundle-match` admission
+          semantics from #753/#754. Review artifact broad intent is superseded by this tracked owner text.
+      serve_active_run_abandon:
+        classification: required_current_contract
+        reason: >
+          Platform spec carries exact `--abandon-active-runs` quiescence and reason-code semantics from #808.
+      serve_shutdown_grace:
+        classification: required_current_contract
+        reason: >
+          Platform spec carries exact `--shutdown-grace` drain-budget semantics from #825.
+      serve_dev_mode_lifecycle:
+        classification: required_current_contract
+        reason: >
+          Platform spec carries exact `--dev` composition and dev entity-container cleanup semantics from #830.
+      event_read_stream_filters:
+        classification: required_current_contract
+        reason: >
+          Platform spec carries exact `swarm events list`, `swarm events follow`, and `swarm event view`
+          API-owner/filter rules from #849/#858.
+      investigate_fail_closed_stubs:
+        classification: legacy_migration_behavior
+        reason: >
+          `swarm investigate *` is not v2 topology. Fail-closed stubs remain only to prevent silent legacy
+          command resurrection and to provide migration guidance.
+      control_mailbox_fail_closed_stubs:
+        classification: legacy_migration_behavior
+        reason: >
+          `swarm control mailbox approve|reject|defer` is retired in favor of `swarm mailbox
+          approve|reject|defer`.
+      fork_fail_closed_stub:
+        classification: legacy_migration_behavior
+        reason: >
+          Top-level `swarm fork` is retired and remains fail-closed only to prevent old mutating operator
+          behavior from bypassing a future gated run-fork API/control surface.
   foundations:
     command_router:
       canonical_owner: cmd/swarm Cobra command tree
