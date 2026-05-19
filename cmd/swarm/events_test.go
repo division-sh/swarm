@@ -124,6 +124,106 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 	}
 }
 
+func TestEventReplayUsesEventReplayV1RPCWithSubscribersAndIdempotencyKey(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rpc" {
+			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want bearer token", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, eventReplayTestResult())
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"event", "replay", "event-1",
+		"--subscriber", "agent-1",
+		"--subscriber", "agent-2",
+		"--idempotency-key", "idem-1",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.JSONRPC != "2.0" || captured.Method != eventReplayMethod {
+		t.Fatalf("request jsonrpc/method = %s/%s, want 2.0/%s", captured.JSONRPC, captured.Method, eventReplayMethod)
+	}
+	wantParams := map[string]any{
+		"event_id":        "event-1",
+		"subscribers":     []any{"agent-1", "agent-2"},
+		"idempotency_key": "idem-1",
+	}
+	if !reflect.DeepEqual(captured.Params, wantParams) {
+		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
+	}
+	for _, want := range []string{
+		"event replay ok:",
+		"event_id=event-1",
+		"replay_event_id=event-replay-1",
+		"audit_event_id=event-audit-1",
+		"subscribers_replayed=agent-1,agent-2",
+		"original_delivery delivery_id=delivery-original-1",
+		"new_delivery delivery_id=delivery-new-1",
+		"source_delivery_id=delivery-original-1",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestEventReplayOmitsOptionalParamsWhenNotProvided(t *testing.T) {
+	t.Setenv("SWARM_API_TOKEN", "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := eventReplayTestResult()
+		result["subscribers_replayed"] = []any{"agent-1"}
+		result["original_deliveries"] = []any{
+			map[string]any{
+				"delivery_id":   "delivery-original-1",
+				"subscriber_id": "agent-1",
+				"session_id":    "session-original-1",
+				"status":        "delivered",
+				"attempt":       1,
+			},
+		}
+		result["new_deliveries"] = []any{
+			map[string]any{
+				"delivery_id":        "delivery-new-1",
+				"subscriber_id":      "agent-1",
+				"session_id":         "session-new-1",
+				"status":             "pending",
+				"attempt":            1,
+				"source_delivery_id": "delivery-original-1",
+			},
+		}
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"event", "replay", "event-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	wantParams := map[string]any{"event_id": "event-1"}
+	if !reflect.DeepEqual(captured.Params, wantParams) {
+		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
+	}
+}
+
 func TestEventsFollowUsesEventSubscribeV1WS(t *testing.T) {
 	t.Setenv("SWARM_API_TOKEN", "test-token")
 	server, wsRequests := newEventObservationWSServer(t, eventObservationWSServerOptions{
@@ -193,6 +293,10 @@ func TestEventsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "list invalid since", args: []string{"events", "list", "--since", "not-time"}, wantStderr: "--since must be an RFC3339 timestamp"},
 		{name: "list invalid delivery status", args: []string{"events", "list", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
 		{name: "view blank event id", args: []string{"event", "view", "  "}, wantStderr: "event id is required"},
+		{name: "replay missing event id", args: []string{"event", "replay"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "replay blank event id", args: []string{"event", "replay", "  "}, wantStderr: "event id is required"},
+		{name: "replay blank subscriber", args: []string{"event", "replay", "event-1", "--subscriber", "  "}, wantStderr: "--subscriber must be a non-empty agent id"},
+		{name: "replay extra arg", args: []string{"event", "replay", "event-1", "extra"}, wantStderr: "accepts 1 arg(s)"},
 		{name: "follow rejects list limit", args: []string{"events", "follow", "--limit", "1"}, wantStderr: "unknown flag"},
 		{name: "follow invalid replay since", args: []string{"events", "follow", "--replay-since", "not-time"}, wantStderr: "--replay-since must be an RFC3339 timestamp"},
 	} {
@@ -225,6 +329,7 @@ func TestEventsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 	for _, args := range [][]string{
 		{"events", "list"},
 		{"event", "view", "event-1"},
+		{"event", "replay", "event-1"},
 		{"events", "follow"},
 	} {
 		calls.Store(0)
@@ -243,6 +348,36 @@ func TestEventsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 }
 
 func TestEventsMapFailureExitCodes(t *testing.T) {
+	replayConflictErrors := []string{
+		"EVENT_REPLAY_NO_DELIVERY_HISTORY",
+		"EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
+		"EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
+		"EVENT_REPLAY_NOT_ELIGIBLE",
+		"PAYLOAD_VALIDATION_FAILED",
+		"IDEMPOTENCY_CONFLICT",
+	}
+	for _, code := range replayConflictErrors {
+		code := code
+		t.Run("event replay "+code+" exits six", func(t *testing.T) {
+			t.Setenv("SWARM_API_TOKEN", "test-token")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventReplayJSONRPCError(t, w, req.ID, code)
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			exit := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"event", "replay", "event-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			if exit != 6 {
+				t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", exit, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), code) {
+				t.Fatalf("stderr = %q, want substring %q", stderr.String(), code)
+			}
+		})
+	}
+
 	for _, tc := range []struct {
 		name       string
 		args       []string
@@ -262,6 +397,17 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 			wantStderr: "EVENT_NOT_FOUND",
 		},
 		{
+			name: "event replay not found exits five",
+			args: []string{"event", "replay", "missing-event"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventReplayJSONRPCError(t, w, req.ID, "EVENT_NOT_FOUND")
+			},
+			wantCode:   5,
+			wantStderr: "EVENT_NOT_FOUND",
+		},
+		{
 			name: "http auth exits four",
 			args: []string{"events", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -269,6 +415,24 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 			},
 			wantCode:   4,
 			wantStderr: "v1 RPC HTTP 401",
+		},
+		{
+			name: "event replay http auth exits four",
+			args: []string{"event", "replay", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			},
+			wantCode:   4,
+			wantStderr: "v1 RPC HTTP 401",
+		},
+		{
+			name: "event replay http runtime exits three",
+			args: []string{"event", "replay", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			},
+			wantCode:   3,
+			wantStderr: "v1 RPC HTTP 503",
 		},
 		{
 			name: "unknown rpc error exits three",
@@ -280,6 +444,84 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 			},
 			wantCode:   3,
 			wantStderr: "METHOD_UNAVAILABLE",
+		},
+		{
+			name: "event replay unauthorized rpc exits four",
+			args: []string{"event", "replay", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventReplayJSONRPCError(t, w, req.ID, "UNAUTHORIZED")
+			},
+			wantCode:   4,
+			wantStderr: "UNAUTHORIZED",
+		},
+		{
+			name: "event replay unknown rpc exits three",
+			args: []string{"event", "replay", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeEventReplayJSONRPCError(t, w, req.ID, "METHOD_UNAVAILABLE")
+			},
+			wantCode:   3,
+			wantStderr: "METHOD_UNAVAILABLE",
+		},
+		{
+			name: "malformed event replay exits three",
+			args: []string{"event", "replay", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := eventReplayTestResult()
+				delete(result, "replay_event_id")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "replay_event_id is required",
+		},
+		{
+			name: "malformed event replay subscribers exits three",
+			args: []string{"event", "replay", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := eventReplayTestResult()
+				delete(result, "subscribers_replayed")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "subscribers_replayed is required",
+		},
+		{
+			name: "malformed event replay source lineage exits three",
+			args: []string{"event", "replay", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := eventReplayTestResult()
+				newDeliveries := result["new_deliveries"].([]any)
+				newDelivery := newDeliveries[0].(map[string]any)
+				delete(newDelivery, "source_delivery_id")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "new_deliveries[0].source_delivery_id is required",
+		},
+		{
+			name: "malformed event replay status exits three",
+			args: []string{"event", "replay", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := eventReplayTestResult()
+				originalDeliveries := result["original_deliveries"].([]any)
+				originalDelivery := originalDeliveries[0].(map[string]any)
+				originalDelivery["status"] = "locally_replayed"
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "original_deliveries[0].status",
 		},
 		{
 			name: "malformed list exits three",
@@ -507,6 +749,31 @@ func validEventObservationEvent(eventID string) map[string]any {
 	}
 }
 
+func eventReplayTestResult() map[string]any {
+	return map[string]any{
+		"event_id":             "event-1",
+		"replay_event_id":      "event-replay-1",
+		"audit_event_id":       "event-audit-1",
+		"subscribers_replayed": []any{"agent-1", "agent-2"},
+		"original_deliveries":  []any{eventReplayTestDelivery("delivery-original-1", "agent-1", "session-original-1", "delivered", 1, ""), eventReplayTestDelivery("delivery-original-2", "agent-2", "session-original-2", "failed", 2, "")},
+		"new_deliveries":       []any{eventReplayTestDelivery("delivery-new-1", "agent-1", "session-new-1", "pending", 1, "delivery-original-1"), eventReplayTestDelivery("delivery-new-2", "agent-2", "session-new-2", "pending", 1, "delivery-original-2")},
+	}
+}
+
+func eventReplayTestDelivery(deliveryID, subscriberID, sessionID, status string, attempt int, sourceDeliveryID string) map[string]any {
+	delivery := map[string]any{
+		"delivery_id":   deliveryID,
+		"subscriber_id": subscriberID,
+		"session_id":    sessionID,
+		"status":        status,
+		"attempt":       attempt,
+	}
+	if sourceDeliveryID != "" {
+		delivery["source_delivery_id"] = sourceDeliveryID
+	}
+	return delivery
+}
+
 func writeEventObservationJSONRPCError(t *testing.T, w http.ResponseWriter, id string, code string) {
 	t.Helper()
 	w.Header().Set("content-type", "application/json")
@@ -522,5 +789,26 @@ func writeEventObservationJSONRPCError(t *testing.T, w http.ResponseWriter, id s
 		},
 	}); err != nil {
 		t.Fatalf("encode error response: %v", err)
+	}
+}
+
+func writeEventReplayJSONRPCError(t *testing.T, w http.ResponseWriter, id string, code string) {
+	t.Helper()
+	w.Header().Set("content-type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]any{
+			"code":    -32010,
+			"message": "Application error: " + code,
+			"data": map[string]any{
+				"code":           code,
+				"details":        map[string]any{"event_id": "event-1"},
+				"retryable":      false,
+				"correlation_id": "corr-event-replay",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("encode response: %v", err)
 	}
 }
