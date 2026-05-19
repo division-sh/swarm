@@ -146,7 +146,7 @@ func newMailboxListCommand(opts rootCommandOptions) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			listOpts.limitSet = cmd.Flags().Changed("limit")
-			return runMailboxListCommand(cmd.Context(), cmd.OutOrStdout(), listOpts)
+			return runMailboxListCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), listOpts)
 		},
 	}
 	cmd.Flags().StringVar(&listOpts.status, "status", listOpts.status, "Mailbox status: pending, decided, expired, or deferred")
@@ -166,7 +166,7 @@ func newMailboxViewCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "View one mailbox item through v1 RPC.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMailboxViewCommand(cmd.Context(), cmd.OutOrStdout(), opts, args[0])
+			return runMailboxViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0])
 		},
 	}
 }
@@ -182,7 +182,7 @@ func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Approve a pending mailbox item through v1 RPC.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), actionOpts, args[0])
+			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), actionOpts, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
@@ -201,7 +201,7 @@ func newMailboxRejectCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Reject a pending mailbox item through v1 RPC.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), actionOpts, args[0])
+			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), actionOpts, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&actionOpts.reason, "reason", "", "Required rejection reason")
@@ -220,7 +220,7 @@ func newMailboxDeferCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Defer a pending mailbox item through v1 RPC.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), actionOpts, args[0])
+			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), actionOpts, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&actionOpts.until, "until", "", "Required RFC3339 timestamp")
@@ -228,68 +228,83 @@ func newMailboxDeferCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func runMailboxListCommand(ctx context.Context, out io.Writer, opts mailboxListCommandOptions) error {
+func runMailboxListCommand(ctx context.Context, out, errOut io.Writer, opts mailboxListCommandOptions) error {
 	params, err := opts.params()
 	if err != nil {
-		return err
+		return returnCLIValidationError(errOut, err)
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, mailboxListAPIErrorClassifier())
 	}
 	var result mailboxListResult
 	if err := client.call(ctx, "mailbox.list", params, &result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, mailboxListAPIErrorClassifier())
 	}
 	if err := validateMailboxListResult(result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, mailboxListAPIErrorClassifier())
 	}
 	writeMailboxListResult(out, result)
 	return nil
 }
 
-func runMailboxViewCommand(ctx context.Context, out io.Writer, opts rootCommandOptions, mailboxID string) error {
+func runMailboxViewCommand(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, mailboxID string) error {
 	mailboxID = strings.TrimSpace(mailboxID)
 	if mailboxID == "" {
-		return fmt.Errorf("mailbox item id is required")
+		return returnCLIValidationError(errOut, fmt.Errorf("mailbox item id is required"))
 	}
 	client, err := newCLIAPIClient(opts)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, mailboxReadAPIErrorClassifier())
 	}
 	var result mailboxDetailResult
 	if err := client.call(ctx, "mailbox.get", map[string]any{"mailbox_id": mailboxID}, &result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, mailboxReadAPIErrorClassifier())
 	}
 	if err := validateMailboxDetailResult(result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, mailboxReadAPIErrorClassifier())
 	}
 	writeMailboxDetailResult(out, result)
 	return nil
 }
 
-func runMailboxDecisionCommand(ctx context.Context, out io.Writer, opts mailboxDecisionCommandOptions, mailboxID string) error {
+func runMailboxDecisionCommand(ctx context.Context, out, errOut io.Writer, opts mailboxDecisionCommandOptions, mailboxID string) error {
 	mailboxID = strings.TrimSpace(mailboxID)
 	if mailboxID == "" {
-		return fmt.Errorf("mailbox item id is required")
+		return returnCLIValidationError(errOut, fmt.Errorf("mailbox item id is required"))
 	}
 	params, err := opts.params(mailboxID)
 	if err != nil {
-		return err
+		return returnCLIValidationError(errOut, err)
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, mailboxDecisionAPIErrorClassifier())
 	}
 	var result mailboxDecisionResult
 	if err := client.call(ctx, opts.method, params, &result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, mailboxDecisionAPIErrorClassifier())
 	}
 	if err := validateMailboxDecisionResult(opts.action, result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, mailboxDecisionAPIErrorClassifier())
 	}
 	writeMailboxDecisionResult(out, opts.action, mailboxID, result)
 	return nil
+}
+
+func mailboxListAPIErrorClassifier() cliAPIErrorClassifier {
+	return cliAPIErrorClassifier{}
+}
+
+func mailboxReadAPIErrorClassifier() cliAPIErrorClassifier {
+	return cliAPIErrorClassifier{notFoundCodes: []string{"MAILBOX_NOT_FOUND"}}
+}
+
+func mailboxDecisionAPIErrorClassifier() cliAPIErrorClassifier {
+	return cliAPIErrorClassifier{
+		notFoundCodes: []string{"MAILBOX_NOT_FOUND"},
+		conflictCodes: []string{"MAILBOX_ALREADY_DECIDED", "MAILBOX_APPROVAL_EVENT_UNCONFIGURED", "IDEMPOTENCY_CONFLICT"},
+	}
 }
 
 func validateMailboxListResult(result mailboxListResult) error {

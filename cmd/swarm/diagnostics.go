@@ -120,7 +120,7 @@ func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 			if cmd.Flags().Changed("limit") && runOpts.limit == 0 {
 				return fmt.Errorf("--limit must be between 1 and 500")
 			}
-			return runDiagnosticRunListCommand(cmd.Context(), cmd.OutOrStdout(), runOpts)
+			return runDiagnosticRunListCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts)
 		},
 	}
 	bindDiagnosticRunListFlags(cmd, &runOpts)
@@ -133,7 +133,7 @@ func newHealthCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Print structured operator health through v1 RPC.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDiagnosticHealthCommand(cmd.Context(), cmd.OutOrStdout(), opts)
+			return runDiagnosticHealthCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 		},
 	}
 }
@@ -149,7 +149,7 @@ func newStatusCommand(opts rootCommandOptions) *cobra.Command {
 			if len(args) == 1 {
 				runID = args[0]
 			}
-			return runDiagnosticRunCommand(cmd.Context(), cmd.OutOrStdout(), runOpts, runID)
+			return runDiagnosticRunCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts, runID)
 		},
 	}
 	cmd.Flags().BoolVar(&runOpts.noDiagnose, "no-diagnose", false, "Use run.get and print only the canonical run header")
@@ -294,52 +294,52 @@ func bindDiagnosticRunListFlags(cmd *cobra.Command, opts *diagnosticRunListOptio
 	cmd.Flags().StringVar(&opts.cursor, "cursor", "", "Optional pagination cursor")
 }
 
-func runDiagnosticRunListCommand(ctx context.Context, out io.Writer, opts diagnosticRunListOptions) error {
+func runDiagnosticRunListCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticRunListOptions) error {
 	params, err := opts.params()
 	if err != nil {
 		return err
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	result, err := fetchDiagnosticRunList(ctx, client, params)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	writeDiagnosticRunList(out, result)
 	return nil
 }
 
-func runDiagnosticRunCommand(ctx context.Context, out io.Writer, opts diagnosticRunOptions, runID string) error {
+func runDiagnosticRunCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticRunOptions, runID string) error {
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		runID, err = resolveActivePreferredRunID(ctx, client)
 		if err != nil {
-			return err
+			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 		}
 	}
 	if opts.noDiagnose {
 		var result diagnosticRunGetResult
 		if err := client.call(ctx, "run.get", map[string]any{"run_id": runID}, &result); err != nil {
-			return err
+			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 		}
 		if err := validateDiagnosticRunHeader("run", result.Run); err != nil {
-			return err
+			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 		}
 		writeDiagnosticRunHeader(out, result.Run)
 		return nil
 	}
 	var result diagnosticRunDiagnosisResult
 	if err := client.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	if err := validateDiagnosticRunDiagnosis(result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	writeDiagnosticRunDiagnosis(out, result)
 	return nil
@@ -348,13 +348,13 @@ func runDiagnosticRunCommand(ctx context.Context, out io.Writer, opts diagnostic
 func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts diagnosticTraceOptions, runID string) error {
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		runID, err = resolveActivePreferredRunID(ctx, client)
 		if err != nil {
-			return err
+			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 		}
 	}
 	if opts.follow {
@@ -363,10 +363,10 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 	params := map[string]any{"run_id": runID}
 	var result diagnosticRunTraceResult
 	if err := client.call(ctx, "run.trace", params, &result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	if err := validateDiagnosticRunTraceResult(result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
 	writeDiagnosticRunTrace(out, runID, result)
 	return nil
@@ -421,13 +421,17 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 	}
 }
 
-func runDiagnosticHealthCommand(ctx context.Context, out io.Writer, opts rootCommandOptions) error {
+func runDiagnosticHealthCommand(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions) error {
 	result, err := fetchDiagnosticHealthCheck(ctx, opts)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, cliAPIErrorClassifier{})
 	}
 	writeDiagnosticHealth(out, result)
 	return nil
+}
+
+func diagnosticRunAPIErrorClassifier() cliAPIErrorClassifier {
+	return cliAPIErrorClassifier{notFoundCodes: []string{"RUN_NOT_FOUND"}}
 }
 
 func fetchDiagnosticHealthCheck(ctx context.Context, opts rootCommandOptions) (diagnosticHealthCheckResult, error) {

@@ -634,8 +634,8 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			if code != 4 {
+				t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 			if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
 				t.Fatalf("stderr = %q, want missing-token message", stderr.String())
@@ -665,8 +665,8 @@ func TestOmittedRunResolverFailsClosedWhenNoRunsExist(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			if code != 3 {
+				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 			if len(*requests) != 3 {
 				t.Fatalf("requests = %d, want 3 active-preference run.list probes", len(*requests))
@@ -688,6 +688,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		name       string
 		args       []string
 		handler    http.HandlerFunc
+		wantCode   int
 		wantStderr string
 	}{
 		{
@@ -697,6 +698,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
 			},
+			wantCode:   4,
 			wantStderr: "v1 RPC HTTP 401",
 		},
 		{
@@ -721,6 +723,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 					},
 				})
 			},
+			wantCode:   5,
 			wantStderr: "RUN_NOT_FOUND",
 		},
 		{
@@ -731,6 +734,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				writeJSONRPCResult(t, w, req.ID, map[string]any{})
 			},
+			wantCode:   3,
 			wantStderr: "runs is required",
 		},
 		{
@@ -743,6 +747,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 				delete(run, "run_id")
 				writeJSONRPCResult(t, w, req.ID, map[string]any{"run": run})
 			},
+			wantCode:   3,
 			wantStderr: "run.run_id is required",
 		},
 		{
@@ -755,6 +760,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 				run["status"] = "waiting"
 				writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []any{run}})
 			},
+			wantCode:   3,
 			wantStderr: `runs[0].status="waiting" is not a valid RunStatus`,
 		},
 		{
@@ -767,6 +773,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 				run["status"] = "waiting"
 				writeJSONRPCResult(t, w, req.ID, map[string]any{"run": run})
 			},
+			wantCode:   3,
 			wantStderr: `run.status="waiting" is not a valid RunStatus`,
 		},
 		{
@@ -782,6 +789,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 					"heuristics":        []any{},
 				})
 			},
+			wantCode:   3,
 			wantStderr: "blocking_layer is required",
 		},
 		{
@@ -798,6 +806,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 					"heuristics":        []any{},
 				})
 			},
+			wantCode:   3,
 			wantStderr: `operational_state="blocked" is not a valid OperationalState`,
 		},
 		{
@@ -813,6 +822,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 					"heuristics":        []any{},
 				})
 			},
+			wantCode:   3,
 			wantStderr: "blocking_reason is required",
 		},
 		{
@@ -828,6 +838,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 					"blocking_reason":   "",
 				})
 			},
+			wantCode:   3,
 			wantStderr: "heuristics is required",
 		},
 		{
@@ -838,6 +849,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				writeJSONRPCResult(t, w, req.ID, map[string]any{})
 			},
+			wantCode:   3,
 			wantStderr: "trace is required",
 		},
 		{
@@ -854,6 +866,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 					"bundle":     map[string]any{},
 				})
 			},
+			wantCode:   3,
 			wantStderr: "bundle.fingerprint is required",
 		},
 		{
@@ -873,6 +886,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 					},
 				})
 			},
+			wantCode:   3,
 			wantStderr: "bundle.workflow_name is required",
 		},
 		{
@@ -892,6 +906,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 					},
 				})
 			},
+			wantCode:   3,
 			wantStderr: "bundle.workflow_version is required",
 		},
 	} {
@@ -902,8 +917,8 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
 			if strings.TrimSpace(stdout.String()) != "" {
 				t.Fatalf("stdout = %q, want empty", stdout.String())

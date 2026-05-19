@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -337,29 +336,7 @@ func changedDeliveryCount(deliveries []runtimeNukeQuiescedDelivery) int {
 }
 
 func runtimeNukeErrorExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if strings.Contains(err.Error(), "SWARM_API_TOKEN is required") {
-		return 4
-	}
-	var httpErr *cliAPIHTTPError
-	if errors.As(err, &httpErr) {
-		if httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden {
-			return 4
-		}
-		return 3
-	}
-	var rpcErr *jsonRPCError
-	if errors.As(err, &rpcErr) {
-		switch applicationErrorCode(rpcErr.Data) {
-		case "UNAUTHORIZED":
-			return 4
-		case "RUNTIME_NUKE_IN_PROGRESS", "IDEMPOTENCY_CONFLICT":
-			return 6
-		default:
-			return 3
-		}
-	}
-	return 3
+	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
+		conflictCodes: []string{"RUNTIME_NUKE_IN_PROGRESS", "IDEMPOTENCY_CONFLICT"},
+	})
 }

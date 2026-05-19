@@ -56,7 +56,7 @@ func newCLIAPIClient(opts rootCommandOptions) (*cliAPIClient, error) {
 	}
 	token := strings.TrimSpace(os.Getenv("SWARM_API_TOKEN"))
 	if token == "" {
-		return nil, fmt.Errorf("SWARM_API_TOKEN is required for runtime-state CLI commands")
+		return nil, errCLIAPITokenRequired
 	}
 	client := opts.httpClient
 	if client == nil {

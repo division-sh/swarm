@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -185,36 +183,19 @@ func writeAgentReplayResult(out io.Writer, result agentReplayResult) {
 }
 
 func agentReplayErrorExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if strings.Contains(err.Error(), "SWARM_API_TOKEN is required") {
-		return agentReplayExitAuth
-	}
-	var httpErr *cliAPIHTTPError
-	if errors.As(err, &httpErr) {
-		if httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden {
-			return agentReplayExitAuth
-		}
-		return agentReplayExitRuntime
-	}
-	var rpcErr *jsonRPCError
-	if errors.As(err, &rpcErr) {
-		switch applicationErrorCode(rpcErr.Data) {
-		case "UNAUTHORIZED":
-			return agentReplayExitAuth
-		case "EVENT_NOT_FOUND":
-			return agentReplayExitNotFound
-		case "EVENT_REPLAY_NO_DELIVERY_HISTORY",
+	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
+		runtimeExit:   agentReplayExitRuntime,
+		authExit:      agentReplayExitAuth,
+		notFoundExit:  agentReplayExitNotFound,
+		conflictExit:  agentReplayExitConflict,
+		notFoundCodes: []string{"EVENT_NOT_FOUND"},
+		conflictCodes: []string{
+			"EVENT_REPLAY_NO_DELIVERY_HISTORY",
 			"EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
 			"EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
 			"EVENT_REPLAY_NOT_ELIGIBLE",
 			"PAYLOAD_VALIDATION_FAILED",
-			"IDEMPOTENCY_CONFLICT":
-			return agentReplayExitConflict
-		default:
-			return agentReplayExitRuntime
-		}
-	}
-	return agentReplayExitRuntime
+			"IDEMPOTENCY_CONFLICT",
+		},
+	})
 }

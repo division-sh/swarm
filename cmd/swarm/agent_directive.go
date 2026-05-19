@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -154,31 +152,17 @@ func writeAgentDirectiveResult(out io.Writer, agentID string, result agentDirect
 }
 
 func agentDirectiveErrorExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if strings.Contains(err.Error(), "SWARM_API_TOKEN is required") {
-		return agentDirectiveExitAuth
-	}
-	var httpErr *cliAPIHTTPError
-	if errors.As(err, &httpErr) {
-		if httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden {
-			return agentDirectiveExitAuth
-		}
-		return agentDirectiveExitRuntime
-	}
-	var rpcErr *jsonRPCError
-	if errors.As(err, &rpcErr) {
-		switch applicationErrorCode(rpcErr.Data) {
-		case "UNAUTHORIZED":
-			return agentDirectiveExitAuth
-		case "AGENT_NOT_FOUND", "RUN_NOT_FOUND":
-			return agentDirectiveExitNotFound
-		case "AGENT_NOT_RUNNING", "RUN_ALREADY_TERMINAL", "AMBIGUOUS_RUN_TARGET", "IDEMPOTENCY_CONFLICT":
-			return agentDirectiveExitConflict
-		default:
-			return agentDirectiveExitRuntime
-		}
-	}
-	return agentDirectiveExitRuntime
+	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
+		runtimeExit:   agentDirectiveExitRuntime,
+		authExit:      agentDirectiveExitAuth,
+		notFoundExit:  agentDirectiveExitNotFound,
+		conflictExit:  agentDirectiveExitConflict,
+		notFoundCodes: []string{"AGENT_NOT_FOUND", "RUN_NOT_FOUND"},
+		conflictCodes: []string{
+			"AGENT_NOT_RUNNING",
+			"RUN_ALREADY_TERMINAL",
+			"AMBIGUOUS_RUN_TARGET",
+			"IDEMPOTENCY_CONFLICT",
+		},
+	})
 }

@@ -139,8 +139,8 @@ func TestVersionServerRequiresTokenBeforeRequest(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"version", "--server"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 2 {
-		t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	if code != 4 {
+		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
 		t.Fatalf("stderr = %q, want missing-token message", stderr.String())
@@ -157,6 +157,7 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		handler    http.HandlerFunc
+		wantCode   int
 		wantStderr string
 	}{
 		{
@@ -165,6 +166,7 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
 			},
+			wantCode:   4,
 			wantStderr: "v1 RPC HTTP 401",
 		},
 		{
@@ -183,6 +185,7 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 					},
 				})
 			},
+			wantCode:   4,
 			wantStderr: "UNAUTHORIZED: unauthorized",
 		},
 		{
@@ -193,6 +196,7 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 				w.Header().Set("content-type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "1.0", "id": req.ID, "result": validVersionHealthResult()})
 			},
+			wantCode:   3,
 			wantStderr: "malformed JSON-RPC response",
 		},
 		{
@@ -208,6 +212,7 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 				}
 				writeJSONRPCResult(t, w, req.ID, result)
 			},
+			wantCode:   3,
 			wantStderr: "bundle.workflow_version is required",
 		},
 	} {
@@ -218,8 +223,8 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"version", "--server"}, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
 			if strings.TrimSpace(stdout.String()) != "" {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
@@ -241,8 +246,8 @@ func TestVersionServerFailsClosedOnTransportError(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"version", "--server"}, &stdout, &stderr, opts)
-	if code != 2 {
-		t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	if code != 3 {
+		t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	if strings.TrimSpace(stdout.String()) != "" {
 		t.Fatalf("stdout = %q, want empty", stdout.String())

@@ -323,8 +323,8 @@ func TestMailboxRequiresAPITokenBeforeRequest(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "")
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			if code != 4 {
+				t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 			if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
 				t.Fatalf("stderr = %q, want missing-token message", stderr.String())
@@ -383,6 +383,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		handler    http.HandlerFunc
+		wantCode   int
 		wantStderr string
 	}{
 		{
@@ -391,6 +392,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
 			},
+			wantCode:   4,
 			wantStderr: "v1 RPC HTTP 401",
 		},
 		{
@@ -398,6 +400,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				_, _ = w.Write([]byte(`{`))
 			},
+			wantCode:   3,
 			wantStderr: "decode JSON-RPC response",
 		},
 		{
@@ -407,6 +410,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				writeJSONRPCResult(t, w, req.ID, map[string]any{"ok": true})
 			},
+			wantCode:   3,
 			wantStderr: "mailbox_decision_id is required",
 		},
 		{
@@ -418,6 +422,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 					"status":              "decided",
 				})
 			},
+			wantCode:   3,
 			wantStderr: "malformed JSON-RPC response: id",
 		},
 		{
@@ -433,6 +438,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 					},
 				})
 			},
+			wantCode:   3,
 			wantStderr: "malformed JSON-RPC response: id=<missing>",
 		},
 		{
@@ -455,6 +461,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 					},
 				})
 			},
+			wantCode:   5,
 			wantStderr: "MAILBOX_NOT_FOUND",
 		},
 	} {
@@ -465,8 +472,8 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "approve", "mailbox-1"}, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
 			if strings.TrimSpace(stdout.String()) != "" {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
@@ -483,6 +490,7 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		name       string
 		args       []string
 		handler    http.HandlerFunc
+		wantCode   int
 		wantStderr string
 	}{
 		{
@@ -492,6 +500,7 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
 			},
+			wantCode:   4,
 			wantStderr: "v1 RPC HTTP 401",
 		},
 		{
@@ -502,6 +511,7 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				writeJSONRPCResult(t, w, req.ID, map[string]any{"next_cursor": "cursor-1"})
 			},
+			wantCode:   3,
 			wantStderr: "malformed mailbox.list result: items is required",
 		},
 		{
@@ -514,6 +524,7 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				delete(item, "source_flow")
 				writeJSONRPCResult(t, w, req.ID, map[string]any{"items": []map[string]any{item}})
 			},
+			wantCode:   3,
 			wantStderr: "items[0]: source_flow is required",
 		},
 		{
@@ -527,6 +538,7 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 					"history": []map[string]any{{"action": "created", "actor_token_id": "system", "ts": "2026-05-13T12:00:00Z"}},
 				})
 			},
+			wantCode:   3,
 			wantStderr: "malformed mailbox.get result: payload is required",
 		},
 		{
@@ -548,6 +560,7 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 					},
 				})
 			},
+			wantCode:   5,
 			wantStderr: "MAILBOX_NOT_FOUND",
 		},
 	} {
@@ -558,8 +571,8 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
 			if strings.TrimSpace(stdout.String()) != "" {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
@@ -612,8 +625,8 @@ func TestMailboxRejectsMalformedStatusByAction(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			if code != 3 {
+				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 			if strings.TrimSpace(stdout.String()) != "" {
 				t.Fatalf("stdout = %q, want empty", stdout.String())

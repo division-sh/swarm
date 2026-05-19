@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -937,64 +936,28 @@ func eventObservationDash(value string) string {
 }
 
 func eventObservationErrorExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if strings.Contains(err.Error(), "SWARM_API_TOKEN is required") {
-		return eventObservationExitAuth
-	}
-	var httpErr *cliAPIHTTPError
-	if errors.As(err, &httpErr) {
-		if httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden {
-			return eventObservationExitAuth
-		}
-		return eventObservationExitRuntime
-	}
-	var rpcErr *jsonRPCError
-	if errors.As(err, &rpcErr) {
-		switch applicationErrorCode(rpcErr.Data) {
-		case "UNAUTHORIZED":
-			return eventObservationExitAuth
-		case "EVENT_NOT_FOUND":
-			return eventObservationExitNotFound
-		default:
-			return eventObservationExitRuntime
-		}
-	}
-	return eventObservationExitRuntime
+	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
+		runtimeExit:   eventObservationExitRuntime,
+		authExit:      eventObservationExitAuth,
+		notFoundExit:  eventObservationExitNotFound,
+		notFoundCodes: []string{"EVENT_NOT_FOUND"},
+	})
 }
 
 func eventReplayErrorExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if strings.Contains(err.Error(), "SWARM_API_TOKEN is required") {
-		return eventReplayExitAuth
-	}
-	var httpErr *cliAPIHTTPError
-	if errors.As(err, &httpErr) {
-		if httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden {
-			return eventReplayExitAuth
-		}
-		return eventReplayExitRuntime
-	}
-	var rpcErr *jsonRPCError
-	if errors.As(err, &rpcErr) {
-		switch applicationErrorCode(rpcErr.Data) {
-		case "UNAUTHORIZED":
-			return eventReplayExitAuth
-		case "EVENT_NOT_FOUND":
-			return eventReplayExitNotFound
-		case "EVENT_REPLAY_NO_DELIVERY_HISTORY",
+	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
+		runtimeExit:   eventReplayExitRuntime,
+		authExit:      eventReplayExitAuth,
+		notFoundExit:  eventReplayExitNotFound,
+		conflictExit:  eventReplayExitConflict,
+		notFoundCodes: []string{"EVENT_NOT_FOUND"},
+		conflictCodes: []string{
+			"EVENT_REPLAY_NO_DELIVERY_HISTORY",
 			"EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
 			"EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
 			"EVENT_REPLAY_NOT_ELIGIBLE",
 			"PAYLOAD_VALIDATION_FAILED",
-			"IDEMPOTENCY_CONFLICT":
-			return eventReplayExitConflict
-		default:
-			return eventReplayExitRuntime
-		}
-	}
-	return eventReplayExitRuntime
+			"IDEMPOTENCY_CONFLICT",
+		},
+	})
 }

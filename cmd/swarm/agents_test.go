@@ -185,8 +185,8 @@ func TestAgentReadCommandsFailClosedWithoutToken(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agents", "list"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 2 {
-		t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	if code != 4 {
+		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
 		t.Fatalf("stderr = %q, want token failure", stderr.String())
@@ -201,6 +201,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		name       string
 		args       []string
 		handler    http.HandlerFunc
+		wantCode   int
 		wantStderr string
 	}{
 		{
@@ -209,6 +210,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 			},
+			wantCode:   4,
 			wantStderr: "v1 RPC HTTP 401",
 		},
 		{
@@ -219,6 +221,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				writeJSONRPCResult(t, w, req.ID, map[string]any{})
 			},
+			wantCode:   3,
 			wantStderr: "malformed agent.list result: agents is required",
 		},
 		{
@@ -231,6 +234,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				delete(agent, "status")
 				writeJSONRPCResult(t, w, req.ID, map[string]any{"agents": []map[string]any{agent}})
 			},
+			wantCode:   3,
 			wantStderr: "malformed agent.list result: agents[0]: status is required",
 		},
 		{
@@ -241,6 +245,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				writeJSONRPCResult(t, w, req.ID, map[string]any{})
 			},
+			wantCode:   3,
 			wantStderr: "malformed agent.get result: agent: agent_id is required",
 		},
 		{
@@ -251,6 +256,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				writeAgentJSONRPCError(t, w, req.ID, "AGENT_NOT_FOUND")
 			},
+			wantCode:   5,
 			wantStderr: "AGENT_NOT_FOUND: Application error: AGENT_NOT_FOUND",
 		},
 		{
@@ -264,6 +270,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 					"current_session_ref": map[string]any{"session_id": "session-1"},
 				})
 			},
+			wantCode:   3,
 			wantStderr: "malformed agent.get result: current_session_ref.started_at is required",
 		},
 	} {
@@ -274,8 +281,8 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != 2 {
-				t.Fatalf("code = %d, want 2 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			if code != tc.wantCode {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
 			if !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)

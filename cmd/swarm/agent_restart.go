@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -103,31 +101,12 @@ func writeAgentRestartResult(out io.Writer, agentID string) {
 }
 
 func agentRestartErrorExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if strings.Contains(err.Error(), "SWARM_API_TOKEN is required") {
-		return agentRestartExitAuth
-	}
-	var httpErr *cliAPIHTTPError
-	if errors.As(err, &httpErr) {
-		if httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden {
-			return agentRestartExitAuth
-		}
-		return agentRestartExitRuntime
-	}
-	var rpcErr *jsonRPCError
-	if errors.As(err, &rpcErr) {
-		switch applicationErrorCode(rpcErr.Data) {
-		case "UNAUTHORIZED":
-			return agentRestartExitAuth
-		case "AGENT_NOT_FOUND":
-			return agentRestartExitNotFound
-		case "IDEMPOTENCY_CONFLICT":
-			return agentRestartExitConflict
-		default:
-			return agentRestartExitRuntime
-		}
-	}
-	return agentRestartExitRuntime
+	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
+		runtimeExit:   agentRestartExitRuntime,
+		authExit:      agentRestartExitAuth,
+		notFoundExit:  agentRestartExitNotFound,
+		conflictExit:  agentRestartExitConflict,
+		notFoundCodes: []string{"AGENT_NOT_FOUND"},
+		conflictCodes: []string{"IDEMPOTENCY_CONFLICT"},
+	})
 }
