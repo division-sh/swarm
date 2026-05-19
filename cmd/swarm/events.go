@@ -184,6 +184,7 @@ func newEventCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newEventViewCommand(opts),
+		newEventPublishCommand(opts),
 		newEventReplayCommand(opts),
 	)
 	return cmd
