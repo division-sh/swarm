@@ -5323,6 +5323,51 @@ cli_specification:
     - docs/SWARM_INVESTIGATE_COMMAND_DRAFT.md
     - docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux.yaml
     - stale v1 `swarm investigate *` command catalog entries
+  catalog_accounting_model:
+    owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.command_catalog
+    accounting_unit: explicit_command_catalog_row
+    rule: >
+      CLI v2 catalog accounting counts one explicit `command_catalog` map entry as one row.
+      Row keys, not Cobra nodes, literal subcommands, optional flags, examples, target modes,
+      or ignored review-artifact prose, define the implementation and tracker accounting unit.
+      Future #794/#735 children MUST bind to these explicit rows unless a later tracked spec
+      change deliberately splits or merges rows.
+    derived_count_rule: >
+      Numeric totals are not independently authoritative prose. Total, tier, and implementation
+      status counts MUST be derived from the structured `command_catalog` rows at review/proof
+      time by grouping row entries by `tier` and `implementation_status`.
+    stale_count_policy: >
+      Count claims in ignored review artifacts, issue prose, historical matrices, or non-promoted
+      design notes are reconciliation evidence only. If they disagree with the structured rows,
+      the structured rows win until a tracked spec PR changes the catalog.
+    family_normalization_examples:
+      forkchat:
+        row: forkchat
+        rule: >
+          `swarm forkchat new|resume|list|view|delete` is one blocked backlog family row for
+          #735/#749 accounting until a future tracked spec PR splits the family.
+      control:
+        rows:
+        - control_pause
+        - control_continue
+        - control_stop
+        rule: >
+          Each control verb is one row. Target forms such as `<run-id>` and `--all` are modes
+          of that row, not separate command rows.
+      agent_replay:
+        rows:
+        - agent_replay
+        - agent_replay_backlog
+        rule: >
+          Event-targeted replay and backlog replay are separate rows because they have different
+          runtime/API ownership and were intentionally split by the promoted catalog.
+      events:
+        rows:
+        - event_replay
+        - event_publish
+        rule: >
+          Event replay and event publish are separate rows. The implemented replay row MUST NOT
+          be reopened or counted as closing the absent publish row.
   review_artifact_reconciliation:
     source: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux-v2.yaml
     source_status: ignored_untracked_reconciliation_input
