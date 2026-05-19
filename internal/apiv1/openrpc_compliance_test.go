@@ -274,11 +274,9 @@ func assertEvidence(t *testing.T, methodName, field string, evidence complianceE
 	if status == "" {
 		t.Fatalf("%s %s status is empty", methodName, field)
 	}
-	allowed := map[string]struct{}{
-		"covered":                     {},
-		"shared":                      {},
-		"spot_checked":                {},
-		"published_without_discovery": {},
+	allowed := allowedEvidenceStatuses(field)
+	if len(allowed) == 0 {
+		t.Fatalf("%s uses unknown evidence field %q", methodName, field)
 	}
 	if allowTrackedGap {
 		allowed["tracked_gap"] = struct{}{}
@@ -288,6 +286,29 @@ func assertEvidence(t *testing.T, methodName, field string, evidence complianceE
 	}
 	if len(evidence.Proof) == 0 {
 		t.Fatalf("%s %s proof must name the test, helper, issue, or artifact backing status %q", methodName, field, status)
+	}
+}
+
+func allowedEvidenceStatuses(field string) map[string]struct{} {
+	switch field {
+	case "happy_path":
+		return complianceStringSet([]string{"covered"})
+	case "required_param_validation", "unknown_top_level_param_validation":
+		return complianceStringSet([]string{"shared", "covered"})
+	case "auth":
+		return complianceStringSet([]string{"shared", "covered"})
+	case "declared_error_tests":
+		return complianceStringSet([]string{"covered", "spot_checked"})
+	case "idempotency":
+		return complianceStringSet([]string{"covered"})
+	case "result_schema", "notification_schema":
+		return complianceStringSet([]string{"covered", "spot_checked"})
+	case "examples":
+		return complianceStringSet([]string{"covered"})
+	case "service_discovery_publication":
+		return complianceStringSet([]string{"published_without_discovery"})
+	default:
+		return map[string]struct{}{}
 	}
 }
 
