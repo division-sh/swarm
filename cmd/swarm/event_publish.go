@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"regexp"
 	"strings"
 
@@ -240,36 +238,19 @@ func writeEventPublishResult(out io.Writer, eventName string, result eventPublis
 }
 
 func eventPublishErrorExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if strings.Contains(err.Error(), "SWARM_API_TOKEN is required") {
-		return eventPublishExitAuth
-	}
-	var httpErr *cliAPIHTTPError
-	if errors.As(err, &httpErr) {
-		if httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden {
-			return eventPublishExitAuth
-		}
-		return eventPublishExitRuntime
-	}
-	var rpcErr *jsonRPCError
-	if errors.As(err, &rpcErr) {
-		switch applicationErrorCode(rpcErr.Data) {
-		case "UNAUTHORIZED":
-			return eventPublishExitAuth
-		case "RUN_NOT_FOUND":
-			return eventPublishExitNotFound
-		case "BUNDLE_MISMATCH",
+	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
+		runtimeExit:   eventPublishExitRuntime,
+		authExit:      eventPublishExitAuth,
+		notFoundExit:  eventPublishExitNotFound,
+		conflictExit:  eventPublishExitRejected,
+		notFoundCodes: []string{"RUN_NOT_FOUND"},
+		conflictCodes: []string{
+			"BUNDLE_MISMATCH",
 			"UNSUPPORTED_BUNDLE_REF",
 			"EVENT_NOT_DECLARED",
 			"PAYLOAD_VALIDATION_FAILED",
 			"RUN_ALREADY_TERMINAL",
-			"IDEMPOTENCY_CONFLICT":
-			return eventPublishExitRejected
-		default:
-			return eventPublishExitRuntime
-		}
-	}
-	return eventPublishExitRuntime
+			"IDEMPOTENCY_CONFLICT",
+		},
+	})
 }

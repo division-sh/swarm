@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -110,31 +108,12 @@ func writeAgentReplayBacklogResult(out io.Writer, agentID string, result agentRe
 }
 
 func agentReplayBacklogErrorExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if strings.Contains(err.Error(), "SWARM_API_TOKEN is required") {
-		return agentReplayBacklogExitAuth
-	}
-	var httpErr *cliAPIHTTPError
-	if errors.As(err, &httpErr) {
-		if httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden {
-			return agentReplayBacklogExitAuth
-		}
-		return agentReplayBacklogExitRuntime
-	}
-	var rpcErr *jsonRPCError
-	if errors.As(err, &rpcErr) {
-		switch applicationErrorCode(rpcErr.Data) {
-		case "UNAUTHORIZED":
-			return agentReplayBacklogExitAuth
-		case "AGENT_NOT_FOUND":
-			return agentReplayBacklogExitNotFound
-		case "IDEMPOTENCY_CONFLICT":
-			return agentReplayBacklogExitConflict
-		default:
-			return agentReplayBacklogExitRuntime
-		}
-	}
-	return agentReplayBacklogExitRuntime
+	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
+		runtimeExit:   agentReplayBacklogExitRuntime,
+		authExit:      agentReplayBacklogExitAuth,
+		notFoundExit:  agentReplayBacklogExitNotFound,
+		conflictExit:  agentReplayBacklogExitConflict,
+		notFoundCodes: []string{"AGENT_NOT_FOUND"},
+		conflictCodes: []string{"IDEMPOTENCY_CONFLICT"},
+	})
 }

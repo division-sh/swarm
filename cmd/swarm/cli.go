@@ -164,21 +164,21 @@ func newVersionCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Print local Swarm binary version information.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVersionCommand(cmd.Context(), cmd.OutOrStdout(), versionOpts)
+			return runVersionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), versionOpts)
 		},
 	}
 	cmd.Flags().BoolVar(&versionOpts.server, "server", false, "Also query /v1/rpc health.check and print server bundle/runtime identity")
 	return cmd
 }
 
-func runVersionCommand(ctx context.Context, out io.Writer, opts versionCommandOptions) error {
+func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionCommandOptions) error {
 	if !opts.server {
 		writeLocalVersion(out)
 		return nil
 	}
 	result, err := fetchDiagnosticHealthCheck(ctx, opts.apiOptions)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, cliAPIErrorClassifier{})
 	}
 	writeLocalVersion(out)
 	writeVersionServerIdentity(out, result)

@@ -107,7 +107,7 @@ func newAgentsListCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "List declared agents through v1 RPC.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAgentListCommand(cmd.Context(), cmd.OutOrStdout(), listOpts)
+			return runAgentListCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), listOpts)
 		},
 	}
 	cmd.Flags().StringVar(&listOpts.flow, "flow", "", "Filter by canonical flow path")
@@ -121,46 +121,54 @@ func newAgentViewCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "View one agent through v1 RPC.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAgentViewCommand(cmd.Context(), cmd.OutOrStdout(), opts, args[0])
+			return runAgentViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0])
 		},
 	}
 }
 
-func runAgentListCommand(ctx context.Context, out io.Writer, opts agentListCommandOptions) error {
+func runAgentListCommand(ctx context.Context, out, errOut io.Writer, opts agentListCommandOptions) error {
 	params := opts.params()
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, agentListAPIErrorClassifier())
 	}
 	var result agentListResult
 	if err := client.call(ctx, "agent.list", params, &result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, agentListAPIErrorClassifier())
 	}
 	if err := validateAgentListResult(result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, agentListAPIErrorClassifier())
 	}
 	writeAgentListResult(out, result)
 	return nil
 }
 
-func runAgentViewCommand(ctx context.Context, out io.Writer, opts rootCommandOptions, agentID string) error {
+func runAgentViewCommand(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, agentID string) error {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
-		return fmt.Errorf("agent id is required")
+		return returnCLIValidationError(errOut, fmt.Errorf("agent id is required"))
 	}
 	client, err := newCLIAPIClient(opts)
 	if err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
 	}
 	var result agentDetailResult
 	if err := client.call(ctx, "agent.get", map[string]any{"agent_id": agentID}, &result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
 	}
 	if err := validateAgentDetailResult(result); err != nil {
-		return err
+		return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
 	}
 	writeAgentDetailResult(out, result)
 	return nil
+}
+
+func agentListAPIErrorClassifier() cliAPIErrorClassifier {
+	return cliAPIErrorClassifier{}
+}
+
+func agentViewAPIErrorClassifier() cliAPIErrorClassifier {
+	return cliAPIErrorClassifier{notFoundCodes: []string{"AGENT_NOT_FOUND"}}
 }
 
 func (opts agentListCommandOptions) params() map[string]any {

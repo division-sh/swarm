@@ -5381,9 +5381,12 @@ cli_specification:
         tracker: '#844'
         action: Promote exact universal flag, config-file, and environment-precedence rules before implementation.
       exit_code_and_error_channel_normalization:
-        disposition: tracked_child
+        disposition: promoted_first_slice
         tracker: '#846'
-        action: Promote exact exit-code taxonomy and stderr/stdout error-channel rules before implementation.
+        action: >
+          The currently implemented API-backed command first slice is promoted in
+          cli_specification.foundations.error_channel_and_exit_code_contract. Remaining review-artifact output-mode and
+          universal flag semantics stay split to #848/#844.
       output_modes_and_shared_renderer:
         disposition: tracked_child
         tracker: '#848'
@@ -5504,6 +5507,48 @@ cli_specification:
       `swarm investigate` is retired legacy topology and MUST NOT be extended.
     output_contract: 'Default output is human/agent-readable text. `--json` emits JSON or NDJSON for streaming commands. `--quiet` prints only the load-bearing value.'
     auth_boundary: 'Runtime-state commands use v1 bearer auth through `SWARM_API_TOKEN`; legacy Builder/operator token fallback is invalid.'
+    error_channel_and_exit_code_contract:
+      implemented_by: '#846'
+      scope: >
+        First-slice normalization for currently implemented API-backed CLI commands. This applies to diagnostics/read
+        paths, mailbox list/view/decisions, version --server, agents list/view, agent mutations, control commands, event
+        list/follow/view/replay/publish, and swarm run shared API/client failures. Future command families consume this
+        contract when their API-backed implementation is promoted.
+      canonical_owner: cmd/swarm shared CLI API error classifier
+      stdout_rule: >
+        stdout is reserved for successful load-bearing command output. API/client/runtime errors, malformed API
+        responses, validation failures, and retired-namespace migration messages render to stderr.
+      root_fallback_rule: >
+        The root Cobra fallback keeps exit 2 for CLI syntax, misuse, invalid args, retired aliases, and other no-API-call
+        validation paths. Implemented API-backed commands MUST classify shared API/client/runtime errors before returning;
+        they MUST NOT leak missing-token, HTTP/RPC auth, transport, JSON-RPC envelope, malformed result, or known
+        application-code errors into the root fallback.
+      exit_codes:
+        success: 0
+        cli_validation_or_misuse_before_api_call: 2
+        runtime_transport_readiness_or_malformed_api: 3
+        auth_or_missing_token: 4
+        resource_not_found: 5
+        resource_state_or_conflict: 6
+        run_terminal_failed_or_cancelled: 7
+        interrupted_or_detached: 130
+      shared_classification:
+        missing_swarm_api_token: 4
+        http_401_or_403: 4
+        json_rpc_application_code_UNAUTHORIZED: 4
+        known_resource_not_found_application_codes: 5
+        known_resource_state_or_idempotency_conflict_application_codes: 6
+        transport_errors_http_non_auth_json_rpc_envelope_errors_unknown_rpc_codes_and_malformed_success_payloads: 3
+      command_local_preservation: >
+        Commands may define resource-specific not-found and conflict application-code sets, and `swarm run` preserves
+        terminal workflow exit 7 and interrupt/detach exit 130. Those command-local helpers still delegate shared
+        API/client categories to the canonical classifier.
+      split_siblings:
+      - '#844 universal flag/config/env precedence'
+      - '#848 --json/--quiet/output renderer normalization'
+      - '#839 retired namespace migration cleanup'
+      - absent #735 command families
+      - API/runtime method semantics
   tiers:
     must_have: 'Closure-gate command set for the promoted CLI v2 catalog.'
     should_have: 'Subsequent slices and backlog commands; each still requires a gated implementation child before code changes.'
@@ -5966,7 +6011,9 @@ cli_specification:
         columns: AGENT_ID, ROLE, TYPE, STATUS, MODEL_TIER, MODE, SCOPE
       exit_codes:
         success: 0
-        cli_validation_or_transport_or_rpc_or_malformed_response: 2
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
       proof_expectations:
       - exact /v1/rpc agent.list call with flow/role params only when provided
       - fail-closed SWARM_API_TOKEN behavior before any request
@@ -5985,7 +6032,12 @@ cli_specification:
         refs_only: optional current_session_ref and last_turn_ref lines when present
       exit_codes:
         success: 0
-        cli_validation_or_transport_or_rpc_or_malformed_response: 2
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        not_found_errors:
+        - AGENT_NOT_FOUND
       proof_expectations:
       - exact /v1/rpc agent.get call with agent_id
       - AGENT_NOT_FOUND and malformed AgentDetail responses fail closed
