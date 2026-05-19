@@ -60,7 +60,7 @@ func ProjectRunOperationalStatus(report RunDebugReport) RunOperationalStatus {
 
 func runOperationalStatusHeuristics(report RunDebugReport) []string {
 	if len(report.DeadLetters) == 0 {
-		return nil
+		return []string{}
 	}
 	return []string{"dead letters exist for this run"}
 }
