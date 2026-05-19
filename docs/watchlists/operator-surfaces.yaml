@@ -167,12 +167,14 @@ nodes:
       - no checked-in 42-method matrix keyed by generated OpenRPC method name
       - required params, unknown params, auth, declared errors, idempotency, result schema, and notification schema proof status can drift silently
       - stale or free-form proof references in the checked-in compliance matrix can drift silently from their test/helper/artifact/tracker owners
+      - generated supported-surface runtime probes can be absent for read-only HTTP methods even when proof-accounting rows resolve
       - OpenRPC method examples and rpc.discover publication status are not explicitly tracked
       - CI can pass without a direct swarm-openrpc-gen --check step
     representative_issues:
       - 835
       - 847
       - 857
+      - 861
     common_framing_mistakes:
       too_broad:
         - full v1 runtime conformance can be closed by one matrix PR
