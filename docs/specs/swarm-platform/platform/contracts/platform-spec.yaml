@@ -5368,9 +5368,10 @@ cli_specification:
         tracker: '#863'
         action: '`swarm event replay` is implemented over `/v1/rpc event.replay` by PR #866 / commit 23ef7d9c; it must not be reopened or grouped with future event publish work.'
       event_publish:
-        disposition: future_child
-        tracker: '#735'
-        action: '`swarm event publish` remains a future #735 child; it must not be absorbed by the #863 event replay slice.'
+        disposition: closed_child
+        tracker: '#868'
+        pr: '#869'
+        action: '`swarm event publish` is implemented over `/v1/rpc event.publish` by #868 / PR #869; it must not be reopened as a future #735 event-family child or grouped with run.start migration work.'
       conversations:
         disposition: future_child
         tracker: '#735'
