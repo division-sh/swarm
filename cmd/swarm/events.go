@@ -21,6 +21,12 @@ const (
 	eventObservationExitRuntime     = 3
 	eventObservationExitAuth        = 4
 	eventObservationExitNotFound    = 5
+	eventReplayMethod               = "event.replay"
+	eventReplayExitValidation       = 2
+	eventReplayExitRuntime          = 3
+	eventReplayExitAuth             = 4
+	eventReplayExitNotFound         = 5
+	eventReplayExitConflict         = 6
 )
 
 type eventFilterOptions struct {
@@ -49,6 +55,12 @@ type eventFollowCommandOptions struct {
 	apiOptions  rootCommandOptions
 	filter      eventFilterOptions
 	replaySince string
+}
+
+type eventReplayCommandOptions struct {
+	apiOptions     rootCommandOptions
+	subscribers    []string
+	idempotencyKey string
 }
 
 type eventListResult struct {
@@ -90,6 +102,24 @@ type eventDeadLetter struct {
 
 type eventSubscriptionResult struct {
 	SubscriptionID string `json:"subscription_id"`
+}
+
+type eventReplayResult struct {
+	EventID             string                `json:"event_id"`
+	ReplayEventID       string                `json:"replay_event_id"`
+	AuditEventID        string                `json:"audit_event_id"`
+	SubscribersReplayed []string              `json:"subscribers_replayed"`
+	OriginalDeliveries  []eventReplayDelivery `json:"original_deliveries"`
+	NewDeliveries       []eventReplayDelivery `json:"new_deliveries"`
+}
+
+type eventReplayDelivery struct {
+	DeliveryID       string `json:"delivery_id"`
+	SubscriberID     string `json:"subscriber_id"`
+	SessionID        string `json:"session_id,omitempty"`
+	Status           string `json:"status"`
+	Attempt          int    `json:"attempt"`
+	SourceDeliveryID string `json:"source_delivery_id,omitempty"`
 }
 
 type eventSubscriptionNotification struct {
@@ -146,13 +176,16 @@ func newEventsCommand(opts rootCommandOptions) *cobra.Command {
 func newEventCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "event",
-		Short: "View one event through v1 API owners.",
+		Short: "View or replay one event through v1 API owners.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(newEventViewCommand(opts))
+	cmd.AddCommand(
+		newEventViewCommand(opts),
+		newEventReplayCommand(opts),
+	)
 	return cmd
 }
 
@@ -201,6 +234,21 @@ func newEventViewCommand(opts rootCommandOptions) *cobra.Command {
 			return runEventViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0])
 		},
 	}
+}
+
+func newEventReplayCommand(opts rootCommandOptions) *cobra.Command {
+	replayOpts := eventReplayCommandOptions{apiOptions: opts}
+	cmd := &cobra.Command{
+		Use:   "replay <event-id>",
+		Short: "Replay one event through /v1/rpc event.replay.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runEventReplayCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, replayOpts)
+		},
+	}
+	cmd.Flags().StringArrayVar(&replayOpts.subscribers, "subscriber", nil, "Original agent subscriber to replay to; repeat to select a subset")
+	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	return cmd
 }
 
 func bindEventFilterFlags(cmd *cobra.Command, opts *eventFilterOptions) {
@@ -259,6 +307,30 @@ func runEventViewCommand(ctx context.Context, out, errOut io.Writer, opts rootCo
 		return commandExitError{code: eventObservationExitRuntime}
 	}
 	writeEventDetailResult(out, result)
+	return nil
+}
+
+func runEventReplayCommand(ctx context.Context, out, errOut io.Writer, args []string, opts eventReplayCommandOptions) error {
+	eventID, subscribers, err := validateEventReplayArgs(args, opts.subscribers)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return commandExitError{code: eventReplayExitValidation}
+	}
+	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return commandExitError{code: eventReplayErrorExitCode(err)}
+	}
+	var result eventReplayResult
+	if err := client.call(ctx, eventReplayMethod, opts.params(eventID, subscribers), &result); err != nil {
+		fmt.Fprintln(errOut, err)
+		return commandExitError{code: eventReplayErrorExitCode(err)}
+	}
+	if err := validateEventReplayResult(result, eventID); err != nil {
+		fmt.Fprintln(errOut, err)
+		return commandExitError{code: eventReplayExitRuntime}
+	}
+	writeEventReplayResult(out, result)
 	return nil
 }
 
@@ -360,6 +432,36 @@ func (opts eventFollowCommandOptions) params() (map[string]any, error) {
 		params["replay_since"] = replaySince
 	}
 	return params, nil
+}
+
+func validateEventReplayArgs(args []string, subscriberFlags []string) (string, []string, error) {
+	if len(args) != 1 {
+		return "", nil, fmt.Errorf("event replay requires <event-id>")
+	}
+	eventID := strings.TrimSpace(args[0])
+	if eventID == "" {
+		return "", nil, fmt.Errorf("event id is required")
+	}
+	subscribers := make([]string, 0, len(subscriberFlags))
+	for _, subscriber := range subscriberFlags {
+		subscriber = strings.TrimSpace(subscriber)
+		if subscriber == "" {
+			return "", nil, fmt.Errorf("--subscriber must be a non-empty agent id")
+		}
+		subscribers = append(subscribers, subscriber)
+	}
+	return eventID, subscribers, nil
+}
+
+func (opts eventReplayCommandOptions) params(eventID string, subscribers []string) map[string]any {
+	params := map[string]any{"event_id": eventID}
+	if len(subscribers) > 0 {
+		params["subscribers"] = subscribers
+	}
+	if key := strings.TrimSpace(opts.idempotencyKey); key != "" {
+		params["idempotency_key"] = key
+	}
+	return params
 }
 
 func (opts eventFilterOptions) params() (map[string]any, error) {
@@ -500,6 +602,74 @@ func validateEventDeadLetter(prefix string, deadLetter eventDeadLetter) error {
 	}
 	if err := validateRequiredTimestamp(prefix+".created_at", deadLetter.CreatedAt); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateEventReplayResult(result eventReplayResult, expectedEventID string) error {
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "event_id", value: result.EventID},
+		{name: "replay_event_id", value: result.ReplayEventID},
+		{name: "audit_event_id", value: result.AuditEventID},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("malformed event.replay result: %s is required", field.name)
+		}
+	}
+	if strings.TrimSpace(result.EventID) != expectedEventID {
+		return fmt.Errorf("malformed event.replay result: event_id=%q, want %q", result.EventID, expectedEventID)
+	}
+	if result.SubscribersReplayed == nil {
+		return fmt.Errorf("malformed event.replay result: subscribers_replayed is required")
+	}
+	if result.OriginalDeliveries == nil {
+		return fmt.Errorf("malformed event.replay result: original_deliveries is required")
+	}
+	if result.NewDeliveries == nil {
+		return fmt.Errorf("malformed event.replay result: new_deliveries is required")
+	}
+	for i, subscriber := range result.SubscribersReplayed {
+		if strings.TrimSpace(subscriber) == "" {
+			return fmt.Errorf("malformed event.replay result: subscribers_replayed[%d] is required", i)
+		}
+	}
+	for i, delivery := range result.OriginalDeliveries {
+		if err := validateEventReplayDelivery(fmt.Sprintf("original_deliveries[%d]", i), delivery, false); err != nil {
+			return err
+		}
+	}
+	for i, delivery := range result.NewDeliveries {
+		if err := validateEventReplayDelivery(fmt.Sprintf("new_deliveries[%d]", i), delivery, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateEventReplayDelivery(field string, delivery eventReplayDelivery, requireSource bool) error {
+	for _, part := range []struct {
+		name  string
+		value string
+	}{
+		{name: "delivery_id", value: delivery.DeliveryID},
+		{name: "subscriber_id", value: delivery.SubscriberID},
+		{name: "status", value: delivery.Status},
+	} {
+		if strings.TrimSpace(part.value) == "" {
+			return fmt.Errorf("malformed event.replay result: %s.%s is required", field, part.name)
+		}
+	}
+	if _, ok := eventObservationValidDeliveryStatuses[strings.TrimSpace(delivery.Status)]; !ok {
+		return fmt.Errorf("malformed event.replay result: %s.status=%q is not a valid DeliveryStatus", field, delivery.Status)
+	}
+	if delivery.Attempt < 1 {
+		return fmt.Errorf("malformed event.replay result: %s.attempt must be >= 1", field)
+	}
+	if requireSource && strings.TrimSpace(delivery.SourceDeliveryID) == "" {
+		return fmt.Errorf("malformed event.replay result: %s.source_delivery_id is required", field)
 	}
 	return nil
 }
@@ -716,6 +886,39 @@ func writeEventFollowEvent(out io.Writer, event eventFull) {
 	fmt.Fprintf(out, "event %s\n", strings.Join(fields, " "))
 }
 
+func writeEventReplayResult(out io.Writer, result eventReplayResult) {
+	if out == nil {
+		return
+	}
+	fmt.Fprintf(out, "event replay ok: event_id=%s replay_event_id=%s audit_event_id=%s subscribers_replayed=%s original_deliveries=%d new_deliveries=%d\n",
+		result.EventID,
+		result.ReplayEventID,
+		result.AuditEventID,
+		strings.Join(result.SubscribersReplayed, ","),
+		len(result.OriginalDeliveries),
+		len(result.NewDeliveries),
+	)
+	for _, delivery := range result.OriginalDeliveries {
+		fmt.Fprintf(out, "original_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d\n",
+			delivery.DeliveryID,
+			delivery.SubscriberID,
+			delivery.Status,
+			eventObservationDash(delivery.SessionID),
+			delivery.Attempt,
+		)
+	}
+	for _, delivery := range result.NewDeliveries {
+		fmt.Fprintf(out, "new_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d source_delivery_id=%s\n",
+			delivery.DeliveryID,
+			delivery.SubscriberID,
+			delivery.Status,
+			eventObservationDash(delivery.SessionID),
+			delivery.Attempt,
+			delivery.SourceDeliveryID,
+		)
+	}
+}
+
 func eventObservationCompactJSON(value map[string]any) string {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -758,4 +961,39 @@ func eventObservationErrorExitCode(err error) int {
 		}
 	}
 	return eventObservationExitRuntime
+}
+
+func eventReplayErrorExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	if strings.Contains(err.Error(), "SWARM_API_TOKEN is required") {
+		return eventReplayExitAuth
+	}
+	var httpErr *cliAPIHTTPError
+	if errors.As(err, &httpErr) {
+		if httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden {
+			return eventReplayExitAuth
+		}
+		return eventReplayExitRuntime
+	}
+	var rpcErr *jsonRPCError
+	if errors.As(err, &rpcErr) {
+		switch applicationErrorCode(rpcErr.Data) {
+		case "UNAUTHORIZED":
+			return eventReplayExitAuth
+		case "EVENT_NOT_FOUND":
+			return eventReplayExitNotFound
+		case "EVENT_REPLAY_NO_DELIVERY_HISTORY",
+			"EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
+			"EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
+			"EVENT_REPLAY_NOT_ELIGIBLE",
+			"PAYLOAD_VALIDATION_FAILED",
+			"IDEMPOTENCY_CONFLICT":
+			return eventReplayExitConflict
+		default:
+			return eventReplayExitRuntime
+		}
+	}
+	return eventReplayExitRuntime
 }

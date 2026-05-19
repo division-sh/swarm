@@ -6017,10 +6017,47 @@ cli_specification:
       - EVENT_NOT_FOUND, HTTP/RPC failures, and malformed EventFull results fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
     event_replay:
-      command: swarm event replay <event-id>
+      command: swarm event replay <event-id> [--subscriber <agent-id> ...] [--idempotency-key <key>]
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc event.replay
+      behavior: >-
+        Mutating event redelivery CLI consumer. The CLI sends event_id, optional subscribers from repeated --subscriber flags,
+        and optional idempotency_key to /v1/rpc event.replay through the shared v1 API client. The server remains the replay
+        owner: it derives replay targets from original event_deliveries, creates fresh replay/audit evidence, and returns
+        EventReplayResult.
+      flags:
+      - name: --subscriber <agent-id>
+        repeatable: true
+        maps_to: subscribers
+        behavior: Optional subset of original agent subscriber IDs. Omitted means all original agent subscribers.
+      - name: --idempotency-key <key>
+        maps_to: idempotency_key
+        behavior: Optional v1 API idempotency key for this mutating replay request.
+      output:
+        success_detail: One replay summary line with event_id/replay_event_id/audit_event_id/subscribers_replayed/delivery counts, followed by original_delivery and new_delivery lineage rows from the server-owned EventReplayResult.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        replay_conflict: 6
+        not_found_errors:
+        - EVENT_NOT_FOUND
+        replay_conflict_errors:
+        - EVENT_REPLAY_NO_DELIVERY_HISTORY
+        - EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL
+        - EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE
+        - EVENT_REPLAY_NOT_ELIGIBLE
+        - PAYLOAD_VALIDATION_FAILED
+        - IDEMPOTENCY_CONFLICT
+      proof_expectations:
+      - exact /v1/rpc event.replay call with event_id, optional subscribers, and optional idempotency_key params only
+      - missing or blank event id, blank --subscriber, invalid args, and missing SWARM_API_TOKEN make zero API calls
+      - success output renders server-owned replay_event_id, audit_event_id, subscribers_replayed, and original/new delivery lineage
+      - EVENT_NOT_FOUND, replay conflict errors, auth/HTTP/RPC failures, and malformed EventReplayResult values fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.publish, agent.replay, or agent.replay_backlog usage
     event_publish:
       command: swarm event publish <event-name>
       tier: should_have
@@ -6156,7 +6193,7 @@ cli_specification:
     - swarm investigate trace
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
-    - swarm event replay / event publish
+    - swarm event publish
     - swarm conversations list / conversation view / conversation turn
     - swarm forkchat new|resume|list|view|delete
     - swarm entities list / entity view / entity aggregate
