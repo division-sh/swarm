@@ -6192,10 +6192,57 @@ cli_specification:
       - EVENT_NOT_FOUND, replay conflict errors, auth/HTTP/RPC failures, and malformed EventReplayResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.publish, agent.replay, or agent.replay_backlog usage
     event_publish:
-      command: swarm event publish <event-name>
+      command: swarm event publish <event-name> --payload-json <json-object> [--run-id <run-id>] [--bundle-fingerprint <sha256:...>] [--emitter <source>] [--idempotency-key <key>]
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc event.publish
+      behavior: >-
+        Mutating event publication CLI consumer. The CLI validates the event name, required JSON object payload, optional run
+        target, optional bundle fingerprint assertion, optional emitter, and optional idempotency key, then sends exactly those
+        params to /v1/rpc event.publish through the shared v1 API client. The server remains the event-publication owner:
+        it validates declared event/payload/run/bundle/idempotency semantics, publishes through the runtime EventBus/store
+        owner, derives delivery rows, and returns EventPublishResult.
+      flags:
+      - name: --payload-json <json-object>
+        required: true
+        maps_to: payload
+        behavior: Required inline JSON object payload. File/stdin payload input is not part of the v1 CLI event-publish slice.
+      - name: --run-id <run-id>
+        maps_to: run_id
+        behavior: Optional existing nonterminal run id to inject the event into. Omitted means the server allocates and starts a new run.
+      - name: --bundle-fingerprint <sha256:...>
+        maps_to: bundle_ref.fingerprint
+        behavior: Optional assertion that the server is running the expected boot bundle fingerprint. v1 BundleRef supports fingerprint only.
+      - name: --emitter <source>
+        maps_to: emitter
+        behavior: Optional producer identifier. Omitted means the server default emitter applies.
+      - name: --idempotency-key <key>
+        maps_to: idempotency_key
+        behavior: Optional v1 API idempotency key for this mutating publish request.
+      output:
+        success_detail: One publish summary line with event_id, event_name, run_id, new_run_created, and delivery count, followed by persisted delivery rows containing subscriber_id, status, session_id, and attempt.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        publish_rejected: 6
+        not_found_errors:
+        - RUN_NOT_FOUND
+        publish_rejected_errors:
+        - BUNDLE_MISMATCH
+        - UNSUPPORTED_BUNDLE_REF
+        - EVENT_NOT_DECLARED
+        - PAYLOAD_VALIDATION_FAILED
+        - RUN_ALREADY_TERMINAL
+        - IDEMPOTENCY_CONFLICT
+      proof_expectations:
+      - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional bundle_ref.fingerprint, optional emitter, and optional idempotency_key params only
+      - missing/blank event name, invalid or non-object --payload-json, blank optional flags, malformed bundle fingerprint, invalid args, and missing SWARM_API_TOKEN make zero API calls
+      - success output renders only server-owned EventPublishResult event_id, run_id, new_run_created, and delivery rows
+      - RUN_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
+      - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, agent.replay, or agent.replay_backlog usage
       relation_to_run_start: '`run.start` remains usable for #743 until a separate migration changes the CLI internals to event.publish.'
     conversations_list:
       command: swarm conversations list
@@ -6317,6 +6364,8 @@ cli_specification:
     - swarm events list
     - swarm events follow
     - swarm event view
+    - swarm event replay
+    - swarm event publish
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
     - swarm investigate
@@ -6326,7 +6375,6 @@ cli_specification:
     - swarm investigate trace
     remaining_must_have_not_implemented: []
     remaining_should_have_not_implemented:
-    - swarm event publish
     - swarm conversations list / conversation view / conversation turn
     - swarm forkchat new|resume|list|view|delete
     - swarm entities list / entity view / entity aggregate
