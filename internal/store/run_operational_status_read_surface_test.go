@@ -93,4 +93,31 @@ func TestProjectRunOperationalStatus_PreservesHealthyRunningWhenActiveDeliveries
 	if got.BlockingLayer != "" || got.BlockingReason != "" {
 		t.Fatalf("unexpected blocking projection: %#v", got)
 	}
+	if got.Heuristics == nil {
+		t.Fatal("heuristics = nil, want empty slice")
+	}
+	if len(got.Heuristics) != 0 {
+		t.Fatalf("heuristics = %#v, want empty", got.Heuristics)
+	}
+}
+
+func TestProjectRunOperationalStatus_EmitsDeadLetterHeuristic(t *testing.T) {
+	report := RunDebugReport{
+		RunTableStatus: "running",
+		LastEventAt:    time.Unix(1700000000, 0).UTC(),
+		Deliveries: []RunDebugDeliveryCount{
+			{SubscriberID: "agent-1", Status: "in_progress", Count: 1},
+		},
+		DeadLetters: []RunDebugDeadLetter{
+			{OriginalEvent: "evt-1", FailureType: "handler_error"},
+		},
+	}
+
+	got := ProjectRunOperationalStatus(report)
+	if len(got.Heuristics) != 1 {
+		t.Fatalf("heuristics = %#v, want one item", got.Heuristics)
+	}
+	if got.Heuristics[0] != "dead letters exist for this run" {
+		t.Fatalf("heuristic = %q, want dead letters note", got.Heuristics[0])
+	}
 }

@@ -603,6 +603,15 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 			t.Fatalf("%s result missing top-level key %q: %#v", methodName, key, result)
 		}
 	}
+	if methodName == "run.diagnose" {
+		heuristics, ok := result["heuristics"].([]any)
+		if !ok {
+			t.Fatalf("run.diagnose heuristics = %#v, want array", result["heuristics"])
+		}
+		if len(heuristics) != 0 {
+			t.Fatalf("run.diagnose heuristics = %#v, want empty array", heuristics)
+		}
+	}
 }
 
 func assertReadOnlyProbeInvalidParams(t *testing.T, methodName string, resp rpcResponse, field string) {
