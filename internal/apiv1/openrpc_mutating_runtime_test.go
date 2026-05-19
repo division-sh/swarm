@@ -1,0 +1,1117 @@
+package apiv1
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"swarm/internal/apispec"
+	"swarm/internal/events"
+	runtimeagentcontrol "swarm/internal/runtime/agentcontrol"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/destructivereset"
+	runtimeingress "swarm/internal/runtime/ingress"
+	runtimeruncontrol "swarm/internal/runtime/runcontrol"
+	"swarm/internal/runtime/semanticview"
+	"swarm/internal/store"
+)
+
+const mutatingRuntimeProbeTestName = "TestOpenRPCMutatingHTTPRuntimeProbes"
+
+func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
+	root := repoRoot(t)
+	api := loadComplianceAPISpec(t, root)
+	openRPC, _ := loadComplianceOpenRPC(t, filepath.Join(root, "docs", "specs", "swarm-platform", "platform", "contracts", "openrpc.json"))
+	matrix := loadComplianceMatrix(t, filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml"))
+
+	methods := mutatingHTTPRuntimeMethods(t, api, openRPC, matrix)
+	assertStringList(t, "mutating HTTP runtime method set", methods, approvedMutatingHTTPRuntimeMethods())
+
+	fixtures := mutatingHTTPRuntimeFixtures()
+	assertStringList(t, "mutating HTTP runtime fixture methods", sortedMutatingProbeFixtureMethods(fixtures), methods)
+	assertMutatingRuntimeMatrixProofRefs(t, api, matrix, methods)
+	assertMutatingRuntimeDeclaredErrorCoverage(t, api, methods)
+
+	t.Run("classification excludes sibling classes", func(t *testing.T) {
+		mutating := complianceStringSet(methods)
+		for _, sibling := range []string{"agent.get", "event.subscribe", "rpc.unsubscribe", "health.check"} {
+			if _, ok := mutating[sibling]; ok {
+				t.Fatalf("%s classified into mutating HTTP runtime probes; sibling methods must stay under #857", sibling)
+			}
+		}
+	})
+
+	for _, methodName := range methods {
+		methodName := methodName
+		fixture := fixtures[methodName]
+		method := api.MethodCatalog[methodName]
+
+		t.Run(methodName+"/success_idempotency_and_conflict", func(t *testing.T) {
+			handler, calls, state := newMutatingRuntimeProbeHandler(t, methodName)
+			key := "idem-" + strings.ReplaceAll(methodName, ".", "-")
+			params := mutatingProbeParamsWithIdempotency(fixture.Params, key)
+			status, resp, body := callMutatingProbeRPC(t, handler, methodName, params, "Bearer "+testToken)
+			if status != http.StatusOK {
+				t.Fatalf("status = %d, want 200 body=%s", status, body)
+			}
+			if calls[methodName] != 1 {
+				t.Fatalf("%s handler calls = %d, want 1", methodName, calls[methodName])
+			}
+			assertMutatingProbeSuccess(t, methodName, resp, fixture.ResultKeys)
+			if got := state.effectCount(); got != fixture.SuccessEffects {
+				t.Fatalf("%s side effects after success = %d, want %d", methodName, got, fixture.SuccessEffects)
+			}
+			if got := state.idempotency.calls; got != 1 {
+				t.Fatalf("%s idempotency calls after success = %d, want 1", methodName, got)
+			}
+
+			replayStatus, replayResp, replayBody := callMutatingProbeRPC(t, handler, methodName, params, "Bearer "+testToken)
+			if replayStatus != http.StatusOK {
+				t.Fatalf("replay status = %d, want 200 body=%s", replayStatus, replayBody)
+			}
+			if calls[methodName] != 2 {
+				t.Fatalf("%s handler calls after replay = %d, want 2", methodName, calls[methodName])
+			}
+			assertMutatingProbeSuccess(t, methodName, replayResp, fixture.ResultKeys)
+			if got := state.effectCount(); got != fixture.SuccessEffects {
+				t.Fatalf("%s side effects after replay = %d, want %d", methodName, got, fixture.SuccessEffects)
+			}
+			if got := state.idempotency.calls; got != 2 {
+				t.Fatalf("%s idempotency calls after replay = %d, want 2", methodName, got)
+			}
+
+			conflictParams := mutatingProbeConflictParams(fixture, key)
+			conflictStatus, conflictResp, conflictBody := callMutatingProbeRPC(t, handler, methodName, conflictParams, "Bearer "+testToken)
+			if conflictStatus != http.StatusOK {
+				t.Fatalf("conflict status = %d, want 200 body=%s", conflictStatus, conflictBody)
+			}
+			if calls[methodName] != 3 {
+				t.Fatalf("%s handler calls after conflict = %d, want 3", methodName, calls[methodName])
+			}
+			assertMutatingProbeApplicationError(t, testRegistry(t), methodName, conflictResp, IdempotencyConflictCode)
+			if got := state.effectCount(); got != fixture.SuccessEffects {
+				t.Fatalf("%s side effects after conflict = %d, want %d", methodName, got, fixture.SuccessEffects)
+			}
+			if got := state.idempotency.calls; got != 3 {
+				t.Fatalf("%s idempotency calls after conflict = %d, want 3", methodName, got)
+			}
+		})
+
+		t.Run(methodName+"/unknown_params_key", func(t *testing.T) {
+			handler, calls, state := newMutatingRuntimeProbeHandler(t, methodName)
+			params := cloneProbeParams(fixture.Params)
+			params["_unexpected"] = true
+			status, resp, body := callMutatingProbeRPC(t, handler, methodName, params, "Bearer "+testToken)
+			if status != http.StatusOK {
+				t.Fatalf("status = %d, want 200 body=%s", status, body)
+			}
+			assertMutatingProbeInvalidParams(t, methodName, resp, "_unexpected")
+			assertMutatingProbeNoExecution(t, methodName, calls, state, "unknown params-object key")
+		})
+
+		for _, paramName := range requiredParamNames(method) {
+			paramName := paramName
+			t.Run(methodName+"/missing_required_"+paramName, func(t *testing.T) {
+				handler, calls, state := newMutatingRuntimeProbeHandler(t, methodName)
+				params := cloneProbeParams(fixture.Params)
+				delete(params, paramName)
+				status, resp, body := callMutatingProbeRPC(t, handler, methodName, params, "Bearer "+testToken)
+				if status != http.StatusOK {
+					t.Fatalf("status = %d, want 200 body=%s", status, body)
+				}
+				assertMutatingProbeInvalidParams(t, methodName, resp, paramName)
+				assertMutatingProbeNoExecution(t, methodName, calls, state, "missing required param")
+			})
+		}
+
+		for _, authCase := range []struct {
+			name   string
+			header string
+		}{
+			{name: "missing_auth"},
+			{name: "invalid_auth", header: "Bearer wrong"},
+		} {
+			authCase := authCase
+			t.Run(methodName+"/"+authCase.name, func(t *testing.T) {
+				handler, calls, state := newMutatingRuntimeProbeHandler(t, methodName)
+				status, _, body := callMutatingProbeRPC(t, handler, methodName, fixture.Params, authCase.header)
+				if status != http.StatusUnauthorized {
+					t.Fatalf("status = %d, want 401 body=%s", status, body)
+				}
+				assertMutatingProbeNoExecution(t, methodName, calls, state, authCase.name)
+			})
+		}
+	}
+
+	for _, probe := range mutatingHTTPRuntimeErrorProbes() {
+		probe := probe
+		t.Run(probe.Method+"/"+probe.Code, func(t *testing.T) {
+			method := api.MethodCatalog[probe.Method]
+			if _, ok := complianceStringSet(method.Errors)[probe.Code]; !ok {
+				t.Fatalf("%s error probe uses %s, absent from declared errors %v", probe.Method, probe.Code, method.Errors)
+			}
+			handler, calls, state := newMutatingRuntimeProbeHandler(t, probe.Method, probe.Modifiers...)
+			status, resp, body := callMutatingProbeRPC(t, handler, probe.Method, probe.Params, "Bearer "+testToken)
+			if status != http.StatusOK {
+				t.Fatalf("status = %d, want 200 body=%s", status, body)
+			}
+			if calls[probe.Method] != 1 {
+				t.Fatalf("%s handler calls = %d, want 1 for declared application error", probe.Method, calls[probe.Method])
+			}
+			assertMutatingProbeApplicationError(t, testRegistry(t), probe.Method, resp, probe.Code)
+			if got := state.effectCount(); got != probe.WantEffects {
+				t.Fatalf("%s side effects after %s = %d, want %d", probe.Method, probe.Code, got, probe.WantEffects)
+			}
+		})
+	}
+}
+
+func mutatingHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, openRPC apispec.OpenRPCDocument, matrix openRPCComplianceMatrix) []string {
+	t.Helper()
+	openRPCMethods := map[string]struct{}{}
+	for _, method := range openRPC.Methods {
+		openRPCMethods[method.Name] = struct{}{}
+	}
+	matrixRows := map[string]openRPCMethodMatrix{}
+	for _, row := range matrix.Methods {
+		matrixRows[row.Method] = row
+	}
+
+	var out []string
+	for _, methodName := range api.Conventions.Idempotency.MutatingMethods {
+		method, ok := api.MethodCatalog[methodName]
+		if !ok {
+			t.Fatalf("%s listed in mutating_methods but missing from platform spec method_catalog", methodName)
+		}
+		if _, ok := openRPCMethods[methodName]; !ok {
+			t.Fatalf("%s missing from generated OpenRPC artifact", methodName)
+		}
+		row, ok := matrixRows[methodName]
+		if !ok {
+			t.Fatalf("%s missing from OpenRPC compliance matrix", methodName)
+		}
+		if row.Transport != expectedComplianceTransport(methodName, method) {
+			t.Fatalf("%s matrix transport = %q, want %q", methodName, row.Transport, expectedComplianceTransport(methodName, method))
+		}
+		if expectedComplianceTransport(methodName, method) != "http" {
+			t.Fatalf("%s mutating runtime probe expected HTTP transport, got %q", methodName, expectedComplianceTransport(methodName, method))
+		}
+		out = append(out, methodName)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func approvedMutatingHTTPRuntimeMethods() []string {
+	return []string{
+		"agent.replay",
+		"agent.replay_backlog",
+		"agent.restart",
+		"agent.send_directive",
+		"event.publish",
+		"event.replay",
+		"mailbox.approve",
+		"mailbox.defer",
+		"mailbox.reject",
+		"run.continue",
+		"run.pause",
+		"run.start",
+		"run.stop",
+		"runtime.nuke",
+		"runtime.pause",
+		"runtime.resume",
+	}
+}
+
+type mutatingHTTPRuntimeFixture struct {
+	Params                         map[string]any
+	ConflictParams                 map[string]any
+	TrimEquivalentConflictKeyValue bool
+	ResultKeys                     []string
+	SuccessEffects                 int
+}
+
+func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
+	runID := "00000000-0000-0000-0000-000000000101"
+	otherRunID := "00000000-0000-0000-0000-000000000102"
+	until := time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano)
+	later := time.Unix(1700007200, 0).UTC().Format(time.RFC3339Nano)
+	return map[string]mutatingHTTPRuntimeFixture{
+		"agent.replay": {
+			Params:         map[string]any{"event_id": "evt-1", "agent_id": "agent-a"},
+			ConflictParams: map[string]any{"event_id": "evt-1", "agent_id": "agent-b"},
+			ResultKeys:     []string{"event_id", "agent_id", "replay_event_id", "audit_event_id", "original_delivery", "new_delivery"},
+			SuccessEffects: 2,
+		},
+		"agent.replay_backlog": {
+			Params:         map[string]any{"agent_id": "agent-a"},
+			ConflictParams: map[string]any{"agent_id": "agent-b"},
+			ResultKeys:     []string{"ok", "replayed_count"},
+			SuccessEffects: 1,
+		},
+		"agent.restart": {
+			Params:         map[string]any{"agent_id": "agent-a"},
+			ConflictParams: map[string]any{"agent_id": "agent-b"},
+			ResultKeys:     []string{"ok"},
+			SuccessEffects: 1,
+		},
+		"agent.send_directive": {
+			Params:         map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID},
+			ConflictParams: map[string]any{"agent_id": "agent-a", "directive": "pause", "run_id": runID},
+			ResultKeys:     []string{"ok", "run_id", "run_id_resolution", "directive_event_id", "directive_event_type"},
+			SuccessEffects: 1,
+		},
+		"event.publish": {
+			Params:         map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}},
+			ConflictParams: map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "dentistry"}},
+			ResultKeys:     []string{"event_id", "run_id", "new_run_created", "deliveries"},
+			SuccessEffects: 1,
+		},
+		"event.replay": {
+			Params:         map[string]any{"event_id": "evt-1"},
+			ConflictParams: map[string]any{"event_id": "evt-1", "subscribers": []any{"agent-a"}},
+			ResultKeys:     []string{"event_id", "replay_event_id", "audit_event_id", "subscribers_replayed", "original_deliveries", "new_deliveries"},
+			SuccessEffects: 2,
+		},
+		"mailbox.approve": {
+			Params:         map[string]any{"mailbox_id": "mailbox-1", "decision_payload": map[string]any{"approved": true}},
+			ConflictParams: map[string]any{"mailbox_id": "mailbox-1", "decision_payload": map[string]any{"approved": false}},
+			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "downstream_event_id"},
+			SuccessEffects: 2,
+		},
+		"mailbox.defer": {
+			Params:         map[string]any{"mailbox_id": "mailbox-1", "until": until},
+			ConflictParams: map[string]any{"mailbox_id": "mailbox-1", "until": later},
+			ResultKeys:     []string{"ok", "mailbox_decision_id", "status"},
+			SuccessEffects: 1,
+		},
+		"mailbox.reject": {
+			Params:         map[string]any{"mailbox_id": "mailbox-1", "reason": "not enough evidence"},
+			ConflictParams: map[string]any{"mailbox_id": "mailbox-1", "reason": "duplicate request"},
+			ResultKeys:     []string{"ok", "mailbox_decision_id", "status"},
+			SuccessEffects: 1,
+		},
+		"run.continue": {
+			Params:         map[string]any{"run_id": runID},
+			ConflictParams: map[string]any{"run_id": otherRunID},
+			ResultKeys:     []string{"ok"},
+			SuccessEffects: 1,
+		},
+		"run.pause": {
+			Params:         map[string]any{"run_id": runID},
+			ConflictParams: map[string]any{"run_id": otherRunID},
+			ResultKeys:     []string{"ok"},
+			SuccessEffects: 1,
+		},
+		"run.start": {
+			Params:         map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "run_id": runID},
+			ConflictParams: map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "dentistry"}, "run_id": runID},
+			ResultKeys:     []string{"run_id", "status"},
+			SuccessEffects: 1,
+		},
+		"run.stop": {
+			Params:         map[string]any{"run_id": runID},
+			ConflictParams: map[string]any{"run_id": otherRunID},
+			ResultKeys:     []string{"ok"},
+			SuccessEffects: 1,
+		},
+		"runtime.nuke": {
+			Params:         map[string]any{"dry_run": false},
+			ConflictParams: map[string]any{"dry_run": true},
+			ResultKeys:     []string{"ok", "status", "operation_name", "plan", "quiescence", "cleanup", "containers"},
+			SuccessEffects: 4,
+		},
+		"runtime.pause": {
+			Params:                         map[string]any{},
+			ConflictParams:                 map[string]any{},
+			TrimEquivalentConflictKeyValue: true,
+			ResultKeys:                     []string{"ok"},
+			SuccessEffects:                 1,
+		},
+		"runtime.resume": {
+			Params:                         map[string]any{},
+			ConflictParams:                 map[string]any{},
+			TrimEquivalentConflictKeyValue: true,
+			ResultKeys:                     []string{"ok"},
+			SuccessEffects:                 1,
+		},
+	}
+}
+
+type mutatingHTTPRuntimeErrorProbe struct {
+	Method      string
+	Params      map[string]any
+	Code        string
+	WantEffects int
+	Modifiers   []func(*mutatingRuntimeProbeState)
+}
+
+func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
+	runID := "00000000-0000-0000-0000-000000000101"
+	missingRunID := "00000000-0000-0000-0000-000000000999"
+	badFingerprint := "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	validEvent := map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
+	return []mutatingHTTPRuntimeErrorProbe{
+		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": badFingerprint}}), Code: BundleMismatchCode},
+		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"label": "latest"}}), Code: UnsupportedBundleRefCode},
+		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing"}), Code: EventNotDeclaredCode},
+		{Method: "event.publish", Params: validEvent, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
+		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": missingRunID}), Code: RunNotFoundCode},
+		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runs.headers[runID] = store.RunHeader{RunID: runID, Status: "completed"}
+		}}},
+
+		{Method: "event.replay", Params: map[string]any{"event_id": "missing", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
+		{Method: "event.replay", Params: map[string]any{"event_id": "evt-empty", "idempotency_key": "idem-error"}, Code: EventReplayNoDeliveryHistoryCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent("evt-empty", nil, eventReplayStatusDelivered)
+		}}},
+		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "subscribers": []any{"agent-b"}, "idempotency_key": "idem-error"}, Code: EventReplaySubscriberNotOriginalCode},
+		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.missingRecipients = []string{"agent-a"} }}},
+		{Method: "event.replay", Params: map[string]any{"event_id": "evt-pending", "idempotency_key": "idem-error"}, Code: EventReplayNotEligibleCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent("evt-pending", []string{"agent-a"}, eventReplayStatusPending)
+		}}},
+		{Method: "event.replay", Params: map[string]any{"event_id": "evt-1", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
+
+		{Method: "agent.replay", Params: map[string]any{"event_id": "missing", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
+		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-empty", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNoDeliveryHistoryCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.observability.events["evt-empty"] = mutatingProbeOriginalEvent("evt-empty", nil, eventReplayStatusDelivered)
+		}}},
+		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-b", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberNotOriginalCode},
+		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplaySubscriberUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.missingRecipients = []string{"agent-a"} }}},
+		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-pending", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: EventReplayNotEligibleCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.observability.events["evt-pending"] = mutatingProbeOriginalEvent("evt-pending", []string{"agent-a"}, eventReplayStatusPending)
+		}}},
+		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
+
+		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"fingerprint": badFingerprint}, "run_id": runID}), Code: BundleMismatchCode},
+		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"bundle_ref": map[string]any{"label": "latest"}, "run_id": runID}), Code: UnsupportedBundleRefCode},
+		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"event_name": "scan.missing", "run_id": runID}), Code: EventNotDeclaredCode},
+		{Method: "run.start", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.publishErr = runtimebus.ErrPayloadValidation }}},
+
+		{Method: "run.stop", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runControl.errs["stop"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
+		}}},
+		{Method: "run.stop", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runControl.errs["stop"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: runID, CurrentStatus: "completed"}
+		}}},
+		{Method: "run.pause", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runControl.errs["pause"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
+		}}},
+		{Method: "run.pause", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runControl.errs["pause"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: runID, CurrentStatus: "completed"}
+		}}},
+		{Method: "run.pause", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunAlreadyPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runControl.errs["pause"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyPaused, RunID: runID, CurrentStatus: "paused"}
+		}}},
+		{Method: "run.continue", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runControl.errs["continue"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrRunNotFound, RunID: runID}
+		}}},
+		{Method: "run.continue", Params: map[string]any{"run_id": runID, "idempotency_key": "idem-error"}, Code: RunNotPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runControl.errs["continue"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: runID, CurrentStatus: "running"}
+		}}},
+
+		{Method: "mailbox.approve", Params: map[string]any{"mailbox_id": "missing", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.mailbox.decisionErr = store.ErrMailboxV1NotFound }}},
+		{Method: "mailbox.approve", Params: map[string]any{"mailbox_id": "mailbox-1", "idempotency_key": "idem-error"}, Code: MailboxAlreadyDecidedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.mailbox.decisionErr = &store.MailboxV1AlreadyDecidedError{MailboxID: "mailbox-1", ExistingDecision: "approved", DecidedAt: s.now}
+		}}},
+		{Method: "mailbox.approve", Params: map[string]any{"mailbox_id": "mailbox-1", "idempotency_key": "idem-error"}, Code: MailboxApprovalEventUnconfiguredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.mailbox.decisionErr = &store.MailboxV1ApprovalRouteError{MailboxID: "mailbox-1", ItemType: "review_request"}
+		}}},
+		{Method: "mailbox.reject", Params: map[string]any{"mailbox_id": "missing", "reason": "no", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.mailbox.decisionErr = store.ErrMailboxV1NotFound }}},
+		{Method: "mailbox.reject", Params: map[string]any{"mailbox_id": "mailbox-1", "reason": "no", "idempotency_key": "idem-error"}, Code: MailboxAlreadyDecidedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.mailbox.decisionErr = &store.MailboxV1AlreadyDecidedError{MailboxID: "mailbox-1", ExistingDecision: "rejected", DecidedAt: s.now}
+		}}},
+		{Method: "mailbox.defer", Params: map[string]any{"mailbox_id": "missing", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.mailbox.decisionErr = store.ErrMailboxV1NotFound }}},
+		{Method: "mailbox.defer", Params: map[string]any{"mailbox_id": "mailbox-1", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: MailboxAlreadyDecidedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.mailbox.decisionErr = &store.MailboxV1AlreadyDecidedError{MailboxID: "mailbox-1", ExistingDecision: "deferred", DecidedAt: s.now}
+		}}},
+		{Method: "mailbox.defer", Params: map[string]any{"mailbox_id": "mailbox-1", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: InvalidDeferUntilCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.mailbox.decisionErr = &store.MailboxV1InvalidDeferUntilError{Reason: "too far in future"}
+		}}},
+
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "missing", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
+		}}},
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentNotRunningCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotRunning, AgentID: "agent-a", CurrentStatus: runtimeagentcontrol.StatusTerminated}
+		}}},
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": missingRunID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrRunNotFound, AgentID: "agent-a", RunID: missingRunID}
+		}}},
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID, "idempotency_key": "idem-error"}, Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrRunAlreadyTerminal, AgentID: "agent-a", RunID: runID, CurrentStatus: "completed"}
+		}}},
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AmbiguousRunTargetCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAmbiguousRunTarget, AgentID: "agent-a", ActiveSessions: []runtimeagentcontrol.ActiveSessionTarget{{SessionID: "sess-1", RunID: runID}}}
+		}}},
+		{Method: "agent.restart", Params: map[string]any{"agent_id": "missing", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.restart"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
+		}}},
+		{Method: "agent.replay_backlog", Params: map[string]any{"agent_id": "missing", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.replay_backlog"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
+		}}},
+
+		{Method: "runtime.pause", Params: map[string]any{"idempotency_key": "idem-error"}, Code: RuntimeAlreadyPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runtimeIngress.errs["runtime.pause"] = runtimeingress.ErrAlreadyPaused
+		}}},
+		{Method: "runtime.resume", Params: map[string]any{"idempotency_key": "idem-error"}, Code: RuntimeNotPausedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runtimeIngress.errs["runtime.resume"] = runtimeingress.ErrNotPaused
+		}}},
+		{Method: "runtime.nuke", Params: map[string]any{"dry_run": false, "idempotency_key": "idem-error"}, Code: RuntimeNukeInProgressCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.nuke.planErr = destructivereset.ErrOperationInProgress }}},
+	}
+}
+
+func assertMutatingRuntimeDeclaredErrorCoverage(t *testing.T, api *apispec.APISpecification, methods []string) {
+	t.Helper()
+	covered := map[string]map[string]struct{}{}
+	for _, methodName := range methods {
+		covered[methodName] = map[string]struct{}{IdempotencyConflictCode: {}}
+	}
+	for _, probe := range mutatingHTTPRuntimeErrorProbes() {
+		if _, ok := covered[probe.Method]; !ok {
+			t.Fatalf("%s error probe is outside the approved mutating HTTP method set", probe.Method)
+		}
+		covered[probe.Method][probe.Code] = struct{}{}
+	}
+	for _, methodName := range methods {
+		for _, code := range api.MethodCatalog[methodName].Errors {
+			if _, ok := covered[methodName][code]; !ok {
+				t.Fatalf("%s declared error %s lacks generated mutating runtime probe coverage", methodName, code)
+			}
+		}
+	}
+}
+
+func assertMutatingRuntimeMatrixProofRefs(t *testing.T, api *apispec.APISpecification, matrix openRPCComplianceMatrix, methods []string) {
+	t.Helper()
+	mutatingMethods := complianceStringSet(methods)
+	rows := map[string]openRPCMethodMatrix{}
+	for _, row := range matrix.Methods {
+		rows[row.Method] = row
+		if _, ok := mutatingMethods[row.Method]; !ok && rowHasMutatingRuntimeProof(row) {
+			t.Fatalf("%s has %s proof_ref but is outside the approved mutating HTTP runtime probe set", row.Method, mutatingRuntimeProbeTestName)
+		}
+	}
+
+	for _, methodName := range methods {
+		row, ok := rows[methodName]
+		if !ok {
+			t.Fatalf("%s missing from compliance matrix", methodName)
+		}
+		assertEvidenceHasMutatingRuntimeProof(t, methodName, "happy_path", row.HappyPath)
+		assertEvidenceHasMutatingRuntimeProof(t, methodName, "unknown_top_level_param_validation", row.UnknownTopLevelParamValidation)
+		assertEvidenceHasMutatingRuntimeProof(t, methodName, "auth", row.Auth)
+		assertEvidenceHasMutatingRuntimeProof(t, methodName, "declared_error_tests", row.DeclaredErrorTests)
+		assertEvidenceHasMutatingRuntimeProof(t, methodName, "idempotency", row.Idempotency)
+		assertEvidenceHasMutatingRuntimeProof(t, methodName, "result_schema", row.ResultSchema)
+		if len(requiredParamNames(api.MethodCatalog[methodName])) > 0 {
+			assertEvidenceHasMutatingRuntimeProof(t, methodName, "required_param_validation", row.RequiredParamValidation)
+		}
+	}
+}
+
+func assertEvidenceHasMutatingRuntimeProof(t *testing.T, methodName, field string, evidence complianceEvidence) {
+	t.Helper()
+	if !evidenceHasGoTest(evidence, mutatingRuntimeProbeTestName) {
+		t.Fatalf("%s %s missing go_test proof_ref %s", methodName, field, mutatingRuntimeProbeTestName)
+	}
+}
+
+func rowHasMutatingRuntimeProof(row openRPCMethodMatrix) bool {
+	for _, evidence := range complianceEvidenceFields(row) {
+		if evidenceHasGoTest(evidence.evidence, mutatingRuntimeProbeTestName) {
+			return true
+		}
+	}
+	return false
+}
+
+func newMutatingRuntimeProbeHandler(t *testing.T, methodName string, modifiers ...func(*mutatingRuntimeProbeState)) (*Handler, map[string]int, *mutatingRuntimeProbeState) {
+	t.Helper()
+	state := newMutatingRuntimeProbeState(t, methodName)
+	for _, modifier := range modifiers {
+		modifier(state)
+	}
+	allHandlers := OperatorReadHandlers(state.options(t))
+	calls := map[string]int{}
+	handlers := map[string]MethodHandler{}
+	for _, name := range approvedMutatingHTTPRuntimeMethods() {
+		handler, ok := allHandlers[name]
+		if !ok {
+			t.Fatalf("OperatorReadHandlers missing mutating method %s", name)
+		}
+		name, handler := name, handler
+		handlers[name] = func(ctx context.Context, req Request) (any, error) {
+			calls[name]++
+			return handler(ctx, req)
+		}
+	}
+	return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: handlers}), calls, state
+}
+
+type mutatingRuntimeProbeState struct {
+	method         string
+	now            time.Time
+	idempotency    *mutatingProbeIdempotencyStore
+	runs           *fakeRunReadStore
+	observability  *fakeObservabilityReadStore
+	events         *mutatingProbeEventPublisher
+	runControl     *mutatingProbeRunControl
+	agentControl   *mutatingProbeAgentControl
+	runtimeIngress *mutatingProbeRuntimeIngress
+	mailbox        *mutatingProbeMailboxStore
+	nuke           *recordingRuntimeNukeOwners
+	effects        int
+}
+
+func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRuntimeProbeState {
+	t.Helper()
+	now := time.Unix(1700000000, 0).UTC()
+	runID := "00000000-0000-0000-0000-000000000101"
+	state := &mutatingRuntimeProbeState{
+		method:      methodName,
+		now:         now,
+		idempotency: newMutatingProbeIdempotencyStore(),
+		runs: &fakeRunReadStore{
+			headers: map[string]store.RunHeader{
+				runID: {RunID: runID, Status: "running", TriggerEventType: "scan.requested", TriggerEventID: "evt-1", StartedAt: now},
+			},
+		},
+		observability: &fakeObservabilityReadStore{events: map[string]store.OperatorEventFull{}},
+		runControl:    &mutatingProbeRunControl{errs: map[string]error{}},
+		agentControl:  &mutatingProbeAgentControl{errs: map[string]error{}},
+		runtimeIngress: &mutatingProbeRuntimeIngress{
+			errs: map[string]error{},
+		},
+		nuke: newRecordingRuntimeNukeOwners(),
+	}
+	state.observability.events["evt-1"] = mutatingProbeOriginalEvent("evt-1", []string{"agent-a"}, eventReplayStatusDelivered)
+	state.events = &mutatingProbeEventPublisher{state: state}
+	state.runControl.state = state
+	state.agentControl.state = state
+	state.runtimeIngress.state = state
+	state.mailbox = newMutatingProbeMailboxStore(state)
+	return state
+}
+
+func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
+	t.Helper()
+	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	return OperatorReadOptions{
+		Now:                   func() time.Time { return s.now },
+		Ready:                 func() bool { return true },
+		Database:              fakePinger{},
+		Runs:                  s.runs,
+		Observability:         s.observability,
+		AgentControl:          s.agentControl,
+		Mailbox:               s.mailbox,
+		Idempotency:           s.idempotency,
+		Events:                s.events,
+		RunControl:            s.runControl,
+		RuntimeIngress:        s.runtimeIngress,
+		ResetCoordinator:      s.nuke,
+		ResetQuiescer:         recordingRuntimeNukeQuiescer{s.nuke},
+		ResetCleaner:          recordingRuntimeNukeCleaner{s.nuke},
+		ResetContainers:       recordingRuntimeNukeContainerStopper{s.nuke},
+		Source:                source,
+		MailboxApprovalRoutes: map[string]string{"review_request": "mailbox.item_decided"},
+		Bundle: runtimecontracts.BundleIdentity{
+			WorkflowName:    "review",
+			WorkflowVersion: "1.0.0",
+			Fingerprint:     runStartTestFingerprint,
+		},
+	}
+}
+
+func (s *mutatingRuntimeProbeState) recordEffect() {
+	s.effects++
+}
+
+func (s *mutatingRuntimeProbeState) effectCount() int {
+	return s.effects + len(s.nuke.calls)
+}
+
+type mutatingProbeIdempotencyStore struct {
+	calls   int
+	records map[string]store.APIIdempotencyCompletion
+	hashes  map[string]string
+}
+
+func newMutatingProbeIdempotencyStore() *mutatingProbeIdempotencyStore {
+	return &mutatingProbeIdempotencyStore{
+		records: map[string]store.APIIdempotencyCompletion{},
+		hashes:  map[string]string{},
+	}
+}
+
+func (s *mutatingProbeIdempotencyStore) WithAPIIdempotency(
+	ctx context.Context,
+	req store.APIIdempotencyRequest,
+	execute func(context.Context) (store.APIIdempotencyCompletion, error),
+) (store.APIIdempotencyCompletion, bool, error) {
+	s.calls++
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		completion, err := execute(ctx)
+		return completion, false, err
+	}
+	key := strings.Join([]string{req.Method, req.ActorTokenID, strings.TrimSpace(req.IdempotencyKey)}, "|")
+	if completion, ok := s.records[key]; ok {
+		if s.hashes[key] != req.RequestHash {
+			return store.APIIdempotencyCompletion{}, false, &store.APIIdempotencyConflictError{
+				OriginalRequestHash:    s.hashes[key],
+				ConflictingRequestHash: req.RequestHash,
+				Method:                 req.Method,
+				ResourceID:             completion.ResourceID,
+			}
+		}
+		copied := completion
+		copied.Response = append(json.RawMessage(nil), completion.Response...)
+		return copied, true, nil
+	}
+	completion, err := execute(ctx)
+	if err != nil {
+		return store.APIIdempotencyCompletion{}, false, err
+	}
+	copied := completion
+	copied.Response = append(json.RawMessage(nil), completion.Response...)
+	s.records[key] = copied
+	s.hashes[key] = req.RequestHash
+	return completion, false, nil
+}
+
+type mutatingProbeEventPublisher struct {
+	state             *mutatingRuntimeProbeState
+	publishErr        error
+	directErr         error
+	checkErr          error
+	missingRecipients []string
+}
+
+func (p *mutatingProbeEventPublisher) Publish(_ context.Context, evt events.Event) error {
+	if p.publishErr != nil {
+		return p.publishErr
+	}
+	p.state.recordEffect()
+	p.state.storeEvent(evt, nil)
+	return nil
+}
+
+func (p *mutatingProbeEventPublisher) PublishTx(ctx context.Context, _ *sql.Tx, evt events.Event) error {
+	return p.Publish(ctx, evt)
+}
+
+func (p *mutatingProbeEventPublisher) PublishDirect(_ context.Context, evt events.Event, recipients []string) error {
+	if p.directErr != nil {
+		return p.directErr
+	}
+	p.state.recordEffect()
+	deliveries := make([]store.OperatorEventDelivery, 0, len(recipients))
+	for i, recipient := range recipients {
+		deliveries = append(deliveries, store.OperatorEventDelivery{
+			DeliveryID:     "delivery-" + recipient,
+			SubscriberType: eventReplaySubscriberTypeAgent,
+			SubscriberID:   recipient,
+			SessionID:      "sess-" + recipient,
+			Status:         eventReplayStatusDelivered,
+			RetryCount:     i,
+		})
+	}
+	p.state.storeEvent(evt, deliveries)
+	return nil
+}
+
+func (p *mutatingProbeEventPublisher) CheckDirectRecipients(_ context.Context, _ events.Event, recipients []string) (runtimebus.DirectRecipientStatus, error) {
+	status := runtimebus.DirectRecipientStatus{Requested: append([]string(nil), recipients...)}
+	if p.checkErr != nil {
+		return status, p.checkErr
+	}
+	if len(p.missingRecipients) > 0 {
+		status.Missing = append([]string(nil), p.missingRecipients...)
+		return status, nil
+	}
+	status.Recipients = append([]string(nil), recipients...)
+	return status, nil
+}
+
+func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []store.OperatorEventDelivery) {
+	payload := map[string]any{}
+	if len(evt.Payload) > 0 {
+		_ = json.Unmarshal(evt.Payload, &payload)
+	}
+	s.observability.events[evt.ID] = store.OperatorEventFull{
+		EventID:    evt.ID,
+		EventName:  strings.TrimSpace(string(evt.Type)),
+		EntityID:   evt.EntityID(),
+		RunID:      evt.RunID,
+		CreatedAt:  evt.CreatedAt.UTC(),
+		Source:     evt.SourceAgent,
+		Payload:    payload,
+		Deliveries: deliveries,
+	}
+}
+
+func mutatingProbeOriginalEvent(eventID string, subscribers []string, status string) store.OperatorEventFull {
+	deliveries := make([]store.OperatorEventDelivery, 0, len(subscribers))
+	for _, subscriber := range subscribers {
+		deliveries = append(deliveries, store.OperatorEventDelivery{
+			DeliveryID:     "original-" + subscriber,
+			SubscriberType: eventReplaySubscriberTypeAgent,
+			SubscriberID:   subscriber,
+			SessionID:      "sess-" + subscriber,
+			Status:         status,
+		})
+	}
+	return store.OperatorEventFull{
+		EventID:    eventID,
+		EventName:  "scan.requested",
+		EntityID:   "entity-1",
+		RunID:      "00000000-0000-0000-0000-000000000101",
+		CreatedAt:  time.Unix(1700000000, 0).UTC(),
+		Source:     "origin-agent",
+		Payload:    map[string]any{"topic": "medicine"},
+		Deliveries: deliveries,
+	}
+}
+
+type mutatingProbeRunControl struct {
+	state *mutatingRuntimeProbeState
+	errs  map[string]error
+}
+
+func (c *mutatingProbeRunControl) Stop(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error) {
+	return c.transition("stop", req)
+}
+
+func (c *mutatingProbeRunControl) Pause(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error) {
+	return c.transition("pause", req)
+}
+
+func (c *mutatingProbeRunControl) Continue(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error) {
+	return c.transition("continue", req)
+}
+
+func (c *mutatingProbeRunControl) transition(action string, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error) {
+	if err := c.errs[action]; err != nil {
+		return runtimeruncontrol.TransitionResult{}, err
+	}
+	c.state.recordEffect()
+	return runtimeruncontrol.TransitionResult{RunID: req.RunID, Status: action}, nil
+}
+
+type mutatingProbeAgentControl struct {
+	state *mutatingRuntimeProbeState
+	errs  map[string]error
+}
+
+func (c *mutatingProbeAgentControl) SendDirective(_ context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
+	if err := c.errs["agent.send_directive"]; err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	c.state.recordEffect()
+	runID := strings.TrimSpace(req.RunID)
+	if runID == "" {
+		runID = "00000000-0000-0000-0000-000000000201"
+	}
+	return runtimeagentcontrol.SendDirectiveResult{
+		AgentID:            req.AgentID,
+		Response:           "accepted",
+		RunID:              runID,
+		RunIDResolution:    runtimeagentcontrol.RunResolutionSpecified,
+		DirectiveEventID:   "00000000-0000-0000-0000-000000000202",
+		DirectiveEventType: runtimeagentcontrol.DirectiveEventType,
+	}, nil
+}
+
+func (c *mutatingProbeAgentControl) Restart(_ context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
+	if err := c.errs["agent.restart"]; err != nil {
+		return runtimeagentcontrol.RestartResult{}, err
+	}
+	c.state.recordEffect()
+	return runtimeagentcontrol.RestartResult{AgentID: req.AgentID}, nil
+}
+
+func (c *mutatingProbeAgentControl) ReplayBacklog(_ context.Context, req runtimeagentcontrol.ReplayBacklogRequest) (runtimeagentcontrol.ReplayBacklogResult, error) {
+	if err := c.errs["agent.replay_backlog"]; err != nil {
+		return runtimeagentcontrol.ReplayBacklogResult{}, err
+	}
+	c.state.recordEffect()
+	return runtimeagentcontrol.ReplayBacklogResult{AgentID: req.AgentID, ReplayedCount: 3}, nil
+}
+
+type mutatingProbeRuntimeIngress struct {
+	state *mutatingRuntimeProbeState
+	errs  map[string]error
+}
+
+func (c *mutatingProbeRuntimeIngress) Pause(_ context.Context, _ runtimeingress.TransitionRequest) (runtimeingress.TransitionResult, error) {
+	if err := c.errs["runtime.pause"]; err != nil {
+		return runtimeingress.TransitionResult{}, err
+	}
+	c.state.recordEffect()
+	return runtimeingress.TransitionResult{Status: runtimeingress.StatusPaused, TransitionID: "pause-1"}, nil
+}
+
+func (c *mutatingProbeRuntimeIngress) Resume(_ context.Context, _ runtimeingress.TransitionRequest) (runtimeingress.TransitionResult, error) {
+	if err := c.errs["runtime.resume"]; err != nil {
+		return runtimeingress.TransitionResult{}, err
+	}
+	c.state.recordEffect()
+	return runtimeingress.TransitionResult{Status: runtimeingress.StatusRunning, TransitionID: "resume-1"}, nil
+}
+
+type mutatingProbeMailboxStore struct {
+	state       *mutatingRuntimeProbeState
+	item        store.MailboxV1Item
+	decisionErr error
+}
+
+func newMutatingProbeMailboxStore(state *mutatingRuntimeProbeState) *mutatingProbeMailboxStore {
+	return &mutatingProbeMailboxStore{
+		state: state,
+		item: store.MailboxV1Item{
+			MailboxID:     "mailbox-1",
+			Type:          "review_request",
+			Status:        "pending",
+			Priority:      "high",
+			SourceEventID: "evt-1",
+			SourceFlow:    "review/primary",
+			Payload:       map[string]any{"title": "probe"},
+			CreatedAt:     state.now.Format(time.RFC3339Nano),
+		},
+	}
+}
+
+func (s *mutatingProbeMailboxStore) ListV1MailboxItems(context.Context, store.MailboxV1ListOptions) ([]store.MailboxV1Item, string, error) {
+	return []store.MailboxV1Item{s.item}, "", nil
+}
+
+func (s *mutatingProbeMailboxStore) GetV1MailboxItem(_ context.Context, mailboxID string) (store.MailboxV1ItemDetail, error) {
+	if strings.TrimSpace(mailboxID) != s.item.MailboxID {
+		return store.MailboxV1ItemDetail{}, store.ErrMailboxV1NotFound
+	}
+	return store.MailboxV1ItemDetail{Item: s.item, Payload: s.item.Payload}, nil
+}
+
+func (s *mutatingProbeMailboxStore) DecideV1MailboxItem(ctx context.Context, decision store.MailboxV1DecisionRequest) (store.MailboxV1DecisionOutcome, error) {
+	execute := func(context.Context) (store.APIIdempotencyCompletion, error) {
+		if s.decisionErr != nil {
+			return store.APIIdempotencyCompletion{}, s.decisionErr
+		}
+		s.state.recordEffect()
+		result := store.MailboxV1DecisionResult{
+			OK:                true,
+			MailboxDecisionID: "decision-" + strings.TrimSpace(decision.Action),
+			Status:            strings.TrimSpace(decision.Action),
+		}
+		if decision.Action == "approved" && strings.TrimSpace(decision.ApprovalEventType) != "" && decision.ApprovalEventTx != nil {
+			eventID := "mailbox-event-1"
+			result.DownstreamEventID = eventID
+			if err := decision.ApprovalEventTx(ctx, nil, events.Event{
+				ID:          eventID,
+				Type:        events.EventType(decision.ApprovalEventType),
+				SourceAgent: "mailbox",
+				Payload:     json.RawMessage(`{"mailbox_id":"mailbox-1"}`),
+				CreatedAt:   decision.Now,
+			}); err != nil {
+				return store.APIIdempotencyCompletion{}, err
+			}
+		}
+		raw, err := json.Marshal(result)
+		if err != nil {
+			return store.APIIdempotencyCompletion{}, err
+		}
+		return store.APIIdempotencyCompletion{ResourceID: decision.MailboxID, Response: raw}, nil
+	}
+	var completion store.APIIdempotencyCompletion
+	var replay bool
+	var err error
+	if decision.Idempotency != nil {
+		completion, replay, err = s.state.idempotency.WithAPIIdempotency(ctx, *decision.Idempotency, execute)
+	} else {
+		completion, err = execute(ctx)
+	}
+	if err != nil {
+		return store.MailboxV1DecisionOutcome{}, err
+	}
+	var result store.MailboxV1DecisionResult
+	if err := json.Unmarshal(completion.Response, &result); err != nil {
+		return store.MailboxV1DecisionOutcome{}, err
+	}
+	return store.MailboxV1DecisionOutcome{Result: result, Replayed: replay}, nil
+}
+
+func callMutatingProbeRPC(t *testing.T, handler *Handler, methodName string, params map[string]any, authHeader string) (int, rpcResponse, string) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      mutatingProbeID(methodName),
+		"method":  methodName,
+		"params":  params,
+	})
+	if err != nil {
+		t.Fatalf("marshal probe request: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", bytes.NewReader(raw))
+	if strings.TrimSpace(authHeader) != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		return rec.Code, rpcResponse{}, rec.Body.String()
+	}
+	var resp rpcResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode %s RPC response: %v body=%s", methodName, err, rec.Body.String())
+	}
+	return rec.Code, resp, rec.Body.String()
+}
+
+func assertMutatingProbeSuccess(t *testing.T, methodName string, resp rpcResponse, resultKeys []string) {
+	t.Helper()
+	if resp.JSONRPC != jsonRPCVersion {
+		t.Fatalf("%s jsonrpc = %q, want %q", methodName, resp.JSONRPC, jsonRPCVersion)
+	}
+	if resp.ID != mutatingProbeID(methodName) {
+		t.Fatalf("%s id = %#v, want %q", methodName, resp.ID, mutatingProbeID(methodName))
+	}
+	if resp.Error != nil {
+		t.Fatalf("%s error = %#v, want success", methodName, resp.Error)
+	}
+	result := asMap(t, resp.Result)
+	for _, key := range resultKeys {
+		if _, ok := result[key]; !ok {
+			t.Fatalf("%s result missing top-level key %q: %#v", methodName, key, result)
+		}
+	}
+}
+
+func assertMutatingProbeInvalidParams(t *testing.T, methodName string, resp rpcResponse, field string) {
+	t.Helper()
+	if resp.JSONRPC != jsonRPCVersion {
+		t.Fatalf("%s jsonrpc = %q, want %q", methodName, resp.JSONRPC, jsonRPCVersion)
+	}
+	if resp.ID != mutatingProbeID(methodName) {
+		t.Fatalf("%s id = %#v, want %q", methodName, resp.ID, mutatingProbeID(methodName))
+	}
+	if resp.Error == nil {
+		t.Fatalf("%s error = nil, want invalid params for %s", methodName, field)
+	}
+	if resp.Error.Code != codeInvalidParams {
+		t.Fatalf("%s error code = %d, want %d body=%#v", methodName, resp.Error.Code, codeInvalidParams, resp.Error)
+	}
+	data := asMap(t, resp.Error.Data)
+	details := asMap(t, data["details"])
+	if details["field"] != field {
+		t.Fatalf("%s invalid params field = %#v, want %s details=%#v", methodName, details["field"], field, details)
+	}
+	if _, ok := data["correlation_id"].(string); !ok {
+		t.Fatalf("%s invalid params missing correlation_id: %#v", methodName, data)
+	}
+}
+
+func assertMutatingProbeApplicationError(t *testing.T, registry *Registry, methodName string, resp rpcResponse, code string) {
+	t.Helper()
+	if resp.JSONRPC != jsonRPCVersion {
+		t.Fatalf("%s jsonrpc = %q, want %q", methodName, resp.JSONRPC, jsonRPCVersion)
+	}
+	if resp.ID != mutatingProbeID(methodName) {
+		t.Fatalf("%s id = %#v, want %q", methodName, resp.ID, mutatingProbeID(methodName))
+	}
+	if resp.Error == nil {
+		t.Fatalf("%s error = nil, want %s", methodName, code)
+	}
+	numeric, ok := registry.ApplicationErrorCode(code)
+	if !ok {
+		t.Fatalf("registry missing application error code %s", code)
+	}
+	if resp.Error.Code != numeric {
+		t.Fatalf("%s error code = %d, want generated numeric %d for %s", methodName, resp.Error.Code, numeric, code)
+	}
+	data := asMap(t, resp.Error.Data)
+	if data["code"] != code {
+		t.Fatalf("%s data.code = %#v, want %s", methodName, data["code"], code)
+	}
+	if _, ok := data["details"].(map[string]any); !ok && data["details"] != nil {
+		t.Fatalf("%s data.details = %#v, want object or null", methodName, data["details"])
+	}
+	if _, ok := data["retryable"].(bool); !ok {
+		t.Fatalf("%s data.retryable = %#v, want bool", methodName, data["retryable"])
+	}
+	if _, ok := data["correlation_id"].(string); !ok {
+		t.Fatalf("%s data.correlation_id = %#v, want string", methodName, data["correlation_id"])
+	}
+}
+
+func assertMutatingProbeNoExecution(t *testing.T, methodName string, calls map[string]int, state *mutatingRuntimeProbeState, reason string) {
+	t.Helper()
+	if calls[methodName] != 0 {
+		t.Fatalf("%s handler calls = %d, want 0 for %s", methodName, calls[methodName], reason)
+	}
+	if state.idempotency.calls != 0 {
+		t.Fatalf("%s idempotency calls = %d, want 0 for %s", methodName, state.idempotency.calls, reason)
+	}
+	if got := state.effectCount(); got != 0 {
+		t.Fatalf("%s side effects = %d, want 0 for %s", methodName, got, reason)
+	}
+}
+
+func mutatingProbeParamsWithIdempotency(params map[string]any, key string) map[string]any {
+	out := cloneProbeParams(params)
+	if _, ok := out["idempotency_key"]; !ok {
+		out["idempotency_key"] = key
+	}
+	return out
+}
+
+func mutatingProbeConflictParams(fixture mutatingHTTPRuntimeFixture, key string) map[string]any {
+	out := cloneProbeParams(fixture.ConflictParams)
+	if fixture.TrimEquivalentConflictKeyValue {
+		out["idempotency_key"] = " " + key + " "
+		return out
+	}
+	if _, ok := out["idempotency_key"]; !ok {
+		out["idempotency_key"] = key
+	}
+	return out
+}
+
+func mergeProbeParams(base map[string]any, override map[string]any) map[string]any {
+	out := cloneProbeParams(base)
+	for key, value := range override {
+		out[key] = value
+	}
+	return out
+}
+
+func mutatingProbeID(methodName string) string {
+	return "mutating-probe-" + strings.ReplaceAll(methodName, ".", "-")
+}
+
+func sortedMutatingProbeFixtureMethods(fixtures map[string]mutatingHTTPRuntimeFixture) []string {
+	methods := make([]string, 0, len(fixtures))
+	for methodName := range fixtures {
+		methods = append(methods, methodName)
+	}
+	sort.Strings(methods)
+	return methods
+}
+
+var _ APIIdempotencyStore = (*mutatingProbeIdempotencyStore)(nil)
+var _ EventPublisher = (*mutatingProbeEventPublisher)(nil)
+var _ TransactionalEventPublisher = (*mutatingProbeEventPublisher)(nil)
+var _ eventReplayPublisher = (*mutatingProbeEventPublisher)(nil)
+var _ RunControlController = (*mutatingProbeRunControl)(nil)
+var _ AgentControlController = (*mutatingProbeAgentControl)(nil)
+var _ RuntimeIngressController = (*mutatingProbeRuntimeIngress)(nil)
+var _ MailboxAPIStore = (*mutatingProbeMailboxStore)(nil)
