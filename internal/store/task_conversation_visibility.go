@@ -7,10 +7,17 @@ func CanonicalTaskConversationVisibilitySourceSQL(caps ConversationSchemaCapabil
 	if caps.Audits != SchemaFlavorCanonical {
 		return ""
 	}
+	runID := "''"
+	if caps.AuditRunID {
+		runID = "COALESCE(run_id::text, '')"
+	}
+	// Keep run_id in the projection even when the audit table lacks that
+	// column so shared conversation readers can always select it safely.
 	return `
 		SELECT
 			session_id::text AS session_id,
 			agent_id,
+			` + runID + ` AS run_id,
 			COALESCE(scope_key, '') AS scope_key,
 			COALESCE(scope, '') AS scope,
 			COALESCE(runtime_mode, '') AS runtime_mode,

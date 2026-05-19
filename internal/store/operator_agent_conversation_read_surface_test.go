@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,120 @@ func operatorConversationDetailColumns() []string {
 func operatorConversationTurnColumns() []string {
 	return []string{
 		"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id", "trigger_event_id", "trigger_event_type", "task_id", "available_tools", "tool_calls", "emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible", "request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms", "retry_count", "error", "created_at",
+	}
+}
+
+func TestCanonicalTaskConversationVisibilitySourceProjectsRunIDByCapability(t *testing.T) {
+	withRunID := CanonicalTaskConversationVisibilitySourceSQL(ConversationSchemaCapabilities{
+		Audits:     SchemaFlavorCanonical,
+		AuditRunID: true,
+	})
+	if !strings.Contains(withRunID, "COALESCE(run_id::text, '') AS run_id") {
+		t.Fatalf("audit run_id projection missing from canonical source:\n%s", withRunID)
+	}
+
+	withoutRunID := CanonicalTaskConversationVisibilitySourceSQL(ConversationSchemaCapabilities{
+		Audits: SchemaFlavorCanonical,
+	})
+	if !strings.Contains(withoutRunID, "'' AS run_id") {
+		t.Fatalf("audit no-run_id projection missing stable blank run_id:\n%s", withoutRunID)
+	}
+	if strings.Contains(withoutRunID, "COALESCE(run_id::text") {
+		t.Fatalf("audit no-run_id projection referenced missing run_id column:\n%s", withoutRunID)
+	}
+}
+
+func TestOperatorConversationQuerySourcesRunIDCapabilityMatrix(t *testing.T) {
+	tests := []struct {
+		name         string
+		sessionRunID bool
+		auditRunID   bool
+	}{
+		{name: "both", sessionRunID: true, auditRunID: true},
+		{name: "session only", sessionRunID: true},
+		{name: "audit only", auditRunID: true},
+		{name: "neither"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sources := operatorConversationQuerySources(StoreSchemaCapabilities{
+				Conversations: ConversationSchemaCapabilities{
+					Sessions:     SchemaFlavorCanonical,
+					Audits:       SchemaFlavorCanonical,
+					Turns:        SchemaFlavorCanonical,
+					SessionRunID: tc.sessionRunID,
+					AuditRunID:   tc.auditRunID,
+				},
+			})
+			if len(sources) != 2 {
+				t.Fatalf("source count = %d, want 2", len(sources))
+			}
+			for _, source := range sources {
+				switch {
+				case strings.Contains(source, "'live_session' AS kind"):
+					assertRunIDSourceProjection(t, source, tc.sessionRunID)
+				case strings.Contains(source, "'turn_audit' AS kind"):
+					assertRunIDSourceProjection(t, source, tc.auditRunID)
+				default:
+					t.Fatalf("unknown conversation source:\n%s", source)
+				}
+			}
+		})
+	}
+}
+
+func assertRunIDSourceProjection(t *testing.T, source string, hasRunID bool) {
+	t.Helper()
+	if hasRunID {
+		if !strings.Contains(source, "COALESCE(run_id::text, '') AS run_id") {
+			t.Fatalf("run_id-capable source did not project run_id:\n%s", source)
+		}
+		return
+	}
+	if !strings.Contains(source, "'' AS run_id") {
+		t.Fatalf("non-run_id source did not project stable blank run_id:\n%s", source)
+	}
+}
+
+func TestOperatorConversationReadSurfaceListRejectsRunIDFilterWithoutRunIDCapability(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewOperatorConversationReadSurface(db, fakeConversationCapabilitySource{caps: StoreSchemaCapabilities{
+		Conversations: ConversationSchemaCapabilities{
+			Sessions: SchemaFlavorCanonical,
+			Audits:   SchemaFlavorCanonical,
+			Turns:    SchemaFlavorCanonical,
+		},
+	}})
+
+	_, err = reader.ListOperatorConversations(context.Background(), OperatorConversationListOptions{
+		RunID: "11111111-1111-1111-1111-111111111111",
+	})
+	if !errors.Is(err, ErrOperatorConversationRunIDCapability) {
+		t.Fatalf("ListOperatorConversations err = %v, want ErrOperatorConversationRunIDCapability", err)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "pq:") || strings.Contains(strings.ToLower(err.Error()), `column "run_id"`) {
+		t.Fatalf("capability error leaked driver detail: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestOperatorConversationReadSurfaceSanitizesRunIDProjectionDriverError(t *testing.T) {
+	err := operatorConversationReadQueryError("load operator conversation", errors.New(`pq: column "run_id" does not exist at position 46:14 (42703)`))
+	if !errors.Is(err, ErrOperatorConversationRunIDCapability) {
+		t.Fatalf("sanitized err = %v, want ErrOperatorConversationRunIDCapability", err)
+	}
+	lower := strings.ToLower(err.Error())
+	for _, forbidden := range []string{"pq:", `column "run_id"`, "42703", "position"} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("sanitized err leaked %q: %v", forbidden, err)
+		}
 	}
 }
 
