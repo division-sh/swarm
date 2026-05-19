@@ -506,8 +506,11 @@ func validateEventDeadLetter(prefix string, deadLetter eventDeadLetter) error {
 
 func subscribeEvents(ctx context.Context, wsEndpoint, token string, params map[string]any) (*eventSubscription, error) {
 	header := http.Header{"Authorization": []string{"Bearer " + token}}
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsEndpoint, header)
+	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsEndpoint, header)
 	if err != nil {
+		if resp != nil {
+			return nil, eventObservationWSHTTPError(resp)
+		}
 		return nil, fmt.Errorf("v1 WS dial failed: %w", err)
 	}
 	requestID := "swarm-cli:" + eventObservationMethodSubscribe
@@ -554,6 +557,21 @@ func subscribeEvents(ctx context.Context, wsEndpoint, token string, params map[s
 	}
 	go sub.readLoop()
 	return sub, nil
+}
+
+func eventObservationWSHTTPError(resp *http.Response) error {
+	if resp == nil {
+		return nil
+	}
+	message := http.StatusText(resp.StatusCode)
+	if resp.Body != nil {
+		defer resp.Body.Close()
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err == nil && strings.TrimSpace(string(raw)) != "" {
+			message = strings.TrimSpace(string(raw))
+		}
+	}
+	return &cliAPIHTTPError{surface: "v1 WS", statusCode: resp.StatusCode, message: message}
 }
 
 func (s *eventSubscription) readLoop() {

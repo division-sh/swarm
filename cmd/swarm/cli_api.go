@@ -109,6 +109,7 @@ func applicationErrorCode(raw json.RawMessage) string {
 }
 
 type cliAPIHTTPError struct {
+	surface    string
 	statusCode int
 	message    string
 }
@@ -117,7 +118,11 @@ func (e *cliAPIHTTPError) Error() string {
 	if e == nil {
 		return ""
 	}
-	return fmt.Sprintf("v1 RPC HTTP %d: %s", e.statusCode, e.message)
+	surface := strings.TrimSpace(e.surface)
+	if surface == "" {
+		surface = "v1 RPC"
+	}
+	return fmt.Sprintf("%s HTTP %d: %s", surface, e.statusCode, e.message)
 }
 
 func (c *cliAPIClient) call(ctx context.Context, method string, params map[string]any, result any) error {
