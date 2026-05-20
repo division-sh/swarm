@@ -5602,9 +5602,9 @@ cli_specification:
         tracker: '#876'
         action: '`swarm logs` snapshot and follow semantics are promoted as one bounded CLI child over runtime.logs and runtime.subscribe_logs; richer output-mode work remains split to #848.'
       incidents:
-        disposition: future_child
-        tracker: '#735'
-        action: '`swarm incidents` read semantics require a separate gated child.'
+        disposition: promoted_first_slice
+        tracker: '#886'
+        action: '`swarm incidents` default-text read semantics are promoted as one bounded CLI child over runtime.incidents; richer output-mode work remains split to #848/#794.'
       forkchat:
         disposition: blocked
         tracker: '#749'
@@ -5785,12 +5785,18 @@ cli_specification:
         - event_replay
         - event_publish
         - logs
+        - incidents
         - run
         implemented_consumer_residuals:
           logs: >
             `swarm logs` is implemented for default-text snapshot and follow in #876 and is no longer an absent
             command row. JSON/quiet/shared-renderer behavior remains governed by the output_contract and may be
             implemented by the separate #794/#848/#735 output-mode/shared-renderer tail; #876 does not add
+            command-local output-mode flags or semantics.
+          incidents: >
+            `swarm incidents` is implemented for default-text read-only listing in #886 and is no longer an absent
+            command row. JSON/quiet/shared-renderer behavior remains governed by the output_contract and may be
+            implemented by the separate #794/#848/#735 output-mode/shared-renderer tail; #886 does not add
             command-local output-mode flags or semantics.
       exception_rules:
         root_help_completion:
@@ -5829,7 +5835,6 @@ cli_specification:
           - entities_list
           - entity_view
           - entity_aggregate
-          - incidents
           rule: >
             Absent or blocked command rows do not receive output-mode implementation from #848. Their future
             implementation children consume this contract only after their command/API/runtime owner is promoted.
@@ -6773,8 +6778,52 @@ cli_specification:
     incidents:
       command: swarm incidents [filters]
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owner: /v1/rpc runtime.incidents
+      params:
+      - name: since_hours
+        flag: --since-hours <1-720>
+        required: false
+        api_param: since_hours
+        rule: Omitted by the CLI when the flag is absent; the server applies its runtime.incidents default.
+      - name: component
+        flag: --component <component>
+        required: false
+        api_param: component
+      - name: level
+        flag: --level <debug|info|warn|error>
+        required: false
+        api_param: level
+        validation: CLI lowercases the value and rejects unsupported levels before any API call.
+      - name: mcp_only
+        flag: --mcp-only
+        required: false
+        api_param: mcp_only
+        rule: Sent only when the flag is explicitly supplied.
+      - name: limit
+        flag: --limit <1-500>
+        required: false
+        api_param: limit
+        rule: Omitted by the CLI when the flag is absent; the server applies its runtime.incidents default.
+      - name: cursor
+        flag: --cursor <cursor>
+        required: false
+        api_param: cursor
+      output:
+        table: LAST SEEN / LEVEL / COMPONENT / ERROR / COUNT / INCIDENT ID / SAMPLE plus next_cursor when present
+        empty: No runtime incidents match the filter.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+      proof_expectations:
+      - exact /v1/rpc runtime.incidents call with since_hours, component, level, mcp_only, limit, and cursor params only when supplied
+      - invalid args and missing SWARM_API_TOKEN make zero API calls
+      - since_hours is validated as 1-720 and limit as 1-500 before API calls
+      - level is validated as debug, info, warn, or error before API calls
+      - empty result, next_cursor rendering, auth/HTTP/RPC failures, malformed result, and malformed Incident rows are tested with closed exit-code behavior
+      - no direct DB/store/runtime/EventBus/dashboard/process-log/container-log reads and no legacy /api/*, /rpc, /api/rpc, /ws, or /api/ws usage
   retired_namespaces:
     investigate:
       command: swarm investigate *
@@ -6852,6 +6901,7 @@ cli_specification:
     - swarm event replay
     - swarm event publish
     - swarm logs
+    - swarm incidents
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
     - swarm investigate
@@ -6864,7 +6914,6 @@ cli_specification:
     - swarm conversations list / conversation view / conversation turn
     - swarm forkchat new|resume|list|view|delete
     - swarm entities list / entity view / entity aggregate
-    - swarm incidents
     rule: 'Remaining commands require separate gates and must consume canonical API owners; they MUST NOT resurrect direct DB/store/runtime-state readers.'
 
 api_specification:
