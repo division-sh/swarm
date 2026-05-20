@@ -11,10 +11,11 @@ source:
   openrpc_artifact: docs/specs/swarm-platform/platform/contracts/openrpc.json
   generated_from: api_specification.method_catalog
 policy:
-  closure_level: coverage_accounting_proof_ownership_read_only_and_mutating_http_runtime_probes
-  runtime_behavior_changes: forbidden_by_gate
+  closure_level: coverage_accounting_proof_ownership_read_only_mutating_http_and_ws_transport_runtime_probes
+  runtime_behavior_changes: transport_admission_repair_approved_by_878
   read_only_runtime_probe_policy: "#861 adds generated supported-surface runtime probes for read-only HTTP methods only; mutating, WS/protocol, examples, rpc.discover, full result-schema validation, and notification-schema validation remain tracked by #857."
   mutating_runtime_probe_policy: "#872 adds generated supported-surface runtime probes for all 16 mutating HTTP methods only; WS/protocol, examples, rpc.discover, full result-schema validation, and notification-schema validation remain tracked by #857."
+  ws_transport_runtime_probe_policy: "#878 adds central method transport admission proof for all 42 methods and generated supported-surface WebSocket runtime probes for the five WS/protocol methods; examples, rpc.discover, full result-schema validation, and full notification-schema validation remain tracked by #857."
   examples_policy: OpenRPC method examples are tracked gaps in this slice.
   service_discovery_policy: rpc.discover is not published by the v1 contract; method publication is tracked through the generated OpenRPC artifact.
 methods:
@@ -277,14 +278,14 @@ methods:
     transport: ws
     required_params: []
     declared_errors: []
-    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
     required_param_validation: {status: not_applicable}
-    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
-    auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
-    notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
+    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
+    notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
     gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_generated_result_schema_validation, missing_openrpc_examples]
@@ -322,14 +323,14 @@ methods:
     transport: ws
     required_params: []
     declared_errors: []
-    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
     required_param_validation: {status: not_applicable}
-    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
-    auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
-    notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
+    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
+    notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
     gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_generated_result_schema_validation, missing_openrpc_examples]
@@ -412,13 +413,13 @@ methods:
     transport: ws
     required_params: [subscription_id]
     declared_errors: []
-    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}, {kind: go_test, name: TestWebSocketSessionBackpressureAndUnsubscribeCancelState}]}
-    required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
-    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
-    auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}, {kind: go_test, name: TestWebSocketSessionBackpressureAndUnsubscribeCancelState}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
+    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketHealthSubscribeAndUnsubscribe}]}
     notification_schema: {status: not_applicable}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
@@ -532,14 +533,14 @@ methods:
     transport: ws
     required_params: [run_id]
     declared_errors: [RUN_NOT_FOUND]
-    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
-    required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
-    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
-    auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
-    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
-    notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
+    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
+    notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}]}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
     gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_generated_result_schema_validation, missing_openrpc_examples]
@@ -637,14 +638,14 @@ methods:
     transport: ws
     required_params: []
     declared_errors: []
-    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}]}
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}]}
     required_param_validation: {status: not_applicable}
-    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
-    auth: {status: shared, proof_refs: [{kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
     declared_error_tests: {status: not_applicable}
     idempotency: {status: not_applicable}
-    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}]}
-    notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}]}
+    result_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}]}
+    notification_schema: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}]}
     examples: {status: tracked_gap, proof_refs: [{kind: tracker, issue: 857, watchlist: operator_surfaces.v1_openrpc_api_conformance}, {kind: policy_gap, name: openrpc_examples_absent}]}
     service_discovery_publication: {status: published_without_discovery, proof_refs: [{kind: artifact, path: docs/specs/swarm-platform/platform/contracts/openrpc.json}, {kind: go_test, name: TestGeneratedOpenRPCArtifactMatchesPlatformSpec}]}
     gap_classification: [notification_schema_not_emitted_in_openrpc_method, missing_generated_result_schema_validation, missing_openrpc_examples]

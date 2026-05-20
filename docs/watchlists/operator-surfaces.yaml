@@ -169,6 +169,7 @@ nodes:
       - stale or free-form proof references in the checked-in compliance matrix can drift silently from their test/helper/artifact/tracker owners
       - generated supported-surface runtime probes can be absent for read-only HTTP methods even when proof-accounting rows resolve
       - generated supported-surface runtime probes can be absent for mutating HTTP methods, leaving side-effect and idempotency behavior inferred from scattered handler-family tests
+      - central method transport admission can be absent, letting WS/protocol methods execute over /v1/rpc or HTTP-class methods execute over /v1/ws despite matrix transport classification
       - OpenRPC method examples and rpc.discover publication status are not explicitly tracked
       - CI can pass without a direct swarm-openrpc-gen --check step
     representative_issues:
@@ -177,6 +178,7 @@ nodes:
       - 857
       - 861
       - 872
+      - 878
     common_framing_mistakes:
       too_broad:
         - full v1 runtime conformance can be closed by one matrix PR

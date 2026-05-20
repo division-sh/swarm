@@ -28,6 +28,9 @@ const (
 	codeMethodNotFound = -32601
 	codeInvalidParams  = -32602
 	codeInternalError  = -32603
+
+	transportHTTP      = "http"
+	transportWebSocket = "websocket"
 )
 
 type Handler struct {
@@ -162,7 +165,7 @@ func (h *Handler) handleRPC(w http.ResponseWriter, r *http.Request) {
 		writeRPC(w, rpcResponse{JSONRPC: jsonRPCVersion, ID: nil, Error: h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "read body failed"})})
 		return
 	}
-	resp := h.dispatch(r.Context(), raw, "http", correlationID, actorTokenID(token))
+	resp := h.dispatch(r.Context(), raw, transportHTTP, correlationID, actorTokenID(token))
 	writeRPC(w, resp)
 }
 
@@ -197,6 +200,9 @@ func (h *Handler) prepareRequest(raw []byte, transport, fallbackCorrelationID, a
 	req.ActorTokenID = strings.TrimSpace(actorTokenID)
 	req.RequestHash = requestBodyHash(req.Method, req.Params)
 	if method, ok := h.registry.Method(req.Method); ok {
+		if rpcErr := h.admitMethodTransport(req.Method, method, transport, correlationID); rpcErr != nil {
+			return Request{}, &rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr}
+		}
 		if rpcErr := validateParams(method, req.Params, req.CorrelationID); rpcErr != nil {
 			return Request{}, &rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr}
 		}
@@ -208,6 +214,24 @@ func (h *Handler) prepareRequest(raw []byte, transport, fallbackCorrelationID, a
 		}
 	}
 	return req, nil
+}
+
+func (h *Handler) admitMethodTransport(methodName string, method apispec.Method, transport, correlationID string) *rpcError {
+	expected := runtimeMethodTransport(methodName, method)
+	if strings.TrimSpace(transport) == expected {
+		return nil
+	}
+	return h.standardError(codeMethodNotFound, "method not found", correlationID, map[string]any{
+		"method":    strings.TrimSpace(methodName),
+		"transport": strings.TrimSpace(transport),
+	})
+}
+
+func runtimeMethodTransport(methodName string, method apispec.Method) string {
+	if strings.TrimSpace(methodName) == "rpc.unsubscribe" || method.NotificationSchema != nil {
+		return transportWebSocket
+	}
+	return transportHTTP
 }
 
 func (h *Handler) dispatchPrepared(ctx context.Context, req Request) rpcResponse {
@@ -309,7 +333,7 @@ func (s *webSocketSession) writeLoop() {
 }
 
 func (s *webSocketSession) handleRaw(raw []byte) bool {
-	req, failure := s.handler.prepareRequest(raw, "websocket", s.fallbackCorrelationID, s.actorTokenID)
+	req, failure := s.handler.prepareRequest(raw, transportWebSocket, s.fallbackCorrelationID, s.actorTokenID)
 	if failure != nil {
 		return s.enqueue(*failure)
 	}
