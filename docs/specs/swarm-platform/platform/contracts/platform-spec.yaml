@@ -5666,7 +5666,7 @@ cli_specification:
       - '#846 error-channel and exit-code classification; closed first slice'
       - '#839 retired namespace migration cleanup'
       - '#743 swarm run behavior and follow semantics; output-mode implementation may consume this contract later'
-      - absent #735 command families
+      - 'absent #735 command families'
       - API/runtime method semantics
       - JSON error-body or rich structured-error output unless a later tracked child promotes it
       implementation_proof_requirements:
@@ -5716,7 +5716,7 @@ cli_specification:
       - '#844 universal flag/config/env precedence'
       - '#848 --json/--quiet/output renderer normalization'
       - '#839 retired namespace migration cleanup'
-      - absent #735 command families
+      - 'absent #735 command families'
       - API/runtime method semantics
   tiers:
     must_have: 'Closure-gate command set for the promoted CLI v2 catalog.'
