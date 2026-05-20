@@ -28,6 +28,7 @@ import (
 	runtimedeadletters "swarm/internal/runtime/deadletters"
 	runtimedestructivereset "swarm/internal/runtime/destructivereset"
 	runtimemanager "swarm/internal/runtime/manager"
+	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimerunforkexecution "swarm/internal/runtime/runforkexecution"
 	runtimerunquiescence "swarm/internal/runtime/runquiescence"
@@ -158,9 +159,14 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--contracts", "--health-addr", "unified serve listener", "MCP, and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
+		}
+	}
+	for _, notWant := range []string{"--api-port", "--mcp-port", "--api ", "--no-api", "--mcp ", "--no-mcp", "--log-level"} {
+		if strings.Contains(stdout.String(), notWant) {
+			t.Fatalf("serve help exposed unpromoted listener/topology flag %q:\n%s", notWant, stdout.String())
 		}
 	}
 }
@@ -284,6 +290,51 @@ func TestPlatformSpecServeDevModeCompositionPromoted(t *testing.T) {
 	for _, want := range []string{"Scaffold/system", "operator-managed", "unlabeled", "`kind=agent`", "`kind=flow`"} {
 		if !strings.Contains(spec.PreservationBoundary, want) {
 			t.Fatalf("dev mode preservation boundary missing %q:\n%s", want, spec.PreservationBoundary)
+		}
+	}
+}
+
+func TestPlatformSpecServeUnifiedListenerBindContractPromoted(t *testing.T) {
+	spec := loadServeUnifiedListenerSpec(t)
+	if strings.TrimSpace(spec.ImplementedBy) != "#853" {
+		t.Fatalf("listener contract implemented_by = %q, want #853", spec.ImplementedBy)
+	}
+	if strings.TrimSpace(spec.Flag) != "--health-addr <addr>" {
+		t.Fatalf("listener contract flag = %q, want --health-addr <addr>", spec.Flag)
+	}
+	for _, want := range []string{"single HTTP listener", "health-specific name", "API", "MCP"} {
+		if !strings.Contains(spec.Semantics, want) {
+			t.Fatalf("listener semantics missing %q:\n%s", want, spec.Semantics)
+		}
+	}
+	for _, want := range []string{"/healthz", "/readyz"} {
+		if !stringSliceContains(spec.Routes.Always, want) {
+			t.Fatalf("listener always routes missing %q: %#v", want, spec.Routes.Always)
+		}
+	}
+	for _, want := range []string{"/v1/rpc", "/v1/ws"} {
+		if !stringSliceContains(spec.Routes.WhenAPIHandlerInstalled, want) {
+			t.Fatalf("listener API routes missing %q: %#v", want, spec.Routes.WhenAPIHandlerInstalled)
+		}
+	}
+	for _, want := range []string{"/mcp", "/tools/"} {
+		if !stringSliceContains(spec.Routes.WhenMCPGatewayInstalled, want) {
+			t.Fatalf("listener MCP routes missing %q: %#v", want, spec.Routes.WhenMCPGatewayInstalled)
+		}
+	}
+	for _, want := range []string{"swarm run --api-port", "consumer", "second bind owner"} {
+		if !strings.Contains(spec.ConsumerBoundaries.SwarmRunAPIPort, want) {
+			t.Fatalf("api-port boundary missing %q:\n%s", want, spec.ConsumerBoundaries.SwarmRunAPIPort)
+		}
+	}
+	for _, want := range []string{"swarm run --mcp-port", "fail before API/WS calls", "explicit MCP bind ownership"} {
+		if !strings.Contains(spec.ConsumerBoundaries.SwarmRunMCPPort, want) {
+			t.Fatalf("mcp-port boundary missing %q:\n%s", want, spec.ConsumerBoundaries.SwarmRunMCPPort)
+		}
+	}
+	for _, want := range []string{"--api/--no-api", "--mcp/--no-mcp", "serve --api-port", "serve --mcp-port", "--log-level"} {
+		if !stringSliceContains(spec.UnpromotedReviewControls, want) {
+			t.Fatalf("unpromoted review controls missing %q: %#v", want, spec.UnpromotedReviewControls)
 		}
 	}
 }
@@ -578,13 +629,14 @@ func TestNewHealthServerPreservesProcessProbesAndMountsV1API(t *testing.T) {
 	var apiHit atomic.Bool
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		apiHit.Store(true)
-		if r.URL.Path != "/v1/rpc" {
-			t.Errorf("api path = %q, want /v1/rpc", r.URL.Path)
+		if r.URL.Path != "/v1/rpc" && r.URL.Path != "/v1/ws" {
+			t.Errorf("api path = %q, want /v1/rpc or /v1/ws", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"test","result":{"ok":true}}`))
 	})
-	server := newHealthServer(":0", &ready, nil, apiHandler)
+	toolGateway := runtimemcp.NewGateway(nil, "", runtimemcp.GatewayHooks{})
+	server := newHealthServer(":0", &ready, toolGateway, apiHandler)
 	handler := server.Handler
 
 	rec := httptest.NewRecorder()
@@ -612,6 +664,24 @@ func TestNewHealthServerPreservesProcessProbesAndMountsV1API(t *testing.T) {
 	}
 	if !apiHit.Load() {
 		t.Fatal("/v1/rpc did not route to v1 API handler")
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ws", strings.NewReader(`{"jsonrpc":"2.0","id":"test","method":"rpc.unsubscribe","params":{"subscription_id":"sub"}}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/v1/ws status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/mcp", nil))
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "ok" {
+		t.Fatalf("/mcp status/body = %d/%q, want 200 ok", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tools/query_entities", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("/tools/ route status = %d, want mounted gateway 405", rec.Code)
 	}
 
 	for _, path := range []string{"/api", "/api/healthz", "/api/rpc", "/rpc", "/api/ws", "/ws"} {
@@ -2978,6 +3048,14 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 	if strings.Contains(out.String(), "health_endpoints_respond       ok  (/healthz /readyz /v1/rpc /v1/ws)") {
 		t.Fatalf("serve verbose output still claims unproven v1 endpoint response:\n%s", out.String())
 	}
+	for _, want := range []string{"http_listener_bind", "listener=", "routes=" + serveUnifiedRoutes, "health_endpoints_respond", serveReadinessRoutes} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("serve verbose output missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "health=127.") {
+		t.Fatalf("serve verbose output still labels the unified listener as health-only:\n%s", out.String())
+	}
 }
 
 func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *testing.T) {
@@ -3152,6 +3230,24 @@ type serveDevModeSpec struct {
 	SiblingBoundaries    string   `yaml:"sibling_boundaries"`
 }
 
+type serveUnifiedListenerSpec struct {
+	ImplementedBy string `yaml:"implemented_by"`
+	Flag          string `yaml:"flag"`
+	Owner         string `yaml:"owner"`
+	Semantics     string `yaml:"semantics"`
+	Routes        struct {
+		Always                  []string `yaml:"always"`
+		WhenAPIHandlerInstalled []string `yaml:"when_api_handler_installed"`
+		WhenMCPGatewayInstalled []string `yaml:"when_mcp_gateway_installed"`
+	} `yaml:"routes"`
+	BindRules          []string `yaml:"bind_rules"`
+	ConsumerBoundaries struct {
+		SwarmRunAPIPort string `yaml:"swarm_run_api_port"`
+		SwarmRunMCPPort string `yaml:"swarm_run_mcp_port"`
+	} `yaml:"consumer_boundaries"`
+	UnpromotedReviewControls []string `yaml:"unpromoted_review_controls"`
+}
+
 func loadServeBootProgressSequenceFromSpec(t *testing.T) []serveBootProgressSpecStep {
 	t.Helper()
 	var spec struct {
@@ -3215,6 +3311,30 @@ func loadServeDevModeSpec(t *testing.T) serveDevModeSpec {
 		t.Fatal("platform spec missing serve dev_mode_lifecycle_composition")
 	}
 	return spec.CLISpecification.CommandCatalog.Serve.DevMode
+}
+
+func loadServeUnifiedListenerSpec(t *testing.T) serveUnifiedListenerSpec {
+	t.Helper()
+	var spec struct {
+		CLISpecification struct {
+			CommandCatalog struct {
+				Serve struct {
+					Listener serveUnifiedListenerSpec `yaml:"unified_listener_bind_contract"`
+				} `yaml:"serve"`
+			} `yaml:"command_catalog"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	if strings.TrimSpace(spec.CLISpecification.CommandCatalog.Serve.Listener.Flag) == "" {
+		t.Fatal("platform spec missing serve unified_listener_bind_contract")
+	}
+	return spec.CLISpecification.CommandCatalog.Serve.Listener
 }
 
 func stringSliceContains(values []string, want string) bool {

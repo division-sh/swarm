@@ -126,7 +126,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().StringVar(&opts.ContractsPath, "contracts", opts.ContractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, "Store mode: postgres")
-	cmd.Flags().StringVar(&opts.HealthAddr, "health-addr", opts.HealthAddr, "HTTP bind address for health checks")
+	cmd.Flags().StringVar(&opts.HealthAddr, "health-addr", opts.HealthAddr, "HTTP bind address for the unified serve listener: health, readiness, API, WebSocket, MCP, and tools routes")
 	cmd.Flags().DurationVar(&opts.ShutdownGrace, "shutdown-grace", opts.ShutdownGrace, "Time to wait for in-flight work to drain after shutdown starts")
 	cmd.Flags().BoolVar(&opts.SelfCheck, "self-check", opts.SelfCheck, "Run runtime self-check during boot")
 	cmd.Flags().BoolVar(&opts.Dev, "dev", opts.Dev, "Enable local development mode: abandon active runs, skip bundle-match admission, emit verbose boot output, and clean up dev entity containers on shutdown")
