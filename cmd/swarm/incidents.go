@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -49,6 +50,8 @@ var runtimeIncidentValidLevels = map[string]struct{}{
 	"warn":  {},
 	"error": {},
 }
+
+var runtimeIncidentOpaqueIDPattern = regexp.MustCompile(`^[A-Za-z0-9_:.-]+$`)
 
 func newIncidentsCommand(opts rootCommandOptions) *cobra.Command {
 	incidentOpts := runtimeIncidentCommandOptions{apiOptions: opts}
@@ -157,6 +160,9 @@ func validateRuntimeIncident(prefix string, incident runtimeIncident) error {
 	if err := validateRequiredTimestamp(prefix+".last_seen", incident.LastSeen); err != nil {
 		return err
 	}
+	if err := validateRuntimeIncidentOpaqueID(prefix+".incident_id", incident.IncidentID); err != nil {
+		return err
+	}
 	if incident.Count < 1 {
 		return fmt.Errorf("malformed %s: count must be at least 1", prefix)
 	}
@@ -168,6 +174,24 @@ func validateRuntimeIncident(prefix string, incident runtimeIncident) error {
 	}
 	if incident.SampleLogIDs == nil {
 		return fmt.Errorf("malformed %s: sample_log_ids is required", prefix)
+	}
+	for i, logID := range incident.SampleLogIDs {
+		if err := validateRuntimeIncidentOpaqueID(fmt.Sprintf("%s.sample_log_ids[%d]", prefix, i), logID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRuntimeIncidentOpaqueID(field, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("malformed result: %s must not be empty", field)
+	}
+	if len(value) > 256 {
+		return fmt.Errorf("malformed result: %s must be at most 256 characters", field)
+	}
+	if !runtimeIncidentOpaqueIDPattern.MatchString(value) {
+		return fmt.Errorf("malformed result: %s must match OpaqueId pattern", field)
 	}
 	return nil
 }

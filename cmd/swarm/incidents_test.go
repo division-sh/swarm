@@ -234,6 +234,28 @@ func TestIncidentsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			wantStderr: "last_seen must be an RFC3339 timestamp",
 		},
 		{
+			name: "malformed incident invalid opaque incident id exits three",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				incident := validRuntimeIncident("bad id!")
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"incidents": []any{incident}})
+			},
+			wantCode:   3,
+			wantStderr: "incident_id must match OpaqueId pattern",
+		},
+		{
+			name: "malformed incident too long incident id exits three",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				incident := validRuntimeIncident(strings.Repeat("a", 257))
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"incidents": []any{incident}})
+			},
+			wantCode:   3,
+			wantStderr: "incident_id must be at most 256 characters",
+		},
+		{
 			name: "malformed incident invalid count exits three",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
@@ -280,6 +302,30 @@ func TestIncidentsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			},
 			wantCode:   3,
 			wantStderr: "sample_log_ids is required",
+		},
+		{
+			name: "malformed incident invalid sample log id exits three",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				incident := validRuntimeIncident("incident-1")
+				incident["sample_log_ids"] = []string{"log-1", "bad log id!"}
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"incidents": []any{incident}})
+			},
+			wantCode:   3,
+			wantStderr: "sample_log_ids[1] must match OpaqueId pattern",
+		},
+		{
+			name: "malformed incident empty sample log id exits three",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				incident := validRuntimeIncident("incident-1")
+				incident["sample_log_ids"] = []string{"log-1", ""}
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"incidents": []any{incident}})
+			},
+			wantCode:   3,
+			wantStderr: "sample_log_ids[1] must not be empty",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
