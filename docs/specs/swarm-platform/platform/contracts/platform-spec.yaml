@@ -5400,9 +5400,9 @@ cli_specification:
         action: >
           The current unified serve listener contract is promoted in
           cli_specification.command_catalog.serve.unified_listener_bind_contract. `swarm serve --health-addr`
-          remains the current single HTTP listener bind input despite its health-specific historical name.
-          API/MCP split listener controls from the review artifact remain unpromoted until a later tracked
-          serve-topology child accepts them.
+          remains the current single HTTP listener bind input despite its health-specific historical name; this
+          does not bless `--health-addr` as the final CLI v2 listener flag name. API/MCP split listener controls
+          from the review artifact remain unpromoted until a later tracked serve-topology child accepts them.
       trace_filters_and_subscription_recovery:
         disposition: tracked_child
         tracker: '#855'
@@ -5486,7 +5486,9 @@ cli_specification:
         reason: >
           Current Swarm serves health, readiness, `/v1/rpc`, `/v1/ws`, MCP, and tool routes from one
           `swarm serve` HTTP listener. The CLI UX v2 review artifact anticipated split API/MCP listener
-          controls, but those controls are not authoritative until promoted by a later tracked topology child.
+          controls in its primary serve flag summary; its later `--health-addr` mention describes current
+          implementation configurability, not final CLI v2 naming. Split listener controls are not authoritative
+          until promoted by a later tracked topology child.
       event_read_stream_filters:
         classification: required_current_contract
         reason: >
@@ -5788,9 +5790,10 @@ cli_specification:
         semantics: >
           `--health-addr` is the current bind address for the single HTTP listener created by `swarm serve`.
           Despite its historical health-specific name, the listener is not health-only: it exposes health,
-          readiness, API, WebSocket, MCP, and tool routes when their handlers are installed. Implementations MUST
-          NOT infer separate API or MCP listener ownership from the CLI UX v2 review artifact unless that topology
-          is promoted into this spec by a later child.
+          readiness, API, WebSocket, MCP, and tool routes when their handlers are installed. This first slice
+          records current supported behavior; it does not declare `--health-addr` to be the final CLI v2 listener
+          flag name. Implementations MUST NOT infer separate API or MCP listener ownership from the CLI UX v2
+          review artifact unless that topology is promoted into this spec by a later child.
         routes:
           always:
           - /healthz

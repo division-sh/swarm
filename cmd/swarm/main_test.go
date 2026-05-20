@@ -302,7 +302,7 @@ func TestPlatformSpecServeUnifiedListenerBindContractPromoted(t *testing.T) {
 	if strings.TrimSpace(spec.Flag) != "--health-addr <addr>" {
 		t.Fatalf("listener contract flag = %q, want --health-addr <addr>", spec.Flag)
 	}
-	for _, want := range []string{"single HTTP listener", "health-specific name", "API", "MCP"} {
+	for _, want := range []string{"single HTTP listener", "health-specific name", "not declare `--health-addr` to be the final CLI v2 listener", "API", "MCP"} {
 		if !strings.Contains(spec.Semantics, want) {
 			t.Fatalf("listener semantics missing %q:\n%s", want, spec.Semantics)
 		}
