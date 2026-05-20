@@ -138,6 +138,8 @@ func TestRepairContractEntityTypesRepairsResolvableDefaultRows(t *testing.T) {
 	oldVersionID := uuid.NewString()
 	mismatchedBundleRunID := "88888888-8888-8888-8888-888888888888"
 	mismatchedBundleID := uuid.NewString()
+	unknownBundleRunID := "99999999-9999-9999-9999-999999999999"
+	unknownBundleID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		UPDATE runs
 		SET bundle_fingerprint = 'sha256:current'
@@ -152,11 +154,18 @@ func TestRepairContractEntityTypesRepairsResolvableDefaultRows(t *testing.T) {
 		t.Fatalf("seed mismatched bundle run: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status)
+		VALUES ($1::uuid, 'running')
+	`, unknownBundleRunID); err != nil {
+		t.Fatalf("seed unknown bundle run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES
 			('treasury/legacy', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now()),
 			('treasury/legacy-old-version', 'treasury', 'template', '{"workflow_version":"0.9.0"}'::jsonb, 'active', now()),
-			('treasury/legacy-old-bundle', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now())
+			('treasury/legacy-old-bundle', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now()),
+			('treasury/legacy-unknown-bundle', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now())
 	`); err != nil {
 		t.Fatalf("seed flow_instances: %v", err)
 	}
@@ -172,8 +181,10 @@ func TestRepairContractEntityTypesRepairsResolvableDefaultRows(t *testing.T) {
 			($1::uuid, $4::uuid, 'treasury/legacy-old-version', 'default', 'active',
 			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
 			($6::uuid, $5::uuid, 'treasury/legacy-old-bundle', 'default', 'active',
+			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
+			($7::uuid, $8::uuid, 'treasury/legacy-unknown-bundle', 'default', 'active',
 			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
-	`, testPipelineRunID, resolvableID, unresolvedID, oldVersionID, mismatchedBundleID, mismatchedBundleRunID); err != nil {
+	`, testPipelineRunID, resolvableID, unresolvedID, oldVersionID, mismatchedBundleID, mismatchedBundleRunID, unknownBundleRunID, unknownBundleID); err != nil {
 		t.Fatalf("seed default entity_state rows: %v", err)
 	}
 
@@ -188,6 +199,7 @@ func TestRepairContractEntityTypesRepairsResolvableDefaultRows(t *testing.T) {
 	assertEntityStateEntityType(t, db, unresolvedID, "default")
 	assertEntityStateEntityType(t, db, oldVersionID, "default")
 	assertEntityStateEntityTypeForRun(t, db, mismatchedBundleRunID, mismatchedBundleID, "default")
+	assertEntityStateEntityTypeForRun(t, db, unknownBundleRunID, unknownBundleID, "default")
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey(t *testing.T) {
