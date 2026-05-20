@@ -5385,12 +5385,15 @@ cli_specification:
         tracker: '#846'
         action: >
           The currently implemented API-backed command first slice is promoted in
-          cli_specification.foundations.error_channel_and_exit_code_contract. Remaining review-artifact output-mode and
-          universal flag semantics stay split to #848/#844.
+          cli_specification.foundations.error_channel_and_exit_code_contract. Successful-output mode implementation
+          now consumes cli_specification.foundations.output_contract; universal flag semantics stay split to #844.
       output_modes_and_shared_renderer:
-        disposition: tracked_child
+        disposition: promoted_first_slice
         tracker: '#848'
-        action: 'Promote exact `--json`, `--quiet`, streaming NDJSON, and shared renderer rules before implementation.'
+        action: >
+          Exact `--json`, `--quiet`, streaming NDJSON, shared renderer ownership, exception rules,
+          and implementation split-tail accounting are promoted in cli_specification.foundations.output_contract.
+          CLI/runtime renderer implementation remains a future #794/#735 child and MUST consume that owner.
       serve_bind_listener_surface:
         disposition: tracked_child
         tracker: '#853'
@@ -5505,7 +5508,173 @@ cli_specification:
       CLI v2 uses top-level verbs for dominant single-intent operations, resource-noun-first
       commands for multi-verb resources, and `swarm control` only for run-state intervention.
       `swarm investigate` is retired legacy topology and MUST NOT be extended.
-    output_contract: 'Default output is human/agent-readable text. `--json` emits JSON or NDJSON for streaming commands. `--quiet` prints only the load-bearing value.'
+    output_contract:
+      promoted_by: '#848'
+      canonical_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#cli_specification.foundations.output_contract
+      future_runtime_owner: cmd/swarm shared output-mode renderer
+      scope: >
+        Merge-bearing CLI v2 authority for successful command output mode selection and shared rendering.
+        This contract covers default text, `--json`, streaming NDJSON, `--quiet`, stdout/stderr separation,
+        command exceptions, and downstream implementation obligations. It does not implement CLI flags or
+        renderer code by itself.
+      mode_selection:
+        default_mode: default_text
+        explicit_modes:
+        - --json
+        - --quiet
+        collision_rule: >
+          `--json` and `--quiet` are mutually exclusive output modes. Supplying both MUST fail before any
+          API/runtime call with CLI validation exit 2 unless a later tracked spec row explicitly changes that
+          command's collision policy. #844 may later define config/env/default precedence, but it MUST NOT make
+          simultaneously supplied explicit modes ambiguous.
+        no_inert_flags: >
+          A command MUST NOT accept an output-mode flag unless that invocation renders through the shared
+          output-mode owner or is explicitly listed as an exception that fails before side effects. Adding flags
+          that silently fall back to text output is invalid.
+      stdout_stderr_boundary: >
+        Successful load-bearing output renders only to stdout. Errors, warnings, retired-namespace migration text,
+        validation failures, auth failures, transport/API failures, and diagnostics render to stderr under
+        cli_specification.foundations.error_channel_and_exit_code_contract. `--json` and `--quiet` do not change
+        error exit-code classification and do not create JSON error bodies in this first promoted contract.
+      modes:
+        default_text:
+          invocation: no output-mode flag
+          shape: >
+            Human/agent-readable command text, table, or stream described by the command row. Default text MAY
+            contain labels, headings, summaries, alignment, and multiple lines. It is operator UX, not a stable
+            machine-parsed contract.
+        json:
+          invocation: --json
+          non_streaming_shape: >
+            Exactly one UTF-8 JSON document followed by a newline. The document MUST encode the command's
+            canonical result object, list, or local metadata object using server-owned or spec-owned field names.
+            It MUST NOT include ANSI color, human headings, lossy table abbreviations, or reconstructed local
+            semantics not present in the command's canonical owner.
+          streaming_shape: >
+            Streaming commands render newline-delimited JSON (NDJSON): one complete UTF-8 JSON object per line,
+            flushed in the same order as the canonical stream records are observed. Streaming JSON MUST NOT wrap
+            the stream in an array and MUST NOT interleave human text on stdout.
+          empty_result_shape: >
+            Empty successful list/snapshot results render an empty JSON array or an explicitly defined empty
+            result object from the command row. They MUST NOT render human empty-state prose on stdout.
+        quiet:
+          invocation: --quiet
+          shape: >
+            Exactly the command row's declared load-bearing value or values, plus trailing newlines. Quiet output
+            MUST NOT include headings, labels, explanatory prose, tables, ANSI color, or stderr diagnostics on
+            stdout. Commands with no declared load-bearing quiet value MUST reject `--quiet` before side effects
+            with CLI validation exit 2.
+          multiple_values: >
+            If a command row declares more than one quiet value, each value renders on its own line in command-row
+            order. JSON arrays, maps, and table formatting are invalid quiet output unless the row explicitly
+            declares the load-bearing value itself as serialized JSON.
+      shared_renderer_contract:
+        owner_rule: >
+          Future CLI implementation MUST introduce or consume one shared `cmd/swarm` output-mode renderer owner for
+          mode parsing, stdout/stderr policy, JSON/NDJSON encoding, quiet rendering, and exception enforcement.
+          Command-local writers may provide command-specific facts and text renderers, but they MUST NOT each
+          reinterpret output-mode semantics independently.
+        canonical_fact_rule: >
+          Runtime-state commands render facts returned by their canonical API owner at /v1/rpc or /v1/ws. They
+          MUST NOT read DB/store/runtime/EventBus state locally, recompute status, or enrich JSON/quiet output
+          from non-authoritative state. `swarm verify` remains the only local file-contract carve-out.
+        schema_rule: >
+          JSON/NDJSON field names and value semantics come from the command's canonical API schema, local metadata
+          schema, or explicit command-row output contract. When a command row's default text omits fields for
+          readability, `--json` may include the full canonical result, but it must remain server/spec-owned.
+        stream_rule: >
+          Follow-style commands that use /v1/ws or another canonical stream consume the same shared output owner.
+          Default text streams are human-readable; `--json` streams are NDJSON; `--quiet` is unsupported for streams
+          unless the command row declares a specific quiet stream value.
+      command_support:
+        default_eligible_scope: >
+          All implemented, non-retired CLI v2 command rows are output-mode eligible unless this contract or their
+          command row declares an exception. Eligibility means a later implementation slice must either consume the
+          shared output owner for the row or explicitly split the row before adding output-mode behavior.
+        currently_implemented_consumers:
+        - version
+        - verify
+        - runs
+        - status
+        - trace
+        - mailbox_list
+        - mailbox_view
+        - mailbox_approve
+        - mailbox_reject
+        - mailbox_defer
+        - health
+        - control_pause
+        - control_continue
+        - control_stop
+        - control_nuke
+        - agents_list
+        - agent_view
+        - agent_restart
+        - agent_replay
+        - agent_replay_backlog
+        - agent_directive
+        - events_list
+        - events_follow
+        - event_view
+        - event_replay
+        - event_publish
+        - run
+      exception_rules:
+        root_help_completion:
+          commands:
+          - root
+          - help
+          - completion
+          rule: >
+            Root help, help topics, and shell completion generation are default-text/script surfaces. They do not
+            consume JSON/quiet output modes unless a later tracked spec row explicitly promotes that behavior.
+            Unsupported output-mode flags on these surfaces fail before side effects with CLI validation exit 2.
+        serve_daemon_process:
+          commands:
+          - serve
+          rule: >
+            `swarm serve` is a long-running process-control command. Its boot-progress text remains owned by
+            serve boot observability and `--verbose`; output modes are unsupported until a later tracked serve
+            output-mode row defines a machine-readable boot/readiness stream. Unsupported output-mode flags fail
+            before runtime boot or active-run mutation.
+        retired_namespaces:
+          commands:
+          - investigate
+          - control_mailbox
+          - fork
+          - status_v1_retirement_message
+          rule: >
+            Retired and migration-only namespaces remain fail-closed stderr surfaces. Output modes MUST NOT
+            resurrect legacy behavior, make API/runtime calls, or convert migration messages into successful
+            machine-readable output.
+        absent_command_rows:
+          commands:
+          - conversations_list
+          - conversation_view
+          - conversation_turn
+          - forkchat
+          - entities_list
+          - entity_view
+          - entity_aggregate
+          - logs
+          - incidents
+          rule: >
+            Absent or blocked command rows do not receive output-mode implementation from #848. Their future
+            implementation children consume this contract only after their command/API/runtime owner is promoted.
+      split_siblings:
+      - '#844 universal flag/config/env precedence'
+      - '#846 error-channel and exit-code classification; closed first slice'
+      - '#839 retired namespace migration cleanup'
+      - '#743 swarm run behavior and follow semantics; output-mode implementation may consume this contract later'
+      - absent #735 command families
+      - API/runtime method semantics
+      - JSON error-body or rich structured-error output unless a later tracked child promotes it
+      implementation_proof_requirements:
+      - grep proof that implemented output-mode behavior consumes one shared cmd/swarm output-mode owner
+      - tests proving default text, JSON/NDJSON, and quiet behavior for every command row in the approved slice
+      - tests proving unsupported exception rows fail before side effects
+      - stdout/stderr tests proving successful machine-readable stdout is not contaminated by diagnostics/errors
+      - no direct DB/store/runtime/EventBus reads for API-backed output rendering
     auth_boundary: 'Runtime-state commands use v1 bearer auth through `SWARM_API_TOKEN`; legacy Builder/operator token fallback is invalid.'
     error_channel_and_exit_code_contract:
       implemented_by: '#846'
