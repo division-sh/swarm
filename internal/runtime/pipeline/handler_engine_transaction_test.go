@@ -1176,6 +1176,9 @@ vertical:
 	if got := strings.TrimSpace(asString(state.Metadata["storage_ref"])); got != "scoring/"+instanceID {
 		t.Fatalf("state storage_ref = %q, want %q", got, "scoring/"+instanceID)
 	}
+	if got := strings.TrimSpace(asString(state.Metadata["entity_type"])); got != "vertical" {
+		t.Fatalf("state entity_type = %q, want vertical", got)
+	}
 	if got := state.Metadata["revision_count"]; !isZeroIntegerValue(got) {
 		t.Fatalf("state revision_count = %#v, want 0", got)
 	}

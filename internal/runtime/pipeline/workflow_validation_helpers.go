@@ -185,6 +185,9 @@ func workflowMaterializeEntityMetadata(source semanticview.Source, flowID string
 	for key, value := range materialized {
 		out[key] = value
 	}
+	if entityType := strings.TrimSpace(contract.EntityType); entityType != "" {
+		out["entity_type"] = entityType
+	}
 	return out
 }
 

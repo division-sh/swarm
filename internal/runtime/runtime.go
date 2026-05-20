@@ -651,6 +651,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	rt.emitBootProgress(7, "recovery_decision", string(startupRecoveryDecision.Outcome), string(startupRecoveryDecision.ReasonCode))
 
 	if rt.Pipeline != nil {
+		if _, err := rt.Pipeline.RepairContractEntityTypes(ctx); err != nil {
+			rt.emitBootProgress(8, "entity_type_contract_repair", "FAILED", err.Error())
+			return fmt.Errorf("repair contract entity types: %w", err)
+		}
 		go rt.Pipeline.RunMaintenance(startCtx)
 		rt.emitBootProgress(8, "pipeline_maintenance", "started", "")
 	} else {

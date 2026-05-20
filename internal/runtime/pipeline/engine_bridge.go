@@ -319,6 +319,11 @@ func workflowCreateEntityMetadata(source semanticview.Source, flowID string, ins
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
+	if contract, ok := workflowEntityContract(source, flowID); ok {
+		if entityType := strings.TrimSpace(contract.EntityType); entityType != "" {
+			metadata["entity_type"] = entityType
+		}
+	}
 	if instance.InstancePath != "" {
 		metadata["flow_path"] = instance.InstancePath
 		metadata["storage_ref"] = instance.InstancePath
