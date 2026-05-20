@@ -60,7 +60,7 @@ type runtimeLogEntry struct {
 	EntityID  string         `json:"entity_id,omitempty"`
 	SessionID string         `json:"session_id,omitempty"`
 	ErrorCode string         `json:"error_code,omitempty"`
-	Message   string         `json:"message"`
+	Message   *string        `json:"message"`
 	Details   map[string]any `json:"details,omitempty"`
 }
 
@@ -336,6 +336,9 @@ func validateRuntimeLogEntry(prefix string, log runtimeLogEntry) error {
 	if _, ok := runtimeLogValidLevels[level]; !ok {
 		return fmt.Errorf("malformed %s: level=%q is not a valid LogLevel", prefix, log.Level)
 	}
+	if log.Message == nil {
+		return fmt.Errorf("malformed %s: message is required", prefix)
+	}
 	return nil
 }
 
@@ -475,7 +478,7 @@ func writeRuntimeLogListResult(out io.Writer, result runtimeLogListResult) {
 			runtimeLogDash(log.EntityID),
 			runtimeLogDash(log.SessionID),
 			runtimeLogDash(log.ErrorCode),
-			log.Message,
+			runtimeLogMessage(log),
 		)
 	}
 	if strings.TrimSpace(result.NextCursor) != "" {
@@ -506,7 +509,7 @@ func writeRuntimeLogFollowEntry(out io.Writer, log runtimeLogEntry) {
 	if log.ErrorCode != "" {
 		fields = append(fields, "error_code="+log.ErrorCode)
 	}
-	fields = append(fields, "message="+log.Message)
+	fields = append(fields, "message="+runtimeLogMessage(log))
 	if len(log.Details) > 0 {
 		fields = append(fields, "details="+runtimeLogCompactJSON(log.Details))
 	}
@@ -527,6 +530,13 @@ func runtimeLogDash(value string) string {
 		return "-"
 	}
 	return value
+}
+
+func runtimeLogMessage(log runtimeLogEntry) string {
+	if log.Message == nil {
+		return ""
+	}
+	return *log.Message
 }
 
 func runtimeLogErrorClassifier() cliAPIErrorClassifier {
