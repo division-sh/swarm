@@ -1,6 +1,167 @@
 platform:
   name: swarm-orchestrator
   version: 1.6.0
+spec_authority:
+  merge_bearing_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml
+  rule: |
+    This file is the only merge-bearing platform specification. Issue gates,
+    implementation PRs, tests, generated artifacts, and tracker closeouts MUST
+    bind platform semantics to this tracked file or to generated/implementation
+    proof that is derived from it.
+  review_artifact_boundary:
+    directory: docs/specs/swarm-platform/platform/contracts/review/
+    default_status: non_authoritative_review_context
+    rule: |
+      Files under the review directory are local design, reconciliation, or
+      historical evidence unless their exact semantics are promoted into this
+      tracked platform-spec.yaml in the same branch that makes those semantics
+      true. Ignored review drafts MUST NOT be cited as binding source of truth
+      for platform behavior, CLI/API contracts, OpenRPC methods, runtime
+      ownership, or command gating.
+    permitted_use: |
+      Review artifacts may be cited as design evidence, backlog intent, audit
+      trail, or reconciliation input. A gate that depends on such evidence must
+      name the tracked owner that already contains the accepted semantics, or
+      must split/promote the exact semantic draft before implementation.
+    prohibited_use:
+    - Treating an ignored review draft header, local source-of-truth claim, or
+      audit matrix as merge-bearing authority.
+    - Implementing API, runtime, CLI, OpenRPC, or command behavior directly from
+      a review artifact without promoting the matching semantics here.
+    - Leaving active tracker prose that names an ignored review artifact as the
+      binding source after a tracked owner or superseding tracker note exists.
+    tracked_exception:
+      path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.run-trace-surface.yaml
+      status: tracked_review_draft
+      disposition: |
+        Tracked implementation-aligned review draft only. Its own target
+        sections in platform-spec.yaml remain the merge-bearing owners for
+        run-trace semantics.
+  review_artifact_inventory:
+    status: classified_by_issue_865
+    source: '#865 root-corpus read-only inventory'
+    tracked_files:
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.run-trace-surface.yaml
+      classification: already_promoted
+      authority_language_risk: false
+      disposition: Tracked implementation-aligned review draft; target platform-spec sections remain authoritative.
+    ignored_files:
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.accumulator-entity-projection.yaml
+      classification: already_promoted
+      authority_language_risk: true
+      disposition: Accumulator projection semantics are promoted in tracked contract/type-system sections; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.agent-runtime-descriptor.yaml
+      classification: already_promoted
+      authority_language_risk: true
+      disposition: Runtime descriptor/config ownership is promoted in tracked agent/session sections; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux-v2.yaml
+      classification: stale_header_repair
+      authority_language_risk: true
+      disposition: Superseded by platform-spec.yaml#cli_specification.source_of_truth; local AUTHORITATIVE/source-of-truth claims are invalid.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux.yaml
+      classification: stale_header_repair
+      authority_language_risk: true
+      disposition: Historical v1 draft; any pointer to the ignored v2 draft as authoritative is superseded by cli_specification.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.contract-type-system.yaml
+      classification: design_backlog_only
+      authority_language_risk: true
+      disposition: Core Wave 1 semantics are promoted; residual broader E4/E5 expectations remain future promotion work tracked by #499/#500.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cross-cutting-concern-composition.yaml
+      classification: design_backlog_only
+      authority_language_risk: false
+      disposition: Analysis/backlog context only unless a future PR promotes exact semantics here.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.entity-schema-initial-values.yaml
+      classification: already_promoted
+      authority_language_risk: true
+      disposition: Entity initial-value and expression/read-path semantics are promoted; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.event-schema-cross-flow-contract.yaml
+      classification: already_promoted
+      authority_language_risk: true
+      disposition: Strict event-schema and emit.fields semantics are promoted; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.flight-recorder-runtime-log.yaml
+      classification: already_promoted
+      authority_language_risk: true
+      disposition: Runtime-log diagnostics encoding is promoted; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.native-tools-cli-no-fallback.yaml
+      classification: already_promoted
+      authority_language_risk: true
+      disposition: CLI native-tool no-fallback semantics are promoted; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.pipeline-stage-model.yaml
+      classification: already_promoted
+      authority_language_risk: false
+      disposition: Pipeline/stage model semantics are represented in tracked flow and event-boundary sections; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.role-scoped-tool-contracts.yaml
+      classification: already_promoted
+      authority_language_risk: true
+      disposition: Role-scoped entity-tool semantics are promoted; #628 remains blocked on future tracked spec updates before implementation.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.session-audit-split.yaml
+      classification: stale_header_repair
+      authority_language_risk: true
+      disposition: Full-spec-shaped historical draft; tracked platform-spec.yaml is the only merge-bearing owner.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.session-scope-intent.yaml
+      classification: already_promoted
+      authority_language_risk: false
+      disposition: Session scope intent semantics are represented in tracked agent/session sections; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.session-termination-metadata.yaml
+      classification: already_promoted
+      authority_language_risk: true
+      disposition: Session termination metadata, DDL, and invariants are promoted; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.template-flow-pre-instance-handlers.yaml
+      classification: design_backlog_only
+      authority_language_risk: false
+      disposition: Candidate design context only unless exact template-flow semantics are promoted here.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.timer-trigger-typing.yaml
+      classification: design_backlog_only
+      authority_language_risk: false
+      disposition: Candidate design context only unless exact timer typing semantics are promoted here.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.tool-usage-hints.yaml
+      classification: promote_commit_needed
+      authority_language_risk: true
+      disposition: Tool-usage hint semantics are not merge-bearing until promoted into this file with matching implementation.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.user-facing-rpc-api.yaml
+      classification: stale_header_repair
+      authority_language_risk: true
+      disposition: Superseded by platform-spec.yaml#api_specification; local OpenRPC source-of-truth claims are invalid.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-model.yaml
+      classification: already_promoted
+      authority_language_risk: false
+      disposition: Static analyzer model vocabulary is represented in tracked static_analyzer sections; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-slice-1.yaml
+      classification: already_promoted
+      authority_language_risk: false
+      disposition: First verify-analyzer slice is represented in tracked static_analyzer sections; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-slice-2.yaml
+      classification: already_promoted
+      authority_language_risk: false
+      disposition: Payload completeness analyzer semantics are represented in tracked static_analyzer sections; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-slice-3.yaml
+      classification: already_promoted
+      authority_language_risk: true
+      disposition: Pin producer-path analyzer semantics are represented in tracked static_analyzer sections; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-slice-4.yaml
+      classification: already_promoted
+      authority_language_risk: true
+      disposition: State reachability analyzer semantics are represented in tracked static_analyzer sections; draft is evidence only.
+    - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.verify-analyzer-slice-5.yaml
+      classification: already_promoted
+      authority_language_risk: false
+      disposition: Dead-surface analyzer semantics are represented in tracked static_analyzer sections; draft is evidence only.
+  tracker_repairs:
+    explicit_superseding_comments:
+    - '#852'
+    - '#749'
+    - '#746'
+    accounted_existing_trackers:
+    - '#750'
+    - '#628'
+    - '#499'
+    - '#500'
+    - '#664'
+    rule: |
+      Future active tracker references to ignored review artifacts MUST be
+      superseded with a tracked owner before implementation proceeds. If no
+      tracked owner exists, the work must split or promote the exact semantic
+      draft instead of citing the ignored artifact as binding authority.
 vocabulary:
   state_change: A transition in the entity state machine, triggered by an advances_to handler field.
   guard:
@@ -6709,6 +6870,29 @@ api_specification:
     \ placeholders that the impl never honors, all\nmethod signatures typed, all shapes consistent across read paths. This\n\
     YAML is the OpenRPC source-of-truth \u2014 the openrpc.json artifact is\ngenerated mechanically from method_catalog +\
     \ components.\n"
+  source_of_truth:
+    status: promoted_api_catalog
+    merge_bearing_owner: docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#api_specification
+    authority_rule: |
+      This api_specification block is the sole merge-bearing user-facing
+      JSON-RPC/OpenRPC API contract. API implementation gates, CLI/dashboard
+      consumers, generated OpenRPC checks, and tracker closeouts MUST bind to
+      this tracked section plus generated openrpc.json and implementation proof
+      in internal/apispec and internal/apiv1. Issue prose, local review drafts,
+      ignored files, audit matrices, and unpromoted design notes are evidence
+      only until their accepted behavior is promoted here.
+    local_review_spec_disposition: |
+      docs/specs/swarm-platform/platform/contracts/review/platform-spec.user-facing-rpc-api.yaml
+      is ignored/untracked on origin/master and remains reconciliation input
+      only. Any local "OpenRPC source-of-truth" or equivalent authority claim
+      in that file is superseded by this tracked source_of_truth block.
+      Merge-bearing API behavior must be reflected here.
+    promotion_rule: |
+      When the local user-facing RPC review artifact contains methods, shapes,
+      or API lifecycle semantics not represented in this section, that content
+      is candidate intent. It must be promoted into this section with matching
+      generated/implementation proof, split to a tracked child, or explicitly
+      downgraded to backlog before it can be used as implementation authority.
   foundations:
     transport:
       json_rpc_over_http:
