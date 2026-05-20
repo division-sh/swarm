@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,35 +72,8 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 		t.Fatalf("mkdir capture dir: %v", err)
 	}
 	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
-	script := `#!/bin/sh
-set -eu
-capture_dir="${FAKE_DOCKER_CAPTURE_DIR}"
-count_file="$capture_dir/invocations"
-if [ -f "$count_file" ]; then
-  count="$(cat "$count_file")"
-else
-  count=0
-fi
-count=$((count + 1))
-printf '%s' "$count" > "$count_file"
-captured="$capture_dir/$count.stdin"
-input="$(cat)"
-printf '%s' "$input" > "$captured"
-trimmed="$(printf '%s' "$input" | sed 's/^[[:space:]]*//')"
-# CI has exposed extra CLI process invocations, so provider turn progression
-# cannot depend on invocation count. Branch only on the actual tool-result
-# payload shape: the real follow-up stdin is a JSON array emitted by
-# executeToolCalls, while prompts/system text may contain read_file examples.
-if printf '%s' "$trimmed" | grep -q '^\[' &&
-  printf '%s' "$trimmed" | grep -q '"name":"read_file"' &&
-  printf '%s' "$trimmed" | grep -q '"ok":true'; then
-  printf '%s\n' '{"type":"result","result":"done"}'
-else
-  printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}'
-  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"Read","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}'
-  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}'
-fi
-`
+	script := "#!/bin/sh\n" +
+		"SWARM_LLM_FIRST_TURN_FAKE_DOCKER=1 exec " + shellQuote(os.Args[0]) + " -test.run=TestClaudeCLIFirstTurnFakeDockerHelper -- \"$@\"\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
 	}
@@ -232,6 +208,70 @@ fi
 	if len(content) != len(huge) {
 		t.Fatalf("read result content len = %d, want %d", len(content), len(huge))
 	}
+}
+
+func TestClaudeCLIFirstTurnFakeDockerHelper(t *testing.T) {
+	if os.Getenv("SWARM_LLM_FIRST_TURN_FAKE_DOCKER") != "1" {
+		return
+	}
+	os.Exit(runFirstTurnFakeDockerHelper())
+}
+
+func runFirstTurnFakeDockerHelper() int {
+	captureDir := strings.TrimSpace(os.Getenv("FAKE_DOCKER_CAPTURE_DIR"))
+	if captureDir == "" {
+		fmt.Fprintln(os.Stderr, "FAKE_DOCKER_CAPTURE_DIR is required")
+		return 2
+	}
+	input, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read stdin: %v\n", err)
+		return 2
+	}
+	if err := os.MkdirAll(captureDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "mkdir capture dir: %v\n", err)
+		return 2
+	}
+	countFile := filepath.Join(captureDir, "invocations")
+	count := 0
+	if raw, err := os.ReadFile(countFile); err == nil {
+		count, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
+	}
+	count++
+	if err := os.WriteFile(countFile, []byte(strconv.Itoa(count)), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "write invocation count: %v\n", err)
+		return 2
+	}
+	if err := os.WriteFile(filepath.Join(captureDir, strconv.Itoa(count)+".stdin"), input, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "write captured stdin: %v\n", err)
+		return 2
+	}
+	if isReadFileToolResultPayload(input) {
+		fmt.Fprintln(os.Stdout, `{"type":"result","result":"done"}`)
+		return 0
+	}
+	fmt.Fprintln(os.Stdout, `{"type":"system","subtype":"init","session_id":"provider-sess-1","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_category_assessed","Read","Write","Edit"]}`)
+	fmt.Fprintln(os.Stdout, `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-read-1","name":"Read","input":{"path":"/workspace/corpus.json"}}},"session_id":"provider-sess-1"}`)
+	fmt.Fprintln(os.Stdout, `{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"provider-sess-1"}`)
+	return 0
+}
+
+func isReadFileToolResultPayload(input []byte) bool {
+	var payload []map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(input), &payload); err != nil {
+		return false
+	}
+	for _, entry := range payload {
+		ok, _ := entry["ok"].(bool)
+		if ok && strings.TrimSpace(asString(entry["name"])) == "read_file" {
+			return true
+		}
+	}
+	return false
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func capturedToolResultInput(captureDir string) ([]byte, error) {
