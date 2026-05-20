@@ -280,6 +280,19 @@ func TestLogsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			wantCode:   3,
 			wantStderr: "log_id is required",
 		},
+		{
+			name: "malformed log row missing message exits three",
+			args: []string{"logs"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				log := validRuntimeLogEntry("log-1")
+				delete(log, "message")
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"logs": []any{log}})
+			},
+			wantCode:   3,
+			wantStderr: "message is required",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "test-token")
@@ -320,6 +333,17 @@ func TestLogsFollowMalformedWSFailsClosed(t *testing.T) {
 				}(),
 			},
 			wantStderr: "ts is required",
+		},
+		{
+			name: "malformed notification missing message",
+			logs: []map[string]any{
+				func() map[string]any {
+					log := validRuntimeLogEntry("log-1")
+					delete(log, "message")
+					return log
+				}(),
+			},
+			wantStderr: "message is required",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
