@@ -126,7 +126,7 @@ func contractEntityTypeRepairMatchesCurrentSource(source semanticview.Source, co
 	}
 	bundleFingerprint := strings.TrimSpace(item.BundleFingerprint)
 	currentBundleFingerprint = strings.TrimSpace(currentBundleFingerprint)
-	if bundleFingerprint != "" && bundleFingerprint != currentBundleFingerprint {
+	if bundleFingerprint == "" || currentBundleFingerprint == "" || bundleFingerprint != currentBundleFingerprint {
 		return false
 	}
 	flowTemplate := strings.Trim(strings.TrimSpace(item.FlowTemplate), "/")
