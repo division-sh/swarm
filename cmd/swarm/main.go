@@ -47,6 +47,8 @@ import (
 const (
 	defaultPlatformSpecPath = "docs/specs/swarm-platform/platform/contracts/platform-spec.yaml"
 	defaultHealthAddr       = ":8081"
+	serveUnifiedRoutes      = "/healthz /readyz /v1/rpc /v1/ws /mcp /tools/"
+	serveReadinessRoutes    = "/healthz /readyz"
 )
 
 var (
@@ -319,14 +321,14 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("start runtime: %v", err)
 		return 1
 	}
-	reporter.emit(20, "http_listener_bind", "ok", fmt.Sprintf("health=%s routes=/healthz /readyz /v1/rpc /v1/ws", healthListener.Addr()))
+	reporter.emit(20, "http_listener_bind", "ok", fmt.Sprintf("listener=%s routes=%s", healthListener.Addr(), serveUnifiedRoutes))
 	ready.Store(true)
 	if err := waitForServeHealthEndpoints(ctx, healthListener.Addr()); err != nil {
 		reporter.emit(21, "health_endpoints_respond", "FAILED", err.Error())
 		log.Printf("health endpoint verification failed: %v", err)
 		return 1
 	}
-	reporter.emit(21, "health_endpoints_respond", "ok", "/healthz /readyz")
+	reporter.emit(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
 	reporter.emit(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", time.Since(bootStartedAt).Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
 	logReadySummary(source, contractsRoot, opts.HealthAddr)
 
@@ -1767,7 +1769,7 @@ func shutdownHealthServer(server *http.Server) {
 
 func logReadySummary(source semanticview.Source, contractsRoot, healthAddr string) {
 	log.Printf(
-		"swarm runtime ready contracts=%s flows=%d nodes=%d agents=%d events=%d health=%s",
+		"swarm runtime ready contracts=%s flows=%d nodes=%d agents=%d events=%d listener=%s",
 		contractsRoot,
 		len(source.FlowSchemaEntries()),
 		len(source.NodeEntries()),

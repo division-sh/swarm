@@ -5561,9 +5561,14 @@ cli_specification:
           and implementation split-tail accounting are promoted in cli_specification.foundations.output_contract.
           CLI/runtime renderer implementation remains a future #794/#735 child and MUST consume that owner.
       serve_bind_listener_surface:
-        disposition: tracked_child
+        disposition: promoted_first_slice
         tracker: '#853'
-        action: Promote exact API/MCP/health bind-address and listener flag contract before implementation.
+        action: >
+          The current unified serve listener contract is promoted in
+          cli_specification.command_catalog.serve.unified_listener_bind_contract. `swarm serve --health-addr`
+          remains the current single HTTP listener bind input despite its health-specific historical name.
+          API/MCP split listener controls from the review artifact remain unpromoted until a later tracked
+          serve-topology child accepts them.
       trace_filters_and_subscription_recovery:
         disposition: tracked_child
         tracker: '#855'
@@ -5642,6 +5647,12 @@ cli_specification:
         classification: required_current_contract
         reason: >
           Platform spec carries exact `--dev` composition and dev entity-container cleanup semantics from #830.
+      serve_unified_listener_bind_contract:
+        classification: required_current_contract
+        reason: >
+          Current Swarm serves health, readiness, `/v1/rpc`, `/v1/ws`, MCP, and tool routes from one
+          `swarm serve` HTTP listener. The CLI UX v2 review artifact anticipated split API/MCP listener
+          controls, but those controls are not authoritative until promoted by a later tracked topology child.
       event_read_stream_filters:
         classification: required_current_contract
         reason: >
@@ -5938,7 +5949,52 @@ cli_specification:
       command: swarm serve [flags]
       tier: must_have
       implementation_status: partial
-      behavior: starts current runtime, process probes, /v1/rpc, /v1/ws, and MCP surfaces
+      behavior: starts current runtime and one HTTP listener for process probes, /v1/rpc, /v1/ws, MCP, and tool surfaces
+      unified_listener_bind_contract:
+        implemented_by: '#853'
+        flag: --health-addr <addr>
+        owner: >
+          `cmd/swarm serve` owns command-line bind selection; `runServeRuntime`, `newHealthServer`, and
+          `listenHealthServer` own the single runtime HTTP listener. Route handlers own their own runtime/API/MCP
+          semantics, but they do not own independent listener binding in this contract.
+        semantics: >
+          `--health-addr` is the current bind address for the single HTTP listener created by `swarm serve`.
+          Despite its historical health-specific name, the listener is not health-only: it exposes health,
+          readiness, API, WebSocket, MCP, and tool routes when their handlers are installed. Implementations MUST
+          NOT infer separate API or MCP listener ownership from the CLI UX v2 review artifact unless that topology
+          is promoted into this spec by a later child.
+        routes:
+          always:
+          - /healthz
+          - /readyz
+          when_api_handler_installed:
+          - /v1/rpc
+          - /v1/ws
+          when_mcp_gateway_installed:
+          - /mcp
+          - /tools/
+        bind_rules:
+        - 'Blank `--health-addr` uses the default serve listener address.'
+        - 'The listener is one TCP HTTP listener; API, WebSocket, MCP, tools, health, and readiness routes share it.'
+        - 'Startup fails closed when the listener cannot bind; serve MUST NOT continue to runtime readiness without the listener.'
+        - 'Readiness probing proves only `/healthz` and `/readyz`; route mounting for `/v1/rpc`, `/v1/ws`, `/mcp`, and `/tools/` is proven by the serve startup owner and focused tests.'
+        consumer_boundaries:
+          swarm_run_api_port: >
+            `swarm run --api-port` is a consumer of the existing serve startup/listener owner for local foreground
+            startup. It MUST NOT become a second bind owner or introduce a separate runtime boot path.
+          swarm_run_mcp_port: >
+            `swarm run --mcp-port` remains unsupported until explicit MCP bind ownership is promoted. It MUST
+            fail before API/WS calls, local runtime boot, or active-run mutation with CLI validation exit 2.
+        unpromoted_review_controls:
+        - --api/--no-api
+        - --mcp/--no-mcp
+        - serve --api-port
+        - serve --mcp-port
+        - --log-level
+        sibling_boundaries: >
+          Output modes remain governed by `cli_specification.foundations.output_contract`; universal config/env
+          precedence remains #844; `swarm run` foreground/follow behavior remains #743; explicit split API/MCP
+          listener topology remains unpromoted backlog under #750/#794/#735 until a later gate promotes it.
       boot_observability:
         implemented_by: '#802'
         flags:
