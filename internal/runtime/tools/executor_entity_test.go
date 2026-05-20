@@ -137,6 +137,9 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	if strings.TrimSpace(asString(entity["flow_instance"])) != "review/inst-1" {
 		t.Fatalf("flow_instance = %#v, want review/inst-1", entity["flow_instance"])
 	}
+	if strings.TrimSpace(asString(entity["entity_type"])) != "accounts" {
+		t.Fatalf("entity_type = %#v, want accounts", entity["entity_type"])
+	}
 	if _, ok := entity["subject_id"]; ok {
 		t.Fatalf("get_entity returned deprecated subject_id field: %#v", entity)
 	}

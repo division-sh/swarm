@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"swarm/internal/store"
+	"swarm/internal/testutil"
 )
 
 type fakeEntityReadStore struct {
@@ -54,7 +55,7 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 			NextCursor: "next",
 		},
 		getResult: store.OperatorEntityFull{
-			Entity:      store.OperatorEntitySummary{EntityID: "entity-1", RunID: "run-1", CurrentState: "collecting"},
+			Entity:      store.OperatorEntitySummary{EntityID: "entity-1", RunID: "run-1", EntityType: "mvp_spec", CurrentState: "collecting"},
 			Fields:      map[string]any{"priority": "high"},
 			Gates:       map[string]bool{"approved": true},
 			Accumulated: map[string]any{"notes": []any{"a"}},
@@ -88,6 +89,9 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	if fields := asMap(t, getResult["fields"]); fields["priority"] != "high" {
 		t.Fatalf("entity.get result = %#v", get.Result)
 	}
+	if got := asMap(t, getResult["entity"])["entity_type"]; got != "mvp_spec" {
+		t.Fatalf("entity.get entity_type = %#v, want mvp_spec", got)
+	}
 	if entities.lastEntityID != "entity-1" || entities.lastRunID != "run-1" {
 		t.Fatalf("entity.get args = entity_id=%q run_id=%q", entities.lastEntityID, entities.lastRunID)
 	}
@@ -102,6 +106,82 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	}
 	if entities.lastAggregate.RunID != "run-1" || entities.lastAggregate.GroupBy != "current_state" || entities.lastAggregate.Type != "mvp_spec" {
 		t.Fatalf("entity.aggregate options = %#v", entities.lastAggregate)
+	}
+}
+
+func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+	runID := "11111111-1111-1111-1111-111111111111"
+	entityA := "22222222-2222-2222-2222-222222222222"
+	entityB := "33333333-3333-3333-3333-333333333333"
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		) VALUES
+			($1::uuid, $2::uuid, 'scoring/vertical-a', 'vertical', 'discovered',
+			 '{}'::jsonb, '{"vertical_name":"Healthcare"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
+			($1::uuid, $3::uuid, 'scoring/vertical-b', 'vertical', 'pending',
+			 '{}'::jsonb, '{"vertical_name":"Manufacturing"}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
+	`, runID, entityA, entityB); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Entities: pg,
+		}),
+	})
+
+	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"run_id":"11111111-1111-1111-1111-111111111111","type":"vertical","limit":10}}`)
+	if list.Error != nil {
+		t.Fatalf("entity.list error = %#v", list.Error)
+	}
+	rows, _ := asMap(t, list.Result)["entities"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("entity.list rows = %#v", list.Result)
+	}
+	for _, row := range rows {
+		if got := asMap(t, row)["entity_type"]; got != "vertical" {
+			t.Fatalf("entity.list entity_type = %#v, want vertical", got)
+		}
+	}
+
+	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"entity.get","params":{"entity_id":"22222222-2222-2222-2222-222222222222","run_id":"11111111-1111-1111-1111-111111111111"}}`)
+	if get.Error != nil {
+		t.Fatalf("entity.get error = %#v", get.Error)
+	}
+	getResult := asMap(t, get.Result)
+	if got := asMap(t, getResult["entity"])["entity_type"]; got != "vertical" {
+		t.Fatalf("entity.get entity_type = %#v, want vertical", got)
+	}
+	if fields := asMap(t, getResult["fields"]); fields["vertical_name"] != "Healthcare" {
+		t.Fatalf("entity.get fields = %#v", fields)
+	}
+
+	byType := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-type","method":"entity.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"entity_type"}}`)
+	if byType.Error != nil {
+		t.Fatalf("entity.aggregate entity_type error = %#v", byType.Error)
+	}
+	typeCounts := asMap(t, asMap(t, byType.Result)["counts"])
+	if typeCounts["vertical"] != float64(2) || typeCounts["default"] != nil {
+		t.Fatalf("entity_type counts = %#v", typeCounts)
+	}
+
+	typedState := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-state","method":"entity.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"current_state","type":"vertical"}}`)
+	if typedState.Error != nil {
+		t.Fatalf("entity.aggregate typed current_state error = %#v", typedState.Error)
+	}
+	stateCounts := asMap(t, asMap(t, typedState.Result)["counts"])
+	if stateCounts["discovered"] != float64(1) || stateCounts["pending"] != float64(1) {
+		t.Fatalf("typed current_state counts = %#v", stateCounts)
 	}
 }
 

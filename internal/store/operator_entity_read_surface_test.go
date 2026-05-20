@@ -70,6 +70,9 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if len(page1.Entities) != 1 || page1.Entities[0].EntityID != entityA || page1.NextCursor == "" {
 		t.Fatalf("page1 = %#v", page1)
 	}
+	if got := page1.Entities[0].EntityType; got != "mvp_spec" {
+		t.Fatalf("page1 entity_type = %q, want mvp_spec", got)
+	}
 	page2, err := pg.ListOperatorEntities(ctx, OperatorEntityListOptions{
 		RunID:  runA,
 		Flow:   "review",
@@ -91,6 +94,9 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if full.Entity.FlowInstance != "review/primary" || full.Fields["priority"] != "high" || !full.Gates["approved"] {
 		t.Fatalf("full entity = %#v", full)
 	}
+	if full.Entity.EntityType != "mvp_spec" {
+		t.Fatalf("full entity_type = %q, want mvp_spec", full.Entity.EntityType)
+	}
 	if _, err := pg.LoadOperatorEntity(ctx, sharedEntity, ""); !errors.Is(err, ErrAmbiguousEntityRunID) {
 		t.Fatalf("LoadOperatorEntity ambiguous = %v, want ErrAmbiguousEntityRunID", err)
 	}
@@ -104,6 +110,20 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	}
 	if stateAgg.Counts["collecting"] != 2 || stateAgg.Counts["done"] != 1 {
 		t.Fatalf("state aggregate = %#v", stateAgg.Counts)
+	}
+	typedStateAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state", Type: "mvp_spec"})
+	if err != nil {
+		t.Fatalf("AggregateOperatorEntities typed current_state: %v", err)
+	}
+	if typedStateAgg.Counts["collecting"] != 1 || typedStateAgg.Counts["done"] != 1 || typedStateAgg.Counts["ticket"] != 0 {
+		t.Fatalf("typed state aggregate = %#v", typedStateAgg.Counts)
+	}
+	typeAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "entity_type"})
+	if err != nil {
+		t.Fatalf("AggregateOperatorEntities entity_type: %v", err)
+	}
+	if typeAgg.Counts["mvp_spec"] != 2 || typeAgg.Counts["ticket"] != 1 || typeAgg.Counts["default"] != 0 {
+		t.Fatalf("entity_type aggregate = %#v", typeAgg.Counts)
 	}
 	fieldAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority"})
 	if err != nil {

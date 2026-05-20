@@ -120,6 +120,42 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(
 	if got := instance.Metadata["spent_usd"]; got != float64(42) && got != 42 {
 		t.Fatalf("spent_usd = %#v, want 42", got)
 	}
+	if got := strings.TrimSpace(asString(instance.Metadata["entity_type"])); got != "opco_budget" {
+		t.Fatalf("entity_type metadata = %q, want opco_budget", got)
+	}
+	assertEntityStateEntityType(t, db, FlowInstanceEntityID(instance.StorageRef), "opco_budget")
+}
+
+func TestRepairContractEntityTypesRepairsResolvableDefaultRows(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc, _ := newSelectEntityTestCoordinator(t, db)
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	resolvableID := uuid.NewString()
+	unresolvedID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		) VALUES
+			($1::uuid, $2::uuid, 'treasury/legacy', 'default', 'active',
+			 '{}'::jsonb, '{"entity_type":"not-authority","vertical_id":"vertical-1"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
+			($1::uuid, $3::uuid, 'unknown/legacy', 'default', 'active',
+			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
+	`, testPipelineRunID, resolvableID, unresolvedID); err != nil {
+		t.Fatalf("seed default entity_state rows: %v", err)
+	}
+
+	repaired, err := pc.RepairContractEntityTypes(ctx)
+	if err != nil {
+		t.Fatalf("RepairContractEntityTypes: %v", err)
+	}
+	if repaired != 1 {
+		t.Fatalf("repaired rows = %d, want 1", repaired)
+	}
+	assertEntityStateEntityType(t, db, resolvableID, "opco_budget")
+	assertEntityStateEntityType(t, db, unresolvedID, "default")
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey(t *testing.T) {
@@ -814,5 +850,20 @@ func assertEntityStateRowCount(t *testing.T, db *sql.DB, want int) {
 	}
 	if got != want {
 		t.Fatalf("entity_state row count = %d, want %d", got, want)
+	}
+}
+
+func assertEntityStateEntityType(t *testing.T, db *sql.DB, entityID, want string) {
+	t.Helper()
+	var got string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(entity_type, '')
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, testPipelineRunID, entityID).Scan(&got); err != nil {
+		t.Fatalf("load entity_state entity_type for %s: %v", entityID, err)
+	}
+	if got != want {
+		t.Fatalf("entity_state.entity_type = %q, want %q", got, want)
 	}
 }
