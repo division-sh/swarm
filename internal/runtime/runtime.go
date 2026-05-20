@@ -372,6 +372,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			TimerScheduleStore:      stores.ScheduleStore,
 			EventReceiptsCapability: receiptCaps,
 			ArtifactRoot:            artifactRoot,
+			BundleFingerprint:       opts.BundleFingerprint,
 		})
 		if rt.Pipeline != nil {
 			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
