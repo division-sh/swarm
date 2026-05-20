@@ -5432,9 +5432,9 @@ cli_specification:
         tracker: '#735'
         action: '`swarm entities list`, `swarm entity view`, and `swarm entity aggregate` require separate gated children.'
       logs:
-        disposition: future_child
-        tracker: '#735'
-        action: '`swarm logs` snapshot/follow semantics require a separate gated child.'
+        disposition: promoted_first_slice
+        tracker: '#876'
+        action: '`swarm logs` snapshot and follow semantics are promoted as one bounded CLI child over runtime.logs and runtime.subscribe_logs; richer output-mode work remains split to #848.'
       incidents:
         disposition: future_child
         tracker: '#735'
@@ -6548,10 +6548,56 @@ cli_specification:
       implementation_status: absent
       owner: /v1/rpc entity.aggregate
     logs:
-      command: swarm logs [filters]
+      command: swarm logs [filters] [--follow]
       tier: should_have
-      implementation_status: absent
+      implementation_status: implemented
       owners: /v1/rpc runtime.logs for snapshot; /v1/ws runtime.subscribe_logs for --follow
+      behavior: >-
+        Runtime-log observation CLI consumer. Snapshot mode sends runtime.logs filter, time-window, pagination, and order
+        params through the shared v1 API client. Follow mode sends only runtime-log identity/content filters plus optional
+        replay_since through /v1/ws runtime.subscribe_logs. The CLI renders server-owned LogEntry rows and never reads
+        runtime logs directly from DB/store/runtime/EventBus/dashboard/process logs/container logs.
+      flags:
+        shared_filters:
+        - --run-id <run-id>
+        - --entity-id <entity-id>
+        - --session-id <session-id>
+        - --component <component>
+        - --level <debug|info|warn|error>
+        - --error-code <code>
+        - --source <source>
+        snapshot_only:
+        - --since <RFC3339>
+        - --until <RFC3339>
+        - --limit <1-1000>
+        - --cursor <cursor>
+        - --order <asc|desc>
+        follow_only:
+        - --follow
+        - --replay-since <RFC3339>
+        follow_rejected_snapshot_flags:
+        - --since
+        - --until
+        - --limit
+        - --cursor
+        - --order
+      output:
+        snapshot_table: TIME / LEVEL / COMPONENT / SOURCE / RUN / ENTITY / SESSION / ERROR / MESSAGE plus next_cursor when present
+        snapshot_empty: No runtime logs match the filter.
+        follow_notification_line: log log_id=<id> ts=<timestamp> level=<level> component=<component> source=<source> [run_id=<run>] [entity_id=<entity>] [session_id=<session>] [error_code=<code>] message=<message> [details=<compact-json>]
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        interrupted: 130
+      proof_expectations:
+      - exact /v1/rpc runtime.logs call with run_id, entity_id, session_id, component, level, error_code, source, since, until, limit, cursor, and order params only
+      - exact /v1/ws runtime.subscribe_logs call with run_id, entity_id, session_id, component, level, error_code, source, and replay_since params only
+      - follow rejects --since, --until, --limit, --cursor, and --order before opening the WebSocket; --replay-since is accepted only with --follow
+      - invalid flags and missing SWARM_API_TOKEN make zero API or WS calls
+      - malformed runtime.logs results, malformed runtime.subscribe_logs subscription results/notifications, auth/HTTP/RPC/WS failures, and cancellation are tested with closed exit-code behavior
+      - no direct DB/store/runtime/EventBus/dashboard/process-log/container-log reads and no legacy /api/*, /rpc, /api/rpc, /ws, or /api/ws usage
     incidents:
       command: swarm incidents [filters]
       tier: should_have
@@ -6633,6 +6679,7 @@ cli_specification:
     - swarm event view
     - swarm event replay
     - swarm event publish
+    - swarm logs
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
     - swarm investigate
@@ -6645,7 +6692,6 @@ cli_specification:
     - swarm conversations list / conversation view / conversation turn
     - swarm forkchat new|resume|list|view|delete
     - swarm entities list / entity view / entity aggregate
-    - swarm logs
     - swarm incidents
     rule: 'Remaining commands require separate gates and must consume canonical API owners; they MUST NOT resurrect direct DB/store/runtime-state readers.'
 
