@@ -55,9 +55,14 @@ spec_authority:
       authority_language_risk: true
       disposition: Runtime descriptor/config ownership is promoted in tracked agent/session sections; draft is evidence only.
     - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux-v2.yaml
-      classification: stale_header_repair
+      classification: promote_commit_needed
       authority_language_risk: true
-      disposition: Superseded by platform-spec.yaml#cli_specification.source_of_truth; local AUTHORITATIVE/source-of-truth claims are invalid.
+      disposition: >
+        Promotion target for the full CLI v2 implementation stream under
+        #794/#735. Residual CLI v2 behavior must be promoted into
+        platform-spec.yaml#cli_specification with matching implementation or a
+        tracked child before it becomes merge-bearing. The ignored file's local
+        AUTHORITATIVE/source-of-truth header is invalid until that promotion.
     - path: docs/specs/swarm-platform/platform/contracts/review/platform-spec.cli-ux.yaml
       classification: stale_header_repair
       authority_language_risk: true
